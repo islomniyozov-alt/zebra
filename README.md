@@ -86,12 +86,40 @@ policies, the eleven child-table triggers, the `AssetAssignment` partial unique
 indexes, and a self-audit that fails the migration if a future table carries a
 tenant without a policy.
 
+Application code never sets that variable by hand. It calls `withOrg` from
+[`src/lib/tenancy.ts`](src/lib/tenancy.ts), which validates the id, opens one
+interactive transaction and sets `app.current_org_id` for its duration. The id
+comes from the session and from nowhere else.
+
+## Tests
+
+Two tiers, split by whether they write to the database.
+
+| Command              | Runs                                       | Writes              |
+| -------------------- | ------------------------------------------ | ------------------- |
+| `npm run test:check` | structure + unit — part of `npm run check` | no                  |
+| `npm test`           | everything, including cross-org isolation  | yes, then cleans up |
+
+`tests/structure.test.ts` is the migration's own self-audit, promoted out of
+the migration and into `check`. In the migration it fires once, on the day it
+is applied; here it fires on every check, so a later migration that adds a
+tenant table without a policy fails the build instead of waiting to be noticed.
+
+`tests/isolation.integration.test.ts` is the §6 acceptance test. It populates
+**both** organizations in **every** table that carries a tenant — a table left
+empty would pass "sees nothing from the other organization" for the boring
+reason, so a coverage assertion fails if the fixture misses one — then asserts
+isolation in both directions as `zebra_app`.
+
+Both tiers need `.env`. They refuse to run against `NEON_BRANCH=production`.
+
 ## Scripts
 
 | Command                           | Does                                                    |
 | --------------------------------- | ------------------------------------------------------- |
 | `npm run dev`                     | Next dev server on http://localhost:3000                |
-| `npm run check`                   | typecheck + lint + format check                         |
+| `npm run check`                   | typecheck + lint + format + the non-writing tests       |
+| `npm test` / `test:watch`         | every test, isolation suite included                    |
 | `npm run typecheck`               | `tsc --noEmit`                                          |
 | `npm run lint` / `lint:fix`       | ESLint                                                  |
 | `npm run format` / `format:check` | Prettier                                                |

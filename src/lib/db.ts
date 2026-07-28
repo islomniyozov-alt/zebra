@@ -34,7 +34,17 @@ neonConfig.webSocketConstructor ??= WebSocket
 // against a future default flip.
 neonConfig.poolQueryViaFetch = false
 
-const getClient = cache((): PrismaClient => {
+/**
+ * Build a client against an explicit connection string.
+ *
+ * Use this in seeds, migrations tooling and tests — anywhere outside a
+ * request. Application code wants `prisma` below.
+ */
+export function createPrismaClient(connectionString: string): PrismaClient {
+  return new PrismaClient({ adapter: new PrismaNeon({ connectionString }) })
+}
+
+function appConnectionString(): string {
   const connectionString = process.env.DATABASE_URL
 
   if (!connectionString) {
@@ -51,9 +61,24 @@ const getClient = cache((): PrismaClient => {
     )
   }
 
-  return new PrismaClient({ adapter: new PrismaNeon({ connectionString }) })
-})
+  return connectionString
+}
 
+const getClient = cache(
+  (): PrismaClient => createPrismaClient(appConnectionString()),
+)
+
+/**
+ * The request-scoped client.
+ *
+ * WORTH KNOWING: `cache()` only memoizes inside a React request scope. Outside
+ * one — a plain script, a test — it is a passthrough, so each property access
+ * here would build a fresh client and a fresh connection pool. That is survivable
+ * only because §6 requires every request to go through `withOrg`, which touches
+ * this object exactly once, for `$transaction`; everything downstream uses the
+ * transaction client. Reach for `createPrismaClient` rather than this in any
+ * code that is not serving a request.
+ */
 export const prisma = new Proxy({} as PrismaClient, {
   get(_target, property) {
     const client = getClient()
