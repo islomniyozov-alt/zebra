@@ -1,0 +1,12 @@
+node_modules
+.next
+.open-next
+.wrangler
+out
+build
+coverage
+package-lock.json
+src/generated
+cloudflare-env.d.ts
+next-env.d.ts
+prisma/migrations

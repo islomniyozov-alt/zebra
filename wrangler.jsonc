@@ -1,0 +1,50 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+
+  // Default (top-level) environment is DEV. Production is an explicit
+  // named environment so that no command deploys to production by accident.
+  //   dev   ->  npm run deploy
+  //   prod  ->  npm run deploy:prod
+  "name": "zebra-dev",
+  "main": ".open-next/worker.js",
+
+  // Pinned to the workerd build bundled with wrangler 4.115.0
+  // (workerd 1.20260722.1). Raising this is a deliberate act, not a refresh.
+  "compatibility_date": "2026-07-22",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS",
+  },
+
+  "observability": {
+    "enabled": true,
+  },
+
+  // Non-secret configuration only. Connection strings, R2 keys and
+  // AUTH_SECRET are set with `wrangler secret put` and never live here.
+  "vars": {
+    "NEON_BRANCH": "dev",
+    "R2_BUCKET": "zebra-docs-dev",
+  },
+
+  "env": {
+    "production": {
+      "name": "zebra",
+      "compatibility_date": "2026-07-22",
+      "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+      "assets": {
+        "directory": ".open-next/assets",
+        "binding": "ASSETS",
+      },
+      "observability": {
+        "enabled": true,
+      },
+      "vars": {
+        "NEON_BRANCH": "production",
+        "R2_BUCKET": "zebra-docs",
+      },
+    },
+  },
+}

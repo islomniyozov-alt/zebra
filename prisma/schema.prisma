@@ -1,0 +1,1805 @@
+// ============================================================================
+// TRUCKING TMS — DATABASE SCHEMA
+// ============================================================================
+//
+// CONVENTIONS — read before touching this file.
+//
+// 1. MONEY is ALWAYS an Int of CENTS. Never Float, never Decimal for money.
+//    Field names end in `Cents`. $2,500.00 -> 250000.
+//
+// 2. PERCENTAGES are Int BASIS POINTS. 30% -> 3000. 27.5% -> 2750.
+//    Field names end in `Bps`.
+//
+// 3. TENANCY IS TWO LEVELS.
+//    `organizationId` is the TENANT boundary — the carrier group, what a
+//    subscription is sold to. Postgres row-level security enforces it. A bug
+//    in application code physically cannot return another org's rows.
+//    `companyId` is the OPERATING AUTHORITY inside the group (its own MC/DOT,
+//    insurance, factoring, invoice series). It is a business field, scoped by
+//    role in the application layer. Its failure mode is seeing your own other
+//    company's loads; the org boundary's failure mode is a data breach.
+//    Never write a raw query that bypasses either.
+//
+// 4. STATUS IS TWO AXES. A load has an operational status AND a billing
+//    status. They move independently. Cancellation is a third, orthogonal
+//    flag. Never collapse these into one enum.
+//
+// 5. SNAPSHOTS: settlements and invoices freeze the rule/rate that applied at
+//    the time. Changing a driver's pay percentage must never retroactively
+//    change a settlement that was already generated.
+//
+// 6. SOFT DELETE on anything financial or document-related (`deletedAt`).
+//    DOT/FMCSA and IFTA record retention are statutory. Nothing is ever hard
+//    deleted.
+//
+// 7. DOCUMENTS POINT OUTWARD. Document rows carry nullable FKs to the things
+//    they belong to. Parent tables do NOT carry `...DocumentId` fields.
+//    This keeps one relation per pair and one place to look.
+//
+// 8. NUMBER ALLOCATION goes through the Counter table with an atomic
+//    increment. Never MAX(id)+1 — that collides under concurrency.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+// Prisma 7: the connection string no longer lives here. It is supplied in
+// prisma.config.ts (for migrations) and via the driver adapter passed to the
+// PrismaClient constructor at runtime. On Cloudflare Workers use the Neon
+// WebSocket adapter — the HTTP driver cannot run interactive transactions,
+// and settlement generation and invoicing both need them.
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================================
+// TENANCY, USERS, ACCESS
+// ============================================================================
+
+// ============================================================================
+// ORGANIZATION — THE TENANT BOUNDARY
+// ============================================================================
+//
+// An Organization is a carrier GROUP. It is what a subscription is sold to and
+// it is the wall row-level security enforces. Nothing crosses it, ever.
+//
+// A Company inside it is an OPERATING AUTHORITY — its own MC, DOT, insurance,
+// factoring and invoice series. Which authority a load runs under is a
+// compliance fact (running under the wrong authority is an FMCSA problem), so
+// it is a required field on the load, not a UI mode.
+//
+// Shared across authorities: customers/brokers, facilities, factoring
+// companies, users. Enter a broker once for the whole group.
+// Specific to one authority: loads, invoices, settlements, and the trucks and
+// drivers currently operating under it.
+// ============================================================================
+
+model Organization {
+  id   String @id @default(cuid())
+  name String
+  slug String @unique
+
+  tier     PlanTier @default(INTERNAL)
+  isActive Boolean  @default(true)
+
+  // Plan limits. Multi-authority is the paid capability — a single-company
+  // customer never sees authority pickers or company columns anywhere.
+  maxCompanies Int  @default(1)
+  maxTrucks    Int?
+  maxUsers     Int?
+
+  billingEmail String?
+  notes        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companies        Company[]
+  assetHistory     AssetAssignment[]
+  customers        Customer[]
+  locations        Location[]
+  factors          FactoringCompany[]
+  auditLogs       AuditLog[]
+  calendarEvents  CalendarEvent[]
+  claims          Claim[]
+  communications  Communication[]
+  complianceItems ComplianceItem[]
+  counters        Counter[]
+  documents       Document[]
+  drivers         Driver[]
+  expenses        Expense[]
+  fuelTxns        FuelTransaction[]
+  iftaMileage     IftaMileage[]
+  integrations    Integration[]
+  invoices        Invoice[]
+  loads           Load[]
+  maintenance     MaintenanceRecord[]
+  memberships     Membership[]
+  notifications   Notification[]
+  payments        Payment[]
+  settlements     Settlement[]
+  trailers        Trailer[]
+  trucks          Truck[]
+}
+
+enum PlanTier {
+  INTERNAL
+  SOLO
+  FLEET
+  GROUP
+  ENTERPRISE
+}
+
+model Company {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name         String
+  legalName    String?
+  dotNumber    String?
+  mcNumber     String?
+  scac         String?
+  ein          String?
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  state        String?
+  postalCode   String?
+  country      String  @default("US")
+  phone        String?
+  email        String?
+  logoUrl      String?
+  timezone     String  @default("America/Chicago")
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  settings        CompanySettings?
+  memberScopes    MembershipCompany[]
+  assetHistory    AssetAssignment[]
+  counters        Counter[]
+  integrations    Integration[]
+  trucks          Truck[]
+  trailers        Trailer[]
+  drivers         Driver[]
+  loads           Load[]
+  documents       Document[]
+  invoices        Invoice[]
+  payments        Payment[]
+  settlements     Settlement[]
+  expenses        Expense[]
+  fuelTxns        FuelTransaction[]
+  maintenance     MaintenanceRecord[]
+  iftaMileage     IftaMileage[]
+  complianceItems ComplianceItem[]
+  communications  Communication[]
+  notifications   Notification[]
+  calendarEvents  CalendarEvent[]
+  auditLogs       AuditLog[]
+  claims          Claim[]
+
+  @@unique([organizationId, dotNumber])
+  @@index([organizationId, isActive])
+}
+
+model CompanySettings {
+  id        String @id @default(cuid())
+  companyId String @unique
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Invoicing
+  invoiceNumberPrefix String  @default("INV-")
+  invoiceTermsDays    Int     @default(30)
+  invoiceNotes        String?
+  remitToText         String?
+
+  // Default assumptions used by the profitability engine. These are settings,
+  // not constants — §30 requires the math be configurable.
+  defaultFuelCostPerMileCents Int     @default(55)
+  defaultMpg                  Decimal @default(6.5) @db.Decimal(5, 2)
+  factoringFeeBps             Int     @default(300)
+  dispatchFeeBps              Int     @default(0)
+
+  // Notification lead times (days)
+  complianceWarnDays  Int @default(30)
+  podMissingAlertDays Int @default(3)
+  invoiceOverdueDays  Int @default(1)
+
+  // Anything that doesn't deserve a column yet.
+  extra Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String?
+  name         String
+  phone        String?
+  locale       String    @default("en") // en | ru | fa — driver portal needs these on day one
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships    Membership[]
+  sessions       Session[]
+  driverProfiles Driver[]
+
+  loadsBooked        Load[]
+  statusEvents       LoadStatusEvent[]
+  assignmentsMade    LoadAssignment[]
+  assetTransfers     AssetAssignment[]
+  documentsUploaded  Document[]
+  accessorialsOk     LoadAccessorial[]
+  paymentsRecorded   Payment[]
+  settlementsOk      Settlement[]
+  expensesCreated    Expense[]
+  communications     Communication[]
+  notifications      Notification[]
+  auditLogs          AuditLog[]
+  calendarEvents     CalendarEvent[]
+
+  @@index([isActive])
+}
+
+// A user can belong to more than one company — you personally need RAM and
+// Dolphins under one login. Role lives here, NOT on User.
+model Membership {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  role Role
+
+  // Optional per-user overrides on top of the role, e.g. granting a specific
+  // dispatcher visibility of load financials (§2).
+  permissionOverrides Json?
+
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // EMPTY means access to every authority in the org. Populate it to restrict
+  // a dispatcher to specific companies.
+  companyScopes MembershipCompany[]
+
+  @@unique([userId, organizationId])
+  @@index([organizationId, role])
+}
+
+model MembershipCompany {
+  id           String     @id @default(cuid())
+  membershipId String
+  membership   Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  companyId    String
+  company      Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([membershipId, companyId])
+  @@index([companyId])
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MANAGER
+  DISPATCHER
+  ACCOUNTING
+  DRIVER
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// Atomic number allocation — load numbers, invoice numbers, settlement
+// numbers. UPDATE ... RETURNING value+1 inside a transaction.
+model Counter {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  key       String // LOAD_NUMBER | INVOICE_NUMBER | SETTLEMENT_NUMBER
+  value     Int     @default(1000)
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, key])
+}
+
+// §31 — integrations that are not connected must show as unavailable, never
+// faked. This table is the single source of that truth.
+model Integration {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  provider   IntegrationProvider
+  status     IntegrationStatus   @default(NOT_CONFIGURED)
+  configEnc  String? // encrypted blob — never plaintext credentials
+  lastSyncAt DateTime?
+  lastError  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, provider])
+}
+
+enum IntegrationProvider {
+  ELD_GPS
+  FUEL_CARD
+  FACTORING
+  BANKING
+  ACCOUNTING
+  EMAIL
+  SMS
+  MAPS
+  LOAD_BOARD
+  OCR
+  PAYMENTS
+}
+
+enum IntegrationStatus {
+  NOT_CONFIGURED
+  CONNECTED
+  ERROR
+  DISABLED
+}
+
+// ============================================================================
+// FLEET
+// ============================================================================
+
+model Truck {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  unitNumber String
+  vin        String?
+  make       String?
+  model      String?
+  year       Int?
+  plate      String?
+  plateState String?
+
+  currentOdometer Int?
+  status          TruckStatus   @default(AVAILABLE)
+  ownershipType   OwnershipType @default(OWNED)
+
+  purchaseDate      DateTime?
+  purchasePriceCents Int?
+  notes             String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  drivers         Driver[]
+  loads           Load[]
+  assignments     LoadAssignment[]
+  assetHistory    AssetAssignment[]
+  documents       Document[]
+  expenses        Expense[]
+  fuelTxns        FuelTransaction[]
+  maintenance     MaintenanceRecord[]
+  iftaMileage     IftaMileage[]
+  complianceItems ComplianceItem[]
+
+  @@unique([companyId, unitNumber])
+  @@index([companyId, status])
+  @@index([vin])
+}
+
+enum TruckStatus {
+  AVAILABLE
+  DISPATCHED
+  IN_TRANSIT
+  MAINTENANCE
+  OUT_OF_SERVICE
+  SOLD
+}
+
+enum OwnershipType {
+  OWNED
+  LEASED
+  OWNER_OPERATOR
+}
+
+// Not in the original spec, but trailer custody is exactly what the Amazon
+// Relay claim dispute turned on. Track it.
+model Trailer {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  unitNumber    String
+  vin           String?
+  type          String? // dry van, reefer, flatbed
+  year          Int?
+  plate         String?
+  plateState    String?
+  status        TruckStatus   @default(AVAILABLE)
+  ownershipType OwnershipType @default(OWNED)
+  notes         String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  loads           Load[]
+  assignments     LoadAssignment[]
+  assetHistory    AssetAssignment[]
+  documents       Document[]
+  maintenance     MaintenanceRecord[]
+  complianceItems ComplianceItem[]
+
+  @@unique([companyId, unitNumber])
+  @@index([companyId, status])
+}
+
+model Driver {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Optional login for the driver portal. Not every driver gets one.
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+
+  firstName String
+  lastName  String
+  phone     String?
+  email     String?
+
+  cdlNumber String?
+  cdlState  String?
+  cdlClass  String?
+
+  hireDate        DateTime?
+  terminationDate DateTime?
+  status          DriverStatus  @default(AVAILABLE)
+  employmentType  OwnershipType @default(OWNED)
+
+  assignedTruckId String?
+  assignedTruck   Truck?  @relation(fields: [assignedTruckId], references: [id])
+
+  notes String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  payRules        DriverPayRule[]
+  loads           Load[]
+  assignments     LoadAssignment[]
+  assetHistory    AssetAssignment[]
+  settlements     Settlement[]
+  documents       Document[]
+  expenses        Expense[]
+  fuelTxns        FuelTransaction[]
+  complianceItems ComplianceItem[]
+  communications  Communication[]
+
+  @@index([companyId, status])
+  @@index([companyId, lastName])
+}
+
+enum DriverStatus {
+  AVAILABLE
+  DISPATCHED
+  ON_ROUTE
+  OFF_DUTY
+  VACATION
+  INACTIVE
+}
+
+// Versioned by effective date. Editing a driver's pay creates a NEW row; it
+// never mutates the old one, so historical settlements stay reproducible.
+model DriverPayRule {
+  id       String @id @default(cuid())
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  type          PayRuleType
+  percentBps    Int? // 30% -> 3000
+  perMileCents  Int?
+  flatCents     Int?
+  // For PayRuleType.CUSTOM — a small, sandboxed expression evaluated by the
+  // pay engine. Keeps §30 configurable instead of hard-coded.
+  expression    String?
+
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  notes         String?
+
+  createdAt DateTime @default(now())
+
+  @@index([driverId, effectiveFrom])
+}
+
+enum PayRuleType {
+  PERCENT_GROSS
+  PERCENT_LINEHAUL
+  PER_MILE
+  FLAT_PER_LOAD
+  CUSTOM
+}
+
+// One table for every expiring document across trucks, trailers and drivers.
+// This is what makes the calendar (§18) and the expiry notifications (§22) a
+// single query instead of six special cases.
+model ComplianceItem {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  type ComplianceType
+
+  truckId   String?
+  truck     Truck?   @relation(fields: [truckId], references: [id])
+  trailerId String?
+  trailer   Trailer? @relation(fields: [trailerId], references: [id])
+  driverId  String?
+  driver    Driver?  @relation(fields: [driverId], references: [id])
+
+  identifier String? // policy number, permit number, CDL number
+  issuer     String? // insurer, state, medical examiner
+  issuedAt   DateTime?
+  expiresAt  DateTime
+  notes      String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  documents Document[]
+
+  @@index([companyId, expiresAt])
+  @@index([companyId, type, expiresAt])
+}
+
+enum ComplianceType {
+  INSURANCE_LIABILITY
+  INSURANCE_CARGO
+  INSURANCE_PHYSICAL_DAMAGE
+  REGISTRATION
+  IRP
+  IFTA_LICENSE
+  DOT_INSPECTION
+  ANNUAL_INSPECTION
+  PERMIT
+  CDL
+  MEDICAL_CARD
+  DRUG_TEST
+  MVR
+  OTHER
+}
+
+
+// Trucks, trailers and drivers move between sister authorities. Each row is
+// the period one asset operated under one company. `effectiveTo = null` means
+// it is the current owner.
+//
+// This is what makes "which authority operated truck 105 in Q2" answerable —
+// which IFTA, IRP, insurance and DOT inspections all depend on. Moving an
+// asset must never mean re-creating the record and losing its history.
+model AssetAssignment {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  truckId   String?
+  truck     Truck?   @relation(fields: [truckId], references: [id])
+  trailerId String?
+  trailer   Trailer? @relation(fields: [trailerId], references: [id])
+  driverId  String?
+  driver    Driver?  @relation(fields: [driverId], references: [id])
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+  reason        String?
+
+  createdByUserId String?
+  createdBy       User?    @relation(fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+
+  // Enforce a single OPEN period per asset with a partial unique index added
+  // by hand in the migration:
+  //   CREATE UNIQUE INDEX asset_open_period_truck
+  //     ON "AssetAssignment"("truckId") WHERE "effectiveTo" IS NULL;
+  //   ... and the same for trailerId and driverId.
+  @@index([truckId, effectiveFrom])
+  @@index([trailerId, effectiveFrom])
+  @@index([driverId, effectiveFrom])
+  @@index([companyId, effectiveFrom])
+}
+
+// ============================================================================
+// COMMERCIAL — BROKERS, CUSTOMERS, FACILITIES
+// ============================================================================
+
+model Customer {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name      String
+  type      CustomerType @default(BROKER)
+  mcNumber  String?
+  dotNumber String?
+
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  state        String?
+  postalCode   String?
+  country      String  @default("US")
+  phone        String?
+  email        String?
+  billingEmail String?
+
+  paymentTermsDays       Int             @default(30)
+  preferredPaymentMethod PaymentMethod?
+  creditLimitCents       Int?
+  isFactorable           Boolean         @default(true)
+  status                 CustomerStatus  @default(ACTIVE)
+  // BIG M II is the reason this exists. Blocking a broker must be a first
+  // class state, not a note nobody reads.
+  blockedReason          String?
+
+  notes String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  contacts       CustomerContact[]
+  loads          Load[]
+  invoices       Invoice[]
+  payments       Payment[]
+  documents      Document[]
+  communications Communication[]
+  claims         Claim[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, name])
+  @@index([mcNumber])
+}
+
+enum CustomerType {
+  BROKER
+  SHIPPER
+  DIRECT_CUSTOMER
+}
+
+enum CustomerStatus {
+  ACTIVE
+  ON_HOLD
+  BLOCKED
+  INACTIVE
+}
+
+model CustomerContact {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  name      String
+  title     String?
+  phone     String?
+  email     String?
+  isPrimary Boolean @default(false)
+  notes     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId])
+}
+
+// Reusable shipper/receiver facilities so dispatchers stop retyping addresses.
+model Location {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name         String
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  state        String?
+  postalCode   String?
+  country      String  @default("US")
+  latitude     Decimal? @db.Decimal(9, 6)
+  longitude    Decimal? @db.Decimal(9, 6)
+
+  contactName  String?
+  contactPhone String?
+  hours        String?
+  instructions String?
+  notes        String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  stops LoadStop[]
+
+  @@index([organizationId, name])
+  @@index([organizationId, state, city])
+}
+
+model FactoringCompany {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name         String
+  contactName  String?
+  phone        String?
+  email        String?
+  advanceRateBps Int? // e.g. 9700 = 97% advance
+  feeBps         Int? // e.g. 300 = 3%
+  notes        String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  loads    Load[]
+  invoices Invoice[]
+
+  @@index([organizationId])
+}
+
+// ============================================================================
+// LOADS
+// ============================================================================
+
+model Load {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  loadNumber      String // allocated via Counter
+  referenceNumber String? // the broker's load/PRO number
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  truckId   String?
+  truck     Truck?   @relation(fields: [truckId], references: [id])
+  driverId  String?
+  driver    Driver?  @relation(fields: [driverId], references: [id])
+  trailerId String?
+  trailer   Trailer? @relation(fields: [trailerId], references: [id])
+
+  // TWO AXES. See conventions note 4.
+  operationalStatus LoadOperationalStatus @default(BOOKED)
+  billingStatus     LoadBillingStatus     @default(UNINVOICED)
+  isCancelled       Boolean               @default(false)
+  cancelledAt       DateTime?
+  cancelReason      String?
+
+  equipmentType EquipmentType @default(DRY_VAN)
+  commodity     String?
+  weightLbs     Int?
+  tempF         Int?
+  isHazmat      Boolean       @default(false)
+  isTeam        Boolean       @default(false)
+
+  dispatchedMiles Int?
+  actualMiles     Int?
+  emptyMiles      Int?
+
+  // Money. Accessorials are the SUM of billable LoadAccessorial rows; it is
+  // stored denormalized for reporting but must be recomputed on write.
+  linehaulCents      Int @default(0)
+  fuelSurchargeCents Int @default(0)
+  accessorialsCents  Int @default(0)
+  totalRevenueCents  Int @default(0)
+
+  // Driver pay is COMPUTED but the rule used is FROZEN onto the load, so a
+  // later pay change cannot silently alter history.
+  driverPayCents        Int   @default(0)
+  driverPayRuleSnapshot Json?
+
+  estimatedFuelCents   Int @default(0)
+  estimatedProfitCents Int @default(0)
+
+  // Factoring materially changes AR behaviour — the factor collects, not you.
+  isFactored         Boolean           @default(false)
+  factoringCompanyId String?
+  factoringCompany   FactoringCompany? @relation(fields: [factoringCompanyId], references: [id])
+  factoringFeeCents  Int               @default(0)
+
+  bookedByUserId String?
+  bookedBy       User?    @relation(fields: [bookedByUserId], references: [id])
+  bookedAt       DateTime @default(now())
+
+  dispatcherNotes String?
+  driverNotes     String?
+  internalNotes   String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  stops          LoadStop[]
+  accessorials   LoadAccessorial[]
+  statusEvents   LoadStatusEvent[]
+  assignments    LoadAssignment[]
+  documents      Document[]
+  invoiceLines   InvoiceLine[]
+  settlementLines SettlementLine[]
+  expenses       Expense[]
+  fuelTxns       FuelTransaction[]
+  communications Communication[]
+  claims         Claim[]
+
+  @@unique([companyId, loadNumber])
+  @@index([companyId, operationalStatus])
+  @@index([companyId, billingStatus])
+  @@index([companyId, customerId])
+  @@index([companyId, driverId, bookedAt])
+  @@index([companyId, truckId, bookedAt])
+  @@index([referenceNumber])
+}
+
+enum LoadOperationalStatus {
+  AVAILABLE
+  BOOKED
+  DISPATCHED
+  AT_PICKUP
+  LOADED
+  IN_TRANSIT
+  AT_DELIVERY
+  DELIVERED
+  POD_RECEIVED
+}
+
+enum LoadBillingStatus {
+  UNINVOICED
+  READY_TO_INVOICE
+  INVOICED
+  PARTIALLY_PAID
+  PAID
+  DISPUTED
+  WRITTEN_OFF
+}
+
+enum EquipmentType {
+  DRY_VAN
+  REEFER
+  FLATBED
+  STEP_DECK
+  POWER_ONLY
+  TANKER
+  CONTAINER
+  OTHER
+}
+
+model LoadStop {
+  id     String @id @default(cuid())
+  loadId String
+  load   Load   @relation(fields: [loadId], references: [id], onDelete: Cascade)
+
+  sequence Int
+  type     StopType
+
+  // Either a saved facility or a one-off address.
+  locationId   String?
+  location     Location? @relation(fields: [locationId], references: [id])
+  name         String?
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  state        String?
+  postalCode   String?
+
+  appointmentType AppointmentType @default(APPOINTMENT)
+  scheduledAt     DateTime?
+  windowStart     DateTime?
+  windowEnd       DateTime?
+  arrivedAt       DateTime?
+  departedAt      DateTime?
+
+  referenceNumber String? // PU# / DEL#
+  contactName     String?
+  contactPhone    String?
+  instructions    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([loadId, sequence])
+  @@index([loadId])
+  @@index([scheduledAt])
+}
+
+enum StopType {
+  PICKUP
+  DELIVERY
+  INTERMEDIATE
+}
+
+enum AppointmentType {
+  APPOINTMENT
+  FCFS
+  WINDOW
+}
+
+// Detention, TONU, lumper and friends — each needs its own approval state
+// because brokers dispute them individually.
+model LoadAccessorial {
+  id     String @id @default(cuid())
+  loadId String
+  load   Load   @relation(fields: [loadId], references: [id], onDelete: Cascade)
+
+  type       AccessorialType
+  amountCents Int
+  // true  = billable to the broker (revenue)
+  // false = a cost you ate (expense side of profitability)
+  isBillable Boolean            @default(true)
+  status     AccessorialStatus  @default(PENDING)
+
+  approvedByUserId String?
+  approvedBy       User?     @relation(fields: [approvedByUserId], references: [id])
+  approvedAt       DateTime?
+
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([loadId])
+  @@index([status])
+}
+
+enum AccessorialType {
+  DETENTION
+  LAYOVER
+  TONU
+  LUMPER
+  EXTRA_STOP
+  DRIVER_ASSIST
+  REDELIVERY
+  STORAGE
+  FUEL_ADVANCE_FEE
+  OTHER
+}
+
+enum AccessorialStatus {
+  PENDING
+  APPROVED
+  BILLED
+  DENIED
+}
+
+// Full status history. Powers the audit trail, dwell-time analytics, and the
+// "no POD 3 days after delivery" alert — all for free.
+model LoadStatusEvent {
+  id     String @id @default(cuid())
+  loadId String
+  load   Load   @relation(fields: [loadId], references: [id], onDelete: Cascade)
+
+  axis       StatusAxis
+  fromStatus String?
+  toStatus   String
+
+  source          StatusSource @default(MANUAL)
+  changedByUserId String?
+  changedBy       User?        @relation(fields: [changedByUserId], references: [id])
+  occurredAt      DateTime     @default(now())
+  note            String?
+
+  @@index([loadId, occurredAt])
+}
+
+enum StatusAxis {
+  OPERATIONAL
+  BILLING
+}
+
+enum StatusSource {
+  MANUAL
+  AUTOMATIC
+  DRIVER_PORTAL
+  INTEGRATION
+}
+
+// Custody history. "Who had trailer X on July 14" must be answerable in one
+// query — that question cost real money on the Amazon Relay claim.
+model LoadAssignment {
+  id     String @id @default(cuid())
+  loadId String
+  load   Load   @relation(fields: [loadId], references: [id], onDelete: Cascade)
+
+  truckId   String?
+  truck     Truck?   @relation(fields: [truckId], references: [id])
+  driverId  String?
+  driver    Driver?  @relation(fields: [driverId], references: [id])
+  trailerId String?
+  trailer   Trailer? @relation(fields: [trailerId], references: [id])
+
+  assignedAt       DateTime  @default(now())
+  unassignedAt     DateTime?
+  assignedByUserId String?
+  assignedBy       User?     @relation(fields: [assignedByUserId], references: [id])
+  reason           String?
+
+  @@index([loadId])
+  @@index([trailerId, assignedAt])
+  @@index([truckId, assignedAt])
+  @@index([driverId, assignedAt])
+}
+
+// Cargo claims, accidents, shortages. Not in the original spec; you are
+// actively disputing one right now.
+model Claim {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  loadId     String?
+  load       Load?     @relation(fields: [loadId], references: [id])
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+
+  type              ClaimType
+  claimNumber       String?
+  claimantName      String?
+  status            ClaimStatus @default(OPEN)
+  incidentAt        DateTime?
+  amountClaimedCents Int?
+  amountPaidCents    Int?
+  description       String?
+  resolution        String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  documents Document[]
+
+  @@index([companyId, status])
+  @@index([loadId])
+}
+
+enum ClaimType {
+  CARGO_DAMAGE
+  CARGO_SHORTAGE
+  ACCIDENT
+  EQUIPMENT_DAMAGE
+  FACILITY_INCIDENT
+  OTHER
+}
+
+enum ClaimStatus {
+  OPEN
+  UNDER_REVIEW
+  DISPUTED
+  RESOLVED
+  DENIED
+  CLOSED
+}
+
+// ============================================================================
+// DOCUMENTS
+// ============================================================================
+
+model Document {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // R2 object key: {companyId}/{entity}/{entityId}/{uuid}-{filename}
+  // Never served from a public bucket — always a short-lived signed URL minted
+  // behind an authorization check.
+  r2Key       String  @unique
+  filename    String
+  mimeType    String
+  sizeBytes   Int
+  sha256      String? // dedupe + integrity for disputes
+  pageCount   Int?
+
+  type DocumentType
+
+  // Documents point outward (convention 7). Exactly one of these is set.
+  loadId           String?
+  load             Load?           @relation(fields: [loadId], references: [id])
+  truckId          String?
+  truck            Truck?          @relation(fields: [truckId], references: [id])
+  trailerId        String?
+  trailer          Trailer?        @relation(fields: [trailerId], references: [id])
+  driverId         String?
+  driver           Driver?         @relation(fields: [driverId], references: [id])
+  customerId       String?
+  customer         Customer?       @relation(fields: [customerId], references: [id])
+  invoiceId        String?
+  invoice          Invoice?        @relation(fields: [invoiceId], references: [id])
+  settlementId     String?
+  settlement       Settlement?     @relation(fields: [settlementId], references: [id])
+  expenseId        String?
+  expense          Expense?        @relation(fields: [expenseId], references: [id])
+  fuelTransactionId String?
+  fuelTransaction   FuelTransaction? @relation(fields: [fuelTransactionId], references: [id])
+  maintenanceId    String?
+  maintenance      MaintenanceRecord? @relation(fields: [maintenanceId], references: [id])
+  complianceItemId String?
+  complianceItem   ComplianceItem? @relation(fields: [complianceItemId], references: [id])
+  claimId          String?
+  claim            Claim?          @relation(fields: [claimId], references: [id])
+
+  // Populated later by the OCR pipeline (§32). Present from day one so that
+  // enabling AI extraction is a background job, not a migration across
+  // tens of thousands of rows.
+  ocrStatus     OcrStatus @default(NOT_QUEUED)
+  ocrText       String?
+  extractedJson Json?
+  ocrError      String?
+
+  uploadedByUserId String?
+  uploadedBy       User?    @relation(fields: [uploadedByUserId], references: [id])
+  uploadedAt       DateTime @default(now())
+
+  deletedAt DateTime?
+  updatedAt DateTime  @updatedAt
+
+  @@index([companyId, type])
+  @@index([loadId])
+  @@index([driverId])
+  @@index([truckId])
+  @@index([ocrStatus])
+  @@index([sha256])
+}
+
+enum DocumentType {
+  RATE_CONFIRMATION
+  BOL
+  POD
+  LUMPER_RECEIPT
+  SCALE_TICKET
+  FUEL_RECEIPT
+  DETENTION_PROOF
+  INVOICE_PDF
+  SETTLEMENT_PDF
+  MAINTENANCE_RECEIPT
+  INSURANCE_CERT
+  REGISTRATION
+  INSPECTION_REPORT
+  CDL_COPY
+  MEDICAL_CARD
+  ACCIDENT_REPORT
+  PHOTO
+  OTHER
+}
+
+enum OcrStatus {
+  NOT_QUEUED
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// ============================================================================
+// INVOICING & ACCOUNTS RECEIVABLE
+// ============================================================================
+
+model Invoice {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  invoiceNumber String // allocated via Counter
+  customerId    String
+  customer      Customer @relation(fields: [customerId], references: [id])
+
+  status InvoiceStatus @default(DRAFT)
+
+  issueDate DateTime?
+  dueDate   DateTime?
+  termsDays Int       @default(30)
+
+  subtotalCents     Int @default(0)
+  accessorialsCents Int @default(0)
+  totalCents        Int @default(0)
+  amountPaidCents   Int @default(0)
+  balanceCents      Int @default(0)
+
+  // A factored invoice is SOLD. The factor collects it. Aging, cash timing
+  // and profitability all behave differently — do not treat it as normal AR.
+  isFactored         Boolean           @default(false)
+  factoringCompanyId String?
+  factoringCompany   FactoringCompany? @relation(fields: [factoringCompanyId], references: [id])
+  factoredAt         DateTime?
+  factoringFeeCents  Int               @default(0)
+  advanceCents       Int               @default(0)
+  reserveReleasedAt  DateTime?
+
+  sentAt      DateTime?
+  sentToEmail String?
+  notes       String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  lines        InvoiceLine[]
+  applications PaymentApplication[]
+  documents    Document[]
+
+  @@unique([companyId, invoiceNumber])
+  @@index([companyId, status])
+  @@index([companyId, customerId])
+  @@index([companyId, dueDate])
+}
+
+enum InvoiceStatus {
+  DRAFT
+  READY_TO_SEND
+  SENT
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  DISPUTED
+  VOID
+  WRITTEN_OFF
+}
+
+// An invoice can cover several loads (common with brokers who batch-pay).
+model InvoiceLine {
+  id        String  @id @default(cuid())
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  loadId String?
+  load   Load?   @relation(fields: [loadId], references: [id])
+
+  description String
+  quantity    Decimal @default(1) @db.Decimal(10, 2)
+  unitCents   Int
+  amountCents Int
+  sortOrder   Int     @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([invoiceId])
+  @@index([loadId])
+}
+
+model Payment {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+
+  method          PaymentMethod
+  referenceNumber String? // check number, ACH trace, wire ref
+  receivedAt      DateTime
+  amountCents     Int
+  // Amount not yet applied to an invoice — a real state, not an error.
+  unappliedCents  Int           @default(0)
+  notes           String?
+
+  recordedByUserId String?
+  recordedBy       User?   @relation(fields: [recordedByUserId], references: [id])
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  applications PaymentApplication[]
+
+  @@index([companyId, receivedAt])
+  @@index([companyId, customerId])
+}
+
+// One check frequently pays several invoices, and one invoice can be paid in
+// instalments. Modelling this as a join table is the single most important
+// AR decision in the schema.
+model PaymentApplication {
+  id        String  @id @default(cuid())
+  paymentId String
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  amountCents Int
+  appliedAt   DateTime @default(now())
+
+  @@unique([paymentId, invoiceId])
+  @@index([invoiceId])
+}
+
+enum PaymentMethod {
+  CHECK
+  ACH
+  WIRE
+  ZELLE
+  CREDIT_CARD
+  FACTORING_ADVANCE
+  FACTORING_RESERVE
+  CASH
+  OTHER
+}
+
+// ============================================================================
+// DRIVER SETTLEMENTS
+// ============================================================================
+
+model Settlement {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  settlementNumber String // allocated via Counter
+  driverId         String
+  driver           Driver @relation(fields: [driverId], references: [id])
+
+  periodStart DateTime
+  periodEnd   DateTime
+  status      SettlementStatus @default(DRAFT)
+
+  grossCents      Int @default(0)
+  deductionsCents Int @default(0)
+  reimbursements  Int @default(0)
+  netCents        Int @default(0)
+
+  approvedByUserId String?
+  approvedBy       User?     @relation(fields: [approvedByUserId], references: [id])
+  approvedAt       DateTime?
+  paidAt           DateTime?
+  paymentMethod    PaymentMethod?
+  paymentReference String?
+  notes            String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  lines     SettlementLine[]
+  documents Document[]
+
+  @@unique([companyId, settlementNumber])
+  @@index([companyId, driverId, periodEnd])
+  @@index([companyId, status])
+}
+
+enum SettlementStatus {
+  DRAFT
+  APPROVED
+  PAID
+  VOID
+}
+
+model SettlementLine {
+  id           String     @id @default(cuid())
+  settlementId String
+  settlement   Settlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+
+  loadId String?
+  load   Load?   @relation(fields: [loadId], references: [id])
+
+  type        SettlementLineType
+  description String
+  // SIGNED. Earnings positive, deductions negative. Net is a plain SUM.
+  amountCents Int
+  // The exact pay rule applied, frozen. A later pay change cannot rewrite
+  // this settlement.
+  payRuleSnapshot Json?
+  sortOrder       Int   @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([settlementId])
+  @@index([loadId])
+}
+
+enum SettlementLineType {
+  LOAD_PAY
+  ACCESSORIAL_PAY
+  BONUS
+  REIMBURSEMENT
+  DEDUCTION_ADVANCE
+  DEDUCTION_FUEL
+  DEDUCTION_INSURANCE
+  DEDUCTION_ESCROW
+  DEDUCTION_EQUIPMENT
+  DEDUCTION_VIOLATION
+  DEDUCTION_OTHER
+}
+
+// ============================================================================
+// COSTS — EXPENSES, FUEL, MAINTENANCE, IFTA
+// ============================================================================
+
+model Expense {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  incurredAt  DateTime
+  category    ExpenseCategory
+  amountCents Int
+
+  truckId  String?
+  truck    Truck?  @relation(fields: [truckId], references: [id])
+  driverId String?
+  driver   Driver? @relation(fields: [driverId], references: [id])
+  loadId   String?
+  load     Load?   @relation(fields: [loadId], references: [id])
+
+  vendorName    String?
+  paymentMethod PaymentMethod?
+  // Should this be deducted from the driver's settlement?
+  isDriverDeduction Boolean @default(false)
+  isReimbursable    Boolean @default(false)
+  notes             String?
+
+  createdByUserId String?
+  createdBy       User?   @relation(fields: [createdByUserId], references: [id])
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  documents Document[]
+
+  @@index([companyId, incurredAt])
+  @@index([companyId, category])
+  @@index([companyId, truckId, incurredAt])
+  @@index([loadId])
+}
+
+enum ExpenseCategory {
+  FUEL
+  TOLLS
+  MAINTENANCE
+  REPAIRS
+  TIRES
+  INSURANCE
+  PERMITS
+  REGISTRATION
+  PAYROLL
+  DISPATCH
+  FACTORING
+  PARKING
+  LUMPER
+  DRIVER_ADVANCE
+  SCALE
+  WASH
+  OFFICE
+  SOFTWARE
+  LEGAL
+  OTHER
+}
+
+model FuelTransaction {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  purchasedAt DateTime
+  truckId     String?
+  truck       Truck?  @relation(fields: [truckId], references: [id])
+  driverId    String?
+  driver      Driver? @relation(fields: [driverId], references: [id])
+  loadId      String?
+  load        Load?   @relation(fields: [loadId], references: [id])
+
+  vendorName String?
+  city       String?
+  // Jurisdiction matters — this row is also an IFTA fuel purchase.
+  state      String?
+
+  // Gallons are genuinely fractional. Decimal, not cents.
+  gallons             Decimal @db.Decimal(10, 3)
+  pricePerGallonCents Int?
+  totalCents          Int
+  odometer            Int?
+  fuelCardLast4       String?
+  isDef               Boolean @default(false)
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  documents Document[]
+
+  @@index([companyId, purchasedAt])
+  @@index([companyId, truckId, purchasedAt])
+  @@index([companyId, state, purchasedAt])
+}
+
+model MaintenanceRecord {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  truckId   String?
+  truck     Truck?   @relation(fields: [truckId], references: [id])
+  trailerId String?
+  trailer   Trailer? @relation(fields: [trailerId], references: [id])
+
+  servicedAt  DateTime
+  odometer    Int?
+  category    MaintenanceCategory
+  description String?
+  vendorName  String?
+  costCents   Int                 @default(0)
+
+  nextServiceOdometer Int?
+  nextServiceDate     DateTime?
+  notes               String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  documents Document[]
+
+  @@index([companyId, servicedAt])
+  @@index([companyId, truckId, servicedAt])
+  @@index([companyId, nextServiceDate])
+}
+
+enum MaintenanceCategory {
+  OIL_CHANGE
+  TIRES
+  BRAKES
+  ENGINE
+  TRANSMISSION
+  SUSPENSION
+  ELECTRICAL
+  AFTERTREATMENT
+  PREVENTIVE
+  DOT_INSPECTION
+  TRAILER_SERVICE
+  OTHER
+}
+
+// Per-jurisdiction mileage. Realistically this gets POPULATED FROM THE ELD
+// FEED, not typed in by hand. The table exists now so the integration has
+// somewhere to land; do not build a manual-entry UI for it.
+model IftaMileage {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  truckId String
+  truck   Truck  @relation(fields: [truckId], references: [id])
+
+  periodYear    Int
+  periodQuarter Int
+  jurisdiction  String // "IL", "OH", "ON"
+
+  totalMiles   Int     @default(0)
+  taxableMiles Int     @default(0)
+  source       StatusSource @default(INTEGRATION)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, truckId, periodYear, periodQuarter, jurisdiction])
+  @@index([companyId, periodYear, periodQuarter])
+}
+
+// ============================================================================
+// OPERATIONS SUPPORT
+// ============================================================================
+
+model Communication {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  loadId     String?
+  load       Load?     @relation(fields: [loadId], references: [id])
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+  driverId   String?
+  driver     Driver?   @relation(fields: [driverId], references: [id])
+
+  type       CommunicationType
+  direction  CommunicationDirection @default(OUTBOUND)
+  occurredAt DateTime               @default(now())
+  subject    String?
+  body       String
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, occurredAt])
+  @@index([loadId, occurredAt])
+  @@index([customerId, occurredAt])
+}
+
+enum CommunicationType {
+  CALL
+  EMAIL
+  SMS
+  NOTE
+  PORTAL_MESSAGE
+}
+
+enum CommunicationDirection {
+  INBOUND
+  OUTBOUND
+  INTERNAL
+}
+
+model Notification {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Null = broadcast to every user in the company with the right role.
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+
+  type      NotificationType
+  severity  NotificationSeverity @default(INFO)
+  title     String
+  body      String?
+  deepLink  String?
+  // Prevents "missing POD" firing every hour for the same load.
+  dedupeKey String?
+
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@unique([companyId, dedupeKey])
+  @@index([companyId, userId, readAt])
+  @@index([companyId, createdAt])
+}
+
+enum NotificationType {
+  PICKUP_APPROACHING
+  DELIVERY_APPROACHING
+  POD_MISSING
+  INVOICE_NOT_CREATED
+  INVOICE_OVERDUE
+  PAYMENT_RECEIVED
+  MAINTENANCE_DUE
+  COMPLIANCE_EXPIRING
+  DISPATCH_CONFLICT
+  CLAIM_UPDATE
+  SETTLEMENT_READY
+  SYSTEM
+}
+
+enum NotificationSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+// Most calendar entries are DERIVED (stops, compliance expiries, next service
+// dates). This table is only for manual one-off events.
+model CalendarEvent {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  title     String
+  notes     String?
+  startsAt  DateTime
+  endsAt    DateTime?
+  allDay    Boolean  @default(false)
+  color     String?
+
+  createdByUserId String?
+  createdBy       User?   @relation(fields: [createdByUserId], references: [id])
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([companyId, startsAt])
+}
+
+// Written automatically by a Prisma client extension, never by hand. Hand
+// placed audit calls end up around 60% covered, which is the same as useless.
+model AuditLog {
+  id        String  @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+
+  action     AuditAction
+  entityType String
+  entityId   String
+  // { field: { from, to } } — one row per write, not one per field.
+  changes    Json?
+  ip         String?
+  userAgent  String?
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, entityType, entityId])
+  @@index([companyId, createdAt])
+  @@index([userId, createdAt])
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  RESTORE
+  LOGIN
+  LOGOUT
+  EXPORT
+  PERMISSION_CHANGE
+}
