@@ -41,11 +41,50 @@ inferred from the URL — `prisma.config.ts` refuses to guess and fails closed.
 
 ## Setup
 
+`.env` comes first: `npm install` runs `prisma generate`, and `prisma.config.ts`
+refuses to run without a declared branch.
+
 ```bash
 cp .env.example .env      # then fill in real values; .env is gitignored
 npm install
+npm run db:migrate
 npm run dev
 ```
+
+## Database
+
+Two roles, and the difference is the tenancy boundary rather than a
+convention.
+
+| Role           | Used by           | Notes                                         |
+| -------------- | ----------------- | --------------------------------------------- |
+| the Neon owner | migrations, seeds | carries `BYPASSRLS` — sees every organization |
+| `zebra_app`    | the application   | owns nothing, no DDL, no `BYPASSRLS`          |
+
+Every table carrying an `organizationId` — 38 of them — has row-level security
+**enabled and forced**, with one policy shape:
+
+```sql
+USING ("organizationId" = current_setting('app.current_org_id', true))
+```
+
+Unset means invisible. A request that forgets to set the variable sees an empty
+screen, never someone else's data.
+
+Because the owner bypasses all of it, **an isolation test pointed at
+`DIRECT_DATABASE_URL` passes vacuously.** Tests must use `DATABASE_URL`.
+
+The migration creates `zebra_app` with `NOLOGIN` and no password, so no
+credential is ever committed. Grant it login once per Neon branch:
+
+```sql
+ALTER ROLE zebra_app WITH LOGIN PASSWORD '<generated>';
+```
+
+`prisma/migrations/*_rls_and_isolation/migration.sql` is the whole story —
+policies, the eleven child-table triggers, the `AssetAssignment` partial unique
+indexes, and a self-audit that fails the migration if a future table carries a
+tenant without a policy.
 
 ## Scripts
 
@@ -56,6 +95,9 @@ npm run dev
 | `npm run typecheck`               | `tsc --noEmit`                                          |
 | `npm run lint` / `lint:fix`       | ESLint                                                  |
 | `npm run format` / `format:check` | Prettier                                                |
+| `npm run db:migrate`              | `prisma migrate dev` against the declared branch        |
+| `npm run db:deploy`               | `prisma migrate deploy` — no shadow database            |
+| `npm run db:generate`             | regenerate the client into `src/generated/prisma`       |
 | `npm run cf:typegen`              | regenerate `cloudflare-env.d.ts` from `wrangler.jsonc`  |
 | `npm run preview`                 | OpenNext build, then run it in the real Workers runtime |
 | `npm run deploy`                  | build and deploy to `zebra-dev`                         |
