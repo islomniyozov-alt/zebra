@@ -115,6 +115,55 @@ export function withOrg<T>(
   return runInOrg(prisma, orgId, fn, options)
 }
 
+/**
+ * Run `fn` in a transaction that declares WHO is asking, rather than which
+ * tenant they are acting as.
+ *
+ * This unlocks exactly one thing: the `own_membership` policy on Membership
+ * and MembershipCompany, which is how login discovers the organizations a user
+ * belongs to before it can possibly know which one to scope to. It is FOR
+ * SELECT only, so this grants reading and never writing.
+ *
+ * Not a general-purpose escape hatch. If a query needs tenant data, it belongs
+ * in `runInOrg`.
+ */
+export async function runAsUser<T>(
+  client: TransactionCapable,
+  userId: string,
+  fn: (tx: TxClient) => Promise<T>,
+  options: OrgTransactionOptions = {},
+): Promise<T> {
+  assertUserId(userId)
+
+  return client.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.current_user_id', ${userId}, true)`
+      return fn(tx)
+    },
+    {
+      ...(options.timeoutMs === undefined
+        ? {}
+        : { timeout: options.timeoutMs }),
+      ...(options.maxWaitMs === undefined
+        ? {}
+        : { maxWait: options.maxWaitMs }),
+    },
+  )
+}
+
+export class InvalidUserIdError extends Error {
+  constructor(received: unknown) {
+    super(`Not a user id: ${JSON.stringify(received)}.`)
+    this.name = 'InvalidUserIdError'
+  }
+}
+
+export function assertUserId(userId: unknown): asserts userId is string {
+  if (typeof userId !== 'string' || !CUID_V1.test(userId)) {
+    throw new InvalidUserIdError(userId)
+  }
+}
+
 // ---------------------------------------------------------------------------
 // COMPANY SCOPING — A DIFFERENT THING, DELIBERATELY
 //

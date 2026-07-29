@@ -22,6 +22,10 @@ Rules that are cheap to state and expensive to rediscover:
   Proxy — Workers I/O objects cannot cross request boundaries.
 - Password hashing must run on workerd. Native bcrypt and `@node-rs/argon2` do
   not. Verify under `npm run preview`, not just `next dev`.
+- Permission is decided in `src/lib/permissions.ts` and nowhere else. Routes
+  call `requirePermission`; none of them decide inline.
+- Never send a field to the client that the role cannot see. Leave it out of
+  the payload — hiding it in CSS is the same bug as not checking at all.
 - Money is an integer of cents, percentages are integer basis points.
 - Logical CSS properties only — `margin-inline-start`, never `margin-left`.
 - No hex colour outside the token block. Grep before deleting a token.

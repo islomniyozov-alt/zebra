@@ -91,27 +91,87 @@ Application code never sets that variable by hand. It calls `withOrg` from
 interactive transaction and sets `app.current_org_id` for its duration. The id
 comes from the session and from nowhere else.
 
+Two session variables, and the difference matters:
+
+| Variable              | Set by                 | Unlocks                                   |
+| --------------------- | ---------------------- | ----------------------------------------- |
+| `app.current_org_id`  | `withOrg` / `runInOrg` | everything a tenant owns                  |
+| `app.current_user_id` | `runAsUser`            | a user's own `Membership` rows, read-only |
+
+The second exists because login has to discover _which_ organization to scope
+to, and `Membership` is itself behind RLS. The alternative was a
+`SECURITY DEFINER` bypass on the login path — the most attacked path in the
+application — so it is a second policy instead. `FOR SELECT` only: asserting a
+user id reads memberships and can never write one.
+
+## Auth
+
+Email and password against `User` and `Session`. Sessions are rows, not JWTs,
+because revocation has to be immediate.
+
+- **Hashing is PBKDF2 over WebCrypto**, 600,000 iterations, OWASP's current
+  floor. Native bcrypt and `@node-rs/argon2` do not exist on workerd, and both
+  work fine in `next dev` — which is how that gets discovered at deploy time.
+  Measured at ~0.7 s of CPU inside workerd; `tests/workers/` proves it there,
+  not in Node.
+- **The cookie holds the token; the database holds its SHA-256.** A dump of
+  `Session` is a list of useless digests.
+- **Rate limited** per email (5 per 15 min) and per address (30 per 15 min),
+  the second higher because an office shares an address. A locked account
+  refuses the _correct_ password too, or the limit is decoration.
+- **Rotation on login**: whatever session the request arrived with is revoked
+  and a fresh token issued, so a token planted before authentication is
+  worthless after it. Other devices are left alone.
+- **A missing user costs the same as a wrong password** — the failure path
+  still runs a full verify against a throwaway hash, so response time is not a
+  list of which addresses hold accounts.
+
+`can(session, action, resource)` in [`src/lib/permissions.ts`](src/lib/permissions.ts)
+is the only place permission is decided. Routes call `requirePermission` from
+[`src/lib/auth-context.ts`](src/lib/auth-context.ts); no route decides for
+itself. Navigation comes from the same function, so a dispatcher with no
+financial permission never sees an empty **Money** heading — the group is
+absent, not hidden.
+
+## Seed
+
+`npm run db:seed` — §12 exactly, and idempotent.
+
+One organization (`INTERNAL`, five authorities) holding RAM Haulage LLC and
+Dolphins Transport Inc, plus one `OWNER` whose empty scope list means every
+authority. No demo loads, no fake brokers, no placeholder trucks.
+
+The owner's password comes from `SEED_OWNER_PASSWORD`, or is generated and
+printed once if that is unset. There is deliberately no default password.
+
+A second organization exists solely so a tenancy failure has something to
+expose. It is skipped when `NEON_BRANCH=production`.
+
 ## Tests
 
-Two tiers, split by whether they write to the database.
+Three projects, split by what they need and what they touch.
 
-| Command              | Runs                                       | Writes              |
-| -------------------- | ------------------------------------------ | ------------------- |
-| `npm run test:check` | structure + unit — part of `npm run check` | no                  |
-| `npm test`           | everything, including cross-org isolation  | yes, then cleans up |
+| Command              | Runs                                         | Writes              |
+| -------------------- | -------------------------------------------- | ------------------- |
+| `npm run test:check` | `node` + `workers` — part of `npm run check` | no                  |
+| `npm test`           | all three, adding isolation and auth         | yes, then cleans up |
+
+The **workers** project runs inside workerd rather than Node. A green Node
+suite says nothing about the deployed runtime, which is the whole reason
+password hashing is tested there.
 
 `tests/structure.test.ts` is the migration's own self-audit, promoted out of
 the migration and into `check`. In the migration it fires once, on the day it
 is applied; here it fires on every check, so a later migration that adds a
 tenant table without a policy fails the build instead of waiting to be noticed.
 
-`tests/isolation.integration.test.ts` is the §6 acceptance test. It populates
+`tests/integration/isolation.test.ts` is the §6 acceptance test. It populates
 **both** organizations in **every** table that carries a tenant — a table left
 empty would pass "sees nothing from the other organization" for the boring
 reason, so a coverage assertion fails if the fixture misses one — then asserts
 isolation in both directions as `zebra_app`.
 
-Both tiers need `.env`. They refuse to run against `NEON_BRANCH=production`.
+Everything needs `.env`. Nothing runs against `NEON_BRANCH=production`.
 
 ## Scripts
 
@@ -124,6 +184,7 @@ Both tiers need `.env`. They refuse to run against `NEON_BRANCH=production`.
 | `npm run lint` / `lint:fix`       | ESLint                                                  |
 | `npm run format` / `format:check` | Prettier                                                |
 | `npm run db:migrate`              | `prisma migrate dev` against the declared branch        |
+| `npm run db:seed`                 | §12's seed — idempotent                                 |
 | `npm run db:deploy`               | `prisma migrate deploy` — no shadow database            |
 | `npm run db:generate`             | regenerate the client into `src/generated/prisma`       |
 | `npm run cf:typegen`              | regenerate `cloudflare-env.d.ts` from `wrangler.jsonc`  |

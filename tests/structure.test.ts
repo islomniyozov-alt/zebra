@@ -77,15 +77,90 @@ describe('row-level security', () => {
        ORDER BY c.relname
     `)
 
-    // User and Session are cross-organization by nature: one person holds
-    // memberships in several organizations, and login has to find a user by
-    // email before any organization is known. _prisma_migrations is the
-    // owner's bookkeeping and the app has no privileges on it at all.
-    // Anything else appearing here is a table that lost its wall.
+    // The three tables authentication needs before a tenant is known.
+    //
+    // User is cross-organization by nature: one person holds memberships in
+    // several organizations, and login has to find them by email before any
+    // organization is known. Session is what names the organization, so a
+    // policy on it could never be satisfied. LoginAttempt is written before
+    // anyone has proved anything at all.
+    //
+    // _prisma_migrations is the owner's bookkeeping; the app has no
+    // privileges on it. Anything else appearing here lost its wall.
     expect(rows.map((r) => r.relname)).toEqual([
+      'LoginAttempt',
       'Session',
       'User',
       '_prisma_migrations',
+    ])
+  })
+
+  it('does not let Session smuggle a tenant column past the audit', async () => {
+    // Session carries `activeOrganizationId`, not `organizationId`, and the
+    // name is the whole mechanism: it is the INPUT to row-level security, read
+    // before any policy can apply. If someone ever renames it to the obvious
+    // thing, the audit above starts demanding a policy that cannot exist —
+    // and this test explains why before they spend an afternoon on it.
+    const rows = await query<{ attname: string }>(`
+      SELECT a.attname
+        FROM pg_attribute a
+        JOIN pg_class c ON c.oid = a.attrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'public' AND c.relname = 'Session'
+         AND a.attnum > 0 AND NOT a.attisdropped
+       ORDER BY a.attname
+    `)
+
+    const names = rows.map((r) => r.attname)
+    expect(names).toContain('activeOrganizationId')
+    expect(names).not.toContain('organizationId')
+  })
+
+  it('lets a user read their own memberships, and only read them', async () => {
+    // The one policy that is not org_isolation. Login has to discover which
+    // organizations a user belongs to before it can scope to one, so
+    // Membership answers to `app.current_user_id` as well.
+    //
+    // polcmd 'r' is SELECT. If this ever becomes '*', asserting a user id
+    // would also let you WRITE a membership into any organization you named,
+    // because a permissive policy without a command restriction supplies its
+    // USING clause as the write check.
+    const rows = await query<{
+      relname: string
+      cmd: string
+      withcheck: string | null
+    }>(`
+      SELECT c.relname, p.polcmd::text AS cmd, pg_get_expr(p.polwithcheck, p.polrelid) AS withcheck
+        FROM pg_policy p
+        JOIN pg_class c ON c.oid = p.polrelid
+       WHERE p.polname = 'own_membership'
+       ORDER BY c.relname
+    `)
+
+    expect(rows.map((r) => r.relname)).toEqual([
+      'Membership',
+      'MembershipCompany',
+    ])
+    for (const row of rows) {
+      expect(row.cmd, `${row.relname} is not SELECT-only`).toBe('r')
+      expect(row.withcheck, row.relname).toBeNull()
+    }
+  })
+
+  it('has no policies beyond the two the design accounts for', async () => {
+    // A policy nobody remembers adding is a policy nobody reviewed.
+    const rows = await query<{ polname: string }>(`
+      SELECT DISTINCT p.polname
+        FROM pg_policy p
+        JOIN pg_class c ON c.oid = p.polrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'public'
+       ORDER BY p.polname
+    `)
+
+    expect(rows.map((r) => r.polname)).toEqual([
+      'org_isolation',
+      'own_membership',
     ])
   })
 

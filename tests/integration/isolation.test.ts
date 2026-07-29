@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Pool } from '@neondatabase/serverless'
 import { createPrismaClient } from '@/lib/db'
-import { runInOrg, withOrg, type TxClient } from '@/lib/tenancy'
+import { runAsUser, runInOrg, withOrg, type TxClient } from '@/lib/tenancy'
 import type { PrismaClient } from '@/generated/prisma/client'
 import { dropOrganization, seedOrganization, type OrgFixture } from './fixtures'
 
@@ -327,6 +327,95 @@ describe('child tables inherit the wall', () => {
         }),
       ),
     ).rejects.toThrow()
+  })
+})
+
+describe('the own_membership escape hatch', () => {
+  // Login needs to read Membership before it knows an organization, so
+  // Membership answers to `app.current_user_id` too. That is a second key to
+  // the same door and it gets tested like one.
+
+  it('shows a user their own memberships and nobody else’s', async () => {
+    const seen = await runAsUser(app, orgA.userId, (tx) =>
+      tx.membership.findMany({ select: { id: true, userId: true } }),
+    )
+
+    expect(seen.map((m) => m.id)).toEqual(orgA.ids.membership)
+    expect(seen.every((m) => m.userId === orgA.userId)).toBe(true)
+    expect(seen.map((m) => m.id)).not.toContain(orgB.ids.membership![0])
+  })
+
+  it('shows the scope list that belongs to those memberships only', async () => {
+    const seen = await runAsUser(app, orgA.userId, (tx) =>
+      tx.membershipCompany.findMany({ select: { id: true } }),
+    )
+
+    expect(seen.map((m) => m.id)).toEqual(orgA.ids.membershipCompany)
+  })
+
+  it('unlocks nothing else', async () => {
+    // Asserting a user id must not become a way to read tenant data. Only
+    // Membership and MembershipCompany have the second policy.
+    const leaked = await runAsUser(app, orgA.userId, async (tx) => ({
+      loads: await tx.load.count(),
+      companies: await tx.company.count(),
+      invoices: await tx.invoice.count(),
+      organizations: await tx.organization.count(),
+    }))
+
+    expect(leaked).toEqual({
+      loads: 0,
+      companies: 0,
+      invoices: 0,
+      organizations: 0,
+    })
+  })
+
+  it('cannot be used to write a membership into any organization', async () => {
+    // The policy is FOR SELECT. Writes still answer to org_isolation, which
+    // has no org set inside runAsUser, so there is nothing to write into.
+    await expect(
+      runAsUser(app, orgA.userId, (tx) =>
+        tx.membership.create({
+          data: {
+            userId: orgA.userId,
+            organizationId: orgB.organizationId,
+            role: 'OWNER',
+          },
+        }),
+      ),
+    ).rejects.toThrow()
+
+    expect(
+      await owner.membership.count({
+        where: { userId: orgA.userId, organizationId: orgB.organizationId },
+      }),
+    ).toBe(0)
+  })
+
+  it('cannot be used to promote an existing membership', async () => {
+    const changed = await runAsUser(app, orgA.userId, (tx) =>
+      tx.membership.updateMany({
+        where: { userId: orgA.userId },
+        data: { role: 'OWNER' },
+      }),
+    )
+    expect(changed.count).toBe(0)
+  })
+
+  it('does not linger into the next transaction', async () => {
+    await runAsUser(app, orgA.userId, async (tx) => {
+      expect(await tx.membership.count()).toBe(1)
+    })
+
+    const afterwards = await app.$transaction((tx) => tx.membership.count())
+    expect(afterwards).toBe(0)
+  })
+
+  it('refuses an id that is not a cuid', async () => {
+    await expect(
+      runAsUser(app, `' OR '1'='1`, async () => 'reached the callback'),
+    ).rejects.toThrow(/Not a user id/)
   })
 })
 

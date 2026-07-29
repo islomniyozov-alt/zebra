@@ -320,18 +320,76 @@ enum Role {
   DRIVER
 }
 
+// Server-side sessions, not JWTs, because revocation has to be immediate: a
+// dismissed dispatcher must lose access when the row dies, not when a token
+// expires.
 model Session {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  token     String   @unique
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // SHA-256 of the token, never the token. The cookie holds the only copy of
+  // the secret; this column is what remains if the database leaks, and it is
+  // useless on its own. Renamed from `token` for exactly that reason — a
+  // column called `token` invites being logged, compared loosely, or handed
+  // back to a client.
+  tokenHash String @unique
+
+  // The resolved session context (§7). Resolved at login, refreshed when a
+  // membership changes.
+  //
+  // NOT called `organizationId`, and the name is load-bearing. Every column
+  // with that name is subject to row-level security, and this one is the
+  // opposite: it is the INPUT to row-level security, read before any policy
+  // can apply, and a policy on it would make login unresolvable. The
+  // different name keeps the RLS audit honest instead of needing an exception
+  // list. It also says the true thing — this is the organization the session
+  // is currently acting as, of possibly several the user belongs to.
+  activeOrganizationId String
+  role                 Role
+  // Empty means every authority in the organization. See companyScopeFilter.
+  companyScopes        String[]
+  // Copied from the membership so that `can()` has one input and no lookup.
+  // Membership.permissionOverrides remains the source of truth; this is the
+  // resolved copy, refreshed alongside role and scopes.
+  permissionOverrides  Json?
+
   expiresAt DateTime
-  ip        String?
-  userAgent String?
-  createdAt DateTime @default(now())
+  // Set rather than deleted, so "when did this session end, and was it a
+  // logout or an expiry" stays answerable.
+  revokedAt DateTime?
+
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
 
   @@index([userId])
   @@index([expiresAt])
+  @@index([activeOrganizationId])
+}
+
+// Pre-authentication, so it carries no tenant and cannot: at the moment it is
+// written nobody has proved who they are. Row-level security does not apply
+// for the same reason it does not apply to User.
+//
+// Kept as rows rather than a counter so that "who tried, from where, when" is
+// answerable after the fact. This is a system that moves money.
+model LoginAttempt {
+  id String @id @default(cuid())
+
+  // Lowercased and trimmed, as presented. Recorded even when no such user
+  // exists — the attempt happened either way.
+  email     String
+  ip        String?
+  userAgent String?
+  succeeded Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@index([ip, createdAt])
+  @@index([createdAt])
 }
 
 // Atomic number allocation — load numbers, invoice numbers, settlement
