@@ -273,6 +273,26 @@ Everything needs `.env`. Nothing runs against `NEON_BRANCH=production`.
 | `npm run deploy`                  | build and deploy to `zebra-dev`                         |
 | `npm run deploy:prod`             | build and deploy to `zebra`                             |
 
+### Two traps, both hit for real on the first deploy
+
+**Secrets need a trailing newline.** `printf '%s' "$V" | wrangler secret put NAME`
+exits 0 and silently leaves the old value in place. Use `printf '%s
+'`. And do
+not pipe a value out of `dotenv` — dotenv 17 prints a banner to stdout, which
+ends up _inside_ the secret; the first deploy shipped an R2_ENDPOINT of
+`[dotenv@17.2.3] injecting env...https://...` and every presigned URL threw
+`TypeError: Invalid URL string`. Parse `.env` directly.
+
+**A GET route handler that reads nothing dynamic gets prerendered.** Next will
+run it on Node at build time and serve the frozen result, which makes any
+measurement of runtime behaviour a measurement of the build. Add
+`export const dynamic = 'force-dynamic'` to anything that must actually execute
+per request.
+
+Secrets the worker needs, none of which belong in `wrangler.jsonc`:
+`DATABASE_URL`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
+`R2_ENDPOINT`.
+
 `npm run preview` is not optional before deploying. `next dev` runs on Node; the
 deployed app runs on workerd. Things that work in one and not the other —
 password hashing above all — only surface under `preview`.
