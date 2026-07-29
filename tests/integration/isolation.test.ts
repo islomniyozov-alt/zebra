@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Pool } from '@neondatabase/serverless'
 import { createPrismaClient } from '@/lib/db'
 import { runAsUser, runInOrg, withOrg, type TxClient } from '@/lib/tenancy'
+import { unattributed } from '@/lib/audit'
 import type { PrismaClient } from '@/generated/prisma/client'
 import { dropOrganization, seedOrganization, type OrgFixture } from './fixtures'
 
@@ -29,7 +30,9 @@ let tenantModels: string[]
 // A sweep queries all 38 tenant tables inside one transaction. No request ever
 // does that, so Prisma's 5s default is right for the application and wrong
 // here. Two shapes because runInOrg names its options in milliseconds.
-const SWEEP = { timeoutMs: 60_000 } as const
+// No acting user: this suite proves the wall, it does not act for anyone.
+const PROBE = unattributed('isolation suite: asserts the tenant boundary')
+const SWEEP = { timeoutMs: 60_000, attribution: PROBE } as const
 const SWEEP_RAW = { timeout: 60_000 } as const
 
 /** Minimal shape every Prisma model delegate shares, without reaching for `any`. */
@@ -181,11 +184,16 @@ describe('cross-organization isolation', () => {
   it('does not carry one transaction’s organization into the next', async () => {
     // Connections are pooled. SET LOCAL is transaction-scoped precisely so
     // that the next request on the same physical connection starts blind.
-    await runInOrg(app, orgA.organizationId, async (tx) => {
-      expect(
-        await delegate(tx, 'load').findMany({ select: { id: true } }),
-      ).toHaveLength(1)
-    })
+    await runInOrg(
+      app,
+      orgA.organizationId,
+      async (tx) => {
+        expect(
+          await delegate(tx, 'load').findMany({ select: { id: true } }),
+        ).toHaveLength(1)
+      },
+      { attribution: PROBE },
+    )
 
     const afterwards = await app.$transaction((tx) =>
       delegate(tx, 'load').findMany({ select: { id: true } }),
@@ -222,13 +230,17 @@ describe('a forged organizationId in the request', () => {
 
   it('cannot write a row into the other organization', async () => {
     await expect(
-      runInOrg(app, orgA.organizationId, (tx) =>
-        tx.company.create({
-          data: {
-            organizationId: orgB.organizationId,
-            name: 'Forged authority',
-          },
-        }),
+      runInOrg(
+        app,
+        orgA.organizationId,
+        (tx) =>
+          tx.company.create({
+            data: {
+              organizationId: orgB.organizationId,
+              name: 'Forged authority',
+            },
+          }),
+        { attribution: PROBE },
       ),
     ).rejects.toThrow()
 
@@ -240,11 +252,15 @@ describe('a forged organizationId in the request', () => {
   })
 
   it('cannot update a row in the other organization', async () => {
-    const updated = await runInOrg(app, orgA.organizationId, (tx) =>
-      tx.load.updateMany({
-        where: { organizationId: orgB.organizationId },
-        data: { linehaulCents: 1 },
-      }),
+    const updated = await runInOrg(
+      app,
+      orgA.organizationId,
+      (tx) =>
+        tx.load.updateMany({
+          where: { organizationId: orgB.organizationId },
+          data: { linehaulCents: 1 },
+        }),
+      { attribution: PROBE },
     )
     expect(updated.count).toBe(0)
 
@@ -255,8 +271,12 @@ describe('a forged organizationId in the request', () => {
   })
 
   it('cannot delete a row in the other organization', async () => {
-    const deleted = await runInOrg(app, orgA.organizationId, (tx) =>
-      tx.load.deleteMany({ where: { organizationId: orgB.organizationId } }),
+    const deleted = await runInOrg(
+      app,
+      orgA.organizationId,
+      (tx) =>
+        tx.load.deleteMany({ where: { organizationId: orgB.organizationId } }),
+      { attribution: PROBE },
     )
     expect(deleted.count).toBe(0)
     expect(
@@ -269,11 +289,15 @@ describe('a forged organizationId in the request', () => {
   it('cannot reach the other organization through a relation', async () => {
     // Traversal is where a denormalized column earns itself: the join hits
     // LoadStop directly, and LoadStop has its own policy.
-    const stops = await runInOrg(app, orgA.organizationId, (tx) =>
-      tx.loadStop.findMany({
-        select: { id: true },
-        where: { load: { organizationId: orgB.organizationId } },
-      }),
+    const stops = await runInOrg(
+      app,
+      orgA.organizationId,
+      (tx) =>
+        tx.loadStop.findMany({
+          select: { id: true },
+          where: { load: { organizationId: orgB.organizationId } },
+        }),
+      { attribution: PROBE },
     )
     expect(stops).toEqual([])
   })
@@ -281,16 +305,20 @@ describe('a forged organizationId in the request', () => {
 
 describe('child tables inherit the wall', () => {
   it('overwrites a forged organizationId with the parent’s', async () => {
-    const created = await runInOrg(app, orgA.organizationId, (tx) =>
-      tx.loadStop.create({
-        data: {
-          loadId: orgA.ids.load![0]!,
-          organizationId: orgB.organizationId, // a lie
-          sequence: 99,
-          type: 'DELIVERY',
-        },
-        select: { id: true, organizationId: true },
-      }),
+    const created = await runInOrg(
+      app,
+      orgA.organizationId,
+      (tx) =>
+        tx.loadStop.create({
+          data: {
+            loadId: orgA.ids.load![0]!,
+            organizationId: orgB.organizationId, // a lie
+            sequence: 99,
+            type: 'DELIVERY',
+          },
+          select: { id: true, organizationId: true },
+        }),
+      { attribution: PROBE },
     )
 
     expect(created.organizationId).toBe(orgA.organizationId)
@@ -299,15 +327,19 @@ describe('child tables inherit the wall', () => {
 
   it('refuses to attach a child to the other organization’s parent', async () => {
     await expect(
-      runInOrg(app, orgA.organizationId, (tx) =>
-        tx.loadStop.create({
-          data: {
-            loadId: orgB.ids.load![0]!,
-            organizationId: orgA.organizationId,
-            sequence: 98,
-            type: 'DELIVERY',
-          },
-        }),
+      runInOrg(
+        app,
+        orgA.organizationId,
+        (tx) =>
+          tx.loadStop.create({
+            data: {
+              loadId: orgB.ids.load![0]!,
+              organizationId: orgA.organizationId,
+              sequence: 98,
+              type: 'DELIVERY',
+            },
+          }),
+        { attribution: PROBE },
       ),
     ).rejects.toThrow()
 
@@ -316,15 +348,19 @@ describe('child tables inherit the wall', () => {
 
   it('refuses a payment application joining two organizations', async () => {
     await expect(
-      runInOrg(app, orgA.organizationId, (tx) =>
-        tx.paymentApplication.create({
-          data: {
-            paymentId: orgA.ids.payment![0]!,
-            invoiceId: orgB.ids.invoice![0]!,
-            organizationId: orgA.organizationId,
-            amountCents: 1,
-          },
-        }),
+      runInOrg(
+        app,
+        orgA.organizationId,
+        (tx) =>
+          tx.paymentApplication.create({
+            data: {
+              paymentId: orgA.ids.payment![0]!,
+              invoiceId: orgB.ids.invoice![0]!,
+              organizationId: orgA.organizationId,
+              amountCents: 1,
+            },
+          }),
+        { attribution: PROBE },
       ),
     ).rejects.toThrow()
   })
@@ -452,7 +488,9 @@ describe('an organization can be removed', () => {
 describe('the org id is never concatenated into SQL', () => {
   it('rejects an injection attempt before it reaches the database', async () => {
     await expect(
-      runInOrg(app, `' OR '1'='1`, async () => 'reached the callback'),
+      runInOrg(app, `' OR '1'='1`, async () => 'reached the callback', {
+        attribution: PROBE,
+      }),
     ).rejects.toThrow(/Not an organization id/)
   })
 
@@ -461,7 +499,9 @@ describe('the org id is never concatenated into SQL', () => {
     // before any client is touched, so this asserts the guard without opening
     // a connection that the test could not then close.
     await expect(
-      withOrg('not-a-cuid', async () => 'reached the callback'),
+      withOrg('not-a-cuid', async () => 'reached the callback', {
+        attribution: PROBE,
+      }),
     ).rejects.toThrow(/Not an organization id/)
   })
 })

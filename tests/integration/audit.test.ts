@@ -14,7 +14,8 @@ import {
   getAuditHealth,
   onAuditEvent,
   resetAuditHealth,
-  type AuditContext,
+  unattributed,
+  type Attribution,
   type AuditEvent,
 } from '@/lib/audit'
 import type { PrismaClient } from '@/generated/prisma/client'
@@ -34,7 +35,7 @@ let organizationId: string
 let companyId: string
 let customerId: string
 let userId: string
-let audit: AuditContext
+let attribution: Attribution
 
 const RATE = 250000
 
@@ -65,9 +66,8 @@ beforeAll(async () => {
   })
   customerId = customer.id
 
-  audit = {
+  attribution = {
     userId,
-    organizationId,
     ip: '203.0.113.7',
     userAgent: 'zebra-tests/1.0',
   }
@@ -121,7 +121,7 @@ describe('the acceptance test', () => {
           where: { id: load.id },
           data: { linehaulCents: 275000 },
         }),
-      { audit },
+      { attribution },
     )
 
     const rows = await auditRows()
@@ -144,7 +144,7 @@ describe('the acceptance test', () => {
           where: { id: load.id },
           data: { commodity: 'Steel' },
         }),
-      { audit },
+      { attribution },
     )
 
     const row = (await auditRows())[0]!
@@ -165,7 +165,7 @@ describe('coverage across operations', () => {
         tx.customer.create({
           data: { organizationId, name: 'New Broker' },
         }),
-      { audit },
+      { attribution },
     )
 
     const rows = await auditRows()
@@ -190,7 +190,7 @@ describe('coverage across operations', () => {
       organizationId,
       (tx) => tx.load.delete({ where: { id: load.id } }),
       {
-        audit,
+        attribution,
       },
     )
 
@@ -215,7 +215,7 @@ describe('coverage across operations', () => {
           where: { id: load.id },
           data: { deletedAt: new Date() },
         }),
-      { audit },
+      { attribution },
     )
 
     expect((await auditRows())[0]!.action).toBe('DELETE')
@@ -229,7 +229,7 @@ describe('coverage across operations', () => {
       organizationId,
       (tx) =>
         tx.load.update({ where: { id: load.id }, data: { deletedAt: null } }),
-      { audit },
+      { attribution },
     )
 
     expect((await auditRows())[0]!.action).toBe('RESTORE')
@@ -247,7 +247,7 @@ describe('coverage across operations', () => {
           where: { id: { in: [first.id, second.id] } },
           data: { linehaulCents: 300000 },
         }),
-      { audit },
+      { attribution },
     )
 
     const rows = await auditRows()
@@ -278,7 +278,7 @@ describe('coverage across operations', () => {
           where: { id: terse.id },
           data: { commodity: 'Terse' },
         }),
-      { audit },
+      { attribution },
     )
     await runInOrg(
       app,
@@ -289,7 +289,7 @@ describe('coverage across operations', () => {
           data: { commodity: 'Explicit' },
         })
       },
-      { audit },
+      { attribution },
     )
 
     const rows = await auditRows()
@@ -309,7 +309,7 @@ describe('coverage across operations', () => {
           where: { id: load.id },
           data: { linehaulCents: RATE },
         }),
-      { audit },
+      { attribution },
     )
 
     expect(await auditRows()).toHaveLength(0)
@@ -317,7 +317,9 @@ describe('coverage across operations', () => {
 
   it('writes nothing for a read', async () => {
     await makeLoad()
-    await runInOrg(app, organizationId, (tx) => tx.load.findMany(), { audit })
+    await runInOrg(app, organizationId, (tx) => tx.load.findMany(), {
+      attribution,
+    })
     expect(await auditRows()).toHaveLength(0)
   })
 })
@@ -346,7 +348,7 @@ describe('what is deliberately not audited', () => {
           },
         })
       },
-      { audit },
+      { attribution },
     )
 
     // Only the hand-written row. Nothing about writing it, and nothing about
@@ -368,14 +370,19 @@ describe('the audit row lives behind the same wall', () => {
           where: { id: load.id },
           data: { linehaulCents: 111 },
         }),
-      { audit },
+      { attribution },
     )
 
     const other = await owner.organization.create({
       data: { name: 'Other', slug: `audit-other-${Date.now()}` },
     })
     try {
-      const seen = await runInOrg(app, other.id, (tx) => tx.auditLog.findMany())
+      const seen = await runInOrg(
+        app,
+        other.id,
+        (tx) => tx.auditLog.findMany(),
+        { attribution: unattributed('read-only cross-tenant check') },
+      )
       expect(seen).toEqual([])
     } finally {
       await owner.organization.delete({ where: { id: other.id } })
@@ -397,7 +404,7 @@ describe('the audit row lives behind the same wall', () => {
           })
           throw new Error('caller changed their mind')
         },
-        { audit },
+        { attribution },
       ),
     ).rejects.toThrow('caller changed their mind')
 
@@ -434,7 +441,7 @@ describe('failures are loud and countable, and never fail the write', () => {
             where: { id: load.id },
             data: { linehaulCents: 424242 },
           }),
-        { audit },
+        { attribution },
       )
       expect(updated.linehaulCents).toBe(424242)
 
@@ -481,7 +488,7 @@ describe('failures are loud and countable, and never fail the write', () => {
           where: { id: load.id },
           data: { commodity: 'Paper' },
         }),
-      { audit },
+      { attribution },
     )
 
     expect(getAuditHealth().failures).toBe(0)
@@ -491,24 +498,58 @@ describe('failures are loud and countable, and never fail the write', () => {
 })
 
 describe('gaps are counted separately from failures', () => {
-  it('counts a write with no audit context', async () => {
+  it('counts a declared unattributed write, and says why', async () => {
     const load = await makeLoad()
     // The fixture above is itself an uncontexted write, and counting it here
     // would measure the test rather than the thing under test.
     resetAuditHealth()
 
-    // runInOrg without an acting user: the tenancy guarantee holds, but there
-    // is nobody to attribute the change to.
-    await runInOrg(app, organizationId, (tx) =>
-      tx.load.update({ where: { id: load.id }, data: { commodity: 'Grain' } }),
-    )
+    const events: AuditEvent[] = []
+    const unsubscribe = onAuditEvent((event) => events.push(event))
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
 
-    const healthNow = getAuditHealth()
-    expect(healthNow.gaps.noContext).toBe(1)
-    // A gap is not a failure. Conflating them would make the failure counter
-    // useless as an alert.
-    expect(healthNow.failures).toBe(0)
+    try {
+      await runInOrg(
+        app,
+        organizationId,
+        (tx) =>
+          tx.load.update({
+            where: { id: load.id },
+            data: { commodity: 'Grain' },
+          }),
+        { attribution: unattributed('backfill script, no operator involved') },
+      )
+
+      const healthNow = getAuditHealth()
+      expect(healthNow.gaps.unattributed).toBe(1)
+      // A gap is not a failure. Conflating them would make the failure counter
+      // useless as an alert.
+      expect(healthNow.failures).toBe(0)
+      expect(await auditRows()).toHaveLength(0)
+
+      // The reason travels with the gap, so the log says why rather than just
+      // that it happened.
+      const gap = events.find((e) => e.type === 'gap')
+      expect(gap).toMatchObject({
+        kind: 'unattributed',
+        reason: 'backfill script, no operator involved',
+      })
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  it('counts a write that ran in no tenant transaction at all', async () => {
+    // The seed and the login path do this: they write before any organization
+    // is known, so they never reach runInOrg. Types cannot prevent it — only
+    // count it.
+    resetAuditHealth()
+    const load = await makeLoad()
+
+    expect(getAuditHealth().gaps.noContext).toBe(1)
+    expect(getAuditHealth().failures).toBe(0)
     expect(await auditRows()).toHaveLength(0)
+    await owner.load.delete({ where: { id: load.id } })
   })
 
   it('counts createMany, which returns no ids to point at', async () => {
@@ -527,7 +568,7 @@ describe('gaps are counted separately from failures', () => {
               { organizationId, name: 'Bulk B' },
             ],
           }),
-        { audit },
+        { attribution },
       )
 
       expect(getAuditHealth().gaps.unfollowableOperation).toBe(1)
@@ -553,7 +594,7 @@ describe('gaps are counted separately from failures', () => {
               { organizationId, name: 'Traceable B' },
             ],
           }),
-        { audit },
+        { attribution },
       )
 
       const rows = await auditRows()

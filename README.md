@@ -86,10 +86,13 @@ policies, the eleven child-table triggers, the `AssetAssignment` partial unique
 indexes, and a self-audit that fails the migration if a future table carries a
 tenant without a policy.
 
-Application code never sets that variable by hand. It calls `withOrg` from
-[`src/lib/tenancy.ts`](src/lib/tenancy.ts), which validates the id, opens one
-interactive transaction and sets `app.current_org_id` for its duration. The id
-comes from the session and from nowhere else.
+Application code never sets that variable by hand. Routes call `withCurrentOrg`
+from [`src/lib/auth-context.ts`](src/lib/auth-context.ts), which resolves the
+tenant, the permission check and the acting user together; it delegates to
+`withOrg` in [`src/lib/tenancy.ts`](src/lib/tenancy.ts), which validates the id,
+opens one interactive transaction and sets `app.current_org_id` for its
+duration. The id comes from the session and from nowhere else — and ESLint
+refuses `withOrg` under `src/app/**` so that stays true.
 
 Two session variables, and the difference matters:
 
@@ -161,20 +164,55 @@ handed to any sink registered with `onAuditEvent`.
 
 ```ts
 getAuditHealth()
-// { written, failures, lastFailure, gaps: { noContext, unfollowableOperation } }
+// { written, failures, lastFailure,
+//   gaps: { noContext, unattributed, unfollowableOperation } }
 ```
 
-`failures` is expected to be zero forever, which is what makes it worth
-alerting on. **Gaps are counted separately** so they can never drown a real
-failure: `noContext` is a write that ran outside any audit context (the login
-path touching `User`, a seed), and `unfollowableOperation` is `createMany`,
-which returns no ids to point an audit row at — use `createManyAndReturn`
-where the trail matters.
+| Counter                      | Expected               | Meaning                                                              |
+| ---------------------------- | ---------------------- | -------------------------------------------------------------------- |
+| `failures`                   | **zero, forever**      | the audit row could not be written                                   |
+| `gaps.unattributed`          | zero in app code       | somebody declared `unattributed(reason)`; the reason is in the log   |
+| `gaps.unfollowableOperation` | zero                   | `createMany` — use `createManyAndReturn`                             |
+| `gaps.noContext`             | **non-zero, normally** | writes in no tenant transaction: the seed, and login touching `User` |
 
-Routes should call `withCurrentOrg` from
-[`src/lib/auth-context.ts`](src/lib/auth-context.ts) rather than `withOrg`: it
-resolves the tenant, the permission check and the acting user together, so
-writes inside it are attributed instead of counted as gaps.
+Gaps are counted apart from failures precisely so they can never drown one.
+
+> **These counters live in isolate memory.** Workers isolates are ephemeral and
+> plural, so in production `getAuditHealth()` reports one isolate's slice of one
+> moment — not the fleet's. Read it as a test and development instrument. The
+> durable signal today is the `[zebra.audit.failure]` log line, which Workers
+> observability retains and can alert on. For the "zero forever, therefore
+> alertable" property to hold as a _metric_, `onAuditEvent` is the seam — point
+> it at Analytics Engine or Sentry. **Owed before production.**
+
+### This is a change log, not a security event log
+
+Because the audit row rides the caller's transaction, a rolled-back write leaves
+no trace. That is correct for the question this table answers — _what happened
+to this load_ — and wrong for _who tried to reach what and was refused_.
+
+Denied permission checks, forged tenant attempts and rolled-back writes belong
+in a **separate stream**; `LoginAttempt` is the beginning of one. Keep them
+apart: merging them fills the change log with noise and hands the security log a
+rollback rule that erases exactly the attempts you wanted to see.
+
+### Attribution is required, not encouraged
+
+`runInOrg` and `withOrg` **will not compile** without an `attribution`. An
+optional field there was the same shape of bug as the lazy-promise one: writes
+committed perfectly, attributed to nobody, and nothing complained.
+
+```ts
+withOrg(orgId, fn, { attribution: { userId, ip, userAgent } })
+withOrg(orgId, fn, { attribution: unattributed('nightly reconciliation') })
+```
+
+The escape hatch survives, but it has to be typed out, it carries its reason
+into the log, and it is greppable. An audit gap is now a decision.
+
+Routes get it for free from `withCurrentOrg` — and **ESLint refuses `withOrg`,
+`runInOrg`, `runAsUser`, `prisma` and `createPrismaClient` under `src/app/**`**,
+because reaching past the front door also skips the `can()`check §7 requires.`tests/guardrails.test.ts` runs ESLint to prove the rule actually fires.
 
 ## Seed
 

@@ -3,7 +3,7 @@ import { cache } from 'react'
 import { cookies, headers } from 'next/headers'
 import { prisma } from './db'
 import { can, type Action, type Resource } from './permissions'
-import { withOrg, type OrgTransactionOptions, type TxClient } from './tenancy'
+import { withOrg, type TransactionTimeouts, type TxClient } from './tenancy'
 import {
   SESSION_COOKIE,
   SESSION_TTL_MS,
@@ -94,16 +94,15 @@ export async function withCurrentOrg<T>(
   action: Action,
   resource: Resource,
   fn: (tx: TxClient) => Promise<T>,
-  options: Omit<OrgTransactionOptions, 'audit'> = {},
+  options: TransactionTimeouts = {},
 ): Promise<T> {
   const session = await requirePermission(action, resource)
   const metadata = await requestMetadata()
 
   return withOrg(session.organizationId, fn, {
     ...options,
-    audit: {
+    attribution: {
       userId: session.userId,
-      organizationId: session.organizationId,
       ip: metadata.ip ?? null,
       userAgent: metadata.userAgent ?? null,
     },

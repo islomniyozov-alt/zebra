@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   diffRows,
   getAuditHealth,
+  isUnattributed,
   onAuditEvent,
   resetAuditHealth,
+  unattributed,
   type AuditEvent,
 } from '@/lib/audit'
 
@@ -108,7 +110,7 @@ describe('audit health', () => {
       written: 0,
       failures: 0,
       lastFailure: null,
-      gaps: { noContext: 0, unfollowableOperation: 0 },
+      gaps: { noContext: 0, unattributed: 0, unfollowableOperation: 0 },
     })
   })
 
@@ -118,6 +120,23 @@ describe('audit health', () => {
     snapshot.gaps.noContext = 99
     expect(getAuditHealth().failures).toBe(0)
     expect(getAuditHealth().gaps.noContext).toBe(0)
+  })
+})
+
+describe('unattributed', () => {
+  it('carries its reason, so the gap says why', () => {
+    const declared = unattributed('nightly reconciliation job')
+    expect(declared).toEqual({
+      kind: 'unattributed',
+      reason: 'nightly reconciliation job',
+    })
+    expect(isUnattributed(declared)).toBe(true)
+  })
+
+  it('is distinguishable from a real actor', () => {
+    // The discriminant is what lets runInOrg accept either and still know
+    // which it got.
+    expect(isUnattributed({ userId: 'cms59hb1s0000tgvsyq75inm2' })).toBe(false)
   })
 })
 

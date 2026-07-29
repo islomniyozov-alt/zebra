@@ -24,10 +24,27 @@ import type { AuditAction } from '@/generated/prisma/client'
 // FAILURE POLICY. §8 says log and continue. Continuing is not the same as
 // swallowing: every failure increments a counter, records its details, is
 // written to the log with a fixed, greppable tag, and is handed to any
-// registered sink. `getAuditHealth().failures` is expected to be zero forever,
-// which makes it worth alerting on. Gaps — writes that happened outside any
-// audit context, or through an operation this extension cannot follow — are
-// counted separately so that a genuine failure is never lost in their noise.
+// registered sink. Gaps are counted separately so a genuine failure is never
+// lost in their noise. Which counters mean what is spelled out on AuditHealth.
+//
+// WHAT THE COUNTERS CAN AND CANNOT TELL YOU. They live in isolate memory, and
+// Workers isolates are ephemeral and plural — so in production
+// `getAuditHealth()` reports one isolate's slice of one moment, not the
+// fleet's. It is a test and development instrument and should be read as one.
+// The durable signal today is the `[zebra.audit.failure]` log line, which
+// Workers observability retains and can alert on. For a real fleet-wide
+// metric, `onAuditEvent` is the seam: point it at Analytics Engine or Sentry.
+// Until that exists, do not treat a zero from this function as evidence.
+//
+// THIS IS A CHANGE LOG, NOT A SECURITY EVENT LOG, and the two must not merge.
+// Because the audit row rides the caller's transaction, a rolled-back write
+// leaves no trace — which is right for the question this table answers, "what
+// happened to this load". It is wrong for "who tried to reach what and was
+// refused". Denied permission checks, forged tenant attempts and rolled-back
+// writes belong in a separate stream; LoginAttempt is the beginning of one.
+// Conflating them makes both worse: the change log fills with noise and the
+// security log inherits a rollback rule that erases exactly the attempts you
+// wanted to see.
 // ---------------------------------------------------------------------------
 
 /** Never audited, and each for its own reason. */
@@ -62,11 +79,37 @@ const WRITE_OPERATIONS = new Set([
   'deleteMany',
 ])
 
-export interface AuditContext {
-  userId: string | null
-  organizationId: string
+/** Who is making the writes, and from where. */
+export interface Attribution {
+  userId: string
   ip?: string | null
   userAgent?: string | null
+}
+
+/**
+ * A declaration that a batch of writes has no acting user, and why.
+ *
+ * This exists so that an unattributed write is a deliberate, greppable,
+ * reviewable act rather than a forgotten argument. `runInOrg` requires one or
+ * the other, so an audit gap cannot happen because somebody was in a hurry —
+ * only because somebody wrote the word `unattributed` and gave a reason, and
+ * that reason lands in the log.
+ */
+export interface Unattributed {
+  readonly kind: 'unattributed'
+  readonly reason: string
+}
+
+export function unattributed(reason: string): Unattributed {
+  return { kind: 'unattributed', reason }
+}
+
+export type WriteAttribution = Attribution | Unattributed
+
+export function isUnattributed(
+  attribution: WriteAttribution,
+): attribution is Unattributed {
+  return 'kind' in attribution && attribution.kind === 'unattributed'
 }
 
 /** The delegate surface the extension needs from a transaction client. */
@@ -80,7 +123,13 @@ export interface AuditCapableTx {
 
 interface AuditScope {
   tx: AuditCapableTx
-  audit: AuditContext | null
+  /**
+   * Supplied by `runInOrg`, not by the caller. Attribution used to carry its
+   * own copy, which meant two sources for one fact and a way for them to
+   * disagree.
+   */
+  organizationId: string
+  attribution: WriteAttribution
 }
 
 /**
@@ -105,13 +154,31 @@ export interface AuditFailure {
 export interface AuditHealth {
   /** Audit rows successfully written. */
   written: number
-  /** Audit rows that could not be written. Expected to stay at zero. */
+  /**
+   * Audit rows that could not be written. **Should be zero forever** — this is
+   * the number worth alerting on, subject to the isolate caveat at the top of
+   * this file.
+   */
   failures: number
   lastFailure: AuditFailure | null
   gaps: {
-    /** Audited writes that ran outside any audit context. */
+    /**
+     * Writes that ran in no tenant transaction at all — the seed, and the
+     * login path touching `User` before any organization is known.
+     * **Expected to be non-zero** and roughly to track logins. Informational.
+     */
     noContext: number
-    /** Writes through an operation the extension cannot follow to a row. */
+    /**
+     * Writes inside a tenant transaction that explicitly declared
+     * `unattributed(reason)`. **Should be zero in application code**; a
+     * non-zero value is a deliberate decision somebody made, and the reason is
+     * in the log next to it.
+     */
+    unattributed: number
+    /**
+     * `createMany`, which returns no ids to point an audit row at.
+     * **Should be zero** — use `createManyAndReturn` where the trail matters.
+     */
     unfollowableOperation: number
   }
 }
@@ -120,16 +187,23 @@ const health: AuditHealth = {
   written: 0,
   failures: 0,
   lastFailure: null,
-  gaps: { noContext: 0, unfollowableOperation: 0 },
+  gaps: { noContext: 0, unattributed: 0, unfollowableOperation: 0 },
 }
+
+export type AuditGapKind =
+  | 'noContext'
+  | 'unattributed'
+  | 'unfollowableOperation'
 
 export type AuditEvent =
   | { type: 'failure'; failure: AuditFailure }
   | {
       type: 'gap'
-      kind: 'noContext' | 'unfollowableOperation'
+      kind: AuditGapKind
       model: string
       operation: string
+      /** Why, when the caller declared it. */
+      reason?: string
     }
 
 type AuditEventHandler = (event: AuditEvent) => void
@@ -156,6 +230,7 @@ export function resetAuditHealth(): void {
   health.failures = 0
   health.lastFailure = null
   health.gaps.noContext = 0
+  health.gaps.unattributed = 0
   health.gaps.unfollowableOperation = 0
 }
 
@@ -202,13 +277,17 @@ function recordFailure(
 }
 
 function recordGap(
-  kind: 'noContext' | 'unfollowableOperation',
+  kind: AuditGapKind,
   model: string,
   operation: string,
+  reason?: string,
 ): void {
   health.gaps[kind] += 1
-  console.warn('[zebra.audit.gap]', JSON.stringify({ kind, model, operation }))
-  emit({ type: 'gap', kind, model, operation })
+  console.warn(
+    '[zebra.audit.gap]',
+    JSON.stringify({ kind, model, operation, ...(reason ? { reason } : {}) }),
+  )
+  emit({ type: 'gap', kind, model, operation, ...(reason ? { reason } : {}) })
 }
 
 // --- diffing ----------------------------------------------------------------
@@ -310,8 +389,8 @@ async function writeEntries(
 ): Promise<void> {
   if (entries.length === 0) return
 
-  const { tx, audit } = scope
-  if (!audit) return
+  const { tx, attribution } = scope
+  if (isUnattributed(attribution)) return
 
   // Unique per write, and an identifier, so it cannot carry anything from
   // outside. Not that it could — nothing here is caller-controlled.
@@ -334,15 +413,15 @@ async function writeEntries(
   try {
     await tx.auditLog.createMany({
       data: entries.map((entry) => ({
-        organizationId: audit.organizationId,
+        organizationId: scope.organizationId,
         companyId: entry.companyId,
-        userId: audit.userId,
+        userId: attribution.userId,
         action: entry.action,
         entityType: model,
         entityId: entry.entityId,
         changes: entry.changes,
-        ip: audit.ip ?? null,
-        userAgent: audit.userAgent ?? null,
+        ip: attribution.ip ?? null,
+        userAgent: attribution.userAgent ?? null,
       })),
     })
     await tx.$executeRawUnsafe(`RELEASE SAVEPOINT ${savepoint}`)
@@ -391,12 +470,21 @@ export const auditExtension = Prisma.defineExtension({
         }
 
         const scope = auditScope.getStore()
-        if (!scope?.audit) {
-          // Writes outside a tenant context — the login path touching User, a
-          // migration script, a seed. Counted rather than ignored, but kept
-          // apart from failures so it cannot drown one.
+
+        if (!scope) {
+          // No tenant transaction at all — the seed, or the login path
+          // touching User before any organization is known. Not preventable by
+          // types, because these writes never reach runInOrg. Counted rather
+          // than ignored, and kept apart from failures so it cannot drown one.
           const result = await query(args)
           recordGap('noContext', model, operation)
+          return result
+        }
+
+        if (isUnattributed(scope.attribution)) {
+          // Somebody wrote the word and gave a reason. Recorded with it.
+          const result = await query(args)
+          recordGap('unattributed', model, operation, scope.attribution.reason)
           return result
         }
 

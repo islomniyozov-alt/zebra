@@ -1,5 +1,5 @@
 import { prisma } from './db'
-import { auditScope, type AuditCapableTx, type AuditContext } from './audit'
+import { auditScope, type AuditCapableTx, type WriteAttribution } from './audit'
 import type { Prisma, PrismaClient } from '@/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -51,13 +51,7 @@ export function assertOrgId(orgId: unknown): asserts orgId is string {
   }
 }
 
-export interface OrgTransactionOptions {
-  /**
-   * Who is doing this, for the audit trail. Without it the writes inside still
-   * happen and are still counted — as gaps, in `getAuditHealth()`. Routes get
-   * it for free through `withCurrentOrg`.
-   */
-  audit?: AuditContext
+export interface TransactionTimeouts {
   /**
    * Prisma aborts an interactive transaction after 5 seconds by default, and
    * the abort surfaces as an opaque "expired transaction" error rather than as
@@ -68,6 +62,25 @@ export interface OrgTransactionOptions {
   timeoutMs?: number
   /** How long to wait for a connection from the pool before giving up. */
   maxWaitMs?: number
+}
+
+export interface OrgTransactionOptions extends TransactionTimeouts {
+  /**
+   * Who is doing this, for the audit trail. REQUIRED, and required on purpose.
+   *
+   * An optional field here was the same shape of bug as the lazy-promise one:
+   * correct-looking code, quiet wrong outcome, invisible until someone went
+   * looking. Forgetting it produced writes that committed perfectly and were
+   * attributed to nobody, and nothing complained.
+   *
+   * There is still an escape hatch — `unattributed('why')` — but it has to be
+   * typed out, it carries its reason into the log, and it is greppable. An
+   * audit gap is now a decision, not an oversight.
+   *
+   * Application routes never write this by hand; `withCurrentOrg` supplies it
+   * from the session.
+   */
+  attribution: WriteAttribution
 }
 
 /**
@@ -90,7 +103,7 @@ export async function runInOrg<T>(
   client: TransactionCapable,
   orgId: string,
   fn: (tx: TxClient) => Promise<T>,
-  options: OrgTransactionOptions = {},
+  options: OrgTransactionOptions,
 ): Promise<T> {
   assertOrgId(orgId)
 
@@ -112,7 +125,11 @@ export async function runInOrg<T>(
       // would have written no audit row at all, silently, while every test
       // that awaited inside its callback passed.
       return await auditScope.run(
-        { tx: tx as unknown as AuditCapableTx, audit: options.audit ?? null },
+        {
+          tx: tx as unknown as AuditCapableTx,
+          organizationId: orgId,
+          attribution: options.attribution,
+        },
         async () => await fn(tx),
       )
     },
@@ -134,7 +151,7 @@ export async function runInOrg<T>(
 export function withOrg<T>(
   orgId: string,
   fn: (tx: TxClient) => Promise<T>,
-  options: OrgTransactionOptions = {},
+  options: OrgTransactionOptions,
 ): Promise<T> {
   return runInOrg(prisma, orgId, fn, options)
 }
@@ -155,7 +172,7 @@ export async function runAsUser<T>(
   client: TransactionCapable,
   userId: string,
   fn: (tx: TxClient) => Promise<T>,
-  options: OrgTransactionOptions = {},
+  options: TransactionTimeouts = {},
 ): Promise<T> {
   assertUserId(userId)
 
