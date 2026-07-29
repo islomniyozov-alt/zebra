@@ -55,9 +55,28 @@
 //    migration's closing note.
 // ============================================================================
 
+// TWO CLIENTS, because one cannot serve both runtimes.
+//
+// The default build instantiates its WASM query compiler from base64 at
+// runtime. workerd forbids that outright — "Wasm code generation disallowed by
+// embedder" — so the Workers build has to be generated with runtime = "workerd",
+// which emits `import "./query_compiler_fast_bg.wasm?module"` instead and lets
+// the bundler compile it ahead of time.
+//
+// That import is not valid JS to Vite or Node, so it cannot be the client the
+// tests, the seed and `next dev` use. Hence both, and next.config.ts swaps one
+// for the other in the production bundle. Anything running on Node gets the
+// first; the deployed Worker gets the second.
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
+}
+
+generator workerd {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma-workerd"
+  runtime      = "workerd"
+  moduleFormat = "esm"
 }
 
 // Prisma 7: the connection string no longer lives here. It is supplied in
@@ -134,6 +153,7 @@ model Organization {
   memberships     Membership[]
   notifications   Notification[]
   payments        Payment[]
+  pendingUploads  PendingUpload[]
   settlements     Settlement[]
   trailers        Trailer[]
   trucks          Truck[]
@@ -197,6 +217,7 @@ model Company {
   calendarEvents  CalendarEvent[]
   auditLogs       AuditLog[]
   claims          Claim[]
+  pendingUploads  PendingUpload[]
 
   @@unique([organizationId, dotNumber])
   @@index([organizationId, isActive])
@@ -266,6 +287,7 @@ model User {
   notifications     Notification[]
   auditLogs         AuditLog[]
   calendarEvents    CalendarEvent[]
+  pendingUploads    PendingUpload[]
 
   @@index([isActive])
 }
@@ -1292,6 +1314,51 @@ model Document {
   @@index([truckId])
   @@index([ocrStatus])
   @@index([sha256])
+}
+
+// A presigned PUT that was handed out and not yet confirmed.
+//
+// Kept as its own table rather than a PENDING-status Document on purpose: a
+// status column makes correctness depend on every future read path remembering
+// to filter it out, and the one that forgets shows a user a document that was
+// never uploaded. A separate table cannot be forgotten — `Document` means
+// "this file exists", always.
+//
+// It also makes reconciliation an indexed query instead of a bucket listing:
+// expired rows are exactly the mints that never landed.
+model PendingUpload {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId      String
+  company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // The key the URL was minted for. Unique, so a mint cannot be confirmed
+  // twice into two Document rows.
+  r2Key String @unique
+
+  // What the URL is contractually bound to. R2 enforces all three by
+  // signature; these are stored so confirm can check that what landed is what
+  // was promised, rather than trusting the client's second account of it.
+  filename  String
+  mimeType  String
+  sizeBytes Int
+  sha256    String
+  type      DocumentType
+
+  // Which record the finished Document will hang off. Validated at mint time,
+  // because the URL is the capability the moment it exists.
+  targetEntity String
+  targetId     String
+
+  requestedByUserId String?
+  requestedBy       User?   @relation(fields: [requestedByUserId], references: [id])
+
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([organizationId, expiresAt])
+  @@index([targetEntity, targetId])
 }
 
 enum DocumentType {

@@ -1,7 +1,7 @@
 import 'server-only'
 import { cache } from 'react'
 import { cookies, headers } from 'next/headers'
-import { prisma } from './db'
+import { prisma, withRequestClient } from './db'
 import { can, type Action, type Resource } from './permissions'
 import { withOrg, type TransactionTimeouts, type TxClient } from './tenancy'
 import {
@@ -93,19 +93,23 @@ export async function currentUserCan(
 export async function withCurrentOrg<T>(
   action: Action,
   resource: Resource,
-  fn: (tx: TxClient) => Promise<T>,
+  fn: (tx: TxClient, session: SessionContext) => Promise<T>,
   options: TransactionTimeouts = {},
 ): Promise<T> {
-  const session = await requirePermission(action, resource)
-  const metadata = await requestMetadata()
+  // One client for the whole request, regardless of whether a Route Handler
+  // gives React's cache() a scope to memoize in. See src/lib/db.ts.
+  return withRequestClient(async () => {
+    const session = await requirePermission(action, resource)
+    const metadata = await requestMetadata()
 
-  return withOrg(session.organizationId, fn, {
-    ...options,
-    attribution: {
-      userId: session.userId,
-      ip: metadata.ip ?? null,
-      userAgent: metadata.userAgent ?? null,
-    },
+    return withOrg(session.organizationId, (tx) => fn(tx, session), {
+      ...options,
+      attribution: {
+        userId: session.userId,
+        ip: metadata.ip ?? null,
+        userAgent: metadata.userAgent ?? null,
+      },
+    })
   })
 }
 

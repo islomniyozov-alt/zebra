@@ -252,6 +252,25 @@ export async function seedOrganization(
     }),
   )
 
+  record(
+    'pendingUpload',
+    await db.pendingUpload.create({
+      data: {
+        organizationId,
+        companyId,
+        r2Key: `${organizationId}/load/${load.id}/${tag}-pending.pdf`,
+        filename: 'pending.pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: 2048,
+        sha256: 'x'.repeat(43) + '=',
+        type: 'POD',
+        targetEntity: 'load',
+        targetId: load.id,
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+      },
+    }),
+  )
+
   const invoice = record(
     'invoice',
     await db.invoice.create({

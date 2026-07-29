@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { cache } from 'react'
 import { neonConfig } from '@neondatabase/serverless'
 import { PrismaNeon } from '@prisma/adapter-neon'
@@ -74,20 +75,47 @@ function appConnectionString(): string {
   return connectionString
 }
 
-const getClient = cache(
+const cachedClient = cache(
   (): PrismaClient => createPrismaClient(appConnectionString()),
 )
 
 /**
+ * A scope that owns one client for its duration.
+ *
+ * `cache()` memoizes only inside a React request scope, and a Route Handler is
+ * not obviously one — outside it, `cache()` is a passthrough and every property
+ * access on `prisma` would build a client and a connection pool of its own.
+ *
+ * The previous note here said that was survivable because every request touches
+ * `prisma` exactly once. That was true and was never going to stay true: a
+ * request that reads its session and then opens a transaction already touches it
+ * twice. An invariant that has to be maintained by everyone who writes a route
+ * is not an invariant.
+ *
+ * So this does not depend on the answer. `withCurrentOrg` opens one of these
+ * around the whole request; anything inside gets the same client however many
+ * times it asks. Server components with no such scope fall back to `cache()`,
+ * which does memoize there.
+ */
+const requestScope = new AsyncLocalStorage<{ client?: PrismaClient }>()
+
+export function withRequestClient<T>(fn: () => Promise<T>): Promise<T> {
+  return requestScope.run({}, fn)
+}
+
+function getClient(): PrismaClient {
+  const scope = requestScope.getStore()
+  if (scope) {
+    return (scope.client ??= createPrismaClient(appConnectionString()))
+  }
+  return cachedClient()
+}
+
+/**
  * The request-scoped client.
  *
- * WORTH KNOWING: `cache()` only memoizes inside a React request scope. Outside
- * one — a plain script, a test — it is a passthrough, so each property access
- * here would build a fresh client and a fresh connection pool. That is survivable
- * only because §6 requires every request to go through `withOrg`, which touches
- * this object exactly once, for `$transaction`; everything downstream uses the
- * transaction client. Reach for `createPrismaClient` rather than this in any
- * code that is not serving a request.
+ * Reach for `createPrismaClient` rather than this in any code that is not
+ * serving a request — a seed, a script, a test.
  */
 export const prisma = new Proxy({} as PrismaClient, {
   get(_target, property) {
