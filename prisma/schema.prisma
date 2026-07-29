@@ -1882,8 +1882,14 @@ model AuditLog {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  companyId      String
-  company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // NULLABLE, unlike every other companyId in this schema. Plenty of audited
+  // things belong to the organization and to no single authority — a broker, a
+  // saved facility, a user's membership. Requiring a company here would mean
+  // either inventing one or declining to audit those writes, and the second is
+  // how an audit trail quietly becomes 60% covered.
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   userId String?
   user   User?   @relation(fields: [userId], references: [id])
@@ -1901,6 +1907,10 @@ model AuditLog {
   @@index([companyId, entityType, entityId])
   @@index([companyId, createdAt])
   @@index([userId, createdAt])
+  // Company-less rows still have to be findable, and every audit query starts
+  // from the tenant.
+  @@index([organizationId, entityType, entityId])
+  @@index([organizationId, createdAt])
 }
 
 enum AuditAction {

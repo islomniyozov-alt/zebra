@@ -1,4 +1,5 @@
 import { prisma } from './db'
+import { auditScope, type AuditCapableTx, type AuditContext } from './audit'
 import type { Prisma, PrismaClient } from '@/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -52,6 +53,12 @@ export function assertOrgId(orgId: unknown): asserts orgId is string {
 
 export interface OrgTransactionOptions {
   /**
+   * Who is doing this, for the audit trail. Without it the writes inside still
+   * happen and are still counted — as gaps, in `getAuditHealth()`. Routes get
+   * it for free through `withCurrentOrg`.
+   */
+  audit?: AuditContext
+  /**
    * Prisma aborts an interactive transaction after 5 seconds by default, and
    * the abort surfaces as an opaque "expired transaction" error rather than as
    * a slow query. Work that legitimately runs long — generating a settlement
@@ -90,7 +97,24 @@ export async function runInOrg<T>(
   return client.$transaction(
     async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.current_org_id', ${orgId}, true)`
-      return fn(tx)
+      // The audit extension is handed the operation but not the client
+      // running it, and Prisma will not let a query extension be applied to a
+      // transaction client. Async context is how it finds both.
+      //
+      // The `await` is load-bearing and cost an hour. A PrismaPromise is lazy:
+      // `tx.load.update(...)` builds a thenable and executes nothing until it
+      // is awaited. Returning `fn(tx)` unawaited ends the async context before
+      // the query — and therefore before the extension — ever runs, so the
+      // most natural call style in the codebase,
+      //
+      //     withOrg(orgId, (tx) => tx.load.update({ ... }))
+      //
+      // would have written no audit row at all, silently, while every test
+      // that awaited inside its callback passed.
+      return await auditScope.run(
+        { tx: tx as unknown as AuditCapableTx, audit: options.audit ?? null },
+        async () => await fn(tx),
+      )
     },
     {
       ...(options.timeoutMs === undefined

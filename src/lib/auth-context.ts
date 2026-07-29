@@ -3,6 +3,7 @@ import { cache } from 'react'
 import { cookies, headers } from 'next/headers'
 import { prisma } from './db'
 import { can, type Action, type Resource } from './permissions'
+import { withOrg, type OrgTransactionOptions, type TxClient } from './tenancy'
 import {
   SESSION_COOKIE,
   SESSION_TTL_MS,
@@ -78,6 +79,35 @@ export async function currentUserCan(
   resource: Resource,
 ): Promise<boolean> {
   return can(await getSession(), action, resource)
+}
+
+/**
+ * The shape a route should reach for: the request's tenant, its permission
+ * check, and its audit identity, all resolved together.
+ *
+ * Calling `withOrg` directly works and skips none of the tenancy guarantees,
+ * but it also arrives with no acting user — so every write inside it is
+ * recorded as an audit gap rather than an audit row. This is the version that
+ * knows who is asking.
+ */
+export async function withCurrentOrg<T>(
+  action: Action,
+  resource: Resource,
+  fn: (tx: TxClient) => Promise<T>,
+  options: Omit<OrgTransactionOptions, 'audit'> = {},
+): Promise<T> {
+  const session = await requirePermission(action, resource)
+  const metadata = await requestMetadata()
+
+  return withOrg(session.organizationId, fn, {
+    ...options,
+    audit: {
+      userId: session.userId,
+      organizationId: session.organizationId,
+      ip: metadata.ip ?? null,
+      userAgent: metadata.userAgent ?? null,
+    },
+  })
 }
 
 export async function requestMetadata(): Promise<RequestMetadata> {

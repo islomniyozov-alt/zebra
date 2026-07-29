@@ -2,6 +2,7 @@ import { cache } from 'react'
 import { neonConfig } from '@neondatabase/serverless'
 import { PrismaNeon } from '@prisma/adapter-neon'
 import { PrismaClient } from '@/generated/prisma/client'
+import { auditExtension } from './audit'
 
 // ---------------------------------------------------------------------------
 // THE RUNTIME DATABASE CLIENT
@@ -39,9 +40,18 @@ neonConfig.poolQueryViaFetch = false
  *
  * Use this in seeds, migrations tooling and tests — anywhere outside a
  * request. Application code wants `prisma` below.
+ *
+ * The audit extension is attached here rather than at the call sites, so
+ * there is no such thing as a client that writes without being audited. It is
+ * a query extension and adds nothing to the client's surface, hence the cast
+ * back to PrismaClient — the alternative is threading an extended-client type
+ * through every module that takes a database handle, for no gain.
  */
 export function createPrismaClient(connectionString: string): PrismaClient {
-  return new PrismaClient({ adapter: new PrismaNeon({ connectionString }) })
+  const client = new PrismaClient({
+    adapter: new PrismaNeon({ connectionString }),
+  })
+  return client.$extends(auditExtension) as unknown as PrismaClient
 }
 
 function appConnectionString(): string {

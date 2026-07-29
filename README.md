@@ -133,6 +133,49 @@ itself. Navigation comes from the same function, so a dispatcher with no
 financial permission never sees an empty **Money** heading — the group is
 absent, not hidden.
 
+## Audit
+
+A Prisma client extension over `$allOperations`, attached inside
+`createPrismaClient` — so there is no such thing as a client that writes
+without being audited. Hand-placed audit calls end up around 60% covered, and
+60% is worse than none: it looks like a record, so nobody checks.
+
+Each write gets **one row, not one per field**, holding a
+`{ field: { from, to } }` diff of the fields that actually moved. `updatedAt`
+is excluded or it would be in every diff, burying the field that mattered. A
+soft delete is recorded as `DELETE` and clearing `deletedAt` as `RESTORE`,
+because §6 makes `deletedAt` the mechanism.
+
+The row is written **inside the caller's own transaction, behind a
+`SAVEPOINT`**. Both halves matter: inside, because `AuditLog` is behind RLS
+like everything else and a second connection would have no
+`app.current_org_id` — and because a rolled-back write must not leave an audit
+row claiming it happened. Behind a savepoint, because a failed statement
+poisons a Postgres transaction, so without one "audit failed" would silently
+become "the load was never saved".
+
+**Failures are loud and countable, never swallowed.** §8 says log and continue;
+continuing is not the same as hiding. Every failure increments a counter,
+records its details, logs under the fixed tag `[zebra.audit.failure]`, and is
+handed to any sink registered with `onAuditEvent`.
+
+```ts
+getAuditHealth()
+// { written, failures, lastFailure, gaps: { noContext, unfollowableOperation } }
+```
+
+`failures` is expected to be zero forever, which is what makes it worth
+alerting on. **Gaps are counted separately** so they can never drown a real
+failure: `noContext` is a write that ran outside any audit context (the login
+path touching `User`, a seed), and `unfollowableOperation` is `createMany`,
+which returns no ids to point an audit row at — use `createManyAndReturn`
+where the trail matters.
+
+Routes should call `withCurrentOrg` from
+[`src/lib/auth-context.ts`](src/lib/auth-context.ts) rather than `withOrg`: it
+resolves the tenant, the permission check and the acting user together, so
+writes inside it are attributed instead of counted as gaps.
+
 ## Seed
 
 `npm run db:seed` — §12 exactly, and idempotent.
