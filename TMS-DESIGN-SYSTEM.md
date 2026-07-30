@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v1
+**Status:** v2 — §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -256,9 +256,32 @@ Groups render only where the user's role grants at least one child. A dispatcher
 
 Active item: `--z-accent-soft` fill, `--z-accent` text, 2px accent bar on the leading edge. Icons at 16px, always paired with a label. Icon-only navigation is forbidden except in the collapsed rail, which shows tooltips.
 
-### 6.3 Company switcher
+### 6.3 Company filter
 
-Persistent in the topbar, never buried in settings. You run two carriers under one login; the current company must be readable at a glance and impossible to confuse. Show the company name in full, plus a 3px color chip assigned per company. **A destructive or financial action taken in the wrong company is the worst outcome this interface can produce** — the switcher gets a confirmation step when a form is dirty.
+_Amended 2026-07-29. This section previously described a company **switcher** — a
+modal control that put the interface into one authority at a time. That was
+wrong, and wrong in a way that would have shaped every screen built on top of
+it. Reason for the change: a dispatcher's actual question at 6am is "what is
+running today", across all authorities the group operates. A mode forces them
+to ask it twice and then hold the answer in their head. Worse, a mode makes
+"which authority am I in" a piece of hidden state, and hidden state is exactly
+what produces the outcome this section already warns about._
+
+The topbar company control is a **filter**, not a mode. A user sees every
+authority they are scoped to at once; the control narrows the view.
+
+- Tables gain a company column and a per-company colour chip **only when the
+  organization holds more than one company** (`maxCompanies > 1`). A
+  single-authority organization sees none of this — no filter, no column, no
+  chip.
+- Creation forms take the operating authority as their **first field**,
+  defaulting to last-used. The authority is an explicit, visible choice at the
+  moment of writing, not an ambient setting that was decided earlier and
+  elsewhere.
+- **A destructive or financial action taken under the wrong authority is still
+  the worst outcome this interface can produce.** The filter does not prevent
+  that; the required first field does. Which is the point of moving the
+  decision into the form.
 
 ---
 
