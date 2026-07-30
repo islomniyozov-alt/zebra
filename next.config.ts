@@ -18,6 +18,16 @@ const nextConfig: NextConfig = {
   },
   // Next 16 dropped the `eslint` config key along with `next lint`. Linting is
   // a separate gate now — `npm run check`.
+
+  // The bare domain has to land somewhere. A redirect rather than a page,
+  // because §4 says leave a route absent before adding a dead one — and Loads
+  // is the only screen Phase 1 ships. /loads itself redirects to /login when
+  // there is no session, so this is the entry point in both states.
+  //
+  // When the Dashboard exists, this points at it instead.
+  async redirects() {
+    return [{ source: '/', destination: '/loads', permanent: false }]
+  },
   turbopack: {
     resolveAlias: forWorkers
       ? {

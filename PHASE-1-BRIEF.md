@@ -50,8 +50,8 @@ A Transportation Management System replacing a paid TMS for a carrier group of 3
 3. Tenancy mechanism (§6) — **done, `979f65a`**
 4. Auth, roles, seed (§7) — **done, `13ca8bf`**
 5. Audit mechanism (§8) — **done, `63ede81`**, hardened `e96365a`
-6. Document upload infrastructure (§9) and number allocation (§10) — **in progress**
-7. Design token layer, core components, login screen, one Loads screen (§11) — **remaining**
+6. Document upload infrastructure (§9) and number allocation (§10) — **done, `26d090f`**
+7. Design token layer, core components, login screen, one Loads screen (§11) — **done, `e109c7d` · `ff86868`**
 
 ---
 
@@ -79,8 +79,13 @@ Do not build, scaffold, or stub. If a placeholder feels necessary, leave the rou
 | 3    | `withOrg`/`runInOrg`, isolation suite, promoted structure audit | `979f65a`             |
 | 4    | Auth, sessions, `can()`, rate limiting, rotation, **seed**      | `13ca8bf`             |
 | 5    | Audit extension, health counters, guardrails                    | `63ede81` · `e96365a` |
-| 6    | Documents (§9), number allocation (§10)                         | in progress           |
-| 7    | Design layer, login screen, Loads screen, password reset (§11)  | remaining             |
+| 6    | Documents (§9), number allocation (§10)                         | `26d090f`             |
+| 7    | Design layer, login screen, Loads screen, password reset (§11)  | `e109c7d` · `ff86868` |
+
+**There is no Step 8.** Seven steps was the whole plan. Phase 1 closes on the
+§13 criteria and a deploy whose version ID advanced with a live check behind
+it (standing rule 1). Phase 2 is loads and dispatch, and starts as its own
+brief.
 
 ---
 
@@ -184,7 +189,14 @@ Counters are **per company** — each authority bills under its own series. Fail
 
 `TMS-DESIGN-SYSTEM.md` is the source of truth. Read all fifteen sections first.
 
-**Correction to design-system §6.3** — amend the file in the same commit:
+**Correction to design-system §6.3** — amend the design system **in its own
+commit, before** the code that matches it, per standing rule 14.7.
+
+> _v2 said "in the same commit" here, which contradicted rule 14.7. Rule 7
+> wins: it is a standing rule rather than a step instruction, and it is the
+> more conservative reading — an amendment in its own commit can be reviewed,
+> reverted or cited on its own, and one buried in a large code commit cannot.
+> Corrected 2026-07-30. Done in `e109c7d`._
 
 > The topbar company control is a **filter**, not a mode. A user sees every authority they're scoped to at once; the control narrows the view. Tables gain a company column and per-company color chip **only when the org holds more than one company** (`maxCompanies > 1`). Creation forms take the operating authority as their first field, defaulting to last-used. A single-authority organization sees none of this.
 
@@ -231,20 +243,39 @@ Steps 1–5 — passing:
 - [x] Audit failure is loud and countable, verified by revoking `INSERT`
 - [x] Guardrail lint fires, and a test watches it fire
 
-Steps 6–7 — remaining:
+Steps 6–7 — passing:
 
-- [ ] A file uploads direct to R2 via presigned URL and reads back through a signed GET
-- [ ] An oversized or wrong-typed PUT is refused by the URL's own constraints
-- [ ] Counter allocation survives 100 concurrent calls with no duplicates
-- [ ] `src/lib/db.ts` verified under workerd in a real route
-- [ ] A `DISPATCHER` cannot reach a financial route by URL _(deferred from v1 — untestable until routes exist)_
-- [ ] Loads screen renders in the real shell with a working empty state
-- [ ] 20 rows visible at 1080p, Standard density
-- [ ] Every screen correct in `dir="rtl"`
-- [ ] Every screen correct in Russian without overflow
-- [ ] No hex outside the token block
-- [ ] Keyboard focus visible on every interactive element
-- [ ] TypeScript strict, no `any` in application code
+- [x] A file uploads direct to R2 via presigned URL and reads back through a signed GET — end to end on the deployed worker
+- [x] An oversized or wrong-typed PUT is refused by the URL's own constraints — and different bytes of the same length, because the digest is signed too
+- [x] Counter allocation survives 100 concurrent calls with no duplicates — 100 distinct, contiguous
+- [x] `src/lib/db.ts` verified under workerd in a real route
+- [x] Loads screen renders in the real shell with a working empty state
+- [x] 20 rows visible at 1080p, Standard density — **measured 25** on the deployed worker (936px scroller − 33px header ÷ 36px rows)
+- [x] Every screen correct in `dir="rtl"`
+- [x] Every screen correct in Russian without overflow
+- [x] No hex outside the token block — 28 hexes, all in `src/app/globals.css`, enforced by `npm run check:hex`
+- [x] Keyboard focus visible on every interactive element — 32 of 32 on the Loads screen
+- [x] TypeScript strict, no `any` in application code
+
+**Not met, and honestly so:**
+
+- [ ] **A `DISPATCHER` cannot reach a financial route by URL.** Still not
+      testable, because Phase 1 ships no financial route — Invoices,
+      Receivables, Payments and Settlements are Phase 2. What IS proven: a
+      `DISPATCHER` is denied every money resource across every action
+      (tests/permissions.test.ts), the Money nav group is absent from their
+      payload rather than hidden, and `withCurrentOrg` throws `ForbiddenError`
+      before any query runs. The URL-level proof is owed the day the first
+      financial route exists, and belongs in Phase 2's acceptance criteria.
+- [ ] **An `onAuditEvent` sink.** Carried from §8. `getAuditHealth()` counts in
+      isolate memory and the durable signal is the log line; a fleet-wide
+      metric needs Analytics Engine or Sentry. Owed before production, and
+      production is not Phase 1.
+
+**Also true, and worth stating rather than discovering:** every sidebar
+destination except Loads is a link to a screen that does not exist yet. That
+is what building the shell before the screens means, and §11 asked for the
+shell. They fill in through Phase 2.
 
 ---
 
@@ -281,3 +312,12 @@ Report with: the migration or diff, test output, anything visual as a screenshot
 10. §9 — key prefix is `organizationId`; phantom-row ruling and `PendingUpload` recorded.
 11. §11/§12 — seed moved to Step 4 and built; v1's second organization superseded by self-building fixtures.
 12. §11/§13 — login screen and password reset assigned to Step 7; the `DISPATCHER`-by-URL criterion deferred there rather than dropped.
+
+## 17. Amendments, v2 → v2.1
+
+13. §11 — "amend the design system in the same commit" contradicted standing
+    rule 14.7 and is corrected to "its own commit, before". Rule 7 wins.
+14. §5 — Steps 6 and 7 marked done, and the absence of a Step 8 stated
+    explicitly so nobody has to infer it from a table that simply stops.
+15. §13 — criteria updated against what was actually verified, including the
+    two that are **not** met and why.
