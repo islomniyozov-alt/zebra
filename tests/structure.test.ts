@@ -87,8 +87,13 @@ describe('row-level security', () => {
     //
     // _prisma_migrations is the owner's bookkeeping; the app has no
     // privileges on it. Anything else appearing here lost its wall.
+    // PasswordResetToken joins the set for the same reason as the rest: it is
+    // issued and redeemed before anyone has proved who they are, and it cannot
+    // carry a tenant because the request arrives with an email address and
+    // nothing else.
     expect(rows.map((r) => r.relname)).toEqual([
       'LoginAttempt',
+      'PasswordResetToken',
       'Session',
       'User',
       '_prisma_migrations',

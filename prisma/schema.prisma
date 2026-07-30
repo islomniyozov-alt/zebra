@@ -272,6 +272,7 @@ model User {
 
   memberships    Membership[]
   sessions       Session[]
+  resetTokens    PasswordResetToken[]
   driverProfiles Driver[]
 
   loadsBooked       Load[]
@@ -412,6 +413,35 @@ model LoginAttempt {
   @@index([email, createdAt])
   @@index([ip, createdAt])
   @@index([createdAt])
+}
+
+// A single-use, expiring permission to set a new password.
+//
+// Outside row-level security for the same reason as User, Session and
+// LoginAttempt: it is issued and redeemed before anyone has proved who they
+// are. It also cannot carry a tenant — the request arrives with an email
+// address and nothing else.
+//
+// The token itself is never stored, only its SHA-256, exactly like Session.
+// A leaked dump of this table is a list of digests that open nothing.
+model PasswordResetToken {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash String @unique
+
+  expiresAt DateTime
+  // Set on redemption rather than deleted, so "was this link used, and when"
+  // survives the reset. Single use is enforced by checking it, not by hoping
+  // the row is gone.
+  usedAt    DateTime?
+
+  requestedIp String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
 }
 
 // Atomic number allocation — load numbers, invoice numbers, settlement

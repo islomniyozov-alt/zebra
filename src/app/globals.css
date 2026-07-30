@@ -1,1 +1,171 @@
 @import 'tailwindcss';
+
+/* ---------------------------------------------------------------------------
+ * IBM Plex, self-hosted. No CDN (design system §4).
+ *
+ * Via @fontsource, so the woff2 files are npm-managed and bundled rather than
+ * committed as binaries or fetched from someone else's server at runtime.
+ * Only the weights the system actually uses: 400 body, 500 headings/labels/
+ * buttons, 600 KPI values and table column headers. No 700 anywhere (§4.2).
+ * ------------------------------------------------------------------------ */
+@import '@fontsource/ibm-plex-sans/400.css';
+@import '@fontsource/ibm-plex-sans/500.css';
+@import '@fontsource/ibm-plex-sans/600.css';
+@import '@fontsource/ibm-plex-sans-condensed/500.css';
+@import '@fontsource/ibm-plex-sans-condensed/600.css';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+@import '@fontsource/ibm-plex-mono/600.css';
+
+/* ===========================================================================
+ * THE TOKEN BLOCK — design system §3, §4, §5.
+ *
+ * THE ONLY PLACE A HEX COLOUR MAY APPEAR IN THIS CODEBASE. `npm run
+ * check:hex` greps for one anywhere else and fails. Grep before deleting a
+ * token (standing rule 4) — several are referenced only from a status map.
+ * ======================================================================== */
+@theme {
+  /* --- §3.1 neutrals ---------------------------------------------------- */
+  --color-ink: #171a20; /* primary text, table values */
+  --color-ink-2: #5c6370; /* labels, secondary text, column headers */
+  --color-ink-3: #8a919e; /* placeholder, disabled, timestamps */
+  --color-surface: #ffffff; /* cards, table body, modals */
+  --color-surface-2: #f7f8f9; /* page background, table header */
+  --color-surface-3: #eef0f2; /* row hover, pressed states */
+  --color-border: #e2e5e9; /* hairlines, table rules, input borders */
+  --color-border-strong: #c9ced6; /* input focus rest, dividers that matter */
+
+  /* --- §3.2 accent, action only ---------------------------------------- */
+  --color-accent: #3e6ae1;
+  --color-accent-hover: #3457c4;
+  --color-accent-soft: #eaefff; /* selected row, active nav item */
+
+  /* --- §3.3 status, semantically fixed. Never mix pairs. ---------------- */
+  --color-neutral: #64748b;
+  --color-neutral-soft: #f1f5f9; /* available, draft, uninvoiced */
+  --color-progress: #0e7490;
+  --color-progress-soft: #ecfeff; /* dispatched, in transit, sent */
+  --color-success: #15803d;
+  --color-success-soft: #f0fdf4; /* delivered, POD received, paid */
+  --color-warning: #b45309;
+  --color-warning-soft: #fffbeb; /* POD missing, due soon, partially paid */
+  --color-danger: #b91c1c;
+  --color-danger-soft: #fef2f2; /* overdue, disputed, out of service */
+  --color-muted: #94a3b8;
+  --color-muted-soft: #f8fafc; /* cancelled, inactive, void */
+
+  /* --- §3.5 wall display. The only dark surface in the system. ---------- */
+  --color-wall-bg: #0d1014;
+  --color-wall-surface: #171a20;
+  --color-wall-border: #2a2f38;
+  --color-wall-ink: #e8eaed;
+  --color-wall-ink-2: #9aa2ae;
+
+  /* --- §4 typography ---------------------------------------------------- */
+  --font-ui: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-dense: 'IBM Plex Sans Condensed', 'IBM Plex Sans', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  /* §4.1 — the base is 13px, not 16px. Dense by design. */
+  --text-xs: 11px;
+  --text-xs--line-height: 16px;
+  --text-sm: 12px;
+  --text-sm--line-height: 18px;
+  --text-base: 13px;
+  --text-base--line-height: 20px;
+  --text-md: 15px;
+  --text-md--line-height: 22px;
+  --text-lg: 18px;
+  --text-lg--line-height: 26px;
+  --text-xl: 24px;
+  --text-xl--line-height: 32px;
+  --text-xl--letter-spacing: -0.01em;
+  --text-2xl: 30px;
+  --text-2xl--line-height: 36px;
+  --text-2xl--letter-spacing: -0.01em;
+
+  /* --- §5 space. 4px base unit, --z-1 through --z-8. -------------------- */
+  --spacing-z1: 4px;
+  --spacing-z2: 8px;
+  --spacing-z3: 12px;
+  --spacing-z4: 16px;
+  --spacing-z5: 20px;
+  --spacing-z6: 24px;
+  --spacing-z7: 32px;
+  --spacing-z8: 40px;
+
+  --spacing-sidebar: 224px;
+  --spacing-sidebar-collapsed: 56px;
+  --spacing-topbar: 48px;
+  --spacing-gutter: 20px;
+  --spacing-control: 32px;
+  --spacing-control-compact: 28px;
+  --spacing-control-large: 36px;
+
+  /* §5.2 radius. 0 on table cells; nothing larger than 6px anywhere. */
+  --radius-control: 4px; /* buttons, inputs, badges, menus */
+  --radius-card: 6px; /* cards and modals */
+}
+
+/* §5.1 row density. A user preference, defaulting to Standard. */
+:root,
+[data-density='standard'] {
+  --z-row-height: 36px;
+}
+[data-density='compact'] {
+  --z-row-height: 32px;
+}
+[data-density='comfortable'] {
+  --z-row-height: 44px;
+}
+
+/* ===========================================================================
+ * BASE
+ * ======================================================================== */
+@layer base {
+  html {
+    font-family: var(--font-ui);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    /* §4.3 non-negotiable. Proportional figures make a column of numbers
+     * unreadable, and every screen here is a column of numbers. */
+    font-variant-numeric: tabular-nums;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* Standing rule 7: every surface declares its own background. body sets one
+   * so the viewport is never the browser's default, and every surface below
+   * sets its own rather than inheriting this. */
+  body {
+    background-color: var(--color-surface-2);
+    color: var(--color-ink);
+  }
+
+  /* §13 — visible focus on every interactive element, 2px accent, 1px offset.
+   * Never `outline: none` without a replacement. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+    border-radius: var(--radius-control);
+  }
+
+  /* §11 — everything is disabled under prefers-reduced-motion. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer utilities {
+  /* §4 — mono is for identifiers and money only: load and invoice numbers,
+   * VINs, MC/DOT numbers, reference numbers, currency. Things people read
+   * character by character and read aloud down a phone. */
+  .z-identifier {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+}

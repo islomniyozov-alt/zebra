@@ -180,6 +180,13 @@ export interface AuditHealth {
      * **Should be zero** — use `createManyAndReturn` where the trail matters.
      */
     unfollowableOperation: number
+    /**
+     * A write whose caller narrowed the response, where re-reading the full row
+     * to audit it came back empty — row-level security refused it, or the row
+     * left in the same transaction. The audit row is still written from what
+     * was returned; it is just thinner than it should be. **Should be zero.**
+     */
+    rereadBlocked: number
   }
 }
 
@@ -187,13 +194,19 @@ const health: AuditHealth = {
   written: 0,
   failures: 0,
   lastFailure: null,
-  gaps: { noContext: 0, unattributed: 0, unfollowableOperation: 0 },
+  gaps: {
+    noContext: 0,
+    unattributed: 0,
+    unfollowableOperation: 0,
+    rereadBlocked: 0,
+  },
 }
 
 export type AuditGapKind =
   | 'noContext'
   | 'unattributed'
   | 'unfollowableOperation'
+  | 'rereadBlocked'
 
 export type AuditEvent =
   | { type: 'failure'; failure: AuditFailure }
@@ -232,6 +245,7 @@ export function resetAuditHealth(): void {
   health.gaps.noContext = 0
   health.gaps.unattributed = 0
   health.gaps.unfollowableOperation = 0
+  health.gaps.rereadBlocked = 0
 }
 
 function emit(event: AuditEvent): void {
@@ -445,6 +459,7 @@ async function writeEntries(
 /** Everything the delegate calls we make need, without importing the client. */
 interface ModelDelegate {
   findMany(args: { where?: unknown }): Promise<Row[]>
+  findUnique(args: { where: { id: string } }): Promise<Row | null>
 }
 
 function delegateFor(tx: AuditCapableTx, model: string): ModelDelegate | null {
@@ -492,6 +507,37 @@ export const auditExtension = Prisma.defineExtension({
         const delegate = delegateFor(tx, model)
         const where = (args as { where?: unknown }).where
 
+        // A caller that narrowed its response narrowed what the write RETURNS,
+        // not what happened. Auditing the returned shape produced thin rows —
+        // a create with `select: { id: true }` logged two fields and lost
+        // companyId entirely, which is how an audit trail becomes decorative.
+        //
+        // So: narrow the response, never the audit's source. Where the caller
+        // narrowed, re-read the full row in the SAME transaction and audit
+        // that. Same transaction matters twice over — the row is visible
+        // because the write is already in it, and the read is subject to the
+        // same tenant policy as everything else.
+        const narrowed =
+          (args as { select?: unknown }).select !== undefined ||
+          (args as { omit?: unknown }).omit !== undefined
+
+        const fullRow = async (row: Row | null): Promise<Row | null> => {
+          if (!narrowed || !delegate) return row
+          const id = idOf(row)
+          if (!id) return row
+          const reread = await delegate
+            .findUnique({ where: { id } })
+            .catch(() => null)
+          if (!reread) {
+            // Refused by row-level security, or gone by the time we looked.
+            // Counted, never thrown: a thin audit row still beats failing the
+            // caller's write, and §8 forbids audit taking the write down.
+            recordGap('rereadBlocked', model, operation)
+            return row
+          }
+          return reread
+        }
+
         // --- before ---------------------------------------------------------
         let before: Row[] = []
         const needsBefore =
@@ -519,9 +565,10 @@ export const auditExtension = Prisma.defineExtension({
               : isRow(result)
                 ? [result]
                 : []
-            for (const row of rows) {
-              const id = idOf(row)
+            for (const returned of rows) {
+              const id = idOf(returned)
               if (!id) continue
+              const row = (await fullRow(returned)) ?? returned
               entries.push({
                 action: 'CREATE',
                 entityId: id,
@@ -542,10 +589,14 @@ export const auditExtension = Prisma.defineExtension({
 
           case 'update':
           case 'upsert': {
-            const after = isRow(result) ? result : null
+            const returned = isRow(result) ? result : null
             const prior = before[0] ?? null
-            const id = idOf(after) ?? idOf(prior)
+            const id = idOf(returned) ?? idOf(prior)
             if (!id) break
+
+            // `prior` was already read whole. Widen the after-state to match,
+            // or the diff reports every unselected field as having vanished.
+            const after = await fullRow(returned)
 
             const changes = diffRows(prior, after)
             const action: AuditAction = prior

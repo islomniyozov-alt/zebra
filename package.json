@@ -15,7 +15,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:check": "vitest run --project node --project workers",
-    "check": "npm run typecheck && npm run lint && npm run format:check && npm run test:check",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm run check:hex && npm run test:check",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
@@ -25,9 +25,13 @@
     "preview": "opennextjs-cloudflare build && wrangler dev",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "deploy:prod": "opennextjs-cloudflare build && opennextjs-cloudflare deploy -- --env production",
-    "db:seed": "prisma db seed"
+    "db:seed": "prisma db seed",
+    "check:hex": "node scripts/check-hex.mjs"
   },
   "dependencies": {
+    "@fontsource/ibm-plex-mono": "5.2.6",
+    "@fontsource/ibm-plex-sans": "5.2.6",
+    "@fontsource/ibm-plex-sans-condensed": "5.2.6",
     "@neondatabase/serverless": "1.1.0",
     "@prisma/adapter-neon": "7.9.1",
     "@prisma/client": "7.9.1",
@@ -48,6 +52,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "eslint-config-prettier": "10.1.8",
+    "playwright": "1.56.1",
     "prettier": "3.6.2",
     "prisma": "7.9.1",
     "tailwindcss": "^4",

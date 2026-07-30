@@ -110,7 +110,12 @@ describe('audit health', () => {
       written: 0,
       failures: 0,
       lastFailure: null,
-      gaps: { noContext: 0, unattributed: 0, unfollowableOperation: 0 },
+      gaps: {
+        noContext: 0,
+        unattributed: 0,
+        unfollowableOperation: 0,
+        rereadBlocked: 0,
+      },
     })
   })
 

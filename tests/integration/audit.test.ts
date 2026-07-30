@@ -324,6 +324,122 @@ describe('coverage across operations', () => {
   })
 })
 
+describe('a narrowed select narrows the response, not the audit', () => {
+  it('re-reads the full row after a create with a narrow select', async () => {
+    // The bug this fixes: confirmUpload creates a Document with
+    // select: { id, r2Key } and the audit row came back with two fields and a
+    // null companyId. The audit is supposed to record what happened, not what
+    // the caller asked to see.
+    const created = await runInOrg(
+      app,
+      organizationId,
+      (tx) =>
+        tx.load.create({
+          data: {
+            organizationId,
+            companyId,
+            customerId,
+            loadNumber: `NARROW-${Date.now()}`,
+            linehaulCents: RATE,
+          },
+          select: { id: true },
+        }),
+      { attribution },
+    )
+
+    const row = (await auditRows())[0]!
+    expect(row.action).toBe('CREATE')
+    expect(row.entityId).toBe(created.id)
+    // Present despite never being selected.
+    expect(row.companyId).toBe(companyId)
+
+    const changes = row.changes as Record<
+      string,
+      { from: unknown; to: unknown }
+    >
+    expect(changes['linehaulCents']).toEqual({ from: null, to: RATE })
+    expect(changes['customerId']).toEqual({ from: null, to: customerId })
+    expect(Object.keys(changes).length).toBeGreaterThan(5)
+    expect(getAuditHealth().gaps.rereadBlocked).toBe(0)
+  })
+
+  it('diffs an update on full rows, not on the returned shape', async () => {
+    const load = await makeLoad({ commodity: 'Steel' })
+    resetAuditHealth()
+
+    const updated = await runInOrg(
+      app,
+      organizationId,
+      (tx) =>
+        tx.load.update({
+          where: { id: load.id },
+          data: { linehaulCents: 999000 },
+          select: { id: true },
+        }),
+      { attribution },
+    )
+
+    // The caller still gets exactly what it asked for.
+    expect(Object.keys(updated)).toEqual(['id'])
+
+    // And the audit still sees one changed field, not "everything vanished".
+    const row = (await auditRows())[0]!
+    expect(row.changes).toEqual({
+      linehaulCents: { from: RATE, to: 999000 },
+    })
+    expect(row.companyId).toBe(companyId)
+  })
+
+  it('leaves an unnarrowed write on the cheap path', async () => {
+    // No select, so no re-read to pay for.
+    const load = await makeLoad()
+    resetAuditHealth()
+
+    await runInOrg(
+      app,
+      organizationId,
+      (tx) =>
+        tx.load.update({
+          where: { id: load.id },
+          data: { commodity: 'Lumber' },
+        }),
+      { attribution },
+    )
+
+    expect((await auditRows())[0]!.changes).toEqual({
+      commodity: { from: null, to: 'Lumber' },
+    })
+    expect(getAuditHealth().gaps.rereadBlocked).toBe(0)
+  })
+
+  it('still writes an audit row for a narrowed create', async () => {
+    // rereadBlocked is close to unreachable in normal operation — the re-read
+    // runs in the same transaction and the same tenant as the write, so the row
+    // is there by construction. That is exactly why it should read zero, and
+    // why it is counted rather than thrown: the only ways to reach it are a
+    // policy change or a row that left mid-transaction.
+    resetAuditHealth()
+
+    const outcome = await runInOrg(
+      app,
+      organizationId,
+      async (tx) => {
+        const customer = await tx.customer.create({
+          data: { organizationId, name: 'Vanishes' },
+          select: { id: true },
+        })
+        return customer.id
+      },
+      { attribution },
+    )
+
+    expect(outcome).toBeTruthy()
+    // The create itself is audited either way — thin beats absent.
+    expect((await auditRows()).length).toBeGreaterThanOrEqual(1)
+    await owner.customer.deleteMany({ where: { name: 'Vanishes' } })
+  })
+})
+
 describe('what is deliberately not audited', () => {
   it('ignores Session, Notification and AuditLog itself', async () => {
     await runInOrg(
