@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  DEFAULT_ITERATIONS,
+  ARGON2_PARAMS,
   dummyHash,
   hashPassword,
   needsRehash,
@@ -8,21 +8,61 @@ import {
 } from '@/lib/password'
 
 // ---------------------------------------------------------------------------
-// These run in workerd, not Node. That is the entire point: the brief's
-// warning is that password hashing is exactly where "works locally, fails on
-// deploy" happens, and a Node-only suite would have caught none of it.
+// These run in workerd, not Node. That is most of the point — password hashing
+// is exactly where "works locally, fails on deploy" happens.
+//
+// It is NOT all of the point, and Phase 1 learned the difference the expensive
+// way. The vitest workers pool is workerd, but it is not the deployed runtime:
+// it does not enforce the 100,000-iteration PBKDF2 cap that production does,
+// so a test asserting "600,000 iterations run in workerd without complaint"
+// passed here and failed on the live worker. Nothing in this file may be read
+// as evidence about a platform LIMIT. It tests behaviour; limits are settled
+// against the deployed worker and written down in the step report.
 // ---------------------------------------------------------------------------
 
-describe('hashPassword', () => {
-  it('produces a self-describing hash', async () => {
-    const encoded = await hashPassword('correct horse battery staple')
-    const [algorithm, digest, iterations, salt, hash] = encoded.split('$')
+/** A hash in the old format, built the way the old code built it. */
+async function legacyPbkdf2Hash(
+  password: string,
+  iterations: number,
+): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(16))
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password.normalize('NFKC')),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  )
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations },
+    key,
+    256,
+  )
+  const b64url = (bytes: Uint8Array) => {
+    let binary = ''
+    for (const byte of bytes) binary += String.fromCharCode(byte)
+    return btoa(binary)
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '')
+  }
+  return `pbkdf2$sha256$${iterations}$${b64url(salt)}$${b64url(new Uint8Array(bits))}`
+}
 
-    expect(algorithm).toBe('pbkdf2')
-    expect(digest).toBe('sha256')
-    expect(Number(iterations)).toBe(DEFAULT_ITERATIONS)
-    expect(salt).toMatch(/^[A-Za-z0-9_-]+$/)
-    expect(hash).toMatch(/^[A-Za-z0-9_-]+$/)
+describe('hashPassword', () => {
+  it('produces a PHC-format argon2id string', async () => {
+    const encoded = await hashPassword('correct horse battery staple')
+    const [empty, id, version, params, salt, hash] = encoded.split('$')
+
+    expect(empty).toBe('')
+    expect(id).toBe('argon2id')
+    expect(version).toBe('v=19')
+    expect(params).toBe(
+      `m=${ARGON2_PARAMS.m},t=${ARGON2_PARAMS.t},p=${ARGON2_PARAMS.p}`,
+    )
+    // PHC base64: no padding, and the standard alphabet rather than base64url.
+    expect(salt).toMatch(/^[A-Za-z0-9+/]+$/)
+    expect(hash).toMatch(/^[A-Za-z0-9+/]+$/)
   })
 
   it('salts, so the same password never hashes twice the same way', async () => {
@@ -35,16 +75,12 @@ describe('hashPassword', () => {
     expect(await verifyPassword('same', b)).toBe(true)
   })
 
-  it('runs 600,000 iterations inside workerd without complaint', async () => {
-    // Some runtimes cap PBKDF2 iterations. workerd does not — measured at
-    // roughly 0.7s of CPU, which is affordable for an operation that happens
-    // once per login and is rate limited.
-    const started = Date.now()
-    const encoded = await hashPassword('x', DEFAULT_ITERATIONS)
-    const elapsed = Date.now() - started
-
+  it('completes at the configured parameters inside workerd', async () => {
+    // Asserts that it RUNS and that the answer round-trips. It deliberately
+    // asserts nothing about how long it took: the honest cost number comes
+    // from the deployed worker, not from this pool.
+    const encoded = await hashPassword('x')
     expect(await verifyPassword('x', encoded)).toBe(true)
-    expect(elapsed).toBeLessThan(10_000)
   })
 })
 
@@ -78,12 +114,20 @@ describe('verifyPassword', () => {
   it.each([
     ['empty', ''],
     ['not a hash', 'hunter2'],
-    ['too few parts', 'pbkdf2$sha256$600000$abc'],
-    ['wrong algorithm', 'bcrypt$sha256$600000$YWJj$ZGVm'],
-    ['wrong digest', 'pbkdf2$sha512$600000$YWJj$ZGVm'],
-    ['zero iterations', 'pbkdf2$sha256$0$YWJj$ZGVm'],
-    ['negative iterations', 'pbkdf2$sha256$-1$YWJj$ZGVm'],
-    ['non-numeric iterations', 'pbkdf2$sha256$many$YWJj$ZGVm'],
+    ['argon2 with too few parts', '$argon2id$v=19$m=19456,t=2,p=1$YWJj'],
+    [
+      'argon2i, which we never issue',
+      '$argon2i$v=19$m=19456,t=2,p=1$YWJj$ZGVm',
+    ],
+    ['unknown argon2 version', '$argon2id$v=16$m=19456,t=2,p=1$YWJj$ZGVm'],
+    ['missing a cost parameter', '$argon2id$v=19$m=19456,t=2$YWJj$ZGVm'],
+    ['non-numeric cost', '$argon2id$v=19$m=lots,t=2,p=1$YWJj$ZGVm'],
+    ['legacy, too few parts', 'pbkdf2$sha256$600000$abc'],
+    ['legacy, wrong algorithm', 'bcrypt$sha256$600000$YWJj$ZGVm'],
+    ['legacy, wrong digest', 'pbkdf2$sha512$600000$YWJj$ZGVm'],
+    ['legacy, zero iterations', 'pbkdf2$sha256$0$YWJj$ZGVm'],
+    ['legacy, negative iterations', 'pbkdf2$sha256$-1$YWJj$ZGVm'],
+    ['legacy, non-numeric iterations', 'pbkdf2$sha256$many$YWJj$ZGVm'],
   ])('returns false for a malformed hash: %s', async (_label, encoded) => {
     // A corrupt row is a failed login, never a 500 that tells the caller
     // their account is worth a second look.
@@ -91,9 +135,27 @@ describe('verifyPassword', () => {
   })
 })
 
+describe('the PBKDF2 migration', () => {
+  it('still verifies a hash written by the old code', async () => {
+    // The rolling upgrade only rolls if the old format keeps working. If this
+    // test fails, every existing user is locked out.
+    const legacy = await legacyPbkdf2Hash('the-old-passphrase', 100_000)
+    expect(await verifyPassword('the-old-passphrase', legacy)).toBe(true)
+    expect(await verifyPassword('not-it', legacy)).toBe(false)
+  })
+
+  it('flags every PBKDF2 hash as stale, however many iterations it had', async () => {
+    // Including one at the 600k the code briefly claimed to use: the objection
+    // is the algorithm, not the count.
+    for (const iterations of [1_000, 100_000, 600_000]) {
+      expect(needsRehash(await legacyPbkdf2Hash('x', iterations))).toBe(true)
+    }
+  })
+})
+
 describe('needsRehash', () => {
   it('flags a hash made with weaker parameters', async () => {
-    const weak = await hashPassword('x', 1_000)
+    const weak = await hashPassword('x', { m: 8192, t: 1, p: 1 })
     expect(needsRehash(weak)).toBe(true)
     // ...and it still verifies, so nobody is locked out by the upgrade.
     expect(await verifyPassword('x', weak)).toBe(true)
@@ -101,6 +163,13 @@ describe('needsRehash', () => {
 
   it('leaves a current hash alone', async () => {
     expect(needsRehash(await hashPassword('x'))).toBe(false)
+  })
+
+  it('leaves a STRONGER hash alone', async () => {
+    // Someone tuning the parameters up and then rolling back must not cause a
+    // rehash storm that quietly weakens every password it touches.
+    const stronger = await hashPassword('x', { m: 32768, t: 3, p: 1 })
+    expect(needsRehash(stronger)).toBe(false)
   })
 
   it('flags anything it cannot parse', () => {
@@ -122,8 +191,8 @@ describe('dummyHash', () => {
     const realMs = await timeOf(() => verifyPassword('wrong', real))
     const dummyMs = await timeOf(() => verifyPassword('wrong', dummy))
 
-    // Same iteration count, so the same work. Generous bound — this is
-    // asserting the same order of magnitude, not a stopwatch.
+    // Same parameters, so the same work. Generous bound — this asserts the
+    // same order of magnitude, not a stopwatch.
     expect(Math.max(realMs, dummyMs)).toBeLessThan(
       Math.min(realMs, dummyMs) * 4 + 250,
     )

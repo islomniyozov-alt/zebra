@@ -228,6 +228,64 @@ export async function changePassword(
   })
 }
 
+export type ChangeOwnPasswordFailure =
+  | 'invalid_current'
+  | 'too_short'
+  | 'unchanged'
+
+export type ChangeOwnPasswordOutcome =
+  | { ok: true }
+  | { ok: false; reason: ChangeOwnPasswordFailure }
+
+/**
+ * A signed-in user changing their own password.
+ *
+ * The current password is required and verified here rather than in the route,
+ * for the same reason permission is decided in one module: a session is not
+ * proof of the person. A borrowed laptop, a stolen cookie, or a shoulder
+ * surfer all hold a valid session, and without this check any of them converts
+ * that into permanent ownership of the account.
+ *
+ * Deliberately NOT a `user:update` permission check. That resource governs
+ * administering OTHER people; a dispatcher who may not manage users must still
+ * be able to change their own password, and conflating the two would take that
+ * away.
+ */
+export async function changeOwnPassword(
+  db: AuthDb,
+  userId: string,
+  currentPassword: string,
+  newPassword: string,
+  options: { minLength: number; keepSessionId?: string },
+): Promise<ChangeOwnPasswordOutcome> {
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { passwordHash: true, isActive: true },
+  })
+  if (!user?.isActive || !user.passwordHash) {
+    return { ok: false, reason: 'invalid_current' }
+  }
+
+  if (!(await verifyPassword(currentPassword, user.passwordHash))) {
+    return { ok: false, reason: 'invalid_current' }
+  }
+
+  if (newPassword.length < options.minLength) {
+    return { ok: false, reason: 'too_short' }
+  }
+  if (newPassword === currentPassword) {
+    // Not security theatre: the whole reason to change a password is that the
+    // old one is suspect, and silently accepting a no-op would report success
+    // for having done nothing.
+    return { ok: false, reason: 'unchanged' }
+  }
+
+  await changePassword(db, userId, newPassword, {
+    ...(options.keepSessionId ? { keepSessionId: options.keepSessionId } : {}),
+  })
+  return { ok: true }
+}
+
 /**
  * Clear a lockout after an operator verifies the account holder out of band.
  * Deletes the failures rather than the record of success, so the audit trail

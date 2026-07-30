@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { cx } from '@/lib/cx'
 
@@ -119,13 +120,16 @@ export function Topbar({ companies, userInitials, labels }: TopbarProps) {
         <span aria-hidden>◔</span>
       </button>
 
-      <button
-        type="button"
+      {/* A link, not a menu. The account screen is the only destination behind
+       * it today, and a dropdown holding one item is a dropdown to click
+       * twice. It becomes a menu when it has a second thing to hold. */}
+      <Link
+        href="/account"
         aria-label={labels.userMenu}
         className="flex h-control-compact w-control-compact items-center justify-center rounded-control border border-border-strong bg-surface-2 text-xs font-medium text-ink-2 hover:bg-surface-3"
       >
         {userInitials}
-      </button>
+      </Link>
     </header>
   )
 }

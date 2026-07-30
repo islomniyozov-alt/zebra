@@ -9,7 +9,6 @@ import { mkdirSync } from 'node:fs'
 // viewport and no other.
 
 const BASE = process.env.SHOT_BASE ?? 'http://127.0.0.1:3000'
-const TOKEN = process.env.SHOT_TOKEN ?? ''
 const OUT = 'screenshots'
 
 const VIEWPORT = { width: 1920, height: 1080 }
@@ -21,6 +20,9 @@ const SHOTS = [
   { name: 'loads-en', path: '/loads', locale: 'en', authed: true },
   { name: 'loads-ru', path: '/loads', locale: 'ru', authed: true },
   { name: 'loads-fa-rtl', path: '/loads', locale: 'fa', authed: true },
+  { name: 'account-en', path: '/account', locale: 'en', authed: true },
+  { name: 'account-ru', path: '/account', locale: 'ru', authed: true },
+  { name: 'account-fa-rtl', path: '/account', locale: 'fa', authed: true },
 ]
 
 mkdirSync(OUT, { recursive: true })
@@ -32,6 +34,39 @@ mkdirSync(OUT, { recursive: true })
 const executablePath = process.env.SHOT_CHROME
 const browser = await chromium.launch(executablePath ? { executablePath } : {})
 const origin = new URL(BASE).origin
+
+/**
+ * A session, by signing in the way a person does.
+ *
+ * SHOT_TOKEN still wins if it is set. Otherwise this drives the real login
+ * form, which is both less fiddly than minting a row by hand and one more
+ * place the deployed login path gets exercised. Sessions now cost an argon2id
+ * verify, so it is issued once and reused across every authenticated shot.
+ */
+async function signIn() {
+  if (process.env.SHOT_TOKEN) return process.env.SHOT_TOKEN
+
+  const email = process.env.SEED_OWNER_EMAIL
+  const password = process.env.SEED_OWNER_PASSWORD
+  if (!email || !password) return ''
+
+  const context = await browser.newContext({ viewport: VIEWPORT })
+  const page = await context.newPage()
+  await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded' })
+  await page.fill('input[name="email"]', email)
+  await page.fill('input[name="password"]', password)
+  await Promise.all([
+    page.waitForURL(/\/loads/, { timeout: 60_000 }),
+    page.click('button[type="submit"]'),
+  ])
+  const cookie = (await context.cookies()).find(
+    (c) => c.name === 'zebra_session',
+  )
+  await context.close()
+  return cookie?.value ?? ''
+}
+
+const TOKEN = await signIn()
 
 for (const shot of SHOTS) {
   const context = await browser.newContext({
@@ -49,13 +84,17 @@ for (const shot of SHOTS) {
   await context.addCookies(cookies)
 
   const page = await context.newPage()
+  // NOT `networkidle`. Against the deployed worker it never arrives — the
+  // streamed SSR response and Next's link prefetching keep a connection in
+  // flight, and the shot times out instead of being taken.
   const response = await page.goto(`${BASE}${shot.path}`, {
-    waitUntil: 'networkidle',
+    waitUntil: 'domcontentloaded',
   })
 
   // Fonts must be in before the shot, or the screenshot is a picture of the
   // fallback stack.
   await page.evaluate(() => document.fonts.ready)
+  await page.waitForTimeout(500)
 
   const dir = await page.evaluate(() => document.documentElement.dir)
   const lang = await page.evaluate(() => document.documentElement.lang)

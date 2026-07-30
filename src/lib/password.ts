@@ -1,37 +1,63 @@
+import { argon2id } from '@noble/hashes/argon2.js'
+
 // ---------------------------------------------------------------------------
-// PASSWORD HASHING — PBKDF2 over WebCrypto
+// PASSWORD HASHING — argon2id, pure JavaScript
 //
-// Nothing native. bcrypt is a C++ addon and @node-rs/argon2 is a Rust one;
-// neither exists on workerd, and both work perfectly in `next dev`, which is
-// how that discovery normally happens at deploy time.
+// Three runtimes' worth of dead ends are recorded here so nobody walks back
+// into one:
 //
-// WebCrypto's PBKDF2 is available in both runtimes and needs no dependency and
-// no WASM. Measured in workerd (tests/workers/password.test.ts): 600,000
-// iterations of PBKDF2-HMAC-SHA256 costs roughly 0.7s of CPU. That is a lot
-// for one request and the right amount for this one — logins are rare, and
-// rate limiting bounds how often an attacker can make us pay it.
+//   * bcrypt is a C++ addon and @node-rs/argon2 is a Rust one. Neither exists
+//     on workerd. Both work perfectly in `next dev`, which is how that gets
+//     discovered at deploy time.
+//   * PBKDF2 over WebCrypto works in both runtimes, but deployed Workers cap
+//     it at 100,000 iterations — below OWASP's 600k floor for SHA-256. Phase 1
+//     claimed 600k was "measured in workerd"; it was measured in the vitest
+//     workers pool, which does not enforce the cap. The deployed runtime does.
+//   * hash-wasm decodes its module from base64 and calls
+//     `WebAssembly.compile` at runtime. workerd answers "Wasm code generation
+//     disallowed by embedder" — the same refusal that forced a second Prisma
+//     client in Phase 1. Verified, not assumed: see the report for Step 1.
 //
-// ENCODED FORM, one self-describing string:
+// What is left is a pure-JS implementation, and @noble/hashes is the audited
+// one. It costs about half a second in workerd for OWASP's m=19456 profile,
+// which is the same order as the PBKDF2 it replaces and a great deal more
+// resistant to the hardware an attacker would bring.
 //
-//   pbkdf2$sha256$600000$<salt base64url>$<derived key base64url>
+// ENCODED FORM — the PHC string format, so the parameters travel with the
+// hash and a future tuning does not invalidate anything already stored:
 //
-// The parameters travel with the hash, so raising the iteration count later
-// does not invalidate existing passwords: old hashes keep verifying against
-// the parameters they were made with, and `needsRehash` says which ones to
-// upgrade the next time their owner logs in successfully.
+//   $argon2id$v=19$m=19456,t=2,p=1$<salt b64>$<hash b64>
+//
+// Legacy `pbkdf2$sha256$<n>$<salt>$<hash>` strings still VERIFY, and
+// `needsRehash` reports them as stale, so every existing password upgrades
+// itself the next time its owner logs in successfully.
 // ---------------------------------------------------------------------------
 
-const ALGORITHM = 'pbkdf2'
-const DIGEST = 'sha256'
-const WEBCRYPTO_HASH = 'SHA-256'
+/**
+ * OWASP's second recommended argon2id profile (m=19 MiB, t=2, p=1).
+ *
+ * Memory is the parameter that costs an attacker their GPU advantage, so it is
+ * the one to spend on. 19 MiB per concurrent login leaves comfortable room
+ * under a Worker isolate's 128 MB alongside Next and Prisma; the 46 MiB
+ * profile does not, and buys little — measured, the two are 640ms and 511ms.
+ */
+export const ARGON2_PARAMS = {
+  /** Memory cost, in KiB. */
+  m: 19456,
+  /** Time cost — passes over memory. */
+  t: 2,
+  /** Lanes. One, because workerd gives us no threads to spend them on. */
+  p: 1,
+} as const
 
-/** Cloudflare Workers caps PBKDF2 at 100,000 iterations (platform limit,
- *  below OWASP's 600k floor for SHA-256). Revisit if the cap is lifted or
- *  we move to a workerd-compatible argon2/scrypt. */
-export const DEFAULT_ITERATIONS = 100_000
-
+const ARGON2_VERSION = 19
+const DERIVED_BYTES = 32
 const SALT_BYTES = 16
-const DERIVED_BITS = 256
+
+/** Legacy only. Nothing creates a PBKDF2 hash any more; these still verify. */
+const LEGACY_ALGORITHM = 'pbkdf2'
+const LEGACY_DIGEST = 'sha256'
+const LEGACY_WEBCRYPTO_HASH = 'SHA-256'
 
 const encoder = new TextEncoder()
 
@@ -42,36 +68,29 @@ const encoder = new TextEncoder()
  */
 type Bytes = Uint8Array<ArrayBuffer>
 
-function toBase64Url(bytes: Bytes): string {
+// --- encoding ---------------------------------------------------------------
+//
+// PHC uses standard base64 with the padding stripped — NOT base64url. Getting
+// this wrong produces hashes that verify here and nowhere else, which is the
+// kind of bug that only shows up the day you migrate off this file.
+
+function toB64(bytes: Bytes): string {
   let binary = ''
   for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  return btoa(binary).replace(/=+$/, '')
 }
 
-function fromBase64Url(value: string): Bytes {
-  const padded = value.replace(/-/g, '+').replace(/_/g, '/')
-  const binary = atob(padded.padEnd(Math.ceil(padded.length / 4) * 4, '='))
+function fromB64(value: string): Bytes {
+  const binary = atob(value.padEnd(Math.ceil(value.length / 4) * 4, '='))
   return Uint8Array.from(binary, (char) => char.charCodeAt(0))
 }
 
-async function derive(
-  password: string,
-  salt: Bytes,
-  iterations: number,
-): Promise<Bytes> {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(password.normalize('NFKC')),
-    'PBKDF2',
-    false,
-    ['deriveBits'],
-  )
-  const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', hash: WEBCRYPTO_HASH, salt, iterations },
-    key,
-    DERIVED_BITS,
-  )
-  return new Uint8Array(bits)
+function toBase64Url(bytes: Bytes): string {
+  return toB64(bytes).replace(/\+/g, '-').replace(/\//g, '_')
+}
+
+function fromBase64Url(value: string): Bytes {
+  return fromB64(value.replace(/-/g, '+').replace(/_/g, '/'))
 }
 
 /**
@@ -88,20 +107,128 @@ function timingSafeEqual(a: Bytes, b: Bytes): boolean {
   return difference === 0
 }
 
+// --- argon2id ---------------------------------------------------------------
+
+export interface Argon2Params {
+  m: number
+  t: number
+  p: number
+}
+
+function deriveArgon2(
+  password: string,
+  salt: Bytes,
+  params: Argon2Params,
+): Bytes {
+  return argon2id(password.normalize('NFKC'), salt, {
+    ...params,
+    dkLen: DERIVED_BYTES,
+  }) as Bytes
+}
+
 export async function hashPassword(
   password: string,
-  iterations: number = DEFAULT_ITERATIONS,
+  params: Argon2Params = ARGON2_PARAMS,
 ): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES))
-  const derived = await derive(password, salt, iterations)
+  const derived = deriveArgon2(password, salt, params)
   return [
-    ALGORITHM,
-    DIGEST,
-    iterations,
-    toBase64Url(salt),
-    toBase64Url(derived),
+    '',
+    'argon2id',
+    `v=${ARGON2_VERSION}`,
+    `m=${params.m},t=${params.t},p=${params.p}`,
+    toB64(salt),
+    toB64(derived),
   ].join('$')
 }
+
+// --- parsing ----------------------------------------------------------------
+
+type Parsed =
+  | { kind: 'argon2id'; params: Argon2Params; salt: Bytes; hash: Bytes }
+  | { kind: 'pbkdf2'; iterations: number; salt: Bytes; hash: Bytes }
+
+function parse(encoded: string): Parsed | null {
+  return encoded.startsWith('$argon2id$')
+    ? parseArgon2(encoded)
+    : parseLegacy(encoded)
+}
+
+function parseArgon2(encoded: string): Parsed | null {
+  // A leading '$' means split() yields an empty first element. Six parts.
+  const parts = encoded.split('$')
+  if (parts.length !== 6) return null
+
+  const [, id, version, paramList, saltRaw, hashRaw] = parts
+  if (id !== 'argon2id') return null
+  if (version !== `v=${ARGON2_VERSION}`) return null
+
+  const params: Record<string, number> = {}
+  for (const pair of paramList!.split(',')) {
+    const [key, value] = pair.split('=')
+    if (!key || value === undefined) return null
+    const parsed = Number(value)
+    if (!Number.isInteger(parsed) || parsed < 1) return null
+    params[key] = parsed
+  }
+  const { m, t, p } = params
+  if (m === undefined || t === undefined || p === undefined) return null
+
+  try {
+    return {
+      kind: 'argon2id',
+      params: { m, t, p },
+      salt: fromB64(saltRaw!),
+      hash: fromB64(hashRaw!),
+    }
+  } catch {
+    return null
+  }
+}
+
+function parseLegacy(encoded: string): Parsed | null {
+  const parts = encoded.split('$')
+  if (parts.length !== 5) return null
+
+  const [algorithm, digest, iterationsRaw, saltRaw, hashRaw] = parts
+  if (algorithm !== LEGACY_ALGORITHM || digest !== LEGACY_DIGEST) return null
+
+  const iterations = Number(iterationsRaw)
+  if (!Number.isInteger(iterations) || iterations < 1) return null
+
+  try {
+    return {
+      kind: 'pbkdf2',
+      iterations,
+      salt: fromBase64Url(saltRaw!),
+      hash: fromBase64Url(hashRaw!),
+    }
+  } catch {
+    return null
+  }
+}
+
+async function deriveLegacy(
+  password: string,
+  salt: Bytes,
+  iterations: number,
+): Promise<Bytes> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(password.normalize('NFKC')),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  )
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: LEGACY_WEBCRYPTO_HASH, salt, iterations },
+    key,
+    DERIVED_BYTES * 8,
+  )
+  return new Uint8Array(bits)
+}
+
+// --- the two things callers use ---------------------------------------------
 
 /**
  * Whether `password` produced `encoded`.
@@ -117,49 +244,36 @@ export async function verifyPassword(
   const parsed = parse(encoded)
   if (!parsed) return false
 
-  const derived = await derive(password, parsed.salt, parsed.iterations)
+  const derived =
+    parsed.kind === 'argon2id'
+      ? deriveArgon2(password, parsed.salt, parsed.params)
+      : await deriveLegacy(password, parsed.salt, parsed.iterations)
+
   return timingSafeEqual(derived, parsed.hash)
-}
-
-interface ParsedHash {
-  iterations: number
-  salt: Bytes
-  hash: Bytes
-}
-
-function parse(encoded: string): ParsedHash | null {
-  const parts = encoded.split('$')
-  if (parts.length !== 5) return null
-
-  const [algorithm, digest, iterationsRaw, saltRaw, hashRaw] = parts
-  if (algorithm !== ALGORITHM || digest !== DIGEST) return null
-
-  const iterations = Number(iterationsRaw)
-  if (!Number.isInteger(iterations) || iterations < 1) return null
-
-  try {
-    return {
-      iterations,
-      salt: fromBase64Url(saltRaw!),
-      hash: fromBase64Url(hashRaw!),
-    }
-  } catch {
-    return null
-  }
 }
 
 /**
  * Whether a stored hash was made with weaker parameters than we now use.
+ *
+ * Every PBKDF2 hash qualifies, which is what makes the migration a rolling one
+ * rather than a forced reset: the old hash verifies, and is replaced in the
+ * same request.
  *
  * Call after a successful verify — that is the only moment the plaintext is in
  * hand, and so the only moment a rehash is possible.
  */
 export function needsRehash(
   encoded: string,
-  iterations: number = DEFAULT_ITERATIONS,
+  params: Argon2Params = ARGON2_PARAMS,
 ): boolean {
   const parsed = parse(encoded)
-  return parsed === null || parsed.iterations < iterations
+  if (parsed === null) return true
+  if (parsed.kind === 'pbkdf2') return true
+  return (
+    parsed.params.m < params.m ||
+    parsed.params.t < params.t ||
+    parsed.params.p < params.p
+  )
 }
 
 /**
@@ -167,8 +281,8 @@ export function needsRehash(
  * the email matched no user.
  *
  * Without it, "no such user" returns in a millisecond and "wrong password"
- * returns in seven hundred, and the difference is a working list of which
- * email addresses hold accounts.
+ * returns in five hundred, and the difference is a working list of which email
+ * addresses hold accounts.
  */
 export async function dummyHash(): Promise<string> {
   return hashPassword(toBase64Url(crypto.getRandomValues(new Uint8Array(32))))

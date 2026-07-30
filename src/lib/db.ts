@@ -4,6 +4,7 @@ import { neonConfig } from '@neondatabase/serverless'
 import { PrismaNeon } from '@prisma/adapter-neon'
 import { PrismaClient } from '@/generated/prisma/client'
 import { auditExtension } from './audit'
+import { ensureAuditSink } from './audit-sink'
 
 // ---------------------------------------------------------------------------
 // THE RUNTIME DATABASE CLIENT
@@ -49,6 +50,11 @@ neonConfig.poolQueryViaFetch = false
  * through every module that takes a database handle, for no gain.
  */
 export function createPrismaClient(connectionString: string): PrismaClient {
+  // Idempotent, and the only place guaranteed to run before an audited write
+  // in every runtime we have. See src/lib/audit-sink.ts — a missing binding is
+  // a no-op, so this is free under Node and in tests.
+  ensureAuditSink()
+
   const client = new PrismaClient({
     adapter: new PrismaNeon({ connectionString }),
   })

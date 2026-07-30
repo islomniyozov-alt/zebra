@@ -39,7 +39,7 @@ A Transportation Management System replacing a paid TMS for a carrier group of 3
 - **WebSocket adapter, not HTTP.** The HTTP driver can't run interactive transactions, and every request needs one for the RLS session variable.
 - **Prisma 7 config takes `datasource: { url }`, not `adapter`.** _(v1 said otherwise and was wrong — `adapter` doesn't exist in `@prisma/config` 7.9.x. Driver adapters are runtime-only, on the `PrismaClient` constructor.)_
 - **`"type": "module"` in package.json.** Required by the Workers vitest pool. _(v1's `main()`-wrapper ruling is superseded.)_
-- **Password hashing must be WebCrypto-compatible.** Native bcrypt and `@node-rs/argon2` don't run on workerd.
+- ~~**Password hashing must be WebCrypto-compatible.**~~ Native bcrypt and `@node-rs/argon2` don't run on workerd — that part holds. The conclusion did not: WebCrypto is not the only option, and the one chosen was capped. **Superseded in Phase 2 Step 1** — hashing is argon2id via `@noble/hashes`, pure JS. See §18.
 
 ---
 
@@ -267,10 +267,11 @@ Steps 6–7 — passing:
       payload rather than hidden, and `withCurrentOrg` throws `ForbiddenError`
       before any query runs. The URL-level proof is owed the day the first
       financial route exists, and belongs in Phase 2's acceptance criteria.
-- [ ] **An `onAuditEvent` sink.** Carried from §8. `getAuditHealth()` counts in
-      isolate memory and the durable signal is the log line; a fleet-wide
-      metric needs Analytics Engine or Sentry. Owed before production, and
-      production is not Phase 1.
+- [x] **An `onAuditEvent` sink.** Carried from §8, **paid in Phase 2 Step 1.**
+      `onAuditEvent` feeds an Analytics Engine dataset (`AUDIT_EVENTS` →
+      `zebra_audit_dev`) through `src/lib/audit-sink.ts`, and
+      `scripts/audit-events.mjs` reads it back. Verified by query against the
+      deployed worker, not by inspection.
 
 **Also true, and worth stating rather than discovering:** every sidebar
 destination except Loads is a link to a screen that does not exist yet. That
@@ -321,3 +322,23 @@ Report with: the migration or diff, test output, anything visual as a screenshot
     explicitly so nobody has to infer it from a table that simply stops.
 15. §13 — criteria updated against what was actually verified, including the
     two that are **not** met and why.
+
+## 18. Corrections found in Phase 2
+
+Phase 1 is closed and these are not rewrites of it. They are recorded because
+two statements in this document are now known to be **false**, and a closed
+brief that is quietly wrong is worse than one that is openly amended.
+
+16. **§2, §7 and the README claimed PBKDF2 at 600,000 iterations was "measured
+    in workerd".** It was measured in the vitest workers pool, which does not
+    enforce the iteration cap the deployed runtime does. Deployed Workers cap
+    PBKDF2 at 100,000 — below OWASP's floor — and the test asserting otherwise
+    passed vacuously. The count was lowered to 100k in `fdab3bb`, and the
+    algorithm replaced with argon2id in Phase 2 Step 1. The lesson, now Phase 2
+    standing rule 10: **the workers pool is not evidence about a platform
+    limit.** Only the deployed worker is.
+17. **§13's `onAuditEvent` criterion is met**, in Phase 2 Step 1. See §13.
+
+The one remaining Phase 1 debt is unchanged: **a `DISPATCHER` cannot reach a
+financial route by URL** is still untestable, because no financial route exists
+yet. It is in Phase 2's §13 and becomes provable at Phase 2 Step 6.

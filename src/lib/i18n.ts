@@ -118,6 +118,23 @@ const en = {
   'auth.reset.done': 'Password changed. Sign in with the new one.',
   'auth.backToSignIn': 'Back to sign in',
 
+  'account.title': 'Your account',
+  'account.signOut': 'Sign out',
+  'account.signedInAs': 'Signed in as {role}.',
+  'account.password.title': 'Change password',
+  'account.password.body':
+    'Changing your password signs out every other device.',
+  'account.password.current': 'Current password',
+  'account.password.new': 'New password',
+  'account.password.confirm': 'Confirm new password',
+  'account.password.hint': 'At least {n} characters.',
+  'account.password.save': 'Change password',
+  'account.password.done': 'Password changed. Other devices are signed out.',
+  'account.password.mismatch': 'Those two passwords do not match.',
+  'account.password.tooShort': 'Use at least twelve characters.',
+  'account.password.unchanged': 'Choose a password you have not used here.',
+  'account.password.wrongCurrent': 'That current password is not right.',
+
   'status.AVAILABLE': 'Available',
   'status.BOOKED': 'Booked',
   'status.DISPATCHED': 'Dispatched',
@@ -235,6 +252,24 @@ const ru: Dictionary = {
   'auth.reset.done': 'Пароль изменён. Войдите с новым паролем.',
   'auth.backToSignIn': 'Вернуться ко входу',
 
+  'account.title': 'Ваша учётная запись',
+  'account.signOut': 'Выйти',
+  'account.signedInAs': 'Вы вошли как {role}.',
+  'account.password.title': 'Изменить пароль',
+  'account.password.body':
+    'При изменении пароля все остальные устройства будут отключены.',
+  'account.password.current': 'Текущий пароль',
+  'account.password.new': 'Новый пароль',
+  'account.password.confirm': 'Повторите новый пароль',
+  'account.password.hint': 'Не менее {n} символов.',
+  'account.password.save': 'Изменить пароль',
+  'account.password.done': 'Пароль изменён. Остальные устройства отключены.',
+  'account.password.mismatch': 'Пароли не совпадают.',
+  'account.password.tooShort': 'Используйте не менее двенадцати символов.',
+  'account.password.unchanged':
+    'Выберите пароль, который здесь не использовался.',
+  'account.password.wrongCurrent': 'Текущий пароль указан неверно.',
+
   'status.AVAILABLE': 'Свободен',
   'status.BOOKED': 'Забронирован',
   'status.DISPATCHED': 'Отправлен',
@@ -344,6 +379,24 @@ const fa: Dictionary = {
   'auth.reset.invalidToken': 'این پیوند منقضی شده یا قبلاً استفاده شده است.',
   'auth.reset.done': 'گذرواژه تغییر کرد. با گذرواژه تازه وارد شوید.',
   'auth.backToSignIn': 'بازگشت به ورود',
+
+  'account.title': 'حساب شما',
+  'account.signOut': 'خروج',
+  'account.signedInAs': 'با نقش {role} وارد شده‌اید.',
+  'account.password.title': 'تغییر رمز عبور',
+  'account.password.body':
+    'با تغییر رمز عبور، همهٔ دستگاه‌های دیگر از حساب خارج می‌شوند.',
+  'account.password.current': 'رمز عبور فعلی',
+  'account.password.new': 'رمز عبور جدید',
+  'account.password.confirm': 'تکرار رمز عبور جدید',
+  'account.password.hint': 'دست‌کم {n} نویسه.',
+  'account.password.save': 'تغییر رمز عبور',
+  'account.password.done': 'رمز عبور تغییر کرد. دستگاه‌های دیگر خارج شدند.',
+  'account.password.mismatch': 'این دو رمز عبور یکسان نیستند.',
+  'account.password.tooShort': 'دست‌کم دوازده نویسه استفاده کنید.',
+  'account.password.unchanged':
+    'رمزی انتخاب کنید که پیش‌تر اینجا استفاده نشده باشد.',
+  'account.password.wrongCurrent': 'رمز عبور فعلی درست نیست.',
 
   'status.AVAILABLE': 'آزاد',
   'status.BOOKED': 'رزرو شده',

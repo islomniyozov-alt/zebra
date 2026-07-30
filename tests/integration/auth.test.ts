@@ -3,6 +3,7 @@ import { createPrismaClient } from '@/lib/db'
 import { hashPassword } from '@/lib/password'
 import {
   RATE_LIMIT,
+  changeOwnPassword,
   changePassword,
   clearLoginFailures,
   login,
@@ -583,5 +584,107 @@ describe('refreshSessionsForUser', () => {
 describe('normalizeEmail', () => {
   it('trims and lowercases', () => {
     expect(normalizeEmail('  Owner@Example.TEST ')).toBe('owner@example.test')
+  })
+})
+
+describe('changeOwnPassword', () => {
+  // Phase 2 §6 — the owner changes their own password through the interface
+  // rather than through a seed variable. The refusals are exercised against
+  // the deployed worker in the step report; these cover the path that must
+  // NOT be driven live, because doing so would put a real credential in a
+  // transcript, which is the whole reason this exists.
+  const NEXT = 'a-different-passphrase-7731'
+
+  afterEach(async () => {
+    await owner.user.update({
+      where: { id: userId },
+      data: { passwordHash: await hashPassword(PASSWORD) },
+    })
+    await owner.loginAttempt.deleteMany({ where: { email } })
+    await owner.session.deleteMany({ where: { userId } })
+  })
+
+  it('changes the password when the current one is right', async () => {
+    expect(
+      await changeOwnPassword(app, userId, PASSWORD, NEXT, { minLength: 12 }),
+    ).toEqual({ ok: true })
+
+    expect(await login(app, { email, password: NEXT })).toMatchObject({
+      ok: true,
+    })
+    await owner.loginAttempt.deleteMany({ where: { email } })
+    expect(await login(app, { email, password: PASSWORD })).toMatchObject({
+      reason: 'invalid_credentials',
+    })
+  })
+
+  it('stores the new password as argon2id', async () => {
+    await changeOwnPassword(app, userId, PASSWORD, NEXT, { minLength: 12 })
+    const user = await owner.user.findUniqueOrThrow({ where: { id: userId } })
+    expect(user.passwordHash).toMatch(/^\$argon2id\$v=19\$m=\d+,t=\d+,p=\d+\$/)
+  })
+
+  it('refuses a wrong current password and leaves the old one working', async () => {
+    expect(
+      await changeOwnPassword(app, userId, 'not-it', NEXT, { minLength: 12 }),
+    ).toEqual({ ok: false, reason: 'invalid_current' })
+
+    expect(await login(app, { email, password: PASSWORD })).toMatchObject({
+      ok: true,
+    })
+  })
+
+  it('refuses a new password that is too short', async () => {
+    expect(
+      await changeOwnPassword(app, userId, PASSWORD, 'short', {
+        minLength: 12,
+      }),
+    ).toEqual({ ok: false, reason: 'too_short' })
+  })
+
+  it('refuses a no-op change', async () => {
+    // Reporting success for having done nothing is worse than refusing: the
+    // reason to change a password is that the old one is suspect.
+    expect(
+      await changeOwnPassword(app, userId, PASSWORD, PASSWORD, {
+        minLength: 12,
+      }),
+    ).toEqual({ ok: false, reason: 'unchanged' })
+  })
+
+  it('ends every other session and keeps the one that asked', async () => {
+    // If the password is being changed because it leaked, leaving the
+    // attacker's session alive makes the change decorative. Throwing out the
+    // person who just proved they own the account is its own bug.
+    const staying = await login(app, { email, password: PASSWORD })
+    await owner.loginAttempt.deleteMany({ where: { email } })
+    const leaving = await login(app, { email, password: PASSWORD })
+    expect(staying.ok && leaving.ok).toBe(true)
+    if (!staying.ok || !leaving.ok) return
+
+    await changeOwnPassword(app, userId, PASSWORD, NEXT, {
+      minLength: 12,
+      keepSessionId: staying.context.sessionId,
+    })
+
+    expect(await resolveSession(app, staying.token)).not.toBeNull()
+    expect(await resolveSession(app, leaving.token)).toBeNull()
+  })
+
+  it('refuses for a deactivated account', async () => {
+    await owner.user.update({
+      where: { id: userId },
+      data: { isActive: false },
+    })
+    try {
+      expect(
+        await changeOwnPassword(app, userId, PASSWORD, NEXT, { minLength: 12 }),
+      ).toEqual({ ok: false, reason: 'invalid_current' })
+    } finally {
+      await owner.user.update({
+        where: { id: userId },
+        data: { isActive: true },
+      })
+    }
   })
 })

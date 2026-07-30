@@ -29,3 +29,18 @@ export function unauthenticatedDb(): AuthDb & ResetDb {
   // RLS is a property of these four tables, not a licence to connect as owner.
   return createPrismaClient(connectionString)
 }
+
+/**
+ * The same handle under a truthful name, for the one authenticated operation
+ * that still has no tenant: a user changing their own password.
+ *
+ * It touches `User` and `Session` and nothing else, both of which sit outside
+ * row-level security for the reasons above, and it is not a `user:update` —
+ * that resource governs administering other people. A separate name rather
+ * than a second call to `unauthenticatedDb`, because that name would be a lie
+ * in a file that has a session in hand, and a lie in a name outlives every
+ * comment written to excuse it.
+ */
+export function ownAccountDb(): AuthDb {
+  return unauthenticatedDb()
+}

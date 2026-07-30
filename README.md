@@ -112,11 +112,16 @@ user id reads memberships and can never write one.
 Email and password against `User` and `Session`. Sessions are rows, not JWTs,
 because revocation has to be immediate.
 
-- **Hashing is PBKDF2 over WebCrypto**, 600,000 iterations, OWASP's current
-  floor. Native bcrypt and `@node-rs/argon2` do not exist on workerd, and both
-  work fine in `next dev` — which is how that gets discovered at deploy time.
-  Measured at ~0.7 s of CPU inside workerd; `tests/workers/` proves it there,
-  not in Node.
+- **Hashing is argon2id**, `m=19456 KiB, t=2, p=1` — OWASP's second recommended
+  profile — via [`@noble/hashes`](https://github.com/paulmillr/noble-hashes),
+  a pure-JS implementation. Hashes are stored in PHC format
+  (`$argon2id$v=19$m=19456,t=2,p=1$…`), so the parameters travel with the hash
+  and retuning invalidates nothing. **Measured at 646 ms of CPU on the deployed
+  worker**, by `wrangler tail` around a real login. See the dead ends below —
+  three of the four obvious answers do not work here.
+- **Old PBKDF2 hashes still verify**, and `needsRehash` reports every one of
+  them as stale, so each password upgrades itself on its owner's next
+  successful login. Nobody is locked out and nobody is asked to reset.
 - **The cookie holds the token; the database holds its SHA-256.** A dump of
   `Session` is a list of useless digests.
 - **Rate limited** per email (5 per 15 min) and per address (30 per 15 min),
@@ -128,6 +133,28 @@ because revocation has to be immediate.
 - **A missing user costs the same as a wrong password** — the failure path
   still runs a full verify against a throwaway hash, so response time is not a
   list of which addresses hold accounts.
+
+### Password hashing on workerd: what does not work, and why
+
+Four candidates, three dead. Each was verified, not assumed, and each is
+recorded because rediscovering one costs a session.
+
+| Candidate             | Outcome                                                                                                                            |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `bcrypt`              | C++ addon. Does not exist on workerd. Works perfectly in `next dev`.                                                               |
+| `@node-rs/argon2`     | Rust addon. Same.                                                                                                                  |
+| PBKDF2 over WebCrypto | Runs, but **deployed Workers cap it at 100,000 iterations** — below OWASP's 600k floor for SHA-256.                                |
+| `hash-wasm`           | Decodes its module from base64 and calls `WebAssembly.compile` at runtime. workerd: `Wasm code generation disallowed by embedder`. |
+| **`@noble/hashes`**   | Pure JS, no WASM, no addon. Runs. **This is what ships.**                                                                          |
+
+> **The workers vitest pool is not the deployed runtime.** It is workerd, and it
+> is close enough for behaviour, but it does not enforce the PBKDF2 iteration
+> cap. Phase 1 shipped a test named _"runs 600,000 iterations inside workerd
+> without complaint"_ that passed here and failed on the live worker, and the
+> README said the cost was "measured in workerd". It was not. **Nothing in
+> `tests/workers/` may be cited as evidence about a platform limit** — limits
+> are settled against the deployed worker with `wrangler tail`, and the number
+> is pasted into the step report.
 
 `can(session, action, resource)` in [`src/lib/permissions.ts`](src/lib/permissions.ts)
 is the only place permission is decided. Routes call `requirePermission` from
@@ -178,12 +205,31 @@ getAuditHealth()
 Gaps are counted apart from failures precisely so they can never drown one.
 
 > **These counters live in isolate memory.** Workers isolates are ephemeral and
-> plural, so in production `getAuditHealth()` reports one isolate's slice of one
-> moment — not the fleet's. Read it as a test and development instrument. The
-> durable signal today is the `[zebra.audit.failure]` log line, which Workers
-> observability retains and can alert on. For the "zero forever, therefore
-> alertable" property to hold as a _metric_, `onAuditEvent` is the seam — point
-> it at Analytics Engine or Sentry. **Owed before production.**
+> plural, so `getAuditHealth()` reports one isolate's slice of one moment — not
+> the fleet's. Read it as a test and development instrument.
+
+**The durable counterpart is wired** (Phase 2 Step 1, paying Phase 1 §8's debt).
+`onAuditEvent` feeds an Analytics Engine dataset through
+[`src/lib/audit-sink.ts`](src/lib/audit-sink.ts), bound as `AUDIT_EVENTS` →
+`zebra_audit_dev`. Read it back with:
+
+```
+node scripts/audit-events.mjs [hours]
+```
+
+Two properties that file must keep, and that `tests/audit-sink.test.ts` holds
+it to:
+
+- **A missing binding is a no-op, never an error.** Node, `next dev` and every
+  test have no binding, and audit must behave identically without one.
+- **Nothing tenant-identifying leaves.** A datapoint carries the _shape_ of the
+  problem — model, operation, gap kind, error message — never a row id and
+  never a value out of a diff. Analytics Engine sits outside the row-level
+  security the rest of this application is built on.
+
+Its failure mode is silence, which is indistinguishable from the healthy state
+of zero failures. That is why the binding name is asserted from both ends and
+why `scripts/audit-events.mjs` says so out loud when it finds nothing at all.
 
 ### This is a change log, not a security event log
 
@@ -273,6 +319,21 @@ Everything needs `.env`. Nothing runs against `NEON_BRANCH=production`.
 | `npm run deploy`                  | build and deploy to `zebra-dev`                         |
 | `npm run deploy:prod`             | build and deploy to `zebra`                             |
 
+Node scripts, all pointed at the deployed worker by default:
+
+| Script                        | Does                                                          |
+| ----------------------------- | ------------------------------------------------------------- |
+| `scripts/live-check.mjs`      | the second half of "deployed" — routing, auth gating, no CDN  |
+| `scripts/verify-argon2.mjs`   | signs in for real and proves the hash rolled over to argon2id |
+| `scripts/audit-events.mjs`    | reads the Analytics Engine audit sink                         |
+| `scripts/screenshots.mjs`     | 1080p evidence in EN, RU and RTL                              |
+| `scripts/verify-criteria.mjs` | rows-at-1080p and focus-ring measurements                     |
+| `scripts/check-hex.mjs`       | no hex colour outside the token block                         |
+
+**Every step ends with a deploy and a live check** (Phase 2 standing rule 9),
+not just the phase. Every blocker this project has hit lived in the
+local-vs-workerd seam, and the only way to find one is to go there.
+
 ### Two traps, both hit for real on the first deploy
 
 **Secrets need a trailing newline.** `printf '%s' "$V" | wrangler secret put NAME`
@@ -305,3 +366,35 @@ passed.** A green push is not a deploy.
 Nothing secret belongs in `wrangler.jsonc`. `vars` there holds `NEON_BRANCH` and
 `R2_BUCKET` only. Connection strings, R2 keys and `AUTH_SECRET` go in via
 `wrangler secret put` per environment, and in `.env` locally.
+
+### Rotating them
+
+**`zebra_app` database password.** Doable from here, because the migration owns
+the role:
+
+```sql
+ALTER ROLE zebra_app WITH PASSWORD '<new>';   -- as the Neon owner
+```
+
+then update `DATABASE_URL` in `.env` and `printf '%s\n' "$URL" | wrangler secret put DATABASE_URL`.
+Mind both traps above. Rotated 2026-07-30.
+
+**R2 access key pair.** _Not_ doable from here: creating an S3-compatible token
+is an account-level act, and `wrangler login`'s OAuth token is refused for it
+(`9109 Unauthorized to access requested resource`). It is a dashboard job —
+**R2 → Manage R2 API Tokens → Create** with Object Read & Write on
+`zebra-docs-dev`, then:
+
+```
+printf '%s\n' "<key id>"  | wrangler secret put R2_ACCESS_KEY_ID
+printf '%s\n' "<secret>"  | wrangler secret put R2_SECRET_ACCESS_KEY
+```
+
+and the same two values in `.env`. Delete the old token afterwards, not before —
+a presigned URL already in flight is signed with it.
+
+**`neondb_owner` password.** Neon dashboard only, same reasoning.
+
+> **`.env` is gitignored and no credential in it has ever been committed** —
+> `git log -S` over the full history finds none of them, and there is no remote.
+> The exposure is transcript-only. That is still exposure.
