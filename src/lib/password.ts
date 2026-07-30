@@ -25,8 +25,10 @@ const ALGORITHM = 'pbkdf2'
 const DIGEST = 'sha256'
 const WEBCRYPTO_HASH = 'SHA-256'
 
-/** OWASP's current floor for PBKDF2-HMAC-SHA256. */
-export const DEFAULT_ITERATIONS = 600_000
+/** Cloudflare Workers caps PBKDF2 at 100,000 iterations (platform limit,
+ *  below OWASP's 600k floor for SHA-256). Revisit if the cap is lifted or
+ *  we move to a workerd-compatible argon2/scrypt. */
+export const DEFAULT_ITERATIONS = 100_000
 
 const SALT_BYTES = 16
 const DERIVED_BITS = 256
