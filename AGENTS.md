@@ -8,7 +8,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 # Zebra
 
-Read `PHASE-1-BRIEF.md`, `prisma/schema.prisma` and `TMS-DESIGN-SYSTEM.md` before
+Current phase: **Phase 2** — read `PHASE-2-BRIEF.md` first; §16 lists what has
+been flagged against it. `PHASE-1-BRIEF.md` is closed but still binding for the
+mechanisms in its §6–§10.
+
+Read `PHASE-2-BRIEF.md`, `prisma/schema.prisma` and `TMS-DESIGN-SYSTEM.md` before
 writing anything. Where the brief disagrees with the other two, the other two win
 and the contradiction gets flagged rather than silently resolved.
 

@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { FIXTURE_PASSWORD, FIXTURE_PASSWORD_HASH } from '../fixtures/password'
 import { createPrismaClient } from '@/lib/db'
-import { hashPassword } from '@/lib/password'
 import {
   RATE_LIMIT,
   changeOwnPassword,
@@ -30,7 +30,7 @@ import type { PrismaClient } from '@/generated/prisma/client'
 let app: PrismaClient
 let owner: PrismaClient
 
-const PASSWORD = 'a-real-passphrase-9482'
+const PASSWORD = FIXTURE_PASSWORD
 let nonce: string
 let email: string
 let organizationId: string
@@ -59,7 +59,7 @@ beforeAll(async () => {
     data: {
       email,
       name: 'Test Owner',
-      passwordHash: await hashPassword(PASSWORD),
+      passwordHash: FIXTURE_PASSWORD_HASH,
     },
   })
   userId = user.id
@@ -170,7 +170,7 @@ describe('login', () => {
       data: {
         email: strayEmail,
         name: 'Stray',
-        passwordHash: await hashPassword(PASSWORD),
+        passwordHash: FIXTURE_PASSWORD_HASH,
       },
     })
     try {
@@ -268,7 +268,7 @@ describe('rate limiting', () => {
       data: {
         email: otherEmail,
         name: 'Other',
-        passwordHash: await hashPassword(PASSWORD),
+        passwordHash: FIXTURE_PASSWORD_HASH,
       },
     })
     await owner.membership.create({
@@ -500,7 +500,7 @@ describe('logout and revocation', () => {
     } finally {
       await owner.user.update({
         where: { id: userId },
-        data: { passwordHash: await hashPassword(PASSWORD) },
+        data: { passwordHash: FIXTURE_PASSWORD_HASH },
       })
     }
   })
@@ -598,7 +598,7 @@ describe('changeOwnPassword', () => {
   afterEach(async () => {
     await owner.user.update({
       where: { id: userId },
-      data: { passwordHash: await hashPassword(PASSWORD) },
+      data: { passwordHash: FIXTURE_PASSWORD_HASH },
     })
     await owner.loginAttempt.deleteMany({ where: { email } })
     await owner.session.deleteMany({ where: { userId } })

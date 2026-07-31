@@ -23,6 +23,18 @@ const SHOTS = [
   { name: 'account-en', path: '/account', locale: 'en', authed: true },
   { name: 'account-ru', path: '/account', locale: 'ru', authed: true },
   { name: 'account-fa-rtl', path: '/account', locale: 'fa', authed: true },
+  // Step 2's reference screens. Trucks stands in for the three fleet lists,
+  // which share a layout; brokers differs (no authority column, ever) and the
+  // truck form is the only new form shape.
+  { name: 'trucks-en', path: '/trucks', locale: 'en', authed: true },
+  { name: 'trucks-ru', path: '/trucks', locale: 'ru', authed: true },
+  { name: 'trucks-fa-rtl', path: '/trucks', locale: 'fa', authed: true },
+  { name: 'brokers-en', path: '/brokers', locale: 'en', authed: true },
+  { name: 'brokers-ru', path: '/brokers', locale: 'ru', authed: true },
+  { name: 'brokers-fa-rtl', path: '/brokers', locale: 'fa', authed: true },
+  { name: 'truck-new-en', path: '/trucks/new', locale: 'en', authed: true },
+  { name: 'truck-new-ru', path: '/trucks/new', locale: 'ru', authed: true },
+  { name: 'truck-new-fa-rtl', path: '/trucks/new', locale: 'fa', authed: true },
 ]
 
 mkdirSync(OUT, { recursive: true })

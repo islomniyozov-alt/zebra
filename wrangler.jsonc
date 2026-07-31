@@ -22,6 +22,26 @@
     "enabled": true,
   },
 
+  // Every page here opens an interactive transaction and runs several queries
+  // inside it, and Neon lives in us-east-2. Run at the edge, the worker pays
+  // that round trip once per query: measured from Tajikistan, a Trucks page
+  // costs ~2.7s of wall clock against ~4ms of CPU. Smart Placement is supposed
+  // to trade one client hop for N database hops.
+  //
+  // MEASURED, AND IT CHANGED NOTHING. Nine samples per page, before and after,
+  // medians identical to within noise (/trucks 2722 → 2723ms, /loads 3214 →
+  // 3320ms). The API confirms mode:smart is set. The likeliest reason is that
+  // placement needs sustained real traffic before it will relocate anything,
+  // and a few dozen requests from one test run is not that.
+  //
+  // Left enabled because it is the right declaration for a database-bound
+  // worker and it cost nothing (/login, which touches no database, stayed at
+  // 33ms — no regression). It is NOT a proven win. Re-measure when this
+  // carries real traffic. Numbers in the Step 2 report.
+  "placement": {
+    "mode": "smart",
+  },
+
   // The durable end of `onAuditEvent`, owed since Phase 1 §8. Audit health
   // counts in isolate memory, and isolates are ephemeral and plural; this is
   // the counter that outlives them. See src/lib/audit-sink.ts for what is and

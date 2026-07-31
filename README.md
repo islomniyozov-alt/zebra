@@ -4,7 +4,8 @@ Transportation Management System for a multi-authority carrier group.
 
 Read these three, in this order, before changing anything:
 
-1. [`PHASE-1-BRIEF.md`](PHASE-1-BRIEF.md) — what is in scope right now, and what is not
+1. [`PHASE-2-BRIEF.md`](PHASE-2-BRIEF.md) — what is in scope right now, and what is not
+   ([`PHASE-1-BRIEF.md`](PHASE-1-BRIEF.md) is closed; its §6–§10 mechanisms still bind)
 2. [`prisma/schema.prisma`](prisma/schema.prisma) — the data model and its conventions
 3. [`TMS-DESIGN-SYSTEM.md`](TMS-DESIGN-SYSTEM.md) — the interface, and the source of truth for it
 

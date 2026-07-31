@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { FIXTURE_PASSWORD, FIXTURE_PASSWORD_HASH } from '../fixtures/password'
 import { createPrismaClient } from '@/lib/db'
-import { hashPassword } from '@/lib/password'
 import { hashSessionToken, resolveSession } from '@/lib/session'
 import { login, RATE_LIMIT } from '@/lib/auth'
 import {
@@ -17,7 +17,7 @@ import type { PrismaClient } from '@/generated/prisma/client'
 let app: PrismaClient
 let owner: PrismaClient
 
-const PASSWORD = 'the-original-passphrase-1'
+const PASSWORD = FIXTURE_PASSWORD
 const NEW_PASSWORD = 'a-brand-new-passphrase-2'
 let email = ''
 let userId = ''
@@ -39,7 +39,7 @@ beforeAll(async () => {
     data: {
       email,
       name: 'Forgetful',
-      passwordHash: await hashPassword(PASSWORD),
+      passwordHash: FIXTURE_PASSWORD_HASH,
     },
   })
   userId = user.id
@@ -55,7 +55,7 @@ afterEach(async () => {
   await owner.session.deleteMany({ where: { userId } })
   await owner.user.update({
     where: { id: userId },
-    data: { passwordHash: await hashPassword(PASSWORD) },
+    data: { passwordHash: FIXTURE_PASSWORD_HASH },
   })
 })
 
