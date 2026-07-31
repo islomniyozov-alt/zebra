@@ -35,6 +35,12 @@ const SHOTS = [
   { name: 'load-new-en', path: '/loads/new', locale: 'en', authed: true },
   { name: 'load-new-ru', path: '/loads/new', locale: 'ru', authed: true },
   { name: 'load-new-fa-rtl', path: '/loads/new', locale: 'fa', authed: true },
+  // Step 6. The board is the new layout, so all three locales; the Loads
+  // shots above already carry the saved-views bar, which is why they are not
+  // duplicated here.
+  { name: 'dispatch-en', path: '/dispatch', locale: 'en', authed: true },
+  { name: 'dispatch-ru', path: '/dispatch', locale: 'ru', authed: true },
+  { name: 'dispatch-fa-rtl', path: '/dispatch', locale: 'fa', authed: true },
   { name: 'truck-new-en', path: '/trucks/new', locale: 'en', authed: true },
   { name: 'truck-new-ru', path: '/trucks/new', locale: 'ru', authed: true },
   { name: 'truck-new-fa-rtl', path: '/trucks/new', locale: 'fa', authed: true },

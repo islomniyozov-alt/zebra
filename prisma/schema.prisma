@@ -157,6 +157,7 @@ model Organization {
   settlements     Settlement[]
   trailers        Trailer[]
   trucks          Truck[]
+  preferences     UserPreference[]
 }
 
 enum PlanTier {
@@ -289,6 +290,7 @@ model User {
   auditLogs         AuditLog[]
   calendarEvents    CalendarEvent[]
   pendingUploads    PendingUpload[]
+  preferences       UserPreference[]
 
   @@index([isActive])
 }
@@ -341,6 +343,40 @@ enum Role {
   DISPATCHER
   ACCOUNTING
   DRIVER
+}
+
+// One row per user per named preference, per organization.
+//
+// Deliberately a KEY/VALUE table rather than columns, and deliberately not
+// localStorage. Two reasons, and the second is the one that matters:
+//
+//   * A saved view is "my trucks today" (§7.4) — a filter set a dispatcher
+//     expects to find on the office machine AND on the laptop at home.
+//     localStorage gives them one of the two and no way to notice.
+//   * Density (§5.1) is the same shape of fact: small, per user, and useless
+//     if it does not follow them. Step 7 needs it and it is not worth a second
+//     mechanism, so this one is built to hold both from the start.
+//
+// Scoped by organization as well as user because a person may hold memberships
+// in several, and "my trucks today" means different trucks in each.
+model UserPreference {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /** Namespaced: `view.loads.<slug>`, `density`, `columns.loads`. */
+  key String
+  /** Whatever the key's owner defines. Validated on read, never trusted. */
+  value Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, organizationId, key])
+  @@index([organizationId])
+  @@index([userId, organizationId])
 }
 
 // Server-side sessions, not JWTs, because revocation has to be immediate: a
@@ -897,6 +933,17 @@ model Location {
   country      String   @default("US")
   latitude     Decimal? @db.Decimal(9, 6)
   longitude    Decimal? @db.Decimal(9, 6)
+
+  // IANA zone for this facility — "America/Chicago", never an abbreviation or
+  // an offset. Nullable on purpose: an unknown zone is a fact, and a column
+  // that defaulted to something would make every stop look certain.
+  //
+  // Design-system rule 3 wants the STOP's zone. Before this column existed it
+  // was derived from the state, which is right for most of the country and
+  // wrong for the thirteen states that span two zones. The derivation is still
+  // the fallback; this is the override that makes a Florida panhandle dock
+  // correct instead of approximately correct.
+  timezone String?
 
   contactName  String?
   contactPhone String?

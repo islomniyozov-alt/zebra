@@ -10,6 +10,7 @@ import {
   LOAD_WRITE_TIMEOUT_MS,
 } from '@/lib/loads'
 import { optionalText } from '@/lib/reference'
+import { ZONE_CHOICES } from '@/lib/stop-time'
 import type { MessageKey } from '@/lib/i18n'
 
 // The load detail screen's writes. Three of them, and only one is a status
@@ -123,6 +124,42 @@ export async function addNoteAction(
 
   revalidatePath(`/loads/${loadId}`)
   return { error: null, notice: null }
+}
+
+/**
+ * Set (or clear) a place's own timezone, from the stop that shows the guess.
+ *
+ * The ride-along's "form accepts an explicit zone" lands HERE rather than on a
+ * Locations screen, because here is where the approximation is admitted. A
+ * dispatcher reading "approximate — Central, from the state" under a Panhandle
+ * dock can correct it in the same glance; a separate reference screen would
+ * mean noticing the problem in one place and fixing it in another, which is
+ * how it stays wrong.
+ *
+ * Clearing it back to blank is allowed and means "derive it again" — the
+ * fallback stays a fallback, not a thing you can only escape once.
+ *
+ * PERMISSION: `load:update`. There is no `location` resource in
+ * src/lib/permissions.ts and Step 6 is not the step that invents one; the gap
+ * is flagged in the brief rather than resolved here.
+ */
+export async function setStopZoneAction(
+  loadId: string,
+  locationId: string,
+  formData: FormData,
+): Promise<void> {
+  const typed = String(formData.get('timezone') ?? '')
+  // Only a zone this application can render. Anything else is dropped rather
+  // than stored — a bad IANA name surfaces as a wrong appointment time weeks
+  // later, and there is no way to tell it from a real one by looking.
+  const timezone = ZONE_CHOICES.includes(typed) ? typed : null
+
+  await withCurrentOrg('update', 'load', (tx) =>
+    tx.location.update({ where: { id: locationId }, data: { timezone } }),
+  )
+
+  revalidatePath(`/loads/${loadId}`)
+  revalidatePath('/loads')
 }
 
 /** After a document lands, the page has to re-read: a POD may have moved it. */

@@ -87,6 +87,29 @@ const eslintConfig = defineConfig([
           message:
             "An asset's authority is a period, not a column. Use transferAsset from @/lib/asset-transfer — it closes the open AssetAssignment and opens the next one, which is the only reason changing companyId is ever safe.",
         },
+
+        // -----------------------------------------------------------------
+        // A "use server" file exports async functions and NOTHING ELSE.
+        //
+        // Next enforces this at runtime, not at build time, and the runtime
+        // failure is a 500 on the action call — the message stays on the
+        // server and the browser gets a bare digest. That is exactly how the
+        // dispatch board shipped broken: `export const ASSIGN_INITIAL` sitting
+        // beside the action turned every assignment into a 500 with an empty
+        // error slot, so the board silently did nothing. Typecheck passed,
+        // lint passed, the button looked fine, and only `wrangler tail` knew.
+        //
+        // The initial state of a `useActionState` reducer is a value, so it
+        // belongs in a plain module the client can import — ./assign-state.ts,
+        // not the action file next to it. Exported TYPES are erased before
+        // Next sees the module and are not matched here.
+        // -----------------------------------------------------------------
+        {
+          selector:
+            'Program:has(ExpressionStatement > Literal[value="use server"]) > ExportNamedDeclaration > VariableDeclaration > VariableDeclarator:not([init.type="ArrowFunctionExpression"]):not([init.type="FunctionExpression"])',
+          message:
+            'A "use server" file can only export async functions. Exporting a value here compiles, typechecks, and then fails at runtime as a 500 with no message in the browser. Put the constant in a plain module beside it.',
+        },
       ],
     },
   },

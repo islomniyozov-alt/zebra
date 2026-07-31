@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   SPLIT_STATES,
+  ZONE_CHOICES,
   renderDateOnly,
   renderStopTime,
+  resolveZone,
+  unambiguousZone,
   zoneMidnight,
   zoneForState,
 } from '@/lib/stop-time'
@@ -129,6 +132,80 @@ describe('a date typed with no time survives the round trip', () => {
         fallbackZone: 'UTC',
       })?.text,
     ).toBe('Jan 15')
+  })
+})
+
+describe('a facility’s own timezone wins over the state', () => {
+  it('uses the recorded zone, not the state’s', () => {
+    // The Florida panhandle: the state map says Eastern, the dock is Central.
+    // Whoever entered the dock knew; the map did not.
+    const rendered = renderStopTime(AUGUST, 'FL', {
+      fallbackZone: 'UTC',
+      zone: 'America/Chicago',
+    })
+    expect(rendered?.text).toBe('Aug 10, 08:30 CDT')
+    expect(rendered?.zone).toBe('America/Chicago')
+  })
+
+  it('stops calling it approximate once it is known', () => {
+    // The marking exists to say "this was derived". A recorded zone was not.
+    expect(
+      renderStopTime(AUGUST, 'FL', {
+        fallbackZone: 'UTC',
+        zone: 'America/Chicago',
+      })?.approximate,
+    ).toBe(false)
+    // The pairing: the same split state with nothing recorded is still marked.
+    expect(
+      renderStopTime(AUGUST, 'FL', { fallbackZone: 'UTC' })?.approximate,
+    ).toBe(true)
+  })
+
+  it('falls back to the state when nothing is recorded', () => {
+    expect(resolveZone(null, 'IL', 'UTC')).toEqual({
+      zone: 'America/Chicago',
+      approximate: false,
+    })
+  })
+
+  it('only stores a zone for a state that has exactly one', () => {
+    // What may be written to the database as fact, versus what may be shown as
+    // a marked guess. A guess in a column stops looking like a guess.
+    expect(unambiguousZone('IL')).toBe('America/Chicago')
+    expect(unambiguousZone('AZ')).toBe('America/Phoenix')
+    for (const split of SPLIT_STATES) {
+      expect(unambiguousZone(split), split).toBeNull()
+    }
+    expect(unambiguousZone(null)).toBeNull()
+    expect(unambiguousZone('ZZ')).toBeNull()
+  })
+})
+
+describe('the zones a place may be set to', () => {
+  // The load screen writes whatever this list offers straight into
+  // `Location.timezone`, and `setStopZoneAction` refuses anything not in it.
+  // So the list is the validation, and a bad entry here is a wrong
+  // appointment time discovered weeks later by a driver at a closed dock.
+
+  it('offers only names Intl can actually resolve', () => {
+    for (const zone of ZONE_CHOICES) {
+      expect(() =>
+        new Intl.DateTimeFormat('en-US', { timeZone: zone }).format(new Date()),
+      ).not.toThrow()
+    }
+  })
+
+  it('offers every zone the derivation can produce', () => {
+    // Otherwise a place could be showing a zone it cannot be set back to,
+    // and "clear it and start again" would silently change the answer.
+    for (const state of ['IL', 'AZ', 'CA', 'NY', 'ON', 'SK', 'HI']) {
+      const derived = zoneForState(state, 'UTC')
+      expect(ZONE_CHOICES, state).toContain(derived)
+    }
+  })
+
+  it('has no duplicates', () => {
+    expect(new Set(ZONE_CHOICES).size).toBe(ZONE_CHOICES.length)
   })
 })
 

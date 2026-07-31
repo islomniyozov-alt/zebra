@@ -67,6 +67,8 @@ export const LOAD_WRITE_TIMEOUT_MS = 20_000
 
 export interface StopInput {
   type: 'PICKUP' | 'DELIVERY' | 'INTERMEDIATE'
+  /** The reusable facility this stop is at, when one was resolved. */
+  locationId?: string | null
   name?: unknown
   addressLine1?: unknown
   city?: unknown
@@ -176,6 +178,7 @@ async function writeStops(
       organizationId,
       sequence: index + 1,
       type: stop.type,
+      locationId: stop.locationId ?? null,
       name: optionalText(stop.name),
       addressLine1: optionalText(stop.addressLine1),
       city: optionalText(stop.city),

@@ -25,7 +25,8 @@ const pool = new Pool({ connectionString: process.env.DIRECT_DATABASE_URL })
 
 const counts = async () => {
   const { rows } = await pool.query(`
-    select (select count(*) from "Truck") trucks,
+    select (select count(*) from "Load") loads,
+           (select count(*) from "Truck") trucks,
            (select count(*) from "Trailer") trailers,
            (select count(*) from "Driver") drivers,
            (select count(*) from "Customer") brokers,
@@ -34,6 +35,39 @@ const counts = async () => {
 }
 
 async function cleanup() {
+  // Loads first: they point at the trucks, drivers and brokers below.
+  const { rows: shotLoads } = await pool.query(
+    `select id from "Load"
+      where "customerId" in (select id from "Customer" where name like $1)`,
+    [`${MARK}%`],
+  )
+  for (const load of shotLoads) {
+    for (const table of [
+      'LoadStatusEvent',
+      'LoadAssignment',
+      'LoadStop',
+      'Communication',
+      'Document',
+    ]) {
+      await pool.query(`delete from "${table}" where "loadId" = $1`, [load.id])
+    }
+    await pool.query('delete from "AuditLog" where "entityId" = $1', [load.id])
+    await pool.query('delete from "Load" where id = $1', [load.id])
+  }
+  // The places those loads created on the way past. Named after real cities,
+  // so they are matched by name and only the ones this script typed.
+  await pool.query('delete from "Location" where name = any($1)', [
+    [
+      'Chicago, IL',
+      'Dallas, TX',
+      'Seattle, WA',
+      'Boise, ID',
+      'Memphis, TN',
+      'Atlanta, GA',
+      'Laredo, TX',
+      'Phoenix, AZ',
+    ],
+  ])
   await pool.query(
     `delete from "AssetAssignment"
       where "truckId" in (select id from "Truck" where "unitNumber" like $1)
@@ -152,6 +186,97 @@ try {
     await page.selectOption('select[name="status"]', status)
     if (reason) await page.fill('input[name="blockedReason"]', reason)
     await save('/brokers')
+  }
+
+  // Drivers and loads, so the dispatch board is a board and not an empty
+  // grid. §11's claims are about rows, columns and a leading rail, and a
+  // screenshot of nothing is evidence of nothing.
+  const DRIVERS = [
+    ['Marcus', 'SHOT Webb'],
+    ['Aliyah', 'SHOT Novak'],
+    ['Tomas', 'SHOT Ivanov'],
+  ]
+  for (const [firstName, lastName] of DRIVERS) {
+    await page.goto(`${BASE}/drivers/new`, { waitUntil: 'domcontentloaded' })
+    await page.fill('input[name="firstName"]', firstName)
+    await page.fill('input[name="lastName"]', lastName)
+    await save('/drivers')
+  }
+
+  const today = new Date()
+  const day = (offset) => {
+    const date = new Date(today)
+    date.setDate(date.getDate() + offset)
+    return `${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`
+  }
+
+  // Two assigned at booking (so truck rows have cells), two left unassigned
+  // (so the leading rail has something in it). Both halves are the point.
+  const LOADS = [
+    ['SHOT TQL', 'Chicago, IL', 'Dallas, TX', 1, 3, '285000', '968', 0],
+    [
+      'SHOT Landstar Ranger',
+      'Seattle, WA',
+      'Boise, ID',
+      1,
+      2,
+      '192500',
+      '498',
+      1,
+    ],
+    [
+      'SHOT Coyote Logistics',
+      'Memphis, TN',
+      'Atlanta, GA',
+      2,
+      3,
+      '134000',
+      '384',
+      -1,
+    ],
+    // NOT Meridian Freight: that one is BLOCKED, and src/lib/loads.ts refuses
+    // to book a load for a blocked broker. The first version of this fixture
+    // used it and quietly produced three loads where it says four.
+    ['SHOT TQL', 'Laredo, TX', 'Phoenix, AZ', 4, 5, '241000', '921', -1],
+  ]
+  for (const [
+    broker,
+    pickup,
+    delivery,
+    pickDay,
+    dropDay,
+    rate,
+    miles,
+    truckIndex,
+  ] of LOADS) {
+    await page.goto(`${BASE}/loads/new`, { waitUntil: 'domcontentloaded' })
+    await page.fill('input[name="broker"]', broker)
+    await page.fill('input[name="pickup"]', pickup)
+    await page.fill('input[name="delivery"]', delivery)
+    await page.fill('input[name="pickupAt"]', day(pickDay))
+    await page.fill('input[name="deliveryAt"]', day(dropDay))
+    await page.fill('input[name="rate"]', rate)
+    await page.fill('input[name="miles"]', miles)
+    if (truckIndex >= 0) {
+      const trucks = await page
+        .locator('select[name="truckId"] option')
+        .allTextContents()
+      // A DIFFERENT truck per load: these two windows overlap, and §8 would
+      // refuse the second — correctly — if they shared one.
+      const unit = trucks.find((label) =>
+        label.includes(`SHOT-10${truckIndex + 1}`),
+      )
+      if (unit)
+        await page.selectOption('select[name="truckId"]', { label: unit })
+      const drivers = await page
+        .locator('select[name="driverId"] option')
+        .allTextContents()
+      const who = drivers.filter((label) => label.includes('SHOT'))[truckIndex]
+      if (who)
+        await page.selectOption('select[name="driverId"]', { label: who })
+    }
+    await page.click(`${form} button[type="submit"]`)
+    await page.waitForTimeout(12_000)
   }
 
   await browser.close()

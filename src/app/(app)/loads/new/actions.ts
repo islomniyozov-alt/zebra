@@ -12,7 +12,7 @@ import {
   optionalText,
 } from '@/lib/reference'
 import { normalizeTypedDate } from '@/lib/typed-date'
-import { zoneForState, zoneMidnight } from '@/lib/stop-time'
+import { resolveZone, zoneMidnight } from '@/lib/stop-time'
 import { rememberAuthority } from '../../_reference/shared'
 
 export interface CreateLoadState {
@@ -41,12 +41,22 @@ export interface CreateLoadState {
  * untrusted about dates — because the form works without JavaScript, and the
  * blur handler that normalises "810" into "2026-08-10" is JavaScript.
  */
-function stopDate(value: unknown, state: string | null): Date | null {
+function stopDate(
+  value: unknown,
+  place: { state: string | null; timezone: string | null },
+): Date | null {
   const text = optionalText(value)
   if (text === null) return null
   const iso = normalizeTypedDate(text)
   if (iso === null) return null
-  return zoneMidnight(iso, zoneForState(state, COMPANY_FALLBACK_ZONE))
+  // The facility's recorded zone wins over the state's — that is the whole
+  // point of Location.timezone.
+  const { zone } = resolveZone(
+    place.timezone,
+    place.state,
+    COMPANY_FALLBACK_ZONE,
+  )
+  return zoneMidnight(iso, zone)
 }
 
 /**
@@ -113,17 +123,19 @@ export async function createLoadAction(
             stops: [
               {
                 type: 'PICKUP',
+                locationId: from.locationId,
                 name: pickup,
                 city: from.city,
                 state: from.state,
-                scheduledAt: stopDate(formData.get('pickupAt'), from.state),
+                scheduledAt: stopDate(formData.get('pickupAt'), from),
               },
               {
                 type: 'DELIVERY',
+                locationId: to.locationId,
                 name: delivery,
                 city: to.city,
                 state: to.state,
-                scheduledAt: stopDate(formData.get('deliveryAt'), to.state),
+                scheduledAt: stopDate(formData.get('deliveryAt'), to),
               },
             ],
           },

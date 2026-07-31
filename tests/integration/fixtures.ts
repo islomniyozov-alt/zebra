@@ -438,6 +438,19 @@ export async function seedOrganization(
     }),
   )
   record(
+    'userPreference',
+    await db.userPreference.create({
+      data: {
+        organizationId,
+        userId: user.id,
+        key: 'view.loads',
+        value: [
+          { slug: 'mine', name: 'My trucks today', query: 'status=BOOKED' },
+        ],
+      },
+    }),
+  )
+  record(
     'auditLog',
     await db.auditLog.create({
       data: {

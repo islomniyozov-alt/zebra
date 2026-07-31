@@ -6,6 +6,8 @@ import { companyScopeFilter } from '@/lib/tenancy'
 import { FilterBar } from '@/components/ui/FilterBar'
 import { LoadsTable, type LoadRow } from './LoadsTable'
 import { billingLabelKey, operationalLabelKey } from '@/lib/status'
+import { readSavedViews } from '@/lib/preferences'
+import { SavedViews } from './SavedViews'
 import type {
   LoadBillingStatus,
   LoadOperationalStatus,
@@ -31,7 +33,7 @@ export default async function LoadsPage({
   const companyParam =
     typeof params['company'] === 'string' ? params['company'] : undefined
 
-  const { rows, companyCount } = await withCurrentOrg(
+  const { rows, companyCount, savedViews } = await withCurrentOrg(
     'read',
     'load',
     async (tx, session) => {
@@ -101,7 +103,9 @@ export default async function LoadsPage({
         isCancelled: load.isCancelled,
       }))
 
-      return { rows, companyCount }
+      const savedViews = await readSavedViews(tx, session.userId)
+
+      return { rows, companyCount, savedViews }
     },
   )
 
@@ -156,6 +160,19 @@ export default async function LoadsPage({
           ) : null}
         </div>
       </div>
+
+      {/* §7.4 — pinned above the table, not behind a menu. One click. */}
+      <SavedViews
+        views={savedViews}
+        labels={{
+          save: t('views.save'),
+          name: t('views.name'),
+          saveHint: t('views.saveHint'),
+          remove: t('views.remove'),
+          all: t('views.all'),
+          cancel: t('ref.cancel'),
+        }}
+      />
 
       <FilterBar
         clearLabel={t('loads.filter.clear')}

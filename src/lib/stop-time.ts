@@ -110,12 +110,59 @@ export const SPLIT_STATES = new Set([
   'TX',
 ])
 
+/**
+ * The zones a place may be SET to, offered in the load screen.
+ *
+ * Derived from the map rather than typed out again, so a zone can never be
+ * offered that nothing here knows how to render. A free-text field would let
+ * somebody store `CST`, which is not an IANA name, does not observe daylight
+ * time, and would be discovered as a wrong appointment.
+ */
+export const ZONE_CHOICES: readonly string[] = [
+  ...new Set(Object.values(STATE_ZONES)),
+].sort()
+
 export function zoneForState(
   state: string | null | undefined,
   fallback: string,
 ): string {
   if (!state) return fallback
   return STATE_ZONES[state.trim().toUpperCase()] ?? fallback
+}
+
+/**
+ * The zone for a state that has exactly one, or null.
+ *
+ * What may be STORED as fact, as opposed to what may be shown as a marked
+ * approximation. A split state returns null so that the column stays empty
+ * and the interface keeps saying it is guessing — a guess written into the
+ * database stops looking like a guess the moment somebody reads it back.
+ */
+export function unambiguousZone(
+  state: string | null | undefined,
+): string | null {
+  if (!state) return null
+  const code = state.trim().toUpperCase()
+  if (SPLIT_STATES.has(code)) return null
+  return STATE_ZONES[code] ?? null
+}
+
+/**
+ * The zone to render a stop in, and whether it is known or derived.
+ *
+ * Precedence, and it only goes one way: an explicitly recorded zone always
+ * wins, because somebody who knows the dock typed it.
+ */
+export function resolveZone(
+  explicit: string | null | undefined,
+  state: string | null | undefined,
+  fallback: string,
+): { zone: string; approximate: boolean } {
+  if (explicit) return { zone: explicit, approximate: false }
+  return {
+    zone: zoneForState(state, fallback),
+    approximate: state ? SPLIT_STATES.has(state.trim().toUpperCase()) : true,
+  }
 }
 
 /**
@@ -208,11 +255,17 @@ export interface RenderedStopTime {
 export function renderStopTime(
   at: Date | null | undefined,
   state: string | null | undefined,
-  options: { fallbackZone: string; locale?: string },
+  options: {
+    fallbackZone: string
+    locale?: string
+    /** The facility's recorded zone. Wins over the state when present. */
+    zone?: string | null
+  },
 ): RenderedStopTime | null {
   if (!at) return null
 
-  const zone = zoneForState(state, options.fallbackZone)
+  const resolved = resolveZone(options.zone, state, options.fallbackZone)
+  const zone = resolved.zone
   const locale = options.locale ?? 'en-US'
 
   // Midnight in the stop's own zone means no time was given, only a day. §8:
@@ -243,7 +296,7 @@ export function renderStopTime(
   return {
     text: formatter.format(at),
     zone,
-    approximate: state ? SPLIT_STATES.has(state.trim().toUpperCase()) : true,
+    approximate: resolved.approximate,
   }
 }
 

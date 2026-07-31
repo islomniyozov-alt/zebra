@@ -9,7 +9,9 @@ import {
   operationalTone,
   TONE_STRIPE,
 } from '@/lib/status'
-import { renderStopTime } from '@/lib/stop-time'
+import { renderStopTime, ZONE_CHOICES } from '@/lib/stop-time'
+import { Button } from '@/components/ui/Button'
+import { Select } from '@/components/ui/Select'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { StatusTimeline, type TimelineEvent } from './StatusTimeline'
 import { LoadDocuments, type DocumentSlot } from './LoadDocuments'
@@ -19,6 +21,7 @@ import {
   cancelLoadAction,
   markDeliveredAction,
   refreshLoadAction,
+  setStopZoneAction,
   uncancelLoadAction,
 } from './actions'
 import type { LoadOperationalStatus } from '@/generated/prisma/client'
@@ -67,7 +70,10 @@ export default async function LoadDetailPage({
         truck: { select: { unitNumber: true } },
         driver: { select: { firstName: true, lastName: true } },
         trailer: { select: { unitNumber: true } },
-        stops: { orderBy: { sequence: 'asc' } },
+        stops: {
+          orderBy: { sequence: 'asc' },
+          include: { location: { select: { timezone: true } } },
+        },
       },
     })
     if (!load) return null
@@ -104,6 +110,13 @@ export default async function LoadDetailPage({
   const stripeTone = load.isCancelled
     ? 'muted'
     : operationalTone(load.operationalStatus)
+
+  // Blank first, and it means "derive it from the state" — the same fallback
+  // the row had before anybody touched it.
+  const zoneOptions = [
+    { value: '', label: t('places.timezoneAuto') },
+    ...ZONE_CHOICES.map((choice) => ({ value: choice, label: choice })),
+  ]
 
   const statusLabels = Object.fromEntries(
     ALL_OPERATIONAL.map((status) => [status, t(operationalLabelKey(status))]),
@@ -261,12 +274,18 @@ export default async function LoadDetailPage({
 
           <section className="rounded-card border border-border bg-surface p-z4">
             <h2 className="text-md font-medium text-ink">{t('loads.stops')}</h2>
+            {mayUpdate ? (
+              <p className="mt-z1 text-xs text-ink-3">
+                {t('places.timezoneHint')}
+              </p>
+            ) : null}
             <ol className="mt-z3 flex flex-col gap-z3">
               {load.stops.map((stop) => {
                 // Rule 3. In the STOP's zone, with the abbreviation shown.
                 const when = renderStopTime(stop.scheduledAt, stop.state, {
                   fallbackZone: zone,
                   locale,
+                  zone: stop.location?.timezone ?? null,
                 })
                 return (
                   <li
@@ -292,6 +311,30 @@ export default async function LoadDetailPage({
                       <p className="mt-z1 text-xs text-ink-3">
                         {t('loads.zoneApprox').replace('{zone}', when.zone)}
                       </p>
+                    ) : null}
+                    {/* The explicit zone is set HERE, where the guess is
+                     * admitted — see the note on setStopZoneAction. Blank
+                     * means "derive it", so the fallback stays reachable. */}
+                    {mayUpdate && stop.locationId ? (
+                      <form
+                        action={setStopZoneAction.bind(
+                          null,
+                          id,
+                          stop.locationId,
+                        )}
+                        className="mt-z2 flex items-center gap-z2"
+                      >
+                        <Select
+                          name="timezone"
+                          label={t('places.timezone')}
+                          labelHidden
+                          defaultValue={stop.location?.timezone ?? ''}
+                          options={zoneOptions}
+                        />
+                        <Button type="submit" variant="ghost" size="compact">
+                          {t('ref.save')}
+                        </Button>
+                      </form>
                     ) : null}
                   </li>
                 )

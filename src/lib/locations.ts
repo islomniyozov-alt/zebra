@@ -1,5 +1,6 @@
 import type { TxClient } from './tenancy'
 import { optionalText, stateCode } from './reference'
+import { unambiguousZone } from './stop-time'
 
 // ---------------------------------------------------------------------------
 // CREATE-ON-MISS, for the two typeaheads §9 asks for.
@@ -41,7 +42,12 @@ export async function resolveLocation(
   tx: TxClient,
   organizationId: string,
   typed: string,
-): Promise<{ locationId: string; city: string | null; state: string | null }> {
+): Promise<{
+  locationId: string
+  city: string | null
+  state: string | null
+  timezone: string | null
+}> {
   const place = parsePlace(typed)
 
   const existing = await tx.location.findFirst({
@@ -49,13 +55,14 @@ export async function resolveLocation(
       name: { equals: place.name, mode: 'insensitive' },
       deletedAt: null,
     },
-    select: { id: true, city: true, state: true },
+    select: { id: true, city: true, state: true, timezone: true },
   })
   if (existing) {
     return {
       locationId: existing.id,
       city: existing.city,
       state: existing.state,
+      timezone: existing.timezone,
     }
   }
 
@@ -67,10 +74,19 @@ export async function resolveLocation(
       name: place.name,
       city: place.city,
       state: place.state,
+      // Recorded where the state has exactly one zone; left NULL for the
+      // thirteen that do not, so the interface keeps saying "approximate"
+      // rather than storing a guess as a fact. See src/lib/stop-time.ts.
+      timezone: unambiguousZone(place.state),
     },
-    select: { id: true, city: true, state: true },
+    select: { id: true, city: true, state: true, timezone: true },
   })
-  return { locationId: created.id, city: created.city, state: created.state }
+  return {
+    locationId: created.id,
+    city: created.city,
+    state: created.state,
+    timezone: created.timezone,
+  }
 }
 
 /** The same, for brokers. A miss creates one at the schema's defaults. */
