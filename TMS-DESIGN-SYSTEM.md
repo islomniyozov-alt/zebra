@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v2 — §6.3 amended 2026-07-29 (company switcher → company filter)
+**Status:** v3 — §8 amended 2026-08-01 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -367,6 +367,31 @@ Bottom-leading corner, 4 seconds, one at a time, queued. Success is quiet. Error
 **Miles.** Integer, thousands separator, right-aligned. Deadhead shown in `--z-ink-2` next to loaded miles, never summed into the same figure.
 
 **Dates and times.** Store UTC. Render appointment times **in the stop's timezone**, always with the zone: `Jul 28, 14:30 CDT`. Date-only fields — invoice date, due date, expiry — take no timezone: `Jul 28, 2026`. Relative time only under 24 hours: `2h ago`. Aging is an integer count of days, never "about a month."
+
+**An appointment with a date but no time is stored at midnight IN THE STOP'S ZONE, and renders as a bare date.**
+
+_Added 2026-08-01. The incident: a pickup typed as September 15th rendered as
+`Sep 14, 19:00 CDT`. The date had been stored at UTC midnight and then rendered
+in the stop's zone as rule 3 requires — so the two rules, each correct alone,
+walked the day backwards between them. It was found by looking at a screenshot,
+not by a test._
+
+Three parts, and they only work together:
+
+- **Store** midnight in the zone the stop is in, not UTC midnight. September
+  15th in Dallas is `2026-09-15T05:00:00Z`, and the day then survives the round
+  trip.
+- **Render** it as `Sep 15` — no time, no zone. `00:00 CDT` would be inventing a
+  midnight appointment nobody made, and §8 already says a date-only field takes
+  no timezone.
+- **Distinguish** the two cases by the stored instant: midnight-local means the
+  time is unknown, anything else is a real appointment and renders `Sep 15,
+14:30 CDT`.
+
+The zone comes from the stop's own `timezone` where one is recorded, and is
+derived from the state otherwise. A derived zone is shown as approximate,
+because thirteen US states span two of them and the interface should not
+pretend to a certainty it does not have.
 
 **Phone numbers.** `(425) 566-0763`. Tap-to-call on every surface, including desktop.
 
