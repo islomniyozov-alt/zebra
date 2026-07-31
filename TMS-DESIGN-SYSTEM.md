@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v3 — §8 amended 2026-08-01 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
+**Status:** v3 — §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -370,7 +370,7 @@ Bottom-leading corner, 4 seconds, one at a time, queued. Success is quiet. Error
 
 **An appointment with a date but no time is stored at midnight IN THE STOP'S ZONE, and renders as a bare date.**
 
-_Added 2026-08-01. The incident: a pickup typed as September 15th rendered as
+_Added 2026-07-31. The incident: a pickup typed as September 15th rendered as
 `Sep 14, 19:00 CDT`. The date had been stored at UTC midnight and then rendered
 in the stop's zone as rule 3 requires — so the two rules, each correct alone,
 walked the day backwards between them. It was found by looking at a screenshot,
