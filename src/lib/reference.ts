@@ -18,11 +18,11 @@ import type { MessageKey } from './i18n'
 export type ReferenceFailure =
   | 'required'
   | 'duplicate'
-  /** The unit number is free, but a SOFT-DELETED row is still holding it. */
-  | 'duplicate_deleted'
   | 'not_found'
   | 'invalid_year'
   | 'invalid_authority'
+  /** Restoring a removed asset whose number a live one has since taken. */
+  | 'number_taken_since'
 
 export class ReferenceError extends Error {
   readonly code: ReferenceFailure
@@ -47,10 +47,10 @@ export class ReferenceError extends Error {
 export const REFERENCE_ERROR_KEYS: Record<ReferenceFailure, MessageKey> = {
   required: 'ref.error.required',
   duplicate: 'ref.error.duplicate',
-  duplicate_deleted: 'ref.error.duplicateDeleted',
   not_found: 'ref.error.notFound',
   invalid_year: 'ref.error.invalidYear',
   invalid_authority: 'ref.error.invalidAuthority',
+  number_taken_since: 'ref.error.numberTakenSince',
 }
 
 /**

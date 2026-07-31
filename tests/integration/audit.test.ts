@@ -8,7 +8,7 @@ import {
   vi,
 } from 'vitest'
 import { Pool } from '@neondatabase/serverless'
-import { createPrismaClient } from '@/lib/db'
+import { retryingClient } from '../retrying-client'
 import { runInOrg } from '@/lib/tenancy'
 import {
   getAuditHealth,
@@ -40,8 +40,8 @@ let attribution: Attribution
 const RATE = 250000
 
 beforeAll(async () => {
-  app = createPrismaClient(process.env.DATABASE_URL!)
-  owner = createPrismaClient(process.env.DIRECT_DATABASE_URL!)
+  app = retryingClient(process.env.DATABASE_URL!)
+  owner = retryingClient(process.env.DIRECT_DATABASE_URL!)
 
   const nonce = Math.random().toString(36).slice(2, 10)
 

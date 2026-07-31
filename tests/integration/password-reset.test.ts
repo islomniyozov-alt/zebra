@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { FIXTURE_PASSWORD, FIXTURE_PASSWORD_HASH } from '../fixtures/password'
-import { createPrismaClient } from '@/lib/db'
+import { retryingClient } from '../retrying-client'
 import { hashSessionToken, resolveSession } from '@/lib/session'
 import { login, RATE_LIMIT } from '@/lib/auth'
 import {
@@ -24,8 +24,8 @@ let userId = ''
 let organizationId = ''
 
 beforeAll(async () => {
-  app = createPrismaClient(process.env.DATABASE_URL!)
-  owner = createPrismaClient(process.env.DIRECT_DATABASE_URL!)
+  app = retryingClient(process.env.DATABASE_URL!)
+  owner = retryingClient(process.env.DIRECT_DATABASE_URL!)
 
   const nonce = Math.random().toString(36).slice(2, 10)
   email = `reset-${nonce}@example.test`

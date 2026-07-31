@@ -178,8 +178,8 @@ const en = {
   'ref.error.required': 'This is required.',
   'ref.error.duplicate':
     'That unit number is already in use under this authority.',
-  'ref.error.duplicateDeleted':
-    'A removed record still holds that unit number. Restore it, or choose another.',
+  'ref.error.numberTakenSince':
+    'Another unit has taken that number since this one was removed. Renumber it first.',
   'ref.error.notFound': 'That record no longer exists.',
   'ref.error.invalidYear': 'Enter a whole number in a sensible range.',
   'ref.error.invalidAuthority': 'Choose an authority you work under.',
@@ -281,6 +281,18 @@ const en = {
   'brokers.empty.title': 'No brokers yet',
   'brokers.empty.body':
     'Add the first broker and loads can be booked against them.',
+
+  'dispatch.conflict.overlappingLoad':
+    '{asset} is already on load {loadNumber} over these dates.',
+  'dispatch.conflict.otherAuthority':
+    '{asset} currently works under {authority}. Transfer it first, or book this load under {authority}.',
+  'dispatch.conflict.outOfService':
+    '{asset} is not available to dispatch right now.',
+  'dispatch.conflict.notFound': 'That truck or driver no longer exists.',
+  'loads.cancel': 'Cancel load',
+  'loads.cancelReason': 'Why',
+  'loads.cancelled': 'Cancelled',
+  'loads.markDelivered': 'Mark delivered',
 
   'upload.preparing': 'Preparing',
   'upload.uploading': 'Uploading',
@@ -442,8 +454,8 @@ const ru: Dictionary = {
   'ref.noOpenPeriod': 'Открытый период не зафиксирован.',
   'ref.error.required': 'Обязательное поле.',
   'ref.error.duplicate': 'Такой номер уже используется у этого перевозчика.',
-  'ref.error.duplicateDeleted':
-    'Удалённая запись всё ещё занимает этот номер. Восстановите её или выберите другой.',
+  'ref.error.numberTakenSince':
+    'Пока запись была удалена, номер занял другой объект. Сначала измените номер.',
   'ref.error.notFound': 'Эта запись больше не существует.',
   'ref.error.invalidYear': 'Введите целое число в разумных пределах.',
   'ref.error.invalidAuthority': 'Выберите перевозчика, с которым вы работаете.',
@@ -546,6 +558,17 @@ const ru: Dictionary = {
   'brokers.empty.title': 'Брокеров пока нет',
   'brokers.empty.body':
     'Добавьте первого брокера, и на него можно будет оформлять грузы.',
+
+  'dispatch.conflict.overlappingLoad':
+    '{asset} уже назначен на груз {loadNumber} на эти даты.',
+  'dispatch.conflict.otherAuthority':
+    '{asset} сейчас работает под {authority}. Сначала передайте его или оформите груз под {authority}.',
+  'dispatch.conflict.outOfService': '{asset} сейчас недоступен для назначения.',
+  'dispatch.conflict.notFound': 'Этот тягач или водитель больше не существует.',
+  'loads.cancel': 'Отменить груз',
+  'loads.cancelReason': 'Причина',
+  'loads.cancelled': 'Отменён',
+  'loads.markDelivered': 'Отметить доставленным',
 
   'upload.preparing': 'Подготовка',
   'upload.uploading': 'Загрузка',
@@ -700,8 +723,8 @@ const fa: Dictionary = {
   'ref.noOpenPeriod': 'دورهٔ بازی ثبت نشده است.',
   'ref.error.required': 'این مورد الزامی است.',
   'ref.error.duplicate': 'این شماره در این شرکت استفاده شده است.',
-  'ref.error.duplicateDeleted':
-    'یک رکورد حذف‌شده هنوز این شماره را دارد. آن را بازگردانید یا شمارهٔ دیگری بردارید.',
+  'ref.error.numberTakenSince':
+    'از زمان حذف این مورد، شمارهٔ آن را واحد دیگری گرفته است. نخست شماره را عوض کنید.',
   'ref.error.notFound': 'این رکورد دیگر وجود ندارد.',
   'ref.error.invalidYear': 'یک عدد صحیح در بازهٔ منطقی وارد کنید.',
   'ref.error.invalidAuthority': 'شرکتی را انتخاب کنید که با آن کار می‌کنید.',
@@ -803,6 +826,17 @@ const fa: Dictionary = {
   'brokers.empty.title': 'هنوز کارگزاری نیست',
   'brokers.empty.body':
     'نخستین کارگزار را بیفزایید تا بتوان بار را به نام او ثبت کرد.',
+
+  'dispatch.conflict.overlappingLoad':
+    '{asset} در این تاریخ‌ها روی بار {loadNumber} است.',
+  'dispatch.conflict.otherAuthority':
+    '{asset} هم‌اکنون زیر نظر {authority} کار می‌کند. نخست آن را منتقل کنید یا این بار را زیر نظر {authority} ثبت کنید.',
+  'dispatch.conflict.outOfService': '{asset} اکنون برای اعزام در دسترس نیست.',
+  'dispatch.conflict.notFound': 'این کامیون یا راننده دیگر وجود ندارد.',
+  'loads.cancel': 'لغو بار',
+  'loads.cancelReason': 'دلیل',
+  'loads.cancelled': 'لغو‌شده',
+  'loads.markDelivered': 'ثبت تحویل',
 
   'upload.preparing': 'در حال آماده‌سازی',
   'upload.uploading': 'در حال بارگذاری',

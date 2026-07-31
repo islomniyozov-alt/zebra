@@ -1,4 +1,9 @@
 import type { TxClient } from './tenancy'
+import {
+  closeOpenPeriod,
+  openFirstPeriod,
+  type FleetKind,
+} from './asset-transfer'
 import type {
   DriverStatus,
   OwnershipType,
@@ -19,23 +24,21 @@ import {
 //
 // Three entities, one shape: each belongs to a Company (an operating
 // authority), each carries a soft delete, and each can move between
-// authorities. Grouped rather than split into three files precisely because
-// the transfer rule below has to be identical for all three, and two copies of
-// a rule are one copy of a rule and one bug waiting.
+// authorities. Grouped rather than split into three files because every rule
+// below has to be identical for all three, and two copies of a rule are one
+// copy of a rule and one bug waiting.
 //
-// THE SOFT DELETE AND THE UNIQUE INDEX DISAGREE, and the schema is right.
-// `@@unique([companyId, unitNumber])` has no `WHERE "deletedAt" IS NULL`
-// predicate, so a soft-deleted truck 101 keeps holding the number 101 against
-// a new one. Rather than change the schema, the collision is detected BEFORE
-// the insert and turned into an answer a person can act on — "unit 101 exists
-// but was removed; restore it or choose another number" — with the offending
-// id attached so the interface can offer the restore.
+// THE AUTHORITY IS NOT SETTABLE HERE. Moving an asset between authorities is
+// `transferAsset` in ./asset-transfer, the one file ESLint permits to write
+// `companyId` on an asset — because doing it without also writing the period
+// rows leaves two representations of one fact disagreeing, silently.
 //
-// Before, not after, and that is not a style choice: see `assertUnitAvailable`.
-// Flagged in the Step 2 report.
+// UNIQUENESS IS PARTIAL AND LIVES IN POSTGRES. `truck_unit_per_company` and
+// `trailer_unit_per_company` carry `WHERE "deletedAt" IS NULL`, so a removed
+// truck 101 does not hold the number against a new one. `assertUnitAvailable`
+// matches that predicate exactly; the index is the guarantee and the check is
+// only the message.
 // ---------------------------------------------------------------------------
-
-export type FleetKind = 'truck' | 'trailer' | 'driver'
 
 export interface TruckInput {
   companyId: string
@@ -99,9 +102,10 @@ function odometer(value: unknown): number | null {
  * Every query after it, including the one that would explain the failure,
  * fails with `25P02` instead. The explanation query has to happen first.
  *
- * The lookup is deliberately unfiltered by `deletedAt`. That is the whole
- * point: the row holding the number may be one the user cannot see, and
- * "that unit number is taken" pointing at nothing visible is a dead end.
+ * LIVE ROWS ONLY, matching `truck_unit_per_company` — the partial unique index
+ * added in 20260731003653. A removed truck no longer holds its number against
+ * a new one, so looking at removed rows here would refuse writes the database
+ * is perfectly willing to accept.
  *
  * `excludeId` is for updates, where the row already holding the number is the
  * row being edited.
@@ -112,29 +116,25 @@ async function assertUnitAvailable(
   companyId: string,
   unitNumber: string,
   excludeId?: string,
+  failure: 'duplicate' | 'number_taken_since' = 'duplicate',
 ): Promise<void> {
   const where = {
     companyId,
     unitNumber,
+    deletedAt: null,
     ...(excludeId ? { id: { not: excludeId } } : {}),
   }
   const existing =
     kind === 'truck'
-      ? await tx.truck.findFirst({
-          where,
-          select: { id: true, deletedAt: true },
-        })
-      : await tx.trailer.findFirst({
-          where,
-          select: { id: true, deletedAt: true },
-        })
+      ? await tx.truck.findFirst({ where, select: { id: true } })
+      : await tx.trailer.findFirst({ where, select: { id: true } })
 
   if (!existing) return
 
-  throw new ReferenceError(
-    existing.deletedAt ? 'duplicate_deleted' : 'duplicate',
-    { field: 'unitNumber', conflictId: existing.id },
-  )
+  throw new ReferenceError(failure, {
+    field: 'unitNumber',
+    conflictId: existing.id,
+  })
 }
 
 /**
@@ -150,35 +150,6 @@ function duplicateFromRace(error: unknown): never {
     throw new ReferenceError('duplicate', { field: 'unitNumber' })
   }
   throw error
-}
-
-/**
- * Open the first assignment period, at the moment the asset is created.
- *
- * Found by the Step 2 walkthrough: without this, a truck added through the
- * interface has a `companyId` and NO period, so `currentAuthority` returns
- * null and the detail screen says "no open period recorded" for a truck that
- * plainly works for somebody. §8 makes the open `AssetAssignment` the
- * authority of record for dispatch conflicts, and an asset that has never been
- * transferred would have no authority at all by that reading.
- *
- * The history has to start where the asset does.
- */
-async function openFirstPeriod(
-  tx: TxClient,
-  organizationId: string,
-  companyId: string,
-  link: { truckId: string } | { trailerId: string } | { driverId: string },
-  byUserId?: string | null,
-): Promise<void> {
-  await tx.assetAssignment.create({
-    data: {
-      organizationId,
-      companyId,
-      ...link,
-      createdByUserId: byUserId ?? null,
-    },
-  })
 }
 
 async function assertCompanyInScope(
@@ -452,200 +423,95 @@ export async function retireAsset(
 
   if (kind === 'truck') {
     await tx.truck.update({ where: { id }, data: { deletedAt } })
-    await tx.assetAssignment.updateMany({
-      where: { truckId: id, effectiveTo: null },
-      data: { effectiveTo: deletedAt },
-    })
-    return
-  }
-  if (kind === 'trailer') {
+  } else if (kind === 'trailer') {
     await tx.trailer.update({ where: { id }, data: { deletedAt } })
-    await tx.assetAssignment.updateMany({
-      where: { trailerId: id, effectiveTo: null },
-      data: { effectiveTo: deletedAt },
-    })
-    return
+  } else {
+    await tx.driver.update({ where: { id }, data: { deletedAt } })
   }
-  await tx.driver.update({ where: { id }, data: { deletedAt } })
-  await tx.assetAssignment.updateMany({
-    where: { driverId: id, effectiveTo: null },
-    data: { effectiveTo: deletedAt },
-  })
+
+  // An asset that is gone is not still assigned to an authority, and leaving
+  // the period open would block a genuinely new asset from taking its place.
+  await closeOpenPeriod(tx, kind, id, deletedAt)
 }
 
 export async function restoreAsset(
   tx: TxClient,
   kind: FleetKind,
   id: string,
+  organizationId: string,
 ): Promise<void> {
-  // Restoring does NOT reopen an assignment period. Where the asset works now
-  // is a decision someone has to make, not one to infer from where it worked
-  // before it was retired.
+  // Restoring REOPENS the period, under the authority the asset still names.
+  //
+  // Step 3 shipped this the other way for about an hour, on the reasoning that
+  // "where it works now is a decision someone has to make". `findAuthorityDrift`
+  // immediately disagreed, and it was right: a live asset with a `companyId`
+  // and no open period is precisely the disagreement the drift check exists to
+  // catch, and §8 would find it un-dispatchable because it has no authority of
+  // record. Two rules, one of which had to give — and the one that produced an
+  // inconsistent row is the one that gave.
+  //
+  // It CAN fail, though, and only since the partial unique index landed: a
+  // removed truck no longer holds its number, so a new truck may have taken it
+  // in the meantime. Refuse in words rather than surface a P2002 — and refuse
+  // BEFORE the update, because a failed statement poisons the transaction and
+  // there would be nothing left to explain it with.
   if (kind === 'truck') {
+    const truck = await tx.truck.findUnique({
+      where: { id },
+      select: { companyId: true, unitNumber: true },
+    })
+    if (!truck) throw new ReferenceError('not_found')
+    await assertUnitAvailable(
+      tx,
+      'truck',
+      truck.companyId,
+      truck.unitNumber,
+      id,
+      'number_taken_since',
+    )
     await tx.truck.update({ where: { id }, data: { deletedAt: null } })
+    await openFirstPeriod(tx, organizationId, truck.companyId, { truckId: id })
     return
   }
   if (kind === 'trailer') {
+    const trailer = await tx.trailer.findUnique({
+      where: { id },
+      select: { companyId: true, unitNumber: true },
+    })
+    if (!trailer) throw new ReferenceError('not_found')
+    await assertUnitAvailable(
+      tx,
+      'trailer',
+      trailer.companyId,
+      trailer.unitNumber,
+      id,
+      'number_taken_since',
+    )
     await tx.trailer.update({ where: { id }, data: { deletedAt: null } })
+    await openFirstPeriod(tx, organizationId, trailer.companyId, {
+      trailerId: id,
+    })
     return
   }
+  // Drivers carry no unique number; two people may share a name.
+  const driver = await tx.driver.findUnique({
+    where: { id },
+    select: { companyId: true },
+  })
+  if (!driver) throw new ReferenceError('not_found')
   await tx.driver.update({ where: { id }, data: { deletedAt: null } })
+  await openFirstPeriod(tx, organizationId, driver.companyId, { driverId: id })
 }
 
-// --- transfer between authorities -------------------------------------------
-
-export type TransferFailure = 'not_found' | 'same_authority' | 'double_open'
-
-export class TransferError extends Error {
-  readonly code: TransferFailure
-  constructor(code: TransferFailure) {
-    super(code)
-    this.name = 'TransferError'
-    this.code = code
-  }
-}
-
-export interface TransferResult {
-  closedAssignmentId: string | null
-  openedAssignmentId: string
-  fromCompanyId: string
-  toCompanyId: string
-}
-
-/**
- * Move a truck, trailer or driver to another operating authority.
- *
- * The whole reason `AssetAssignment` exists. An authority is not a property of
- * an asset that can simply be overwritten — it is a period with a beginning
- * and an end, because six months from now somebody has to answer "under whose
- * MC number was this truck running on the day of the accident", and the answer
- * has to be a row rather than a memory.
- *
- * So one transaction does three things, and none of them is optional:
- *
- *   1. closes the open period (`effectiveTo` = now);
- *   2. opens a new one under the target authority;
- *   3. moves the asset's own `companyId` to match.
- *
- * Step 3 is what keeps `Truck.companyId` and the open `AssetAssignment` in
- * agreement. They are two representations of one fact and the schema does not
- * enforce that they match — see the Step 2 report.
- *
- * A double-open is refused by a partial unique index in Postgres, not by the
- * check above it. The check is for the message; the index is for the truth.
- */
-export async function transferAsset(
-  tx: TxClient,
-  organizationId: string,
-  kind: FleetKind,
-  id: string,
-  toCompanyId: string,
-  options: { reason?: string | null; byUserId?: string | null } = {},
-): Promise<TransferResult> {
-  await assertCompanyInScope(tx, toCompanyId)
-
-  const asset =
-    kind === 'truck'
-      ? await tx.truck.findUnique({
-          where: { id },
-          select: { id: true, companyId: true, deletedAt: true },
-        })
-      : kind === 'trailer'
-        ? await tx.trailer.findUnique({
-            where: { id },
-            select: { id: true, companyId: true, deletedAt: true },
-          })
-        : await tx.driver.findUnique({
-            where: { id },
-            select: { id: true, companyId: true, deletedAt: true },
-          })
-
-  if (!asset || asset.deletedAt) throw new TransferError('not_found')
-  if (asset.companyId === toCompanyId) {
-    // Not an error the database would catch, and worth refusing: a no-op
-    // transfer that reported success would leave a closed period and an
-    // identical open one, which reads as a real move to anyone auditing it.
-    throw new TransferError('same_authority')
-  }
-
-  const at = new Date()
-  const link =
-    kind === 'truck'
-      ? { truckId: id }
-      : kind === 'trailer'
-        ? { trailerId: id }
-        : { driverId: id }
-
-  const open = await tx.assetAssignment.findFirst({
-    where: { ...link, effectiveTo: null },
-    select: { id: true },
-  })
-
-  if (open) {
-    await tx.assetAssignment.update({
-      where: { id: open.id },
-      data: { effectiveTo: at },
-    })
-  }
-
-  let opened
-  try {
-    opened = await tx.assetAssignment.create({
-      data: {
-        organizationId,
-        companyId: toCompanyId,
-        ...link,
-        effectiveFrom: at,
-        reason: options.reason ?? null,
-        createdByUserId: options.byUserId ?? null,
-      },
-    })
-  } catch (error) {
-    if (isUniqueViolation(error)) throw new TransferError('double_open')
-    throw error
-  }
-
-  if (kind === 'truck') {
-    await tx.truck.update({
-      where: { id },
-      data: { companyId: toCompanyId },
-    })
-  } else if (kind === 'trailer') {
-    await tx.trailer.update({
-      where: { id },
-      data: { companyId: toCompanyId },
-    })
-  } else {
-    await tx.driver.update({
-      where: { id },
-      data: { companyId: toCompanyId },
-    })
-  }
-
-  return {
-    closedAssignmentId: open?.id ?? null,
-    openedAssignmentId: opened.id,
-    fromCompanyId: asset.companyId,
-    toCompanyId,
-  }
-}
-
-/** The authority an asset is currently working under, from the period log. */
-export async function currentAuthority(
-  tx: TxClient,
-  kind: FleetKind,
-  id: string,
-): Promise<{ companyId: string; since: Date } | null> {
-  const link =
-    kind === 'truck'
-      ? { truckId: id }
-      : kind === 'trailer'
-        ? { trailerId: id }
-        : { driverId: id }
-
-  const open = await tx.assetAssignment.findFirst({
-    where: { ...link, effectiveTo: null },
-    select: { companyId: true, effectiveFrom: true },
-  })
-  return open ? { companyId: open.companyId, since: open.effectiveFrom } : null
-}
+// The transfer, the period helpers and the drift check live in
+// ./asset-transfer — the single file ESLint permits to write `companyId` on an
+// asset. Re-exported here so callers still have one fleet import.
+export {
+  transferAsset,
+  currentAuthority,
+  findAuthorityDrift,
+  TransferError,
+  type TransferResult,
+  type TransferFailure,
+  type FleetKind,
+} from './asset-transfer'

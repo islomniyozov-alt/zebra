@@ -544,7 +544,18 @@ model Truck {
   iftaMileage     IftaMileage[]
   complianceItems ComplianceItem[]
 
-  @@unique([companyId, unitNumber])
+  // UNIQUENESS IS PARTIAL AND LIVES IN SQL. Prisma cannot express a `WHERE`
+  // predicate on an index, so `truck_unit_per_company` is created by hand in
+  // 20260730120000_partial_unique_on_soft_delete:
+  //
+  //   CREATE UNIQUE INDEX truck_unit_per_company
+  //     ON "Truck"("companyId", "unitNumber") WHERE "deletedAt" IS NULL;
+  //
+  // A plain @@unique would let a REMOVED truck 101 keep holding the number
+  // against a new one — a row the user cannot see blocking a row they are
+  // trying to create. Same shape as the AssetAssignment open-period indexes.
+  // Do not "restore" the @@unique.
+  @@index([companyId, unitNumber])
   @@index([companyId, status])
   @@index([vin])
 }
@@ -594,7 +605,8 @@ model Trailer {
   maintenance     MaintenanceRecord[]
   complianceItems ComplianceItem[]
 
-  @@unique([companyId, unitNumber])
+  // Partial, in SQL, for the reason recorded on Truck above.
+  @@index([companyId, unitNumber])
   @@index([companyId, status])
 }
 

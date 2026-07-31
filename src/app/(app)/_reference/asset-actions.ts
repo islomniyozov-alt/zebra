@@ -66,7 +66,9 @@ export async function restoreAssetAction(
   kind: FleetKind,
   id: string,
 ): Promise<void> {
-  await withCurrentOrg('update', kind, (tx) => restoreAsset(tx, kind, id))
+  await withCurrentOrg('update', kind, (tx, session) =>
+    restoreAsset(tx, kind, id, session.organizationId),
+  )
   revalidatePath(PATHS[kind])
   revalidatePath(`${PATHS[kind]}/${id}`)
 }

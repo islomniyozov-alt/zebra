@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createPrismaClient } from '@/lib/db'
+import { retryingClient } from '../retrying-client'
 import { withOrg } from '@/lib/tenancy'
 import {
   TransferError,
@@ -7,6 +7,7 @@ import {
   createTrailer,
   createTruck,
   currentAuthority,
+  findAuthorityDrift,
   restoreAsset,
   retireAsset,
   transferAsset,
@@ -46,8 +47,8 @@ const inOrg = <T>(fn: Parameters<typeof withOrg<T>>[1]): Promise<T> =>
   })
 
 beforeAll(async () => {
-  owner = createPrismaClient(process.env.DIRECT_DATABASE_URL!)
-  app = createPrismaClient(process.env.DATABASE_URL!)
+  owner = retryingClient(process.env.DIRECT_DATABASE_URL!)
+  app = retryingClient(process.env.DATABASE_URL!)
 
   const organization = await owner.organization.create({
     data: {
@@ -152,36 +153,90 @@ describe('trucks', () => {
     expect(elsewhere.companyId).toBe(bravoId)
   })
 
-  it('says so when a REMOVED truck is still holding the number', async () => {
-    // The schema's unique index has no `WHERE deletedAt IS NULL` predicate, so
-    // a soft-deleted row keeps its unit number. Rather than change the schema,
-    // the collision is explained — with the id, so the interface can offer a
-    // restore instead of a dead end. Flagged in the Step 2 report.
+  it('frees the unit number when a truck is removed', async () => {
+    // Step 2 shipped this the other way round: the unique index had no
+    // `WHERE deletedAt IS NULL` predicate, so a removed truck kept holding its
+    // number and the service explained the collision. The partial index in
+    // 20260731003653 makes the number genuinely free, which is what a person
+    // expects after removing something.
     const unit = `ghost-${nonce}`
-    const truck = await inOrg((tx) =>
+    const first = await inOrg((tx) =>
       createTruck(tx, organizationId, { companyId: alphaId, unitNumber: unit }),
     )
-    await inOrg((tx) => retireAsset(tx, 'truck', truck.id))
+    await inOrg((tx) => retireAsset(tx, 'truck', first.id))
+
+    const second = await inOrg((tx) =>
+      createTruck(tx, organizationId, { companyId: alphaId, unitNumber: unit }),
+    )
+    expect(second.id).not.toBe(first.id)
+    expect(second.unitNumber).toBe(unit)
+  })
+
+  it('refuses to restore a truck whose number has since been taken, and allows it once freed', async () => {
+    // The case the partial index creates. Both trucks cannot be live under one
+    // number, and the one being restored is the one that has to give way.
+    const unit = `taken-${nonce}`
+    const original = await inOrg((tx) =>
+      createTruck(tx, organizationId, { companyId: alphaId, unitNumber: unit }),
+    )
+    await inOrg((tx) => retireAsset(tx, 'truck', original.id))
+
+    const replacement = await inOrg((tx) =>
+      createTruck(tx, organizationId, { companyId: alphaId, unitNumber: unit }),
+    )
 
     const failure = await inOrg((tx) =>
-      createTruck(tx, organizationId, {
-        companyId: alphaId,
-        unitNumber: unit,
-      }).catch((error: unknown) => error),
+      restoreAsset(tx, 'truck', original.id, organizationId).catch(
+        (error: unknown) => error,
+      ),
     )
     expect(failure).toBeInstanceOf(ReferenceError)
     expect(failure).toMatchObject({
-      code: 'duplicate_deleted',
-      conflictId: truck.id,
+      code: 'number_taken_since',
+      conflictId: replacement.id,
     })
 
-    // The pairing: restore the ghost and the number is usable again — by the
-    // restored truck, which is the point of telling the user about it.
-    await inOrg((tx) => restoreAsset(tx, 'truck', truck.id))
+    // Rule 11's pairing: renumber the replacement and the identical restore
+    // succeeds — so the refusal was about the number, not about restore.
+    await inOrg((tx) =>
+      updateTruck(tx, replacement.id, { unitNumber: `${unit}-b` }),
+    )
+    await inOrg((tx) => restoreAsset(tx, 'truck', original.id, organizationId))
     const restored = await inOrg((tx) =>
-      tx.truck.findUnique({ where: { id: truck.id } }),
+      tx.truck.findUnique({ where: { id: original.id } }),
     )
     expect(restored?.deletedAt).toBeNull()
+  })
+
+  it('lets Postgres, not the check, be the last word on uniqueness', async () => {
+    // The partial index is the guarantee; assertUnitAvailable is only the
+    // message. If the index were dropped, this would silently start passing.
+    const unit = `idx-${nonce}`
+    await inOrg((tx) =>
+      createTruck(tx, organizationId, { companyId: alphaId, unitNumber: unit }),
+    )
+
+    await expect(
+      inOrg((tx) =>
+        tx.truck.create({
+          data: { organizationId, companyId: alphaId, unitNumber: unit },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'P2002' })
+
+    // The pairing: the same insert with deletedAt set is accepted, which is
+    // exactly what the `WHERE deletedAt IS NULL` predicate is for.
+    const removed = await inOrg((tx) =>
+      tx.truck.create({
+        data: {
+          organizationId,
+          companyId: alphaId,
+          unitNumber: unit,
+          deletedAt: new Date(),
+        },
+      }),
+    )
+    expect(removed.unitNumber).toBe(unit)
   })
 
   it('refuses an implausible year, and accepts a plausible one', async () => {
@@ -490,7 +545,7 @@ describe('transferring an asset between authorities', () => {
       ),
     ).rejects.toMatchObject({ code: 'not_found' })
 
-    await inOrg((tx) => restoreAsset(tx, 'truck', truck.id))
+    await inOrg((tx) => restoreAsset(tx, 'truck', truck.id, organizationId))
     const result = await inOrg((tx) =>
       transferAsset(tx, organizationId, 'truck', truck.id, bravoId),
     )
@@ -554,6 +609,71 @@ describe('transferring an asset between authorities', () => {
       expect(open, `${kind} should have an open period`).not.toBeNull()
       expect(open?.companyId).toBe(alphaId)
     }
+  })
+})
+
+describe('the authority-drift assertion', () => {
+  /**
+   * Scoped to one asset on purpose.
+   *
+   * This suite shares an organization with every test above it, and two of
+   * those deliberately write rows around the service layer — the raw
+   * `tx.truck.create` that proves the partial index holds the line, for one.
+   * Those rows have no period and are drift by construction, which is the
+   * check working. A global count here would be asserting on other tests'
+   * leftovers; `tests/integrity.test.ts` is where the whole-database claim
+   * lives, and it runs against a database these fixtures have been deleted
+   * from.
+   */
+  const driftFor = async (assetId: string) =>
+    (await inOrg((tx) => findAuthorityDrift(tx))).filter(
+      (row) => row.assetId === assetId,
+    )
+
+  it('finds nothing when an asset agrees with its open period', async () => {
+    const truck = await inOrg((tx) =>
+      createTruck(tx, organizationId, {
+        companyId: alphaId,
+        unitNumber: `drift-ok-${nonce}`,
+      }),
+    )
+    expect(await driftFor(truck.id)).toEqual([])
+  })
+
+  it('finds the asset when a companyId is moved without a period', async () => {
+    // The pairing that makes tests/integrity.test.ts mean something. That test
+    // asserts zero rows against a database where nothing has gone wrong, which
+    // is exactly the shape of an assertion that passes because it never ran.
+    // Here the damage is done deliberately — the raw update the lint rule
+    // exists to forbid — and the check has to notice.
+    const truck = await inOrg((tx) =>
+      createTruck(tx, organizationId, {
+        companyId: alphaId,
+        unitNumber: `drift-bad-${nonce}`,
+      }),
+    )
+
+    await inOrg(
+      (tx) =>
+        tx.$executeRaw`UPDATE "Truck" SET "companyId" = ${bravoId} WHERE id = ${truck.id}`,
+    )
+
+    expect(await driftFor(truck.id)).toEqual([
+      {
+        kind: 'truck',
+        assetId: truck.id,
+        assetCompanyId: bravoId,
+        openPeriodCompanyId: alphaId,
+      },
+    ])
+
+    // Put it back. Cleanup and pairing in one: if the check does not go quiet
+    // again once the row is repaired, it was not measuring the row.
+    await inOrg(
+      (tx) =>
+        tx.$executeRaw`UPDATE "Truck" SET "companyId" = ${alphaId} WHERE id = ${truck.id}`,
+    )
+    expect(await driftFor(truck.id)).toEqual([])
   })
 })
 

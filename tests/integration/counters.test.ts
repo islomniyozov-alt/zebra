@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createPrismaClient } from '@/lib/db'
+import { retryingClient } from '../retrying-client'
 import { runInOrg } from '@/lib/tenancy'
 import { unattributed, type Attribution } from '@/lib/audit'
 import {
@@ -27,8 +27,8 @@ let companyB = ''
 let attribution: Attribution
 
 beforeAll(async () => {
-  app = createPrismaClient(process.env.DATABASE_URL!)
-  owner = createPrismaClient(process.env.DIRECT_DATABASE_URL!)
+  app = retryingClient(process.env.DATABASE_URL!)
+  owner = retryingClient(process.env.DIRECT_DATABASE_URL!)
   const nonce = Math.random().toString(36).slice(2, 10)
 
   const a = await owner.organization.create({

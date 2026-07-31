@@ -95,3 +95,70 @@ describe('routes cannot reach past withCurrentOrg', () => {
     expect(restricted(messages)).toEqual([])
   })
 })
+
+// ---------------------------------------------------------------------------
+// An asset's authority is a period, not a column.
+//
+// Same reasoning as above, one layer down: `Truck.companyId` and the open
+// `AssetAssignment` are two representations of one fact and the schema does
+// not make them agree, so a bare `update({ data: { companyId } })` moves an
+// asset with no record that it moved. Every assertion below is paired with
+// the shape it must NOT catch (standing rule 11) — a rule that fires on
+// everything is as useless as one that fires on nothing.
+// ---------------------------------------------------------------------------
+
+const syntax = (messages: LintMessage[]) =>
+  messages.filter((message) => message.ruleId === 'no-restricted-syntax')
+
+describe("an asset's companyId cannot be written directly", () => {
+  it.each([
+    [
+      'update',
+      `export const move = async (tx: { truck: { update: (a: unknown) => unknown } }) =>
+         tx.truck.update({ where: { id: 'x' }, data: { companyId: 'y' } })`,
+    ],
+    [
+      'updateMany',
+      `export const move = async (tx: { driver: { updateMany: (a: unknown) => unknown } }) =>
+         tx.driver.updateMany({ where: { id: 'x' }, data: { companyId: 'y' } })`,
+    ],
+  ])('refuses a bare %s in a service', async (_name, code) => {
+    expect(syntax(await lint('src/lib/somewhere.ts', code))).toHaveLength(1)
+  })
+
+  it('refuses it in a route too, not only in src/lib', async () => {
+    const code = `export const move = async (tx: { trailer: { update: (a: unknown) => unknown } }) =>
+      tx.trailer.update({ where: { id: 'x' }, data: { companyId: 'y' } })`
+    expect(syntax(await lint('src/app/trucks/actions.ts', code))).toHaveLength(
+      1,
+    )
+  })
+
+  it('names transferAsset in the message, so the fix is obvious', async () => {
+    const code = `export const move = async (tx: { truck: { update: (a: unknown) => unknown } }) =>
+      tx.truck.update({ where: { id: 'x' }, data: { companyId: 'y' } })`
+    const [message] = syntax(await lint('src/lib/somewhere.ts', code))
+    expect(message?.message).toContain('transferAsset')
+    expect(message?.message).toContain('period')
+  })
+
+  it('allows it in asset-transfer.ts, the one place it is honest', async () => {
+    const code = `export const move = async (tx: { truck: { update: (a: unknown) => unknown } }) =>
+      tx.truck.update({ where: { id: 'x' }, data: { companyId: 'y' } })`
+    expect(syntax(await lint('src/lib/asset-transfer.ts', code))).toEqual([])
+  })
+
+  it('allows CREATING an asset with a companyId', async () => {
+    // Creating an asset is not moving one. A rule that caught this would be a
+    // rule everybody turns off.
+    const code = `export const add = async (tx: { truck: { create: (a: unknown) => unknown } }) =>
+      tx.truck.create({ data: { companyId: 'y', unitNumber: '101' } })`
+    expect(syntax(await lint('src/lib/fleet.ts', code))).toEqual([])
+  })
+
+  it('allows updating an asset WITHOUT touching companyId', async () => {
+    const code = `export const rename = async (tx: { truck: { update: (a: unknown) => unknown } }) =>
+      tx.truck.update({ where: { id: 'x' }, data: { unitNumber: '102' } })`
+    expect(syntax(await lint('src/lib/fleet.ts', code))).toEqual([])
+  })
+})

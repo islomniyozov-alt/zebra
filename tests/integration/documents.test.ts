@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createPrismaClient } from '@/lib/db'
+import { retryingClient } from '../retrying-client'
 import { runInOrg } from '@/lib/tenancy'
 import { unattributed, type Attribution } from '@/lib/audit'
 import { deleteObject, headObject, r2ConfigFromEnv } from '@/lib/r2'
@@ -80,8 +80,8 @@ const makeOrg = async (label: string) => {
 }
 
 beforeAll(async () => {
-  app = createPrismaClient(process.env.DATABASE_URL!)
-  owner = createPrismaClient(process.env.DIRECT_DATABASE_URL!)
+  app = retryingClient(process.env.DATABASE_URL!)
+  owner = retryingClient(process.env.DIRECT_DATABASE_URL!)
   sha256 = await digestOf(PDF)
 
   const a = await makeOrg('a')
