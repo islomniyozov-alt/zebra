@@ -108,9 +108,31 @@ export async function transitionOperational(
   const from = load.operationalStatus
 
   if (load.isCancelled) return { result: 'cancelled', at: from }
+
+  // Nothing written. The caller fired twice and the second one is not news —
+  // a row per retry would fill the timeline with the retry logic's noise.
   if (from === to) return { result: 'unchanged', at: from }
 
   if (RANK[to] < RANK[from] && !options.allowRewind) {
+    // WRITTEN, unlike `unchanged`. Somebody with a reason tried to move this
+    // load and was declined, and the timeline is the audit answer: "a
+    // Delivered click arrived on Tuesday, after the POD had already landed"
+    // is exactly what a dispute turns on. `fromStatus` is where the load
+    // stayed; `toStatus` is what was asked for.
+    await tx.loadStatusEvent.create({
+      data: {
+        loadId,
+        organizationId: load.organizationId,
+        axis: 'OPERATIONAL',
+        fromStatus: from,
+        toStatus: to,
+        outcome: 'REFUSED_STALE',
+        source: options.source,
+        changedByUserId: options.userId ?? null,
+        note: options.note ?? null,
+        ...(options.occurredAt ? { occurredAt: options.occurredAt } : {}),
+      },
+    })
     return { result: 'stale', at: from, attempted: to }
   }
 
@@ -141,6 +163,29 @@ export class UnknownLoadError extends Error {
     super(`No such load: ${loadId}`)
     this.name = 'UnknownLoadError'
   }
+}
+
+/**
+ * POD received — never set by hand (§7).
+ *
+ * Called from `confirmUpload` when a Document of type POD attaches to a load.
+ * It lives here rather than in the load service so that documents.ts can reach
+ * the one transition it needs without importing the whole load module.
+ *
+ * The confirm is retried on timeout and can land before the manual Delivered
+ * click; the engine's idempotence and its refusal to rewind are what make both
+ * safe, and neither is re-implemented at the call site.
+ */
+export async function podConfirmed(
+  tx: TxClient,
+  loadId: string,
+  userId: string | null,
+): Promise<TransitionOutcome> {
+  return transitionOperational(tx, loadId, 'POD_RECEIVED', {
+    source: 'AUTOMATIC',
+    userId,
+    note: 'POD document confirmed',
+  })
 }
 
 /**

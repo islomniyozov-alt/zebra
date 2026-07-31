@@ -6,6 +6,7 @@ import type {
 import { allocateNumber } from './counters'
 import { assertAssignable, loadWindow } from './dispatch'
 import {
+  podConfirmed,
   statusForAssignment,
   transitionOperational,
   type TransitionOutcome,
@@ -605,29 +606,13 @@ export async function markDelivered(
   })
 }
 
-/**
- * POD received — never set by hand (§7).
- *
- * Called when a confirmed `Document` of type POD attaches. It arrives from an
- * upload confirm, which is retried on timeout and can land out of order with
- * the manual Delivered click; both cases are why the engine is idempotent and
- * refuses to rewind.
- */
-export async function podConfirmed(
-  tx: TxClient,
-  loadId: string,
-  userId: string | null,
-): Promise<TransitionOutcome> {
-  return transitionOperational(tx, loadId, 'POD_RECEIVED', {
-    source: 'AUTOMATIC',
-    userId,
-    note: 'POD document confirmed',
-  })
-}
-
 export const UI_OPERATIONAL_STATUSES: LoadOperationalStatus[] = [
   'BOOKED',
   'DISPATCHED',
   'DELIVERED',
   'POD_RECEIVED',
 ]
+
+// Re-exported so callers keep one loads import. It lives in ./load-status
+// because documents.ts needs it and has no business importing this module.
+export { podConfirmed }

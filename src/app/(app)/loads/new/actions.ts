@@ -11,7 +11,8 @@ import {
   ReferenceError,
   optionalText,
 } from '@/lib/reference'
-import { normalizeTypedDate, utcMidnight } from '@/lib/typed-date'
+import { normalizeTypedDate } from '@/lib/typed-date'
+import { zoneForState, zoneMidnight } from '@/lib/stop-time'
 import { rememberAuthority } from '../../_reference/shared'
 
 export interface CreateLoadState {
@@ -28,18 +29,34 @@ export interface CreateLoadState {
 }
 
 /**
- * A typed date, at UTC midnight (§8 — date-only fields carry no timezone).
+ * A typed date, at midnight **in the stop's own zone**.
+ *
+ * NOT UTC midnight, and the difference is a whole day. A pickup typed as
+ * September 15th, stored at UTC midnight and then rendered in the stop's zone
+ * per design rule 3, displays as "Sep 14, 19:00 CDT" — the rule's own failure
+ * mode, committed by the code meant to honour it. Caught in a screenshot of
+ * the Step 5 detail screen.
  *
  * Parsed here as well as in the browser, and not because the browser is
  * untrusted about dates — because the form works without JavaScript, and the
  * blur handler that normalises "810" into "2026-08-10" is JavaScript.
  */
-function dateOnly(value: unknown): Date | null {
+function stopDate(value: unknown, state: string | null): Date | null {
   const text = optionalText(value)
   if (text === null) return null
   const iso = normalizeTypedDate(text)
-  return iso === null ? null : utcMidnight(iso)
+  if (iso === null) return null
+  return zoneMidnight(iso, zoneForState(state, COMPANY_FALLBACK_ZONE))
 }
+
+/**
+ * Where a stop with no state is assumed to be.
+ *
+ * The company's own zone would be better and is one query away; it is not read
+ * here because this is the create path and the stop's state is almost always
+ * present. Flagged in the Step 5 report.
+ */
+const COMPANY_FALLBACK_ZONE = 'America/Chicago'
 
 /** "$2,450.00" → 245000. Money is an integer of cents the moment it is read. */
 function cents(value: unknown): number {
@@ -99,14 +116,14 @@ export async function createLoadAction(
                 name: pickup,
                 city: from.city,
                 state: from.state,
-                scheduledAt: dateOnly(formData.get('pickupAt')),
+                scheduledAt: stopDate(formData.get('pickupAt'), from.state),
               },
               {
                 type: 'DELIVERY',
                 name: delivery,
                 city: to.city,
                 state: to.state,
-                scheduledAt: dateOnly(formData.get('deliveryAt')),
+                scheduledAt: stopDate(formData.get('deliveryAt'), to.state),
               },
             ],
           },

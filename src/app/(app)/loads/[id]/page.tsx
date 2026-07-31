@@ -1,0 +1,361 @@
+import { notFound } from 'next/navigation'
+import Link from 'next/link'
+import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
+import { getLocaleContext } from '@/lib/locale'
+import {
+  billingLabelKey,
+  billingTone,
+  operationalLabelKey,
+  operationalTone,
+  TONE_STRIPE,
+} from '@/lib/status'
+import { renderStopTime } from '@/lib/stop-time'
+import { StatusBadge } from '@/components/ui/StatusBadge'
+import { StatusTimeline, type TimelineEvent } from './StatusTimeline'
+import { LoadDocuments, type DocumentSlot } from './LoadDocuments'
+import { LoadActions, LoadNotes } from './LoadActions'
+import {
+  addNoteAction,
+  cancelLoadAction,
+  markDeliveredAction,
+  refreshLoadAction,
+  uncancelLoadAction,
+} from './actions'
+import type { LoadOperationalStatus } from '@/generated/prisma/client'
+
+// §10 — the load detail screen.
+//
+// Status stripe per §2 (operational meaning, stated in the header), two badges
+// in the two constructions §7.2 requires, stop panels in the STOP's timezone
+// with the zone shown (rule 3), documents grouped by type with dashed warning
+// placeholders for what is missing at this stage, a notes thread writing
+// `Communication` rows, and the timeline rendered from `LoadStatusEvent`.
+
+const ALL_OPERATIONAL: LoadOperationalStatus[] = [
+  'AVAILABLE',
+  'BOOKED',
+  'DISPATCHED',
+  'AT_PICKUP',
+  'LOADED',
+  'IN_TRANSIT',
+  'AT_DELIVERY',
+  'DELIVERED',
+  'POD_RECEIVED',
+]
+
+const bytes = (size: number) =>
+  size < 1024
+    ? `${size} B`
+    : size < 1024 * 1024
+      ? `${Math.round(size / 1024)} KB`
+      : `${(size / 1024 / 1024).toFixed(1)} MB`
+
+export default async function LoadDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>
+}) {
+  const { id } = await params
+  const { t, locale } = await getLocaleContext()
+
+  const data = await withCurrentOrg('read', 'load', async (tx) => {
+    const load = await tx.load.findUnique({
+      where: { id },
+      include: {
+        company: { select: { name: true, timezone: true } },
+        customer: { select: { id: true, name: true } },
+        truck: { select: { unitNumber: true } },
+        driver: { select: { firstName: true, lastName: true } },
+        trailer: { select: { unitNumber: true } },
+        stops: { orderBy: { sequence: 'asc' } },
+      },
+    })
+    if (!load) return null
+
+    const [events, documents, notes] = await Promise.all([
+      tx.loadStatusEvent.findMany({
+        where: { loadId: id },
+        orderBy: { occurredAt: 'desc' },
+        include: { changedBy: { select: { name: true } } },
+      }),
+      tx.document.findMany({
+        where: { loadId: id, deletedAt: null },
+        orderBy: { uploadedAt: 'desc' },
+        include: { uploadedBy: { select: { name: true } } },
+      }),
+      tx.communication.findMany({
+        where: { loadId: id, type: 'NOTE' },
+        orderBy: { occurredAt: 'desc' },
+        take: 50,
+        include: { user: { select: { name: true } } },
+      }),
+    ])
+
+    return { load, events, documents, notes }
+  })
+
+  if (!data) notFound()
+  const { load, events, documents, notes } = data
+
+  const mayUpdate = await currentUserCan('update', 'load')
+  const mayUpload = await currentUserCan('create', 'document')
+
+  const zone = load.company.timezone
+  const stripeTone = load.isCancelled
+    ? 'muted'
+    : operationalTone(load.operationalStatus)
+
+  const statusLabels = Object.fromEntries(
+    ALL_OPERATIONAL.map((status) => [status, t(operationalLabelKey(status))]),
+  )
+
+  const timeline: TimelineEvent[] = events.map((event) => ({
+    id: event.id,
+    fromStatus: event.fromStatus,
+    toStatus: event.toStatus,
+    outcome: event.outcome,
+    source: event.source,
+    at:
+      renderStopTime(event.occurredAt, null, {
+        fallbackZone: zone,
+        locale,
+      })?.text ?? '',
+    by: event.changedBy?.name ?? null,
+    note: event.note,
+  }))
+
+  // §7.8 — grouped by type, and "required" means required AT THIS STAGE. A
+  // rate confirmation is always expected; a POD only once the load is
+  // delivered, because before that its absence is not a problem.
+  const podRequired =
+    load.operationalStatus === 'DELIVERED' ||
+    load.operationalStatus === 'POD_RECEIVED'
+
+  const slotFor = (
+    type: string,
+    label: string,
+    required: boolean,
+  ): DocumentSlot => ({
+    type,
+    label,
+    required,
+    documents: documents
+      .filter((document) => document.type === type)
+      .map((document) => ({
+        id: document.id,
+        type: document.type,
+        filename: document.filename,
+        size: bytes(document.sizeBytes),
+        uploadedAt:
+          renderStopTime(document.uploadedAt, null, {
+            fallbackZone: zone,
+            locale,
+          })?.text ?? '',
+        uploadedBy: document.uploadedBy?.name ?? null,
+      })),
+  })
+
+  const slots: DocumentSlot[] = [
+    slotFor('RATE_CONFIRMATION', t('documents.type.RATE_CONFIRMATION'), true),
+    slotFor('POD', t('documents.type.POD'), podRequired),
+    slotFor('BOL', t('documents.type.BOL'), false),
+  ]
+
+  return (
+    <>
+      <div className="flex items-baseline justify-between gap-z4 border-b border-border bg-surface px-gutter py-z3">
+        <div className="flex items-center gap-z3">
+          {/* §2 — the 3px stripe on the leading edge, never animated. */}
+          <span
+            aria-hidden
+            className={`h-z5 w-[3px] ${TONE_STRIPE[stripeTone]}`}
+          />
+          <h1 className="text-lg font-medium text-ink">
+            <span className="font-mono">{load.loadNumber}</span>
+          </h1>
+          {/* §7.2 — operational FILLED, billing OUTLINED, side by side. */}
+          <StatusBadge
+            tone={operationalTone(load.operationalStatus)}
+            label={t(operationalLabelKey(load.operationalStatus))}
+          />
+          <StatusBadge
+            tone={billingTone(load.billingStatus)}
+            variant="outlined"
+            label={t(billingLabelKey(load.billingStatus))}
+          />
+          {load.isCancelled ? (
+            <StatusBadge tone="muted" label={t('loads.cancelled')} />
+          ) : null}
+        </div>
+
+        <div className="flex items-center gap-z3">
+          <p className="text-xs text-ink-3">{t('loads.stripeMeaning')}</p>
+          {mayUpdate ? (
+            <LoadActions
+              isCancelled={load.isCancelled}
+              canDeliver={
+                load.operationalStatus !== 'POD_RECEIVED' &&
+                load.operationalStatus !== 'DELIVERED'
+              }
+              markDelivered={markDeliveredAction.bind(null, id)}
+              cancel={cancelLoadAction.bind(null, id)}
+              uncancel={uncancelLoadAction.bind(null, id)}
+              labels={{
+                markDelivered: t('loads.markDelivered'),
+                cancel: t('loads.cancel'),
+                cancelTitle: t('loads.cancelTitle'),
+                cancelBody: t('loads.cancelBody'),
+                reason: t('loads.cancelReason'),
+                confirmCancel: t('loads.cancel'),
+                uncancel: t('loads.uncancel'),
+                close: t('ref.cancel'),
+              }}
+            />
+          ) : null}
+        </div>
+      </div>
+
+      <div
+        className={`min-h-0 flex-1 overflow-y-auto bg-surface-2 px-gutter py-z5 ${load.isCancelled ? 'opacity-60' : ''}`}
+      >
+        <div className="grid max-w-[1100px] gap-z4 lg:grid-cols-2">
+          <section className="rounded-card border border-border bg-surface p-z4">
+            <h2 className="text-md font-medium text-ink">
+              {t('loads.summary')}
+            </h2>
+            <dl className="mt-z3 grid grid-cols-2 gap-x-z4 gap-y-z2 text-sm">
+              <dt className="text-ink-2">{t('ref.authority')}</dt>
+              <dd className="text-ink">{load.company.name}</dd>
+              <dt className="text-ink-2">{t('loads.column.customer')}</dt>
+              <dd className="text-ink">
+                <Link
+                  href={`/brokers/${load.customer.id}`}
+                  className="hover:text-accent"
+                >
+                  {load.customer.name}
+                </Link>
+              </dd>
+              <dt className="text-ink-2">{t('loads.column.truck')}</dt>
+              <dd className="font-mono text-ink">
+                {load.truck?.unitNumber ?? '—'}
+              </dd>
+              <dt className="text-ink-2">{t('loads.column.driver')}</dt>
+              <dd className="text-ink">
+                {load.driver
+                  ? `${load.driver.lastName}, ${load.driver.firstName}`
+                  : '—'}
+              </dd>
+              <dt className="text-ink-2">{t('loads.miles')}</dt>
+              <dd className="text-end font-mono text-ink">
+                {load.dispatchedMiles === null
+                  ? '—'
+                  : load.dispatchedMiles.toLocaleString(locale)}
+              </dd>
+            </dl>
+            {load.isCancelled && load.cancelReason ? (
+              <p className="mt-z3 rounded-control border border-danger bg-danger-soft px-z2 py-z1 text-sm text-danger">
+                {load.cancelReason}
+              </p>
+            ) : null}
+          </section>
+
+          <section className="rounded-card border border-border bg-surface p-z4">
+            <h2 className="text-md font-medium text-ink">{t('loads.stops')}</h2>
+            <ol className="mt-z3 flex flex-col gap-z3">
+              {load.stops.map((stop) => {
+                // Rule 3. In the STOP's zone, with the abbreviation shown.
+                const when = renderStopTime(stop.scheduledAt, stop.state, {
+                  fallbackZone: zone,
+                  locale,
+                })
+                return (
+                  <li
+                    key={stop.id}
+                    className="border-b border-border pb-z2 last:border-b-0"
+                  >
+                    <div className="flex items-baseline justify-between gap-z2">
+                      <span className="text-xs uppercase tracking-[0.04em] text-ink-2">
+                        {t(`stop.${stop.type}` as never)}
+                      </span>
+                      <span
+                        className="font-mono text-sm text-ink"
+                        title={when?.zone ?? zone}
+                      >
+                        {when?.text ?? '—'}
+                      </span>
+                    </div>
+                    <p className="mt-z1 text-base text-ink">
+                      {stop.name ??
+                        [stop.city, stop.state].filter(Boolean).join(', ')}
+                    </p>
+                    {when?.approximate ? (
+                      <p className="mt-z1 text-xs text-ink-3">
+                        {t('loads.zoneApprox').replace('{zone}', when.zone)}
+                      </p>
+                    ) : null}
+                  </li>
+                )
+              })}
+            </ol>
+          </section>
+
+          <LoadDocuments
+            loadId={id}
+            slots={slots}
+            mayUpload={mayUpload && !load.isCancelled}
+            onUploaded={refreshLoadAction.bind(null, id)}
+            labels={{
+              title: t('loads.documents'),
+              missing: t('loads.documentMissing'),
+              upload: t('loads.documentUpload'),
+              preparing: t('upload.preparing'),
+              uploading: t('upload.uploading'),
+              done: t('upload.done'),
+              failed: t('upload.failed'),
+              none: t('loads.documentNone'),
+              by: t('loads.by'),
+            }}
+          />
+
+          <StatusTimeline
+            events={timeline}
+            statusLabels={statusLabels}
+            labels={{
+              title: t('loads.timeline'),
+              manual: t('loads.source.manual'),
+              automatic: t('loads.source.automatic'),
+              driverPortal: t('loads.source.driverPortal'),
+              integration: t('loads.source.integration'),
+              refused: t('loads.source.refused'),
+              refusedBody: t('loads.refusedBody'),
+              by: t('loads.by'),
+              empty: t('loads.timelineEmpty'),
+            }}
+          />
+
+          <div className="lg:col-span-2">
+            <LoadNotes
+              notes={notes.map((note) => ({
+                id: note.id,
+                body: note.body,
+                at:
+                  renderStopTime(note.occurredAt, null, {
+                    fallbackZone: zone,
+                    locale,
+                  })?.text ?? '',
+                by: note.user?.name ?? null,
+              }))}
+              add={addNoteAction.bind(null, id)}
+              labels={{
+                title: t('loads.notes'),
+                placeholder: t('loads.notePlaceholder'),
+                post: t('loads.notePost'),
+                empty: t('loads.notesEmpty'),
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}

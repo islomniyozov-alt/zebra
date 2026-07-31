@@ -1,5 +1,6 @@
 import type { DocumentType } from '@/generated/prisma/client'
 import type { TxClient } from './tenancy'
+import { podConfirmed } from './load-status'
 import {
   deleteObject,
   headObject,
@@ -370,6 +371,18 @@ export async function confirmUpload(
   // The mint has served its purpose. Deleting it is what keeps the
   // reconciliation query meaningful: what remains is what never landed.
   await tx.pendingUpload.delete({ where: { id: pending.id } })
+
+  // §7: POD received is set automatically when a confirmed Document of type
+  // POD attaches, and NEVER by hand. This is that moment — the confirm is
+  // what makes the document real, so it is what moves the load.
+  //
+  // The transition is idempotent and refuses to rewind, which matters here
+  // more than anywhere: a confirm retried after a timeout arrives twice, and
+  // a POD can be confirmed before the manual Delivered click ever happens.
+  // Both are handled by the engine rather than by a condition here.
+  if (pending.type === 'POD' && pending.targetEntity === 'load') {
+    await podConfirmed(tx, pending.targetId, options.uploadedByUserId ?? null)
+  }
 
   return { documentId: document.id, r2Key: document.r2Key }
 }

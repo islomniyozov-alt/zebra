@@ -1182,6 +1182,18 @@ model LoadStatusEvent {
   fromStatus String?
   toStatus   String
 
+  // Whether the load actually MOVED. Added in Step 5, because the timeline is
+  // the audit answer and an answer that omits the refusals is a decoration.
+  //
+  // A REFUSED_STALE row is a transition that was attempted and declined for
+  // arriving late — a Delivered click landing after the POD already did, say.
+  // `fromStatus` is where the load stayed and `toStatus` is what was asked
+  // for. Anything reconstructing the load's history filters to APPLIED; the
+  // timeline shows both, because "somebody tried to mark this delivered on
+  // Tuesday and the system said no" is exactly the kind of thing a dispute
+  // turns on.
+  outcome StatusOutcome @default(APPLIED)
+
   source          StatusSource @default(MANUAL)
   changedByUserId String?
   changedBy       User?        @relation(fields: [changedByUserId], references: [id])
@@ -1202,6 +1214,13 @@ enum StatusSource {
   AUTOMATIC
   DRIVER_PORTAL
   INTEGRATION
+}
+
+enum StatusOutcome {
+  /** The load moved. */
+  APPLIED
+  /** Refused for arriving after a later state. The load did not move. */
+  REFUSED_STALE
 }
 
 // Custody history. "Who had trailer X on July 14" must be answerable in one
