@@ -1,4 +1,6 @@
-import { withCurrentOrg } from '@/lib/auth-context'
+import Link from 'next/link'
+import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
+import { Button } from '@/components/ui/Button'
 import { getLocaleContext } from '@/lib/locale'
 import { companyScopeFilter } from '@/lib/tenancy'
 import { FilterBar } from '@/components/ui/FilterBar'
@@ -126,6 +128,8 @@ export default async function LoadsPage({
     'WRITTEN_OFF',
   ]
 
+  const mayCreate = await currentUserCan('create', 'load')
+
   const statuses: LoadOperationalStatus[] = [
     'BOOKED',
     'IN_TRANSIT',
@@ -140,8 +144,17 @@ export default async function LoadsPage({
        * drawer (§7.4). */}
       <div className="flex items-baseline justify-between gap-z4 border-b border-border bg-surface px-gutter py-z3">
         <h1 className="text-lg font-medium text-ink">{t('loads.title')}</h1>
-        {/* §2 — one meaning per screen, stated in the screen's header. */}
-        <p className="text-xs text-ink-3">{t('loads.stripeMeaning')}</p>
+        <div className="flex items-center gap-z3">
+          {/* §2 — one meaning per screen, stated in the screen's header. */}
+          <p className="text-xs text-ink-3">{t('loads.stripeMeaning')}</p>
+          {mayCreate ? (
+            <Link href="/loads/new">
+              <Button variant="primary" size="compact">
+                {t('loads.add')}
+              </Button>
+            </Link>
+          ) : null}
+        </div>
       </div>
 
       <FilterBar

@@ -32,7 +32,13 @@ let tenantModels: string[]
 // here. Two shapes because runInOrg names its options in milliseconds.
 // No acting user: this suite proves the wall, it does not act for anyone.
 const PROBE = unattributed('isolation suite: asserts the tenant boundary')
-const SWEEP = { timeoutMs: 60_000, attribution: PROBE } as const
+// This suite stays OFF the retrying client on purpose — it is the one that
+// proves the tenant wall, and a retry wrapper between it and the driver is one
+// more thing between the assertion and the truth. It still needs the longer
+// POOL WAIT, though: running eighth of eight it failed with "Unable to start a
+// transaction in the given time", which is congestion and not a leak.
+const WAIT = { maxWaitMs: 20_000 } as const
+const SWEEP = { timeoutMs: 60_000, ...WAIT, attribution: PROBE } as const
 const SWEEP_RAW = { timeout: 60_000 } as const
 
 /** Minimal shape every Prisma model delegate shares, without reaching for `any`. */
@@ -192,7 +198,7 @@ describe('cross-organization isolation', () => {
           await delegate(tx, 'load').findMany({ select: { id: true } }),
         ).toHaveLength(1)
       },
-      { attribution: PROBE },
+      { ...WAIT, attribution: PROBE },
     )
 
     const afterwards = await app.$transaction((tx) =>
@@ -240,7 +246,7 @@ describe('a forged organizationId in the request', () => {
               name: 'Forged authority',
             },
           }),
-        { attribution: PROBE },
+        { ...WAIT, attribution: PROBE },
       ),
     ).rejects.toThrow()
 
@@ -260,7 +266,7 @@ describe('a forged organizationId in the request', () => {
           where: { organizationId: orgB.organizationId },
           data: { linehaulCents: 1 },
         }),
-      { attribution: PROBE },
+      { ...WAIT, attribution: PROBE },
     )
     expect(updated.count).toBe(0)
 
@@ -276,7 +282,7 @@ describe('a forged organizationId in the request', () => {
       orgA.organizationId,
       (tx) =>
         tx.load.deleteMany({ where: { organizationId: orgB.organizationId } }),
-      { attribution: PROBE },
+      { ...WAIT, attribution: PROBE },
     )
     expect(deleted.count).toBe(0)
     expect(
@@ -297,7 +303,7 @@ describe('a forged organizationId in the request', () => {
           select: { id: true },
           where: { load: { organizationId: orgB.organizationId } },
         }),
-      { attribution: PROBE },
+      { ...WAIT, attribution: PROBE },
     )
     expect(stops).toEqual([])
   })
@@ -318,7 +324,7 @@ describe('child tables inherit the wall', () => {
           },
           select: { id: true, organizationId: true },
         }),
-      { attribution: PROBE },
+      { ...WAIT, attribution: PROBE },
     )
 
     expect(created.organizationId).toBe(orgA.organizationId)
@@ -339,7 +345,7 @@ describe('child tables inherit the wall', () => {
               type: 'DELIVERY',
             },
           }),
-        { attribution: PROBE },
+        { ...WAIT, attribution: PROBE },
       ),
     ).rejects.toThrow()
 
@@ -360,7 +366,7 @@ describe('child tables inherit the wall', () => {
               amountCents: 1,
             },
           }),
-        { attribution: PROBE },
+        { ...WAIT, attribution: PROBE },
       ),
     ).rejects.toThrow()
   })

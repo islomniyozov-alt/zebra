@@ -119,10 +119,36 @@ export function retryingClient(connectionString: string): PrismaClient {
     get(target, property, receiver) {
       const value = Reflect.get(target, property, receiver)
 
-      // $transaction and friends stay as they are. Retrying an interactive
-      // transaction is exactly the case where a replay can duplicate a write,
-      // and the fixtures that use them are the ones worth failing honestly.
-      if (typeof property === 'string' && property.startsWith('$')) return value
+      // $transaction and friends are never retried — replaying an interactive
+      // transaction is exactly the case where a retry can duplicate a write.
+      //
+      // BOUND TO THE TARGET, and that bind is load-bearing. Returned bare,
+      // `client.$transaction(...)` is invoked with `this` set to the PROXY,
+      // and Prisma's internals reach for private state they cannot find on it.
+      // The visible symptom was not an error: `set_config('app.current_org_id')`
+      // stopped applying to the statements inside the transaction, so every
+      // write failed row-level security with 42501 and every read came back
+      // empty. Introduced in Step 2 and not caught until Step 4, because the
+      // suites I re-ran were the new ones rather than all of them.
+      if (property === '$transaction') {
+        const original = (value as (...args: unknown[]) => unknown).bind(target)
+        return (...args: unknown[]) => {
+          // A longer POOL WAIT, and only here. Prisma gives up waiting for a
+          // connection after 2s; run alone every suite is fine, and run as the
+          // seventh of eight files three tests failed with "Unable to start a
+          // transaction in the given time" — congestion, not deadlock. The
+          // application keeps the 2s default, because in production a 2s wait
+          // for a connection is a signal and not something to sit through.
+          if (typeof args[0] === 'function') {
+            const options = (args[1] ?? {}) as Record<string, unknown>
+            args[1] = { maxWait: 20_000, ...options }
+          }
+          return original(...args)
+        }
+      }
+      if (typeof property === 'string' && property.startsWith('$')) {
+        return typeof value === 'function' ? value.bind(target) : value
+      }
 
       if (value && typeof value === 'object') {
         return wrapModel(value as object, String(property))

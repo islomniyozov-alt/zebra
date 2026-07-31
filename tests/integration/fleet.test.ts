@@ -44,6 +44,9 @@ const nonce = Math.random().toString(36).slice(2, 8)
 const inOrg = <T>(fn: Parameters<typeof withOrg<T>>[1]): Promise<T> =>
   withOrg(organizationId, fn, {
     attribution: { userId, ip: null, userAgent: 'fleet.test' },
+    // See the note in loads.test.ts: 2s of pool wait is enough when this file
+    // runs alone and not when it runs eighth.
+    maxWaitMs: 15_000,
   })
 
 beforeAll(async () => {

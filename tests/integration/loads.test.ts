@@ -43,10 +43,19 @@ const nonce = Math.random().toString(36).slice(2, 8)
 // aborts mid-transaction. The failure surfaces as an opaque "expired
 // transaction" from whichever statement happened to be in flight, which is
 // exactly the kind of error that gets blamed on the code under test.
+//
+// `maxWaitMs` for a different reason, and one worth separating: Prisma gives
+// up waiting for a POOLED CONNECTION after 2s. Run alone this suite never
+// notices; run after seven other integration files it failed three tests with
+// "Unable to start a transaction in the given time" — the ceiling
+// src/lib/counters.ts already documents, reached by suite congestion rather
+// than by concurrency. It is a wait, not a deadlock, so waiting longer is the
+// honest fix here.
 const inOrg = <T>(fn: Parameters<typeof withOrg<T>>[1]): Promise<T> =>
   withOrg(organizationId, fn, {
     attribution: { userId, ip: null, userAgent: 'loads.test' },
     timeoutMs: LOAD_WRITE_TIMEOUT_MS,
+    maxWaitMs: 15_000,
   })
 
 const day = (d: number, hour = 8) => new Date(Date.UTC(2026, 7, d, hour, 0, 0))

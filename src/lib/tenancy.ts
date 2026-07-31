@@ -1,5 +1,11 @@
 import { prisma } from './db'
-import { auditScope, type AuditCapableTx, type WriteAttribution } from './audit'
+import {
+  auditScope,
+  flushAuditBuffer,
+  type AuditCapableTx,
+  type AuditScope,
+  type WriteAttribution,
+} from './audit'
 import type { Prisma, PrismaClient } from '@/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -124,14 +130,23 @@ export async function runInOrg<T>(
       //
       // would have written no audit row at all, silently, while every test
       // that awaited inside its callback passed.
-      return await auditScope.run(
-        {
-          tx: tx as unknown as AuditCapableTx,
-          organizationId: orgId,
-          attribution: options.attribution,
-        },
-        async () => await fn(tx),
-      )
+      const scope: AuditScope = {
+        tx: tx as unknown as AuditCapableTx,
+        organizationId: orgId,
+        attribution: options.attribution,
+        buffer: [],
+      }
+
+      return await auditScope.run(scope, async () => {
+        const result = await fn(tx)
+        // Every audit row for this transaction, in one insert behind one
+        // savepoint, while the transaction is STILL OPEN. Inside, because a
+        // rolled-back write must not leave a row claiming it happened; before
+        // the return, because after it there is no transaction left to write
+        // in. See `AuditScope.buffer` for the measurement that put it here.
+        await flushAuditBuffer(scope)
+        return result
+      })
     },
     {
       ...(options.timeoutMs === undefined

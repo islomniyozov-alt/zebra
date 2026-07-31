@@ -1,0 +1,143 @@
+import { notFound } from 'next/navigation'
+import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
+import { getLocaleContext } from '@/lib/locale'
+import { companyScopeFilter } from '@/lib/tenancy'
+import { CreateLoadForm } from './CreateLoadForm'
+import { lastUsedAuthority } from '../../_reference/shared'
+
+// §7.6 / brief §9 — the most-used form in the product.
+//
+// Everything the form needs arrives in one round trip, prefetched here. A
+// typeahead that queries per keystroke is a typeahead that is slower than the
+// dispatcher, and the lists are small: brokers and places are per-organization,
+// trucks and drivers per authority.
+
+export default async function NewLoadPage() {
+  if (!(await currentUserCan('create', 'load'))) notFound()
+
+  const { t } = await getLocaleContext()
+  const mayeeFinancials = await currentUserCan('read', 'load.financials')
+
+  const data = await withCurrentOrg('read', 'load', async (tx, session) => {
+    const scope = companyScopeFilter(session.companyScopes)
+
+    const [companies, brokers, trucks, drivers, places] = await Promise.all([
+      tx.company.findMany({
+        where: { isActive: true, ...scope },
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true },
+      }),
+      tx.customer.findMany({
+        where: { deletedAt: null, status: { not: 'BLOCKED' } },
+        orderBy: { name: 'asc' },
+        take: 500,
+        select: { name: true },
+      }),
+      tx.truck.findMany({
+        where: { deletedAt: null, ...scope },
+        orderBy: { unitNumber: 'asc' },
+        take: 500,
+        select: { id: true, unitNumber: true },
+      }),
+      tx.driver.findMany({
+        where: { deletedAt: null, ...scope },
+        orderBy: { lastName: 'asc' },
+        take: 500,
+        select: { id: true, firstName: true, lastName: true },
+      }),
+      tx.location.findMany({
+        where: { deletedAt: null },
+        orderBy: { name: 'asc' },
+        take: 500,
+        select: { name: true },
+      }),
+    ])
+
+    // §7 — a field a role cannot see is ABSENT from the payload, never hidden
+    // in CSS. A dispatcher's page never carries the fuel cost or the pay
+    // percentage, so the computed line has nothing to render even if somebody
+    // reaches for it in the browser.
+    const economics = mayeeFinancials
+      ? await tx.companySettings
+          .findFirst({
+            where: scope.companyId ? { companyId: scope.companyId } : {},
+            select: { defaultFuelCostPerMileCents: true },
+          })
+          .then((settings) => ({
+            fuelCostPerMileCents: settings?.defaultFuelCostPerMileCents ?? 55,
+            // Until DriverPayRule rows exist (Phase 3 owns settlements), the
+            // line uses the group's usual split. It is an ESTIMATE under the
+            // rate field, not a number anybody is paid from.
+            driverPayPercentBps: 2800,
+          }))
+      : null
+
+    return { companies, brokers, trucks, drivers, places, economics }
+  })
+
+  const authorities = data.companies.map((company) => ({
+    value: company.id,
+    label: company.name,
+  }))
+  const remembered = await lastUsedAuthority()
+  const defaultAuthority =
+    remembered && authorities.some((option) => option.value === remembered)
+      ? remembered
+      : (authorities[0]?.value ?? '')
+
+  return (
+    <>
+      <div className="flex items-baseline justify-between gap-z4 border-b border-border bg-surface px-gutter py-z3">
+        <h1 className="text-lg font-medium text-ink">{t('loads.new')}</h1>
+        <p className="text-xs text-ink-3">{t('loads.newHint')}</p>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto bg-surface-2 px-gutter py-z5">
+        <CreateLoadForm
+          authorities={authorities}
+          defaultAuthority={defaultAuthority}
+          brokers={data.brokers.map((broker) => broker.name)}
+          trucks={data.trucks.map((truck) => ({
+            value: truck.id,
+            label: truck.unitNumber,
+          }))}
+          drivers={data.drivers.map((driver) => ({
+            value: driver.id,
+            label: `${driver.lastName}, ${driver.firstName}`,
+          }))}
+          places={data.places.map((place) => place.name)}
+          economics={data.economics}
+          labels={{
+            authority: t('ref.authority'),
+            broker: t('loads.column.customer'),
+            truck: t('loads.column.truck'),
+            driver: t('loads.column.driver'),
+            unassigned: t('loads.unassigned'),
+            pickup: t('loads.column.pickup'),
+            delivery: t('loads.column.delivery'),
+            pickupDate: t('loads.pickupDate'),
+            datePlaceholder: t('loads.datePlaceholder'),
+            dateHint: t('loads.dateHint'),
+            deliveryDate: t('loads.deliveryDate'),
+            miles: t('loads.miles'),
+            rate: t('loads.column.rate'),
+            rpm: t('loads.rpm'),
+            driverPay: t('loads.driverPay'),
+            fuel: t('loads.estFuel'),
+            profit: t('loads.estProfit'),
+            rateCon: t('loads.rateCon'),
+            rateConHint: t('loads.rateConHint'),
+            preparing: t('upload.preparing'),
+            uploading: t('upload.uploading'),
+            uploaded: t('upload.done'),
+            uploadFailed: t('upload.failed'),
+            createOnMiss: t('loads.createOnMiss'),
+            placeHint: t('loads.placeHint'),
+            save: t('loads.save'),
+            cancel: t('ref.cancel'),
+          }}
+        />
+      </div>
+    </>
+  )
+}

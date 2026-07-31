@@ -2,7 +2,11 @@
   "rules": [
     {
       "allowed": {
-        "origins": ["http://localhost:3000", "http://localhost:8788"],
+        "origins": [
+          "http://localhost:3000",
+          "http://localhost:8788",
+          "https://zebra-dev.tajikcargollc.workers.dev"
+        ],
         "methods": ["PUT", "GET", "HEAD"],
         "headers": ["content-type", "content-length", "x-amz-checksum-sha256"]
       },

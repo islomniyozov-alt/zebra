@@ -121,7 +121,7 @@ export interface AuditCapableTx {
   [model: string]: unknown
 }
 
-interface AuditScope {
+export interface AuditScope {
   tx: AuditCapableTx
   /**
    * Supplied by `runInOrg`, not by the caller. Attribution used to carry its
@@ -130,6 +130,36 @@ interface AuditScope {
    */
   organizationId: string
   attribution: WriteAttribution
+  /**
+   * Audit rows waiting to be written, flushed once before commit.
+   *
+   * WHY BUFFER. Each audited write used to cost four statements — SAVEPOINT,
+   * the write, the audit INSERT, RELEASE — so six writes cost twenty-four.
+   * Measured on the deployed worker, booking a load took **260ms of CPU and
+   * 9.4 seconds of wall clock**: the work was nothing and the waiting was
+   * everything, because every statement is a round trip to Neon. Buffering
+   * makes it six statements plus one savepoint-wrapped multi-row insert.
+   *
+   * WHAT DOES NOT CHANGE, and this is the part worth guarding:
+   *
+   *   * The rows still ride the CALLER'S transaction. A rolled-back write
+   *     still leaves no audit row claiming it happened (Phase 1 §8).
+   *   * The insert is still behind a savepoint, so a failed audit cannot
+   *     poison the caller's transaction.
+   *   * A failure is still loud and countable. Buffering changes when the
+   *     insert happens, not whether anyone hears about it.
+   *
+   * The one real cost: a failure is discovered at flush rather than at the
+   * write that caused it. `flushAuditBuffer` names the models and operations
+   * the buffer actually held, so a single-model transaction — almost all of
+   * them — reports exactly what it did before.
+   */
+  buffer: BufferedEntry[]
+}
+
+interface BufferedEntry extends PendingEntry {
+  model: string
+  operation: string
 }
 
 /**
@@ -395,11 +425,59 @@ function isRow(value: unknown): value is Row {
 
 let savepointCounter = 0
 
-async function writeEntries(
+/**
+ * Queue audit rows. Nothing reaches Postgres here.
+ *
+ * The insert happens once, in `flushAuditBuffer`, immediately before the
+ * caller's transaction commits. See `AuditScope.buffer` for why.
+ */
+function bufferEntries(
   scope: AuditScope,
   model: string,
   operation: string,
   entries: PendingEntry[],
+): void {
+  if (entries.length === 0) return
+  if (isUnattributed(scope.attribution)) return
+
+  for (const entry of entries) {
+    scope.buffer.push({ ...entry, model, operation })
+  }
+}
+
+/**
+ * Write every buffered row, once, behind one savepoint, before commit.
+ *
+ * Called by `runInOrg` after the caller's work returns and while the
+ * transaction is still open — which is the whole point. Outside it, the rows
+ * would survive a rollback and claim writes that never happened.
+ */
+export async function flushAuditBuffer(scope: AuditScope): Promise<void> {
+  const entries = scope.buffer.splice(0)
+  if (entries.length === 0) return
+
+  // The failure report names what was actually in the buffer rather than a
+  // placeholder. One transaction usually touches one model, so the common
+  // case reads exactly as it did before buffering — `Load` / `update`, not
+  // `<buffered>` / `flush`. A mixed transaction lists what it held, which is
+  // still what an investigation needs.
+  await writeEntries(
+    scope,
+    distinct(entries.map((entry) => entry.model)),
+    distinct(entries.map((entry) => entry.operation)),
+    entries,
+  )
+}
+
+function distinct(values: string[]): string {
+  return [...new Set(values)].sort().join(',')
+}
+
+async function writeEntries(
+  scope: AuditScope,
+  model: string,
+  operation: string,
+  entries: BufferedEntry[],
 ): Promise<void> {
   if (entries.length === 0) return
 
@@ -431,7 +509,10 @@ async function writeEntries(
         companyId: entry.companyId,
         userId: attribution.userId,
         action: entry.action,
-        entityType: model,
+        // The entry's own model, not the caller's label — one flush carries
+        // rows for Load, LoadStop and LoadStatusEvent alike, and each row has
+        // to say which table it is about.
+        entityType: entry.model,
         entityId: entry.entityId,
         changes: entry.changes,
         ip: attribution.ip ?? null,
@@ -658,7 +739,9 @@ export const auditExtension = Prisma.defineExtension({
           }
         }
 
-        await writeEntries(scope, model, operation, entries)
+        // Queued, not written. `runInOrg` flushes the whole buffer in one
+        // insert before the transaction commits — see `AuditScope.buffer`.
+        bufferEntries(scope, model, operation, entries)
         return result
       },
     },
