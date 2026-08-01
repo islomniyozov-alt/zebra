@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v3 — §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
+**Status:** v4 — §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -208,11 +208,28 @@ Tracking: `-0.01em` on `--z-text-xl` and above. Zero elsewhere.
 
 A user preference persisted per user, defaulting to Standard.
 
-| Mode        | Row height | Body size |
-| ----------- | ---------- | --------- |
-| Compact     | 32px       | 12px      |
-| Standard    | 36px       | 12px      |
-| Comfortable | 44px       | 13px      |
+| Mode        | Row height | Body size | Cell padding |
+| ----------- | ---------- | --------- | ------------ |
+| Compact     | 32px       | 12px      | 4px 12px     |
+| Standard    | 36px       | 12px      | 8px 12px     |
+| Comfortable | 44px       | 13px      | 12px 12px    |
+
+**Row height is a MINIMUM, and the vertical cell padding is what moves.**
+
+_Amended 2026-08-01. The reason, measured on the deployed worker: with §5's
+fixed 8px vertical cell padding, a Loads row carrying a status badge renders at
+39px — taller than Standard's 36px and Compact's 32px both. Changing only
+`--z-row-height` therefore changed nothing at all. Compact and Standard both
+measured 39px and the preference was a control that appeared to work and did
+not. Moving the padding with the mode is what there is to give: Compact now
+measures 32px, Standard 39px._
+
+_Standard keeps §5's 8px exactly, so the table above does not contradict the
+one above it — it says which of §5's numbers is fixed and which is the
+Standard case of a scale. The literal 36px Standard row remains unreachable
+while a badge sits in the row; the number stays as the target it always was,
+and the honest claim a check can make is that Compact rows are shorter than
+Standard ones._
 
 ### 5.2 Radius
 
