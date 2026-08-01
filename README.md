@@ -40,6 +40,143 @@ Two, and they are never selected implicitly.
 connection string names an endpoint, not a branch, so the target cannot be
 inferred from the URL — `prisma.config.ts` refuses to guess and fails closed.
 
+## Production bring-up
+
+The parallel run puts real freight, real CDL numbers and real rates in
+production, and none of that belongs on the `dev` branch that agents and tests
+write to. This is the order to bring production up in. **Steps marked
+(account)** cannot be done from this repository — they need the Cloudflare,
+Neon or Resend dashboard, or DNS.
+
+Each step assumes the ones above it.
+
+1. **(account) Two new R2 tokens.** Cloudflare → R2 → Manage R2 API Tokens.
+   One scoped to `zebra-docs-dev`, one to `zebra-docs`, both **Object Read &
+   Write** — the worker never needs more. Put the dev pair in `.env` and on the
+   dev worker now; hold the production pair for step 4. **Delete the old token
+   last**: a presigned URL already in flight is signed with it.
+
+2. **(account) `zebra_app` on the production branch.** The migration creates
+   policies and grants, not the login role — the role must exist first, exactly
+   as it does on dev:
+
+   ```sql
+   -- as neondb_owner, on the production branch
+   CREATE ROLE zebra_app WITH LOGIN PASSWORD '<new>';
+   GRANT USAGE ON SCHEMA public TO zebra_app;
+   ```
+
+   Nothing else. No table grants here — every migration grants its own tables,
+   and a blanket `GRANT ALL` would hand `zebra_app` the DDL it must not have.
+
+3. **Migrate production, from empty.**
+
+   ```bash
+   NEON_BRANCH=production NODE_ENV=production ALLOW_PROD_MIGRATION=1 \
+     DIRECT_DATABASE_URL='<production DIRECT url>' npx prisma migrate deploy
+   ```
+
+   `ALLOW_PROD_MIGRATION` goes on that command and never in `.env`;
+   `prisma.config.ts` refuses all three ways of getting this wrong (no branch
+   declared, branch and `NODE_ENV` disagreeing, pooled URL). Proof it worked is
+   `prisma migrate status` reporting 12 applied and the migrations' own `DO`
+   blocks not raising — they assert RLS is enabled, forced and policied.
+
+4. **Production worker secrets.** `--env production` on every one of them; a
+   forgotten flag writes the dev worker's secret instead and nothing says so.
+
+   ```bash
+   printf '%s\n' "<url>"     | npx wrangler secret put DATABASE_URL        --env production
+   printf '%s\n' "<secret>"  | npx wrangler secret put AUTH_SECRET         --env production
+   printf '%s\n' "<id>"      | npx wrangler secret put R2_ACCOUNT_ID       --env production
+   printf '%s\n' "<key id>"  | npx wrangler secret put R2_ACCESS_KEY_ID    --env production
+   printf '%s\n' "<secret>"  | npx wrangler secret put R2_SECRET_ACCESS_KEY --env production
+   printf '%s\n' "<url>"     | npx wrangler secret put R2_ENDPOINT         --env production
+   printf '%s\n' "<key>"     | npx wrangler secret put RESEND_API_KEY      --env production
+   ```
+
+   `DATABASE_URL` is `zebra_app` at the **pooled** production endpoint, with no
+   `channel_binding` parameter — the WebSocket driver does not speak it and the
+   failure is a connection that hangs rather than one that errors. `AUTH_SECRET`
+   is **fresh**: sharing dev's would make a dev session cookie valid against
+   production. `R2_BUCKET` and `NEON_BRANCH` are not secrets and are already in
+   `wrangler.jsonc`.
+
+   Both shell traps from _Rotating them_ below apply to every line here.
+
+5. **(account) CORS on `zebra-docs`.** With a temporary **Admin Read & Write**
+   token, deleted straight afterwards:
+
+   ```bash
+   R2_ACCESS_KEY_ID=<admin> R2_SECRET_ACCESS_KEY=<admin> \
+     node -r dotenv/config scripts/r2-cors.mjs --apply \
+     --bucket zebra-docs --origin https://<production origin>
+   ```
+
+   The app's own token gets `403 AccessDenied` on this call, which is correct —
+   bucket configuration is not the worker's business. Without the rule, browser
+   uploads fail with nothing useful in any log while terminal uploads work.
+
+6. **(account) Verify `tajikcargollc.com` in Resend** — DKIM CNAMEs and an SPF
+   TXT record. Until it verifies, production mail from `no-reply@` is refused,
+   which is the failure you want: the alternative is silently sending from a
+   shared address.
+
+7. **Seed production.**
+
+   ```bash
+   NEON_BRANCH=production SEED_OWNER_PASSWORD='<a real password>' \
+     DIRECT_DATABASE_URL='<production DIRECT url>' npm run db:seed
+   ```
+
+   The seed hashes that password once and the owner row is an upsert whose
+   `update` is empty — a second seed will not change it — so it is a real one
+   from the start. Left unset, the seed mints one and prints it exactly once.
+   `SEED_OWNER_EMAIL` decides who the owner is; it defaults to the address in
+   `prisma/seed.ts`. The isolation-counterpart organization is skipped
+   outside dev by the seed itself (`prisma/seed.ts` — it prints
+   `skipping the isolation counterpart — never in production`).
+
+8. **Deploy and live-check.**
+
+   ```bash
+   npm run deploy:prod
+   node -r dotenv/config scripts/live-check.mjs https://<production origin>
+   ```
+
+   Standing rule 1: a version ID alone is not a deploy. The live check pairs
+   every refusal with the same request made with a session, so a 401 that is
+   really a 404 cannot pass.
+
+9. **(account) Custom domain** on the `zebra` worker — dispatchers should not
+   bookmark `*.workers.dev`. Then update `APP_ORIGIN` in `wrangler.jsonc`, redeploy,
+   and add the new origin to the bucket's CORS (step 5) **before** removing the
+   old one.
+
+10. **Owner password changed through `/account`**, on production. The seed value
+    is a bootstrap credential and has been typed into a shell.
+
+11. **Prove the audit sink speaks.** The Analytics Engine binding is declared
+    per environment in `wrangler.jsonc` (bindings are _not_ inherited into a
+    named environment — the production block went without one until it was
+    caught, and a missing binding is silent by design). After the first few real
+    writes:
+
+    ```bash
+    node -r dotenv/config scripts/audit-events.mjs
+    ```
+
+    Silence is healthy only once you have seen it speak.
+
+12. **Create the real users** — each dispatcher as `DISPATCHER`, accounting as
+    `ACCOUNTING`, each setting their own password through the reset email. Set
+    `companyScopes` only for someone who genuinely works one authority; an empty
+    scope means every authority in the organization.
+
+> **Never refresh `dev` from production data.** Production now holds CDL
+> numbers, broker rates and settlement figures. Schema-only or anonymized
+> branching from here on.
+
 ## Setup
 
 `.env` comes first: `npm install` runs `prisma generate`, and `prisma.config.ts`

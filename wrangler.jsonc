@@ -84,6 +84,28 @@
       "observability": {
         "enabled": true,
       },
+
+      // WRANGLER DOES NOT INHERIT BINDINGS INTO A NAMED ENVIRONMENT.
+      //
+      // `placement` and `observability` are inheritable keys and would come
+      // down from the top level on their own. Bindings are NOT — vars,
+      // datasets, buckets and the rest are per-environment, and an omitted
+      // one is silently absent rather than an error.
+      //
+      // That is exactly how this block shipped without the audit sink.
+      // `analyticsEngine()` returns null when the binding is missing and audit
+      // keeps working — by design, so that tests and `next dev` are not
+      // broken by it — which means production would have written its audit
+      // trail to an isolate that then went away, and nothing anywhere would
+      // have said so. Found while reading Part A of the parallel-run plan
+      // against the file rather than against the intention.
+      "analytics_engine_datasets": [
+        {
+          "binding": "AUDIT_EVENTS",
+          "dataset": "zebra_audit",
+        },
+      ],
+
       "vars": {
         "NEON_BRANCH": "production",
         "R2_BUCKET": "zebra-docs",

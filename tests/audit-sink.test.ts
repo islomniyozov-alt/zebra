@@ -29,6 +29,41 @@ async function withContext<T>(
   }
 }
 
+/**
+ * wrangler.jsonc, parsed rather than grepped.
+ *
+ * The previous version of the test below searched the whole file for the
+ * binding name and passed while the PRODUCTION environment had no sink at
+ * all: bindings are not inherited into a named environment, and a `toContain`
+ * over the file cannot tell one environment from another. Parsing is what
+ * makes the per-environment claim checkable.
+ *
+ * JSONC, so line comments and trailing commas come out first. Block comments
+ * are not used in that file and are deliberately not handled — a parser that
+ * quietly accepts more than the file contains is a parser that can drift from
+ * what wrangler itself reads.
+ */
+function readWranglerConfig(): {
+  analytics_engine_datasets?: { binding: string; dataset: string }[]
+  env?: Record<
+    string,
+    { analytics_engine_datasets?: { binding: string; dataset: string }[] }
+  >
+} {
+  const raw = readFileSync('wrangler.jsonc', 'utf8')
+  const stripped = raw
+    .split('\n')
+    .map((line) => {
+      // Only a comment that starts the line's content — no URL in that file
+      // sits outside a string, but this is the cheap way to be sure.
+      const trimmed = line.trimStart()
+      return trimmed.startsWith('//') ? '' : line
+    })
+    .join('\n')
+    .replace(/,(\s*[}\]])/g, '$1')
+  return JSON.parse(stripped)
+}
+
 describe('the Analytics Engine binding', () => {
   it('is declared in wrangler.jsonc under the name the code looks for', () => {
     // The two halves of this live in different files and different languages,
@@ -38,6 +73,42 @@ describe('the Analytics Engine binding', () => {
     expect(readFileSync('src/lib/audit-sink.ts', 'utf8')).toContain(
       `'${BINDING}'`,
     )
+  })
+
+  it('is declared in EVERY environment, not just the default one', () => {
+    // Production shipped without it. `analyticsEngine()` returns null when the
+    // binding is missing and audit carries on — correct behaviour, and the
+    // reason the omission is silent. The parallel run puts real freight in
+    // production; an audit trail with no durable sink is the one thing there
+    // that cannot be reconstructed afterwards.
+    const config = readWranglerConfig()
+    const environments: [string, typeof config][] = [
+      ['(default)', config],
+      ...Object.entries(config.env ?? {}),
+    ]
+
+    for (const [name, environment] of environments) {
+      const datasets = environment.analytics_engine_datasets ?? []
+      expect(
+        datasets.map((dataset) => dataset.binding),
+        `environment ${name} has no ${BINDING} binding`,
+      ).toContain(BINDING)
+    }
+  })
+
+  it('gives each environment its own dataset', () => {
+    // Dev and production writing to one dataset would make "zero failures
+    // this week" a claim about both at once, and the acceptance criterion is
+    // about the one carrying real loads.
+    const config = readWranglerConfig()
+    const datasets = [
+      ...(config.analytics_engine_datasets ?? []),
+      ...Object.values(config.env ?? {}).flatMap(
+        (environment) => environment.analytics_engine_datasets ?? [],
+      ),
+    ].map((dataset) => dataset.dataset)
+
+    expect(new Set(datasets).size).toBe(datasets.length)
   })
 
   it('is null when there is no Cloudflare context at all', () => {
