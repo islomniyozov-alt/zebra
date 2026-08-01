@@ -19,10 +19,13 @@ export default async function RootLayout({
   // logical properties, so this one attribute is the entire right-to-left
   // implementation — there is no mirrored stylesheet to keep in step.
   //
-  // data-density is the §5.1 user preference. Standard until there is a
-  // settings screen to change it from.
+  // NO data-density here. It is a per-user preference and this layout has no
+  // user — the login screen has no density to have. The app shell sets it from
+  // the preference row; `:root` in globals.css carries Standard for everything
+  // outside the shell. Setting it here as well made the attribute ambiguous:
+  // a check reading `[data-density]` found <html> and never saw the shell.
   return (
-    <html lang={locale} dir={dir} data-density="standard">
+    <html lang={locale} dir={dir}>
       <body className="bg-surface-2 text-ink">
         <ToastProvider>{children}</ToastProvider>
       </body>

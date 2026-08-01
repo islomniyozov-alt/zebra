@@ -24,6 +24,17 @@ export function driverFields(
   t: Translate,
   authorities: readonly SelectOption[],
   mode: 'create' | 'edit',
+  /**
+   * Every truck the user may see, labelled with its authority.
+   *
+   * NOT pre-filtered to the chosen authority. On create the authority is a
+   * field in this same form, so filtering would mean either client-side
+   * javascript keeping two selects in step, or a list that is wrong until the
+   * form is submitted once. Showing all of them and refusing the mismatch in
+   * words is the honest version, and the label already says which authority
+   * each truck runs under — see `pairedTruck` in src/lib/fleet.ts.
+   */
+  trucks: readonly SelectOption[] = [],
 ): FieldSpec[] {
   const authorityField: FieldSpec[] =
     mode === 'create' && authorities.length > 0
@@ -82,6 +93,16 @@ export function driverFields(
         value: type,
         label: t(ownershipKey(type)),
       })),
+    },
+    {
+      kind: 'select',
+      name: 'assignedTruckId',
+      label: t('drivers.assignedTruck'),
+      hint: t('drivers.assignedTruckHint'),
+      options: [
+        { value: '', label: t('drivers.assignedTruckNone') },
+        ...trucks,
+      ],
     },
     { kind: 'textarea', name: 'notes', label: t('ref.notes') },
   ]

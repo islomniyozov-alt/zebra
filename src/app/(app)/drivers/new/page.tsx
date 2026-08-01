@@ -12,15 +12,39 @@ export default async function NewDriverPage() {
 
   const { t } = await getLocaleContext()
 
-  const companies = await withCurrentOrg('read', 'company', (tx, session) =>
-    tx.company.findMany({
-      where: { isActive: true, ...companyScopeFilter(session.companyScopes) },
-      orderBy: { name: 'asc' },
-      select: { id: true, name: true },
-    }),
+  // Both in one transaction: two `withCurrentOrg` calls would be two round
+  // trips to us-east-2 for one form.
+  const { companies, trucks } = await withCurrentOrg(
+    'read',
+    'company',
+    async (tx, session) => {
+      const scope = companyScopeFilter(session.companyScopes)
+      return {
+        companies: await tx.company.findMany({
+          where: { isActive: true, ...scope },
+          orderBy: { name: 'asc' },
+          select: { id: true, name: true },
+        }),
+        trucks: await tx.truck.findMany({
+          where: { ...scope, deletedAt: null, status: { not: 'SOLD' } },
+          orderBy: [{ company: { name: 'asc' } }, { unitNumber: 'asc' }],
+          select: {
+            id: true,
+            unitNumber: true,
+            company: { select: { name: true } },
+          },
+        }),
+      }
+    },
   )
 
   const authorities = companies.map((c) => ({ value: c.id, label: c.name }))
+  // The authority is IN the label, so a dispatcher can see the mismatch before
+  // the form refuses it.
+  const truckOptions = trucks.map((truck) => ({
+    value: truck.id,
+    label: `${truck.unitNumber} · ${truck.company.name}`,
+  }))
   const remembered = await lastUsedAuthority()
   const defaultAuthority =
     remembered && authorities.some((a) => a.value === remembered)
@@ -34,7 +58,7 @@ export default async function NewDriverPage() {
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto bg-surface-2 px-gutter py-z5">
         <RecordForm
-          fields={driverFields(t, authorities, 'create')}
+          fields={driverFields(t, authorities, 'create', truckOptions)}
           values={{
             companyId: defaultAuthority,
             status: 'AVAILABLE',

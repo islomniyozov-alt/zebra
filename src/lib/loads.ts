@@ -392,10 +392,12 @@ export async function applyAssignmentStatus(
     source: 'AUTOMATIC',
     userId,
     allowRewind: move.rewind,
+    // Keys, localized at render. A note written in English here is a note
+    // that stays English in the Russian timeline.
     note:
       move.to === 'DISPATCHED'
-        ? 'Truck and driver assigned'
-        : 'Assignment removed',
+        ? 'status.note.assigned'
+        : 'status.note.unassigned',
   })
 }
 

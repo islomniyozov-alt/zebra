@@ -183,6 +183,8 @@ const en = {
   'ref.error.notFound': 'That record no longer exists.',
   'ref.error.invalidYear': 'Enter a whole number in a sensible range.',
   'ref.error.invalidAuthority': 'Choose an authority you work under.',
+  'ref.error.truckOtherAuthority':
+    'That truck runs under a different authority. A driver and their truck must be under the same one — transfer the truck first, or pick another.',
   'ref.error.sameAuthority': 'It already works under that authority.',
   'ref.error.doubleOpen':
     'That asset already has an open period. Reload and try again.',
@@ -240,6 +242,10 @@ const en = {
   'drivers.cdlState': 'CDL state',
   'drivers.cdlClass': 'CDL class',
   'drivers.hireDate': 'Hire date',
+  'drivers.assignedTruck': 'Truck',
+  'drivers.assignedTruckNone': 'No truck',
+  'drivers.assignedTruckHint':
+    'The truck this driver runs. It has to be under the same authority.',
   'drivers.employment': 'Employment',
   'drivers.status.AVAILABLE': 'Available',
   'drivers.status.DISPATCHED': 'Dispatched',
@@ -382,6 +388,18 @@ const en = {
   'upload.done': 'Uploaded',
   'upload.failed': 'Upload failed',
   'upload.retry': 'Retry',
+
+  'status.note.podConfirmed': 'POD document confirmed',
+  'status.note.assigned': 'Truck and driver assigned',
+  'status.note.unassigned': 'Assignment removed',
+
+  'email.reset.subject': 'Reset your Zebra password',
+  'email.reset.intro':
+    'Somebody asked to reset the password for this Zebra account.',
+  'email.reset.action': 'Set a new password',
+  'email.reset.expiry': 'The link works once and expires in an hour.',
+  'email.reset.ignore':
+    'If it was not you, nothing has changed and you can ignore this message.',
 } as const
 
 export type MessageKey = keyof typeof en
@@ -542,6 +560,8 @@ const ru: Dictionary = {
   'ref.error.notFound': 'Эта запись больше не существует.',
   'ref.error.invalidYear': 'Введите целое число в разумных пределах.',
   'ref.error.invalidAuthority': 'Выберите перевозчика, с которым вы работаете.',
+  'ref.error.truckOtherAuthority':
+    'Этот тягач числится за другим перевозчиком. Водитель и его тягач должны быть под одним — сначала переведите тягач или выберите другой.',
   'ref.error.sameAuthority': 'Уже работает под этим перевозчиком.',
   'ref.error.doubleOpen':
     'У этого объекта уже есть открытый период. Обновите страницу и повторите.',
@@ -599,6 +619,10 @@ const ru: Dictionary = {
   'drivers.cdlState': 'Штат CDL',
   'drivers.cdlClass': 'Класс CDL',
   'drivers.hireDate': 'Дата приёма',
+  'drivers.assignedTruck': 'Тягач',
+  'drivers.assignedTruckNone': 'Без тягача',
+  'drivers.assignedTruckHint':
+    'Тягач, на котором работает водитель. Должен быть под тем же перевозчиком.',
   'drivers.employment': 'Тип занятости',
   'drivers.status.AVAILABLE': 'Свободен',
   'drivers.status.DISPATCHED': 'Назначен',
@@ -741,6 +765,18 @@ const ru: Dictionary = {
   'upload.done': 'Загружено',
   'upload.failed': 'Не удалось загрузить',
   'upload.retry': 'Повторить',
+
+  'status.note.podConfirmed': 'Документ POD подтверждён',
+  'status.note.assigned': 'Назначены тягач и водитель',
+  'status.note.unassigned': 'Назначение снято',
+
+  'email.reset.subject': 'Сброс пароля в Zebra',
+  'email.reset.intro':
+    'Кто-то запросил сброс пароля для этой учётной записи Zebra.',
+  'email.reset.action': 'Задать новый пароль',
+  'email.reset.expiry': 'Ссылка действует один раз и истекает через час.',
+  'email.reset.ignore':
+    'Если это были не вы, ничего не изменилось — просто не открывайте письмо.',
 }
 
 const fa: Dictionary = {
@@ -894,6 +930,8 @@ const fa: Dictionary = {
   'ref.error.notFound': 'این رکورد دیگر وجود ندارد.',
   'ref.error.invalidYear': 'یک عدد صحیح در بازهٔ منطقی وارد کنید.',
   'ref.error.invalidAuthority': 'شرکتی را انتخاب کنید که با آن کار می‌کنید.',
+  'ref.error.truckOtherAuthority':
+    'این کامیون زیر شرکت دیگری کار می‌کند. راننده و کامیونش باید زیر یک شرکت باشند — نخست کامیون را منتقل کنید یا کامیون دیگری برگزینید.',
   'ref.error.sameAuthority': 'هم‌اکنون زیر نظر همان شرکت است.',
   'ref.error.doubleOpen':
     'این دارایی دورهٔ باز دارد. صفحه را تازه کنید و دوباره تلاش کنید.',
@@ -951,6 +989,10 @@ const fa: Dictionary = {
   'drivers.cdlState': 'ایالت گواهی‌نامه',
   'drivers.cdlClass': 'کلاس گواهی‌نامه',
   'drivers.hireDate': 'تاریخ استخدام',
+  'drivers.assignedTruck': 'کامیون',
+  'drivers.assignedTruckNone': 'بدون کامیون',
+  'drivers.assignedTruckHint':
+    'کامیونی که این راننده می‌راند. باید زیر همان شرکت باشد.',
   'drivers.employment': 'نوع همکاری',
   'drivers.status.AVAILABLE': 'آزاد',
   'drivers.status.DISPATCHED': 'اعزام‌شده',
@@ -1092,11 +1134,38 @@ const fa: Dictionary = {
   'upload.done': 'بارگذاری شد',
   'upload.failed': 'بارگذاری ناموفق بود',
   'upload.retry': 'تلاش دوباره',
+
+  'status.note.podConfirmed': 'سند POD تأیید شد',
+  'status.note.assigned': 'کامیون و راننده تعیین شدند',
+  'status.note.unassigned': 'تعیین لغو شد',
+
+  'email.reset.subject': 'بازنشانی گذرواژهٔ زبرا',
+  'email.reset.intro':
+    'کسی بازنشانی گذرواژهٔ این حساب زبرا را درخواست کرده است.',
+  'email.reset.action': 'تعیین گذرواژهٔ تازه',
+  'email.reset.expiry':
+    'این پیوند یک‌بار کار می‌کند و پس از یک ساعت منقضی می‌شود.',
+  'email.reset.ignore':
+    'اگر شما نبودید، چیزی تغییر نکرده است و می‌توانید این پیام را نادیده بگیرید.',
 }
 
 const DICTIONARIES: Record<Locale, Dictionary> = { en, ru, fa }
 
 export type Translate = (key: MessageKey) => string
+
+/**
+ * Is this string one of our message keys?
+ *
+ * Written for the status timeline. A `LoadStatusEvent.note` is either a key
+ * this application wrote — "status.note.assigned" — or a sentence a human
+ * typed, and only the first should be translated. The membership test is the
+ * whole distinction: a cancellation reason is a sentence and cannot collide
+ * with a dotted key by accident, and a row written before Step 7 holds English
+ * prose that fails the test and is therefore shown exactly as it was stored.
+ */
+export function isMessageKey(value: string): value is MessageKey {
+  return Object.hasOwn(en, value)
+}
 
 /**
  * A translator bound to one locale.

@@ -107,17 +107,43 @@
   --radius-card: 6px; /* cards and modals */
 }
 
-/* §5.1 row density. A user preference, defaulting to Standard. */
+/* §5.1 row density. A user preference, defaulting to Standard.
+ *
+ * Both halves of the table in §5.1, not just the row height: Comfortable is
+ * 44px AND 13px body text, and a mode that only grows the row is a mode that
+ * added whitespace for nothing — which is what design rule 1 forbids. The
+ * attribute is set on the app shell by src/app/(app)/layout.tsx; :root carries
+ * the default so the auth screens, which have no user, still resolve. */
 :root,
 [data-density='standard'] {
   --z-row-height: 36px;
+  --z-body-size: var(--text-sm);
+  --z-body-line: var(--text-sm--line-height);
+  --z-cell-pad-y: 8px; /* §5's table cell padding, and Standard's */
 }
 [data-density='compact'] {
   --z-row-height: 32px;
+  --z-body-size: var(--text-sm);
+  --z-body-line: var(--text-sm--line-height);
+  --z-cell-pad-y: 4px;
 }
 [data-density='comfortable'] {
   --z-row-height: 44px;
+  --z-body-size: var(--text-base);
+  --z-body-line: var(--text-base--line-height);
+  --z-cell-pad-y: 12px;
 }
+
+/* WHY THE PADDING MOVES AND NOT ONLY THE HEIGHT.
+ *
+ * `--z-row-height` is applied as a minimum. A Loads row carries a status
+ * badge, and badge + §5's 8px cell padding is already taller than §5.1's 36px
+ * Standard row — measured at 39px on the deployed worker. So changing only
+ * the height changed NOTHING: Compact and Standard both rendered 39px and the
+ * preference was a control that did nothing. The padding is what there is to
+ * give. Standard keeps §5's 8px exactly; Compact and Comfortable move around
+ * it. §5.1's literal pixel heights remain unreachable while a badge sits in
+ * the row — flagged in the brief, not silently redefined here. */
 
 /* ===========================================================================
  * BASE

@@ -1,9 +1,19 @@
 'use server'
 
+import { headers } from 'next/headers'
 import { unauthenticatedDb } from '@/lib/auth-db'
 import { requestMetadata } from '@/lib/auth-context'
 import { requestPasswordReset, resetPassword } from '@/lib/password-reset'
+import { getLocaleContext } from '@/lib/locale'
+import { sendEmail } from '@/lib/email'
+import { resetEmail, resetLink } from '@/lib/reset-email'
 import type { MessageKey } from '@/lib/i18n'
+
+/** The host this request arrived on, when `APP_ORIGIN` is not set. */
+async function requestHost(): Promise<string | null> {
+  const list = await headers()
+  return list.get('host')
+}
 
 // The named exception: sign-in has no session, so it has no tenant to scope
 // to. See src/lib/auth-db.ts.
@@ -23,13 +33,31 @@ export async function requestResetAction(
   const outcome = await requestPasswordReset(client(), email, { ip })
   if (outcome.rateLimited) return { status: 'rate_limited' }
 
-  // DELIVERY IS NOT BUILT. §4 puts integrations, email included, out of scope
-  // for Phase 1, so there is nowhere to send the link yet. What exists is the
-  // whole mechanism: the token is generated, stored as a digest, expiring and
-  // single-use. Only the transport is missing, and wiring it does not change
-  // anything here.
-  //
-  // The answer is the same sentence whether or not the account exists.
+  // A token comes back only when the address belongs to an active account.
+  // Everything below therefore happens for SOME requests and not others — and
+  // the answer returned to the browser is identical either way, because that
+  // difference is exactly what an enumeration attack is looking for. No
+  // branch below may reach the return value, including the failures.
+  if (outcome.token) {
+    const { t, locale, dir } = await getLocaleContext()
+    const link = resetLink(outcome.token, {
+      origin: process.env.APP_ORIGIN,
+      host: await requestHost(),
+    })
+    // Not awaited into the response? It is. A Worker that returns before its
+    // subrequest finishes has the subrequest cancelled, and `waitUntil` is not
+    // reachable from a server action. The send is ~200ms and the honest cost
+    // of the feature.
+    const sent = await sendEmail(resetEmail(email, link, t, locale, dir))
+    if (!sent.ok) {
+      console.error('[zebra.reset] the link was issued but not delivered', {
+        reason: sent.reason,
+      })
+    }
+  }
+
+  // The same sentence whether or not the account exists, and whether or not
+  // Resend was reachable.
   return { status: 'sent' }
 }
 

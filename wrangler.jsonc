@@ -58,6 +58,18 @@
   "vars": {
     "NEON_BRANCH": "dev",
     "R2_BUCKET": "zebra-docs-dev",
+
+    // Where password-reset links point. A deployment fact, not a request
+    // fact: taken from the Host header, a worker reached through a preview
+    // URL would mint links back to the preview.
+    "APP_ORIGIN": "https://zebra-dev.tajikcargollc.workers.dev",
+
+    // The reset email's sender. `onboarding@resend.dev` is Resend's shared
+    // address: it works with an API key and NO verified domain, and it
+    // delivers only to the address that owns the Resend account — right for
+    // dev, wrong for production, which is why production overrides it below.
+    // RESEND_API_KEY is a secret and is set with `wrangler secret put`.
+    "RESEND_FROM": "Zebra <onboarding@resend.dev>",
   },
 
   "env": {
@@ -75,6 +87,11 @@
       "vars": {
         "NEON_BRANCH": "production",
         "R2_BUCKET": "zebra-docs",
+        "APP_ORIGIN": "https://zebra.tajikcargollc.workers.dev",
+        // Requires the domain to be verified in Resend first. Until it is,
+        // production mail will be REFUSED rather than silently sent from a
+        // shared address — which is the failure you want of the two.
+        "RESEND_FROM": "Zebra <no-reply@tajikcargollc.com>",
       },
     },
   },

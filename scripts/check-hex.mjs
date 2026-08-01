@@ -9,7 +9,10 @@ import { join, relative, sep } from 'node:path'
 // hex — `#z1` spacing tokens and cuid fragments would drown the signal.
 
 const ROOT = 'src'
-const ALLOWED = new Set(['src/app/globals.css'])
+// The token block, plus the one file that cannot reach it: an email does not
+// load globals.css, so `var(--color-ink)` there resolves to nothing. The
+// exemption is by exact path and the file explains itself at the top.
+const ALLOWED = new Set(['src/app/globals.css', 'src/lib/reset-email.ts'])
 const SKIP = new Set(['generated'])
 const HEX = /#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b/g
 

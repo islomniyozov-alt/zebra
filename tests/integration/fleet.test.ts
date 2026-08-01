@@ -700,3 +700,114 @@ describe('the audit trail these writes leave', () => {
     expect(rows[0]!.userId).toBe(userId)
   })
 })
+
+describe('a driver and their truck run under one authority', () => {
+  // §7 dispatches on truck AND driver, and both carry an authority of record —
+  // the MC number the asset runs under, the insurance covering it, the
+  // settlement it is paid from. A driver from Alpha sitting in a Bravo truck
+  // is a load running under paperwork that does not describe it, so the
+  // pairing is refused rather than quietly moving either row.
+  //
+  // STANDING RULE 11: the refusal below is paired with the identical call
+  // succeeding once the single reason for it — the authority — is removed.
+
+  it('pairs a driver with a truck under the same authority', async () => {
+    const truck = await inOrg((tx) =>
+      createTruck(tx, organizationId, {
+        companyId: alphaId,
+        unitNumber: `pair-ok-${nonce}`,
+      }),
+    )
+    const driver = await inOrg((tx) =>
+      createDriver(tx, organizationId, {
+        companyId: alphaId,
+        firstName: 'Pair',
+        lastName: `Ok ${nonce}`,
+        assignedTruckId: truck.id,
+      }),
+    )
+
+    expect(driver.assignedTruckId).toBe(truck.id)
+  })
+
+  it('refuses a truck from another authority, in words', async () => {
+    const bravoTruck = await inOrg((tx) =>
+      createTruck(tx, organizationId, {
+        companyId: bravoId,
+        unitNumber: `pair-bad-${nonce}`,
+      }),
+    )
+
+    await expect(
+      inOrg((tx) =>
+        createDriver(tx, organizationId, {
+          companyId: alphaId,
+          firstName: 'Pair',
+          lastName: `Bad ${nonce}`,
+          assignedTruckId: bravoTruck.id,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      code: 'truck_other_authority',
+      field: 'assignedTruckId',
+    })
+
+    // The pair. Same call, same driver, same truck — with the truck moved to
+    // Alpha through the one mechanism that may move it. If this does not now
+    // succeed, the refusal above proved nothing about authorities.
+    await inOrg((tx) =>
+      transferAsset(tx, organizationId, 'truck', bravoTruck.id, alphaId, {
+        reason: 'pairing test',
+        byUserId: userId,
+      }),
+    )
+    const driver = await inOrg((tx) =>
+      createDriver(tx, organizationId, {
+        companyId: alphaId,
+        firstName: 'Pair',
+        lastName: `Bad ${nonce}`,
+        assignedTruckId: bravoTruck.id,
+      }),
+    )
+    expect(driver.assignedTruckId).toBe(bravoTruck.id)
+  })
+
+  it('lets an edit clear the pairing', async () => {
+    const truck = await inOrg((tx) =>
+      createTruck(tx, organizationId, {
+        companyId: alphaId,
+        unitNumber: `pair-clear-${nonce}`,
+      }),
+    )
+    const driver = await inOrg((tx) =>
+      createDriver(tx, organizationId, {
+        companyId: alphaId,
+        firstName: 'Pair',
+        lastName: `Clear ${nonce}`,
+        assignedTruckId: truck.id,
+      }),
+    )
+
+    const cleared = await inOrg((tx) =>
+      updateDriver(tx, driver.id, {
+        firstName: 'Pair',
+        lastName: `Clear ${nonce}`,
+        assignedTruckId: '',
+      }),
+    )
+    expect(cleared.assignedTruckId).toBeNull()
+  })
+
+  it('refuses a truck that does not exist', async () => {
+    await expect(
+      inOrg((tx) =>
+        createDriver(tx, organizationId, {
+          companyId: alphaId,
+          firstName: 'Pair',
+          lastName: `Ghost ${nonce}`,
+          assignedTruckId: 'ckzzzzzzzzzzzzzzzzzzzzzzz',
+        }),
+      ),
+    ).rejects.toBeInstanceOf(ReferenceError)
+  })
+})

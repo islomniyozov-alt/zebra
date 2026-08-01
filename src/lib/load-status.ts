@@ -184,7 +184,10 @@ export async function podConfirmed(
   return transitionOperational(tx, loadId, 'POD_RECEIVED', {
     source: 'AUTOMATIC',
     userId,
-    note: 'POD document confirmed',
+    // A KEY, not a sentence. The note is rendered by the timeline, which
+    // knows the reader's locale; a string written here does not. See
+    // isMessageKey in src/lib/i18n.ts.
+    note: 'status.note.podConfirmed',
   })
 }
 

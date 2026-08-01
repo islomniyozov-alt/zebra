@@ -280,3 +280,30 @@ describe('navigationFor', () => {
     }
   })
 })
+
+describe('the shell’s own precondition', () => {
+  // §6.3 puts a company filter on every operator screen and the app shell
+  // reads the authority names to build it. A role that can sign in and cannot
+  // read a company name gets ForbiddenError from the LAYOUT, on every page —
+  // which is what a DISPATCHER got until the Phase 2 acceptance run typed
+  // /trucks/new into the URL bar and got a 500 where it expected a 404.
+
+  const OPERATOR_ROLES: Role[] = ROLES.filter((role) => role !== 'DRIVER')
+
+  it.each(OPERATOR_ROLES)('%s can read a company name', (role) => {
+    expect(can(session(role), 'read', 'company')).toBe(true)
+  })
+
+  it('and still cannot change one unless the role says so', () => {
+    // The pair, per standing rule 11: the grant above is `read` and nothing
+    // more, so this assertion is what proves it was not widened by accident.
+    expect(can(session('DISPATCHER'), 'update', 'company')).toBe(false)
+    expect(can(session('ACCOUNTING'), 'update', 'company')).toBe(false)
+    expect(can(session('OWNER'), 'update', 'company')).toBe(true)
+  })
+
+  it('does not reach the driver portal', () => {
+    // A separate shell with a separate vocabulary and no company filter.
+    expect(can(session('DRIVER'), 'read', 'company')).toBe(false)
+  })
+})

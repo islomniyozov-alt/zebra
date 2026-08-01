@@ -6,7 +6,7 @@ import { companyScopeFilter } from '@/lib/tenancy'
 import { FilterBar } from '@/components/ui/FilterBar'
 import { LoadsTable, type LoadRow } from './LoadsTable'
 import { billingLabelKey, operationalLabelKey } from '@/lib/status'
-import { readSavedViews } from '@/lib/preferences'
+import { DENSITIES, readDensity, readSavedViews } from '@/lib/preferences'
 import { SavedViews } from './SavedViews'
 import type {
   LoadBillingStatus,
@@ -33,7 +33,7 @@ export default async function LoadsPage({
   const companyParam =
     typeof params['company'] === 'string' ? params['company'] : undefined
 
-  const { rows, companyCount, savedViews } = await withCurrentOrg(
+  const { rows, companyCount, savedViews, density } = await withCurrentOrg(
     'read',
     'load',
     async (tx, session) => {
@@ -104,8 +104,9 @@ export default async function LoadsPage({
       }))
 
       const savedViews = await readSavedViews(tx, session.userId)
+      const density = await readDensity(tx, session.userId)
 
-      return { rows, companyCount, savedViews }
+      return { rows, companyCount, savedViews, density }
     },
   )
 
@@ -164,6 +165,7 @@ export default async function LoadsPage({
       {/* §7.4 — pinned above the table, not behind a menu. One click. */}
       <SavedViews
         views={savedViews}
+        density={density}
         labels={{
           save: t('views.save'),
           name: t('views.name'),
@@ -171,6 +173,11 @@ export default async function LoadsPage({
           remove: t('views.remove'),
           all: t('views.all'),
           cancel: t('ref.cancel'),
+          density: t('density.label'),
+          densities: DENSITIES.map((value) => ({
+            value,
+            label: t(`density.${value}` as never),
+          })),
         }}
       />
 

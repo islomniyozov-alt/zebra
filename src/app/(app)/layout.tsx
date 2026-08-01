@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { getSession, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { navigationFor } from '@/lib/permissions'
+import { readDensity } from '@/lib/preferences'
 import { Sidebar, type SidebarGroup } from '@/components/shell/Sidebar'
 import { Topbar, type CompanyOption } from '@/components/shell/Topbar'
 import type { MessageKey } from '@/lib/i18n'
@@ -52,16 +53,26 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // The chip colour is positional and therefore stable for a given
   // organization: the colour a dispatcher learns does not move between
   // sessions.
-  const authorities = await withCurrentOrg('read', 'company', (tx, current) =>
-    tx.company.findMany({
-      where: {
-        isActive: true,
-        ...(current.companyScopes.length > 0
-          ? { id: { in: [...current.companyScopes] } }
-          : {}),
-      },
-      orderBy: { name: 'asc' },
-      select: { id: true, name: true },
+  //
+  // The density preference rides along in the same transaction. It is one
+  // more row read on a connection that is already open, and putting it in its
+  // own `withCurrentOrg` would cost a second round trip to us-east-2 on every
+  // single page — see the arithmetic on LOAD_WRITE_TIMEOUT_MS.
+  const { authorities, density } = await withCurrentOrg(
+    'read',
+    'company',
+    async (tx, current) => ({
+      authorities: await tx.company.findMany({
+        where: {
+          isActive: true,
+          ...(current.companyScopes.length > 0
+            ? { id: { in: [...current.companyScopes] } }
+            : {}),
+        },
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true },
+      }),
+      density: await readDensity(tx, current.userId),
     }),
   )
 
@@ -72,7 +83,14 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   }))
 
   return (
-    <div className="flex h-screen overflow-hidden bg-surface-2">
+    /* §5.1 lives HERE rather than on <html>: the preference belongs to a
+     * signed-in user and the root layout has no session — the login screen has
+     * no density to have. `--z-row-height` is a custom property, so it cascades
+     * from this element to everything the shell contains. */
+    <div
+      data-density={density}
+      className="flex h-screen overflow-hidden bg-surface-2"
+    >
       <Sidebar
         groups={groups}
         appName={t('app.name')}

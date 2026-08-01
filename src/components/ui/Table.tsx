@@ -121,7 +121,9 @@ export function Table<Row>({
                       key={column.key}
                       className={cx(
                         // §5 table cell padding, and radius 0 on cells.
-                        'px-z3 py-z2 text-sm text-ink',
+                        // §5.1: the body size follows the density, so
+                        // Comfortable is 13px and the other two are 12px.
+                        'px-z3 py-[var(--z-cell-pad-y)] text-[length:var(--z-body-size)]/[var(--z-body-line)] text-ink',
                         column.align === 'end' ? 'text-end' : 'text-start',
                         column.truncate && 'max-w-[1px] truncate',
                       )}

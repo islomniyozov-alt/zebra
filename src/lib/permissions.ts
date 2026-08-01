@@ -103,6 +103,20 @@ const crud = (resource: Resource): Permission[] => [
   `${resource}:delete`,
 ]
 
+// ---------------------------------------------------------------------------
+// THE SHELL'S OWN PRECONDITION.
+//
+// §6.3 gives every operator screen a company filter, and the app shell reads
+// the authority names to build it. So every role that can open the application
+// at all needs `company:read` — without it the shell's own query throws
+// ForbiddenError on EVERY page, which is what a DISPATCHER got until the
+// Phase 2 acceptance run went looking. It reads the NAME of an authority, not
+// its settings; `company:update` stays where it was.
+//
+// The DRIVER role is deliberately not given it: the portal is a separate shell
+// with a separate vocabulary and no company filter.
+const SHELL_READ: Permission[] = [...read('company')]
+
 const OPERATIONS_READ: Permission[] = [
   ...read('dashboard'),
   ...read('dispatch'),
@@ -180,6 +194,7 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
 
   // Runs the operation and watches the numbers, but does not move money.
   MANAGER: new Set<Permission>([
+    ...SHELL_READ,
     ...OPERATIONS_READ,
     ...OPERATIONS_WRITE,
     ...FLEET_READ,
@@ -195,6 +210,7 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
   // no driver pay, and nothing under Money — which is why the Money nav group
   // does not render for them at all.
   DISPATCHER: new Set<Permission>([
+    ...SHELL_READ,
     ...OPERATIONS_READ,
     ...OPERATIONS_WRITE,
     ...FLEET_READ,
@@ -208,6 +224,7 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
   // Invoices, applies payments, runs settlements. Reads operations because an
   // invoice is built from a load; does not dispatch.
   ACCOUNTING: new Set<Permission>([
+    ...SHELL_READ,
     ...read('dashboard'),
     ...read('load'),
     ...read('calendar'),

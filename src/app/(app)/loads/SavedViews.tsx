@@ -6,9 +6,13 @@ import { usePathname, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { cx } from '@/lib/cx'
-import { deleteViewAction, saveViewAction } from './view-actions'
+import {
+  deleteViewAction,
+  saveViewAction,
+  setDensityAction,
+} from './view-actions'
 import { VIEW_INITIAL, type ViewState } from './view-state'
-import type { SavedView } from '@/lib/preferences'
+import type { Density, SavedView } from '@/lib/preferences'
 
 // §7.4 — "Saved views are first-class: a named filter set, per user, pinned to
 // the top of the table. 'My trucks today' should be one click, not four."
@@ -20,6 +24,7 @@ import type { SavedView } from '@/lib/preferences'
 
 interface Props {
   views: readonly SavedView[]
+  density: Density
   labels: {
     save: string
     name: string
@@ -27,10 +32,12 @@ interface Props {
     remove: string
     all: string
     cancel: string
+    density: string
+    densities: readonly { value: Density; label: string }[]
   }
 }
 
-export function SavedViews({ views, labels }: Props) {
+export function SavedViews({ views, density, labels }: Props) {
   const params = useSearchParams()
   const pathname = usePathname()
   const [naming, setNaming] = useState(false)
@@ -135,6 +142,32 @@ export function SavedViews({ views, labels }: Props) {
           {state.error}
         </p>
       ) : null}
+
+      {/* §6.1 puts density on this row, beside the saved views, and §5.1 makes
+       * it a per-user preference. Submits on change: a "save" button beside a
+       * three-item select is a second click to confirm something the eye has
+       * already confirmed. */}
+      <form action={setDensityAction} className="ms-auto flex items-center">
+        <label
+          htmlFor="density"
+          className="me-z2 text-xs font-medium text-ink-3"
+        >
+          {labels.density}
+        </label>
+        <select
+          id="density"
+          name="density"
+          defaultValue={density}
+          onChange={(event) => event.currentTarget.form?.requestSubmit()}
+          className="h-control-compact rounded-control border border-border-strong bg-surface px-z1 text-xs text-ink-2"
+        >
+          {labels.densities.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </form>
     </div>
   )
 }

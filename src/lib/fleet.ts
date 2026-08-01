@@ -81,6 +81,45 @@ export interface DriverInput {
   status?: DriverStatus
   employmentType?: OwnershipType
   notes?: unknown
+  /** The truck this driver runs. Must be under the same authority. */
+  assignedTruckId?: unknown
+}
+
+/**
+ * Resolve the truck a driver is paired with, refusing a cross-authority one.
+ *
+ * WHY THIS IS A REFUSAL AND NOT A CORRECTION. `Driver.companyId` and
+ * `Truck.companyId` are each an authority of record — the MC number the asset
+ * runs under, the insurance that covers it, the settlement it is paid from. A
+ * driver in one authority sitting in a truck from another is not a data-entry
+ * detail; it is a load running under paperwork that does not describe it. So
+ * the pairing is refused in words rather than silently moving either row, and
+ * the words say what to do about it: transfer the truck, which is what
+ * `transferAsset` is for, and which closes one period and opens the next.
+ *
+ * Blank clears the pairing, and clearing is always allowed.
+ */
+async function pairedTruck(
+  tx: TxClient,
+  companyId: string,
+  value: unknown,
+): Promise<string | null> {
+  const truckId = optionalText(value)
+  if (truckId === null) return null
+
+  const truck = await tx.truck.findFirst({
+    where: { id: truckId, deletedAt: null },
+    select: { id: true, companyId: true },
+  })
+  if (!truck) {
+    throw new ReferenceError('not_found', { field: 'assignedTruckId' })
+  }
+  if (truck.companyId !== companyId) {
+    throw new ReferenceError('truck_other_authority', {
+      field: 'assignedTruckId',
+    })
+  }
+  return truck.id
 }
 
 function odometer(value: unknown): number | null {
@@ -359,6 +398,7 @@ export async function createDriver(
       status: input.status ?? 'AVAILABLE',
       employmentType: input.employmentType ?? 'OWNED',
       notes: optionalText(input.notes),
+      assignedTruckId: await pairedTruck(tx, companyId, input.assignedTruckId),
     },
   })
 
@@ -377,11 +417,20 @@ export async function updateDriver(
   id: string,
   input: Omit<DriverInput, 'companyId'>,
 ) {
+  // companyId comes from the ROW, not the form: an edit does not move an
+  // asset between authorities, and the constraint is about where this driver
+  // actually is.
   const current = await tx.driver.findUnique({
     where: { id },
-    select: { id: true },
+    select: { id: true, companyId: true },
   })
   if (!current) throw new ReferenceError('not_found')
+
+  const assignedTruckId = await pairedTruck(
+    tx,
+    current.companyId,
+    input.assignedTruckId,
+  )
 
   return tx.driver.update({
     where: { id },
@@ -397,6 +446,7 @@ export async function updateDriver(
       ...(input.status ? { status: input.status } : {}),
       ...(input.employmentType ? { employmentType: input.employmentType } : {}),
       notes: optionalText(input.notes),
+      assignedTruckId,
     },
   })
 }

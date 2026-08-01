@@ -41,6 +41,17 @@ const SHOTS = [
   { name: 'dispatch-en', path: '/dispatch', locale: 'en', authed: true },
   { name: 'dispatch-ru', path: '/dispatch', locale: 'ru', authed: true },
   { name: 'dispatch-fa-rtl', path: '/dispatch', locale: 'fa', authed: true },
+  // Step 7. The driver form gained the truck pairing, and the Loads view bar
+  // gained the density control — both are new layout and both are shot in all
+  // three locales.
+  { name: 'driver-new-en', path: '/drivers/new', locale: 'en', authed: true },
+  { name: 'driver-new-ru', path: '/drivers/new', locale: 'ru', authed: true },
+  {
+    name: 'driver-new-fa-rtl',
+    path: '/drivers/new',
+    locale: 'fa',
+    authed: true,
+  },
   { name: 'truck-new-en', path: '/trucks/new', locale: 'en', authed: true },
   { name: 'truck-new-ru', path: '/trucks/new', locale: 'ru', authed: true },
   { name: 'truck-new-fa-rtl', path: '/trucks/new', locale: 'fa', authed: true },

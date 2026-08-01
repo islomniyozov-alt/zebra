@@ -32,20 +32,41 @@ export default async function EditDriverPage({
       select: { id: true, name: true },
     })
 
+    // Only this driver's OWN authority. On edit the authority is fixed — the
+    // way to move a driver is `transferAsset`, below — so there is no reason
+    // to offer a truck this pairing would have to refuse.
+    const trucks = await tx.truck.findMany({
+      where: {
+        companyId: driver.companyId,
+        deletedAt: null,
+        status: { not: 'SOLD' },
+      },
+      orderBy: { unitNumber: 'asc' },
+      select: {
+        id: true,
+        unitNumber: true,
+        company: { select: { name: true } },
+      },
+    })
+
     const open = await currentAuthority(tx, 'driver', id)
     const openCompany = open
       ? (companies.find((c) => c.id === open.companyId)?.name ?? null)
       : null
 
-    return { driver, companies, openCompany }
+    return { driver, companies, openCompany, trucks }
   })
 
   if (!data) notFound()
-  const { driver, companies, openCompany } = data
+  const { driver, companies, openCompany, trucks } = data
 
   const mayEdit = await currentUserCan('update', 'driver')
   const mayDelete = await currentUserCan('delete', 'driver')
   const authorities = companies.map((c) => ({ value: c.id, label: c.name }))
+  const truckOptions = trucks.map((truck) => ({
+    value: truck.id,
+    label: `${truck.unitNumber} · ${truck.company.name}`,
+  }))
 
   return (
     <>
@@ -60,7 +81,7 @@ export default async function EditDriverPage({
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-surface-2 px-gutter py-z5">
         <RecordForm
-          fields={driverFields(t, authorities, 'edit')}
+          fields={driverFields(t, authorities, 'edit', truckOptions)}
           values={{
             firstName: driver.firstName,
             lastName: driver.lastName,
@@ -73,6 +94,7 @@ export default async function EditDriverPage({
             status: driver.status,
             employmentType: driver.employmentType,
             notes: driver.notes ?? '',
+            assignedTruckId: driver.assignedTruckId ?? '',
           }}
           action={updateDriverAction.bind(null, id)}
           cancelHref="/drivers"

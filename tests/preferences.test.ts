@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_SAVED_VIEWS, parseSavedViews, slugify } from '@/lib/preferences'
+import {
+  DEFAULT_DENSITY,
+  DENSITIES,
+  MAX_SAVED_VIEWS,
+  parseDensity,
+  parseSavedViews,
+  slugify,
+} from '@/lib/preferences'
 
 // The preference column is `Json` and the row is per user, so anything can end
 // up in it — a future API, a hand-edited row, a shape from before a rename.
@@ -75,6 +82,30 @@ describe('reading saved views tolerates anything', () => {
       parseSavedViews([{ slug: 'x', name: 'n'.repeat(300), query: '' }])[0]
         ?.name,
     ).toHaveLength(60)
+  })
+})
+
+describe('density (§5.1)', () => {
+  // The value ends up in a `data-density` attribute, so this parser is also
+  // the thing that stops a preference row putting arbitrary text in the DOM.
+
+  it.each(DENSITIES)('accepts %s', (mode) => {
+    expect(parseDensity(mode)).toBe(mode)
+  })
+
+  it.each([
+    ['nothing set', null],
+    ['a mode that was renamed away', 'cosy'],
+    ['a number', 3],
+    ['an object', { mode: 'compact' }],
+    ['markup', '"><script>'],
+  ])('falls back to Standard for %s', (_label, value) => {
+    expect(parseDensity(value)).toBe(DEFAULT_DENSITY)
+    expect(parseDensity(value)).toBe('standard')
+  })
+
+  it('offers exactly the three modes the design system defines', () => {
+    expect(DENSITIES).toEqual(['compact', 'standard', 'comfortable'])
   })
 })
 

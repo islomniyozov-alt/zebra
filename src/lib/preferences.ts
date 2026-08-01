@@ -21,9 +21,39 @@ import type { TxClient } from './tenancy'
 export const PREFERENCE_KEYS = {
   /** `view.loads` — the saved filter sets for the Loads table. */
   loadsViews: 'view.loads',
-  /** `density` — Step 7. Declared here so the shape is agreed before it lands. */
+  /** `density` — §5.1's row density. Landed in Step 7, as this said it would. */
   density: 'density',
 } as const
+
+// --- density (§5.1) --------------------------------------------------------
+
+export const DENSITIES = ['compact', 'standard', 'comfortable'] as const
+export type Density = (typeof DENSITIES)[number]
+
+/** What §5.1 says the default is, and what globals.css renders without help. */
+export const DEFAULT_DENSITY: Density = 'standard'
+
+/**
+ * Read a stored density, tolerating anything.
+ *
+ * An unrecognised value is `standard`, not an error and not an empty screen.
+ * The value ends up in a `data-density` attribute, so this doubles as the
+ * check that stops a preference row putting arbitrary text into the DOM.
+ */
+export function parseDensity(value: unknown): Density {
+  return DENSITIES.includes(value as Density)
+    ? (value as Density)
+    : DEFAULT_DENSITY
+}
+
+export async function readDensity(
+  tx: TxClient,
+  userId: string,
+): Promise<Density> {
+  return parseDensity(await readPreference(tx, userId, PREFERENCE_KEYS.density))
+}
+
+// --- saved views (§7.4) ----------------------------------------------------
 
 export interface SavedView {
   /** Stable, generated from the name. Used in the URL and as the row key. */

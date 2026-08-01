@@ -10,6 +10,7 @@ import {
   TONE_STRIPE,
 } from '@/lib/status'
 import { renderStopTime, ZONE_CHOICES } from '@/lib/stop-time'
+import { isMessageKey } from '@/lib/i18n'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -134,7 +135,10 @@ export default async function LoadDetailPage({
         locale,
       })?.text ?? '',
     by: event.changedBy?.name ?? null,
-    note: event.note,
+    // Ours gets translated; a human's is shown exactly as typed. §12: the
+    // system's own words are chrome and belong in the reader's language; a
+    // dispatcher's sentence is evidence and belongs verbatim.
+    note: event.note && isMessageKey(event.note) ? t(event.note) : event.note,
   }))
 
   // §7.8 — grouped by type, and "required" means required AT THIS STAGE. A

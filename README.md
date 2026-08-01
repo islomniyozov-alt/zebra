@@ -364,9 +364,40 @@ passed.** A green push is not a deploy.
 
 ## Secrets
 
-Nothing secret belongs in `wrangler.jsonc`. `vars` there holds `NEON_BRANCH` and
-`R2_BUCKET` only. Connection strings, R2 keys and `AUTH_SECRET` go in via
+Nothing secret belongs in `wrangler.jsonc`. `vars` there holds the non-secret
+configuration — `NEON_BRANCH`, `R2_BUCKET`, `APP_ORIGIN`, `RESEND_FROM`.
+Connection strings, R2 keys, `AUTH_SECRET` and `RESEND_API_KEY` go in via
 `wrangler secret put` per environment, and in `.env` locally.
+
+### Email (Resend)
+
+The password-reset link is the only mail this application sends. The transport
+is `src/lib/email.ts` — one `fetch` to `https://api.resend.com/emails`, no SDK.
+
+**The API key is an account-level act and cannot be created from here.** Same
+class as the R2 token below:
+
+1. **resend.com → API Keys → Create**, with **Sending access**.
+2. `printf '%s
+' "<key>" | npx wrangler secret put RESEND_API_KEY`
+
+Until that is done the worker logs `[zebra.email] RESEND_API_KEY is not set;
+nothing was sent` and the reset screen still says the same sentence it always
+says — the answer to "reset my password" must not change based on whether the
+account exists OR on whether Resend is reachable, or it becomes the
+account-enumeration oracle the rest of the flow carefully is not.
+
+**The sender.** `RESEND_FROM` defaults to `Zebra <onboarding@resend.dev>`,
+Resend's shared address: it works with no verified domain and delivers **only
+to the address that owns the Resend account**. Right for dev, wrong for
+production — production sets `Zebra <no-reply@tajikcargollc.com>`, which
+requires the domain to be verified in Resend first (DNS: DKIM CNAMEs plus an
+SPF TXT). Until it is verified, production mail is REFUSED rather than
+silently sent from a shared address, which is the better of the two failures.
+
+**`APP_ORIGIN`** is where reset links point. It is a deployment fact, not a
+request fact: taken from the `Host` header, a worker reached through a preview
+URL would mint links back to the preview. The header is only the fallback.
 
 ### Rotating them
 

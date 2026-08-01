@@ -25,6 +25,7 @@ function read(formData: FormData) {
       | OwnershipType
       | undefined,
     notes: formData.get('notes'),
+    assignedTruckId: formData.get('assignedTruckId'),
   }
 }
 
@@ -47,6 +48,8 @@ export async function createDriverAction(
 
   await rememberAuthority(input.companyId)
   revalidatePath('/drivers')
+  // The trucks list shows who is in each truck, so a pairing changes it too.
+  revalidatePath('/trucks')
   redirect('/drivers')
 }
 
@@ -66,5 +69,6 @@ export async function updateDriverAction(
   }
 
   revalidatePath('/drivers')
+  revalidatePath('/trucks')
   redirect('/drivers')
 }

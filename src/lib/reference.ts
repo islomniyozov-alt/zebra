@@ -23,6 +23,8 @@ export type ReferenceFailure =
   | 'invalid_authority'
   /** Restoring a removed asset whose number a live one has since taken. */
   | 'number_taken_since'
+  /** Pairing a driver with a truck that runs under a different authority. */
+  | 'truck_other_authority'
 
 export class ReferenceError extends Error {
   readonly code: ReferenceFailure
@@ -51,6 +53,7 @@ export const REFERENCE_ERROR_KEYS: Record<ReferenceFailure, MessageKey> = {
   invalid_year: 'ref.error.invalidYear',
   invalid_authority: 'ref.error.invalidAuthority',
   number_taken_since: 'ref.error.numberTakenSince',
+  truck_other_authority: 'ref.error.truckOtherAuthority',
 }
 
 /**
