@@ -95,11 +95,12 @@ Each step assumes the ones above it.
    printf '%s\n' "<key>"     | npx wrangler secret put RESEND_API_KEY      --env production
    ```
 
-   `DATABASE_URL` is `zebra_app` at the **pooled** production endpoint, with no
-   `channel_binding` parameter — the WebSocket driver does not speak it and the
-   failure is a connection that hangs rather than one that errors. `AUTH_SECRET`
-   is **fresh**: sharing dev's would make a dev session cookie valid against
-   production. `R2_BUCKET` and `NEON_BRANCH` are not secrets and are already in
+   `DATABASE_URL` is `zebra_app` at the **pooled** production endpoint.
+   `sslmode=require&channel_binding=require` is what Neon hands you and it is
+   what dev has run on since Phase 1 — an earlier draft of this runbook said to
+   strip `channel_binding`, which was wrong, and is corrected here rather than
+   left to become folklore. `AUTH_SECRET` is **fresh**: sharing dev's would
+   make a dev session cookie valid against production. `R2_BUCKET` and `NEON_BRANCH` are not secrets and are already in
    `wrangler.jsonc`.
 
    Both shell traps from _Rotating them_ below apply to every line here.
@@ -125,15 +126,37 @@ Each step assumes the ones above it.
 7. **Seed production.**
 
    ```bash
-   NEON_BRANCH=production SEED_OWNER_PASSWORD='<a real password>' \
-     DIRECT_DATABASE_URL='<production DIRECT url>' npm run db:seed
+   NEON_BRANCH=production DIRECT_DATABASE_URL='<production DIRECT url>' \
+     node --import tsx -r dotenv/config prisma/seed.ts
    ```
 
-   The seed hashes that password once and the owner row is an upsert whose
-   `update` is empty — a second seed will not change it — so it is a real one
-   from the start. Left unset, the seed mints one and prints it exactly once.
-   `SEED_OWNER_EMAIL` decides who the owner is; it defaults to the address in
-   `prisma/seed.ts`. The isolation-counterpart organization is skipped
+   **Not `npm run db:seed`.** That goes through the Prisma CLI, which loads
+   `prisma.config.ts`, which refuses `NEON_BRANCH=production` unless
+   `NODE_ENV=production` _and_ `ALLOW_PROD_MIGRATION=1` are set as well — and
+   setting a flag named for migrations in order to run a seed is the kind of
+   small lie that makes a guard worthless the next time it matters. The seed
+   script reads `NEON_BRANCH` and `DIRECT_DATABASE_URL` itself and needs
+   nothing from that config, so it is invoked directly. `dotenv/config` is
+   still loaded, for `SEED_OWNER_EMAIL` and `SEED_OWNER_PASSWORD`; dotenv does
+   not overwrite a variable already set on the command line, so the two above
+   win over `.env`'s dev values.
+
+   Expect `[zebra.audit.gap] noContext` lines. A seed writes outside any
+   request, so there is no session to attribute the rows to, and the audit
+   extension says so rather than inventing one.
+
+   The seed hashes `SEED_OWNER_PASSWORD` once and the owner row is an upsert
+   whose `update` is empty — a second seed will not change it — so it is a real
+   one from the start. Left unset, the seed mints one and prints it exactly
+   once. `SEED_OWNER_EMAIL` decides who the owner is; it defaults to the
+   address in `prisma/seed.ts`.
+
+   What it leaves behind: one organization, both operating authorities, one
+   OWNER membership with no company scope (which means all of them), and
+   nothing operational. **No `Counter` rows** — the load-number series is
+   created atomically by `allocateNumber` when the first load is booked under
+   an authority, not by the seed. An empty `Counter` table on a fresh
+   production branch is the correct state, not a missing step. The isolation-counterpart organization is skipped
    outside dev by the seed itself (`prisma/seed.ts` — it prints
    `skipping the isolation counterpart — never in production`).
 

@@ -43,6 +43,12 @@ yarn-error.log*
 .env*
 !.env.example
 
+# Hand-off files for a connection string or a key, used for the length of one
+# command and deleted afterwards. Ignored so that a production URL parked here
+# for five minutes cannot be committed by an absent-minded `git add -A`.
+prod-url.txt
+*.secret.txt
+
 # vercel
 .vercel
 
