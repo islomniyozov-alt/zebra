@@ -109,7 +109,10 @@
       "vars": {
         "NEON_BRANCH": "production",
         "R2_BUCKET": "zebra-docs",
-        "APP_ORIGIN": "https://zebra.tajikcargollc.workers.dev",
+        // The custom domain. Reset links point here, so this and the DNS
+        // record have to be true at the same time — see the note in the
+        // README runbook, step 9.
+        "APP_ORIGIN": "https://tms.tajikcargollc.com",
         // Requires the domain to be verified in Resend first. Until it is,
         // production mail will be REFUSED rather than silently sent from a
         // shared address — which is the failure you want of the two.
