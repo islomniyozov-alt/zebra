@@ -103,6 +103,28 @@ Each step assumes the ones above it.
    make a dev session cookie valid against production. `R2_BUCKET` and `NEON_BRANCH` are not secrets and are already in
    `wrangler.jsonc`.
 
+   **Prove the string before you store it.** A wrong `DATABASE_URL` does not
+   fail at deploy — it fails on the first request that touches the database,
+   as a 500 with the message on the server and nothing in the browser. Both
+   ways it can be wrong were hit on this bring-up, in this order:
+
+   ```
+   TypeError: Invalid URL string          the value is not a URL at all
+   Authentication failed ... not valid    it is a URL, the password is wrong
+   ```
+
+   Each cost a deploy-and-probe cycle to identify. Two seconds beforehand says
+   which:
+
+   ```bash
+   ZEBRA_TEST_URL='postgresql://...' node -r dotenv/config scripts/check-connection.mjs
+   ```
+
+   It reports the role, host, database and whether row-level security holds on
+   that connection, and never prints the password. An application URL that
+   reports `sees N Company rows with no org set` for N > 0 is a tenancy
+   failure, not a working connection.
+
    Both shell traps from _Rotating them_ below apply to every line here.
 
 5. **(account) CORS on `zebra-docs`.** With a temporary **Admin Read & Write**
