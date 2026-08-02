@@ -171,10 +171,11 @@ Each step assumes the ones above it.
    every refusal with the same request made with a session, so a 401 that is
    really a 404 cannot pass.
 
-9. **(account) Custom domain** on the `zebra` worker — dispatchers should not
-   bookmark `*.workers.dev`. Then update `APP_ORIGIN` in `wrangler.jsonc`, redeploy,
-   and add the new origin to the bucket's CORS (step 5) **before** removing the
-   old one.
+9. **(account) Custom domain** — **PARKED.** `tajikcargollc.com` does not
+   resolve yet; neither the apex nor `tms.`. Production runs on
+   `https://zebra.tajikcargollc.workers.dev` until it does, and the four things
+   that must move together when it exists are written out below so that they
+   move together rather than one at a time.
 
 10. **Owner password changed through `/account`**, on production. The seed value
     is a bootstrap credential and has been typed into a shell.
@@ -195,6 +196,55 @@ Each step assumes the ones above it.
     `ACCOUNTING`, each setting their own password through the reset email. Set
     `companyScopes` only for someone who genuinely works one authority; an empty
     scope means every authority in the organization.
+
+### Parked: moving production to a custom domain
+
+Four values name the origin and **all four have to agree**. Moving one at a
+time gives you an application that serves on the new host while its reset
+links, its uploads or its mail still point at the old one — each failing in a
+different place, none of them loudly.
+
+Do it in this order. Steps 1 and 4 are account-level.
+
+1. **(account) Attach the domain** to the `zebra` worker (Cloudflare →
+   Workers → the worker → Settings → Domains & Routes), and confirm it
+   actually resolves before touching anything else:
+
+   ```bash
+   nslookup tms.tajikcargollc.com
+   curl -s -o /dev/null -w '%{http_code}\n' https://tms.tajikcargollc.com/login
+   ```
+
+2. **CORS: ADD the new origin, keep the old one.** Both, in the same call —
+   the script replaces the whole configuration:
+
+   ```bash
+   R2_ACCESS_KEY_ID=<admin> R2_SECRET_ACCESS_KEY=<admin> \
+     node -r dotenv/config scripts/r2-cors.mjs --apply --bucket zebra-docs \
+     --origin https://tms.tajikcargollc.com \
+     --origin https://zebra.tajikcargollc.workers.dev
+   ```
+
+   Uploads in flight are signed against the origin that minted them. Drop the
+   workers.dev origin only after a day on the new host with no upload failures.
+
+3. **`APP_ORIGIN`** in `wrangler.jsonc` (production `vars`) → the new origin,
+   then `npm run deploy:prod`. This one is safe to flip immediately: it decides
+   where reset links point and nothing else reads it.
+
+4. **(account) Verify the sending domain in Resend** (DKIM CNAMEs + SPF TXT),
+   then set `RESEND_FROM` to `Zebra <no-reply@tajikcargollc.com>` and deploy
+   again.
+
+   **This is the step that unblocks onboarding.** Until it is done, production
+   sends from `onboarding@resend.dev`, Resend's shared sender, which delivers
+   **only to the address that owns the Resend account** — the owner can reset
+   their own password and nobody else can. Runbook step 12 creates dispatchers
+   by reset email, so it cannot be completed before this.
+
+Afterwards, the checks worth running: `scripts/live-check.mjs` against the new
+origin, one document upload from a browser on the new host, and one reset
+request whose link you actually click.
 
 > **Never refresh `dev` from production data.** Production now holds CDL
 > numbers, broker rates and settlement figures. Schema-only or anonymized

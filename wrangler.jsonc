@@ -109,14 +109,25 @@
       "vars": {
         "NEON_BRANCH": "production",
         "R2_BUCKET": "zebra-docs",
-        // The custom domain. Reset links point here, so this and the DNS
-        // record have to be true at the same time — see the note in the
-        // README runbook, step 9.
-        "APP_ORIGIN": "https://tms.tajikcargollc.com",
-        // Requires the domain to be verified in Resend first. Until it is,
-        // production mail will be REFUSED rather than silently sent from a
-        // shared address — which is the failure you want of the two.
-        "RESEND_FROM": "Zebra <no-reply@tajikcargollc.com>",
+        // The workers.dev origin, deliberately, until the custom domain
+        // exists. Reset links point wherever this says and tms.tajikcargollc.com
+        // does not resolve — the apex does not either — so pointing at it
+        // would mint links to a host that never answers. The move to the
+        // custom domain is a four-line block in the README runbook, parked
+        // until there is a DNS record to hang it on.
+        "APP_ORIGIN": "https://zebra.tajikcargollc.workers.dev",
+        // `no-reply@tajikcargollc.com` needs the domain verified in Resend,
+        // and the domain does not exist yet. Rather than leave production
+        // mail refused, this is Resend's shared sender — which needs no
+        // verification and works today.
+        //
+        // WITH ONE LIMIT THAT MATTERS: onboarding@resend.dev delivers ONLY to
+        // the address that owns the Resend account. The owner can reset their
+        // own password; a dispatcher cannot be onboarded by reset email until
+        // a real sending domain is verified. That is a smaller failure than
+        // mail being refused outright, and it is not "working" — see the
+        // parked block in the README runbook.
+        "RESEND_FROM": "Zebra <onboarding@resend.dev>",
       },
     },
   },
