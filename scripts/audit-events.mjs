@@ -62,6 +62,18 @@ const response = await fetch(
 const body = await response.text()
 if (!response.ok) {
   console.error(`Analytics Engine said ${response.status}:`, body.slice(0, 400))
+  if (response.status === 401 && !process.env.CLOUDFLARE_API_TOKEN) {
+    // The token above comes out of wrangler's config file, and a `wrangler
+    // login` OAuth token expires roughly hourly. Wrangler refreshes it when it
+    // runs; this script only reads it, so an expired one gives a bare
+    // "Authentication error" that reads like a permissions problem and is not.
+    // This is a weekly command during the parallel run — it should say so.
+    console.error(
+      "\n  The token in wrangler's config has almost certainly expired.\n" +
+        '  Run any wrangler command to refresh it, then retry:\n' +
+        '    npx wrangler whoami && node scripts/audit-events.mjs',
+    )
+  }
   process.exit(1)
 }
 

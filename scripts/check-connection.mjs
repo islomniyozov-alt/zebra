@@ -29,17 +29,52 @@ if (!url) {
   process.exit(1)
 }
 
+/**
+ * Describe the value WITHOUT quoting any of it.
+ *
+ * The first version of this printed `url.slice(0, 24)` on the not-a-URL path,
+ * reasoning that 24 characters of a broken string is diagnostic and harmless.
+ * It is neither. `postgresql://zebra_app:` is 23 characters, so character 24
+ * is the first character of the password — and the strings that FAIL to parse
+ * are disproportionately the ones whose password contains a character that
+ * breaks `new URL()`. That printed two real passwords into terminal
+ * scrollback and a transcript before anybody noticed.
+ *
+ * So: shape only. Every check below is a boolean or a count, and no substring
+ * of the value reaches the output on any path.
+ */
+function describe(value) {
+  return [
+    `length ${value.length}`,
+    /^[a-z][a-z0-9+.-]*:\/\//i.test(value)
+      ? 'starts with a scheme'
+      : 'NO scheme at the start',
+    `${(value.match(/@/g) ?? []).length} "@"`,
+    /\s/.test(value) ? 'CONTAINS WHITESPACE' : 'no whitespace',
+    /[\r\n]/.test(value) ? 'CONTAINS A LINE BREAK' : 'single line',
+    /^["']|["']$/.test(value) ? 'WRAPPED IN QUOTES' : 'unquoted',
+  ].join(', ')
+}
+
+/** Nothing derived from the value may reach a log. Errors included. */
+function scrub(text) {
+  let safe = text.replaceAll(url, '<connection string>')
+  const password = url.match(/^[^:]+:\/\/[^:]+:([^@]+)@/)?.[1]
+  if (password) safe = safe.replaceAll(password, '<password>')
+  return safe
+}
+
 let parsed
 try {
   parsed = new URL(url)
 } catch {
   console.error('NOT A URL. This is the `TypeError: Invalid URL string` case.')
-  console.error(
-    `  length ${url.length}, starts ${JSON.stringify(url.slice(0, 24))}`,
-  )
+  console.error(`  ${describe(url)}`)
   console.error(
     '  Common causes: the shell command was stored instead of its output; a\n' +
-      '  quote or a carriage return came along; the clipboard was empty.',
+      '  quote or a carriage return came along; the clipboard was empty. The\n' +
+      '  value itself is deliberately not shown — a broken connection string\n' +
+      '  is still a password.',
   )
   process.exit(1)
 }
@@ -54,6 +89,33 @@ console.log('')
 neonConfig.webSocketConstructor ??= WebSocket
 neonConfig.poolQueryViaFetch = false
 const pool = new Pool({ connectionString: url })
+
+// THE LEAK THAT MATTERED, and it was not the one this file set out to fix.
+//
+// On an authentication failure the driver rejects the query — which the catch
+// below handles and scrubs — and THEN emits an unhandled `error` event on the
+// idle client. Node's default handler prints the event, which inspects the
+// client, which contains `config.connectionString`. The password goes to
+// stderr in cleartext, after a clean "FAILED to connect" that says it did not.
+//
+// Found by running this script against a URL with a canary password in it and
+// grepping the output for the canary — which is the only way to find it, since
+// every line the script itself writes is already careful.
+//
+// Two handlers, because one is the known path and the other is every path.
+pool.on('error', () => {
+  // Reported from the catch below. Swallowed here so Node does not print the
+  // client object that carries the string.
+})
+
+process.on('uncaughtException', (error) => {
+  console.error('FAILED — an error escaped after the connection attempt.')
+  console.error(
+    `  ${scrub(error instanceof Error ? error.message : String(error)).slice(0, 200)}`,
+  )
+  console.error('  (details suppressed: they carry the connection string)')
+  process.exit(1)
+})
 
 try {
   const { rows } = await pool.query(
@@ -80,7 +142,9 @@ try {
           : ' ← RLS IS NOT HOLDING ON THIS CONNECTION'),
   )
 } catch (error) {
-  const message = error instanceof Error ? error.message : String(error)
+  // Scrubbed: a driver is entitled to put the connection string it was handed
+  // into its own error message, and several do.
+  const message = scrub(error instanceof Error ? error.message : String(error))
   console.error('FAILED to connect.')
   console.error(`  ${message.split('\n').slice(0, 3).join(' ').slice(0, 300)}`)
   if (/authentication failed|password/i.test(message)) {
