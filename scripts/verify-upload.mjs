@@ -14,10 +14,14 @@ import { writeFileSync, unlinkSync } from 'node:fs'
 //                               URL that R2 then refuses
 //   the confirm round trip      the object lands and the row never appears
 //
-// So this proves all three in one pass: upload through the interface, reload,
-// and then FOLLOW THE DOWNLOAD LINK — a presigned GET that only answers if the
-// object is genuinely in the bucket. A row in the table proves the confirm
-// call; the bytes coming back prove R2 has the file.
+// So this proves all three in one pass: R2's own 200 to the browser's PUT
+// proves the CORS rule and the key pair; the document appearing on the load,
+// and surviving a reload, proves the confirm round trip wrote a row.
+//
+// It does NOT read the file back, because there is nowhere to read it from:
+// the documents panel renders the filename as text and offers no download.
+// That is a product gap, not an oversight here — flagged rather than papered
+// over with an assertion that quietly tests nothing.
 //
 // UI ONLY, no database connection. It runs against production, where the
 // direct connection string is not something to have lying around.
@@ -111,7 +115,10 @@ await Promise.all([
 ])
 record('the load opens', true, page.url().replace(BASE, ''))
 
-const before = await page.locator('a:has-text(".pdf")').count()
+// The filename is rendered as a <span>, not a link. Counting list items in the
+// documents panel is what actually tracks a document appearing.
+const rows = () => page.locator('section:has(h2) li:has(span.font-mono)')
+const before = await rows().count()
 
 // The named slot's own file input. Hydration matters: setting files before
 // React has attached the change handler uploads nothing and reports nothing.
@@ -133,7 +140,7 @@ const deadline = Date.now() + 120_000
 let after = before
 while (after <= before && Date.now() < deadline) {
   await page.waitForTimeout(3000)
-  after = await page.locator('a:has-text(".pdf")').count()
+  after = await rows().count()
 }
 
 record(
@@ -150,21 +157,20 @@ record(
 // Survives a reload: the confirm call wrote a row, not just client state.
 await page.reload({ waitUntil: 'domcontentloaded' })
 await page.waitForTimeout(3000)
-const persisted = await page.locator('a:has-text(".pdf")').count()
+const persisted = await rows().count()
 record('and survives a reload', persisted > before, `${persisted} document(s)`)
 
-// The proof that R2 actually holds it: follow the download link, which is a
-// presigned GET. A row with no object behind it fails exactly here.
-const download = page.locator('a:has-text(".pdf")').last()
-const href = await download.getAttribute('href')
-const fetched = await page.evaluate(async (url) => {
-  const response = await fetch(url, { redirect: 'follow' })
-  return { status: response.status, length: (await response.text()).length }
-}, href)
+// The confirm call wrote what the client measured, not just a name: the panel
+// shows a size, and a size of nothing would mean the row was invented.
+const named = page.locator(`li:has-text("${TAG}.pdf")`).first()
+const shown = ((await named.textContent().catch(() => '')) ?? '').replace(
+  /\s+/g,
+  ' ',
+)
 record(
-  'the bytes come back from R2',
-  fetched.status === 200 && fetched.length >= BYTES.length - 8,
-  `HTTP ${fetched.status}, ${fetched.length} bytes (sent ${BYTES.length})`,
+  'the row carries the file it was given',
+  shown.includes(`${TAG}.pdf`) && /\d+\s?(B|KB|MB)/.test(shown),
+  shown.trim().slice(0, 70) || '(not found)',
 )
 
 await page.screenshot({ path: 'screenshots/verify-upload.png' })
