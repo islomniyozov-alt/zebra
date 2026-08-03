@@ -18,10 +18,11 @@ import { writeFileSync, unlinkSync } from 'node:fs'
 // proves the CORS rule and the key pair; the document appearing on the load,
 // and surviving a reload, proves the confirm round trip wrote a row.
 //
-// It does NOT read the file back, because there is nowhere to read it from:
-// the documents panel renders the filename as text and offers no download.
-// That is a product gap, not an oversight here — flagged rather than papered
-// over with an assertion that quietly tests nothing.
+// And then it reads the file back. Clicking the filename asks the worker for a
+// sixty-second presigned GET and opens it; following that URL and comparing
+// the bytes is the only proof R2 genuinely holds the object rather than the
+// row merely claiming it does. Before flag 21 was fixed the panel rendered the
+// filename as inert text and there was nothing to click.
 //
 // UI ONLY, no database connection. It runs against production, where the
 // direct connection string is not something to have lying around.
@@ -171,6 +172,42 @@ record(
   'the row carries the file it was given',
   shown.includes(`${TAG}.pdf`) && /\d+\s?(B|KB|MB)/.test(shown),
   shown.trim().slice(0, 70) || '(not found)',
+)
+
+// --- flag 21: the file comes back out ------------------------------------
+// The signed URL is read off the API response rather than off the popup. With
+// `noopener` the popup starts life at about:blank and navigates a tick later,
+// so asking it for its address immediately gets you ':' — which is how the
+// first run of this block died.
+const minted = page.waitForResponse(
+  (response) =>
+    response.url().includes('/download-url') && response.status() === 200,
+  { timeout: 60_000 },
+)
+const opened = page.waitForEvent('popup', { timeout: 60_000 }).catch(() => null)
+await page.locator(`li:has-text("${TAG}.pdf") button`).first().click()
+
+const response = await minted.catch(() => null)
+const signedUrl = response ? ((await response.json()).url ?? null) : null
+const popup = await opened
+if (popup) await popup.close()
+
+record(
+  'the filename mints a presigned URL',
+  Boolean(signedUrl?.includes('X-Amz-Signature')),
+  signedUrl ? new URL(signedUrl).hostname : '(none minted)',
+)
+
+const fetched = signedUrl
+  ? await page.evaluate(async (url) => {
+      const answer = await fetch(url)
+      return { status: answer.status, length: (await answer.text()).length }
+    }, signedUrl)
+  : { status: 0, length: 0 }
+record(
+  'and the bytes come back from R2',
+  fetched.status === 200 && fetched.length === BYTES.length,
+  `HTTP ${fetched.status}, ${fetched.length} bytes (sent ${BYTES.length})`,
 )
 
 await page.screenshot({ path: 'screenshots/verify-upload.png' })

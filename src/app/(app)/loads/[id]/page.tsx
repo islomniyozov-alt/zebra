@@ -361,6 +361,7 @@ export default async function LoadDetailPage({
               failed: t('upload.failed'),
               none: t('loads.documentNone'),
               by: t('loads.by'),
+              downloadFailed: t('documents.downloadFailed'),
             }}
           />
 

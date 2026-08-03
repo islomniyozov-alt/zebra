@@ -47,6 +47,7 @@ interface Props {
     failed: string
     none: string
     by: string
+    downloadFailed: string
   }
 }
 
@@ -58,6 +59,31 @@ export function LoadDocuments({
   labels,
 }: Props) {
   const router = useRouter()
+  const [opening, setOpening] = useState<string | null>(null)
+  const [openError, setOpenError] = useState<string | null>(null)
+
+  /**
+   * Fetch a short-lived URL, then follow it.
+   *
+   * Two steps rather than a redirect, matching the route's own reasoning: a
+   * redirect would leave a signed R2 URL in browser history and in any
+   * referrer log on the way. `noopener` because the target is a bucket, not
+   * this application.
+   */
+  const open = async (documentId: string) => {
+    setOpening(documentId)
+    setOpenError(null)
+    try {
+      const response = await fetch(`/api/documents/${documentId}/download-url`)
+      if (!response.ok) throw new Error(String(response.status))
+      const { url } = (await response.json()) as { url: string }
+      window.open(url, '_blank', 'noopener,noreferrer')
+    } catch {
+      setOpenError(labels.downloadFailed)
+    } finally {
+      setOpening(null)
+    }
+  }
   const [busy, setBusy] = useState<string | null>(null)
   const [phase, setPhase] = useState<UploadPhase>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -87,6 +113,12 @@ export function LoadDocuments({
   return (
     <section className="rounded-card border border-border bg-surface p-z4">
       <h2 className="text-md font-medium text-ink">{labels.title}</h2>
+
+      {openError ? (
+        <p role="alert" className="mt-z2 text-sm text-danger">
+          {openError}
+        </p>
+      ) : null}
 
       <div className="mt-z3 flex flex-col gap-z3">
         {slots.map((slot) => {
@@ -134,9 +166,22 @@ export function LoadDocuments({
                       key={document.id}
                       className="flex flex-wrap items-baseline gap-z2 border-b border-border pb-z1 text-sm last:border-b-0"
                     >
-                      <span className="font-mono text-ink">
+                      {/* Flag 21. The route to read a document back has
+                       * existed since Step 4 and nothing ever called it: the
+                       * filename was a <span>, so a POD went into R2 and, from
+                       * the interface, never came out — on a screen whose whole
+                       * purpose is the document you send the broker to get
+                       * paid. A button rather than an <a>, because the URL is
+                       * minted on demand and lives sixty seconds; putting it in
+                       * an href would age it before the click. */}
+                      <button
+                        type="button"
+                        onClick={() => open(document.id)}
+                        disabled={opening === document.id}
+                        className="font-mono text-ink underline decoration-border-strong underline-offset-2 hover:text-accent disabled:text-ink-3"
+                      >
                         {document.filename}
-                      </span>
+                      </button>
                       <span className="font-mono text-xs text-ink-3">
                         {document.size}
                       </span>

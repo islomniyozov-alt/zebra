@@ -52,6 +52,14 @@ const SHOTS = [
     locale: 'fa',
     authed: true,
   },
+  // Admin → Users. New layout, so all three locales; the create form is where
+  // the credential panel lives and is worth seeing mirrored.
+  { name: 'users-en', path: '/users', locale: 'en', authed: true },
+  { name: 'users-ru', path: '/users', locale: 'ru', authed: true },
+  { name: 'users-fa-rtl', path: '/users', locale: 'fa', authed: true },
+  { name: 'user-new-en', path: '/users/new', locale: 'en', authed: true },
+  { name: 'user-new-ru', path: '/users/new', locale: 'ru', authed: true },
+  { name: 'user-new-fa-rtl', path: '/users/new', locale: 'fa', authed: true },
   { name: 'truck-new-en', path: '/trucks/new', locale: 'en', authed: true },
   { name: 'truck-new-ru', path: '/trucks/new', locale: 'ru', authed: true },
   { name: 'truck-new-fa-rtl', path: '/trucks/new', locale: 'fa', authed: true },
