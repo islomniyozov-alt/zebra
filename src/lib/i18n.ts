@@ -59,6 +59,8 @@ const en = {
   'nav.settings': 'Settings',
 
   'topbar.search': 'Search',
+  // Held, not shown: the search affordance is hidden until search exists.
+  // See src/components/shell/Topbar.tsx.
   'topbar.searchHint': 'Search loads, invoices, trucks',
   'topbar.allAuthorities': 'All authorities',
   'topbar.notifications': 'Notifications',

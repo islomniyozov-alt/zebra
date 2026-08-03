@@ -32,7 +32,6 @@ interface TopbarProps {
   userInitials: string
   /** Pre-translated. A translator closure cannot cross to a client component. */
   labels: {
-    searchHint: string
     allAuthorities: string
     authority: string
     notifications: string
@@ -60,15 +59,18 @@ export function Topbar({ companies, userInitials, labels }: TopbarProps) {
 
   return (
     <header className="flex h-topbar shrink-0 items-center gap-z4 border-b border-border bg-surface px-gutter">
-      {/* ⌘K opens this properly in Phase 2; the affordance is here now so the
-       * shell is not rearranged around it later. */}
-      <button
-        type="button"
-        className="flex h-control-compact flex-1 items-center gap-z2 rounded-control border border-border-strong bg-surface-2 px-z2 text-start text-sm text-ink-3 hover:bg-surface-3"
-      >
-        <span>{labels.searchHint}</span>
-        <kbd className="ms-auto font-mono text-xs text-ink-3">⌘K</kbd>
-      </button>
+      {/* SEARCH IS NOT BUILT, SO IT IS NOT SHOWN.
+       *
+       * This was a full-width control with a ⌘K hint and no handler, carrying
+       * a comment promising Phase 2 would wire it. Phase 2 came and went. A
+       * dispatcher on their first morning clicks it, nothing happens, and what
+       * they learn is that the application is flaky — which costs more than the
+       * missing feature does.
+       *
+       * The space is still reserved, so the shell does not rearrange around it
+       * when the real thing lands. `topbar.searchHint` stays in i18n for the
+       * same reason: three translations that would have to be written again. */}
+      <div aria-hidden className="flex-1" />
 
       {showCompanyFilter ? (
         <div

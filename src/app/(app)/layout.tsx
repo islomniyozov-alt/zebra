@@ -101,7 +101,6 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           companies={companies}
           userInitials="OW"
           labels={{
-            searchHint: t('topbar.searchHint'),
             allAuthorities: t('topbar.allAuthorities'),
             authority: t('loads.filter.authority'),
             notifications: t('topbar.notifications'),
