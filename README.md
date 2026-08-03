@@ -127,7 +127,22 @@ Each step assumes the ones above it.
 
    Both shell traps from _Rotating them_ below apply to every line here.
 
-5. **(account) CORS on `zebra-docs`.** With a temporary **Admin Read & Write**
+5. **Prove the R2 pair, then set it.** Same discipline as the connection
+   string, and for a sharper reason: a wrong R2 key does not fail until
+   somebody uploads a document, and then it fails in the BROWSER as
+   `net::ERR_FAILED`, which reads like a CORS problem. The worker's log stays
+   clean. R2's real answer is only visible outside the browser.
+
+   ```bash
+   R2_ACCESS_KEY_ID=... R2_SECRET_ACCESS_KEY=... R2_BUCKET=zebra-docs      R2_ENDPOINT=https://<account>.r2.cloudflarestorage.com      node scripts/check-r2.mjs
+   ```
+
+   It checks the shape (32 and 64 hex characters), then writes a probe object
+   and deletes it. A 403 on the PUT means the token is scoped to a different
+   bucket — which is the mistake that caused these keys to be re-issued in the
+   first place.
+
+6. **(account) CORS on `zebra-docs`.** With a temporary **Admin Read & Write**
    token, deleted straight afterwards:
 
    ```bash
@@ -140,12 +155,12 @@ Each step assumes the ones above it.
    bucket configuration is not the worker's business. Without the rule, browser
    uploads fail with nothing useful in any log while terminal uploads work.
 
-6. **(account) Verify `tajikcargollc.com` in Resend** — DKIM CNAMEs and an SPF
+7. **(account) Verify `tajikcargollc.com` in Resend** — DKIM CNAMEs and an SPF
    TXT record. Until it verifies, production mail from `no-reply@` is refused,
    which is the failure you want: the alternative is silently sending from a
    shared address.
 
-7. **Seed production.**
+8. **Seed production.**
 
    ```bash
    NEON_BRANCH=production DIRECT_DATABASE_URL='<production DIRECT url>' \
@@ -182,7 +197,7 @@ Each step assumes the ones above it.
    outside dev by the seed itself (`prisma/seed.ts` — it prints
    `skipping the isolation counterpart — never in production`).
 
-8. **Deploy and live-check.**
+9. **Deploy and live-check.**
 
    ```bash
    npm run deploy:prod
@@ -193,16 +208,16 @@ Each step assumes the ones above it.
    every refusal with the same request made with a session, so a 401 that is
    really a 404 cannot pass.
 
-9. **(account) Custom domain** — **PARKED.** `tajikcargollc.com` does not
-   resolve yet; neither the apex nor `tms.`. Production runs on
-   `https://zebra.tajikcargollc.workers.dev` until it does, and the four things
-   that must move together when it exists are written out below so that they
-   move together rather than one at a time.
+10. **(account) Custom domain** — **PARKED.** `tajikcargollc.com` does not
+    resolve yet; neither the apex nor `tms.`. Production runs on
+    `https://zebra.tajikcargollc.workers.dev` until it does, and the four things
+    that must move together when it exists are written out below so that they
+    move together rather than one at a time.
 
-10. **Owner password changed through `/account`**, on production. The seed value
+11. **Owner password changed through `/account`**, on production. The seed value
     is a bootstrap credential and has been typed into a shell.
 
-11. **Prove the audit sink speaks.** The Analytics Engine binding is declared
+12. **Prove the audit sink speaks.** The Analytics Engine binding is declared
     per environment in `wrangler.jsonc` (bindings are _not_ inherited into a
     named environment — the production block went without one until it was
     caught, and a missing binding is silent by design). After the first few real
@@ -214,7 +229,7 @@ Each step assumes the ones above it.
 
     Silence is healthy only once you have seen it speak.
 
-12. **Create the real users** — each dispatcher as `DISPATCHER`, accounting as
+13. **Create the real users** — each dispatcher as `DISPATCHER`, accounting as
     `ACCOUNTING`, each setting their own password through the reset email. Set
     `companyScopes` only for someone who genuinely works one authority; an empty
     scope means every authority in the organization.
