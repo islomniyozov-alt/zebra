@@ -594,8 +594,9 @@ Everything needs `.env`. Nothing runs against `NEON_BRANCH=production`.
 | `npm run db:generate`             | regenerate the client into `src/generated/prisma`       |
 | `npm run cf:typegen`              | regenerate `cloudflare-env.d.ts` from `wrangler.jsonc`  |
 | `npm run preview`                 | OpenNext build, then run it in the real Workers runtime |
-| `npm run deploy`                  | build and deploy to `zebra-dev`                         |
-| `npm run deploy:prod`             | build and deploy to `zebra`                             |
+| `npm run deploy:dev`              | build, stamp the commit, deploy to `zebra-dev`          |
+| `npm run deploy:prod`             | build, stamp the commit, deploy to `zebra`              |
+| `npm run check:drift`             | what each worker is running, against HEAD               |
 
 Node scripts, all pointed at the deployed worker by default:
 
@@ -638,6 +639,90 @@ password hashing above all — only surface under `preview`.
 
 **"Deployed" means the live Cloudflare version ID advanced and a live check
 passed.** A green push is not a deploy.
+
+## Verification credentials
+
+The scripts under `scripts/` that need a session — `live-check.mjs`,
+`verify-users.mjs` — choose their account from the URL they are pointed at.
+`scripts/check-credentials.mjs` owns that decision and there is exactly one
+rule in it: **production never falls back to the seed owner.**
+
+| Target                 | Reads                                      |
+| ---------------------- | ------------------------------------------ |
+| `zebra-dev`, localhost | `SEED_OWNER_EMAIL` / `SEED_OWNER_PASSWORD` |
+| anything else          | `PROD_CHECK_EMAIL` / `PROD_CHECK_PASSWORD` |
+
+An unrecognised host counts as production. A custom domain nobody has added to
+the list should demand the careful credential, not the convenient one.
+
+### The Live Check account
+
+Create it **through Admin → Users**, like any other person:
+
+- role **ADMIN** — it needs to reach the screens the check exercises
+- name it so it is obvious in the list, e.g. `Live Check`
+- leave the company scope empty
+- take the temporary password from the created panel and put it in
+  `PROD_CHECK_PASSWORD`; it never expires on its own, and nothing forces it to
+  be changed because nobody signs in interactively with it
+
+Then, for a production run:
+
+```bash
+PROD_CHECK_EMAIL=live-check@… PROD_CHECK_PASSWORD=… \
+  node -r dotenv/config scripts/live-check.mjs https://zebra.tajikcargollc.workers.dev
+```
+
+**It can be deactivated at will**, from the same Users screen, and that is the
+point of it being an ordinary account rather than a credential in a vault:
+deactivating revokes its sessions immediately, the checks start failing loudly
+on the next run, and nothing else in the application is affected. Reactivate
+when you want them back.
+
+Two reasons the owner account is not used here. It broke — the owner changed
+their production password through `/account`, which is exactly what they were
+told to do, and the live check began reporting a failure that was its own stale
+credential. And it was worse when it worked: a script signing into production
+as the account that can do everything, from a machine where the password sits
+in a dotfile beside the dev one.
+
+`verify-users.mjs` additionally refuses a production run without
+`PROD_DIRECT_DATABASE_URL`. It creates a user and deletes it again; doing that
+against production through the dev connection string would either fail or, far
+worse, half-succeed.
+
+## Deploying
+
+Two commands, and **there is no bare `npm run deploy`** — it was removed rather
+than aliased, so muscle memory cannot reach the wrong worker:
+
+```bash
+npm run deploy:dev     # zebra-dev
+npm run deploy:prod    # zebra
+```
+
+Both stamp the short commit onto the Cloudflare version with `--message`, and
+a deploy from a dirty tree is stamped `<sha>+dirty` — "which commit is live"
+has to be answerable including when the honest answer is "not one".
+
+`npm run check:drift` reads that stamp back for both workers:
+
+```
+HEAD is 927b522
+  dev         b1acc9f3  927b522 — matches HEAD
+  production  180e1ba7  eaba71e — 3 commit(s) behind HEAD, 2 file(s) under src/
+```
+
+It runs as part of `npm run check` and **always exits 0**, including when it
+shouts. Being ahead of production is the normal state of development, and a
+gate that fails on the normal state is a gate people learn to skip. It is loud
+in exactly one case — production trailing a commit that touched `src/` — and
+silent about network failure, so `npm run check` still works on a plane.
+
+The incident it exists for: the Telegram share action passed its whole check
+suite, a live check and three screenshots **on dev**, while production carried
+the previous commit and nobody noticed until the button was missing from the
+screen that mattered.
 
 ## Secrets
 

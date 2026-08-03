@@ -15,7 +15,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:check": "vitest run --project node --project workers",
-    "check": "npm run typecheck && npm run lint && npm run format:check && npm run check:hex && npm run test:check",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm run check:hex && npm run test:check && npm run check:drift",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
@@ -23,10 +23,11 @@
     "db:studio": "prisma studio",
     "cf:typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
     "preview": "opennextjs-cloudflare build && wrangler dev",
-    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
-    "deploy:prod": "opennextjs-cloudflare build && opennextjs-cloudflare deploy -- --env production",
+    "deploy:dev": "node scripts/deploy.mjs",
+    "deploy:prod": "node scripts/deploy.mjs --production",
     "db:seed": "prisma db seed",
-    "check:hex": "node scripts/check-hex.mjs"
+    "check:hex": "node scripts/check-hex.mjs",
+    "check:drift": "node scripts/check-deploy-drift.mjs"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "5.2.6",

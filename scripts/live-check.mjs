@@ -21,9 +21,14 @@
 // says out loud which assertions it could not pair.
 // ---------------------------------------------------------------------------
 
+import { credentialsFor } from './check-credentials.mjs'
+
 const BASE = process.argv[2] ?? 'https://zebra-dev.tajikcargollc.workers.dev'
-const EMAIL = process.env.SEED_OWNER_EMAIL
-const PASSWORD = process.env.SEED_OWNER_PASSWORD
+// Which account depends on which worker. Production never falls back to the
+// owner's password — see scripts/check-credentials.mjs.
+const CREDENTIALS = credentialsFor(BASE)
+const EMAIL = CREDENTIALS.ok ? CREDENTIALS.email : null
+const PASSWORD = CREDENTIALS.ok ? CREDENTIALS.password : null
 
 const results = []
 
@@ -57,10 +62,7 @@ async function check(label, path, expect, options = {}) {
  */
 async function signIn() {
   if (!EMAIL || !PASSWORD) {
-    return {
-      cookie: null,
-      reason: 'SEED_OWNER_EMAIL / SEED_OWNER_PASSWORD not set',
-    }
+    return { cookie: null, reason: CREDENTIALS.reason }
   }
 
   const { chromium } = await import('playwright')

@@ -63,7 +63,7 @@ Invoices, payments, AR, settlements, expenses, fuel, IFTA, maintenance screens, 
 | 6    | Dispatch board (§11) + Loads table upgrades                                         | this step |
 | 7    | Reset email, density persistence, polish, full acceptance run, deploy               | this step |
 
-**Deploy on day one and after every step.** Every Phase 1 blocker lived in the local-vs-workerd seam. `npm run deploy` + live check is part of each step's definition of done.
+**Deploy on day one and after every step.** Every Phase 1 blocker lived in the local-vs-workerd seam. `npm run deploy:dev` + live check is part of each step's definition of done — and `npm run check:drift` says whether production is carrying it too, because a deploy to the worker without freight on it is not a deploy.
 
 ---
 

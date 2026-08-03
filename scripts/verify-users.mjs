@@ -1,5 +1,6 @@
 import { chromium } from 'playwright'
 import { neonConfig, Pool } from '@neondatabase/serverless'
+import { isProduction, requireCredentials } from './check-credentials.mjs'
 
 // ---------------------------------------------------------------------------
 // THE USERS SCREEN, ON THE DEPLOYED WORKER.
@@ -25,7 +26,11 @@ const EMAIL = `${TAG.toLowerCase()}@example.test`
 
 neonConfig.webSocketConstructor ??= WebSocket
 neonConfig.poolQueryViaFetch = false
-const pool = new Pool({ connectionString: process.env.DIRECT_DATABASE_URL })
+const pool = new Pool({
+  connectionString: isProduction(BASE)
+    ? process.env.PROD_DIRECT_DATABASE_URL
+    : process.env.DIRECT_DATABASE_URL,
+})
 
 const results = []
 const record = (label, ok, detail) => {
@@ -52,10 +57,23 @@ const signIn = async (email, password) => {
   return { context, page, landed: page.url().replace(BASE, '') }
 }
 
-const owner = await signIn(
-  process.env.SEED_OWNER_EMAIL,
-  process.env.SEED_OWNER_PASSWORD,
-)
+// Production signs in as the Live Check ADMIN, never as the owner. And it
+// needs its OWN database URL: this script creates a user and removes it again,
+// and doing that against production through a dev connection string would
+// either fail or, worse, half-succeed.
+const CREDENTIALS = requireCredentials(BASE)
+if (
+  CREDENTIALS.target === 'production' &&
+  !process.env.PROD_DIRECT_DATABASE_URL
+) {
+  console.error(
+    'Refusing to run against production without PROD_DIRECT_DATABASE_URL.',
+    '\n  This script creates and deletes a user, and asserts against the row.',
+  )
+  process.exit(1)
+}
+
+const owner = await signIn(CREDENTIALS.email, CREDENTIALS.password)
 
 // --- create --------------------------------------------------------------
 await owner.page.goto(`${BASE}/users/new`, { waitUntil: 'domcontentloaded' })
@@ -237,9 +255,7 @@ record(
 await back.context.close()
 
 // --- the actor cannot lock themselves out --------------------------------
-const ownRow = owner.page
-  .locator(`tr:has-text("${process.env.SEED_OWNER_EMAIL}")`)
-  .first()
+const ownRow = owner.page.locator(`tr:has-text("${CREDENTIALS.email}")`).first()
 const ownControls = await ownRow.locator('button').count()
 record(
   'no deactivate control on your own row',
