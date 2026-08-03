@@ -21,6 +21,12 @@ export default async function AccountPage() {
     <>
       <div className="flex items-baseline justify-between gap-z4 border-b border-border bg-surface px-gutter py-z3">
         <h1 className="text-lg font-medium text-ink">{t('account.title')}</h1>
+        {/* NOTE FOR ANYONE AUTOMATING THIS SCREEN: this is a form, and it
+         * renders ABOVE the password form. `form button[type="submit"]`
+         * therefore matches SIGN OUT, not Change password — which is how a
+         * diagnostic fixture once signed itself out, read the login page's
+         * 200, and reported a bug that did not exist. Target the password
+         * form by a field only it has. */}
         <SignOutButton label={t('account.signOut')} />
       </div>
 

@@ -254,6 +254,89 @@ record(
 )
 await back.context.close()
 
+// --- changing a password keeps YOU in and signs the others out ------------
+//
+// The promise in changePasswordAction: "Every other session ends; this one
+// survives, so the person who just proved they own the account is not the one
+// thrown out." It had never been checked, and it is the first thing every new
+// dispatcher does.
+//
+// The selector matters. `form button[type="submit"]` matches the SIGN OUT
+// form, which renders above this one — a fixture that made that mistake
+// signed itself out, read the login page's 200, and produced an afternoon of
+// investigation into a bug that was not there.
+const staying = await signIn(EMAIL, temporary)
+const leaving = await signIn(EMAIL, temporary)
+
+// Whatever the scope IS, the change must not alter it. Asserting a specific
+// value here would be asserting something about this fixture rather than about
+// the operation — this user is created unscoped, and `[]` is correct for them.
+const scopesBefore = (
+  await pool.query(
+    `select s."companyScopes" from "Session" s join "User" u on u.id = s."userId"
+      where u.email = $1 order by s."createdAt" asc`,
+    [EMAIL],
+  )
+).rows.map((row) => JSON.stringify(row.companyScopes))
+
+await staying.page.goto(`${BASE}/account`, { waitUntil: 'domcontentloaded' })
+await staying.page.waitForTimeout(2500)
+const passwordForm = staying.page.locator(
+  'form:has(input[name="confirmation"])',
+)
+const CHANGED = `changed-${TAG.toLowerCase()}-9x`
+await passwordForm.locator('input[name="current"]').fill(temporary)
+await passwordForm.locator('input[name="password"]').fill(CHANGED)
+await passwordForm.locator('input[name="confirmation"]').fill(CHANGED)
+await passwordForm.locator('button[type="submit"]').click()
+await staying.page.waitForTimeout(14_000)
+
+const sessionRows = (
+  await pool.query(
+    `select s."revokedAt", s."companyScopes" from "Session" s
+       join "User" u on u.id = s."userId" where u.email = $1`,
+    [EMAIL],
+  )
+).rows
+record(
+  'changing a password signs out the other devices',
+  sessionRows.filter((row) => row.revokedAt !== null).length >= 1,
+  `${sessionRows.filter((row) => row.revokedAt === null).length} of ${sessionRows.length} still live`,
+)
+
+const stillIn = await staying.page.goto(`${BASE}/loads/new`, {
+  waitUntil: 'domcontentloaded',
+})
+record(
+  'and leaves the person who changed it signed in',
+  staying.page.url().includes('/loads/new'),
+  `HTTP ${stillIn?.status()} at ${staying.page.url().replace(BASE, '')}`,
+)
+
+const otherDevice = await leaving.page.goto(`${BASE}/loads`, {
+  waitUntil: 'domcontentloaded',
+})
+record(
+  'the other device is bounced to the login screen',
+  leaving.page.url().includes('/login'),
+  `HTTP ${otherDevice?.status()} at ${leaving.page.url().replace(BASE, '')}`,
+)
+
+// The scope survives it. A restricted dispatcher who changes their password
+// must not quietly widen to every authority — the question that sent an
+// afternoon into changeOwnPassword before the answer turned out to be a
+// fixture clicking Sign out.
+const scopesAfter = sessionRows.map((row) => JSON.stringify(row.companyScopes))
+record(
+  'and no session had its company scope rewritten',
+  scopesBefore.every((scope) => scopesAfter.includes(scope)) &&
+    new Set(scopesAfter).size === new Set(scopesBefore).size,
+  `${new Set(scopesAfter).size} distinct scope value(s), unchanged`,
+)
+
+await staying.context.close()
+await leaving.context.close()
+
 // --- the actor cannot lock themselves out --------------------------------
 const ownRow = owner.page.locator(`tr:has-text("${CREDENTIALS.email}")`).first()
 const ownControls = await ownRow.locator('button').count()
