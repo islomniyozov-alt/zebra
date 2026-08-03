@@ -57,6 +57,9 @@ export default async function NewUserPage() {
         <NewUserForm
           roles={roles}
           companies={companies}
+          // The same origin reset links carry, so the address handed to a new
+          // dispatcher and the address in their reset mail agree.
+          signInOrigin={process.env.APP_ORIGIN ?? null}
           translate={translate}
           labels={{
             name: t('users.name'),
@@ -70,6 +73,14 @@ export default async function NewUserPage() {
             tempPassword: t('users.tempPassword'),
             tempPasswordHint: t('users.tempPasswordHint'),
             done: t('users.tempPasswordDone'),
+            shareTelegram: t('users.share.telegram'),
+            shareCopy: t('users.share.copy'),
+            shareCopied: t('users.share.copied'),
+            shareCopyFailed: t('users.share.copyFailed'),
+            shareIntro: t('users.share.intro'),
+            shareEmail: t('users.share.email'),
+            sharePassword: t('users.share.password'),
+            shareInstruction: t('users.share.instruction'),
           }}
         />
       </div>

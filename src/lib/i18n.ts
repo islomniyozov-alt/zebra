@@ -422,6 +422,16 @@ const en = {
   'users.tempPasswordHint':
     'Shown once and never again. Send it with the sign-in link, and tell them to change it immediately — doing so ends every other session, including this password.',
   'users.tempPasswordDone': 'I have sent it',
+  'users.share.telegram': 'Share via Telegram',
+  'users.share.copy': 'Copy message',
+  'users.share.copied': 'Copied',
+  'users.share.copyFailed':
+    'Could not copy. Select the message above and copy it by hand.',
+  'users.share.intro': 'Your Zebra sign-in',
+  'users.share.email': 'Email',
+  'users.share.password': 'Temporary password',
+  'users.share.instruction':
+    'Log in, open Account, change your password immediately.',
   'users.error.nameRequired': 'A name is required.',
   'users.error.emailRequired': 'A valid email address is required.',
   'users.error.alreadyMember': 'Somebody with that address already works here.',
@@ -839,6 +849,16 @@ const ru: Dictionary = {
   'users.tempPasswordHint':
     'Показывается один раз. Отправьте его вместе со ссылкой для входа и попросите сразу сменить — смена завершает все остальные сеансы, включая этот пароль.',
   'users.tempPasswordDone': 'Отправлено',
+  'users.share.telegram': 'Отправить в Telegram',
+  'users.share.copy': 'Скопировать сообщение',
+  'users.share.copied': 'Скопировано',
+  'users.share.copyFailed':
+    'Не удалось скопировать. Выделите сообщение выше и скопируйте вручную.',
+  'users.share.intro': 'Ваш вход в Zebra',
+  'users.share.email': 'Эл. почта',
+  'users.share.password': 'Временный пароль',
+  'users.share.instruction':
+    'Войдите, откройте «Учётная запись» и сразу смените пароль.',
   'users.error.nameRequired': 'Укажите имя.',
   'users.error.emailRequired': 'Укажите корректный адрес эл. почты.',
   'users.error.alreadyMember': 'Сотрудник с таким адресом уже работает здесь.',
@@ -1250,6 +1270,16 @@ const fa: Dictionary = {
   'users.tempPasswordHint':
     'تنها یک‌بار نشان داده می‌شود. آن را همراه پیوند ورود بفرستید و بخواهید بی‌درنگ عوضش کند — این کار همهٔ نشست‌های دیگر، از جمله همین گذرواژه، را پایان می‌دهد.',
   'users.tempPasswordDone': 'فرستادم',
+  'users.share.telegram': 'ارسال با تلگرام',
+  'users.share.copy': 'رونوشت پیام',
+  'users.share.copied': 'رونوشت شد',
+  'users.share.copyFailed':
+    'رونوشت نشد. پیام بالا را برگزینید و دستی رونوشت کنید.',
+  'users.share.intro': 'ورود شما به زبرا',
+  'users.share.email': 'رایانامه',
+  'users.share.password': 'گذرواژهٔ موقت',
+  'users.share.instruction':
+    'وارد شوید، «حساب» را باز کنید و بی‌درنگ گذرواژه را عوض کنید.',
   'users.error.nameRequired': 'نام لازم است.',
   'users.error.emailRequired': 'نشانی رایانامهٔ درست لازم است.',
   'users.error.alreadyMember': 'کسی با این نشانی هم‌اکنون اینجا کار می‌کند.',

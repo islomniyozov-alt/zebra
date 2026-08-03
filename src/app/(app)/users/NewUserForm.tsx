@@ -1,10 +1,11 @@
 'use client'
 
-import { useActionState } from 'react'
+import { useActionState, useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
+import { composeCredentialMessage } from '@/lib/share-message'
 import { createUserAction } from './actions'
 import { CREATE_USER_INITIAL, type CreateUserState } from './user-state'
 
@@ -25,6 +26,14 @@ import { CREATE_USER_INITIAL, type CreateUserState } from './user-state'
 interface Props {
   roles: readonly { value: string; label: string }[]
   companies: readonly { id: string; name: string }[]
+  /**
+   * The origin to tell the new person to visit.
+   *
+   * From APP_ORIGIN on the server, so the address in the hand-over message is
+   * the same one the reset links use. Falls back to the host the admin is
+   * actually on, which is never wrong and occasionally less canonical.
+   */
+  signInOrigin: string | null
   labels: {
     name: string
     email: string
@@ -37,11 +46,25 @@ interface Props {
     tempPassword: string
     tempPasswordHint: string
     done: string
+    shareTelegram: string
+    shareCopy: string
+    shareCopied: string
+    shareCopyFailed: string
+    shareIntro: string
+    shareEmail: string
+    sharePassword: string
+    shareInstruction: string
   }
   translate: Record<string, string>
 }
 
-export function NewUserForm({ roles, companies, labels, translate }: Props) {
+export function NewUserForm({
+  roles,
+  companies,
+  signInOrigin,
+  labels,
+  translate,
+}: Props) {
   const [state, action, pending] = useActionState<CreateUserState, FormData>(
     createUserAction,
     CREATE_USER_INITIAL,
@@ -49,31 +72,11 @@ export function NewUserForm({ roles, companies, labels, translate }: Props) {
 
   if (state.created) {
     return (
-      <div className="rounded-card border border-success bg-success-soft p-z4">
-        <h2 className="text-md font-medium text-ink">{labels.created}</h2>
-        <p className="mt-z1 text-base text-ink">
-          {state.created.name}{' '}
-          <span className="font-mono text-ink-2">{state.created.email}</span>
-        </p>
-
-        <p className="mt-z4 text-xs font-semibold uppercase tracking-[0.04em] text-ink-2">
-          {labels.tempPassword}
-        </p>
-        {/* Mono, large, selectable: it will be read aloud or copied, and §4
-         * puts identifiers in mono for exactly that reason. */}
-        <p className="mt-z1 select-all break-all font-mono text-md text-ink">
-          {state.created.temporaryPassword}
-        </p>
-        <p className="mt-z2 max-w-[60ch] text-sm text-ink-2">
-          {labels.tempPasswordHint}
-        </p>
-
-        <div className="mt-z4">
-          <Link href="/users">
-            <Button variant="primary">{labels.done}</Button>
-          </Link>
-        </div>
-      </div>
+      <CreatedPanel
+        created={state.created}
+        signInOrigin={signInOrigin}
+        labels={labels}
+      />
     )
   }
 
@@ -118,5 +121,116 @@ export function NewUserForm({ roles, companies, labels, translate }: Props) {
         </Link>
       </div>
     </form>
+  )
+}
+
+/**
+ * The one screen in the application that shows a credential — and now the one
+ * that hands it over.
+ *
+ * The message is composed from the values that were just created, never from
+ * anything retyped. A 32-character base64url password with one transposed
+ * character is invisible to the eye and produces "it doesn't work" an hour
+ * later, from somebody who cannot tell you which character.
+ */
+function CreatedPanel({
+  created,
+  signInOrigin,
+  labels,
+}: {
+  created: NonNullable<CreateUserState['created']>
+  signInOrigin: string | null
+  labels: Props['labels']
+}) {
+  const [copied, setCopied] = useState(false)
+  const [copyFailed, setCopyFailed] = useState(false)
+
+  // `window.location.origin` only when APP_ORIGIN is unset. Reading it during
+  // render would differ between the server pass and the client one, so it is
+  // resolved on demand, inside the handlers, where there is always a window.
+  const originOf = () =>
+    signInOrigin ??
+    (typeof window === 'undefined' ? '' : window.location.origin)
+
+  const message = () =>
+    composeCredentialMessage(
+      originOf(),
+      created.email,
+      created.temporaryPassword,
+      {
+        intro: labels.shareIntro,
+        email: labels.shareEmail,
+        password: labels.sharePassword,
+        instruction: labels.shareInstruction,
+      },
+    )
+
+  const copy = async () => {
+    setCopyFailed(false)
+    try {
+      await navigator.clipboard.writeText(message().full)
+      setCopied(true)
+    } catch {
+      // Clipboard access can be refused by policy or by an insecure context.
+      // Saying so beats a button that appears to work and copies nothing.
+      setCopyFailed(true)
+    }
+  }
+
+  return (
+    <div className="rounded-card border border-success bg-success-soft p-z4">
+      <h2 className="text-md font-medium text-ink">{labels.created}</h2>
+      <p className="mt-z1 text-base text-ink">
+        {created.name}{' '}
+        <span className="font-mono text-ink-2">{created.email}</span>
+      </p>
+
+      <p className="mt-z4 text-xs font-semibold uppercase tracking-[0.04em] text-ink-2">
+        {labels.tempPassword}
+      </p>
+      {/* Mono, large, selectable: it will be read aloud or copied, and §4
+       * puts identifiers in mono for exactly that reason. */}
+      <p className="mt-z1 select-all break-all font-mono text-md text-ink">
+        {created.temporaryPassword}
+      </p>
+      <p className="mt-z2 max-w-[60ch] text-sm text-ink-2">
+        {labels.tempPasswordHint}
+      </p>
+
+      {/* Delivery. Telegram first because that is what this operation uses;
+       * copy second because desktop Telegram handles t.me links unevenly and a
+       * share button that opens nothing is worse than no share button.
+       *
+       * A plain <a>, not a Button-with-onClick: it is a link to another
+       * application, and middle-click and "open in new tab" should work the way
+       * every other link does. */}
+      <div className="mt-z4 flex flex-wrap items-center gap-z2">
+        <a
+          href={message().telegramHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="h-control rounded-control bg-accent px-z3 text-base font-medium leading-[32px] text-surface hover:bg-accent-hover"
+        >
+          {labels.shareTelegram}
+        </a>
+        <Button type="button" variant="secondary" onClick={copy}>
+          {copied ? labels.shareCopied : labels.shareCopy}
+        </Button>
+      </div>
+
+      {copyFailed ? (
+        <p role="alert" className="mt-z2 text-sm text-danger">
+          {labels.shareCopyFailed}
+        </p>
+      ) : null}
+
+      {/* Separate, and after. "I have sent it" is the admin's own record that
+       * the hand-over happened; it is not a consequence of clicking share. */}
+      <div className="mt-z5 border-t border-border pt-z3">
+        <Link href="/users">
+          <Button variant="primary">{labels.done}</Button>
+        </Link>
+      </div>
+    </div>
   )
 }

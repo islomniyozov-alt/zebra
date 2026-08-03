@@ -78,6 +78,62 @@ record(
   temporary ? `${temporary.length} characters, base64url` : '(nothing shown)',
 )
 
+// --- the hand-over message -----------------------------------------------
+// The whole point of the share action is that nobody retypes a 32-character
+// password. So the assertion is that the composed message carries THE SAME
+// string the panel just displayed — not that a message exists.
+const telegramHref = await owner.page
+  .locator('a[href^="https://t.me/share/url"]')
+  .first()
+  .getAttribute('href')
+  .catch(() => null)
+
+const shareParams = telegramHref
+  ? new URL(telegramHref).searchParams
+  : new URLSearchParams()
+const shareText = shareParams.get('text') ?? ''
+
+record(
+  'the Telegram share carries the real password',
+  temporary.length > 0 && shareText.includes(temporary),
+  telegramHref ? 'password present in the draft' : '(no share link)',
+)
+record(
+  'and the address and sign-in URL',
+  shareText.includes(EMAIL) &&
+    (shareParams.get('url') ?? '').startsWith('http'),
+  shareParams.get('url') ?? '(none)',
+)
+record(
+  'and the instruction, verbatim',
+  shareText.includes('change your password immediately'),
+  shareText
+    .split(String.fromCharCode(10))
+    .filter(Boolean)
+    .pop()
+    ?.slice(0, 60) ?? '(empty)',
+)
+record(
+  'and names no recipient',
+  Boolean(telegramHref) &&
+    !/[?&](to|chat|phone|user)=/.test(telegramHref ?? ''),
+  'share picker only',
+)
+
+// The clipboard fallback composes from the same function; this proves the
+// button is wired to it rather than to a second copy of the text.
+await owner.context.grantPermissions(['clipboard-read', 'clipboard-write'])
+await owner.page.locator('button:has-text("Copy message")').click()
+await owner.page.waitForTimeout(1500)
+const clipboard = await owner.page.evaluate(() =>
+  navigator.clipboard.readText(),
+)
+record(
+  'the copy fallback puts the same message on the clipboard',
+  clipboard.includes(temporary) && clipboard.includes(EMAIL),
+  `${clipboard.length} characters`,
+)
+
 await owner.page.screenshot({ path: 'screenshots/users-created.png' })
 
 // --- it is a real credential ---------------------------------------------
