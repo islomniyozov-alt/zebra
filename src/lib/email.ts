@@ -43,7 +43,10 @@ export interface EmailMessage {
 
 export type SendResult =
   | { ok: true; id: string }
-  | { ok: false; reason: 'not_configured' | 'rejected' | 'unreachable' }
+  | {
+      ok: false
+      reason: 'not_configured' | 'rejected' | 'unreachable' | 'misconfigured'
+    }
 
 export interface EmailConfig {
   apiKey: string
@@ -60,9 +63,32 @@ export interface EmailConfig {
 export function emailConfigFromEnv(
   env: Record<string, string | undefined> = process.env,
 ): EmailConfig | null {
-  const apiKey = env.RESEND_API_KEY
-  if (!apiKey) return null
-  return { apiKey, from: env.RESEND_FROM || DEFAULT_FROM }
+  const raw = env.RESEND_API_KEY
+  if (!raw) return null
+
+  // Trimmed as hygiene, and NOT as the fix for anything.
+  //
+  // Production's reset mail failed with `TypeError: Invalid header value.` and
+  // a trailing newline on this secret was the obvious suspect. It is not the
+  // culprit: workerd accepts a trailing newline in a header value, as
+  // tests/workers/email-header.test.ts asserts on the real runtime. What
+  // throws is an illegal character INSIDE the value — a key pasted across two
+  // lines, or a whole shell command landing in the secret, which has happened
+  // repeatedly here.
+  //
+  // So this trim tidies the harmless case and deliberately does not touch the
+  // harmful one: a key mangled in the middle stays mangled, keeps failing, and
+  // keeps producing the `misconfigured` reason below that names the secret
+  // instead of blaming the network.
+  const apiKey = raw.trim()
+  if (apiKey !== raw) {
+    console.warn(
+      '[zebra.email] RESEND_API_KEY had surrounding whitespace and was trimmed',
+      { trimmed: raw.length - apiKey.length },
+    )
+  }
+
+  return { apiKey, from: (env.RESEND_FROM || DEFAULT_FROM).trim() }
 }
 
 /** The part of an address that is safe to log. */
@@ -101,11 +127,24 @@ export async function sendEmail(
       }),
     })
   } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+
+    // `fetch` throws before any socket opens when a header value is illegal —
+    // a key with a newline in it, most often. That is a CONFIGURATION fault
+    // and saying "unreachable" sends whoever reads the log to the wrong place.
+    if (/invalid header|header value/i.test(detail)) {
+      console.error(
+        '[zebra.email] the request could not be built — check RESEND_API_KEY',
+        { to: domainOf(message.to), error: detail },
+      )
+      return { ok: false, reason: 'misconfigured' }
+    }
+
     // A network failure, not a rejection. Worth separating: one is Resend
     // saying no and the other is never having reached them.
     console.error('[zebra.email] could not reach Resend', {
       to: domainOf(message.to),
-      error: error instanceof Error ? error.message : String(error),
+      error: detail,
     })
     return { ok: false, reason: 'unreachable' }
   }

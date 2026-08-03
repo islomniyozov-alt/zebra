@@ -21,6 +21,24 @@ describe('configuration', () => {
     )
   })
 
+  it('trims a key that arrived with whitespace', () => {
+    // Hygiene, not a repair. Which of these actually breaks a header is asked
+    // of workerd in tests/workers/email-header.test.ts, and the answer is not
+    // the one this looks like — a trailing newline is tolerated there.
+    const withNewline = ['re_x', ''].join('\n')
+    expect(emailConfigFromEnv({ RESEND_API_KEY: withNewline })?.apiKey).toBe(
+      're_x',
+    )
+    expect(
+      emailConfigFromEnv({ RESEND_API_KEY: `  re_x${['', ''].join('\r\n')}` })
+        ?.apiKey,
+    ).toBe('re_x')
+  })
+
+  // Which values a header will actually accept belongs on workerd, not here —
+  // see tests/workers/email-header.test.ts. Node agreeing with workerd is not
+  // something to assume; it is the whole reason that project exists.
+
   it('prefers an explicit sender', () => {
     expect(
       emailConfigFromEnv({
@@ -90,6 +108,19 @@ describe('sending', () => {
       }) as unknown as typeof fetch,
     )
     expect(result).toEqual({ ok: false, reason: 'unreachable' })
+  })
+
+  it('calls a broken header a misconfiguration, not a network failure', async () => {
+    // Reporting this as `unreachable` sent a day of production reset mail
+    // into a log line that pointed at the network instead of at the secret.
+    const result = await sendEmail(
+      message,
+      { apiKey: 're_secret', from: 'Zebra <a@b.c>' },
+      (async () => {
+        throw new TypeError('Invalid header value.')
+      }) as unknown as typeof fetch,
+    )
+    expect(result).toEqual({ ok: false, reason: 'misconfigured' })
   })
 
   it('sends nothing, loudly, when there is no key', async () => {
