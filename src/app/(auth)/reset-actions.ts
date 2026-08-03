@@ -31,7 +31,13 @@ export async function requestResetAction(
   const { ip } = await requestMetadata()
 
   const outcome = await requestPasswordReset(client(), email, { ip })
-  if (outcome.rateLimited) return { status: 'rate_limited' }
+  if (outcome.rateLimited) {
+    // Logged because it is the OTHER way this request produces no email, and
+    // without it a rate-limited attempt and a delivered one look identical in
+    // the worker log. That ambiguity cost a diagnosis round trip.
+    console.warn('[zebra.reset] refused: rate limited', { ip })
+    return { status: 'rate_limited' }
+  }
 
   // A token comes back only when the address belongs to an active account.
   // Everything below therefore happens for SOME requests and not others — and

@@ -162,5 +162,19 @@ export async function sendEmail(
   }
 
   const payload = (await response.json().catch(() => ({}))) as { id?: string }
+
+  // SUCCESS SAYS SO. Every failure path above logs, and the success path used
+  // to log nothing — which made "the reset mail is working" a claim about the
+  // ABSENCE of a line, indistinguishable from a request that never attempted
+  // to send at all. Same reasoning as the audit sink: silence is only healthy
+  // once you have watched it speak.
+  //
+  // The id is Resend's, and it is the handle you give their dashboard when
+  // somebody says the mail never arrived. No address, no token, no subject.
+  console.log('[zebra.email] sent', {
+    to: domainOf(message.to),
+    id: payload.id ?? '(none returned)',
+  })
+
   return { ok: true, id: payload.id ?? '' }
 }
