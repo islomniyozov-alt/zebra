@@ -155,6 +155,36 @@ Each step assumes the ones above it.
    bucket configuration is not the worker's business. Without the rule, browser
    uploads fail with nothing useful in any log while terminal uploads work.
 
+   **On Windows, type the values — do not route them through the clipboard.**
+   Four secrets on this project have been set to the wrong thing, and every one
+   of them came from a `Get-Clipboard` line that was stored or pasted instead
+   of run. `Read-Host -AsSecureString` keeps the value out of shell history,
+   out of `.env`, and out of any file:
+
+   ```powershell
+   $id  = Read-Host 'Admin access key id'
+   $sec = Read-Host 'Admin secret access key' -AsSecureString
+   $env:R2_ACCESS_KEY_ID     = $id
+   $env:R2_SECRET_ACCESS_KEY =
+     [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+       [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
+
+   # 1. prove the pair reaches the bucket at all
+   $env:R2_BUCKET = 'zebra-docs'
+   node scripts/check-r2.mjs
+
+   # 2. set the rule, both origins, then read it back
+   node scripts/r2-cors.mjs --apply --bucket zebra-docs `
+     --origin https://zebra.tajikcargollc.workers.dev
+   node scripts/r2-cors.mjs --bucket zebra-docs
+
+   # 3. forget them, and delete the token in the dashboard
+   Remove-Item Env:R2_ACCESS_KEY_ID, Env:R2_SECRET_ACCESS_KEY
+   ```
+
+   Step 1 matters as much as step 2: an admin token scoped to the wrong bucket
+   sets CORS on a bucket nobody uploads to, and reports success doing it.
+
 7. **(account) Verify `tajikcargollc.com` in Resend** — DKIM CNAMEs and an SPF
    TXT record. Until it verifies, production mail from `no-reply@` is refused,
    which is the failure you want: the alternative is silently sending from a
