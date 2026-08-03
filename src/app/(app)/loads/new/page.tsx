@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { companyScopeFilter } from '@/lib/tenancy'
+import { companyIdScopeFilter, companyScopeFilter } from '@/lib/tenancy'
 import { CreateLoadForm } from './CreateLoadForm'
 import { lastUsedAuthority } from '../../_reference/shared'
 
@@ -20,10 +20,12 @@ export default async function NewLoadPage() {
 
   const data = await withCurrentOrg('read', 'load', async (tx, session) => {
     const scope = companyScopeFilter(session.companyScopes)
+    const companyIdScope = companyIdScopeFilter(session.companyScopes)
 
     const [companies, brokers, trucks, drivers, places] = await Promise.all([
       tx.company.findMany({
-        where: { isActive: true, ...scope },
+        // `id`, not `companyId` — Company IS the authority. See tenancy.ts.
+        where: { isActive: true, ...companyIdScope },
         orderBy: { name: 'asc' },
         select: { id: true, name: true },
       }),

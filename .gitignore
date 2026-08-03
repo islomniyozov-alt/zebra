@@ -49,6 +49,12 @@ yarn-error.log*
 prod-url.txt
 *.secret.txt
 
+# One-off reproduction scripts written at the repo root so they can import the
+# project's dependencies. They are diagnostic scaffolding, not tooling — the
+# ones worth keeping become scripts/verify-*.mjs. One rode into a commit on a
+# `git add -A` before this line existed.
+/repro*.mjs
+
 # vercel
 .vercel
 

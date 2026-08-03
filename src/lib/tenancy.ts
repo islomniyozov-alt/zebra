@@ -235,12 +235,41 @@ export function assertUserId(userId: unknown): asserts userId is string {
 
 export type CompanyScopeFilter = { companyId?: { in: string[] } }
 
+/**
+ * For any model that BELONGS to an authority — Load, Truck, Driver, Trailer.
+ *
+ * NOT for `Company` itself: that table's key is `id`, and a `companyId` on it
+ * does not exist. Use `companyIdScopeFilter` there. The two are separated
+ * because spreading the wrong one is invisible — see the note on it.
+ */
 export function companyScopeFilter(
   companyScopes: readonly string[],
 ): CompanyScopeFilter {
   return companyScopes.length === 0
     ? {}
     : { companyId: { in: [...companyScopes] } }
+}
+
+export type CompanyIdScopeFilter = { id?: { in: string[] } }
+
+/**
+ * The same restriction, expressed against `Company` itself.
+ *
+ * THIS EXISTS BECAUSE THE OTHER ONE WAS SPREAD INTO A COMPANY QUERY ON SEVEN
+ * SCREENS AND NOTHING NOTICED. `{ companyId: { in: [...] } }` is not a valid
+ * `CompanyWhereInput`, so Prisma throws at RUNTIME — and TypeScript never
+ * objects, because excess-property checking does not apply to a spread into a
+ * `where`. It compiles, it passes every test, and then it 500s for the first
+ * person whose membership is restricted to one authority.
+ *
+ * An owner has an empty scope list, so both helpers return `{}` and the fault
+ * is invisible to whoever is building the screen. It surfaced when a
+ * dispatcher scoped to a single carrier clicked Add load.
+ */
+export function companyIdScopeFilter(
+  companyScopes: readonly string[],
+): CompanyIdScopeFilter {
+  return companyScopes.length === 0 ? {} : { id: { in: [...companyScopes] } }
 }
 
 /**

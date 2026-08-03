@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { companyScopeFilter } from '@/lib/tenancy'
+import { companyIdScopeFilter } from '@/lib/tenancy'
 import { currentAuthority } from '@/lib/fleet'
 import { RecordForm } from '@/components/forms/RecordForm'
 import { AssetActions } from '../../_reference/AssetActions'
@@ -28,7 +28,11 @@ export default async function EditTruckPage({
     if (!truck) return null
 
     const companies = await tx.company.findMany({
-      where: { isActive: true, ...companyScopeFilter(session.companyScopes) },
+      // `id`, not `companyId` — Company IS the authority. See tenancy.ts.
+      where: {
+        isActive: true,
+        ...companyIdScopeFilter(session.companyScopes),
+      },
       orderBy: { name: 'asc' },
       select: { id: true, name: true },
     })

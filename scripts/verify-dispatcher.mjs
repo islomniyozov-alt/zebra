@@ -88,6 +88,21 @@ const membership = (
   )
 ).rows[0]
 
+// SCOPED TO ONE AUTHORITY, and that is the whole point of this line.
+//
+// Every earlier version of this script made an UNSCOPED dispatcher, whose
+// `companyScopes` is empty — the same shape an owner has. So the scope filter
+// was never exercised, and seven screens went on spreading a `companyId`
+// filter into a query on `Company`, whose column is `id`. Prisma throws at
+// runtime; TypeScript cannot see it, because excess properties are not checked
+// through a spread into a `where`. It reached production, and a dispatcher
+// found it by clicking Add load on his first afternoon.
+await pool.query(
+  `insert into "MembershipCompany" (id, "membershipId", "companyId", "organizationId")
+     values ($1, $2, $3, $4)`,
+  [cuid(), membership.id, companyId, organizationId],
+)
+
 // A truck with a purchase price and a broker with a credit limit — the two
 // fields §16 flag 5 says no permission resource covers, and which are
 // therefore omitted from every payload rather than gated.
@@ -150,6 +165,19 @@ record(
   dispatcher.page.url().replace(BASE, ''),
 )
 
+const scoped = (
+  await pool.query(
+    `select count(*)::int n from "MembershipCompany" mc
+       join "Membership" m on m.id = mc."membershipId" where m."userId" = $1`,
+    [user.id],
+  )
+).rows[0]
+record(
+  'and is restricted to one authority',
+  scoped.n === 1,
+  `${scoped.n} company scope — the configuration that broke`,
+)
+
 // --- the payload, not the pixels -------------------------------------------
 // 187,500.00 is the purchase price. Searching the RESPONSE BODY, not the
 // rendered text: a field hidden with CSS is still in the payload and this is
@@ -193,6 +221,36 @@ record(
   'no permission resource covers fleet money yet',
 )
 
+// --- THE SCREENS A DISPATCHER ACTUALLY USES --------------------------------
+//
+// Every check in this file until now asserted a REFUSAL: the payload without
+// the money, the route that 404s. None of them ever opened a screen a
+// dispatcher works on all day and looked at the status code.
+//
+// So Ahmad clicked Add load on his first afternoon and got a server error,
+// on a path an owner opens fifty times a day without trouble. A role-specific
+// failure needs a role-specific walk, and "it refuses what it should" is only
+// half of that.
+const DISPATCHER_SCREENS = [
+  '/loads',
+  '/loads/new',
+  '/dispatch',
+  '/trucks',
+  '/trailers',
+  '/drivers',
+  '/brokers',
+  '/account',
+]
+
+for (const path of DISPATCHER_SCREENS) {
+  const page = await bodyOf(dispatcher.page, path)
+  record(
+    `a dispatcher can open ${path}`,
+    page.status === 200,
+    `HTTP ${page.status}`,
+  )
+}
+
 // --- a route the role does not hold ----------------------------------------
 const dispatcherNew = await bodyOf(dispatcher.page, '/trucks/new')
 record(
@@ -225,6 +283,9 @@ await browser.close()
 await pool.query('delete from "Session" where "userId" = $1', [user.id])
 await pool.query('delete from "LoginAttempt" where email = $1', [EMAIL])
 await pool.query('delete from "AuditLog" where "userId" = $1', [user.id])
+await pool.query('delete from "MembershipCompany" where "membershipId" = $1', [
+  membership.id,
+])
 await pool.query('delete from "Membership" where id = $1', [membership.id])
 await pool.query('delete from "User" where id = $1', [user.id])
 await pool.query('delete from "AssetAssignment" where "truckId" = $1', [

@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { companyScopeFilter } from '@/lib/tenancy'
+import { companyIdScopeFilter, companyScopeFilter } from '@/lib/tenancy'
 import { RecordForm } from '@/components/forms/RecordForm'
 import { createDriverAction } from '../actions'
 import { driverFields } from '../fields'
@@ -19,9 +19,11 @@ export default async function NewDriverPage() {
     'company',
     async (tx, session) => {
       const scope = companyScopeFilter(session.companyScopes)
+      const companyIdScope = companyIdScopeFilter(session.companyScopes)
       return {
         companies: await tx.company.findMany({
-          where: { isActive: true, ...scope },
+          // `id`, not `companyId` — Company IS the authority. See tenancy.ts.
+          where: { isActive: true, ...companyIdScope },
           orderBy: { name: 'asc' },
           select: { id: true, name: true },
         }),
