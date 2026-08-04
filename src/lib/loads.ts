@@ -209,13 +209,20 @@ async function assertCompanyInScope(
   }
 }
 
+/**
+ * Refuse an unbookable broker, and report how they settle.
+ *
+ * The settlement terms come back from the same read rather than a second one:
+ * inside a transaction with a 5s ceiling and a 200ms round trip, a query that
+ * can ride along should.
+ */
 async function assertBookableCustomer(
   tx: TxClient,
   customerId: string,
-): Promise<void> {
+): Promise<{ settlesDirectly: boolean }> {
   const customer = await tx.customer.findFirst({
     where: { id: customerId, deletedAt: null },
-    select: { status: true, name: true },
+    select: { status: true, name: true, settlesDirectly: true },
   })
   if (!customer) {
     throw new ReferenceError('not_found', { field: 'customerId' })
@@ -225,6 +232,7 @@ async function assertBookableCustomer(
     // one is the exact thing blocking exists to stop.
     throw new ReferenceError('required', { field: 'customerId' })
   }
+  return { settlesDirectly: customer.settlesDirectly }
 }
 
 export interface CreateLoadOptions {
@@ -247,7 +255,7 @@ export async function createLoad(
   const companyId = requiredText(input.companyId, 'companyId')
   await assertCompanyInScope(tx, companyId)
   const customerId = requiredText(input.customerId, 'customerId')
-  await assertBookableCustomer(tx, customerId)
+  const { settlesDirectly } = await assertBookableCustomer(tx, customerId)
 
   if (input.stops.length < 2) {
     throw new ReferenceError('required', { field: 'stops' })
@@ -302,6 +310,11 @@ export async function createLoad(
         fuelSurchargeCents,
         totalRevenueCents: linehaulCents + fuelSurchargeCents,
         dispatcherNotes: optionalText(input.dispatcherNotes),
+        // COPIED from the customer, not joined to it. Amazon Relay settles by
+        // weekly ACH statement, so its loads never become invoices — and a
+        // customer whose terms change next year must not rewrite the billing
+        // history of freight that has already run.
+        directSettled: settlesDirectly,
         bookedByUserId: options.byUserId ?? null,
         // NOT set here. BOOKED is the schema default and the first status
         // event is written below, so the log starts where the load does.

@@ -366,9 +366,13 @@ model UserPreference {
   userId         String
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  /** Namespaced: `view.loads.<slug>`, `density`, `columns.loads`. */
-  key String
-  /** Whatever the key's owner defines. Validated on read, never trusted. */
+  /**
+   * Namespaced: `view.loads.<slug>`, `density`, `columns.loads`.
+   */
+  key   String
+  /**
+   * Whatever the key's owner defines. Validated on read, never trusted.
+   */
   value Json
 
   createdAt DateTime @default(now())
@@ -860,10 +864,17 @@ model Customer {
   preferredPaymentMethod PaymentMethod?
   creditLimitCents       Int?
   isFactorable           Boolean        @default(true)
-  status                 CustomerStatus @default(ACTIVE)
+
+  // The DEFAULT for loads booked under this customer. Amazon Relay settles by
+  // weekly ACH statement rather than against invoices; the flag lives here so
+  // a dispatcher never has to remember it, and is copied onto each load so
+  // changing it later cannot rewrite freight that has already run.
+  settlesDirectly Boolean @default(false)
+
+  status        CustomerStatus @default(ACTIVE)
   // BIG M II is the reason this exists. Blocking a broker must be a first
   // class state, not a note nobody reads.
-  blockedReason          String?
+  blockedReason String?
 
   notes String?
 
@@ -1046,6 +1057,18 @@ model Load {
   factoringCompanyId String?
   factoringCompany   FactoringCompany? @relation(fields: [factoringCompanyId], references: [id])
   factoringFeeCents  Int               @default(0)
+
+  // Copied from Customer.settlesDirectly when the load is booked, and never
+  // re-read from it. Amazon Relay pays RAM by ACH weekly — one statement
+  // covering many loads, with no invoice anywhere in it. A direct-settled load
+  // never becomes an invoice: it stays out of ready-to-invoice and out of
+  // broker AR, is paid against by a statement, and its revenue still counts in
+  // settlements and profitability.
+  //
+  // Its own column rather than a join to the customer, because a customer that
+  // changes terms next year must not rewrite the billing history of freight
+  // that has already run.
+  directSettled Boolean @default(false)
 
   bookedByUserId String?
   bookedBy       User?    @relation(fields: [bookedByUserId], references: [id])
@@ -1264,9 +1287,13 @@ enum StatusSource {
 }
 
 enum StatusOutcome {
-  /** The load moved. */
+  /**
+   * The load moved.
+   */
   APPLIED
-  /** Refused for arriving after a later state. The load did not move. */
+  /**
+   * Refused for arriving after a later state. The load did not move.
+   */
   REFUSED_STALE
 }
 
