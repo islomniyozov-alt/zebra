@@ -307,3 +307,85 @@ describe('the shell’s own precondition', () => {
     expect(can(session('DRIVER'), 'read', 'company')).toBe(false)
   })
 })
+
+describe('Phase 3 sweep: money on a non-money screen', () => {
+  // `Truck.purchasePriceCents` and `Customer.creditLimitCents` existed as
+  // columns with NO resource covering them, so every screen omitted them
+  // rather than gating them — flag 5, and the reason verify-dispatcher asserts
+  // their absence for an OWNER too. Now they are nameable.
+
+  it('a dispatcher sees neither', () => {
+    expect(can(session('DISPATCHER'), 'read', 'truck.financials')).toBe(false)
+    expect(can(session('DISPATCHER'), 'read', 'customer.financials')).toBe(
+      false,
+    )
+  })
+
+  it.each<Role>(['OWNER', 'ADMIN', 'MANAGER', 'ACCOUNTING'])(
+    '%s does',
+    (role) => {
+      expect(can(session(role), 'read', 'truck.financials')).toBe(true)
+      expect(can(session(role), 'read', 'customer.financials')).toBe(true)
+    },
+  )
+
+  it('and reading them is not writing them', () => {
+    // The pair. MANAGER "watches the numbers but does not move money", so a
+    // grant that quietly included update would contradict the role's own
+    // description.
+    expect(can(session('MANAGER'), 'update', 'truck.financials')).toBe(false)
+    expect(can(session('ACCOUNTING'), 'update', 'customer.financials')).toBe(
+      false,
+    )
+    expect(can(session('OWNER'), 'update', 'truck.financials')).toBe(true)
+  })
+})
+
+describe('Phase 3 sweep: managing places', () => {
+  // A dispatcher creates a Location by typing a stop, and corrects a dock's
+  // timezone from the load screen. Both rode on `load:update` until now.
+
+  it.each<Role>(['OWNER', 'ADMIN', 'MANAGER', 'DISPATCHER'])(
+    '%s may manage places',
+    (role) => {
+      expect(can(session(role), 'create', 'location.manage')).toBe(true)
+      expect(can(session(role), 'update', 'location.manage')).toBe(true)
+    },
+  )
+
+  it('accounting does not', () => {
+    // Not a slight: accounting never opens a load to fix a dock's timezone,
+    // and a permission nobody uses is a permission nobody audits.
+    expect(can(session('ACCOUNTING'), 'update', 'location.manage')).toBe(false)
+  })
+
+  it('and a driver may not touch any of the three', () => {
+    for (const resource of [
+      'truck.financials',
+      'customer.financials',
+      'location.manage',
+    ] as const) {
+      expect(can(session('DRIVER'), 'read', resource)).toBe(false)
+    }
+  })
+})
+
+describe('Phase 3 sweep: who sets a rate', () => {
+  // §1: "Rates are entered by OWNER/ACCOUNTING — Step 1 makes that possible
+  // on a booked load."
+
+  it.each<Role>(['OWNER', 'ADMIN', 'ACCOUNTING'])('%s may set one', (role) => {
+    expect(can(session(role), 'update', 'load.financials')).toBe(true)
+  })
+
+  it('a manager reads the number without setting it', () => {
+    // "Runs the operation and watches the numbers, but does not move money."
+    expect(can(session('MANAGER'), 'read', 'load.financials')).toBe(true)
+    expect(can(session('MANAGER'), 'update', 'load.financials')).toBe(false)
+  })
+
+  it('a dispatcher cannot even read it', () => {
+    expect(can(session('DISPATCHER'), 'read', 'load.financials')).toBe(false)
+    expect(can(session('DISPATCHER'), 'update', 'load.financials')).toBe(false)
+  })
+})

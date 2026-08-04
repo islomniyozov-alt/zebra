@@ -29,6 +29,12 @@ export const RESOURCES = [
   // Money visible on an operational surface. Separate on purpose.
   'load.financials',
   'driver.pay',
+  // The other two money-on-a-non-money-screen fields, added in Phase 3's
+  // sweep. Both existed as COLUMNS with no resource covering them, so they
+  // were omitted from every payload rather than gated — see flag 5, and the
+  // verify-dispatcher check that asserts the absence for an owner too.
+  'truck.financials',
+  'customer.financials',
   // Fleet
   'truck',
   'trailer',
@@ -46,6 +52,10 @@ export const RESOURCES = [
   'customer',
   'document',
   'report',
+  // Places. A dispatcher creates them by typing a stop (create-on-miss) and
+  // corrects a timezone from the load screen; that is management of reference
+  // data and it deserves naming rather than riding on `load:update`.
+  'location.manage',
   // Admin
   'user',
   'company',
@@ -146,6 +156,19 @@ const FLEET_WRITE: Permission[] = [
   ...crud('compliance'),
 ]
 
+/**
+ * Money that appears on a FLEET or RECORDS screen rather than a money screen.
+ *
+ * Held apart from MONEY_READ because the roles differ: accounting needs a
+ * customer's credit limit to decide whether to haul for them, and a manager
+ * needs a truck's purchase price to talk about the fleet — while neither
+ * implies the invoice ledger.
+ */
+const EMBEDDED_MONEY_READ: Permission[] = [
+  ...read('truck.financials'),
+  ...read('customer.financials'),
+]
+
 const MONEY_READ: Permission[] = [
   ...read('invoice'),
   ...read('receivable'),
@@ -155,6 +178,17 @@ const MONEY_READ: Permission[] = [
   ...read('fuel'),
   ...read('load.financials'),
   ...read('driver.pay'),
+]
+
+/**
+ * Entering what a load is worth.
+ *
+ * §1: "Rates are entered by OWNER/ACCOUNTING." A MANAGER reads the number and
+ * does not set it; a DISPATCHER never sees it at all.
+ */
+const RATE_ENTRY: Permission[] = [
+  'load.financials:update',
+  'load.financials:create',
 ]
 
 const MONEY_WRITE: Permission[] = [
@@ -195,6 +229,10 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
   // Runs the operation and watches the numbers, but does not move money.
   MANAGER: new Set<Permission>([
     ...SHELL_READ,
+    ...EMBEDDED_MONEY_READ,
+    'location.manage:read',
+    'location.manage:create',
+    'location.manage:update',
     ...OPERATIONS_READ,
     ...OPERATIONS_WRITE,
     ...FLEET_READ,
@@ -211,6 +249,12 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
   // does not render for them at all.
   DISPATCHER: new Set<Permission>([
     ...SHELL_READ,
+    // Places, and deliberately NOT the two financial resources above. A
+    // dispatcher types "Chicago, IL" into a stop and the place is created; a
+    // dispatcher corrects a dock's timezone. Neither is money.
+    'location.manage:read',
+    'location.manage:create',
+    'location.manage:update',
     ...OPERATIONS_READ,
     ...OPERATIONS_WRITE,
     ...FLEET_READ,
@@ -225,6 +269,8 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
   // invoice is built from a load; does not dispatch.
   ACCOUNTING: new Set<Permission>([
     ...SHELL_READ,
+    ...EMBEDDED_MONEY_READ,
+    ...RATE_ENTRY,
     ...read('dashboard'),
     ...read('load'),
     ...read('calendar'),

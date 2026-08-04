@@ -10,10 +10,11 @@ import {
   TONE_STRIPE,
 } from '@/lib/status'
 import { renderStopTime, ZONE_CHOICES } from '@/lib/stop-time'
-import { isMessageKey } from '@/lib/i18n'
+import { isMessageKey, type MessageKey } from '@/lib/i18n'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { RatePanel, type AccessorialRow } from './RatePanel'
 import { StatusTimeline, type TimelineEvent } from './StatusTimeline'
 import { LoadDocuments, type DocumentSlot } from './LoadDocuments'
 import { LoadActions, LoadNotes } from './LoadActions'
@@ -34,6 +35,19 @@ import type { LoadOperationalStatus } from '@/generated/prisma/client'
 // with the zone shown (rule 3), documents grouped by type with dashed warning
 // placeholders for what is missing at this stage, a notes thread writing
 // `Communication` rows, and the timeline rendered from `LoadStatusEvent`.
+
+const ACCESSORIAL_TYPES = [
+  'DETENTION',
+  'LAYOVER',
+  'TONU',
+  'LUMPER',
+  'EXTRA_STOP',
+  'DRIVER_ASSIST',
+  'REDELIVERY',
+  'STORAGE',
+  'FUEL_ADVANCE_FEE',
+  'OTHER',
+] as const
 
 const ALL_OPERATIONAL: LoadOperationalStatus[] = [
   'AVAILABLE',
@@ -75,6 +89,15 @@ export default async function LoadDetailPage({
           orderBy: { sequence: 'asc' },
           include: { location: { select: { timezone: true } } },
         },
+        accessorials: {
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            type: true,
+            amountCents: true,
+            isBillable: true,
+          },
+        },
       },
     })
     if (!load) return null
@@ -107,6 +130,13 @@ export default async function LoadDetailPage({
   const mayUpdate = await currentUserCan('update', 'load')
   const mayUpload = await currentUserCan('create', 'document')
 
+  // §7 and rule 8: a role that cannot see money is not handed money and told
+  // not to look. The whole panel — and every figure in it — is absent from a
+  // dispatcher's payload, which is what verify-dispatcher asserts by reading
+  // the response body rather than the rendered text.
+  const maySeeRate = await currentUserCan('read', 'load.financials')
+  const maySetRate = await currentUserCan('update', 'load.financials')
+
   const zone = load.company.timezone
   const stripeTone = load.isCancelled
     ? 'muted'
@@ -118,6 +148,30 @@ export default async function LoadDetailPage({
     { value: '', label: t('places.timezoneAuto') },
     ...ZONE_CHOICES.map((choice) => ({ value: choice, label: choice })),
   ]
+
+  // Built only when the role may see it. `accessorials` is selected in the
+  // query above for everyone, so this is where it stops for a dispatcher —
+  // the payload carries the array, but nothing derived from money reaches the
+  // component tree. (Step 2 moves the select itself behind the check.)
+  const accessorialRows: AccessorialRow[] = maySeeRate
+    ? load.accessorials.map((row) => ({
+        id: row.id,
+        type: row.type,
+        typeLabel: t(`accessorial.${row.type}` as MessageKey),
+        amountCents: row.amountCents,
+        isBillable: row.isBillable,
+      }))
+    : []
+
+  const rateMessages = Object.fromEntries(
+    (
+      [
+        'rate.error.badAmount',
+        'rate.error.negative',
+        'rate.error.notFound',
+      ] as MessageKey[]
+    ).map((key) => [key, t(key)]),
+  )
 
   const statusLabels = Object.fromEntries(
     ALL_OPERATIONAL.map((status) => [status, t(operationalLabelKey(status))]),
@@ -345,6 +399,36 @@ export default async function LoadDetailPage({
               })}
             </ol>
           </section>
+
+          {maySeeRate ? (
+            <RatePanel
+              loadId={id}
+              linehaulCents={load.linehaulCents}
+              fuelSurchargeCents={load.fuelSurchargeCents}
+              accessorials={accessorialRows}
+              mayEdit={maySetRate}
+              accessorialTypes={ACCESSORIAL_TYPES.map((type) => ({
+                value: type,
+                label: t(`accessorial.${type}` as MessageKey),
+              }))}
+              locale={locale}
+              translate={rateMessages}
+              labels={{
+                title: t('rate.title'),
+                linehaul: t('rate.linehaul'),
+                fuelSurcharge: t('rate.fuelSurcharge'),
+                accessorials: t('rate.accessorials'),
+                total: t('rate.total'),
+                save: t('rate.save'),
+                saved: t('rate.saved'),
+                add: t('rate.addAccessorial'),
+                amount: t('rate.amount'),
+                billable: t('rate.billable'),
+                remove: t('rate.remove'),
+                none: t('rate.none'),
+              }}
+            />
+          ) : null}
 
           <LoadDocuments
             loadId={id}
