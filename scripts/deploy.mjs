@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
+import { check as checkMigrationGap } from './check-migration-gap.mjs'
 
 // ---------------------------------------------------------------------------
 // DEPLOY, WITH THE COMMIT STAMPED ON THE VERSION.
@@ -36,6 +37,23 @@ if (dirty) {
     'The working tree has uncommitted changes; the version is stamped +dirty\n' +
       'so nobody later mistakes it for the commit it nearly is.',
   )
+}
+
+// SCHEMA BEFORE CODE, for production only.
+//
+// Step 2 shipped a column reference to production before the column existed.
+// Nothing broke, which is the problem: the window was silent and closed only
+// because no request reached that path. Dev is exempt — `migrate dev` runs
+// against it constantly and a gap there is the normal state of an afternoon.
+if (production) {
+  const gap = await checkMigrationGap({
+    confirmed: process.argv.includes('--migrations-applied'),
+  })
+  if (!gap.ok) {
+    console.error('')
+    console.error('Refusing to deploy code that is ahead of the schema.')
+    process.exit(1)
+  }
 }
 
 const run = (args) => {

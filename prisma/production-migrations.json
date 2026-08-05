@@ -1,0 +1,20 @@
+{
+  "applied": [
+    "20260728224443_init",
+    "20260728224900_rls_and_isolation",
+    "20260728233000_org_trigger_only_on_relevant_columns",
+    "20260729001500_auth_sessions_and_login_attempts",
+    "20260729002000_session_permission_overrides",
+    "20260729010000_own_membership_visibility",
+    "20260729020000_auditlog_company_optional",
+    "20260729030000_pending_upload",
+    "20260730010000_password_reset_token",
+    "20260731003653_partial_unique_on_soft_delete",
+    "20260731145835_status_event_outcome",
+    "20260731165122_location_timezone_and_user_preferences",
+    "20260804214210_direct_settled_loads",
+    "20260804214642_customer_settles_directly"
+  ],
+  "recordedAt": "2026-08-05",
+  "verified": false
+}

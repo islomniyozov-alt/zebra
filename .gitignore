@@ -55,6 +55,9 @@ prod-url.txt
 # `git add -A` before this line existed.
 /repro*.mjs
 
+# The integration runner's machine-readable report. Regenerated every run.
+.vitest-integration.json
+
 # vercel
 .vercel
 
