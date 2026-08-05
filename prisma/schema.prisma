@@ -195,30 +195,31 @@ model Company {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  settings        CompanySettings?
-  memberScopes    MembershipCompany[]
-  assetHistory    AssetAssignment[]
-  counters        Counter[]
-  integrations    Integration[]
-  trucks          Truck[]
-  trailers        Trailer[]
-  drivers         Driver[]
-  loads           Load[]
-  documents       Document[]
-  invoices        Invoice[]
-  payments        Payment[]
-  settlements     Settlement[]
-  expenses        Expense[]
-  fuelTxns        FuelTransaction[]
-  maintenance     MaintenanceRecord[]
-  iftaMileage     IftaMileage[]
-  complianceItems ComplianceItem[]
-  communications  Communication[]
-  notifications   Notification[]
-  calendarEvents  CalendarEvent[]
-  auditLogs       AuditLog[]
-  claims          Claim[]
-  pendingUploads  PendingUpload[]
+  settings           CompanySettings?
+  memberScopes       MembershipCompany[]
+  assetHistory       AssetAssignment[]
+  counters           Counter[]
+  integrations       Integration[]
+  factoringCompanies FactoringCompany[]
+  trucks             Truck[]
+  trailers           Trailer[]
+  drivers            Driver[]
+  loads              Load[]
+  documents          Document[]
+  invoices           Invoice[]
+  payments           Payment[]
+  settlements        Settlement[]
+  expenses           Expense[]
+  fuelTxns           FuelTransaction[]
+  maintenance        MaintenanceRecord[]
+  iftaMileage        IftaMileage[]
+  complianceItems    ComplianceItem[]
+  communications     Communication[]
+  notifications      Notification[]
+  calendarEvents     CalendarEvent[]
+  auditLogs          AuditLog[]
+  claims             Claim[]
+  pendingUploads     PendingUpload[]
 
   @@unique([organizationId, dotNumber])
   @@index([organizationId, isActive])
@@ -977,6 +978,15 @@ model FactoringCompany {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
+  // Whose factor this is. Both authorities factor with Triumph and negotiate
+  // their terms separately, so the terms live on a row PER CARRIER rather than
+  // on one shared record with an exception written down somewhere else.
+  //
+  // Nullable because a factor can be on file before anybody decides which
+  // authority uses it; the setup screen always sets it.
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
   name           String
   contactName    String?
   phone          String?
@@ -993,6 +1003,7 @@ model FactoringCompany {
   invoices Invoice[]
 
   @@index([organizationId])
+  @@index([companyId])
 }
 
 // ============================================================================

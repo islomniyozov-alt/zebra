@@ -109,6 +109,51 @@ export function parseQuantityToHundredths(quantity: string): number {
 }
 
 /**
+ * A typed percentage — "3", "3.25", "97 %" — as integer basis points.
+ *
+ * Schema convention 2: percentages are basis points, so 3% is 300 and 27.5% is
+ * 2750. Two decimal places is exactly the precision basis points hold, and a
+ * third is truncated for the same reason a third decimal on a rate is: it is a
+ * typo, and rounding it would be this module deciding something the person
+ * typing did not.
+ *
+ * Refuses a negative. There is no negative advance rate and no negative fee;
+ * the one place a minus belongs in factoring is a credit, and a credit is an
+ * amount rather than a rate.
+ */
+export function parsePercentToBps(input: string): number {
+  // The percent sign is stripped from the ENDS only, never from between the
+  // digits. Measured: stripping it everywhere turns "3%4" — a stray keystroke
+  // — into 34%, which is a plausible rate and therefore exactly the kind of
+  // silently wrong number this phase exists to prevent.
+  const cleaned = input
+    .replace(/[\s,]/g, '')
+    .replace(/^%+/, '')
+    .replace(/%+$/, '')
+  if (cleaned === '') throw new MoneyFormatError(input)
+
+  const match = /^(\d*)(?:\.(\d*))?$/.exec(cleaned)
+  if (!match) throw new MoneyFormatError(input)
+
+  const [, whole = '', fraction = ''] = match
+  if (whole === '' && fraction === '') throw new MoneyFormatError(input)
+
+  const bps = Number.parseInt(
+    `${whole || '0'}${`${fraction}00`.slice(0, 2)}`,
+    10,
+  )
+  if (!Number.isSafeInteger(bps)) throw new MoneyFormatError(input)
+  return bps
+}
+
+/** Basis points as a plain percentage string. No symbol. Trailing zeros cut. */
+export function bpsToInput(bps: number): string {
+  const whole = Math.trunc(bps / 100)
+  const fraction = String(Math.abs(bps) % 100).padStart(2, '0')
+  return fraction === '00' ? String(whole) : `${whole}.${fraction}`
+}
+
+/**
  * What a load is worth: the three stored integers, added.
  *
  * A separate function so the screen and the invoice generator cannot drift —
@@ -144,4 +189,92 @@ export function formatCents(cents: number, locale?: string): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })
+}
+
+/**
+ * Split an amount across weights so the parts sum to EXACTLY the amount.
+ *
+ * A factoring fee is charged once on an invoice and has to land on the loads
+ * that invoice covers, because per-load profitability is the number the owner
+ * actually steers by. Three loads sharing a $150.75 fee cannot each take a
+ * third: 5025 is not divisible by three in cents, and three roundings that
+ * each look right leave a cent that belongs to nobody.
+ *
+ * LARGEST REMAINDER. Each part takes its floor, then the leftover cents go one
+ * each to the parts with the largest fractional remainders, ties broken by
+ * position so the result is deterministic — the same invoice apportions the
+ * same way every time it is recomputed, which is what makes the drift check
+ * meaningful rather than noisy.
+ *
+ *   apportionCents(15075, [245000, 190000, 162500])
+ *     exact shares: 6181.27..., 4792.98..., 4100.74...
+ *     floors:       6181 + 4792 + 4100 = 15073, leftover 2
+ *     largest remainders: .98 (second), .74 (third)
+ *     result:       [6181, 4793, 4101]  ->  sums to 15075
+ *
+ * Zero total gives zeros. Zero weights give the whole amount to the first
+ * part rather than throwing: an invoice whose loads somehow total nothing is a
+ * data problem, and losing the fee would hide it.
+ */
+export function apportionCents(
+  totalCents: number,
+  weights: readonly number[],
+): number[] {
+  if (weights.length === 0) return []
+  if (totalCents === 0) return weights.map(() => 0)
+
+  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0)
+  if (weightTotal === 0) {
+    return weights.map((_, index) => (index === 0 ? totalCents : 0))
+  }
+
+  // Integer arithmetic throughout: `share` is the exact numerator and the
+  // remainder is compared without ever forming a fraction.
+  const parts = weights.map((weight) => {
+    const numerator = totalCents * weight
+    return {
+      floor: Math.floor(numerator / weightTotal),
+      remainder: numerator % weightTotal,
+    }
+  })
+
+  const distributed = parts.reduce((sum, part) => sum + part.floor, 0)
+  let leftover = totalCents - distributed
+
+  const order = parts
+    .map((part, index) => ({ index, remainder: part.remainder }))
+    // Largest remainder first; position breaks a tie, so the split is stable.
+    .sort((a, b) => b.remainder - a.remainder || a.index - b.index)
+
+  const result = parts.map((part) => part.floor)
+  for (const { index } of order) {
+    if (leftover <= 0) break
+    result[index] = (result[index] ?? 0) + 1
+    leftover -= 1
+  }
+
+  return result
+}
+
+/**
+ * What a factor advances, charges and holds back.
+ *
+ * All three from the invoice total and two rates in basis points, so a reader
+ * can check any of them against the others: advance + fee + reserve == total,
+ * always, by construction rather than by hope.
+ */
+export function factoringSplit(
+  totalCents: number,
+  advanceRateBps: number,
+  feeBps: number,
+): { advanceCents: number; feeCents: number; reserveCents: number } {
+  const advanceCents = Math.round((totalCents * advanceRateBps) / 10_000)
+  const feeCents = Math.round((totalCents * feeBps) / 10_000)
+  // The reserve is what is LEFT, not a third independent rounding — that is
+  // what keeps the three summing to the total exactly.
+  return {
+    advanceCents,
+    feeCents,
+    reserveCents: totalCents - advanceCents - feeCents,
+  }
 }

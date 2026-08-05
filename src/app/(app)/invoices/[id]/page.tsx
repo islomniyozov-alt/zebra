@@ -2,10 +2,12 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { formatCents } from '@/lib/money'
+import { factorsForCompanies } from '@/lib/factoring'
+import { bpsToInput, formatCents } from '@/lib/money'
 import { Button } from '@/components/ui/Button'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { MarkSent } from './MarkSent'
+import { MarkFactored } from './MarkFactored'
 import type { MessageKey } from '@/lib/i18n'
 
 // The preview: what the PDF will say, on a screen, in the reader's language.
@@ -16,6 +18,14 @@ const SENT_ERROR_KEYS: MessageKey[] = [
   'invoices.error.alreadySent',
   'invoices.error.noChannel',
   'invoices.error.notFound',
+  'factoring.error.invoiceNotFound',
+  'factoring.error.factorNotFound',
+  'factoring.error.alreadyFactored',
+  'factoring.error.notSent',
+  'factoring.error.noTerms',
+  'factoring.error.wrongCarrier',
+  'factoring.error.badRate',
+  'factoring.error.overHundred',
 ]
 
 export default async function InvoicePage({
@@ -29,11 +39,12 @@ export default async function InvoicePage({
   const { t, locale } = await getLocaleContext()
   const mayUpdate = await currentUserCan('update', 'invoice')
 
-  const invoice = await withCurrentOrg('read', 'invoice', (tx) =>
-    tx.invoice.findUnique({
+  const data = await withCurrentOrg('read', 'invoice', async (tx) => {
+    const invoice = await tx.invoice.findUnique({
       where: { id },
       select: {
         id: true,
+        companyId: true,
         invoiceNumber: true,
         status: true,
         issueDate: true,
@@ -45,6 +56,12 @@ export default async function InvoicePage({
         balanceCents: true,
         sentAt: true,
         notes: true,
+        isFactored: true,
+        factoredAt: true,
+        advanceCents: true,
+        factoringFeeCents: true,
+        reserveReleasedAt: true,
+        factoringCompany: { select: { name: true } },
         company: { select: { name: true } },
         customer: { select: { name: true } },
         lines: {
@@ -57,10 +74,23 @@ export default async function InvoicePage({
           },
         },
       },
-    }),
-  )
+    })
+    if (!invoice) return null
 
-  if (!invoice) notFound()
+    // Only this invoice's own authority. Offering a factor belonging to the
+    // other carrier would produce a choice `markFactored` refuses, and a
+    // dropdown whose entries are rejected on submit is a worse screen than one
+    // that never offers them.
+    const factors =
+      mayUpdate && !invoice.isFactored
+        ? await factorsForCompanies(tx, { companyId: invoice.companyId })
+        : []
+
+    return { invoice, factors }
+  })
+
+  if (!data) notFound()
+  const { invoice } = data
 
   const day = (value: Date | null) =>
     value ? value.toISOString().slice(0, 10) : '—'
@@ -190,6 +220,76 @@ export default async function InvoicePage({
                   markSent: t('invoices.markSent'),
                   channel: t('invoices.channel'),
                   channelHint: t('invoices.channelHint'),
+                }}
+              />
+            </section>
+          ) : null}
+
+          {/* Sold. The three figures and the date, because "we factored it" is
+           * not an answer to "how much did we actually get, and when". */}
+          {invoice.isFactored ? (
+            <section className="rounded-card border border-border bg-surface p-z4">
+              <h2 className="text-md font-medium text-ink">
+                {t('receivables.factored')}
+              </h2>
+              <dl className="mt-z3 grid grid-cols-[auto_1fr] gap-x-z4 gap-y-z1 text-sm">
+                <dt className="text-ink-2">{t('receivables.factor')}</dt>
+                <dd className="text-ink">
+                  {invoice.factoringCompany?.name ?? '—'}
+                </dd>
+                <dt className="text-ink-2">{t('factoring.soldOn')}</dt>
+                <dd className="font-mono text-ink">
+                  {day(invoice.factoredAt)}
+                </dd>
+                <dt className="text-ink-2">{t('receivables.advance')}</dt>
+                <dd className="font-mono tabular-nums text-ink">
+                  {formatCents(invoice.advanceCents, locale)}
+                </dd>
+                <dt className="text-ink-2">{t('receivables.fee')}</dt>
+                <dd className="font-mono tabular-nums text-ink">
+                  {formatCents(invoice.factoringFeeCents, locale)}
+                </dd>
+                <dt className="text-ink-2">
+                  {invoice.reserveReleasedAt
+                    ? t('receivables.reserveReleased')
+                    : t('receivables.reserveOutstanding')}
+                </dt>
+                {/* Derived from the three stored integers on the row above it,
+                 * so a reader can check it without leaving the screen. */}
+                <dd className="font-mono tabular-nums text-ink">
+                  {formatCents(
+                    invoice.totalCents -
+                      invoice.advanceCents -
+                      invoice.factoringFeeCents,
+                    locale,
+                  )}
+                </dd>
+              </dl>
+            </section>
+          ) : null}
+
+          {mayUpdate && !invoice.isFactored && data.factors.length > 0 ? (
+            <section className="rounded-card border border-border bg-surface p-z4">
+              <MarkFactored
+                invoiceId={invoice.id}
+                factors={[
+                  { value: '', label: '—' },
+                  ...data.factors.map((factor) => ({
+                    value: factor.id,
+                    label:
+                      factor.advanceRateBps === null || factor.feeBps === null
+                        ? factor.name
+                        : `${factor.name} — ${bpsToInput(factor.advanceRateBps)}% / ${bpsToInput(factor.feeBps)}%`,
+                  })),
+                ]}
+                translate={translate}
+                labels={{
+                  markFactored: t('factoring.markFactored'),
+                  hint: t('factoring.markFactoredHint'),
+                  factor: t('factoring.chooseFactor'),
+                  advanceRate: t('factoring.advanceRate'),
+                  feeRate: t('factoring.feeRate'),
+                  overrideHint: t('factoring.overrideHint'),
                 }}
               />
             </section>

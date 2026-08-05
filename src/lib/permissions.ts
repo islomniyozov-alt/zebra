@@ -197,6 +197,15 @@ const MONEY_WRITE: Permission[] = [
   ...crud('settlement'),
   ...crud('expense'),
   ...crud('fuel'),
+  // Factoring terms. Who each authority sells its invoices to, and at what
+  // advance and fee — configuration that lives under receivables because that
+  // is the number it changes. A MANAGER reads the aging through MONEY_READ and
+  // does not renegotiate the terms behind it.
+  //
+  // Create and update only: nothing deletes a factor, and granting an action
+  // no screen performs is a claim nobody ever checks.
+  'receivable:create',
+  'receivable:update',
   'invoice:export',
   'receivable:export',
   'settlement:approve',

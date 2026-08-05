@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   MoneyFormatError,
+  bpsToInput,
   formatCents,
   centsToInput,
   loadRevenueCents,
   multiplyCents,
   parseMoneyToCents,
+  parsePercentToBps,
   parseQuantityToHundredths,
 } from '@/lib/money'
 
@@ -140,6 +142,64 @@ describe('what a load is worth', () => {
   it('is reproducible by a reader from the stored columns', () => {
     // §7's rule, as an assertion: 2450.00 + 380.00 + 162.50 = 2992.50
     expect(centsToInput(299250)).toBe('2992.50')
+  })
+})
+
+describe('parsing a rate somebody typed as a percentage', () => {
+  it.each([
+    ['3', 300],
+    ['3.25', 325],
+    ['97', 9700],
+    ['97 %', 9700],
+    ['100', 10000],
+    ['0', 0],
+    ['0.5', 50],
+    ['.5', 50],
+    ['27.5', 2750],
+  ])('reads %s as %i basis points', (input, expected) => {
+    expect(parsePercentToBps(input)).toBe(expected)
+  })
+
+  it('truncates a third decimal rather than inventing precision', () => {
+    // Basis points hold two decimal places of a percent and no more. 3.259%
+    // is not a rate anybody negotiated; it is a typo, and rounding it up would
+    // be this module deciding something the person typing did not.
+    expect(parsePercentToBps('3.259')).toBe(325)
+  })
+
+  it.each(['', '  ', 'three', '-3', '3.2.5', '3%4'])(
+    'refuses %o rather than guessing',
+    (input) => {
+      expect(() => parsePercentToBps(input)).toThrow(MoneyFormatError)
+    },
+  )
+
+  it('refuses a negative rate specifically', () => {
+    // There is no negative advance and no negative fee. The one place a minus
+    // belongs in factoring is a credit, and a credit is an amount, not a rate.
+    expect(() => parsePercentToBps('-3')).toThrow(MoneyFormatError)
+  })
+
+  it('strips a percent sign from the ends but never from between digits', () => {
+    // "%3%" is a keystroke, and 3% is unambiguously what was meant. "3%4" is
+    // not — stripping the sign there would read it as 34%, which is a
+    // plausible factoring rate and therefore the worst possible outcome.
+    expect(parsePercentToBps('%3%')).toBe(300)
+    expect(() => parsePercentToBps('3%4')).toThrow(MoneyFormatError)
+  })
+
+  it('round-trips through the form and back', () => {
+    // What the setup screen does: store 9700, render "97", accept it again.
+    for (const bps of [0, 50, 300, 325, 2750, 9700, 10000]) {
+      expect(parsePercentToBps(bpsToInput(bps))).toBe(bps)
+    }
+  })
+
+  it('renders without a trailing .00 that nobody typed', () => {
+    expect(bpsToInput(9700)).toBe('97')
+    expect(bpsToInput(325)).toBe('3.25')
+    expect(bpsToInput(50)).toBe('0.50')
+    expect(bpsToInput(0)).toBe('0')
   })
 })
 
