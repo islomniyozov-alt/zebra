@@ -335,3 +335,105 @@ export function invoiceTotalFromLoads(
 ): number {
   return loads.reduce((total, load) => total + loadRevenueCents(load), 0)
 }
+
+export type MarkSentFailure = 'not_found' | 'already_sent' | 'no_channel'
+
+export type MarkSentOutcome =
+  | { ok: true; sentAt: Date }
+  | { ok: false; reason: MarkSentFailure }
+
+/**
+ * Record that an invoice went out, and by what route.
+ *
+ * NOT a send. §6: the only working sender reaches the owner's inbox alone
+ * until a sending domain is verified, so the honest flow is download → send it
+ * yourself → tell the system you did. A button that claims to email a broker
+ * and silently reaches nobody would be worse than no button, and this is the
+ * shape that stays correct when the domain lands: a real send would set the
+ * same fields.
+ *
+ * The channel is recorded because "did we send it?" and "where did it go?" are
+ * different questions in a payment chase, and the second one is the one that
+ * gets answered wrong from memory a month later.
+ */
+export async function markInvoiceSent(
+  tx: TxClient,
+  invoiceId: string,
+  input: { channel: string; sentToEmail?: string | null; sentAt?: Date },
+): Promise<MarkSentOutcome> {
+  const channel = input.channel.trim()
+  if (channel === '') return { ok: false, reason: 'no_channel' }
+
+  const invoice = await tx.invoice.findUnique({
+    where: { id: invoiceId },
+    select: { id: true, sentAt: true, status: true },
+  })
+  if (!invoice) return { ok: false, reason: 'not_found' }
+  if (invoice.sentAt !== null) return { ok: false, reason: 'already_sent' }
+
+  const sentAt = input.sentAt ?? new Date()
+  await tx.invoice.update({
+    where: { id: invoiceId },
+    data: {
+      sentAt,
+      // The channel rides in the notes field until Step 5 gives billing its
+      // own event stream. Named here so the next reader knows it is deliberate
+      // and where it is going, rather than finding a channel in `notes` and
+      // wondering.
+      notes: `sent: ${channel}${input.sentToEmail ? ` (${input.sentToEmail})` : ''}`,
+      sentToEmail: input.sentToEmail ?? null,
+      status: 'SENT',
+    },
+  })
+
+  return { ok: true, sentAt }
+}
+
+/**
+ * Direct-settled loads with no statement payment against them yet.
+ *
+ * They are NOT invoiceable and NOT in broker AR — but they are money owed, and
+ * a screen that simply omits them teaches everybody that Zebra does not know
+ * about Relay freight. Step 5 gives them a payment path; this makes them
+ * visible in the meantime.
+ */
+export async function directSettledAwaiting(
+  tx: TxClient,
+  where: Prisma.LoadWhereInput = {},
+): Promise<ReadyLoad[]> {
+  const loads = await tx.load.findMany({
+    where: {
+      deletedAt: null,
+      isCancelled: false,
+      directSettled: true,
+      operationalStatus: 'POD_RECEIVED',
+      totalRevenueCents: { gt: 0 },
+      ...where,
+    },
+    orderBy: [{ customer: { name: 'asc' } }, { loadNumber: 'asc' }],
+    take: 500,
+    select: {
+      id: true,
+      loadNumber: true,
+      companyId: true,
+      customerId: true,
+      customer: { select: { name: true } },
+      linehaulCents: true,
+      fuelSurchargeCents: true,
+      accessorialsCents: true,
+      totalRevenueCents: true,
+    },
+  })
+
+  return loads.map((load) => ({
+    id: load.id,
+    loadNumber: load.loadNumber,
+    companyId: load.companyId,
+    customerId: load.customerId,
+    customerName: load.customer.name,
+    linehaulCents: load.linehaulCents,
+    fuelSurchargeCents: load.fuelSurchargeCents,
+    accessorialsCents: load.accessorialsCents,
+    totalRevenueCents: load.totalRevenueCents,
+  }))
+}
