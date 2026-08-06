@@ -61,7 +61,7 @@ await page.fill('input[name="password"]', PASSWORD)
 
 const started = Date.now()
 await Promise.all([
-  page.waitForURL(/\/loads/, { timeout: 60_000 }),
+  page.waitForURL(/\/(loads|dashboard)/, { timeout: 60_000 }),
   page.click('button[type="submit"]'),
 ])
 const elapsed = Date.now() - started
@@ -91,7 +91,7 @@ await secondPage.fill('input[name="email"]', EMAIL)
 await secondPage.fill('input[name="password"]', PASSWORD)
 const secondStart = Date.now()
 await Promise.all([
-  secondPage.waitForURL(/\/loads/, { timeout: 60_000 }),
+  secondPage.waitForURL(/\/(loads|dashboard)/, { timeout: 60_000 }),
   secondPage.click('button[type="submit"]'),
 ])
 console.log('argon2id login round trip:', `${Date.now() - secondStart}ms`)

@@ -152,7 +152,7 @@ async function signIn() {
   await page.fill('input[name="email"]', email)
   await page.fill('input[name="password"]', password)
   await Promise.all([
-    page.waitForURL(/\/loads/, { timeout: 60_000 }),
+    page.waitForURL(/\/(loads|dashboard)/, { timeout: 60_000 }),
     page.click('button[type="submit"]'),
   ])
   const cookie = (await context.cookies()).find(

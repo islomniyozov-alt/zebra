@@ -4,8 +4,10 @@ import { getLocaleContext } from '@/lib/locale'
 import { LoginForm } from './LoginForm'
 
 export default async function LoginPage() {
-  // Already signed in? The login screen is not a place to linger.
-  if (await getSession()) redirect('/loads')
+  // Already signed in? The login screen is not a place to linger. Same
+  // destination as a fresh sign-in, so arriving at /login with a session and
+  // arriving with credentials land in the same place.
+  if (await getSession()) redirect('/dashboard')
 
   const { t } = await getLocaleContext()
 

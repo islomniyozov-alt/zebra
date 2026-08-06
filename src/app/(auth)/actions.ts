@@ -87,7 +87,15 @@ export async function signInAction(
     })
   }
 
-  redirect('/loads')
+  // THE FIRST SCREEN OF THE DAY, and signing in is the start of it. This was
+  // /loads until Step B, which left the two arrival routes disagreeing: the
+  // bare domain went to the dashboard and a sign-in went to Loads.
+  //
+  // Every operator role holds `dashboard:read` — OWNER and ADMIN through
+  // EVERYTHING, MANAGER and DISPATCHER through OPERATIONS_READ, ACCOUNTING
+  // explicitly. A DRIVER holds neither this nor `load:read`, so the operator
+  // application refuses them here exactly as it refused them at /loads.
+  redirect('/dashboard')
 }
 
 export async function signOutAction(): Promise<void> {

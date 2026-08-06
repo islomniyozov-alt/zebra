@@ -96,7 +96,7 @@ await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded' })
 await page.fill('input[name="email"]', process.env.SEED_OWNER_EMAIL)
 await page.fill('input[name="password"]', process.env.SEED_OWNER_PASSWORD)
 await Promise.all([
-  page.waitForURL(/\/loads/, { timeout: 90_000 }),
+  page.waitForURL(/\/(loads|dashboard)/, { timeout: 90_000 }),
   page.click('button[type="submit"]'),
 ])
 

@@ -30,7 +30,7 @@ await page.goto(new URL('/login', BASE).href, { waitUntil: 'domcontentloaded' })
 await page.fill('input[name="email"]', process.env.SEED_OWNER_EMAIL)
 await page.fill('input[name="password"]', process.env.SEED_OWNER_PASSWORD)
 await Promise.all([
-  page.waitForURL(/\/loads/, { timeout: 60_000 }),
+  page.waitForURL(/\/(loads|dashboard)/, { timeout: 60_000 }),
   page.click('button[type="submit"]'),
 ])
 const cookie = (await context.cookies()).find((c) => c.name === 'zebra_session')

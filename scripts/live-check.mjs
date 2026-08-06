@@ -78,12 +78,11 @@ async function signIn() {
     await page.fill('input[name="email"]', EMAIL)
     await page.fill('input[name="password"]', PASSWORD)
     await Promise.all([
-      // Sign-in still lands on /loads. The BARE DOMAIN now lands on
-      // /dashboard, so the two arrival routes disagree — flagged in the Step B
-      // report as a question rather than changed here, because moving the
-      // post-login destination is a product decision and it would move every
-      // walkthrough that waits on /loads.
-      page.waitForURL(/\/loads/, { timeout: 60_000 }),
+      // Both arrival routes now land on /dashboard — the bare domain by
+      // redirect, a sign-in by `signInAction`. The alternation stays because
+      // it costs nothing and a wait that pins the destination twice is a wait
+      // that fails twice when it moves again.
+      page.waitForURL(/\/(loads|dashboard)/, { timeout: 60_000 }),
       page.click('button[type="submit"]'),
     ])
     const found = (await context.cookies()).find(

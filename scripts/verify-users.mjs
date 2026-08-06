@@ -54,6 +54,9 @@ const signIn = async (email, password) => {
   await page
     .waitForURL(/\/(loads|dashboard)/, { timeout: 90_000 })
     .catch(() => {})
+  // The post-login destination is /dashboard since Step B. These assertions
+  // name it rather than accepting anything, because "signed in successfully"
+  // and "landed somewhere" are different claims.
   return { context, page, landed: page.url().replace(BASE, '') }
 }
 
@@ -158,7 +161,7 @@ await owner.page.screenshot({ path: 'screenshots/users-created.png' })
 const newcomer = await signIn(EMAIL, temporary)
 record(
   'the new user can sign in with it',
-  newcomer.landed.includes('/loads'),
+  newcomer.landed.includes('/dashboard'),
   newcomer.landed,
 )
 
@@ -231,7 +234,7 @@ record(
 const refused = await signIn(EMAIL, temporary)
 record(
   'and they cannot sign in again',
-  !refused.landed.includes('/loads'),
+  !refused.landed.includes('/dashboard'),
   refused.landed,
 )
 await refused.context.close()
@@ -249,7 +252,7 @@ await owner.page.waitForTimeout(10_000)
 const back = await signIn(EMAIL, temporary)
 record(
   'reactivating lets them back in (rule 11’s pair)',
-  back.landed.includes('/loads'),
+  back.landed.includes('/dashboard'),
   back.landed,
 )
 await back.context.close()

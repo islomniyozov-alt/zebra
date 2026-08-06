@@ -160,8 +160,11 @@ const session = async (email, password) => {
 
 const dispatcher = await session(EMAIL, PASSWORD)
 record(
+  // The destination moved to /dashboard when the dashboard shipped. Asserted
+  // rather than loosened: "signing in lands somewhere" is not the claim worth
+  // making, and a dispatcher holds `dashboard:read` through OPERATIONS_READ.
   'the dispatcher can sign in',
-  dispatcher.page.url().includes('/loads'),
+  dispatcher.page.url().includes('/dashboard'),
   dispatcher.page.url().replace(BASE, ''),
 )
 
