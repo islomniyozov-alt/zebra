@@ -8,13 +8,21 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 # Zebra
 
-Current phase: **Phase 2** — read `PHASE-2-BRIEF.md` first; §16 lists what has
-been flagged against it. `PHASE-1-BRIEF.md` is closed but still binding for the
-mechanisms in its §6–§10.
+**Phase 3 is closed.** Phases 1, 2 and 3 are all closed and all still binding:
+Phase 1 for the mechanisms in its §6–§10, Phase 2 for its engine patterns,
+Phase 3 for money. Each brief's flag section is the list of what was argued
+with rather than obeyed — `PHASE-2-BRIEF.md` §16, `PHASE-3-BRIEF.md` §9 — and
+`PHASE-3-BRIEF.md` §11 is what the next phase inherits.
 
-Read `PHASE-2-BRIEF.md`, `prisma/schema.prisma` and `TMS-DESIGN-SYSTEM.md` before
-writing anything. Where the brief disagrees with the other two, the other two win
-and the contradiction gets flagged rather than silently resolved.
+Read `prisma/schema.prisma` and `TMS-DESIGN-SYSTEM.md` before writing anything,
+plus the brief for whatever is being built. Where a brief disagrees with those
+two, the two win and the contradiction gets flagged rather than silently
+resolved.
+
+Briefs get transcribed into the repository. Phase 3's had to be excavated from
+a session transcript at Step 7 to run its own acceptance criteria against; a
+rule that lives only in a chat log cannot be cited in review, and a criterion
+that lives only in a chat log cannot be checked.
 
 Rules that are cheap to state and expensive to rediscover:
 
