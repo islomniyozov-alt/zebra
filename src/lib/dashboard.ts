@@ -35,6 +35,15 @@ export interface ActionRow {
   key: string
   /** Counted, never estimated. Zero rows are dropped before render. */
   count: number
+  /**
+   * What the row is WORTH, where the money is the point.
+   *
+   * "3 payments not yet applied" is a filing job; "$14,200 not yet applied" is
+   * money the carrier cannot see in any receivable figure. Only the unapplied
+   * row carries one — the others are counts of work, and inventing a value for
+   * them would be a number nobody could reproduce.
+   */
+  amountCents?: number
   href: string
   /** Danger for money going stale, warning for work waiting, else neutral. */
   tone: 'danger' | 'warning' | 'neutral'
@@ -46,6 +55,8 @@ interface ActionSpec {
   href: string
   tone: ActionRow['tone']
   count: (tx: TxClient, scope: CompanyScopeFilter) => Promise<number>
+  /** Optional second query, for rows whose point is an amount. */
+  amount?: (tx: TxClient, scope: CompanyScopeFilter) => Promise<number>
 }
 
 /**
@@ -126,6 +137,15 @@ const ACTIONS: ActionSpec[] = [
       tx.payment.count({
         where: { ...scope, deletedAt: null, unappliedCents: { gt: 0 } },
       }),
+    // THE MONEY IS THE POINT HERE. Summed from the same rows the count
+    // counts, so the figure and the number beside it cannot disagree.
+    amount: async (tx, scope) =>
+      (
+        await tx.payment.aggregate({
+          where: { ...scope, deletedAt: null, unappliedCents: { gt: 0 } },
+          _sum: { unappliedCents: true },
+        })
+      )._sum.unappliedCents ?? 0,
   },
   {
     key: 'draftSettlements',
@@ -174,12 +194,19 @@ export async function actionQueue(
   )
 
   const counted = await Promise.all(
-    permitted.map(async (action) => ({
-      key: action.key,
-      href: action.href,
-      tone: action.tone,
-      count: await action.count(tx, scope),
-    })),
+    permitted.map(async (action) => {
+      const [count, amountCents] = await Promise.all([
+        action.count(tx, scope),
+        action.amount ? action.amount(tx, scope) : Promise.resolve(undefined),
+      ])
+      return {
+        key: action.key,
+        href: action.href,
+        tone: action.tone,
+        count,
+        ...(amountCents === undefined ? {} : { amountCents }),
+      }
+    }),
   )
 
   return counted.filter((row) => row.count > 0)
@@ -195,18 +222,25 @@ export function actionKeysFor(session: AuthorizedSession): string[] {
 // --- the fleet, in plain numbers ---------------------------------------------
 
 export interface FleetGlance {
-  trucks: number
-  trailers: number
-  drivers: number
+  /** Trucks with a live driver paired to them, and trucks without. */
+  trucksPaired: number
+  trucksIdle: number
+  /** Drivers paired to a truck, and drivers without one. */
+  driversPaired: number
+  driversIdle: number
   /** Loads moving right now: dispatched through at-delivery. */
   inTransit: number
 }
 
 /**
- * Counts, not percentages and not a chart.
+ * The fleet BY ASSIGNMENT STATE, which is the question actually being asked.
  *
- * §14 bans the animated chart; four integers answer "what have I got" faster
- * than anything that needs a legend.
+ * "Eleven trucks" is inventory. "Nine paired, two idle" is a decision: two
+ * tractors are earning nothing this morning, and somebody should know that
+ * before the load board closes.
+ *
+ * Counts, not percentages and not a chart — §14 bans the animated chart, and
+ * five integers answer "what have I got" faster than anything with a legend.
  */
 export async function fleetGlance(
   tx: TxClient,
@@ -217,35 +251,55 @@ export async function fleetGlance(
   // `companyScopeFilter`'s shape drops into each of them unchanged. Company
   // itself is the exception and needs `companyIdScopeFilter` — see tenancy.ts
   // and the seven screens that got it wrong in Phase 2.
-  const [trucks, trailers, drivers, inTransit] = await Promise.all([
-    tx.truck.count({
-      where: { ...scope, deletedAt: null, status: { not: 'SOLD' } },
-    }),
-    tx.trailer.count({
-      where: { ...scope, deletedAt: null, status: { not: 'SOLD' } },
-    }),
-    tx.driver.count({
-      where: { ...scope, deletedAt: null, status: { not: 'INACTIVE' } },
-    }),
-    tx.load.count({
-      where: {
-        ...scope,
-        deletedAt: null,
-        isCancelled: false,
-        operationalStatus: {
-          in: [
-            'DISPATCHED',
-            'AT_PICKUP',
-            'LOADED',
-            'IN_TRANSIT',
-            'AT_DELIVERY',
-          ],
-        },
-      },
-    }),
-  ])
+  const liveTruck = {
+    ...scope,
+    deletedAt: null,
+    status: { not: 'SOLD' },
+  } as const
+  const liveDriver = {
+    ...scope,
+    deletedAt: null,
+    status: { not: 'INACTIVE' },
+  } as const
+  /** A driver who still works here. Reused so both sides agree on "live". */
+  const pairedDriver = { deletedAt: null, status: { not: 'INACTIVE' } } as const
 
-  return { trucks, trailers, drivers, inTransit }
+  const [trucksPaired, trucksIdle, driversPaired, driversIdle, inTransit] =
+    await Promise.all([
+      // A truck is paired when a live driver points at it. The pairing lives
+      // on `Driver.assignedTruckId` and only there, so this is the only
+      // direction the schema can answer.
+      tx.truck.count({
+        where: { ...liveTruck, drivers: { some: pairedDriver } },
+      }),
+      // NOT `NOT some` — `none` over the same filter, so a truck whose only
+      // driver has been retired counts as idle rather than as spoken for.
+      tx.truck.count({
+        where: { ...liveTruck, drivers: { none: pairedDriver } },
+      }),
+      tx.driver.count({
+        where: { ...liveDriver, assignedTruckId: { not: null } },
+      }),
+      tx.driver.count({ where: { ...liveDriver, assignedTruckId: null } }),
+      tx.load.count({
+        where: {
+          ...scope,
+          deletedAt: null,
+          isCancelled: false,
+          operationalStatus: {
+            in: [
+              'DISPATCHED',
+              'AT_PICKUP',
+              'LOADED',
+              'IN_TRANSIT',
+              'AT_DELIVERY',
+            ],
+          },
+        },
+      }),
+    ])
+
+  return { trucksPaired, trucksIdle, driversPaired, driversIdle, inTransit }
 }
 
 // --- this week, per authority -------------------------------------------------
@@ -253,8 +307,14 @@ export async function fleetGlance(
 export interface WeekRow {
   companyId: string
   companyName: string
-  loads: number
+  /** Booked in the week — freight taken on, whether or not it has run. */
+  booked: number
+  /** Delivered in the week. Revenue counts on this one. */
+  delivered: number
   revenueCents: number
+  /** Of that revenue: sold to a factor, and collected by the carrier. */
+  factoredCents: number
+  directCents: number
 }
 
 /**
@@ -293,35 +353,76 @@ export async function thisWeek(
   })
   if (companies.length === 0) return []
 
-  // One grouped query rather than one per authority: the dashboard is the
-  // first screen of the day and it must not cost a round trip per company.
-  const grouped = await tx.load.groupBy({
-    by: ['companyId'],
-    where: {
-      companyId: { in: companies.map((company) => company.id) },
-      deletedAt: null,
-      isCancelled: false,
-      statusEvents: {
-        some: {
-          axis: 'OPERATIONAL',
-          toStatus: 'DELIVERED',
-          outcome: 'APPLIED',
-          occurredAt: { gte: since },
-        },
+  const ids = companies.map((company) => company.id)
+  const live = { deletedAt: null, isCancelled: false } as const
+  const deliveredThisWeek = {
+    statusEvents: {
+      some: {
+        axis: 'OPERATIONAL',
+        toStatus: 'DELIVERED',
+        outcome: 'APPLIED',
+        occurredAt: { gte: since },
       },
     },
-    _count: { _all: true },
-    _sum: { totalRevenueCents: true },
-  })
+  } as const
 
-  const byCompany = new Map(grouped.map((row) => [row.companyId, row]))
+  // FOUR GROUPED QUERIES, not four per authority: the dashboard is the first
+  // screen of the day and it must not cost a round trip per company.
+  //
+  // BOOKED AND DELIVERED ARE DIFFERENT WEEKS' WORK and neither is the other's
+  // proxy. A quiet booking week with a heavy delivery week is a business
+  // running down its backlog, and one number cannot show it.
+  const [booked, delivered, factored, direct] = await Promise.all([
+    tx.load.groupBy({
+      by: ['companyId'],
+      where: { companyId: { in: ids }, ...live, bookedAt: { gte: since } },
+      _count: { _all: true },
+    }),
+    tx.load.groupBy({
+      by: ['companyId'],
+      where: { companyId: { in: ids }, ...live, ...deliveredThisWeek },
+      _count: { _all: true },
+      _sum: { totalRevenueCents: true },
+    }),
+    // FACTORED VS DIRECT, over the same delivered set, so the two sum to the
+    // revenue beside them. `isFactored` on the load is the apportioned truth —
+    // step 4 put it there and `findFactoringDrift` keeps it honest.
+    tx.load.groupBy({
+      by: ['companyId'],
+      where: {
+        companyId: { in: ids },
+        ...live,
+        ...deliveredThisWeek,
+        isFactored: true,
+      },
+      _sum: { totalRevenueCents: true },
+    }),
+    tx.load.groupBy({
+      by: ['companyId'],
+      where: {
+        companyId: { in: ids },
+        ...live,
+        ...deliveredThisWeek,
+        isFactored: false,
+      },
+      _sum: { totalRevenueCents: true },
+    }),
+  ])
+
+  const bookedBy = new Map(booked.map((row) => [row.companyId, row]))
+  const deliveredBy = new Map(delivered.map((row) => [row.companyId, row]))
+  const factoredBy = new Map(factored.map((row) => [row.companyId, row]))
+  const directBy = new Map(direct.map((row) => [row.companyId, row]))
 
   // Every authority appears, including the ones that hauled nothing — a
   // missing row reads as a bug, where a zero reads as a quiet week.
   return companies.map((company) => ({
     companyId: company.id,
     companyName: company.name,
-    loads: byCompany.get(company.id)?._count._all ?? 0,
-    revenueCents: byCompany.get(company.id)?._sum.totalRevenueCents ?? 0,
+    booked: bookedBy.get(company.id)?._count._all ?? 0,
+    delivered: deliveredBy.get(company.id)?._count._all ?? 0,
+    revenueCents: deliveredBy.get(company.id)?._sum.totalRevenueCents ?? 0,
+    factoredCents: factoredBy.get(company.id)?._sum.totalRevenueCents ?? 0,
+    directCents: directBy.get(company.id)?._sum.totalRevenueCents ?? 0,
   }))
 }

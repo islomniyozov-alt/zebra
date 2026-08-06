@@ -6,6 +6,7 @@ import { companyScopeFilter } from '@/lib/tenancy'
 import { FilterBar } from '@/components/ui/FilterBar'
 import { LoadsTable, type LoadRow } from './LoadsTable'
 import { billingLabelKey, operationalLabelKey } from '@/lib/status'
+import { readyToInvoiceWhere } from '@/lib/invoices'
 import { DENSITIES, readDensity, readSavedViews } from '@/lib/preferences'
 import { SavedViews } from './SavedViews'
 import type {
@@ -13,6 +14,15 @@ import type {
   LoadOperationalStatus,
   Prisma,
 } from '@/generated/prisma/client'
+
+/**
+ * The billing chip whose filter is a predicate rather than an enum value.
+ *
+ * Not a `LoadBillingStatus`: it is the same string the column happens to use,
+ * but it selects through `readyToInvoiceWhere()`. Named once so the three
+ * places that special-case it cannot drift.
+ */
+const READY = 'READY_TO_INVOICE'
 
 // §11.7 — the screen that proves the rest of it works. Real shell, real table,
 // real filter bar, real empty state. No data, no create action.
@@ -69,9 +79,19 @@ export default async function LoadsPage({
     const statusWhere = statusParam
       ? { operationalStatus: statusParam as LoadOperationalStatus }
       : {}
-    const billingWhere = billingParam
-      ? { billingStatus: billingParam as LoadBillingStatus }
-      : {}
+    // READY TO INVOICE IS A PREDICATE, NOT A COLUMN VALUE, and the two are
+    // not the same set. `billingStatus` says READY_TO_INVOICE for
+    // direct-settled freight too — it has a POD and a rate — while
+    // `readyToInvoiceWhere()` excludes it, because Relay work never becomes an
+    // invoice. Filtering on the column would list loads the invoice queue
+    // refuses to show, which is exactly the disagreement the shared-predicate
+    // rule exists to prevent.
+    const billingWhere: Prisma.LoadWhereInput =
+      billingParam === READY
+        ? readyToInvoiceWhere()
+        : billingParam
+          ? { billingStatus: billingParam as LoadBillingStatus }
+          : {}
 
     const loads = await tx.load.findMany({
       where: { ...base, ...statusWhere, ...billingWhere },
@@ -133,7 +153,7 @@ export default async function LoadsPage({
     // Each group ignores its OWN filter and honours the other — so the
     // billing counts narrow when a status is picked, and vice versa, and
     // clicking a chip lands on exactly the number it promised.
-    const [statusCounts, billingCounts] = await Promise.all([
+    const [statusCounts, billingCounts, readyCount] = await Promise.all([
       tx.load.groupBy({
         by: ['operationalStatus'],
         where: { ...base, ...billingWhere },
@@ -143,6 +163,11 @@ export default async function LoadsPage({
         by: ['billingStatus'],
         where: { ...base, ...statusWhere },
         _count: { _all: true },
+      }),
+      // One extra count: this chip's predicate is not a column, so `groupBy`
+      // cannot produce it. Same function the chip filters by.
+      tx.load.count({
+        where: { ...base, ...statusWhere, ...readyToInvoiceWhere() },
       }),
     ])
 
@@ -157,9 +182,12 @@ export default async function LoadsPage({
       statusCounts: Object.fromEntries(
         statusCounts.map((row) => [row.operationalStatus, row._count._all]),
       ) as Record<string, number>,
-      billingCounts: Object.fromEntries(
-        billingCounts.map((row) => [row.billingStatus, row._count._all]),
-      ) as Record<string, number>,
+      billingCounts: {
+        ...Object.fromEntries(
+          billingCounts.map((row) => [row.billingStatus, row._count._all]),
+        ),
+        [READY]: readyCount,
+      } as Record<string, number>,
     }
   })
 
@@ -194,7 +222,17 @@ export default async function LoadsPage({
     'DELIVERED',
     'POD_RECEIVED',
   ]
-  const billing: LoadBillingStatus[] = ['UNINVOICED', 'INVOICED', 'PAID']
+  // READY_TO_INVOICE first: it is the biggest bucket on a working board —
+  // eight of thirteen rows the day the counts went in — and a filter bar that
+  // cannot reach its own largest group is a bar nobody uses. PARTIALLY_PAID
+  // was the other one the counts exposed as missing.
+  const billing: string[] = [
+    READY,
+    'UNINVOICED',
+    'INVOICED',
+    'PARTIALLY_PAID',
+    'PAID',
+  ]
 
   return (
     <>
@@ -256,7 +294,7 @@ export default async function LoadsPage({
             label: t('loads.filter.billing'),
             choices: billing.map((status) => ({
               value: status,
-              label: t(billingLabelKey(status)),
+              label: t(billingLabelKey(status as LoadBillingStatus)),
               count: billingCounts[status] ?? 0,
             })),
           },

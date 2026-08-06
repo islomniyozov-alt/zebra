@@ -62,14 +62,29 @@ export default async function DashboardPage() {
     return { queue, fleet, week }
   })
 
+  // BY ASSIGNMENT STATE. "Nine trucks" is inventory; "seven paired, two idle"
+  // is a decision somebody can act on before the load board closes.
   const fleetCards: { key: string; label: MessageKey; value: number }[] = [
-    { key: 'trucks', label: 'dash.fleet.trucks', value: data.fleet.trucks },
     {
-      key: 'trailers',
-      label: 'dash.fleet.trailers',
-      value: data.fleet.trailers,
+      key: 'trucksPaired',
+      label: 'dash.fleet.trucksPaired',
+      value: data.fleet.trucksPaired,
     },
-    { key: 'drivers', label: 'dash.fleet.drivers', value: data.fleet.drivers },
+    {
+      key: 'trucksIdle',
+      label: 'dash.fleet.trucksIdle',
+      value: data.fleet.trucksIdle,
+    },
+    {
+      key: 'driversPaired',
+      label: 'dash.fleet.driversPaired',
+      value: data.fleet.driversPaired,
+    },
+    {
+      key: 'driversIdle',
+      label: 'dash.fleet.driversIdle',
+      value: data.fleet.driversIdle,
+    },
     {
       key: 'inTransit',
       label: 'dash.fleet.inTransit',
@@ -78,9 +93,19 @@ export default async function DashboardPage() {
   ]
 
   const hasFleet =
-    data.fleet.trucks + data.fleet.trailers + data.fleet.drivers > 0
+    data.fleet.trucksPaired +
+      data.fleet.trucksIdle +
+      data.fleet.driversPaired +
+      data.fleet.driversIdle >
+    0
   const weekTotal = data.week.reduce((sum, row) => sum + row.revenueCents, 0)
-  const weekLoads = data.week.reduce((sum, row) => sum + row.loads, 0)
+  const weekBooked = data.week.reduce((sum, row) => sum + row.booked, 0)
+  const weekDelivered = data.week.reduce((sum, row) => sum + row.delivered, 0)
+  const weekFactored = data.week.reduce(
+    (sum, row) => sum + row.factoredCents,
+    0,
+  )
+  const weekDirect = data.week.reduce((sum, row) => sum + row.directCents, 0)
 
   return (
     <>
@@ -132,10 +157,19 @@ export default async function DashboardPage() {
                         className={`h-[28px] w-[3px] ${TONE_STRIPE[row.tone]}`}
                       />
                       <span className="font-mono text-md font-semibold tabular-nums text-ink">
-                        {row.count}
+                        {/* Where the row carries an amount, the AMOUNT is the
+                         * headline: "3 payments not applied" is a filing job,
+                         * "$14,200 not applied" is money nobody can see. The
+                         * count follows in the sentence so both are there. */}
+                        {row.amountCents === undefined
+                          ? row.count
+                          : formatCents(row.amountCents, locale)}
                       </span>
                       <span className="text-ink">
                         {t(`dash.action.${row.key}` as MessageKey)}
+                        {row.amountCents === undefined ? null : (
+                          <span className="text-ink-3"> ({row.count})</span>
+                        )}
                       </span>
                     </Link>
                   </li>
@@ -188,7 +222,7 @@ export default async function DashboardPage() {
                 {t('dash.weekHint')}
               </p>
 
-              {weekLoads === 0 ? (
+              {weekBooked + weekDelivered === 0 ? (
                 <div className="mt-z3 overflow-hidden rounded-card border border-border">
                   <EmptyState
                     title={t('dash.weekEmpty.title')}
@@ -212,10 +246,19 @@ export default async function DashboardPage() {
                           {t('dash.week.authority')}
                         </th>
                         <th className="px-z3 py-z2 text-end text-xs font-semibold uppercase tracking-[0.04em] text-ink-2">
-                          {t('dash.week.loads')}
+                          {t('dash.week.booked')}
+                        </th>
+                        <th className="px-z3 py-z2 text-end text-xs font-semibold uppercase tracking-[0.04em] text-ink-2">
+                          {t('dash.week.delivered')}
                         </th>
                         <th className="px-z3 py-z2 text-end text-xs font-semibold uppercase tracking-[0.04em] text-ink-2">
                           {t('dash.week.revenue')}
+                        </th>
+                        <th className="px-z3 py-z2 text-end text-xs font-semibold uppercase tracking-[0.04em] text-ink-2">
+                          {t('dash.week.factored')}
+                        </th>
+                        <th className="px-z3 py-z2 text-end text-xs font-semibold uppercase tracking-[0.04em] text-ink-2">
+                          {t('dash.week.direct')}
                         </th>
                       </tr>
                     </thead>
@@ -229,10 +272,21 @@ export default async function DashboardPage() {
                             {row.companyName}
                           </td>
                           <td className="px-z3 py-z2 text-end font-mono tabular-nums text-ink">
-                            {row.loads}
+                            {row.booked}
+                          </td>
+                          <td className="px-z3 py-z2 text-end font-mono tabular-nums text-ink">
+                            {row.delivered}
                           </td>
                           <td className="px-z3 py-z2 text-end font-mono tabular-nums text-ink">
                             {formatCents(row.revenueCents, locale)}
+                          </td>
+                          {/* The two split the revenue beside them exactly —
+                           * a reader can add them and check (rule 9-money). */}
+                          <td className="px-z3 py-z2 text-end font-mono tabular-nums text-ink-2">
+                            {formatCents(row.factoredCents, locale)}
+                          </td>
+                          <td className="px-z3 py-z2 text-end font-mono tabular-nums text-ink-2">
+                            {formatCents(row.directCents, locale)}
                           </td>
                         </tr>
                       ))}
@@ -245,10 +299,19 @@ export default async function DashboardPage() {
                             {t('dash.week.total')}
                           </td>
                           <td className="px-z3 py-z2 text-end font-mono tabular-nums font-medium text-ink">
-                            {weekLoads}
+                            {weekBooked}
+                          </td>
+                          <td className="px-z3 py-z2 text-end font-mono tabular-nums font-medium text-ink">
+                            {weekDelivered}
                           </td>
                           <td className="px-z3 py-z2 text-end font-mono tabular-nums font-medium text-ink">
                             {formatCents(weekTotal, locale)}
+                          </td>
+                          <td className="px-z3 py-z2 text-end font-mono tabular-nums text-ink-2">
+                            {formatCents(weekFactored, locale)}
+                          </td>
+                          <td className="px-z3 py-z2 text-end font-mono tabular-nums text-ink-2">
+                            {formatCents(weekDirect, locale)}
                           </td>
                         </tr>
                       ) : null}

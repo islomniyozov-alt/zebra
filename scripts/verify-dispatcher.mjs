@@ -235,6 +235,7 @@ record(
 // failure needs a role-specific walk, and "it refuses what it should" is only
 // half of that.
 const DISPATCHER_SCREENS = [
+  '/dashboard',
   '/loads',
   '/loads/new',
   '/dispatch',
@@ -267,6 +268,65 @@ record(
   'and the SAME url works for an owner (rule 11)',
   ownerNew.status === 200 && ownerNew.body.includes('unitNumber'),
   `HTTP ${ownerNew.status}`,
+)
+
+// --- the dashboard's own rows -----------------------------------------------
+//
+// The action queue is built per role: each row names the resource it needs and
+// the ones the session cannot read are never counted. That is asserted in
+// tests/dashboard.test.ts against `can`, which proves the FILTER — this proves
+// the PAYLOAD, on the deployed worker, by reading what came down the wire.
+//
+// The same argument as the money fields on /trucks: a number a dispatcher must
+// not see is absent from the response, not hidden in CSS.
+const dash = await bodyOf(dispatcher.page, '/dashboard')
+
+record(
+  'a dispatcher gets the operational dashboard rows',
+  dash.status === 200 &&
+    (dash.body.includes('Delivered, waiting on a POD') ||
+      dash.body.includes('Booked with no truck or driver') ||
+      dash.body.includes('Nothing is waiting')),
+  `HTTP ${dash.status}`,
+)
+
+// Every money row's label, by the words that would appear if one rendered.
+const MONEY_ROWS = [
+  'Ready to invoice',
+  'POD in, no rate entered',
+  'Invoices past due',
+  'Payments not yet applied',
+  'Settlements in draft',
+]
+const leaked = MONEY_ROWS.filter((label) => dash.body.includes(label))
+record(
+  'and no money row reaches the payload at all',
+  leaked.length === 0,
+  leaked.length === 0 ? 'none of five present' : leaked.join(', '),
+)
+
+// The week section is money too — heading included, since a heading over an
+// empty section still tells a dispatcher there is revenue to be seen.
+record(
+  'and no revenue section, not even its heading',
+  !dash.body.includes('This week') && !dash.body.includes('Both authorities'),
+  'absent',
+)
+
+// PAIRED, per standing rule 11: the same screen for an owner HAS the money.
+//
+// This pairing does more than balance the refusal — it proves the LABELS above
+// are the strings the screen really renders. Without it, an i18n rename would
+// turn "no money row reaches the payload" into a check that passes because it
+// is looking for words nothing says any more.
+const ownerDash = await bodyOf(owner.page, '/dashboard')
+const ownerHas = MONEY_ROWS.filter((label) => ownerDash.body.includes(label))
+record(
+  'while an owner sees the money rows on the same screen',
+  ownerDash.status === 200 &&
+    ownerDash.body.includes('This week') &&
+    ownerHas.length > 0,
+  `HTTP ${ownerDash.status} · ${ownerHas.length} of ${MONEY_ROWS.length} row label(s) live`,
 )
 
 // The navigation does not offer what the role cannot reach, either (§7).

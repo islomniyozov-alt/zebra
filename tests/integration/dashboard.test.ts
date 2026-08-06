@@ -214,8 +214,40 @@ describe('the fleet at a glance', () => {
     const glance = await inOrg((tx) => fleetGlance(tx, {}))
     // The sold truck and the inactive driver are equipment the carrier no
     // longer has; counting them makes the fleet look bigger than it is.
-    expect(glance.trucks).toBe(1)
-    expect(glance.drivers).toBe(0)
+    expect(glance.trucksPaired + glance.trucksIdle).toBe(1)
+    expect(glance.driversPaired + glance.driversIdle).toBe(0)
+  }, 300_000)
+
+  it('splits by assignment state, and a retired driver frees the truck', async () => {
+    const truck = await owner.truck.create({
+      data: { organizationId, companyId: alphaId, unitNumber: `P1-${nonce}` },
+    })
+    const driver = await owner.driver.create({
+      data: {
+        organizationId,
+        companyId: alphaId,
+        firstName: 'Paired',
+        lastName: `Up ${nonce}`,
+        assignedTruckId: truck.id,
+      },
+    })
+
+    const paired = await inOrg((tx) => fleetGlance(tx, {}))
+    expect(paired.trucksPaired).toBe(1)
+    expect(paired.driversPaired).toBe(1)
+
+    // RETIRE THE DRIVER. The truck must go back to idle rather than staying
+    // spoken for by somebody who no longer works here — which is why the
+    // count uses `none` over the live-driver filter and not `NOT some`.
+    await owner.driver.update({
+      where: { id: driver.id },
+      data: { status: 'INACTIVE' },
+    })
+
+    const after = await inOrg((tx) => fleetGlance(tx, {}))
+    expect(after.trucksPaired).toBe(0)
+    expect(after.trucksIdle).toBe(paired.trucksIdle + 1)
+    expect(after.driversPaired).toBe(0)
   }, 300_000)
 })
 
@@ -247,14 +279,24 @@ describe('this week, per authority', () => {
     const inWeek = await inOrg((tx) =>
       thisWeek(tx, [alphaId], new Date('2026-11-06T12:00:00Z')),
     )
-    expect(inWeek[0]).toMatchObject({ loads: 1, revenueCents: 150000 })
+    expect(inWeek[0]).toMatchObject({
+      delivered: 1,
+      revenueCents: 150000,
+      // Not factored, so the whole of it is the carrier's to collect. The two
+      // split the revenue exactly, which is the property worth asserting.
+      factoredCents: 0,
+      directCents: 150000,
+    })
+    expect(inWeek[0]!.factoredCents + inWeek[0]!.directCents).toBe(
+      inWeek[0]!.revenueCents,
+    )
 
     // The following week does not see it — revenue is earned when the freight
     // moves, and it moves once.
     const nextWeek = await inOrg((tx) =>
       thisWeek(tx, [alphaId], new Date('2026-11-13T12:00:00Z')),
     )
-    expect(nextWeek[0]).toMatchObject({ loads: 0, revenueCents: 0 })
+    expect(nextWeek[0]).toMatchObject({ delivered: 0, revenueCents: 0 })
   }, 300_000)
 
   it('keeps the two authorities apart', async () => {
