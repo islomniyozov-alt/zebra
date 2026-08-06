@@ -11,6 +11,7 @@ import { SavedViews } from './SavedViews'
 import type {
   LoadBillingStatus,
   LoadOperationalStatus,
+  Prisma,
 } from '@/generated/prisma/client'
 
 // §11.7 — the screen that proves the rest of it works. Real shell, real table,
@@ -32,83 +33,135 @@ export default async function LoadsPage({
     typeof params['status'] === 'string' ? params['status'] : undefined
   const companyParam =
     typeof params['company'] === 'string' ? params['company'] : undefined
+  // THE BILLING CHIPS NEVER FILTERED ANYTHING. The bar has offered them since
+  // Phase 2 and the query only ever read `status` and `company`, so clicking
+  // one rewrote the URL and returned the same rows. Found while adding the
+  // counts, because a count has to come from the query the chip runs and this
+  // chip ran none.
+  const billingParam =
+    typeof params['billing'] === 'string' ? params['billing'] : undefined
 
-  const { rows, companyCount, savedViews, density } = await withCurrentOrg(
-    'read',
-    'load',
-    async (tx, session) => {
-      // Company scoping is a business filter in the app layer, not a security
-      // boundary — the tenant wall is already in Postgres. An empty scope list
-      // means every authority in the organization.
-      const scope = companyScopeFilter(session.companyScopes)
+  const {
+    rows,
+    companyCount,
+    savedViews,
+    density,
+    statusCounts,
+    billingCounts,
+  } = await withCurrentOrg('read', 'load', async (tx, session) => {
+    // Company scoping is a business filter in the app layer, not a security
+    // boundary — the tenant wall is already in Postgres. An empty scope list
+    // means every authority in the organization.
+    const scope = companyScopeFilter(session.companyScopes)
 
-      const companyCount = await tx.company.count()
+    const companyCount = await tx.company.count()
 
-      const loads = await tx.load.findMany({
-        where: {
-          deletedAt: null,
-          ...scope,
-          ...(companyParam ? { companyId: companyParam } : {}),
-          ...(statusParam
-            ? { operationalStatus: statusParam as LoadOperationalStatus }
-            : {}),
+    // The filters other than the one being counted. Each chip's count is
+    // "how many rows would I get if I clicked this", so it honours every
+    // OTHER active filter and ignores its own group — a Booked count that
+    // ignored the company filter would send somebody to a screen with a
+    // different number on it.
+    const base: Prisma.LoadWhereInput = {
+      deletedAt: null,
+      ...scope,
+      ...(companyParam ? { companyId: companyParam } : {}),
+    }
+    const statusWhere = statusParam
+      ? { operationalStatus: statusParam as LoadOperationalStatus }
+      : {}
+    const billingWhere = billingParam
+      ? { billingStatus: billingParam as LoadBillingStatus }
+      : {}
+
+    const loads = await tx.load.findMany({
+      where: { ...base, ...statusWhere, ...billingWhere },
+      orderBy: { bookedAt: 'desc' },
+      take: 100,
+      select: {
+        id: true,
+        loadNumber: true,
+        isCancelled: true,
+        operationalStatus: true,
+        billingStatus: true,
+        // §7 — a field a role cannot see is absent from the payload, never
+        // hidden in CSS. Rate is here because `read load` implies the board;
+        // margin and driver pay are separate resources and are not selected.
+        linehaulCents: true,
+        company: { select: { name: true } },
+        customer: { select: { name: true } },
+        truck: { select: { unitNumber: true } },
+        stops: {
+          orderBy: { sequence: 'asc' },
+          select: { city: true, state: true, type: true },
         },
-        orderBy: { bookedAt: 'desc' },
-        take: 100,
-        select: {
-          id: true,
-          loadNumber: true,
-          isCancelled: true,
-          operationalStatus: true,
-          billingStatus: true,
-          // §7 — a field a role cannot see is absent from the payload, never
-          // hidden in CSS. Rate is here because `read load` implies the board;
-          // margin and driver pay are separate resources and are not selected.
-          linehaulCents: true,
-          company: { select: { name: true } },
-          customer: { select: { name: true } },
-          truck: { select: { unitNumber: true } },
-          stops: {
-            orderBy: { sequence: 'asc' },
-            select: { city: true, state: true, type: true },
-          },
-        },
-      })
+      },
+    })
 
-      const money = new Intl.NumberFormat(locale, {
-        style: 'currency',
-        currency: 'USD',
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      })
+    const money = new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
 
-      const place = (
-        stop: { city: string | null; state: string | null } | undefined,
-      ) => (stop ? [stop.city, stop.state].filter(Boolean).join(', ') : '—')
+    const place = (
+      stop: { city: string | null; state: string | null } | undefined,
+    ) => (stop ? [stop.city, stop.state].filter(Boolean).join(', ') : '—')
 
-      const rows: LoadRow[] = loads.map((load) => ({
-        id: load.id,
-        loadNumber: load.loadNumber,
-        companyName: load.company.name,
-        customerName: load.customer.name,
-        pickup: place(load.stops.find((stop) => stop.type === 'PICKUP')),
-        delivery: place(
-          [...load.stops].reverse().find((stop) => stop.type === 'DELIVERY'),
-        ),
-        truck: load.truck?.unitNumber ?? '—',
-        operationalStatus: load.operationalStatus,
-        billingStatus: load.billingStatus,
-        // Money is an integer of cents everywhere until the moment it is read.
-        rate: money.format(load.linehaulCents / 100),
-        isCancelled: load.isCancelled,
-      }))
+    const rows: LoadRow[] = loads.map((load) => ({
+      id: load.id,
+      loadNumber: load.loadNumber,
+      companyName: load.company.name,
+      customerName: load.customer.name,
+      pickup: place(load.stops.find((stop) => stop.type === 'PICKUP')),
+      delivery: place(
+        [...load.stops].reverse().find((stop) => stop.type === 'DELIVERY'),
+      ),
+      truck: load.truck?.unitNumber ?? '—',
+      operationalStatus: load.operationalStatus,
+      billingStatus: load.billingStatus,
+      // Money is an integer of cents everywhere until the moment it is read.
+      rate: money.format(load.linehaulCents / 100),
+      isCancelled: load.isCancelled,
+    }))
 
-      const savedViews = await readSavedViews(tx, session.userId)
-      const density = await readDensity(tx, session.userId)
+    // THE COUNTS, from the same predicate the chips filter by. Two
+    // groupBys rather than one count per chip: seven statuses would be seven
+    // round trips on the screen a dispatcher reloads all morning, and the
+    // 200ms-per-statement link to Neon is what makes that expensive.
+    //
+    // Each group ignores its OWN filter and honours the other — so the
+    // billing counts narrow when a status is picked, and vice versa, and
+    // clicking a chip lands on exactly the number it promised.
+    const [statusCounts, billingCounts] = await Promise.all([
+      tx.load.groupBy({
+        by: ['operationalStatus'],
+        where: { ...base, ...billingWhere },
+        _count: { _all: true },
+      }),
+      tx.load.groupBy({
+        by: ['billingStatus'],
+        where: { ...base, ...statusWhere },
+        _count: { _all: true },
+      }),
+    ])
 
-      return { rows, companyCount, savedViews, density }
-    },
-  )
+    const savedViews = await readSavedViews(tx, session.userId)
+    const density = await readDensity(tx, session.userId)
+
+    return {
+      rows,
+      companyCount,
+      savedViews,
+      density,
+      statusCounts: Object.fromEntries(
+        statusCounts.map((row) => [row.operationalStatus, row._count._all]),
+      ) as Record<string, number>,
+      billingCounts: Object.fromEntries(
+        billingCounts.map((row) => [row.billingStatus, row._count._all]),
+      ) as Record<string, number>,
+    }
+  })
 
   // Every value, so a row in any state has a word next to its colour —
   // never colour alone (standing rule 5).
@@ -191,6 +244,11 @@ export default async function LoadsPage({
             choices: statuses.map((status) => ({
               value: status,
               label: t(operationalLabelKey(status)),
+              // A chip with a number is information; without one it is
+              // furniture. Zero is a real answer and is shown — "Delivered (0)"
+              // tells a dispatcher the day is clear, where a missing chip
+              // would just look like a filter that vanished.
+              count: statusCounts[status] ?? 0,
             })),
           },
           {
@@ -199,6 +257,7 @@ export default async function LoadsPage({
             choices: billing.map((status) => ({
               value: status,
               label: t(billingLabelKey(status)),
+              count: billingCounts[status] ?? 0,
             })),
           },
         ]}

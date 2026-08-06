@@ -17,6 +17,16 @@ import { cx } from '@/lib/cx'
 export interface FilterChoice {
   value: string
   label: string
+  /**
+   * How many rows this chip would show, counted by the caller from the same
+   * predicate the chip filters by.
+   *
+   * Optional because not every filter can be counted cheaply — a chip without
+   * one renders exactly as it used to. Where it IS given, zero is shown rather
+   * than hidden: "Delivered (0)" says the day is clear, and a chip that
+   * disappeared would read as a filter that broke.
+   */
+  count?: number
 }
 
 export interface FilterGroup {
@@ -78,6 +88,19 @@ export function FilterBar({ groups, clearLabel, moreLabel }: FilterBarProps) {
                 )}
               >
                 {choice.label}
+                {choice.count === undefined ? null : (
+                  // Dimmer than the label and tabular, so a column of chips
+                  // stays scannable and the numbers line up rather than
+                  // jittering as they change.
+                  <span
+                    className={cx(
+                      'ms-z1 font-mono tabular-nums',
+                      selected ? 'text-accent' : 'text-ink-3',
+                    )}
+                  >
+                    {choice.count}
+                  </span>
+                )}
               </button>
             )
           })}
