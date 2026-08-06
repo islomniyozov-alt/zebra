@@ -113,6 +113,13 @@ if (process.env.DIRECT_DATABASE_URL) {
 
     if (invoice) SHOTS.push(...money('invoice-detail', `/invoices/${invoice}`))
     if (payment) SHOTS.push(...money('payment-detail', `/payments/${payment}`))
+    const truck =
+      (
+        await pool.query(
+          'select id from "Truck" where "deletedAt" is null order by "createdAt" desc limit 1',
+        )
+      ).rows[0]?.id ?? null
+    if (truck) SHOTS.push(...money('truck-detail', '/trucks/' + truck))
     if (settlement) {
       SHOTS.push(...money('settlement-detail', `/settlements/${settlement}`))
     }
