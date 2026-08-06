@@ -4,6 +4,7 @@ import { findAuthorityDrift } from '@/lib/asset-transfer'
 import { findFactoringDrift } from '@/lib/factoring'
 import { findPaymentDrift } from '@/lib/payments'
 import { findBillingStatusDrift } from '@/lib/billing-status'
+import { findSettlementDrift } from '@/lib/settlements'
 import { runInOrg } from '@/lib/tenancy'
 import { unattributed } from '@/lib/audit'
 import type { PrismaClient } from '@/generated/prisma/client'
@@ -118,6 +119,24 @@ describe('a load’s billing status agrees with the money', () => {
   // erase the only record that the argument is still open.
   it('no load says something the invoices and payments do not', async () => {
     const drift = await acrossEveryOrg((tx) => findBillingStatusDrift(tx))
+
+    expect(drift, JSON.stringify(drift, null, 2)).toEqual([])
+  })
+})
+
+describe('a settlement still reproduces from its own snapshots', () => {
+  // Phase 3 §5 step 6, and the strongest form of the claim "approve freezes
+  // it". Every LOAD_PAY line carries the rule, the basis and the result;
+  // recomputing from the snapshot ALONE — no lookup of a rule that may since
+  // have been closed, edited or deleted — must give back the stored figure.
+  //
+  // It also checks the four totals against the lines, because a settlement
+  // whose net does not add up is a cheque for the wrong amount.
+  //
+  // A frozen document that nothing checks is a document somebody will
+  // eventually edit.
+  it('no settlement line disagrees with the snapshot beside it', async () => {
+    const drift = await acrossEveryOrg((tx) => findSettlementDrift(tx))
 
     expect(drift, JSON.stringify(drift, null, 2)).toEqual([])
   })

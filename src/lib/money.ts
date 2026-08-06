@@ -146,6 +146,32 @@ export function parsePercentToBps(input: string): number {
   return bps
 }
 
+/**
+ * A percentage OF an amount, both integers, rounded once.
+ *
+ * The second place this module rounds, and it is here rather than at the two
+ * call sites — a factoring fee and a driver's percentage of gross are the same
+ * arithmetic, and two copies of it are two chances to round differently.
+ *
+ *   30% of $2,830.00  ->  283000 x 3000 / 10000 = 84900
+ *   3%  of $5,025.00  ->  502500 x  300 / 10000 = 15075
+ *   27.5% of $1,000.01 -> 100001 x 2750 / 10000 = 27500.275 -> 27500
+ *
+ * HALF UP ON THE ABSOLUTE VALUE, the same rule as `multiplyCents`, so a credit
+ * rounds the mirror of the charge it reverses. `Math.round` alone would not:
+ * it rounds toward positive infinity, so -0.5 becomes -0 and +0.5 becomes 1.
+ *
+ * The product is exact: basis points times cents stays well inside a safe
+ * integer for any amount this business will ever bill.
+ */
+export function percentOfCents(cents: number, bps: number): number {
+  const product = cents * bps
+  const negative = product < 0
+  const absolute = Math.abs(product)
+  const rounded = Math.trunc((absolute + 5_000) / 10_000)
+  return negative ? -rounded : rounded
+}
+
 /** Basis points as a plain percentage string. No symbol. Trailing zeros cut. */
 export function bpsToInput(bps: number): string {
   const whole = Math.trunc(bps / 100)
@@ -268,8 +294,8 @@ export function factoringSplit(
   advanceRateBps: number,
   feeBps: number,
 ): { advanceCents: number; feeCents: number; reserveCents: number } {
-  const advanceCents = Math.round((totalCents * advanceRateBps) / 10_000)
-  const feeCents = Math.round((totalCents * feeBps) / 10_000)
+  const advanceCents = percentOfCents(totalCents, advanceRateBps)
+  const feeCents = percentOfCents(totalCents, feeBps)
   // The reserve is what is LEFT, not a third independent rounding — that is
   // what keeps the three summing to the total exactly.
   return {

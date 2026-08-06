@@ -1,0 +1,181 @@
+import { formatCents } from './money'
+import { assemblePdf, pdfString, winAnsi } from './pdf'
+
+// ---------------------------------------------------------------------------
+// THE SETTLEMENT PDF.
+//
+// The document a driver is handed on Friday, and the one they bring back in
+// three weeks when they think the fuel deduction was wrong. So every line
+// SHOWS ITS WORKING: not "$735.00" but "L-1042  30% of $2,450.00  $735.00".
+// A settlement a driver cannot check by hand is a settlement they have to
+// argue about instead.
+//
+// Same construction as the invoice PDF and for the same reasons — no library,
+// eight objects, Helvetica from the base fourteen, WinAnsi. The shared
+// machinery moved to pdf.ts when this became the second one; the layout is
+// deliberately not shared, because two documents that must look different are
+// not helped by one function with a mode flag.
+//
+// ENGLISH-ONLY, same parked flag as the invoice: base-14 fonts cannot render
+// Cyrillic or Farsi. A driver's NAME can, though — Latin-1 covers the accented
+// characters that actually appear on a licence.
+// ---------------------------------------------------------------------------
+
+export interface SettlementPdfLine {
+  loadNumber: string | null
+  description: string
+  /** "30% of $2,450.00" — how the figure was reached. Blank where obvious. */
+  basis: string
+  amountCents: number
+}
+
+export interface SettlementPdfInput {
+  settlementNumber: string
+  periodStart: string
+  periodEnd: string
+  carrier: { name: string; dotNumber?: string | null; mcNumber?: string | null }
+  driver: { name: string; phone?: string | null }
+  lines: readonly SettlementPdfLine[]
+  grossCents: number
+  deductionsCents: number
+  reimbursementsCents: number
+  netCents: number
+  status: string
+  paidOn?: string | null
+  paymentReference?: string | null
+}
+
+const LEFT = 56
+const RIGHT = 556
+const TOP = 786
+
+/** How many lines fit on the one page this renders. */
+export const MAX_SETTLEMENT_LINES = 30
+
+export function renderSettlementPdf(input: SettlementPdfInput): Uint8Array {
+  const ops: string[] = []
+  let y = TOP
+
+  const text = (value: string, x: number, size: number, bold = false) => {
+    ops.push(
+      `BT /${bold ? 'F2' : 'F1'} ${size} Tf ${x} ${y} Td (${pdfString(winAnsi(value))}) Tj ET`,
+    )
+  }
+  const money = (cents: number, size: number, bold = false) => {
+    const rendered = formatCents(cents, 'en-US')
+    // Helvetica's 0.5-em average. Money is short, so the approximation never
+    // drifts far enough to matter — the same one the invoice uses.
+    const width = rendered.length * size * 0.5
+    text(rendered, RIGHT - width, size, bold)
+  }
+  const rule = () => {
+    ops.push(`${LEFT} ${y} m ${RIGHT} ${y} l 0.6 w S`)
+  }
+
+  text('DRIVER SETTLEMENT', LEFT, 18, true)
+  text(
+    input.settlementNumber,
+    RIGHT - input.settlementNumber.length * 9,
+    18,
+    true,
+  )
+  y -= 24
+
+  text(input.carrier.name, LEFT, 11, true)
+  y -= 14
+  const identifiers = [
+    input.carrier.dotNumber ? `USDOT ${input.carrier.dotNumber}` : null,
+    input.carrier.mcNumber ? `MC ${input.carrier.mcNumber}` : null,
+  ]
+    .filter(Boolean)
+    .join('   ')
+  if (identifiers) {
+    text(identifiers, LEFT, 9)
+    y -= 18
+  } else {
+    y -= 4
+  }
+
+  rule()
+  y -= 18
+
+  text('DRIVER', LEFT, 8, true)
+  text('PERIOD', 320, 8, true)
+  text('STATUS', 470, 8, true)
+  y -= 13
+  text(input.driver.name, LEFT, 10)
+  text(`${input.periodStart} - ${input.periodEnd}`, 320, 10)
+  text(input.status, 470, 10)
+  y -= 12
+  if (input.driver.phone) text(input.driver.phone, LEFT, 9)
+  y -= 20
+
+  rule()
+  y -= 16
+  text('LOAD', LEFT, 8, true)
+  text('DESCRIPTION', LEFT + 60, 8, true)
+  text('HOW IT WAS CALCULATED', 300, 8, true)
+  text('AMOUNT', RIGHT - 40, 8, true)
+  y -= 6
+  rule()
+  y -= 16
+
+  for (const line of input.lines.slice(0, MAX_SETTLEMENT_LINES)) {
+    text(line.loadNumber ?? '', LEFT, 9)
+    text(line.description, LEFT + 60, 9)
+    // THE WORKING. This column is why the document is worth printing.
+    if (line.basis) text(line.basis, 300, 9)
+    money(line.amountCents, 9)
+    y -= 14
+  }
+
+  y -= 4
+  rule()
+  y -= 16
+
+  text('Gross pay', 380, 10)
+  money(input.grossCents, 10)
+  y -= 14
+  if (input.reimbursementsCents !== 0) {
+    text('Reimbursements', 380, 10)
+    money(input.reimbursementsCents, 10)
+    y -= 14
+  }
+  if (input.deductionsCents !== 0) {
+    // Shown NEGATIVE, because that is what it does to the total below it. A
+    // deductions line printed positive next to a smaller net is the single
+    // most common thing a driver queries.
+    text('Deductions', 380, 10)
+    money(-input.deductionsCents, 10)
+    y -= 14
+  }
+  text('NET PAY', 380, 12, true)
+  money(input.netCents, 12, true)
+  y -= 26
+
+  if (input.paidOn) {
+    text(
+      `Paid ${input.paidOn}${input.paymentReference ? ` - ${input.paymentReference}` : ''}`,
+      LEFT,
+      9,
+    )
+    y -= 14
+  }
+
+  if (input.lines.length > MAX_SETTLEMENT_LINES) {
+    // Said on the document rather than silently dropped. A settlement that
+    // prints 30 of 34 loads and totals all 34 is a document that looks wrong
+    // and is right, which is worse than either.
+    // No parentheses in the sentence: they are structural inside a PDF
+    // string and `pdfString` escapes them, so the file would carry
+    // "line\(s\)" and anything grepping the bytes for the message would miss
+    // it. Plain words survive the escaping unchanged.
+    text(
+      `${input.lines.length - MAX_SETTLEMENT_LINES} further lines not shown - see the screen`,
+      LEFT,
+      9,
+    )
+  }
+
+  return assemblePdf(ops.join('\n'))
+}

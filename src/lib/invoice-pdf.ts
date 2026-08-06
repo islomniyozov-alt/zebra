@@ -1,4 +1,5 @@
 import { formatCents } from './money'
+import { assemblePdf, pdfString, winAnsi } from './pdf'
 
 // ---------------------------------------------------------------------------
 // THE INVOICE PDF — written by hand, on purpose.
@@ -8,9 +9,11 @@ import { formatCents } from './money'
 // opens, and it has to be produced on workerd.
 //
 // NO LIBRARY. pdf-lib and its cousins are 300–600KB of bundle for a page of
-// text in a Worker with a 3MB budget already carrying Prisma. This writes the
-// eight objects a text-only PDF needs, using Helvetica — one of the fourteen
-// base fonts every conforming reader has built in, so nothing is embedded.
+// text in a Worker with a 3MB budget already carrying Prisma. The eight
+// objects a text-only PDF needs live in pdf.ts, shared with the settlement —
+// the file format is identical because the spec says so. The LAYOUT below is
+// not shared, and should not be: two documents that must look different are
+// not helped by one renderer with a mode flag.
 //
 // WHAT THIS COSTS. Base-14 fonts are WinAnsi, which cannot render Cyrillic or
 // Farsi. An invoice goes to an American broker in English and that is the
@@ -39,24 +42,6 @@ export interface InvoicePdfInput {
   accessorialsCents: number
   totalCents: number
   notes?: string | null
-}
-
-/** Escape the three characters that are structural inside a PDF string. */
-function pdfString(value: string): string {
-  return value
-    .replace(/\\/g, '\\\\')
-    .replace(/\(/g, '\\(')
-    .replace(/\)/g, '\\)')
-}
-
-/**
- * WinAnsi only. A character the base font cannot render is replaced rather
- * than silently dropped: "?" in a broker's name is a visible bug somebody
- * reports, where a missing glyph is one nobody notices until the payment is
- * short.
- */
-function winAnsi(value: string): string {
-  return value.replace(/[^\x20-\x7E]/g, '?')
 }
 
 const LEFT = 56
@@ -156,39 +141,8 @@ export function renderInvoicePdf(input: InvoicePdfInput): Uint8Array {
   }
 
   const content = ops.join('\n')
-  return assemble(content)
+  return assemblePdf(content)
 }
 
 /** How many lines fit on the one page this renders. */
 export const MAX_PDF_LINES = 34
-
-function assemble(content: string): Uint8Array {
-  const encoder = new TextEncoder()
-  const objects = [
-    '<< /Type /Catalog /Pages 2 0 R >>',
-    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] ' +
-      '/Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 4 0 R >>',
-    `<< /Length ${encoder.encode(content).length} >>\nstream\n${content}\nendstream`,
-    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
-    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>',
-  ]
-
-  let pdf = '%PDF-1.4\n'
-  const offsets: number[] = []
-  for (const [index, object] of objects.entries()) {
-    offsets.push(encoder.encode(pdf).length)
-    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`
-  }
-
-  const xrefOffset = encoder.encode(pdf).length
-  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`
-  for (const offset of offsets) {
-    pdf += `${String(offset).padStart(10, '0')} 00000 n \n`
-  }
-  pdf +=
-    `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n` +
-    `startxref\n${xrefOffset}\n%%EOF\n`
-
-  return encoder.encode(pdf)
-}

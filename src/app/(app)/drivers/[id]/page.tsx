@@ -3,9 +3,13 @@ import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyIdScopeFilter } from '@/lib/tenancy'
 import { currentAuthority } from '@/lib/fleet'
+import { PAY_RULE_TYPES, payRulesFor } from '@/lib/driver-pay'
+import { bpsToInput, formatCents } from '@/lib/money'
 import { RecordForm } from '@/components/forms/RecordForm'
 import { AssetActions } from '../../_reference/AssetActions'
 import { updateDriverAction } from '../actions'
+import { PayRules, type PayRuleRowView } from './PayRules'
+import type { MessageKey } from '@/lib/i18n'
 import { driverFields } from '../fields'
 import { dateInputValue } from '../../_reference/shared'
 import {
@@ -20,7 +24,7 @@ export default async function EditDriverPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const { t } = await getLocaleContext()
+  const { t, locale } = await getLocaleContext()
 
   const data = await withCurrentOrg('read', 'driver', async (tx, session) => {
     const driver = await tx.driver.findUnique({ where: { id } })
@@ -53,20 +57,64 @@ export default async function EditDriverPage({
       },
     })
 
+    // Pay rules ride along on the same transaction rather than a second
+    // round trip — this screen is one read.
+    const payRules = await payRulesFor(tx, id)
+
     const open = await currentAuthority(tx, 'driver', id)
     const openCompany = open
       ? (companies.find((c) => c.id === open.companyId)?.name ?? null)
       : null
 
-    return { driver, companies, openCompany, trucks }
+    return { driver, companies, openCompany, trucks, payRules }
   })
 
   if (!data) notFound()
-  const { driver, companies, openCompany, trucks } = data
+  const { driver, companies, openCompany, trucks, payRules } = data
 
   const mayEdit = await currentUserCan('update', 'driver')
   const mayDelete = await currentUserCan('delete', 'driver')
+  // A MANAGER reads what a driver is paid; setting it is `driver.pay:update`,
+  // which OWNER, ADMIN and ACCOUNTING hold. A DISPATCHER sees neither.
+  const maySeePay = await currentUserCan('read', 'driver.pay')
+  const maySetPay = await currentUserCan('update', 'driver.pay')
   const authorities = companies.map((c) => ({ value: c.id, label: c.name }))
+
+  const day = (value: Date | null) =>
+    value ? value.toISOString().slice(0, 10) : null
+
+  // The figure each rule turns on, rendered from its own integer column — bps
+  // for percentages, cents for the other two. Never from a float.
+  const payRuleViews: PayRuleRowView[] = payRules.map((rule) => ({
+    id: rule.id,
+    type: rule.type,
+    typeLabel: t(`payRule.${rule.type}` as MessageKey),
+    figure:
+      rule.percentBps !== null
+        ? `${bpsToInput(rule.percentBps)}%`
+        : rule.perMileCents !== null
+          ? `${formatCents(rule.perMileCents, locale)} / mi`
+          : rule.flatCents !== null
+            ? formatCents(rule.flatCents, locale)
+            : '—',
+    from: day(rule.effectiveFrom) ?? '—',
+    to: day(rule.effectiveTo),
+    isCurrent: rule.isCurrent,
+    notes: rule.notes,
+  }))
+
+  const PAY_ERROR_KEYS: MessageKey[] = [
+    'payRule.error.driverNotFound',
+    'payRule.error.customUnsupported',
+    'payRule.error.badPercent',
+    'payRule.error.badPerMile',
+    'payRule.error.badFlat',
+    'payRule.error.badDates',
+    'payRule.error.overlaps',
+  ]
+  const translate = Object.fromEntries(
+    PAY_ERROR_KEYS.map((key) => [key, t(key)]),
+  )
   const truckOptions = trucks.map((truck) => ({
     value: truck.id,
     label: `${truck.unitNumber} · ${truck.company.name}`,
@@ -144,6 +192,46 @@ export default async function EditDriverPage({
             />
           ) : null}
         </RecordForm>
+
+        {/* NEVER SENT TO A ROLE THAT CANNOT SEE IT. A dispatcher gets no
+         * payload at all here — not a hidden panel, not a disabled one. Rule:
+         * leave it out, because hiding it in CSS is the same bug as not
+         * checking at all. */}
+        {maySeePay ? (
+          <div className="mt-z4 max-w-[860px]">
+            <PayRules
+              driverId={id}
+              rules={payRuleViews}
+              types={PAY_RULE_TYPES.map((type) => ({
+                value: type,
+                label: t(`payRule.${type}` as MessageKey),
+              }))}
+              today={new Date().toISOString().slice(0, 10)}
+              translate={translate}
+              labels={{
+                title: t('payRule.title'),
+                hint: t('payRule.hint'),
+                add: maySetPay ? t('payRule.add') : t('payRule.title'),
+                type: t('payRule.type'),
+                percent: t('payRule.percent'),
+                perMile: t('payRule.perMile'),
+                flat: t('payRule.flat'),
+                from: t('payRule.from'),
+                to: t('payRule.to'),
+                toHint: t('payRule.toHint'),
+                open: t('payRule.open'),
+                notes: t('payRule.notes'),
+                save: t('payRule.save'),
+                close: t('payRule.close'),
+                closeHint: t('payRule.closeHint'),
+                none: t('payRule.none'),
+                grossHint: t('payRule.grossHint'),
+                linehaulHint: t('payRule.linehaulHint'),
+              }}
+              readOnly={!maySetPay}
+            />
+          </div>
+        ) : null}
       </div>
     </>
   )
