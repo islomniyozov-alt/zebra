@@ -411,7 +411,7 @@ export const NAVIGATION: readonly NavGroup[] = [
     key: 'operations',
     labelKey: 'nav.group.operations',
     items: [
-      unbuilt('dashboard', '/', 'dashboard', 'unassigned — in no brief'),
+      item('dashboard', '/dashboard', 'dashboard'),
       item('dispatch', '/dispatch', 'dispatch'),
       item('loads', '/loads', 'load'),
       unbuilt('calendar', '/calendar', 'calendar', 'Phase 5'),

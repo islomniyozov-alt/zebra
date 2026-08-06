@@ -63,6 +63,10 @@ const SHOTS = [
   { name: 'truck-new-en', path: '/trucks/new', locale: 'en', authed: true },
   { name: 'truck-new-ru', path: '/trucks/new', locale: 'ru', authed: true },
   { name: 'truck-new-fa-rtl', path: '/trucks/new', locale: 'fa', authed: true },
+  // Step B. The dashboard — the first screen of the day, and the one §12's
+  // "Russian runs ~30% longer" hits hardest because every queue row is a
+  // sentence rather than a label.
+  ...money('dashboard', '/dashboard'),
   // PHASE 3. The money screens, all three locales. These are where §12's
   // "Russian runs ~30% longer" bites hardest: every one of them is a dense
   // table of right-aligned figures beside a translated label, and Farsi
