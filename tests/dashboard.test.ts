@@ -23,6 +23,9 @@ describe('who gets which rows in the action queue', () => {
 
     expect(keys).toContain('podMissing')
     expect(keys).toContain('unassigned')
+    // COMPLIANCE IS OPERATIONAL, not financial (§2.5): a dispatcher must see
+    // it, because an expired inspection gates a dispatch decision they make.
+    expect(keys).toContain('compliance')
 
     for (const money of [
       'noRate',
@@ -56,6 +59,15 @@ describe('who gets which rows in the action queue', () => {
     }
     expect(keys).not.toContain('unassigned')
     expect(can(session('ACCOUNTING'), 'read', 'dispatch')).toBe(false)
+
+    // NOR COMPLIANCE. `compliance:read` rides in FLEET_READ, which ACCOUNTING
+    // does not hold — it gets `truck:read` and `driver:read` by name and not
+    // the fleet bundle. Phase 4 §2.5 assigns compliance to the DISPATCHER and
+    // is silent about accounting, so this asserts what the model says rather
+    // than granting a permission nobody asked for. Flagged in
+    // PHASE-4-BRIEF.md §6 as a question for the owner.
+    expect(keys).not.toContain('compliance')
+    expect(can(session('ACCOUNTING'), 'read', 'compliance')).toBe(false)
   })
 
   it('gives a MANAGER the numbers but not the payment work', () => {
@@ -69,7 +81,18 @@ describe('who gets which rows in the action queue', () => {
   })
 
   it('gives an OWNER everything and a DRIVER nothing', () => {
-    expect(actionKeysFor(session('OWNER'))).toHaveLength(7)
+    // Named rather than counted: a bare length is a magic number that says
+    // nothing about WHICH row was added or lost when it moves.
+    expect(actionKeysFor(session('OWNER'))).toEqual([
+      'compliance',
+      'podMissing',
+      'noRate',
+      'readyToInvoice',
+      'overdue',
+      'unapplied',
+      'draftSettlements',
+      'unassigned',
+    ])
     // The portal is a separate shell with a separate vocabulary; a driver has
     // no operator permission at all, so there is no queue to build.
     expect(actionKeysFor(session('DRIVER'))).toEqual([])

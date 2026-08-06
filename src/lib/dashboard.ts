@@ -1,5 +1,6 @@
 import type { CompanyScopeFilter, TxClient } from './tenancy'
 import { readyToInvoiceWhere } from './invoices'
+import { complianceCount } from './compliance'
 import type { AuthorizedSession, Resource } from './permissions'
 import { can } from './permissions'
 
@@ -66,6 +67,21 @@ interface ActionSpec {
  * that is merely waiting.
  */
 const ACTIONS: ActionSpec[] = [
+  {
+    // COMPLIANCE FIRST, because it is the only row where the cost of ignoring
+    // it is a truck held at a scale house rather than a slow invoice. Gated on
+    // `compliance`, which every operator role holds through FLEET_READ — a
+    // dispatcher must see this one (§2.5), it gates a real dispatch decision.
+    //
+    // The horizon is the authority's own `complianceWarnDays`, read by
+    // `complianceQueue` — the Phase 1 settings field that had nothing reading
+    // it until now (§2.3).
+    key: 'compliance',
+    resource: 'compliance',
+    href: '/safety',
+    tone: 'danger',
+    count: async (tx, scope) => (await complianceCount(tx, scope)).count,
+  },
   {
     // Delivered, no POD. The load cannot be billed and the clock is running.
     key: 'podMissing',

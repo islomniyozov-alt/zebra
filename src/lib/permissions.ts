@@ -424,6 +424,10 @@ export const NAVIGATION: readonly NavGroup[] = [
       item('trucks', '/trucks', 'truck'),
       item('trailers', '/trailers', 'trailer'),
       item('drivers', '/drivers', 'driver'),
+      // Compliance dates are OPERATIONAL, not financial: a dispatcher reads
+      // them because they gate a real dispatch decision (§2.5). `compliance`
+      // has been in FLEET_READ since Phase 1, so no permission changes.
+      item('safety', '/safety', 'compliance'),
       unbuilt('maintenance', '/maintenance', 'maintenance', 'Phase 4'),
     ],
   },
@@ -435,8 +439,12 @@ export const NAVIGATION: readonly NavGroup[] = [
       item('receivables', '/receivables', 'receivable'),
       item('payments', '/payments', 'payment'),
       item('settlements', '/settlements', 'settlement'),
-      unbuilt('expenses', '/expenses', 'expense', 'Phase 4'),
-      unbuilt('fuel', '/fuel', 'fuel', 'Phase 4'),
+      // §2.6: Expenses, Fuel and IFTA move to Phase 5. Phase 4 is fleet and
+      // safety, not the spend ledger — maintenance COSTS land in Phase 4
+      // because they attach to a work order, but the general expense screens
+      // do not.
+      unbuilt('expenses', '/expenses', 'expense', 'Phase 5'),
+      unbuilt('fuel', '/fuel', 'fuel', 'Phase 5'),
     ],
   },
   {
@@ -447,12 +455,10 @@ export const NAVIGATION: readonly NavGroup[] = [
       // The document PIPELINE exists — upload, confirm, download, all on the
       // load screen. A standalone browser over every document is what is
       // missing, and no brief asks for one.
-      unbuilt(
-        'documents',
-        '/documents',
-        'document',
-        'unassigned — in no brief',
-      ),
+      // §2.7: assigned to Phase 4 step 6. The pipeline exists — upload,
+      // confirm, download, all on the load screen — and what is missing is
+      // the reading room over it.
+      unbuilt('documents', '/documents', 'document', 'Phase 4'),
       unbuilt('reports', '/reports', 'report', 'Phase 5'),
     ],
   },
@@ -463,12 +469,9 @@ export const NAVIGATION: readonly NavGroup[] = [
       item('users', '/users', 'user'),
       // CompanySettings is written by the seed and read by the invoice and
       // settlement services; nothing edits it through a screen.
-      unbuilt(
-        'settings',
-        '/settings',
-        'organization',
-        'unassigned — in no brief',
-      ),
+      // §2.7: assigned to Phase 4 step 6, and it needs a migration first —
+      // see PHASE-4-BRIEF.md §6 flag 2.
+      unbuilt('settings', '/settings', 'organization', 'Phase 4'),
     ],
   },
 ]

@@ -8,11 +8,13 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 # Zebra
 
-**Phase 3 is closed.** Phases 1, 2 and 3 are all closed and all still binding:
-Phase 1 for the mechanisms in its §6–§10, Phase 2 for its engine patterns,
-Phase 3 for money. Each brief's flag section is the list of what was argued
-with rather than obeyed — `PHASE-2-BRIEF.md` §16, `PHASE-3-BRIEF.md` §9 — and
-`PHASE-3-BRIEF.md` §11 is what the next phase inherits.
+Current phase: **Phase 4 — fleet & safety.** Read `PHASE-4-BRIEF.md` first;
+§6 lists what has been flagged against it.
+
+Phases 1, 2 and 3 are closed and all still binding: Phase 1 for the mechanisms
+in its §6–§10, Phase 2 for its engine patterns, Phase 3 for money. Each brief's
+flag section is the list of what was argued with rather than obeyed —
+`PHASE-2-BRIEF.md` §16, `PHASE-3-BRIEF.md` §9, `PHASE-4-BRIEF.md` §6.
 
 Read `prisma/schema.prisma` and `TMS-DESIGN-SYSTEM.md` before writing anything,
 plus the brief for whatever is being built. Where a brief disagrees with those
