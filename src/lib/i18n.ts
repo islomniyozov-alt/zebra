@@ -631,6 +631,11 @@ const en = {
     'Gross is the linehaul, the fuel surcharge and the accessorials together.',
   'payRule.linehaulHint':
     'Linehaul is the line rate alone — no fuel, no extras.',
+  'payRule.basis.percentGross': '{percent} of {amount} gross',
+  'payRule.basis.percentLinehaul': '{percent} of {amount} linehaul',
+  'payRule.basis.perMile': '{miles} mi at {rate}',
+  'payRule.basis.perMileDispatched': '{miles} dispatched mi at {rate}',
+  'payRule.basis.flatPerLoad': 'flat {amount} per load',
   'payRule.error.driverNotFound': 'That driver no longer exists.',
   'payRule.error.customUnsupported':
     'Pay by a written expression is not supported. Choose one of the four rules.',
@@ -1402,6 +1407,11 @@ const ru: Dictionary = {
     'Валовая — это основная ставка, топливная надбавка и доп. услуги вместе.',
   'payRule.linehaulHint':
     'Основная ставка — только линейная ставка, без топлива и доплат.',
+  'payRule.basis.percentGross': '{percent} от {amount} валовой',
+  'payRule.basis.percentLinehaul': '{percent} от {amount} основной ставки',
+  'payRule.basis.perMile': '{miles} миль по {rate}',
+  'payRule.basis.perMileDispatched': '{miles} плановых миль по {rate}',
+  'payRule.basis.flatPerLoad': 'фиксированно {amount} за груз',
   'payRule.error.driverNotFound': 'Этот водитель больше не существует.',
   'payRule.error.customUnsupported':
     'Оплата по формуле не поддерживается. Выберите одно из четырёх правил.',
@@ -2167,6 +2177,11 @@ const fa: Dictionary = {
     'ناخالص یعنی کرایهٔ پایه، اضافه‌بهای سوخت و خدمات جانبی روی هم.',
   'payRule.linehaulHint':
     'کرایهٔ پایه یعنی فقط نرخ خط — بدون سوخت و بدون اضافات.',
+  'payRule.basis.percentGross': '{percent} از {amount} ناخالص',
+  'payRule.basis.percentLinehaul': '{percent} از {amount} کرایهٔ پایه',
+  'payRule.basis.perMile': '{miles} مایل با نرخ {rate}',
+  'payRule.basis.perMileDispatched': '{miles} مایل برنامه‌ای با نرخ {rate}',
+  'payRule.basis.flatPerLoad': 'مقطوع {amount} برای هر بار',
   'payRule.error.driverNotFound': 'این راننده دیگر وجود ندارد.',
   'payRule.error.customUnsupported':
     'پرداخت با فرمول نوشتاری پشتیبانی نمی‌شود. یکی از چهار قاعده را انتخاب کنید.',

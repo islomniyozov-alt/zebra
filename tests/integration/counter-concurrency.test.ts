@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
-import { withOrg } from '@/lib/tenancy'
+import { withOrg, type TxClient } from '@/lib/tenancy'
 import { allocateNumber } from '@/lib/counters'
 import { dropOrganization, seedOrganization, type OrgFixture } from './fixtures'
 import type { PrismaClient } from '@/generated/prisma/client'
@@ -42,7 +42,10 @@ afterAll(async () => {
 
 describe('a number series under concurrency', () => {
   it('hands out distinct contiguous numbers', async () => {
-    const CALLERS = 50
+    // §7 says 100. Fifty proved the property; a hundred is what the box asks
+    // for, and the difference is worth having because contention is the thing
+    // being tested.
+    const CALLERS = 100
 
     const numbers = await Promise.all(
       Array.from({ length: CALLERS }, () =>
@@ -78,6 +81,60 @@ describe('a number series under concurrency', () => {
       select: { value: true },
     })
     expect(counter?.value).toBe(sorted[sorted.length - 1])
+  }, 300_000)
+
+  it('holds the row lock for one statement on the warm path', async () => {
+    // §7: "counter lock held <= 2 statements (measured)". The lock is taken by
+    // the UPDATE ... RETURNING and released at commit, so what the ceiling
+    // bounds is how many statements run inside that window.
+    //
+    // MEASURED, not read off the source. The transaction client is wrapped in
+    // a Proxy that records every `$queryRaw` and `$executeRaw` before
+    // delegating, so this counts what `allocateNumber` ACTUALLY issues rather
+    // than what the function appears to.
+    const issued: string[] = []
+
+    const counted = (tx: TxClient): TxClient =>
+      new Proxy(tx, {
+        get(target, property, receiver) {
+          const value = Reflect.get(target, property, receiver)
+          if (
+            typeof value === 'function' &&
+            (property === '$queryRaw' || property === '$executeRaw')
+          ) {
+            return (...args: unknown[]) => {
+              // The tagged-template first argument carries the SQL fragments.
+              const strings = args[0]
+              issued.push(
+                Array.isArray(strings) ? strings.join('?') : String(strings),
+              )
+              return (value as (...a: unknown[]) => unknown).apply(target, args)
+            }
+          }
+          return value
+        },
+      }) as TxClient
+
+    const number = await withOrg(
+      org.organizationId,
+      // Warm path: the series exists by now, so the INSERT ... ON CONFLICT
+      // fallback is not reached. That fallback is the two-statement case, and
+      // two is exactly the ceiling the brief allows.
+      (tx) => allocateNumber(counted(tx), org.companyId, 'INVOICE_NUMBER'),
+      {
+        attribution: {
+          userId: org.userId,
+          ip: null,
+          userAgent: 'counter-concurrency.test',
+        },
+        ...WAIT,
+      },
+    )
+
+    expect(typeof number).toBe('number')
+    expect(issued, issued.join(' | ')).toHaveLength(1)
+    expect(issued[0]).toContain('UPDATE "Counter"')
+    expect(issued[0]).toContain('RETURNING value')
   }, 300_000)
 
   it('keeps each authority on its own series', async () => {

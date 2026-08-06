@@ -1,4 +1,4 @@
-import type { LoadBillingStatus } from '@/generated/prisma/client'
+import type { LoadBillingStatus, StatusSource } from '@/generated/prisma/client'
 import type { TxClient } from './tenancy'
 
 // ---------------------------------------------------------------------------
@@ -20,6 +20,14 @@ import type { TxClient } from './tenancy'
 // it and `npm run check` fails on any disagreement. Same discipline as
 // findAuthorityDrift and findFactoringDrift: a derived column earns a check
 // that asks the database whether it still agrees.
+//
+// EVERY MOVE LEAVES A TRAIL. `StatusAxis.BILLING` existed in the schema from
+// the start and nothing wrote it — the billing axis moved silently while the
+// operational one kept a timeline. §7 asks the billing timeline to show the
+// source per event, so `refreshBillingStatus` writes a `LoadStatusEvent` for
+// every change it makes, with the source the caller names. "When did this load
+// become paid, and what made it" is a dispute question, and until now the only
+// answer was the column's current value.
 //
 // WHAT IS NOT AUTOMATIC. DISPUTED and WRITTEN_OFF are decisions somebody makes
 // about a load, not consequences of arithmetic. They are left alone here — a
@@ -172,6 +180,7 @@ export async function billingFactsFor(
 export async function refreshBillingStatus(
   tx: TxClient,
   loadIds: readonly string[],
+  options: { source?: StatusSource; userId?: string | null } = {},
 ): Promise<
   { loadId: string; from: LoadBillingStatus; to: LoadBillingStatus }[]
 > {
@@ -182,7 +191,7 @@ export async function refreshBillingStatus(
     billingFactsFor(tx, unique),
     tx.load.findMany({
       where: { id: { in: unique } },
-      select: { id: true, billingStatus: true },
+      select: { id: true, organizationId: true, billingStatus: true },
     }),
   ])
 
@@ -207,6 +216,23 @@ export async function refreshBillingStatus(
       where: { id: load.id },
       data: { billingStatus: next },
     })
+
+    // The BILLING axis, on the same timeline as the operational one. Source
+    // defaults to AUTOMATIC because that is what this almost always is: a POD
+    // landing, an invoice generated, a payment applied. A caller that knows
+    // better says so.
+    await tx.loadStatusEvent.create({
+      data: {
+        loadId: load.id,
+        organizationId: load.organizationId,
+        axis: 'BILLING',
+        fromStatus: load.billingStatus,
+        toStatus: next,
+        source: options.source ?? 'AUTOMATIC',
+        changedByUserId: options.userId ?? null,
+      },
+    })
+
     changed.push({ loadId: load.id, from: load.billingStatus, to: next })
   }
 

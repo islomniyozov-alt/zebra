@@ -8,7 +8,11 @@ import {
   type PayRule,
   type PayableLoad,
 } from '@/lib/driver-pay'
-import { basisSentence } from '@/lib/settlement-view'
+import {
+  ENGLISH_BASIS,
+  basisSentence,
+  settlementPdfLines,
+} from '@/lib/settlement-view'
 import { percentOfCents } from '@/lib/money'
 
 // ---------------------------------------------------------------------------
@@ -258,5 +262,41 @@ describe('the working, as a sentence', () => {
     expect(result.ok && basisSentence(result.snapshot, 'en-US')).toBe(
       '1,210 dispatched mi at $0.58',
     )
+  })
+
+  it('puts the words where each language puts them', () => {
+    // The RTL defect this template machinery exists for. Glued English words
+    // around mirrored figures rendered "of $2,450.00 gross 30%" on the Farsi
+    // settlement screen; a template per language puts them in order.
+    const result = payFor(LOAD, rule({ type: 'PERCENT_LINEHAUL' }))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+
+    const russian = basisSentence(result.snapshot, 'ru-RU', {
+      ...ENGLISH_BASIS,
+      percentLinehaul: '{percent} от {amount} основной ставки',
+    })
+    expect(russian.startsWith('30% от')).toBe(true)
+    expect(russian.endsWith('основной ставки')).toBe(true)
+    // And no English survives into it.
+    expect(russian).not.toContain('of')
+    expect(russian).not.toContain('linehaul')
+  })
+
+  it('leaves the PDF in English, because base-14 fonts cannot draw the rest', () => {
+    const result = payFor(LOAD, rule())
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(
+      settlementPdfLines([
+        {
+          type: 'LOAD_PAY',
+          description: 'Load pay',
+          amountCents: result.amountCents,
+          payRuleSnapshot: JSON.parse(JSON.stringify(result.snapshot)),
+          load: { loadNumber: 'L-1042' },
+        },
+      ])[0]!.basis,
+    ).toBe('30% of $2,990.00 gross')
   })
 })

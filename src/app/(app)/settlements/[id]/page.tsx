@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { isDeduction } from '@/lib/settlements'
-import { basisSentence } from '@/lib/settlement-view'
+import { basisSentence, type BasisTemplates } from '@/lib/settlement-view'
 import { readSnapshot } from '@/lib/driver-pay'
 import { formatCents } from '@/lib/money'
 import { Button } from '@/components/ui/Button'
@@ -119,6 +119,18 @@ export default async function SettlementPage({
 
   const isDraft = settlement.status === 'DRAFT'
 
+  // THE WORKING, IN THE READER'S LANGUAGE. Templates rather than glued words:
+  // the first version concatenated English around the figures and the Farsi
+  // screen rendered "of $2,450.00 gross 30%" — mirrored numbers, unmirrored
+  // words, unreadable in the one place a driver checks their pay.
+  const basisTemplates: BasisTemplates = {
+    percentGross: t('payRule.basis.percentGross'),
+    percentLinehaul: t('payRule.basis.percentLinehaul'),
+    perMile: t('payRule.basis.perMile'),
+    perMileDispatched: t('payRule.basis.perMileDispatched'),
+    flatPerLoad: t('payRule.basis.flatPerLoad'),
+  }
+
   return (
     <>
       <div className="flex items-baseline justify-between gap-z4 border-b border-border bg-surface px-gutter py-z3">
@@ -214,7 +226,11 @@ export default async function SettlementPage({
                   <span className="text-ink">{line.description}</span>
                   {/* The working, from the line's own snapshot. */}
                   <span className="text-xs text-ink-3">
-                    {basisSentence(readSnapshot(line.payRuleSnapshot), locale)}
+                    {basisSentence(
+                      readSnapshot(line.payRuleSnapshot),
+                      locale,
+                      basisTemplates,
+                    )}
                   </span>
                   <span
                     className={

@@ -63,7 +63,59 @@ const SHOTS = [
   { name: 'truck-new-en', path: '/trucks/new', locale: 'en', authed: true },
   { name: 'truck-new-ru', path: '/trucks/new', locale: 'ru', authed: true },
   { name: 'truck-new-fa-rtl', path: '/trucks/new', locale: 'fa', authed: true },
+  // PHASE 3. The money screens, all three locales. These are where §12's
+  // "Russian runs ~30% longer" bites hardest: every one of them is a dense
+  // table of right-aligned figures beside a translated label, and Farsi
+  // mirrors the lot.
+  ...money('invoices', '/invoices'),
+  ...money('receivables', '/receivables'),
+  ...money('payments', '/payments'),
+  ...money('settlements', '/settlements'),
 ]
+
+/** One screen in all three locales. The RTL shot is named so it sorts last. */
+function money(name, path) {
+  return [
+    { name: `${name}-en`, path, locale: 'en', authed: true },
+    { name: `${name}-ru`, path, locale: 'ru', authed: true },
+    { name: `${name}-fa-rtl`, path, locale: 'fa', authed: true },
+  ]
+}
+
+// The DETAIL screens need a real row, so their paths are resolved from the
+// database rather than written here. A shot of an empty detail page proves
+// nothing about a table of money, and a hard-coded id goes stale the first
+// time somebody reseeds.
+if (process.env.DIRECT_DATABASE_URL) {
+  const { neonConfig, Pool } = await import('@neondatabase/serverless')
+  neonConfig.webSocketConstructor ??= WebSocket
+  neonConfig.poolQueryViaFetch = false
+  const pool = new Pool({ connectionString: process.env.DIRECT_DATABASE_URL })
+  try {
+    const newest = async (table, extra = '') =>
+      (
+        await pool.query(
+          `select id from "${table}" where "deletedAt" is null ${extra}
+            order by "createdAt" desc limit 1`,
+        )
+      ).rows[0]?.id ?? null
+
+    const invoice = await newest('Invoice')
+    const payment = await newest('Payment')
+    const settlement = await newest('Settlement', "and status <> 'VOID'")
+
+    if (invoice) SHOTS.push(...money('invoice-detail', `/invoices/${invoice}`))
+    if (payment) SHOTS.push(...money('payment-detail', `/payments/${payment}`))
+    if (settlement) {
+      SHOTS.push(...money('settlement-detail', `/settlements/${settlement}`))
+    }
+    console.log(
+      `detail shots: invoice=${Boolean(invoice)} payment=${Boolean(payment)} settlement=${Boolean(settlement)}`,
+    )
+  } finally {
+    await pool.end()
+  }
+}
 
 mkdirSync(OUT, { recursive: true })
 

@@ -722,9 +722,18 @@ model DriverPayRule {
   percentBps   Int? // 30% -> 3000
   perMileCents Int?
   flatCents    Int?
-  // For PayRuleType.CUSTOM — a small, sandboxed expression evaluated by the
-  // pay engine. Keeps §30 configurable instead of hard-coded.
-  expression   String?
+
+  // `expression` USED TO BE HERE, for PayRuleType.CUSTOM — a small sandboxed
+  // language evaluated by the pay engine. Dropped in Phase 3 step 7 (flagged
+  // in step 6, removed here) because nothing wrote it and nothing should:
+  // paying a person by evaluating a string is a calculator nobody can review,
+  // a parser nobody wrote, and an injection surface on the one table whose
+  // output is somebody's wages.
+  //
+  // CUSTOM stays in the enum. Dropping an enum member is a rewrite of every
+  // row that ever held it, and the four concrete rules are enforced in
+  // driver-pay.ts where the refusal can say why. A fifth arrangement should
+  // arrive as a fifth NAMED rule with its own arithmetic and its own test.
 
   effectiveFrom DateTime
   effectiveTo   DateTime?

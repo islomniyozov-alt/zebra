@@ -12,6 +12,7 @@ import {
   applyToInvoice,
   applyToLoads,
   findPaymentDrift,
+  listPayments,
   recordPayment,
   statementCandidates,
 } from '@/lib/payments'
@@ -257,6 +258,85 @@ describe('a broker paying an invoice', () => {
     // BOTH loads, at the same moment. A broker pays a document, not a load.
     expect(await billingOf(first.id)).toBe('PAID')
     expect(await billingOf(second.id)).toBe('PAID')
+  }, 300_000)
+
+  it('spreads ONE CHECK across three invoices, and shows what is left', async () => {
+    // §7's box, exactly as written: "One check applied across three invoices;
+    // partial payment leaves correct balances; unapplied remainder visible."
+    //
+    // Three invoices — $1,000.00, $2,000.00 and $3,000.00 — and a single
+    // $5,500.00 check. It settles the first two, part-pays the third, and
+    // leaves nothing unapplied; then a second, larger check clears the third
+    // and the surplus stays on the payment where somebody will ask about it.
+    const one = await sentInvoice([
+      (await deliveredLoad(brokerId, '1000', 60)).id,
+    ])
+    const two = await sentInvoice([
+      (await deliveredLoad(brokerId, '2000', 62)).id,
+    ])
+    const three = await sentInvoice([
+      (await deliveredLoad(brokerId, '3000', 64)).id,
+    ])
+    expect([one.totalCents, two.totalCents, three.totalCents]).toEqual([
+      100000, 200000, 300000,
+    ])
+
+    const check = await payment(550000, 'CHECK')
+
+    expect(
+      await inOrg((tx) => applyToInvoice(tx, check, one.invoiceId, 100000)),
+    ).toMatchObject({
+      ok: true,
+      unappliedCents: 450000,
+      invoiceBalanceCents: 0,
+    })
+    expect(
+      await inOrg((tx) => applyToInvoice(tx, check, two.invoiceId, 200000)),
+    ).toMatchObject({
+      ok: true,
+      unappliedCents: 250000,
+      invoiceBalanceCents: 0,
+    })
+    // PARTIAL: $2,500.00 against a $3,000.00 invoice leaves $500.00 owed.
+    expect(
+      await inOrg((tx) => applyToInvoice(tx, check, three.invoiceId, 250000)),
+    ).toMatchObject({
+      ok: true,
+      unappliedCents: 0,
+      invoiceBalanceCents: 50000,
+    })
+
+    // THREE APPLICATIONS, ONE PAYMENT — the join table doing the job it exists
+    // for, and the reason `PaymentApplication` is not a column on Invoice.
+    expect(
+      await owner.paymentApplication.count({ where: { paymentId: check } }),
+    ).toBe(3)
+
+    const balances = await owner.invoice.findMany({
+      where: {
+        id: { in: [one.invoiceId, two.invoiceId, three.invoiceId] },
+      },
+      orderBy: { totalCents: 'asc' },
+      select: { balanceCents: true, status: true },
+    })
+    expect(balances).toEqual([
+      { balanceCents: 0, status: 'PAID' },
+      { balanceCents: 0, status: 'PAID' },
+      { balanceCents: 50000, status: 'PARTIALLY_PAID' },
+    ])
+
+    // THE UNAPPLIED REMAINDER, VISIBLE. A $600.00 check against a $500.00
+    // balance settles it and leaves $100.00 sitting on the payment.
+    const surplus = await payment(60000, 'CHECK')
+    expect(
+      await inOrg((tx) => applyToInvoice(tx, surplus, three.invoiceId, 50000)),
+    ).toMatchObject({ ok: true, unappliedCents: 10000, invoiceBalanceCents: 0 })
+
+    const listed = await inOrg((tx) => listPayments(tx, { id: surplus }))
+    expect(listed[0]).toMatchObject({
+      amountCents: 60000,
+      unappliedCents: 10000,
+    })
   }, 300_000)
 
   it('refuses more than the invoice still owes', async () => {
@@ -579,5 +659,131 @@ describe('the drift checks', () => {
 
     expect(await billingOf(load.id)).toBe('DISPUTED')
     expect(await inOrg((tx) => findBillingStatusDrift(tx))).toEqual([])
+  }, 300_000)
+})
+
+describe('§7: every money mutation is audited, and the billing axis has a timeline', () => {
+  // Two acceptance boxes in one fixture, because they are two views of the
+  // same events: what changed (AuditLog) and how the load's billing state got
+  // where it is (LoadStatusEvent on the BILLING axis).
+  it('leaves an audit row with the money in the diff, for each kind of write', async () => {
+    const load = await deliveredLoad(brokerId, '2450', 80)
+    const invoice = await sentInvoice([load.id])
+    const check = await payment(245000, 'CHECK')
+    await inOrg((tx) => applyToInvoice(tx, check, invoice.invoiceId, 245000))
+
+    const rows = await owner.auditLog.findMany({
+      where: {
+        organizationId,
+        entityType: {
+          in: ['Load', 'Invoice', 'Payment', 'PaymentApplication'],
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 400,
+      select: {
+        entityType: true,
+        entityId: true,
+        action: true,
+        changes: true,
+        userId: true,
+      },
+    })
+
+    // EVERY KIND OF MONEY WRITE IS THERE. Not a spot check: each of the four
+    // models this path touches has to appear, because a gap in the trail is
+    // invisible until somebody needs it.
+    for (const entityType of [
+      'Load',
+      'Invoice',
+      'Payment',
+      'PaymentApplication',
+    ]) {
+      expect(
+        rows.some((row) => row.entityType === entityType),
+        `${entityType} has no audit row`,
+      ).toBe(true)
+    }
+
+    const changesOf = (row: (typeof rows)[number]) =>
+      row.changes as Record<string, { from: unknown; to: unknown }>
+
+    // THE DIFF IS CORRECT, not merely present. Setting the rate moved
+    // `totalRevenueCents` from 0 to 245000, and the row carries both sides —
+    // a trail that records "something changed" is a trail nobody can use.
+    const rate = rows.find(
+      (row) =>
+        row.entityType === 'Load' &&
+        row.entityId === load.id &&
+        changesOf(row).totalRevenueCents?.to === 245000,
+    )
+    expect(rate, 'no audit row carries the rate').toBeDefined()
+    expect(changesOf(rate!).totalRevenueCents).toEqual({
+      from: 0,
+      to: 245000,
+    })
+    expect(rate!.action).toBe('UPDATE')
+
+    // The payment application carries the amount and names who applied it.
+    const applied = rows.find((row) => row.entityType === 'PaymentApplication')
+    expect(applied!.action).toBe('CREATE')
+    expect(
+      changesOf(applied!).amountCents?.to,
+      JSON.stringify(applied!.changes),
+    ).toBe(245000)
+    expect(applied!.userId).toBe(userId)
+
+    // And the invoice reaching zero is recorded on both sides.
+    const settled = rows.find(
+      (row) =>
+        row.entityType === 'Invoice' &&
+        row.entityId === invoice.invoiceId &&
+        changesOf(row).balanceCents?.to === 0,
+    )
+    expect(
+      settled,
+      'no audit row shows the invoice reaching zero',
+    ).toBeDefined()
+    expect(changesOf(settled!).balanceCents).toEqual({ from: 245000, to: 0 })
+  }, 300_000)
+
+  it('writes a BILLING event per transition, each naming its source', async () => {
+    const load = await deliveredLoad(brokerId, '1750', 85)
+    const invoice = await sentInvoice([load.id])
+    const check = await payment(100000, 'CHECK')
+    await inOrg((tx) => applyToInvoice(tx, check, invoice.invoiceId, 100000))
+    const rest = await payment(75000, 'CHECK')
+    await inOrg((tx) => applyToInvoice(tx, rest, invoice.invoiceId, 75000))
+
+    const billing = await owner.loadStatusEvent.findMany({
+      where: { loadId: load.id, axis: 'BILLING' },
+      orderBy: { occurredAt: 'asc' },
+      select: { fromStatus: true, toStatus: true, source: true },
+    })
+
+    // The whole journey, in order, on its own axis: uninvoiced when the POD
+    // landed and the rate was on it, invoiced, part paid, paid.
+    expect(billing.map((event) => event.toStatus)).toEqual([
+      'READY_TO_INVOICE',
+      'INVOICED',
+      'PARTIALLY_PAID',
+      'PAID',
+    ])
+
+    // EVERY EVENT NAMES ITS SOURCE — the box asks for exactly this. All of
+    // these are AUTOMATIC because nothing on this axis is clicked.
+    expect(billing.every((event) => event.source === 'AUTOMATIC')).toBe(true)
+
+    // And the chain is continuous: each event starts where the last one ended.
+    for (let index = 1; index < billing.length; index++) {
+      expect(billing[index]!.fromStatus).toBe(billing[index - 1]!.toStatus)
+    }
+
+    // The operational axis is untouched by any of it — two axes, moving
+    // independently (schema convention 4).
+    const operational = await owner.loadStatusEvent.count({
+      where: { loadId: load.id, axis: 'OPERATIONAL' },
+    })
+    expect(operational).toBeGreaterThan(0)
   }, 300_000)
 })

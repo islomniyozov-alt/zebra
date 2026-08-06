@@ -26,7 +26,10 @@ import {
   setStopZoneAction,
   uncancelLoadAction,
 } from './actions'
-import type { LoadOperationalStatus } from '@/generated/prisma/client'
+import type {
+  LoadBillingStatus,
+  LoadOperationalStatus,
+} from '@/generated/prisma/client'
 
 // §10 — the load detail screen.
 //
@@ -59,6 +62,17 @@ const ALL_OPERATIONAL: LoadOperationalStatus[] = [
   'AT_DELIVERY',
   'DELIVERED',
   'POD_RECEIVED',
+]
+
+/** The other axis, for the timeline's label map. Both now write events. */
+const ALL_BILLING: LoadBillingStatus[] = [
+  'UNINVOICED',
+  'READY_TO_INVOICE',
+  'INVOICED',
+  'PARTIALLY_PAID',
+  'PAID',
+  'DISPUTED',
+  'WRITTEN_OFF',
 ]
 
 const bytes = (size: number) =>
@@ -173,9 +187,17 @@ export default async function LoadDetailPage({
     ).map((key) => [key, t(key)]),
   )
 
-  const statusLabels = Object.fromEntries(
-    ALL_OPERATIONAL.map((status) => [status, t(operationalLabelKey(status))]),
-  )
+  // BOTH AXES. The timeline query has no axis filter, and since step 7 the
+  // billing axis writes events too — so the label map has to cover them or a
+  // reader sees the raw enum. The billing badge beside the load number is
+  // already ungated, so the timeline showing the same fact adds no exposure.
+  const statusLabels = Object.fromEntries([
+    ...ALL_OPERATIONAL.map((status) => [
+      status,
+      t(operationalLabelKey(status)),
+    ]),
+    ...ALL_BILLING.map((status) => [status, t(billingLabelKey(status))]),
+  ])
 
   const timeline: TimelineEvent[] = events.map((event) => ({
     id: event.id,

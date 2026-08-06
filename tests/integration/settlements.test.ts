@@ -5,7 +5,10 @@ import { createBroker } from '@/lib/brokers'
 import { LOAD_WRITE_TIMEOUT_MS, createLoad } from '@/lib/loads'
 import { transitionOperational } from '@/lib/load-status'
 import { setLoadRate } from '@/lib/rates'
-import { saveDriverPayRule } from '@/lib/driver-pay'
+import { readyToInvoice } from '@/lib/invoices'
+import { renderSettlementPdf } from '@/lib/settlement-pdf'
+import { settlementPdfLines } from '@/lib/settlement-view'
+import { closePayRule, saveDriverPayRule } from '@/lib/driver-pay'
 import {
   addSettlementLine,
   approveSettlement,
@@ -96,6 +99,69 @@ async function deliveredLoad(linehaul: string, fuel: string, podOn: Date) {
     }),
   )
   return load
+}
+
+/**
+ * The settlement's PDF, as text, for byte-comparison.
+ *
+ * The PDF rather than the row, because the document is what a driver holds and
+ * "reproduces byte-identical" is a claim about the document.
+ */
+async function renderFor(settlementId: string): Promise<string> {
+  const settlement = await owner.settlement.findUniqueOrThrow({
+    where: { id: settlementId },
+    select: {
+      settlementNumber: true,
+      periodStart: true,
+      periodEnd: true,
+      status: true,
+      grossCents: true,
+      deductionsCents: true,
+      reimbursementsCents: true,
+      netCents: true,
+      company: { select: { name: true, dotNumber: true, mcNumber: true } },
+      driver: { select: { firstName: true, lastName: true, phone: true } },
+      lines: {
+        orderBy: { sortOrder: 'asc' },
+        select: {
+          type: true,
+          description: true,
+          amountCents: true,
+          payRuleSnapshot: true,
+          load: { select: { loadNumber: true } },
+        },
+      },
+    },
+  })
+
+  const day = (value: Date) => value.toISOString().slice(0, 10)
+  // `status` is normalised out: the same settlement is DRAFT before approval
+  // and APPROVED after, and the comparison here is of the money, not of where
+  // it is in its lifecycle.
+  return new TextDecoder().decode(
+    renderSettlementPdf({
+      settlementNumber: settlement.settlementNumber,
+      periodStart: day(settlement.periodStart),
+      periodEnd: day(settlement.periodEnd),
+      carrier: {
+        name: settlement.company.name,
+        dotNumber: settlement.company.dotNumber,
+        mcNumber: settlement.company.mcNumber,
+      },
+      driver: {
+        name: `${settlement.driver.firstName} ${settlement.driver.lastName}`,
+        phone: settlement.driver.phone,
+      },
+      lines: settlementPdfLines(settlement.lines),
+      grossCents: settlement.grossCents,
+      deductionsCents: settlement.deductionsCents,
+      reimbursementsCents: settlement.reimbursementsCents,
+      netCents: settlement.netCents,
+      status: 'DRAFT',
+      paidOn: null,
+      paymentReference: null,
+    }),
+  )
 }
 
 beforeAll(async () => {
@@ -600,5 +666,276 @@ describe('the drift check', () => {
       data: { amountCents: line!.amountCents },
     })
     expect(await inOrg((tx) => findSettlementDrift(tx))).toEqual([])
+  }, 300_000)
+})
+
+describe('§7: a mixed-rule week, and Relay revenue', () => {
+  // The acceptance box, as written: "A weekly settlement for a mixed-rule
+  // driver reproduces byte-identical on regeneration; a pay-rule change after
+  // approval changes nothing retroactively."
+  //
+  // BYTE-IDENTICAL is asserted on the PDF, because that is the artefact a
+  // driver holds. Two generations differ in id and timestamps and must — what
+  // has to match is the document.
+  it('reproduces the PDF byte for byte after the rule changes', async () => {
+    const mixed = await owner.driver.create({
+      data: {
+        organizationId,
+        companyId,
+        firstName: 'Mixed',
+        lastName: `Rule ${nonce}`,
+      },
+    })
+
+    // MIXED-RULE: per-mile through November, percent-of-linehaul from
+    // December. The loads below sit under the per-mile rule; the December rule
+    // exists to be the thing that must not reach back.
+    expect(
+      await inOrg((tx) =>
+        saveDriverPayRule(tx, mixed.id, {
+          type: 'PER_MILE',
+          perMileCents: 58,
+          effectiveFrom: new Date(Date.UTC(2026, 0, 1)),
+          effectiveTo: new Date(Date.UTC(2026, 10, 30)),
+        }),
+      ),
+    ).toMatchObject({ ok: true })
+    expect(
+      await inOrg((tx) =>
+        saveDriverPayRule(tx, mixed.id, {
+          type: 'PERCENT_LINEHAUL',
+          percentBps: 3200,
+          effectiveFrom: new Date(Date.UTC(2026, 11, 1)),
+        }),
+      ),
+    ).toMatchObject({ ok: true })
+
+    const period = {
+      periodStart: new Date(Date.UTC(2026, 10, 2)),
+      periodEnd: new Date(Date.UTC(2026, 10, 8, 23, 59, 59, 999)),
+    }
+
+    for (const [linehaul, miles, dayOfMonth] of [
+      ['2450', 1240, 3],
+      ['1900', 860, 5],
+    ] as const) {
+      const load = await inOrg((tx) =>
+        createLoad(
+          tx,
+          organizationId,
+          {
+            companyId,
+            customerId: brokerId,
+            driverId: mixed.id,
+            stops: [
+              {
+                type: 'PICKUP',
+                city: 'Chicago',
+                state: 'IL',
+                scheduledAt: new Date(Date.UTC(2026, 10, dayOfMonth - 1)),
+              },
+              {
+                type: 'DELIVERY',
+                city: 'Dallas',
+                state: 'TX',
+                scheduledAt: new Date(Date.UTC(2026, 10, dayOfMonth)),
+              },
+            ],
+          },
+          { byUserId: userId },
+        ),
+      )
+      await owner.load.update({
+        where: { id: load.id },
+        data: { actualMiles: miles },
+      })
+      await inOrg((tx) =>
+        setLoadRate(tx, load.id, { linehaul, fuelSurcharge: '380' }),
+      )
+      await inOrg((tx) =>
+        transitionOperational(tx, load.id, 'POD_RECEIVED', {
+          source: 'AUTOMATIC',
+          userId,
+          occurredAt: new Date(Date.UTC(2026, 10, dayOfMonth)),
+        }),
+      )
+    }
+
+    const first = await inOrg((tx) =>
+      generateSettlement(tx, organizationId, {
+        driverId: mixed.id,
+        ...period,
+        labels,
+      }),
+    )
+    // 1240 x $0.58 = $719.20 and 860 x $0.58 = $498.80, so $1,218.00 —
+    // per-mile, NOT the 32% of linehaul that December's rule would give.
+    expect(first).toMatchObject({ ok: true, grossCents: 121800 })
+    if (!first.ok) return
+
+    const before = await renderFor(first.settlementId)
+
+    // Approve it, then give the driver a raise — the way a raise is actually
+    // recorded: close the rule that is open and open a new one after it. The
+    // November rule is untouched, which is the whole point of rules being a
+    // history rather than a setting.
+    await inOrg((tx) => approveSettlement(tx, first.settlementId, userId))
+    const december = await owner.driverPayRule.findFirst({
+      where: { driverId: mixed.id, type: 'PERCENT_LINEHAUL' },
+      select: { id: true },
+    })
+    await inOrg((tx) =>
+      closePayRule(tx, december!.id, new Date(Date.UTC(2026, 11, 31))),
+    )
+    expect(
+      await inOrg((tx) =>
+        saveDriverPayRule(tx, mixed.id, {
+          type: 'PER_MILE',
+          perMileCents: 75,
+          effectiveFrom: new Date(Date.UTC(2027, 0, 1)),
+        }),
+      ),
+    ).toMatchObject({ ok: true })
+
+    // NOTHING RETROACTIVE. Same document, byte for byte, after the raise.
+    expect(await renderFor(first.settlementId)).toBe(before)
+
+    // And a REGENERATION — a different row, built from scratch — produces the
+    // same document, because `ruleInForce` asks which rule covered the day the
+    // load ran and that answer has not changed.
+    await owner.settlement.update({
+      where: { id: first.settlementId },
+      data: { status: 'DRAFT' },
+    })
+    await inOrg((tx) => voidSettlement(tx, first.settlementId))
+
+    const second = await inOrg((tx) =>
+      generateSettlement(tx, organizationId, {
+        driverId: mixed.id,
+        ...period,
+        labels,
+      }),
+    )
+    expect(second).toMatchObject({ ok: true, grossCents: 121800 })
+    if (!second.ok) return
+    expect(second.settlementId).not.toBe(first.settlementId)
+
+    // The NUMBER differs — a new document gets a new number and the series
+    // stays contiguous — so that one field is normalised and everything else
+    // has to match exactly.
+    const regenerated = await renderFor(second.settlementId)
+    expect(regenerated.split(second.settlementNumber).join('STL-X')).toBe(
+      before.split(first.settlementNumber).join('STL-X'),
+    )
+
+    // WHAT THIS DOES NOT CLAIM, measured rather than assumed. Rewriting the
+    // November rule IN PLACE — which no screen can do, only a hand-edit —
+    // leaves the approved document alone, because every line carries its own
+    // snapshot. A regeneration after that edit does NOT reproduce: it reads
+    // 2100 miles at the new 75c and comes to $1,575.00, because the question
+    // "what rule covered that day" now has a different answer. That is the
+    // correction somebody made, not a bug — and it is exactly the class of
+    // hand-edit `findSettlementDrift` catches on the stored settlement.
+    const november = await owner.driverPayRule.findFirst({
+      where: { driverId: mixed.id, effectiveTo: { not: null } },
+      orderBy: { effectiveFrom: 'asc' },
+      select: { id: true },
+    })
+    await owner.driverPayRule.update({
+      where: { id: november!.id },
+      data: { perMileCents: 75 },
+    })
+
+    expect(await renderFor(second.settlementId)).toBe(regenerated)
+
+    await owner.settlement.update({
+      where: { id: second.settlementId },
+      data: { status: 'DRAFT' },
+    })
+    await inOrg((tx) => voidSettlement(tx, second.settlementId))
+    const third = await inOrg((tx) =>
+      generateSettlement(tx, organizationId, {
+        driverId: mixed.id,
+        ...period,
+        labels,
+      }),
+    )
+    expect(third).toMatchObject({ ok: true, grossCents: 157500 })
+  }, 300_000)
+
+  it('pays a Relay load in the settlement it never invoices', async () => {
+    // §7: "Relay load never appears in ready-to-invoice or broker AR; its
+    // revenue appears in settlement and profitability." The first half is
+    // asserted in the invoice and payment suites; this is the second.
+    const relay = await inOrg((tx) =>
+      createBroker(tx, organizationId, { name: `Relay ${nonce}` }),
+    )
+    await owner.customer.update({
+      where: { id: relay.id },
+      data: { settlesDirectly: true },
+    })
+
+    const load = await inOrg((tx) =>
+      createLoad(
+        tx,
+        organizationId,
+        {
+          companyId,
+          customerId: relay.id,
+          driverId,
+          stops: [
+            {
+              type: 'PICKUP',
+              city: 'Chicago',
+              state: 'IL',
+              scheduledAt: new Date(Date.UTC(2026, 11, 7)),
+            },
+            {
+              type: 'DELIVERY',
+              city: 'Dallas',
+              state: 'TX',
+              scheduledAt: new Date(Date.UTC(2026, 11, 8)),
+            },
+          ],
+        },
+        { byUserId: userId },
+      ),
+    )
+    // Copied at booking from the customer, never re-read.
+    expect(load.directSettled).toBe(true)
+
+    await inOrg((tx) =>
+      setLoadRate(tx, load.id, { linehaul: '1500', fuelSurcharge: '0' }),
+    )
+    await inOrg((tx) =>
+      transitionOperational(tx, load.id, 'POD_RECEIVED', {
+        source: 'AUTOMATIC',
+        userId,
+        occurredAt: new Date(Date.UTC(2026, 11, 8)),
+      }),
+    )
+
+    // NOT in the invoice queue — it never becomes an invoice.
+    expect(
+      (await inOrg((tx) => readyToInvoice(tx))).map((row) => row.id),
+    ).not.toContain(load.id)
+
+    // But the driver hauled it, so it IS in the settlement: 30% of $1,500.00.
+    const outcome = await inOrg((tx) =>
+      generateSettlement(tx, organizationId, {
+        driverId,
+        periodStart: new Date(Date.UTC(2026, 11, 7)),
+        periodEnd: new Date(Date.UTC(2026, 11, 13, 23, 59, 59, 999)),
+        labels,
+      }),
+    )
+    expect(outcome).toMatchObject({ ok: true, grossCents: 45000 })
+    if (!outcome.ok) return
+
+    const line = await owner.settlementLine.findFirst({
+      where: { settlementId: outcome.settlementId, loadId: load.id },
+      select: { amountCents: true },
+    })
+    expect(line?.amountCents).toBe(45000)
   }, 300_000)
 })
