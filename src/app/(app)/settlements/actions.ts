@@ -76,8 +76,12 @@ export async function generateSettlementAction(
         // Written in the generating user's locale and then FROZEN. A
         // settlement is a document, and a document does not change language
         // because a different person opens it.
+        //
+        // `settlementLine.LOAD_PAY`, not `settlements.loads` — the first run
+        // of the walkthrough produced lines reading "Loads 1111", because a
+        // column heading had been reused as a line description.
         loadPay: (loadNumber: string) =>
-          `${t('settlements.loads')} ${loadNumber}`,
+          `${t('settlementLine.LOAD_PAY')} ${loadNumber}`,
       },
     }),
   )
