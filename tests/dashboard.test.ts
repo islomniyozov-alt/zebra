@@ -38,7 +38,7 @@ describe('who gets which rows in the action queue', () => {
     }
   })
 
-  it('gives ACCOUNTING every money row, and not the dispatch one', () => {
+  it('gives ACCOUNTING the money rows and compliance, not the dispatch one', () => {
     // Accounting runs the money end to end and reads operations because an
     // invoice is built from a load — but permissions.ts says in as many words
     // that it "does not dispatch", so it has no `dispatch:read`.
@@ -48,6 +48,7 @@ describe('who gets which rows in the action queue', () => {
     // worse dashboard than one that leaves it out.
     const keys = actionKeysFor(session('ACCOUNTING'))
     for (const key of [
+      'compliance',
       'podMissing',
       'noRate',
       'readyToInvoice',
@@ -60,14 +61,19 @@ describe('who gets which rows in the action queue', () => {
     expect(keys).not.toContain('unassigned')
     expect(can(session('ACCOUNTING'), 'read', 'dispatch')).toBe(false)
 
-    // NOR COMPLIANCE. `compliance:read` rides in FLEET_READ, which ACCOUNTING
-    // does not hold — it gets `truck:read` and `driver:read` by name and not
-    // the fleet bundle. Phase 4 §2.5 assigns compliance to the DISPATCHER and
-    // is silent about accounting, so this asserts what the model says rather
-    // than granting a permission nobody asked for. Flagged in
-    // PHASE-4-BRIEF.md §6 as a question for the owner.
-    expect(keys).not.toContain('compliance')
-    expect(can(session('ACCOUNTING'), 'read', 'compliance')).toBe(false)
+    // COMPLIANCE, READ-ONLY. The owner answered §6 flag 5: accounting handles
+    // insurance certificates at billing and factoring time, so it sees expiry
+    // dates. THE PAIR is the point — reading is granted, renewing is not, and
+    // asserting only the first half would let a later `crud('compliance')`
+    // slip in unnoticed.
+    expect(keys).toContain('compliance')
+    expect(can(session('ACCOUNTING'), 'read', 'compliance')).toBe(true)
+    for (const action of ['create', 'update', 'delete'] as const) {
+      expect(
+        can(session('ACCOUNTING'), action, 'compliance'),
+        `accounting can ${action} compliance`,
+      ).toBe(false)
+    }
   })
 
   it('gives a MANAGER the numbers but not the payment work', () => {

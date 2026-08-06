@@ -3,6 +3,8 @@ import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyIdScopeFilter } from '@/lib/tenancy'
 import { currentAuthority } from '@/lib/fleet'
+import { CompliancePanel } from '../../_reference/CompliancePanel'
+import { compliancePanelData } from '../../_reference/compliance-view'
 import { RecordForm } from '@/components/forms/RecordForm'
 import { AssetActions } from '../../_reference/AssetActions'
 import { updateTrailerAction } from '../actions'
@@ -40,11 +42,15 @@ export default async function EditTrailerPage({
       ? (companies.find((c) => c.id === open.companyId)?.name ?? null)
       : null
 
-    return { trailer, companies, openCompany }
+    const compliance = await compliancePanelData(tx, 'trailer', id, t)
+
+    return { trailer, companies, openCompany, compliance }
   })
 
   if (!data) notFound()
-  const { trailer, companies, openCompany } = data
+  const { trailer, companies, openCompany, compliance } = data
+  const maySeeCompliance = await currentUserCan('read', 'compliance')
+  const mayRenew = await currentUserCan('create', 'compliance')
 
   const mayEdit = await currentUserCan('update', 'trailer')
   const mayDelete = await currentUserCan('delete', 'trailer')
@@ -117,6 +123,30 @@ export default async function EditTrailerPage({
             />
           ) : null}
         </RecordForm>
+
+        {/* PHASE 4 §5 STEP 2. Compliance dates are OPERATIONAL — a dispatcher
+         * reads them because they gate a dispatch decision (§2.5), and
+         * ACCOUNTING reads them for insurance certificates at billing time.
+         * Renewing is `compliance:create`, which stays with FLEET_WRITE. */}
+        {maySeeCompliance ? (
+          <div className="mt-z4 max-w-[900px]">
+            <CompliancePanel
+              subject="trailer"
+              subjectId={id}
+              rows={compliance.rows}
+              types={compliance.types}
+              documentTypeFor={compliance.documentTypeFor}
+              mayRenew={mayRenew}
+              today={compliance.today}
+              translate={compliance.translate}
+              labels={
+                compliance.labels as Parameters<
+                  typeof CompliancePanel
+                >[0]['labels']
+              }
+            />
+          </div>
+        ) : null}
       </div>
     </>
   )

@@ -3,6 +3,8 @@ import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyIdScopeFilter } from '@/lib/tenancy'
 import { currentAuthority } from '@/lib/fleet'
+import { CompliancePanel } from '../../_reference/CompliancePanel'
+import { compliancePanelData } from '../../_reference/compliance-view'
 import { PAY_RULE_TYPES, payRulesFor } from '@/lib/driver-pay'
 import { bpsToInput, formatCents } from '@/lib/money'
 import { RecordForm } from '@/components/forms/RecordForm'
@@ -66,11 +68,15 @@ export default async function EditDriverPage({
       ? (companies.find((c) => c.id === open.companyId)?.name ?? null)
       : null
 
-    return { driver, companies, openCompany, trucks, payRules }
+    const compliance = await compliancePanelData(tx, 'driver', id, t)
+
+    return { driver, companies, openCompany, trucks, payRules, compliance }
   })
 
   if (!data) notFound()
-  const { driver, companies, openCompany, trucks, payRules } = data
+  const { driver, companies, openCompany, trucks, payRules, compliance } = data
+  const maySeeCompliance = await currentUserCan('read', 'compliance')
+  const mayRenewCompliance = await currentUserCan('create', 'compliance')
 
   const mayEdit = await currentUserCan('update', 'driver')
   const mayDelete = await currentUserCan('delete', 'driver')
@@ -197,6 +203,29 @@ export default async function EditDriverPage({
          * payload at all here — not a hidden panel, not a disabled one. Rule:
          * leave it out, because hiding it in CSS is the same bug as not
          * checking at all. */}
+        {/* PHASE 4 §5 STEP 2. A driver's CDL and medical card, on the screen
+         * that already carries their licence details. Operational, so a
+         * DISPATCHER sees it — unlike the pay panel below. */}
+        {maySeeCompliance ? (
+          <div className="mt-z4 max-w-[900px]">
+            <CompliancePanel
+              subject="driver"
+              subjectId={id}
+              rows={compliance.rows}
+              types={compliance.types}
+              documentTypeFor={compliance.documentTypeFor}
+              mayRenew={mayRenewCompliance}
+              today={compliance.today}
+              translate={compliance.translate}
+              labels={
+                compliance.labels as Parameters<
+                  typeof CompliancePanel
+                >[0]['labels']
+              }
+            />
+          </div>
+        ) : null}
+
         {maySeePay ? (
           <div className="mt-z4 max-w-[860px]">
             <PayRules

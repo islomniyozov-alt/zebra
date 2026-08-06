@@ -4,6 +4,8 @@ import { withOrg } from '@/lib/tenancy'
 import {
   complianceCount,
   complianceQueue,
+  documentTypeFor,
+  recordRenewal,
   recordsForSubject,
 } from '@/lib/compliance'
 import { actionQueue } from '@/lib/dashboard'
@@ -47,7 +49,7 @@ const asOwner = (): AuthorizedSession => ({
 
 /** A compliance record expiring `days` from `NOW`. */
 async function record(
-  type: 'ANNUAL_INSPECTION' | 'REGISTRATION' | 'CDL',
+  type: 'ANNUAL_INSPECTION' | 'REGISTRATION' | 'CDL' | 'MEDICAL_CARD',
   days: number,
   identifier?: string,
 ) {
@@ -257,4 +259,146 @@ describe('what the queue filters', () => {
     )
     expect(withHistory.rows.some((row) => row.isSuperseded)).toBe(true)
   }, 300_000)
+})
+
+describe('§4: recording a renewal (step 2)', () => {
+  it('creates a new record and never touches the old one', async () => {
+    // MEDICAL_CARD, used by no other test in this file. The first version used
+    // CDL and the renewal came back superseded — correctly, because an earlier
+    // test had already filed a CDL 900 days out. The code was right and the
+    // fixture collided; a type of its own keeps the two apart.
+    const before = await record('MEDICAL_CARD', -5, `MED-OLD-${nonce}`)
+    const stampedBefore = await owner.complianceItem.findUniqueOrThrow({
+      where: { id: before.id },
+      select: { updatedAt: true, expiresAt: true },
+    })
+
+    const expiresAt = new Date(NOW.getTime())
+    expiresAt.setUTCDate(expiresAt.getUTCDate() + 700)
+
+    const outcome = await inOrg((tx) =>
+      recordRenewal(tx, {
+        subject: 'truck',
+        subjectId: truckId,
+        type: 'MEDICAL_CARD',
+        expiresAt,
+        identifier: `MED-NEW-${nonce}`,
+      }),
+    )
+    expect(outcome).toMatchObject({ ok: true })
+    if (!outcome.ok) return
+
+    // THE OLD ROW IS BYTE-FOR-BYTE WHERE IT WAS. `updatedAt` moves on any
+    // write, so an unchanged timestamp is the strongest available proof that
+    // §2.1's "never overwrite" is what actually happened.
+    const stampedAfter = await owner.complianceItem.findUniqueOrThrow({
+      where: { id: before.id },
+      select: { updatedAt: true, expiresAt: true },
+    })
+    expect(stampedAfter.updatedAt.getTime()).toBe(
+      stampedBefore.updatedAt.getTime(),
+    )
+    expect(stampedAfter.expiresAt.getTime()).toBe(
+      stampedBefore.expiresAt.getTime(),
+    )
+
+    // And the panel shows both, the old one marked.
+    const panel = await inOrg((tx) =>
+      recordsForSubject(tx, 'truck', truckId, NOW),
+    )
+    expect(panel.find((row) => row.id === before.id)?.isSuperseded).toBe(true)
+    expect(panel.find((row) => row.id === outcome.recordId)).toMatchObject({
+      status: 'current',
+      isSuperseded: false,
+      identifier: `MED-NEW-${nonce}`,
+    })
+  }, 300_000)
+
+  it('takes the tenant and the authority from the asset, not the caller', async () => {
+    const expiresAt = new Date(NOW.getTime())
+    expiresAt.setUTCDate(expiresAt.getUTCDate() + 400)
+
+    const outcome = await inOrg((tx) =>
+      recordRenewal(tx, {
+        subject: 'truck',
+        subjectId: truckId,
+        type: 'DOT_INSPECTION',
+        expiresAt,
+      }),
+    )
+    expect(outcome).toMatchObject({ ok: true })
+    if (!outcome.ok) return
+
+    const stored = await owner.complianceItem.findUniqueOrThrow({
+      where: { id: outcome.recordId },
+      select: { organizationId: true, companyId: true, truckId: true },
+    })
+    expect(stored).toMatchObject({ organizationId, companyId, truckId })
+  }, 300_000)
+
+  it('refuses an id that is not in this tenant', async () => {
+    // Row-level security hides the other organization's truck, so the lookup
+    // finds nothing and the write never happens — a forged id lands on air.
+    expect(
+      await inOrg((tx) =>
+        recordRenewal(tx, {
+          subject: 'truck',
+          subjectId: 'cmnotarealtruckidatall000',
+          type: 'REGISTRATION',
+          expiresAt: new Date('2030-01-01T00:00:00Z'),
+        }),
+      ),
+    ).toMatchObject({ ok: false, reason: 'subject_not_found' })
+  }, 300_000)
+
+  it('refuses an issue date after the expiry, and a duplicate expiry', async () => {
+    const expiresAt = new Date('2029-06-01T00:00:00Z')
+
+    expect(
+      await inOrg((tx) =>
+        recordRenewal(tx, {
+          subject: 'truck',
+          subjectId: truckId,
+          type: 'REGISTRATION',
+          issuedAt: new Date('2029-07-01T00:00:00Z'),
+          expiresAt,
+        }),
+      ),
+    ).toMatchObject({ ok: false, reason: 'bad_dates' })
+
+    const first = await inOrg((tx) =>
+      recordRenewal(tx, {
+        subject: 'truck',
+        subjectId: truckId,
+        type: 'REGISTRATION',
+        expiresAt,
+      }),
+    )
+    expect(first).toMatchObject({ ok: true })
+
+    // The same renewal submitted twice. Two live registrations for one truck
+    // is the data problem `shapeRecords` deliberately shows rather than
+    // resolves — better to refuse the double-submit that causes it.
+    expect(
+      await inOrg((tx) =>
+        recordRenewal(tx, {
+          subject: 'truck',
+          subjectId: truckId,
+          type: 'REGISTRATION',
+          expiresAt,
+        }),
+      ),
+    ).toMatchObject({ ok: false, reason: 'duplicate' })
+  }, 300_000)
+
+  it('files each compliance type under the right document type', () => {
+    // The upload control on a registration row offers "Registration" rather
+    // than making somebody pick from eighteen.
+    expect(documentTypeFor('REGISTRATION')).toBe('REGISTRATION')
+    expect(documentTypeFor('ANNUAL_INSPECTION')).toBe('INSPECTION_REPORT')
+    expect(documentTypeFor('INSURANCE_LIABILITY')).toBe('INSURANCE_CERT')
+    expect(documentTypeFor('CDL')).toBe('CDL_COPY')
+    // Anything unmapped still uploads, under OTHER.
+    expect(documentTypeFor('PERMIT')).toBe('OTHER')
+  })
 })

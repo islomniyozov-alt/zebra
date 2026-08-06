@@ -1,4 +1,8 @@
-import type { ComplianceType, Prisma } from '@/generated/prisma/client'
+import type {
+  ComplianceType,
+  DocumentType,
+  Prisma,
+} from '@/generated/prisma/client'
 import type { CompanyScopeFilter, TxClient } from './tenancy'
 
 // ---------------------------------------------------------------------------
@@ -411,4 +415,155 @@ export async function recordsForSubject(
     rows[0] ? { companyId: { in: [rows[0].companyId] } } : {},
   )
   return shapeRecords(rows, leadDays, now)
+}
+
+// --- renewing (step 2) --------------------------------------------------------
+
+/**
+ * The document type each compliance type files under.
+ *
+ * `DocumentType` is a separate vocabulary from `ComplianceType` and always has
+ * been — one describes the FILE, the other the OBLIGATION. Mapping them here
+ * means the upload control on a registration row offers "Registration" rather
+ * than making somebody choose from eighteen.
+ */
+export const DOCUMENT_TYPE_FOR: Record<string, DocumentType> = {
+  ANNUAL_INSPECTION: 'INSPECTION_REPORT',
+  DOT_INSPECTION: 'INSPECTION_REPORT',
+  REGISTRATION: 'REGISTRATION',
+  INSURANCE_LIABILITY: 'INSURANCE_CERT',
+  INSURANCE_CARGO: 'INSURANCE_CERT',
+  INSURANCE_PHYSICAL_DAMAGE: 'INSURANCE_CERT',
+  CDL: 'CDL_COPY',
+  MEDICAL_CARD: 'MEDICAL_CARD',
+}
+
+export function documentTypeFor(type: ComplianceType): DocumentType {
+  return DOCUMENT_TYPE_FOR[type] ?? 'OTHER'
+}
+
+export type RenewalFailure =
+  | 'subject_not_found'
+  | 'bad_dates'
+  | 'no_expiry'
+  | 'duplicate'
+
+export type RenewalResult =
+  | { ok: true; recordId: string }
+  | { ok: false; reason: RenewalFailure }
+
+export interface RenewalInput {
+  subject: ComplianceSubject
+  subjectId: string
+  type: ComplianceType
+  issuedAt?: Date | null
+  expiresAt: Date
+  identifier?: string | null
+  issuer?: string | null
+  notes?: string | null
+}
+
+/**
+ * Record a renewal. ALWAYS A CREATE, NEVER AN UPDATE (§2.1).
+ *
+ * There is no `updateComplianceRecord` in this module and there should not be
+ * one. The old registration is the evidence that the truck was legal last
+ * March; editing it in place destroys that, and a carrier asked to prove a
+ * date to an auditor has nothing left to show. A renewal is a new row and the
+ * old one becomes history — which `shapeRecords` marks and the panel renders.
+ */
+export async function recordRenewal(
+  tx: TxClient,
+  input: RenewalInput,
+): Promise<RenewalResult> {
+  if (Number.isNaN(input.expiresAt.getTime())) {
+    return { ok: false, reason: 'no_expiry' }
+  }
+  if (
+    input.issuedAt &&
+    !Number.isNaN(input.issuedAt.getTime()) &&
+    input.issuedAt.getTime() > input.expiresAt.getTime()
+  ) {
+    return { ok: false, reason: 'bad_dates' }
+  }
+
+  // The subject decides the tenant and the authority — read from the asset
+  // rather than taken from the caller, so a forged id lands on nothing.
+  const subject =
+    input.subject === 'truck'
+      ? await tx.truck.findFirst({
+          where: { id: input.subjectId, deletedAt: null },
+          select: { id: true, organizationId: true, companyId: true },
+        })
+      : input.subject === 'trailer'
+        ? await tx.trailer.findFirst({
+            where: { id: input.subjectId, deletedAt: null },
+            select: { id: true, organizationId: true, companyId: true },
+          })
+        : await tx.driver.findFirst({
+            where: { id: input.subjectId, deletedAt: null },
+            select: { id: true, organizationId: true, companyId: true },
+          })
+
+  if (!subject) return { ok: false, reason: 'subject_not_found' }
+
+  // A SECOND RECORD WITH THE SAME EXPIRY is refused. Two live registrations
+  // for one truck is a data problem `shapeRecords` deliberately shows rather
+  // than resolves — better to refuse the double-submit that causes it than to
+  // render the confusion afterwards.
+  const clash = await tx.complianceItem.findFirst({
+    where: {
+      deletedAt: null,
+      type: input.type,
+      expiresAt: input.expiresAt,
+      ...(input.subject === 'truck' ? { truckId: subject.id } : {}),
+      ...(input.subject === 'trailer' ? { trailerId: subject.id } : {}),
+      ...(input.subject === 'driver' ? { driverId: subject.id } : {}),
+    },
+    select: { id: true },
+  })
+  if (clash) return { ok: false, reason: 'duplicate' }
+
+  const created = await tx.complianceItem.create({
+    data: {
+      organizationId: subject.organizationId,
+      companyId: subject.companyId,
+      type: input.type,
+      ...(input.subject === 'truck' ? { truckId: subject.id } : {}),
+      ...(input.subject === 'trailer' ? { trailerId: subject.id } : {}),
+      ...(input.subject === 'driver' ? { driverId: subject.id } : {}),
+      issuedAt: input.issuedAt ?? null,
+      expiresAt: input.expiresAt,
+      identifier: input.identifier?.trim() || null,
+      issuer: input.issuer?.trim() || null,
+      notes: input.notes?.trim() || null,
+    },
+    select: { id: true },
+  })
+
+  return { ok: true, recordId: created.id }
+}
+
+/** The documents filed against one compliance record, for its panel row. */
+export async function documentsForRecords(
+  tx: TxClient,
+  recordIds: readonly string[],
+): Promise<Map<string, { id: string; filename: string }[]>> {
+  if (recordIds.length === 0) return new Map()
+
+  const documents = await tx.document.findMany({
+    where: { complianceItemId: { in: [...recordIds] }, deletedAt: null },
+    orderBy: { uploadedAt: 'desc' },
+    select: { id: true, filename: true, complianceItemId: true },
+  })
+
+  const byRecord = new Map<string, { id: string; filename: string }[]>()
+  for (const document of documents) {
+    const key = document.complianceItemId
+    if (!key) continue
+    const list = byRecord.get(key) ?? []
+    list.push({ id: document.id, filename: document.filename })
+    byRecord.set(key, list)
+  }
+  return byRecord
 }

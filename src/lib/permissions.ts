@@ -285,6 +285,12 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     ...read('calendar'),
     ...read('driver'),
     ...read('truck'),
+    // READ-ONLY, deliberately. Accounting handles insurance certificates at
+    // billing and factoring time, so it needs to see an expiry date — but
+    // renewing one is a safety act, and `compliance:create/update/delete` stay
+    // with the roles that hold FLEET_WRITE. Resolves PHASE-4-BRIEF.md §6
+    // flag 5, which §2.5 left open.
+    ...read('compliance'),
     ...MONEY_READ,
     ...MONEY_WRITE,
     ...RECORDS_READ,

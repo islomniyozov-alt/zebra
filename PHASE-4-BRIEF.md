@@ -109,20 +109,17 @@ Recorded rather than resolved, per Phase 1's discipline.
    record replaced a specific other one, that is a real column and a real
    decision, not an inference.
 
-5. **ACCOUNTING cannot read compliance, and §2.5 does not say whether it
-   should.** The role list assigns compliance dates to the DISPATCHER as
+5. ~~**ACCOUNTING cannot read compliance, and §2.5 does not say whether it
+   should.**~~ **Resolved by the owner at the start of Step 2.** ACCOUNTING now
+   holds `compliance:read` and nothing more: it handles insurance certificates
+   at billing and factoring time, so it sees an expiry date, while renewing one
+   stays a safety act behind `FLEET_WRITE`. Asserted as a PAIR in
+   `tests/dashboard.test.ts` — reading granted, create/update/delete refused —
+   because asserting only the first half would let a later `crud('compliance')`
+   slip in unnoticed.
+
+   Original text: §2.5 assigns compliance dates to the DISPATCHER as
    operational, puts maintenance costs behind the money gate, and gives
-   ACCOUNTING read on claims and DataQs. It is silent on ACCOUNTING and
-   compliance dates.
-
-   The permission model already answers it, and the answer is no:
-   `compliance:read` rides in `FLEET_READ`, which ACCOUNTING does not hold — it
-   is granted `truck:read` and `driver:read` by name instead. So the dashboard
-   compliance row and `/safety` are both absent for ACCOUNTING today.
-
-   Left as the model has it, asserted in `tests/dashboard.test.ts`, and raised
-   rather than resolved: granting a role a new permission because a test I
-   wrote expected it would be inventing an answer to a question the brief did
-   not ask. **A one-line change if the owner says accounting should see expiry
-   dates** — they do touch insurance certificates at billing and factoring
-   time, which is the argument for yes.
+   ACCOUNTING read on claims and DataQs. It was silent on ACCOUNTING and
+   compliance dates, and the permission model's answer was no — `compliance:read`
+   rode in `FLEET_READ`, which ACCOUNTING does not hold.
