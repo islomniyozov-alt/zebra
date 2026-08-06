@@ -321,6 +321,20 @@ export async function seedOrganization(
       },
     }),
   )
+  // The other application path — a payment against a LOAD, which is how
+  // direct-settled freight is paid. It carries a tenant, so the wall has to
+  // hold for it too, and this suite only proves what the fixture populates.
+  record(
+    'paymentLoadApplication',
+    await db.paymentLoadApplication.create({
+      data: {
+        paymentId: payment.id,
+        loadId: load.id,
+        organizationId,
+        amountCents: 1,
+      },
+    }),
+  )
 
   const settlement = record(
     'settlement',

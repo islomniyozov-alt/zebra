@@ -529,6 +529,83 @@ const en = {
   'factoring.error.wrongCarrier':
     'That factor belongs to a different authority. Terms are negotiated per authority.',
 
+  'payments.title': 'Payments',
+  'payments.record': 'Record a payment',
+  'payments.received': 'Received',
+  'payments.method': 'Method',
+  'payments.reference': 'Reference',
+  'payments.referenceHint': 'Check number, ACH trace, wire reference.',
+  'payments.amount': 'Amount',
+  'payments.payer': 'Paid by',
+  'payments.authority': 'Authority',
+  'payments.notes': 'Notes',
+  'payments.applied': 'Applied',
+  'payments.unapplied': 'Unapplied',
+  'payments.unappliedHint':
+    'Money that landed in the bank with nothing said about what it paid. A real state, not an error — leave it here until you know.',
+  'payments.fullyApplied': 'Fully applied',
+  'payments.appliedTo': 'Applied to',
+  'payments.save': 'Record it',
+  'payments.empty.title': 'No payments recorded',
+  'payments.empty.body':
+    'Money that arrives goes here first, then gets applied.',
+  'payments.detail': 'Payment',
+  'payments.applications': 'What it paid',
+  'payments.noApplications': 'Nothing applied yet.',
+  'payments.apply': 'Apply',
+  'payments.applyToInvoice': 'Apply to an invoice',
+  'payments.applyToInvoiceHint':
+    'A broker pays a document. Choose the invoice and how much of this payment settles it.',
+  'payments.invoice': 'Invoice',
+  'payments.balanceAfter': 'Balance after',
+  'payments.statement': 'Apply a statement to loads',
+  'payments.statementHint':
+    'Direct-settled freight has no invoice — Amazon Relay pays one weekly ACH against many loads. Tick what the statement covers; anything left over stays unapplied.',
+  'payments.statementEmpty':
+    'No direct-settled loads are waiting for payment under this authority.',
+  'payments.load': 'Load',
+  'payments.outstanding': 'Outstanding',
+  'payments.propose': 'Fill from the oldest first',
+  'payments.applyStatement': 'Apply to the ticked loads',
+  'payments.selected': 'ticked',
+  'payments.remainder': 'Unreconciled remainder',
+  'payments.remainderHint':
+    'The statement and the freight disagree. Nothing is forced to match — this is the difference, and it is a question for the payer.',
+  'payments.shortfall': 'Still owed on these loads',
+  'payments.overpaid': 'Left on this payment',
+  'payments.method.CHECK': 'Check',
+  'payments.method.ACH': 'ACH',
+  'payments.method.WIRE': 'Wire',
+  'payments.method.ZELLE': 'Zelle',
+  'payments.method.CREDIT_CARD': 'Card',
+  'payments.method.FACTORING_ADVANCE': 'Factoring advance',
+  'payments.method.FACTORING_RESERVE': 'Factoring reserve',
+  'payments.method.CASH': 'Cash',
+  'payments.method.OTHER': 'Other',
+  'payments.error.noCompany': 'Choose the authority the money landed under.',
+  'payments.error.badAmount':
+    'Enter an amount like 4350 or 4,350.00. A refund is not a payment with a minus sign.',
+  'payments.error.noDate': 'Enter the date it was received.',
+  'payments.error.customerNotFound': 'That payer no longer exists.',
+  'payments.error.paymentNotFound': 'That payment no longer exists.',
+  'payments.error.invoiceNotFound': 'That invoice no longer exists.',
+  'payments.error.loadNotFound': 'One of those loads no longer exists.',
+  'payments.error.noLoads': 'Tick at least one load.',
+  'payments.error.exceedsUnapplied':
+    'That is more than this payment has left to apply.',
+  'payments.error.exceedsBalance':
+    'That is more than the invoice still owes. Overpaying would create a credit nobody asked for.',
+  'payments.error.exceedsLoadBalance':
+    'That is more than those loads are worth: {loads}.',
+  'payments.error.wrongCarrier':
+    'The money and the debt belong to different authorities.',
+  'payments.error.notDirectSettled':
+    'These loads are billed by invoice, so they are paid through it: {loads}. Applying a statement here would credit the money twice.',
+  'payments.error.factoredInvoice':
+    'That invoice was sold to a factor — the factor collects it. Only a factoring advance or reserve settles it.',
+  'payments.error.notFactored':
+    'A factoring advance or reserve applies only to an invoice that was sold.',
+
   'rate.title': 'Rate',
   'rate.linehaul': 'Linehaul',
   'rate.fuelSurcharge': 'Fuel surcharge',
@@ -1101,6 +1178,83 @@ const ru: Dictionary = {
   'factoring.error.wrongCarrier':
     'Этот фактор относится к другой компании. Условия согласуются отдельно по каждой.',
 
+  'payments.title': 'Платежи',
+  'payments.record': 'Внести платёж',
+  'payments.received': 'Получен',
+  'payments.method': 'Способ',
+  'payments.reference': 'Реквизит',
+  'payments.referenceHint': 'Номер чека, трассировка ACH, референс перевода.',
+  'payments.amount': 'Сумма',
+  'payments.payer': 'Плательщик',
+  'payments.authority': 'Компания',
+  'payments.notes': 'Заметки',
+  'payments.applied': 'Разнесено',
+  'payments.unapplied': 'Не разнесено',
+  'payments.unappliedHint':
+    'Деньги пришли на счёт, но неизвестно, за что. Это нормальное состояние, а не ошибка — оставьте так, пока не выясните.',
+  'payments.fullyApplied': 'Разнесено полностью',
+  'payments.appliedTo': 'Разнесено на',
+  'payments.save': 'Внести',
+  'payments.empty.title': 'Платежей нет',
+  'payments.empty.body':
+    'Поступившие деньги сначала попадают сюда, потом разносятся.',
+  'payments.detail': 'Платёж',
+  'payments.applications': 'За что оплачено',
+  'payments.noApplications': 'Пока ничего не разнесено.',
+  'payments.apply': 'Разнести',
+  'payments.applyToInvoice': 'Разнести на счёт',
+  'payments.applyToInvoiceHint':
+    'Брокер оплачивает документ. Выберите счёт и сумму из этого платежа.',
+  'payments.invoice': 'Счёт',
+  'payments.balanceAfter': 'Остаток после',
+  'payments.statement': 'Разнести выписку на грузы',
+  'payments.statementHint':
+    'У прямых расчётов нет счёта — Amazon Relay платит один ACH в неделю за много грузов. Отметьте, что покрывает выписка; остаток останется неразнесённым.',
+  'payments.statementEmpty':
+    'Нет грузов прямого расчёта, ожидающих оплаты по этой компании.',
+  'payments.load': 'Груз',
+  'payments.outstanding': 'К оплате',
+  'payments.propose': 'Заполнить, начиная со старых',
+  'payments.applyStatement': 'Разнести на отмеченные грузы',
+  'payments.selected': 'отмечено',
+  'payments.remainder': 'Несверенный остаток',
+  'payments.remainderHint':
+    'Выписка и грузы не сходятся. Ничего не подгоняется — это и есть разница, и это вопрос к плательщику.',
+  'payments.shortfall': 'Ещё не оплачено по этим грузам',
+  'payments.overpaid': 'Осталось на платеже',
+  'payments.method.CHECK': 'Чек',
+  'payments.method.ACH': 'ACH',
+  'payments.method.WIRE': 'Перевод',
+  'payments.method.ZELLE': 'Zelle',
+  'payments.method.CREDIT_CARD': 'Карта',
+  'payments.method.FACTORING_ADVANCE': 'Аванс фактора',
+  'payments.method.FACTORING_RESERVE': 'Резерв фактора',
+  'payments.method.CASH': 'Наличные',
+  'payments.method.OTHER': 'Другое',
+  'payments.error.noCompany':
+    'Выберите компанию, на счёт которой пришли деньги.',
+  'payments.error.badAmount':
+    'Введите сумму, например 4350 или 4 350.00. Возврат — это не платёж с минусом.',
+  'payments.error.noDate': 'Укажите дату получения.',
+  'payments.error.customerNotFound': 'Этот плательщик больше не существует.',
+  'payments.error.paymentNotFound': 'Этот платёж больше не существует.',
+  'payments.error.invoiceNotFound': 'Этот счёт больше не существует.',
+  'payments.error.loadNotFound': 'Одного из этих грузов больше нет.',
+  'payments.error.noLoads': 'Отметьте хотя бы один груз.',
+  'payments.error.exceedsUnapplied':
+    'Это больше, чем осталось разнести по этому платежу.',
+  'payments.error.exceedsBalance':
+    'Это больше, чем осталось по счёту. Переплата создала бы кредит, о котором никто не просил.',
+  'payments.error.exceedsLoadBalance':
+    'Это больше стоимости этих грузов: {loads}.',
+  'payments.error.wrongCarrier': 'Деньги и долг относятся к разным компаниям.',
+  'payments.error.notDirectSettled':
+    'Эти грузы выставлены счётом и оплачиваются через него: {loads}. Разнесение выписки здесь зачло бы деньги дважды.',
+  'payments.error.factoredInvoice':
+    'Этот счёт продан фактору — его собирает фактор. Закрыть его может только аванс или резерв фактора.',
+  'payments.error.notFactored':
+    'Аванс или резерв фактора применяется только к проданному счёту.',
+
   'rate.title': 'Ставка',
   'rate.linehaul': 'Основная ставка',
   'rate.fuelSurcharge': 'Топливная надбавка',
@@ -1666,6 +1820,82 @@ const fa: Dictionary = {
     'برای این فاکتور نرخ پیش‌پرداخت یا کارمزد ثبت نشده است. آن‌ها را در تنظیم فاکتورینگ اضافه کنید.',
   'factoring.error.wrongCarrier':
     'این فاکتور به شرکت دیگری تعلق دارد. شرایط برای هر شرکت جداگانه توافق می‌شود.',
+
+  'payments.title': 'پرداخت‌ها',
+  'payments.record': 'ثبت پرداخت',
+  'payments.received': 'دریافت',
+  'payments.method': 'روش',
+  'payments.reference': 'شناسه',
+  'payments.referenceHint': 'شمارهٔ چک، کد پیگیری ACH، شناسهٔ حواله.',
+  'payments.amount': 'مبلغ',
+  'payments.payer': 'پرداخت‌کننده',
+  'payments.authority': 'شرکت',
+  'payments.notes': 'یادداشت',
+  'payments.applied': 'تخصیص‌یافته',
+  'payments.unapplied': 'تخصیص‌نیافته',
+  'payments.unappliedHint':
+    'پولی که به حساب نشسته و معلوم نیست بابت چیست. این یک وضعیت واقعی است نه خطا — تا روشن شدن، همین‌طور بماند.',
+  'payments.fullyApplied': 'کاملاً تخصیص یافت',
+  'payments.appliedTo': 'تخصیص به',
+  'payments.save': 'ثبت کن',
+  'payments.empty.title': 'پرداختی ثبت نشده است',
+  'payments.empty.body':
+    'پولی که می‌رسد اول اینجا می‌آید، بعد تخصیص داده می‌شود.',
+  'payments.detail': 'پرداخت',
+  'payments.applications': 'بابت چه چیزی',
+  'payments.noApplications': 'هنوز چیزی تخصیص نیافته است.',
+  'payments.apply': 'تخصیص',
+  'payments.applyToInvoice': 'تخصیص به صورت‌حساب',
+  'payments.applyToInvoiceHint':
+    'بروکر بابت یک سند پرداخت می‌کند. صورت‌حساب و مبلغی از این پرداخت را انتخاب کنید.',
+  'payments.invoice': 'صورت‌حساب',
+  'payments.balanceAfter': 'مانده پس از آن',
+  'payments.statement': 'تخصیص صورت‌وضعیت به بارها',
+  'payments.statementHint':
+    'بار تسویهٔ مستقیم صورت‌حساب ندارد — آمازون ریلی هفته‌ای یک ACH بابت چند بار می‌پردازد. آنچه صورت‌وضعیت پوشش می‌دهد را علامت بزنید؛ باقیمانده تخصیص‌نیافته می‌ماند.',
+  'payments.statementEmpty':
+    'برای این شرکت هیچ بار تسویهٔ مستقیمی در انتظار پرداخت نیست.',
+  'payments.load': 'بار',
+  'payments.outstanding': 'مانده',
+  'payments.propose': 'از قدیمی‌ترین پر کن',
+  'payments.applyStatement': 'تخصیص به بارهای علامت‌خورده',
+  'payments.selected': 'علامت‌خورده',
+  'payments.remainder': 'اختلاف تطبیق‌نشده',
+  'payments.remainderHint':
+    'صورت‌وضعیت و بارها با هم نمی‌خوانند. چیزی به زور جور نمی‌شود — این همان اختلاف است و پرسشی برای پرداخت‌کننده.',
+  'payments.shortfall': 'هنوز بابت این بارها طلبکاریم',
+  'payments.overpaid': 'باقیمانده روی این پرداخت',
+  'payments.method.CHECK': 'چک',
+  'payments.method.ACH': 'ACH',
+  'payments.method.WIRE': 'حواله',
+  'payments.method.ZELLE': 'Zelle',
+  'payments.method.CREDIT_CARD': 'کارت',
+  'payments.method.FACTORING_ADVANCE': 'پیش‌پرداخت فاکتور',
+  'payments.method.FACTORING_RESERVE': 'ذخیرهٔ فاکتور',
+  'payments.method.CASH': 'نقد',
+  'payments.method.OTHER': 'سایر',
+  'payments.error.noCompany': 'شرکتی که پول به حسابش نشسته را انتخاب کنید.',
+  'payments.error.badAmount':
+    'مبلغی مانند ۴۳۵۰ یا ۴٬۳۵۰.۰۰ وارد کنید. بازپرداخت، پرداختِ منفی نیست.',
+  'payments.error.noDate': 'تاریخ دریافت را وارد کنید.',
+  'payments.error.customerNotFound': 'این پرداخت‌کننده دیگر وجود ندارد.',
+  'payments.error.paymentNotFound': 'این پرداخت دیگر وجود ندارد.',
+  'payments.error.invoiceNotFound': 'این صورت‌حساب دیگر وجود ندارد.',
+  'payments.error.loadNotFound': 'یکی از آن بارها دیگر وجود ندارد.',
+  'payments.error.noLoads': 'دست‌کم یک بار را علامت بزنید.',
+  'payments.error.exceedsUnapplied':
+    'این بیشتر از باقیماندهٔ قابل تخصیص این پرداخت است.',
+  'payments.error.exceedsBalance':
+    'این بیشتر از مانده صورت‌حساب است. پرداخت اضافه، بستانکاری‌ای می‌سازد که کسی نخواسته.',
+  'payments.error.exceedsLoadBalance':
+    'این بیشتر از ارزش این بارهاست: {loads}.',
+  'payments.error.wrongCarrier': 'پول و بدهی به دو شرکت مختلف تعلق دارند.',
+  'payments.error.notDirectSettled':
+    'این بارها با صورت‌حساب مطالبه می‌شوند و از همان راه پرداخت می‌شوند: {loads}. تخصیص صورت‌وضعیت اینجا پول را دو بار حساب می‌کند.',
+  'payments.error.factoredInvoice':
+    'این صورت‌حساب به فاکتور فروخته شده — وصولش با اوست. فقط پیش‌پرداخت یا ذخیرهٔ فاکتور آن را تسویه می‌کند.',
+  'payments.error.notFactored':
+    'پیش‌پرداخت یا ذخیرهٔ فاکتور فقط به صورت‌حسابِ فروخته‌شده تعلق می‌گیرد.',
 
   'rate.title': 'نرخ',
   'rate.linehaul': 'کرایهٔ پایه',

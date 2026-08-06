@@ -1105,6 +1105,10 @@ model Load {
   communications  Communication[]
   claims          Claim[]
 
+  // Money paid against the LOAD rather than against an invoice. Only ever
+  // populated for direct-settled freight — see PaymentLoadApplication.
+  paymentApplications PaymentLoadApplication[]
+
   @@unique([companyId, loadNumber])
   @@index([companyId, operationalStatus])
   @@index([companyId, billingStatus])
@@ -1652,7 +1656,8 @@ model Payment {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  applications PaymentApplication[]
+  applications     PaymentApplication[]
+  loadApplications PaymentLoadApplication[]
 
   @@index([companyId, receivedAt])
   @@index([companyId, customerId])
@@ -1678,6 +1683,46 @@ model PaymentApplication {
 
   @@unique([paymentId, invoiceId])
   @@index([invoiceId])
+  @@index([organizationId])
+}
+
+// THE OTHER APPLICATION PATH, and the reason there are two.
+//
+// Amazon Relay pays RAM by ACH weekly: ONE statement covering many loads, with
+// no invoice anywhere in it. Those loads carry `directSettled` and never become
+// an invoice, so `PaymentApplication` — which requires one — has nothing to
+// point at. Forcing an invoice into existence purely to receive the payment
+// would put a document in the system that was never sent to anybody and never
+// will be, and every AR figure would then count freight the broker settles by
+// statement.
+//
+// So a payment applies to LOADS here, and to INVOICES there. The two paths are
+// deliberately separate tables rather than one table with two nullable columns:
+// a nullable pair admits a row that points at neither, and Postgres treats
+// NULLs as distinct in a unique index, so the "one application per pair"
+// guarantee would quietly stop holding.
+//
+// The difference between what the statement paid and what the loads are worth
+// is an UNRECONCILED REMAINDER. It stays on the payment as unapplied money, or
+// on the loads as an unpaid balance. It is never forced to match — a statement
+// that disagrees with the freight is a question for Amazon, and a system that
+// silently balances it destroys the only evidence that the question exists.
+model PaymentLoadApplication {
+  id        String  @id @default(cuid())
+  paymentId String
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  loadId    String
+  load      Load    @relation(fields: [loadId], references: [id], onDelete: Cascade)
+
+  // Denormalized from Payment — convention 9, same as PaymentApplication. The
+  // trigger refuses the write if the Load belongs to a different organization.
+  organizationId String
+
+  amountCents Int
+  appliedAt   DateTime @default(now())
+
+  @@unique([paymentId, loadId])
+  @@index([loadId])
   @@index([organizationId])
 }
 

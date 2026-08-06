@@ -1,5 +1,6 @@
 import type { Prisma } from '@/generated/prisma/client'
 import type { TxClient } from './tenancy'
+import { refreshBillingStatus } from './billing-status'
 import { allocateNumber } from './counters'
 import { loadRevenueCents } from './money'
 
@@ -312,10 +313,14 @@ export async function generateInvoice(
     select: { id: true, invoiceNumber: true },
   })
 
-  await tx.load.updateMany({
-    where: { id: { in: loads.map((load) => load.id) } },
-    data: { billingStatus: 'INVOICED' },
-  })
+  // Recomputed, not assigned. `INVOICED` was hard-coded here until step 5 gave
+  // the billing axis a single owner; the value is the same on this path and
+  // the point is that it can no longer differ from what the drift check
+  // computes. See billing-status.ts.
+  await refreshBillingStatus(
+    tx,
+    loads.map((load) => load.id),
+  )
 
   return {
     ok: true,

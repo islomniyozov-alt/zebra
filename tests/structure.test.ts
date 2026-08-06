@@ -215,6 +215,7 @@ describe('child-table triggers', () => {
       LoadStop: 'zebra_org_from_load',
       MembershipCompany: 'zebra_org_from_membership',
       PaymentApplication: 'zebra_org_from_payment',
+      PaymentLoadApplication: 'zebra_org_from_payment_load',
       SettlementLine: 'zebra_org_from_settlement',
     })
   })
@@ -236,7 +237,7 @@ describe('child-table triggers', () => {
        ORDER BY c.relname
     `)
 
-    expect(rows.length).toBe(11)
+    expect(rows.length).toBe(12)
     for (const row of rows) {
       expect(row.columns, `${row.tbl} fires on every UPDATE`).not.toEqual([])
       expect(row.columns, row.tbl).toContain('organizationId')
@@ -254,7 +255,7 @@ describe('child-table triggers', () => {
        ORDER BY p.proname
     `)
 
-    expect(rows.length).toBe(8)
+    expect(rows.length).toBe(9)
     for (const row of rows) {
       expect(row.config, row.proname).toContain('search_path=public, pg_temp')
     }

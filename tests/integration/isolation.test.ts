@@ -27,9 +27,10 @@ let orgA: OrgFixture
 let orgB: OrgFixture
 let tenantModels: string[]
 
-// A sweep queries all 38 tenant tables inside one transaction. No request ever
-// does that, so Prisma's 5s default is right for the application and wrong
-// here. Two shapes because runInOrg names its options in milliseconds.
+// A sweep queries every tenant table inside one transaction — the list is read
+// from the database below rather than written here, so it cannot go stale. No
+// request does that, so Prisma's 5s default is right for the application and
+// wrong here. Two shapes because runInOrg names its options in milliseconds.
 // No acting user: this suite proves the wall, it does not act for anyone.
 const PROBE = unattributed('isolation suite: asserts the tenant boundary')
 // This suite stays OFF the retrying client on purpose — it is the one that
@@ -162,8 +163,9 @@ describe('cross-organization isolation', () => {
           }
           return found
         },
-        // Thirty-eight round trips to Neon in one transaction. No request does
-        // this; the sweep does, and it must not die on the default 5s cap.
+        // One round trip to Neon per tenant table, in one transaction. No
+        // request does this; the sweep does, and it must not die on the
+        // default 5s cap.
         SWEEP,
       )
 
@@ -369,6 +371,40 @@ describe('child tables inherit the wall', () => {
         { ...WAIT, attribution: PROBE },
       ),
     ).rejects.toThrow()
+  })
+
+  it('refuses a payment applied to another organization’s load', async () => {
+    // The SECOND application path (direct-settled freight, Phase 3 step 5).
+    // A join table is exactly where a cross-tenant write hides: both endpoints
+    // are valid rows on their own, and only the pair is wrong.
+    await expect(
+      runInOrg(
+        app,
+        orgA.organizationId,
+        (tx) =>
+          tx.paymentLoadApplication.create({
+            data: {
+              paymentId: orgA.ids.payment![0]!,
+              loadId: orgB.ids.load![0]!,
+              organizationId: orgA.organizationId,
+              amountCents: 1,
+            },
+          }),
+        { ...WAIT, attribution: PROBE },
+      ),
+    ).rejects.toThrow()
+
+    // The PAIR, not the load: the fixture gives every load one legitimate
+    // application of its own, so counting by load would find that one and
+    // report a leak that is not there.
+    expect(
+      await owner.paymentLoadApplication.count({
+        where: {
+          paymentId: orgA.ids.payment![0]!,
+          loadId: orgB.ids.load![0]!,
+        },
+      }),
+    ).toBe(0)
   })
 })
 

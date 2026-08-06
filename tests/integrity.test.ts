@@ -2,6 +2,8 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { createPrismaClient } from '@/lib/db'
 import { findAuthorityDrift } from '@/lib/asset-transfer'
 import { findFactoringDrift } from '@/lib/factoring'
+import { findPaymentDrift } from '@/lib/payments'
+import { findBillingStatusDrift } from '@/lib/billing-status'
 import { runInOrg } from '@/lib/tenancy'
 import { unattributed } from '@/lib/audit'
 import type { PrismaClient } from '@/generated/prisma/client'
@@ -86,6 +88,36 @@ describe('a factored invoice agrees with the loads it covers', () => {
   // all means the stored shares are not what the arithmetic produces.
   it('every factored invoice fee sums exactly from its loads', async () => {
     const drift = await acrossEveryOrg((tx) => findFactoringDrift(tx))
+
+    expect(drift, JSON.stringify(drift, null, 2)).toEqual([])
+  })
+})
+
+describe('a payment agrees with what it was applied to', () => {
+  // Phase 3 §5 step 5. `Payment.unappliedCents` is a cache of
+  // `amountCents − sum(applications) − sum(loadApplications)`.
+  //
+  // A cache that disagrees with its source is money the carrier believes it
+  // can still allocate but cannot — or, the other way round, money it has
+  // allocated twice. Neither shows up on a screen as wrong; both show up on a
+  // bank reconciliation months later.
+  it('no payment has an unapplied figure its applications disagree with', async () => {
+    const drift = await acrossEveryOrg((tx) => findPaymentDrift(tx))
+
+    expect(drift, JSON.stringify(drift, null, 2)).toEqual([])
+  })
+})
+
+describe('a load’s billing status agrees with the money', () => {
+  // The billing axis is a CACHE (billing-status.ts). A load whose stored
+  // status has drifted is a load in the wrong queue: invisible in
+  // ready-to-invoice, or offered for invoicing a second time.
+  //
+  // DISPUTED and WRITTEN_OFF are excluded by the check itself — they are
+  // decisions somebody made, not arithmetic, and recomputing over them would
+  // erase the only record that the argument is still open.
+  it('no load says something the invoices and payments do not', async () => {
+    const drift = await acrossEveryOrg((tx) => findBillingStatusDrift(tx))
 
     expect(drift, JSON.stringify(drift, null, 2)).toEqual([])
   })

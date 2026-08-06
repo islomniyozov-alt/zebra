@@ -1,6 +1,7 @@
 import type { AccessorialType } from '@/generated/prisma/client'
 import type { TxClient } from './tenancy'
 import { MoneyFormatError, loadRevenueCents, parseMoneyToCents } from './money'
+import { refreshBillingStatus } from './billing-status'
 
 // ---------------------------------------------------------------------------
 // WHAT A LOAD IS WORTH (Phase 3 §5 step 1).
@@ -101,6 +102,11 @@ export async function setLoadRate(
     },
   })
 
+  // A load with a POD and no rate is not ready to bill; putting the rate on it
+  // is what makes it ready. The billing axis is recomputed rather than set —
+  // see billing-status.ts for the one place that rule lives.
+  await refreshBillingStatus(tx, [loadId])
+
   return { ok: true, totalRevenueCents }
 }
 
@@ -188,6 +194,8 @@ async function recomputeFromAccessorials(
     where: { id: loadId },
     data: { accessorialsCents, totalRevenueCents },
   })
+
+  await refreshBillingStatus(tx, [loadId])
 
   return { ok: true, accessorialsCents, totalRevenueCents }
 }

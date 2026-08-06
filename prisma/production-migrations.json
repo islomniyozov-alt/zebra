@@ -13,7 +13,8 @@
     "20260731145835_status_event_outcome",
     "20260731165122_location_timezone_and_user_preferences",
     "20260804214210_direct_settled_loads",
-    "20260804214642_customer_settles_directly"
+    "20260804214642_customer_settles_directly",
+    "20260805194823_factoring_company_per_carrier"
   ],
   "recordedAt": "2026-08-05",
   "verified": false

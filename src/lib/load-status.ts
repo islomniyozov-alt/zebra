@@ -1,4 +1,5 @@
 import type { TxClient } from './tenancy'
+import { refreshBillingStatus } from './billing-status'
 import type {
   LoadOperationalStatus,
   StatusSource,
@@ -154,6 +155,12 @@ export async function transitionOperational(
       ...(options.occurredAt ? { occurredAt: options.occurredAt } : {}),
     },
   })
+
+  // THE OTHER AXIS FOLLOWS. The two statuses move independently (schema
+  // convention 4) but they are not unrelated: a POD landing is what makes a
+  // load ready to bill. Recomputed rather than set, so the rule for what
+  // "ready" means lives in exactly one place — see billing-status.ts.
+  await refreshBillingStatus(tx, [loadId])
 
   return { result: 'moved', from, to }
 }
