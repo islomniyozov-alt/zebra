@@ -158,20 +158,37 @@ export function shapeRecords(
   }[],
   leadDays: number,
   now: Date = new Date(),
+  /**
+   * Latest expiry per `subjectId:type`, where the caller knows more than the
+   * rows it is passing.
+   *
+   * THE QUEUE MUST PASS THIS. Its rows are limited to the expiry horizon, so
+   * the renewal that supersedes a lapsed record — a year out, by definition —
+   * is not among them. Computing supersession from the rows alone left every
+   * renewed-but-lapsed registration sitting in the queue as a red row for a
+   * truck that was entirely legal. Caught by the integration test, which is
+   * the only place the two queries meet.
+   *
+   * `recordsForSubject` passes nothing, and correctly: its rows ARE the whole
+   * history for that asset.
+   */
+  latestByKey?: ReadonlyMap<string, number>,
 ): ComplianceRow[] {
-  // SUPERSESSION, computed once over the whole set. For each
-  // (subject, subjectId, type) the latest `expiresAt` is the live one; every
-  // older record of that pair is history. Ties keep both — two records with the
-  // same expiry is a data problem, and silently picking one would hide it.
-  const latest = new Map<string, number>()
   const keyOf = (row: (typeof rows)[number]) => {
     const subjectId = row.truck?.id ?? row.trailer?.id ?? row.driver?.id ?? ''
     return `${subjectId}:${row.type}`
   }
-  for (const row of rows) {
-    const key = keyOf(row)
-    const at = row.expiresAt.getTime()
-    if (!latest.has(key) || at > latest.get(key)!) latest.set(key, at)
+
+  // For each (subject, type) the latest `expiresAt` is the live one; every
+  // older record of that pair is history. Ties keep both — two records with the
+  // same expiry is a data problem, and silently picking one would hide it.
+  const latest = new Map<string, number>(latestByKey ?? [])
+  if (!latestByKey) {
+    for (const row of rows) {
+      const key = keyOf(row)
+      const at = row.expiresAt.getTime()
+      if (!latest.has(key) || at > latest.get(key)!) latest.set(key, at)
+    }
   }
 
   return rows.flatMap((row) => {
@@ -279,7 +296,46 @@ export async function complianceQueue(
     select: SELECT,
   })
 
-  const shaped = shapeRecords(rows, leadDays, now).filter(
+  // THE LATEST EXPIRY PER SUBJECT AND TYPE, over EVERY record — not just the
+  // ones inside the horizon. A renewal is by definition outside it, so without
+  // this a lapsed-but-renewed registration stays in the queue forever.
+  //
+  // Scoped to the subjects actually on screen, so it stays one cheap grouped
+  // query rather than a read of the whole table.
+  const subjectIds = [...new Set(rows.map((row) => subjectIdOf(row)))].filter(
+    Boolean,
+  )
+  const latestByKey = new Map<string, number>()
+  if (subjectIds.length > 0) {
+    const all = await tx.complianceItem.findMany({
+      where: {
+        ...scope,
+        deletedAt: null,
+        OR: [
+          { truckId: { in: subjectIds } },
+          { trailerId: { in: subjectIds } },
+          { driverId: { in: subjectIds } },
+        ],
+      },
+      select: {
+        type: true,
+        expiresAt: true,
+        truckId: true,
+        trailerId: true,
+        driverId: true,
+      },
+    })
+    for (const row of all) {
+      const subjectId = row.truckId ?? row.trailerId ?? row.driverId ?? ''
+      const key = `${subjectId}:${row.type}`
+      const at = row.expiresAt.getTime()
+      if (!latestByKey.has(key) || at > latestByKey.get(key)!) {
+        latestByKey.set(key, at)
+      }
+    }
+  }
+
+  const shaped = shapeRecords(rows, leadDays, now, latestByKey).filter(
     (row) => row.status !== 'current',
   )
 
@@ -292,6 +348,15 @@ export async function complianceQueue(
         shaped.filter((row) => !row.isSuperseded),
     leadDays,
   }
+}
+
+/** Whichever of the three subject columns is set. */
+function subjectIdOf(row: {
+  truck: { id: string } | null
+  trailer: { id: string } | null
+  driver: { id: string } | null
+}): string {
+  return row.truck?.id ?? row.trailer?.id ?? row.driver?.id ?? ''
 }
 
 /** `{ truckId: { not: null } }` and friends — the subject filter. */

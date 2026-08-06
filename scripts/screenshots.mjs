@@ -63,6 +63,9 @@ const SHOTS = [
   { name: 'truck-new-en', path: '/trucks/new', locale: 'en', authed: true },
   { name: 'truck-new-ru', path: '/trucks/new', locale: 'ru', authed: true },
   { name: 'truck-new-fa-rtl', path: '/trucks/new', locale: 'fa', authed: true },
+  // PHASE 4 step 1. The compliance queue — dense, and every row a date next to
+  // a status word, which is where §12's longer Russian bites.
+  ...money('safety', '/safety'),
   // Step B. The dashboard — the first screen of the day, and the one §12's
   // "Russian runs ~30% longer" hits hardest because every queue row is a
   // sentence rather than a label.
