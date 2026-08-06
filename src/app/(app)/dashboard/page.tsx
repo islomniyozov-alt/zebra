@@ -196,6 +196,14 @@ export default async function DashboardPage() {
                   />
                 </div>
               ) : (
+                // A PLAIN TABLE, not the `Table` component, and the reason is
+                // worth stating: `Table` owns the full-height scrolling
+                // container a list screen needs (`min-h-0 flex-1
+                // overflow-auto`), which is wrong for a three-row summary
+                // embedded in a page that scrolls as a whole. §7.1's rules
+                // that still apply here are kept by hand — hairline
+                // separators, uppercase header, money right-aligned and
+                // tabular.
                 <div className="mt-z3 overflow-hidden rounded-card border border-border bg-surface">
                   <table className="w-full border-collapse text-sm">
                     <thead>

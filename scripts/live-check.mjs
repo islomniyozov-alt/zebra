@@ -78,6 +78,11 @@ async function signIn() {
     await page.fill('input[name="email"]', EMAIL)
     await page.fill('input[name="password"]', PASSWORD)
     await Promise.all([
+      // Sign-in still lands on /loads. The BARE DOMAIN now lands on
+      // /dashboard, so the two arrival routes disagree — flagged in the Step B
+      // report as a question rather than changed here, because moving the
+      // post-login destination is a product decision and it would move every
+      // walkthrough that waits on /loads.
       page.waitForURL(/\/loads/, { timeout: 60_000 }),
       page.click('button[type="submit"]'),
     ])
@@ -99,7 +104,10 @@ async function signIn() {
 
 // --- unauthenticated ---------------------------------------------------------
 
-await check('root redirects to the working screen', '/', '307 → /loads')
+// The destination MOVED in Step B, from /loads to /dashboard, and this line
+// is what noticed — it is a hard-coded expectation on purpose, so the bare
+// domain cannot quietly start landing somewhere else.
+await check('root redirects to the working screen', '/', '307 → /dashboard')
 await check('login renders', '/login', '200')
 await check('reset request renders', '/reset-password', '200')
 
