@@ -1,7 +1,10 @@
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Role } from '@/generated/prisma/client'
 import {
   ACTIONS,
+  NAVIGATION,
   RESOURCES,
   can,
   navigationFor,
@@ -248,13 +251,20 @@ describe('navigationFor', () => {
   })
 
   it('drops individual items too, not just whole groups', () => {
+    // A DISPATCHER holds `document:read` and `customer:read` but not
+    // `report:read`, so Records loses Reports on permission. It now shows
+    // BROKERS ALONE, because Documents was hidden as unbuilt — the standalone
+    // document browser does not exist, only the pipeline on the load screen.
     const records = navigationFor(session('DISPATCHER')).find(
       (g) => g.key === 'records',
     )
-    expect(records?.items.map((item) => item.key)).toEqual([
-      'brokers',
-      'documents',
-    ])
+    expect(records?.items.map((item) => item.key)).toEqual(['brokers'])
+
+    // The permission half of that is still true and still worth asserting,
+    // separately from the built half — the two filters must not be confused
+    // for each other.
+    expect(can(session('DISPATCHER'), 'read', 'document')).toBe(true)
+    expect(can(session('DISPATCHER'), 'read', 'report')).toBe(false)
   })
 
   it('shows accounting Money but not Admin', () => {
@@ -387,5 +397,96 @@ describe('Phase 3 sweep: who sets a rate', () => {
   it('a dispatcher cannot even read it', () => {
     expect(can(session('DISPATCHER'), 'read', 'load.financials')).toBe(false)
     expect(can(session('DISPATCHER'), 'update', 'load.financials')).toBe(false)
+  })
+})
+
+describe('the sidebar only offers screens that exist', () => {
+  // THE BUG THIS PREVENTS, reported from the parallel run: the sidebar listed
+  // Dashboard, Calendar, Maintenance, Expenses, Fuel, Documents, Reports and
+  // Settings, and not one of them had a page. Seven were 404s. Dashboard was
+  // worse — `/` redirects to `/loads`, so clicking it looked like the sidebar
+  // had lost track of where you were.
+  //
+  // The guard reads the FILESYSTEM rather than a list kept here, because a
+  // list kept here is the same promise the nav was already making.
+
+  const appDir = join(process.cwd(), 'src', 'app', '(app)')
+
+  /** Does a route segment have a page? `/` is special — it has no page at all. */
+  const hasPage = (href: string): boolean => {
+    if (href === '/') return existsSync(join(appDir, 'page.tsx'))
+    const segments = href.replace(/^\//, '').split('/')
+    return existsSync(join(appDir, ...segments, 'page.tsx'))
+  }
+
+  const owner: AuthorizedSession = {
+    userId: 'u',
+    organizationId: 'o',
+    role: 'OWNER',
+    companyScopes: [],
+  }
+
+  it('every entry an OWNER is offered resolves to a real page', () => {
+    // The OWNER sees the most, so this is the widest the sidebar ever gets.
+    const missing = navigationFor(owner)
+      .flatMap((group) => group.items)
+      .filter((entry) => !hasPage(entry.href))
+      .map((entry) => `${entry.key} -> ${entry.href}`)
+
+    expect(missing, missing.join(', ')).toEqual([])
+  })
+
+  it('and every entry that does NOT resolve is marked with its phase', () => {
+    // The other direction: an unbuilt screen must be hidden BY THE MARKER, not
+    // by accident. Anything without a page and without `returnsIn` would be
+    // offered the moment somebody granted its permission.
+    const unmarked = NAVIGATION.flatMap((group) => group.items)
+      .filter((entry) => !hasPage(entry.href) && entry.returnsIn === undefined)
+      .map((entry) => entry.key)
+
+    expect(unmarked, unmarked.join(', ')).toEqual([])
+  })
+
+  it('does not mark a screen that has in fact been built', () => {
+    // The reverse mistake: a screen ships and nobody removes the marker, so it
+    // stays invisible and the work is wasted.
+    const stale = NAVIGATION.flatMap((group) => group.items)
+      .filter((entry) => hasPage(entry.href) && entry.returnsIn !== undefined)
+      .map((entry) => entry.key)
+
+    expect(stale, stale.join(', ')).toEqual([])
+  })
+
+  it('keeps every group, because each still has a real screen in it', () => {
+    // The ruling was "hide unbuilt entries, keep the group structure". If
+    // hiding ever empties a group, the sidebar rearranges and this says so.
+    expect(navigationFor(owner).map((group) => group.key)).toEqual([
+      'operations',
+      'fleet',
+      'money',
+      'records',
+      'admin',
+    ])
+  })
+
+  it('hides the unbuilt from every role, not just from the ones without rights', () => {
+    // A screen nobody can open is not a permission question. If it were, an
+    // OWNER would see it and a DISPATCHER would not, for two different reasons
+    // that would eventually disagree.
+    const roles: Role[] = [
+      'OWNER',
+      'ADMIN',
+      'MANAGER',
+      'DISPATCHER',
+      'ACCOUNTING',
+    ]
+    for (const role of roles) {
+      const offered = navigationFor({ ...owner, role }).flatMap((group) =>
+        group.items.map((entry) => entry.href),
+      )
+      expect(offered.includes('/calendar'), role).toBe(false)
+      expect(offered.includes('/settings'), role).toBe(false)
+      expect(offered.includes('/'), role).toBe(false)
+    }
   })
 })

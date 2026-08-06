@@ -357,6 +357,8 @@ export interface NavItem {
   href: string
   resource: Resource
   action: Action
+  /** Set only on screens that do not exist. Hidden until they do. */
+  returnsIn?: string
 }
 
 export interface NavGroup {
@@ -372,15 +374,47 @@ const item = (
   action: Action = 'read',
 ): NavItem => ({ key, labelKey: `nav.${key}`, href, resource, action })
 
+/**
+ * A nav entry for a screen that DOES NOT EXIST YET.
+ *
+ * Kept in the list, hidden from the sidebar, and carrying the phase it returns
+ * in as DATA rather than as a comment — so the label and the behaviour cannot
+ * drift apart, and building the screen is a one-word edit back to `item`.
+ *
+ * The same ruling as the search box: a control that looks finished and does
+ * nothing teaches a dispatcher the application is flaky, which costs more than
+ * the missing feature. Worse here — `/` and `/calendar` are not even 404s.
+ * Dashboard REDIRECTS TO LOADS, so clicking it looked like the sidebar had
+ * lost track of where you were.
+ *
+ * `returnsIn` is free text because three of these are in no brief at all, and
+ * "unassigned" is the honest answer rather than a phase invented to fill the
+ * field.
+ */
+const unbuilt = (
+  key: string,
+  href: string,
+  resource: Resource,
+  returnsIn: string,
+  action: Action = 'read',
+): NavItem => ({
+  key,
+  labelKey: `nav.${key}`,
+  href,
+  resource,
+  action,
+  returnsIn,
+})
+
 export const NAVIGATION: readonly NavGroup[] = [
   {
     key: 'operations',
     labelKey: 'nav.group.operations',
     items: [
-      item('dashboard', '/', 'dashboard'),
+      unbuilt('dashboard', '/', 'dashboard', 'unassigned — in no brief'),
       item('dispatch', '/dispatch', 'dispatch'),
       item('loads', '/loads', 'load'),
-      item('calendar', '/calendar', 'calendar'),
+      unbuilt('calendar', '/calendar', 'calendar', 'Phase 5'),
     ],
   },
   {
@@ -390,7 +424,7 @@ export const NAVIGATION: readonly NavGroup[] = [
       item('trucks', '/trucks', 'truck'),
       item('trailers', '/trailers', 'trailer'),
       item('drivers', '/drivers', 'driver'),
-      item('maintenance', '/maintenance', 'maintenance'),
+      unbuilt('maintenance', '/maintenance', 'maintenance', 'Phase 4'),
     ],
   },
   {
@@ -401,8 +435,8 @@ export const NAVIGATION: readonly NavGroup[] = [
       item('receivables', '/receivables', 'receivable'),
       item('payments', '/payments', 'payment'),
       item('settlements', '/settlements', 'settlement'),
-      item('expenses', '/expenses', 'expense'),
-      item('fuel', '/fuel', 'fuel'),
+      unbuilt('expenses', '/expenses', 'expense', 'Phase 4'),
+      unbuilt('fuel', '/fuel', 'fuel', 'Phase 4'),
     ],
   },
   {
@@ -410,8 +444,16 @@ export const NAVIGATION: readonly NavGroup[] = [
     labelKey: 'nav.group.records',
     items: [
       item('brokers', '/brokers', 'customer'),
-      item('documents', '/documents', 'document'),
-      item('reports', '/reports', 'report'),
+      // The document PIPELINE exists — upload, confirm, download, all on the
+      // load screen. A standalone browser over every document is what is
+      // missing, and no brief asks for one.
+      unbuilt(
+        'documents',
+        '/documents',
+        'document',
+        'unassigned — in no brief',
+      ),
+      unbuilt('reports', '/reports', 'report', 'Phase 5'),
     ],
   },
   {
@@ -419,22 +461,39 @@ export const NAVIGATION: readonly NavGroup[] = [
     labelKey: 'nav.group.admin',
     items: [
       item('users', '/users', 'user'),
-      item('settings', '/settings', 'organization'),
+      // CompanySettings is written by the seed and read by the invoice and
+      // settlement services; nothing edits it through a screen.
+      unbuilt(
+        'settings',
+        '/settings',
+        'organization',
+        'unassigned — in no brief',
+      ),
     ],
   },
 ]
 
 /**
- * The navigation this session may see: items filtered by permission, then
- * groups with nothing left in them dropped entirely.
+ * The navigation this session may see: entries that EXIST, filtered by
+ * permission, then groups with nothing left in them dropped entirely.
+ *
+ * Unbuilt first, because a screen nobody can open is not a permission
+ * question — hiding it from an OWNER and from a DISPATCHER for two different
+ * reasons would be two bugs waiting to disagree.
+ *
+ * The GROUP STRUCTURE SURVIVES this: every one of the five groups still has at
+ * least one real screen in it, so the sidebar keeps its shape and nothing
+ * rearranges when the missing screens land.
  */
 export function navigationFor(
   session: AuthorizedSession | null | undefined,
 ): NavGroup[] {
   return NAVIGATION.map((group) => ({
     ...group,
-    items: group.items.filter((entry) =>
-      can(session, entry.action, entry.resource),
+    items: group.items.filter(
+      (entry) =>
+        entry.returnsIn === undefined &&
+        can(session, entry.action, entry.resource),
     ),
   })).filter((group) => group.items.length > 0)
 }
