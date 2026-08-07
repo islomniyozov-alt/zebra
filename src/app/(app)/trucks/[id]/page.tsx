@@ -5,6 +5,8 @@ import { companyIdScopeFilter } from '@/lib/tenancy'
 import { currentAuthority } from '@/lib/fleet'
 import { CompliancePanel } from '../../_reference/CompliancePanel'
 import { compliancePanelData } from '../../_reference/compliance-view'
+import { MaintenancePanel } from '../../_reference/MaintenancePanel'
+import { maintenancePanelData } from '../../_reference/maintenance-view'
 import { RecordForm } from '@/components/forms/RecordForm'
 import { AssetActions } from '../../_reference/AssetActions'
 import { updateTruckAction } from '../actions'
@@ -21,7 +23,12 @@ export default async function EditTruckPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const { t } = await getLocaleContext()
+  const { t, locale } = await getLocaleContext()
+
+  // Decided before the transaction opens and threaded into the service, so the
+  // cost is never selected for a role that cannot see it — §2.5 and the
+  // standing rule that a field the role cannot see is left OUT of the payload.
+  const maySeeCost = await currentUserCan('read', 'truck.financials')
 
   const data = await withCurrentOrg('read', 'truck', async (tx, session) => {
     // Row-level security has already removed another tenant's trucks, so a
@@ -45,14 +52,26 @@ export default async function EditTruckPage({
       : null
 
     const compliance = await compliancePanelData(tx, 'truck', id, t)
+    const maintenance = await maintenancePanelData(
+      tx,
+      'truck',
+      id,
+      maySeeCost,
+      t,
+      locale,
+    )
 
-    return { truck, companies, openCompany, compliance }
+    return { truck, companies, openCompany, compliance, maintenance }
   })
 
   if (!data) notFound()
-  const { truck, companies, openCompany, compliance } = data
+  const { truck, companies, openCompany, compliance, maintenance } = data
   const maySeeCompliance = await currentUserCan('read', 'compliance')
   const mayRenew = await currentUserCan('create', 'compliance')
+
+  const maySeeMaintenance = await currentUserCan('read', 'maintenance')
+  const mayRecordMaintenance = await currentUserCan('create', 'maintenance')
+  const mayAttach = await currentUserCan('create', 'document')
 
   const mayEdit = await currentUserCan('update', 'truck')
   const mayDelete = await currentUserCan('delete', 'truck')
@@ -153,6 +172,30 @@ export default async function EditTruckPage({
               labels={
                 compliance.labels as Parameters<
                   typeof CompliancePanel
+                >[0]['labels']
+              }
+            />
+          </div>
+        ) : null}
+
+        {/* PHASE 4 §5 STEP 3. A dispatcher reads the service history — a truck
+         * in the shop is a dispatch fact — and never the cost, which is
+         * `truck.financials` and simply is not in the payload for them. */}
+        {maySeeMaintenance ? (
+          <div className="mt-z4 max-w-[900px]">
+            <MaintenancePanel
+              subject="truck"
+              subjectId={id}
+              rows={maintenance.rows}
+              categories={maintenance.categories}
+              {...(maintenance.totals ? { totals: maintenance.totals } : {})}
+              mayRecord={mayRecordMaintenance}
+              mayAttach={mayAttach}
+              today={maintenance.today}
+              translate={maintenance.translate}
+              labels={
+                maintenance.labels as Parameters<
+                  typeof MaintenancePanel
                 >[0]['labels']
               }
             />

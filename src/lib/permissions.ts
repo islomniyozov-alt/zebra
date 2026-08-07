@@ -434,7 +434,10 @@ export const NAVIGATION: readonly NavGroup[] = [
       // them because they gate a real dispatch decision (§2.5). `compliance`
       // has been in FLEET_READ since Phase 1, so no permission changes.
       item('safety', '/safety', 'compliance'),
-      unbuilt('maintenance', '/maintenance', 'maintenance', 'Phase 4'),
+      // Phase 4 step 3. `maintenance` is in FLEET_READ, so a dispatcher gets
+      // the screen — and not the cost column on it, which is
+      // `truck.financials` and is decided by the page rather than by the nav.
+      item('maintenance', '/maintenance', 'maintenance'),
     ],
   },
   {

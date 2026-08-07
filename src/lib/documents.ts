@@ -67,7 +67,7 @@ export const ALLOWED_MIME_TYPES: readonly string[] = [
  * list of legal targets and the list of tables mint is allowed to look in, and
  * one place to add to when Phase 2 attaches documents to something new.
  */
-const TARGETS = {
+export const TARGETS = {
   load: { column: 'loadId', model: 'load' },
   truck: { column: 'truckId', model: 'truck' },
   trailer: { column: 'trailerId', model: 'trailer' },
@@ -77,7 +77,12 @@ const TARGETS = {
   settlement: { column: 'settlementId', model: 'settlement' },
   expense: { column: 'expenseId', model: 'expense' },
   fuelTransaction: { column: 'fuelTransactionId', model: 'fuelTransaction' },
-  maintenance: { column: 'maintenanceId', model: 'maintenance' },
+  // `maintenanceRecord`, not `maintenance` — the model is `MaintenanceRecord`
+  // and this string is used as a PRISMA DELEGATE KEY below, so the wrong name
+  // is a runtime crash on `undefined.findUnique` rather than a type error.
+  // Nothing had ever uploaded a maintenance receipt, so nothing had found it.
+  // The structure test now walks every entry against the real client.
+  maintenance: { column: 'maintenanceId', model: 'maintenanceRecord' },
   complianceItem: { column: 'complianceItemId', model: 'complianceItem' },
   claim: { column: 'claimId', model: 'claim' },
 } as const satisfies Record<string, { column: string; model: string }>

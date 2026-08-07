@@ -123,3 +123,42 @@ Recorded rather than resolved, per Phase 1's discipline.
    ACCOUNTING read on claims and DataQs. It was silent on ACCOUNTING and
    compliance dates, and the permission model's answer was no — `compliance:read`
    rode in `FLEET_READ`, which ACCOUNTING does not hold.
+
+6. **`MaintenanceRecord` already exists too, and Step 3 needed no migration.**
+   The same finding as flag 1, one step later. §3 step 3 asks for work orders
+   "per asset (date, odometer, vendor, category, cost cents…, receipts via the
+   pipeline)" and the schema has carried every one of those since the init
+   migration: `servicedAt`, `odometer`, `vendorName`, `category`
+   (`MaintenanceCategory`, twelve members), `description`, `costCents`,
+   `notes`, soft delete, a `Document[]` relation, and indexes on
+   `[companyId, servicedAt]`, `[companyId, truckId, servicedAt]` and
+   `[companyId, nextServiceDate]`.
+
+   It carries two fields the brief does not ask for — `nextServiceOdometer` and
+   `nextServiceDate` — which are the beginning of a PM-due queue. Step 3 stores
+   and displays both and builds no queue on them; that is a Phase 5 screen if
+   the owner wants one.
+
+   **Two rules held while building on it.** `MaintenanceRecord.truckId` and
+   `trailerId` are both nullable, so a row can hang off nothing — such a row is
+   dropped from every view rather than rendered against a dash, the same call
+   the compliance panel makes. And the cost gate is a **resource, not a
+   column check**: see flag 7.
+
+7. **Maintenance costs are gated on `truck.financials`, and ACCOUNTING holds
+   that resource without holding `maintenance:read`.** §2.5 says a DISPATCHER
+   "sees the work order and not the cost" and does not name the resource. There
+   was no `maintenance.cost` resource and there is now no need for one:
+   `truck.financials` was introduced in Phase 3's sweep for exactly this shape —
+   money that appears on a FLEET screen rather than a money screen — and is held
+   by OWNER, ADMIN, MANAGER and ACCOUNTING and not by DISPATCHER, which is the
+   split §2.5 describes. Step 3 reuses it. If maintenance spend ever needs a
+   different audience from a truck's purchase price, that is a one-line split
+   and the call sites are the three named in `tests/permissions.test.ts`.
+
+   The asymmetry that falls out of it, recorded rather than fixed: **ACCOUNTING
+   can read `truck.financials` and cannot read `maintenance`**, so `/maintenance`
+   404s for the one role most likely to be reconciling a shop invoice. The
+   parallel is flag 5 — compliance had the same shape and was resolved by an
+   explicit ruling, not by a step quietly widening a role. Asserted as it stands
+   in `tests/permissions.test.ts` so the answer is visible rather than implied.

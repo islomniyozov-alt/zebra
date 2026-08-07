@@ -351,6 +351,46 @@ describe('Phase 3 sweep: money on a non-money screen', () => {
   })
 })
 
+describe('Phase 4 step 3: a work order and what it cost', () => {
+  // §2.5, and the reason maintenance needed two resources rather than one: the
+  // SERVICE is operational and the COST is money. A dispatcher planning around
+  // a truck in the shop needs the first and has no use for the second.
+
+  it('a dispatcher reads the work order', () => {
+    expect(can(session('DISPATCHER'), 'read', 'maintenance')).toBe(true)
+  })
+
+  it('and cannot read what it cost', () => {
+    // THE PAIR. Either assertion alone is satisfied by a mistake: granting
+    // both would hide nothing, granting neither would hide the screen.
+    expect(can(session('DISPATCHER'), 'read', 'truck.financials')).toBe(false)
+  })
+
+  it.each<Role>(['OWNER', 'ADMIN', 'MANAGER'])('%s reads both', (role) => {
+    expect(can(session(role), 'read', 'maintenance')).toBe(true)
+    expect(can(session(role), 'read', 'truck.financials')).toBe(true)
+  })
+
+  it('and a dispatcher cannot open one either', () => {
+    // Reading is FLEET_READ; recording is FLEET_WRITE. A dispatcher who could
+    // file a work order would be entering a cost they cannot see.
+    expect(can(session('DISPATCHER'), 'create', 'maintenance')).toBe(false)
+    expect(can(session('MANAGER'), 'create', 'maintenance')).toBe(true)
+  })
+
+  it('accounting holds the money half and NOT the screen', () => {
+    // Recorded rather than fixed, because it is a real asymmetry and not mine
+    // to resolve: ACCOUNTING can read `truck.financials` — so it would see the
+    // cost column — and has never held `maintenance:read`, so /maintenance
+    // 404s for it. Flagged in PHASE-4-BRIEF.md §6 flag 7. The parallel is
+    // `compliance:read`, which accounting was granted one step earlier by an
+    // explicit ruling rather than by a service quietly widening a role.
+    expect(can(session('ACCOUNTING'), 'read', 'truck.financials')).toBe(true)
+    expect(can(session('ACCOUNTING'), 'read', 'maintenance')).toBe(false)
+    expect(can(session('ACCOUNTING'), 'create', 'maintenance')).toBe(false)
+  })
+})
+
 describe('Phase 3 sweep: managing places', () => {
   // A dispatcher creates a Location by typing a stop, and corrects a dock's
   // timezone from the load screen. Both rode on `load:update` until now.

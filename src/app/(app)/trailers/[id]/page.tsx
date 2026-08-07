@@ -5,6 +5,8 @@ import { companyIdScopeFilter } from '@/lib/tenancy'
 import { currentAuthority } from '@/lib/fleet'
 import { CompliancePanel } from '../../_reference/CompliancePanel'
 import { compliancePanelData } from '../../_reference/compliance-view'
+import { MaintenancePanel } from '../../_reference/MaintenancePanel'
+import { maintenancePanelData } from '../../_reference/maintenance-view'
 import { RecordForm } from '@/components/forms/RecordForm'
 import { AssetActions } from '../../_reference/AssetActions'
 import { updateTrailerAction } from '../actions'
@@ -21,7 +23,11 @@ export default async function EditTrailerPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const { t } = await getLocaleContext()
+  const { t, locale } = await getLocaleContext()
+
+  // Decided before the transaction opens and threaded into the service, so the
+  // cost is never selected for a role that cannot see it — §2.5.
+  const maySeeCost = await currentUserCan('read', 'truck.financials')
 
   const data = await withCurrentOrg('read', 'trailer', async (tx, session) => {
     const trailer = await tx.trailer.findUnique({ where: { id } })
@@ -43,14 +49,26 @@ export default async function EditTrailerPage({
       : null
 
     const compliance = await compliancePanelData(tx, 'trailer', id, t)
+    const maintenance = await maintenancePanelData(
+      tx,
+      'trailer',
+      id,
+      maySeeCost,
+      t,
+      locale,
+    )
 
-    return { trailer, companies, openCompany, compliance }
+    return { trailer, companies, openCompany, compliance, maintenance }
   })
 
   if (!data) notFound()
-  const { trailer, companies, openCompany, compliance } = data
+  const { trailer, companies, openCompany, compliance, maintenance } = data
   const maySeeCompliance = await currentUserCan('read', 'compliance')
   const mayRenew = await currentUserCan('create', 'compliance')
+
+  const maySeeMaintenance = await currentUserCan('read', 'maintenance')
+  const mayRecordMaintenance = await currentUserCan('create', 'maintenance')
+  const mayAttach = await currentUserCan('create', 'document')
 
   const mayEdit = await currentUserCan('update', 'trailer')
   const mayDelete = await currentUserCan('delete', 'trailer')
@@ -142,6 +160,29 @@ export default async function EditTrailerPage({
               labels={
                 compliance.labels as Parameters<
                   typeof CompliancePanel
+                >[0]['labels']
+              }
+            />
+          </div>
+        ) : null}
+
+        {/* PHASE 4 §5 STEP 3. Trailers get serviced too — reefer units and
+         * brake jobs are where a dry van's year actually goes. */}
+        {maySeeMaintenance ? (
+          <div className="mt-z4 max-w-[900px]">
+            <MaintenancePanel
+              subject="trailer"
+              subjectId={id}
+              rows={maintenance.rows}
+              categories={maintenance.categories}
+              {...(maintenance.totals ? { totals: maintenance.totals } : {})}
+              mayRecord={mayRecordMaintenance}
+              mayAttach={mayAttach}
+              today={maintenance.today}
+              translate={maintenance.translate}
+              labels={
+                maintenance.labels as Parameters<
+                  typeof MaintenancePanel
                 >[0]['labels']
               }
             />

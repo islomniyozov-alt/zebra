@@ -132,6 +132,29 @@ const broker = (
   )
 ).rows[0]
 
+// A WORK ORDER WITH A COST ON IT (Phase 4 step 3). Unlike the two fields
+// above, this one IS gated by a resource — `truck.financials` — so the pair
+// below is the real thing: the dispatcher's payload has the work order and not
+// the money, and the owner's has both. $1,937.11 is deliberately an amount
+// nothing else on the screen could produce.
+const workOrder = (
+  await pool.query(
+    `insert into "MaintenanceRecord"
+       (id, "organizationId", "companyId", "truckId", "servicedAt", category,
+        description, "vendorName", odometer, "costCents", "updatedAt")
+       values ($4, $1, $2, $3, now(), 'BRAKES', $5, $6, 412000, 193711, now())
+       returning id`,
+    [
+      organizationId,
+      companyId,
+      truck.id,
+      cuid(),
+      `${TAG} steer axle brake job`,
+      `${TAG} Truck Service`,
+    ],
+  )
+).rows[0]
+
 const browser = await chromium.launch(
   process.env.SHOT_CHROME ? { executablePath: process.env.SHOT_CHROME } : {},
 )
@@ -242,6 +265,8 @@ const DISPATCHER_SCREENS = [
   '/trucks',
   '/trailers',
   '/drivers',
+  '/safety',
+  '/maintenance',
   '/brokers',
   '/account',
 ]
@@ -329,6 +354,49 @@ record(
   `HTTP ${ownerDash.status} · ${ownerHas.length} of ${MONEY_ROWS.length} row label(s) live`,
 )
 
+// --- the work order and what it cost (Phase 4 step 3) -----------------------
+//
+// §2.5: "a DISPATCHER sees the work order and not the cost". The pair is the
+// whole check — the dispatcher's payload must carry the service and not the
+// money, and the owner's must carry both, or the first half is satisfied by a
+// screen that simply failed to render.
+const maint = await bodyOf(dispatcher.page, '/maintenance')
+record(
+  'a dispatcher sees the work order itself',
+  maint.status === 200 && maint.body.includes(`${TAG} steer axle brake job`),
+  `HTTP ${maint.status}`,
+)
+record(
+  'and neither the cost nor the column it would sit in',
+  !maint.body.includes('193711') &&
+    !maint.body.includes('1,937.11') &&
+    !maint.body.includes('>Cost<') &&
+    !maint.body.includes('On screen'),
+  'no cost cell, no cost header, no on-screen total',
+)
+
+// The same work order on the TRUCK's own panel: the panel and the fleet list
+// are two different queries and either could put the number back.
+const truckPanel = await bodyOf(dispatcher.page, `/trucks/${truck.id}`)
+record(
+  'the truck panel shows it the same way',
+  truckPanel.status === 200 &&
+    truckPanel.body.includes(`${TAG} steer axle brake job`) &&
+    !truckPanel.body.includes('193711') &&
+    !truckPanel.body.includes('1,937.11') &&
+    !truckPanel.body.includes('Spent on this asset'),
+  `HTTP ${truckPanel.status} — history yes, running total no`,
+)
+
+const ownerMaint = await bodyOf(owner.page, '/maintenance')
+record(
+  'while an OWNER sees the cost on the same screen (rule 11)',
+  ownerMaint.status === 200 &&
+    ownerMaint.body.includes(`${TAG} steer axle brake job`) &&
+    ownerMaint.body.includes('1,937.11'),
+  `HTTP ${ownerMaint.status}`,
+)
+
 // The navigation does not offer what the role cannot reach, either (§7).
 const nav = await dispatcher.page.goto(`${BASE}/loads`, {
   waitUntil: 'domcontentloaded',
@@ -351,6 +419,9 @@ await pool.query('delete from "MembershipCompany" where "membershipId" = $1', [
 ])
 await pool.query('delete from "Membership" where id = $1', [membership.id])
 await pool.query('delete from "User" where id = $1', [user.id])
+await pool.query('delete from "MaintenanceRecord" where id = $1', [
+  workOrder.id,
+])
 await pool.query('delete from "AssetAssignment" where "truckId" = $1', [
   truck.id,
 ])
