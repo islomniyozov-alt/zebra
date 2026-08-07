@@ -115,12 +115,26 @@ await page.waitForURL(/\/(loads|dashboard)/, { timeout: 60_000 })
  * asks the question this script is actually asking: is the row THERE.
  */
 const submitAndSee = async (formSelector, text) => {
+  const url = page.url()
   await page.click(`${formSelector} button[type="submit"]`)
   await page.waitForTimeout(1500)
-  await page.reload({ waitUntil: 'domcontentloaded' })
-  await page.locator(`li:has-text("${text}")`).first().waitFor({
-    timeout: 30_000,
-  })
+
+  // NAVIGATE, DO NOT RELOAD. `page.reload()` races the server action's own
+  // refresh and aborts — "maybe frame was detached?" — which reads as a broken
+  // feature and is a broken script. A fresh `goto` asks the question this
+  // script is actually asking: is the row THERE.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded' })
+      await page.locator(`li:has-text("${text}")`).first().waitFor({
+        timeout: 20_000,
+      })
+      return
+    } catch (error) {
+      if (attempt === 2) throw error
+      await page.waitForTimeout(2000)
+    }
+  }
 }
 
 // --- open a claim -----------------------------------------------------------

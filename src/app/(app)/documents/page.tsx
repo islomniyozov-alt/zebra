@@ -6,6 +6,7 @@ import { companyScopeFilter } from '@/lib/tenancy'
 import { normalizeTypedDate } from '@/lib/typed-date'
 import {
   browseDocuments,
+  browserFacets,
   readableEntities,
   type BrowserRow,
 } from '@/lib/document-browser'
@@ -75,47 +76,29 @@ export default async function DocumentsPage({
     'document',
     async (tx, session) => {
       const scope = companyScopeFilter(session.companyScopes)
-      const dates = {
+      const window = {
         ...(from ? { from } : {}),
         ...(to ? { to } : {}),
       }
 
-      const [filtered, all] = await Promise.all([
+      // ONE HEAVY QUERY AND ONE CHEAP ONE. The browse joins twelve relations to
+      // build the labels and links; the facets need none of that. Running the
+      // browse twice — once for the rows, once for the counts — blew the
+      // 5-second interactive transaction budget on the deployed worker and the
+      // page 500'd. `wrangler tail` said so in words.
+      const [filtered, facets] = await Promise.all([
         browseDocuments(tx, session, scope, {
           ...(typeParam ? { type: typeParam } : {}),
           ...(entityParam ? { entity: entityParam } : {}),
-          ...dates,
+          ...window,
         }),
-        // The unfiltered set the chip counts come from — but still inside the
-        // date window, because a date range is a different kind of filter from
-        // a chip and a count that ignored it would promise rows outside it.
-        browseDocuments(tx, session, scope, dates),
+        browserFacets(tx, session, scope, window, CHIP_TYPES),
       ])
-
-      const matches = (row: BrowserRow, ignore: 'type' | 'entity') =>
-        (ignore === 'type' || !typeParam || row.type === typeParam) &&
-        (ignore === 'entity' || !entityParam || row.entity === entityParam)
 
       return {
         rows: filtered,
         allowed: readableEntities(session),
-        counts: {
-          type: Object.fromEntries(
-            CHIP_TYPES.map((type) => [
-              type,
-              all.filter((row) => matches(row, 'type') && row.type === type)
-                .length,
-            ]),
-          ) as Record<string, number>,
-          entity: Object.fromEntries(
-            readableEntities(session).map((entity) => [
-              entity,
-              all.filter(
-                (row) => matches(row, 'entity') && row.entity === entity,
-              ).length,
-            ]),
-          ) as Record<string, number>,
-        },
+        counts: facets,
       }
     },
   )
@@ -212,7 +195,15 @@ export default async function DocumentsPage({
           {
             param: 'type',
             label: t('docs.type'),
-            choices: CHIP_TYPES.map((type) => ({
+            // ONLY THE TYPES THIS SESSION COULD EVER SEE. A departure from the
+            // convention that a zero-count chip still renders ("Delivered (0)"
+            // says the day is clear) — here a zero means "not yours" as often
+            // as it means "none today", and a chip labelled Settlement on a
+            // dispatcher's screen names a thing they cannot open. The selected
+            // one always renders, so a filter can always be cleared.
+            choices: CHIP_TYPES.filter(
+              (type) => (counts.type[type] ?? 0) > 0 || type === typeParam,
+            ).map((type) => ({
               value: type,
               label: t(`docType.${type}` as MessageKey),
               count: counts.type[type] ?? 0,

@@ -498,9 +498,13 @@ record(
 const ownerDocs = await bodyOf(owner.page, '/documents')
 record(
   'while an owner is offered both (rule 11)',
+  // THE ENTITY CHIPS, which render for every kind the session may read whatever
+  // the data holds. The TYPE chips are a different question — those only render
+  // where the count is non-zero, so asserting on them would be asserting about
+  // what happens to be in the dev database today.
   ownerDocs.status === 200 &&
-    ownerDocs.body.includes('Settlement') &&
-    ownerDocs.body.includes('Invoice'),
+    ownerDocs.body.includes('>Settlement<') &&
+    ownerDocs.body.includes('>Invoice<'),
   `HTTP ${ownerDocs.status}`,
 )
 

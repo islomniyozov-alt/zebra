@@ -288,6 +288,87 @@ export interface BrowserQuery {
   to?: string
 }
 
+export interface BrowserFacets {
+  type: Record<string, number>
+  entity: Record<string, number>
+}
+
+/**
+ * The chip counts, from a query with NO JOINS.
+ *
+ * The first version of this screen counted by running the full browse twice —
+ * once filtered, once not — and the second one blew the 5-second interactive
+ * transaction budget on the deployed worker: two findManys with twelve relation
+ * joins each, over a WebSocket, is 6.5 seconds. `wrangler tail` said so in
+ * words, and the page 500'd.
+ *
+ * Counting never needed the joins. A chip needs to know a document's TYPE and
+ * which foreign key is set; the labels and links are only for rows on screen.
+ * So this selects scalars, and the heavy query runs once.
+ */
+export async function browserFacets(
+  tx: TxClient,
+  session: AuthorizedSession,
+  scope: CompanyScopeFilter = {},
+  window: { from?: string; to?: string } = {},
+  types: readonly DocumentType[] = [],
+): Promise<BrowserFacets> {
+  const allowed = readableEntities(session)
+
+  const rows = await tx.document.findMany({
+    where: {
+      ...scope,
+      deletedAt: null,
+      ...permissionWhere(session),
+      ...dateWindow(window),
+    },
+    take: 1000,
+    select: {
+      type: true,
+      ...Object.fromEntries(
+        allowed.map((entity) => [TARGETS[entity].column, true]),
+      ),
+    },
+  })
+
+  const entityOf = (row: Record<string, unknown>) =>
+    allowed.find((entity) => row[TARGETS[entity].column] !== null)
+
+  return {
+    type: Object.fromEntries(
+      types.map((type) => [
+        type,
+        rows.filter((row) => row.type === type).length,
+      ]),
+    ),
+    entity: Object.fromEntries(
+      allowed.map((entity) => [
+        entity,
+        rows.filter(
+          (row) => entityOf(row as Record<string, unknown>) === entity,
+        ).length,
+      ]),
+    ),
+  }
+}
+
+/** The uploaded-at window, inclusive of both typed days. */
+function dateWindow(window: {
+  from?: string
+  to?: string
+}): Prisma.DocumentWhereInput {
+  if (!window.from && !window.to) return {}
+  return {
+    uploadedAt: {
+      ...(window.from ? { gte: new Date(`${window.from}T00:00:00Z`) } : {}),
+      // Inclusive of the whole day somebody typed, which is what "to the 8th"
+      // means to a person and not what `lte: 2026-08-08T00:00` means to
+      // Postgres.
+      ...(window.to ? { lte: new Date(`${window.to}T23:59:59.999Z`) } : {}),
+    },
+  }
+}
+
 export async function browseDocuments(
   tx: TxClient,
   session: AuthorizedSession,
@@ -308,21 +389,10 @@ export async function browseDocuments(
       ...permissionWhere(session),
       ...(query.type ? { type: query.type } : {}),
       ...(entity ? { [TARGETS[entity].column]: { not: null } } : {}),
-      ...(query.from || query.to
-        ? {
-            uploadedAt: {
-              ...(query.from
-                ? { gte: new Date(`${query.from}T00:00:00Z`) }
-                : {}),
-              // Inclusive of the whole day somebody typed, which is what "to
-              // the 8th" means to a person and not what `lte: 2026-08-08T00:00`
-              // means to Postgres.
-              ...(query.to
-                ? { lte: new Date(`${query.to}T23:59:59.999Z`) }
-                : {}),
-            },
-          }
-        : {}),
+      ...dateWindow({
+        ...(query.from ? { from: query.from } : {}),
+        ...(query.to ? { to: query.to } : {}),
+      }),
     },
     orderBy: { uploadedAt: 'desc' },
     take: 300,
