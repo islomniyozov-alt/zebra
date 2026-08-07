@@ -44,6 +44,7 @@ export default async function SafetyPage({
   // gates a dispatch decision they make (§2.5).
   if (!(await currentUserCan('read', 'compliance'))) notFound()
   const maySeeInspections = await currentUserCan('read', 'inspection')
+  const maySeeClaims = await currentUserCan('read', 'claim')
 
   const params = await searchParams
   const { t } = await getLocaleContext()
@@ -195,6 +196,16 @@ export default async function SafetyPage({
               className="whitespace-nowrap text-sm text-accent hover:underline"
             >
               {t('ins.open')}
+            </Link>
+          ) : null}
+          {/* A DISPATCHER holds `inspection:read` and not `claim:read`, so
+           * these two links are separate questions and not one heading. */}
+          {maySeeClaims ? (
+            <Link
+              href="/safety/claims"
+              className="whitespace-nowrap text-sm text-accent hover:underline"
+            >
+              {t('claims.open')}
             </Link>
           ) : null}
         </div>

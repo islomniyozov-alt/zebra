@@ -89,6 +89,7 @@ export const TARGETS = {
   // delegate, and the two differ here on purpose.
   inspection: { column: 'inspectionId', model: 'roadsideInspection' },
   claim: { column: 'claimId', model: 'claim' },
+  dataQs: { column: 'dataQsId', model: 'dataQsChallenge' },
 } as const satisfies Record<string, { column: string; model: string }>
 
 export type TargetEntity = keyof typeof TARGETS

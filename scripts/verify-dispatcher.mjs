@@ -424,6 +424,39 @@ record(
   `HTTP ${ownerNewInspection.status}`,
 )
 
+// --- claims are not a dispatcher's business (Phase 4 step 5) ----------------
+//
+// §2.5 names the roles for claims and DataQs — OWNER/ADMIN/MANAGER write,
+// ACCOUNTING reads — and a DISPATCHER is on neither list. So `/safety/claims`
+// is a 404 for them, unlike `/safety` and `/safety/inspections`, which they
+// open every day.
+//
+// The three checks together are the point: two screens that DO open, one that
+// does not, and the same refused url working for an owner. Any one alone would
+// pass for the wrong reason.
+const dispatcherClaims = await bodyOf(dispatcher.page, '/safety/claims')
+record(
+  'a dispatcher typing /safety/claims is refused',
+  dispatcherClaims.status === 404,
+  `HTTP ${dispatcherClaims.status}`,
+)
+
+const ownerClaims = await bodyOf(owner.page, '/safety/claims')
+record(
+  'and the SAME url works for an owner (rule 11)',
+  ownerClaims.status === 200,
+  `HTTP ${ownerClaims.status}`,
+)
+
+// The inspection screen is shared, and the DataQs panel on it is not: the
+// challenge is claims-side. Asserted on the payload, not the pixels.
+const inspectionsList = await bodyOf(dispatcher.page, '/safety/inspections')
+record(
+  'and the DataQs panel never reaches a dispatcher',
+  !inspectionsList.body.includes('DataQs'),
+  'no challenge panel in the payload',
+)
+
 // The navigation does not offer what the role cannot reach, either (§7).
 const nav = await dispatcher.page.goto(`${BASE}/loads`, {
   waitUntil: 'domcontentloaded',

@@ -7,8 +7,14 @@ import {
   documentsForInspections,
   inspectionById,
 } from '@/lib/inspections'
+import {
+  DATAQS_LADDER,
+  DATAQS_OUTCOMES,
+  challengesForInspection,
+} from '@/lib/dataqs'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { ViolationPanel } from '../../../_reference/ViolationPanel'
+import { DataQsPanel } from '../../../_reference/DataQsPanel'
 import type { MessageKey } from '@/lib/i18n'
 
 // PHASE 4 §5 STEP 4 — one inspection.
@@ -43,6 +49,18 @@ export default async function InspectionPage({
 
   const mayEdit = await currentUserCan('update', 'inspection')
   const mayAttach = await currentUserCan('create', 'document')
+
+  // §2.5 puts DataQs with claims — OWNER/ADMIN/MANAGER write, ACCOUNTING
+  // reads — so it is a separate question from reading the inspection, and a
+  // DISPATCHER who can open this page sees no challenges panel at all.
+  const maySeeChallenges = await currentUserCan('read', 'dataQs')
+  const mayWriteChallenges = await currentUserCan('create', 'dataQs')
+
+  const challenges = maySeeChallenges
+    ? await withCurrentOrg('read', 'dataQs', (tx) =>
+        challengesForInspection(tx, id),
+      )
+    : []
 
   const day = (value: Date) => value.toISOString().slice(0, 10)
 
@@ -197,6 +215,86 @@ export default async function InspectionPage({
               failed: t('compliancePanel.failed'),
             }}
           />
+
+          {/* PHASE 4 §5 STEP 5. The last two links of §4's trace, on the same
+           * screen as the first two: inspection → violation → challenge →
+           * outcome, readable without navigating anywhere. */}
+          {maySeeChallenges ? (
+            <DataQsPanel
+              inspectionId={inspection.id}
+              rows={challenges.map((challenge) => ({
+                id: challenge.id,
+                violationCode: challenge.violation?.code ?? null,
+                status: challenge.status,
+                statusLabel: t(
+                  `dataqsStatus.${challenge.status}` as MessageKey,
+                ),
+                outcome: challenge.outcome,
+                outcomeLabel: challenge.outcome
+                  ? t(`dataqsOutcome.${challenge.outcome}` as MessageKey)
+                  : null,
+                basis: challenge.basis,
+                outcomeNote: challenge.outcomeNote,
+                referenceNumber: challenge.referenceNumber,
+                submitted: challenge.submittedAt
+                  ? day(challenge.submittedAt)
+                  : null,
+                decided: challenge.decidedAt ? day(challenge.decidedAt) : null,
+                // THE LADDER IS READ FROM THE SERVICE, so the select offers
+                // exactly the moves the service would accept. A control that
+                // offers a refusal teaches people to distrust the screen.
+                nextStatuses: DATAQS_LADDER[challenge.status].map((next) => ({
+                  value: next,
+                  label: t(`dataqsStatus.${next}` as MessageKey),
+                })),
+              }))}
+              violations={[
+                // The whole-inspection option first: a carrier disputing "this
+                // was not our truck" is not disputing any single code.
+                { value: '', label: t('dataqs.wholeInspection') },
+                ...inspection.violations.map((violation) => ({
+                  value: violation.id,
+                  label: violation.code,
+                })),
+              ]}
+              outcomes={DATAQS_OUTCOMES.map((outcome) => ({
+                value: outcome,
+                label: t(`dataqsOutcome.${outcome}` as MessageKey),
+              }))}
+              mayWrite={mayWriteChallenges}
+              translate={{
+                'dataqs.error.inspectionNotFound': t(
+                  'dataqs.error.inspectionNotFound',
+                ),
+                'dataqs.error.violationNotOnInspection': t(
+                  'dataqs.error.violationNotOnInspection',
+                ),
+                'dataqs.error.noBasis': t('dataqs.error.noBasis'),
+                'dataqs.error.needsOutcome': t('dataqs.error.needsOutcome'),
+                'dataqs.error.refused': t('dataqs.error.refused'),
+                'dataqs.error.notFound': t('dataqs.error.notFound'),
+              }}
+              labels={{
+                title: t('dataqs.title'),
+                hint: t('dataqs.hint'),
+                none: t('dataqs.none'),
+                add: t('dataqs.add'),
+                violation: t('dataqs.violation'),
+                basis: t('dataqs.basis'),
+                reference: t('dataqs.reference'),
+                save: t('dataqs.save'),
+                status: t('dataqs.status'),
+                outcome: t('dataqs.outcome'),
+                outcomeNote: t('dataqs.outcomeNote'),
+                submitted: t('dataqs.submitted'),
+                decided: t('dataqs.decided'),
+                move: t('dataqs.move'),
+                moveTo: t('dataqs.moveTo'),
+                pickOutcome: t('dataqs.pickOutcome'),
+                noOutcome: t('dataqs.noOutcome'),
+              }}
+            />
+          ) : null}
         </div>
       </div>
     </>

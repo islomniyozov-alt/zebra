@@ -397,6 +397,50 @@ describe('Phase 4 step 3: a work order and what it cost', () => {
   })
 })
 
+describe('Phase 4 step 5: claims and DataQs', () => {
+  // §2.5, verbatim: "Claims and DataQs: OWNER/ADMIN/MANAGER write, ACCOUNTING
+  // reads." The role line is shorter than any existing bundle, so the grant is
+  // its own — and that is exactly the kind of hand-written list that drifts.
+
+  it.each<Role>(['OWNER', 'ADMIN', 'MANAGER'])('%s writes both', (role) => {
+    expect(can(session(role), 'create', 'claim')).toBe(true)
+    expect(can(session(role), 'update', 'claim')).toBe(true)
+    expect(can(session(role), 'create', 'dataQs')).toBe(true)
+    expect(can(session(role), 'update', 'dataQs')).toBe(true)
+  })
+
+  it('accounting reads them', () => {
+    // It reserves against an open claim and reconciles what was paid on a
+    // settled one.
+    expect(can(session('ACCOUNTING'), 'read', 'claim')).toBe(true)
+    expect(can(session('ACCOUNTING'), 'read', 'dataQs')).toBe(true)
+  })
+
+  it('and writes neither', () => {
+    // THE PAIR. Filing a claim and moving a challenge are the safety desk's
+    // acts; without this, a later `crud` in the ACCOUNTING list goes unnoticed.
+    expect(can(session('ACCOUNTING'), 'create', 'claim')).toBe(false)
+    expect(can(session('ACCOUNTING'), 'update', 'claim')).toBe(false)
+    expect(can(session('ACCOUNTING'), 'create', 'dataQs')).toBe(false)
+    expect(can(session('ACCOUNTING'), 'update', 'dataQs')).toBe(false)
+  })
+
+  it('a dispatcher cannot even read one', () => {
+    // Deliberately NOT in FLEET_READ, unlike compliance and inspections. A
+    // claim carries an amount and a dispute; the dispatcher who books the next
+    // load has no part in either, and §2.5 does not list them.
+    expect(can(session('DISPATCHER'), 'read', 'claim')).toBe(false)
+    expect(can(session('DISPATCHER'), 'read', 'dataQs')).toBe(false)
+  })
+
+  it('while still reading the inspection a challenge is written against', () => {
+    // The pair's far side: gating the challenge must not gate the inspection.
+    // An out-of-service order is a dispatch fact whatever is being disputed
+    // about it.
+    expect(can(session('DISPATCHER'), 'read', 'inspection')).toBe(true)
+  })
+})
+
 describe('Phase 3 sweep: managing places', () => {
   // A dispatcher creates a Location by typing a stop, and corrects a dock's
   // timezone from the load screen. Both rode on `load:update` until now.

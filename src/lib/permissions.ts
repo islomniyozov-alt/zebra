@@ -47,6 +47,11 @@ export const RESOURCES = [
   // dispatch fact. Naming it separately means the answer to "who may record an
   // inspection" is not welded to "who may renew a registration".
   'inspection',
+  // Claims and DataQs challenges. §2.5 gives them their own role line —
+  // OWNER/ADMIN/MANAGER write, ACCOUNTING reads — which is neither FLEET_* nor
+  // MONEY_*, so they are named here and granted explicitly below.
+  'claim',
+  'dataQs',
   // Money
   'invoice',
   'receivable',
@@ -223,6 +228,18 @@ const MONEY_WRITE: Permission[] = [
   'invoice:approve',
 ]
 
+/**
+ * Claims and DataQs challenges (§2.5).
+ *
+ * Deliberately NOT in FLEET_READ: a claim carries an amount and a dispute, and
+ * a dispatcher who books the next load has no part in either. §2.5 names the
+ * roles exactly — OWNER/ADMIN/MANAGER write, ACCOUNTING reads — and that is a
+ * shorter list than any existing bundle, so it gets its own.
+ */
+const CLAIMS_READ: Permission[] = [...read('claim'), ...read('dataQs')]
+
+const CLAIMS_WRITE: Permission[] = [...crud('claim'), ...crud('dataQs')]
+
 const RECORDS_READ: Permission[] = [
   ...read('customer'),
   ...read('document'),
@@ -257,6 +274,8 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     ...OPERATIONS_WRITE,
     ...FLEET_READ,
     ...FLEET_WRITE,
+    ...CLAIMS_READ,
+    ...CLAIMS_WRITE,
     ...MONEY_READ,
     ...RECORDS_READ,
     ...RECORDS_WRITE,
@@ -313,6 +332,10 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     // a roadside inspection/violation" (§1). Read on the challenge without read
     // on the thing it is written against would be a screen with a hole in it.
     ...read('inspection'),
+    // Read and not write, straight from §2.5. Accounting reserves against an
+    // open claim and reconciles what was paid on a settled one; filing and
+    // moving one is the safety desk's act.
+    ...CLAIMS_READ,
     ...MONEY_READ,
     ...MONEY_WRITE,
     ...RECORDS_READ,

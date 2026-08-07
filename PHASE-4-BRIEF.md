@@ -233,3 +233,59 @@ Recorded rather than resolved, per Phase 1's discipline.
     The rule this earns: **an applied migration file is closed to edits,
     including its comments.** A prose pass that sweeps the repository must skip
     `prisma/migrations`.
+
+12. **Step 5 needed a migration too, and three tables rather than the one the
+    brief implies.** `Claim` has existed since the init migration with the type,
+    the status ladder's enum, the amounts and an optional load link. What §3
+    step 5 asks for beyond that does not exist anywhere:
+    - **parties** (plural) — `Claim.claimantName` is one string.
+      `ClaimParty` adds the roll: claimant, insurer, adjuster, attorney, other
+      carrier, witness — each with **their** reference number, which is never
+      ours and is the field people copy off a letter.
+    - **notes timeline** — no note table at all. `ClaimNote` is append-only and
+      carries BOTH a typed note and a status change, because they are one story
+      to whoever reads the history. It has no `deletedAt` on purpose: a timeline
+      somebody can quietly revise is not an audit answer.
+    - **DataQs challenges** — `DataQsChallenge`, hanging off the inspection per
+      §1 and not off the claim.
+
+    `20260807182143_claims_and_dataqs` carries the usual hand-written tail: RLS
+    on all three, a `set_org` trigger deriving `organizationId` from the claim
+    for the two child tables, and two constraints Prisma cannot express — see
+    flag 13.
+
+13. **Two rules that live in Postgres because they are relationships, not
+    fields.**
+    - `dataqs_violation_matches` (trigger): a challenge that names a violation
+      must name one belonging to the inspection it names. Two foreign keys
+      cannot say this between them, and it is the one way §4's trace
+      (inspection → violation → challenge → outcome) could silently lead to a
+      different truck.
+    - `dataqs_outcome_matches_status` (CHECK): a challenge is CLOSED exactly
+      when it has an outcome. Status is where the filing is; outcome is what
+      came of it. Without the pairing, "closed" would mean won and lost at the
+      same time.
+
+    Both are asserted in `tests/structure.test.ts` and proved to fire in the
+    integration suite by going around the service.
+
+14. **A claim's ladder is a TABLE, not a rank — and CLOSED is terminal.** The
+    load engine ranks its statuses and refuses backwards moves; a claim
+    genuinely goes backwards, because DENIED → DISPUTED is an appeal and is the
+    most common move a claims desk makes. So `CLAIM_LADDER` is written out, and
+    the screens build their selects from the same table the service enforces —
+    a control that offers a move the service refuses teaches people the screen
+    is guessing.
+
+    The one hard edge: **a claim that comes back after closing is a new claim.**
+    Reopening would destroy the meaning of the closing date on every report
+    already run. Recorded here because it is a business rule invented in this
+    step, not one the brief states.
+
+15. **`Claim` has no truck or driver link, and Step 5 did not add one.** An
+    accident claim involves a tractor and a person, and the schema reaches them
+    only through the optional load — which a bobtail accident does not have.
+    §3 step 5 asks for "optional load link, parties" and nothing more, so
+    nothing more was built. If the owner wants an accident filed against a unit
+    directly, that is two nullable columns and a screen change, and it belongs
+    to whoever asks for it rather than to a step that guessed.

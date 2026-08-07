@@ -205,6 +205,8 @@ describe('child-table triggers', () => {
     `)
 
     expect(Object.fromEntries(rows.map((r) => [r.tbl, r.fn]))).toEqual({
+      ClaimNote: 'zebra_org_from_claim',
+      ClaimParty: 'zebra_org_from_claim',
       CompanySettings: 'zebra_org_from_company',
       CustomerContact: 'zebra_org_from_customer',
       DriverPayRule: 'zebra_org_from_driver',
@@ -238,7 +240,7 @@ describe('child-table triggers', () => {
        ORDER BY c.relname
     `)
 
-    expect(rows.length).toBe(13)
+    expect(rows.length).toBe(15)
     for (const row of rows) {
       expect(row.columns, `${row.tbl} fires on every UPDATE`).not.toEqual([])
       expect(row.columns, row.tbl).toContain('organizationId')
@@ -252,11 +254,31 @@ describe('child-table triggers', () => {
       SELECT p.proname, p.proconfig AS config
         FROM pg_proc p
         JOIN pg_namespace n ON n.oid = p.pronamespace
-       WHERE n.nspname = 'public' AND p.prosecdef AND p.proname LIKE 'zebra_org_from_%'
+       WHERE n.nspname = 'public' AND p.prosecdef AND p.proname LIKE 'zebra\_%'
        ORDER BY p.proname
     `)
 
-    expect(rows.length).toBe(10)
+    // `zebra_%`, not `zebra_org_from_%`. The narrower pattern was written when
+    // every SECURITY DEFINER function derived a tenant; step 5 added
+    // `zebra_dataqs_violation_matches`, which is owner-level code the old
+    // filter would have skipped. Escaped, because `_` is a wildcard in LIKE.
+    //
+    // NAMED, not counted. "expected 12 to be 11" sends somebody to `pg_proc`
+    // to find out which one appeared; this says so.
+    expect(rows.map((r) => r.proname)).toEqual([
+      'zebra_dataqs_violation_matches',
+      'zebra_org_from_claim',
+      'zebra_org_from_company',
+      'zebra_org_from_customer',
+      'zebra_org_from_driver',
+      'zebra_org_from_inspection',
+      'zebra_org_from_invoice',
+      'zebra_org_from_load',
+      'zebra_org_from_membership',
+      'zebra_org_from_payment',
+      'zebra_org_from_payment_load',
+      'zebra_org_from_settlement',
+    ])
     for (const row of rows) {
       expect(row.config, row.proname).toContain('search_path=public, pg_temp')
     }
@@ -297,6 +319,26 @@ describe('constraints Prisma cannot express', () => {
     const subject = rows.find((r) => r.conname === 'inspection_has_a_subject')
     expect(subject, rows.map((r) => r.conname).join(', ')).toBeDefined()
     expect(subject?.def).toContain('num_nonnulls')
+  })
+
+  it('keeps a DataQs outcome and its status in step', async () => {
+    // Status is where the challenge is; outcome is what came of it. A SUBMITTED
+    // challenge carrying an outcome, or a CLOSED one carrying none, is a row
+    // nobody can read — and "closed" stops meaning anything. Prisma has no way
+    // to say "these two agree", so it is a CHECK.
+    const rows = await query<{ conname: string; def: string }>(`
+      SELECT con.conname, pg_get_constraintdef(con.oid) AS def
+        FROM pg_constraint con
+        JOIN pg_class c ON c.oid = con.conrelid
+       WHERE c.relname = 'DataQsChallenge' AND con.contype = 'c'
+       ORDER BY con.conname
+    `)
+
+    const matched = rows.find(
+      (r) => r.conname === 'dataqs_outcome_matches_status',
+    )
+    expect(matched, rows.map((r) => r.conname).join(', ')).toBeDefined()
+    expect(matched?.def).toContain('outcome')
   })
 })
 

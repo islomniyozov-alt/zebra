@@ -142,6 +142,9 @@ model Organization {
   complianceItems ComplianceItem[]
   inspections     RoadsideInspection[]
   violations      InspectionViolation[]
+  dataQs          DataQsChallenge[]
+  claimParties    ClaimParty[]
+  claimNotes      ClaimNote[]
   counters        Counter[]
   documents       Document[]
   drivers         Driver[]
@@ -217,6 +220,7 @@ model Company {
   iftaMileage        IftaMileage[]
   complianceItems    ComplianceItem[]
   inspections        RoadsideInspection[]
+  dataQs             DataQsChallenge[]
   communications     Communication[]
   notifications      Notification[]
   calendarEvents     CalendarEvent[]
@@ -285,6 +289,7 @@ model User {
   assignmentsMade   LoadAssignment[]
   assetTransfers    AssetAssignment[]
   documentsUploaded Document[]
+  claimNotes        ClaimNote[]
   accessorialsOk    LoadAccessorial[]
   paymentsRecorded  Payment[]
   settlementsOk     Settlement[]
@@ -1411,6 +1416,7 @@ model RoadsideInspection {
   updatedAt DateTime  @updatedAt
 
   violations InspectionViolation[]
+  challenges DataQsChallenge[]
   documents  Document[]
 
   @@index([companyId, inspectedAt])
@@ -1453,6 +1459,8 @@ model InspectionViolation {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
+  challenges DataQsChallenge[]
+
   @@index([inspectionId])
   @@index([organizationId])
 }
@@ -1477,6 +1485,71 @@ enum ViolationUnit {
   VEHICLE
   HAZMAT
   OTHER
+}
+
+// A DataQs challenge — the carrier telling FMCSA that a violation is wrong.
+//
+// §1: "A DataQs challenge is its own record tied to a roadside
+// inspection/violation, with a status and an outcome — not a note on a claim."
+// So it hangs off the inspection, not off Claim, and it points at ONE violation
+// when the carrier is disputing a specific code and at none when it is
+// disputing the inspection itself (wrong carrier, wrong unit, duplicate
+// filing) — which is a real and common challenge.
+//
+// STATUS AND OUTCOME ARE TWO FIELDS, not one. Status is where the challenge is;
+// outcome is what came of it, and it stays null until FMCSA answers. Collapsing
+// them would make "closed" ambiguous between won and lost.
+model DataQsChallenge {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId      String
+  company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  inspectionId String
+  inspection   RoadsideInspection   @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  violationId  String?
+  violation    InspectionViolation? @relation(fields: [violationId], references: [id])
+
+  status  DataQsStatus   @default(DRAFT)
+  outcome DataQsOutcome?
+
+  /// Why the carrier says it is wrong. The substance of the filing.
+  basis           String
+  /// What FMCSA said. Recorded when the outcome is.
+  outcomeNote     String?
+  /// The RDR number DataQs hands back. Off their screen, not allocated here.
+  referenceNumber String?
+
+  submittedAt DateTime?
+  decidedAt   DateTime?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  documents Document[]
+
+  @@index([companyId, status])
+  @@index([inspectionId])
+  @@index([violationId])
+}
+
+enum DataQsStatus {
+  /// Written up, not yet filed with FMCSA.
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  /// FMCSA answered. The answer is in `outcome`.
+  CLOSED
+}
+
+enum DataQsOutcome {
+  ACCEPTED
+  PARTIALLY_ACCEPTED
+  REJECTED
+  /// The carrier pulled it. Not a loss, and worth telling apart from one.
+  WITHDRAWN
 }
 
 // Cargo claims, accidents, shortages. Not in the original spec; you are
@@ -1508,9 +1581,84 @@ model Claim {
   updatedAt DateTime  @updatedAt
 
   documents Document[]
+  parties   ClaimParty[]
+  notes_    ClaimNote[]
 
   @@index([companyId, status])
   @@index([loadId])
+}
+
+// Everyone with a stake in a claim. A cargo claim has at minimum a claimant
+// and, once it is real, our insurer and their adjuster — with a reference
+// number of their own that has nothing to do with ours. `Claim.claimantName`
+// stays as the one-line summary the list column reads; this is the roll.
+model ClaimParty {
+  id             String       @id @default(cuid())
+  // No companyId of its own: the claim carries the authority. `organizationId`
+  // is DERIVED by the set_org trigger — see the migration.
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  claimId String
+  claim   Claim  @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  role      ClaimPartyRole
+  name      String
+  phone     String?
+  email     String?
+  /// Their claim number, which is not ours. The field people copy off a letter.
+  reference String?
+  notes     String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([claimId])
+  @@index([organizationId])
+}
+
+enum ClaimPartyRole {
+  CLAIMANT
+  INSURER
+  ADJUSTER
+  ATTORNEY
+  /// The other carrier, in an accident that involved one.
+  CARRIER
+  WITNESS
+  OTHER
+}
+
+// ONE TIMELINE, carrying both what somebody wrote and what the claim did.
+//
+// A note and a status change are the same kind of event to the person reading
+// the history — "denied on the 8th, appealed on the 11th" is one story — and
+// splitting them into two lists means reading two lists and merging them by
+// hand. A status change is a row with `fromStatus`/`toStatus` set; a typed note
+// is a row with a body. Both may be present: the ladder asks for a reason.
+//
+// Append-only. Nothing edits or deletes a row here, and there is no
+// `deletedAt` on purpose — a timeline somebody can quietly revise is not an
+// audit answer.
+model ClaimNote {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  claimId String
+  claim   Claim  @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  body       String?
+  fromStatus ClaimStatus?
+  toStatus   ClaimStatus?
+
+  authorUserId String?
+  author       User?   @relation(fields: [authorUserId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([claimId, createdAt])
+  @@index([organizationId])
 }
 
 enum ClaimType {
@@ -1582,6 +1730,8 @@ model Document {
   inspection        RoadsideInspection? @relation(fields: [inspectionId], references: [id])
   claimId           String?
   claim             Claim?              @relation(fields: [claimId], references: [id])
+  dataQsId          String?
+  dataQs            DataQsChallenge?    @relation(fields: [dataQsId], references: [id])
 
   // Populated later by the OCR pipeline (§32). Present from day one so that
   // enabling AI extraction is a background job, not a migration across
@@ -1606,6 +1756,7 @@ model Document {
   // asset screen. `complianceItemId` has no index for the same query and should
   // grow one; that is a separate migration and not this step's to smuggle in.
   @@index([inspectionId])
+  @@index([dataQsId])
   @@index([ocrStatus])
   @@index([sha256])
 }
