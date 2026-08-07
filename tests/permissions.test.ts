@@ -378,16 +378,22 @@ describe('Phase 4 step 3: a work order and what it cost', () => {
     expect(can(session('MANAGER'), 'create', 'maintenance')).toBe(true)
   })
 
-  it('accounting holds the money half and NOT the screen', () => {
-    // Recorded rather than fixed, because it is a real asymmetry and not mine
-    // to resolve: ACCOUNTING can read `truck.financials` — so it would see the
-    // cost column — and has never held `maintenance:read`, so /maintenance
-    // 404s for it. Flagged in PHASE-4-BRIEF.md §6 flag 7. The parallel is
-    // `compliance:read`, which accounting was granted one step earlier by an
-    // explicit ruling rather than by a service quietly widening a role.
+  it('accounting reads the work order and the cost on it', () => {
+    // §6 flag 7, resolved by the owner: accounting already held
+    // `truck.financials`, so it could see a cost and could not open the screen
+    // the cost was on. It reconciles the shop's invoice against what was
+    // recorded, so it reads both halves.
+    expect(can(session('ACCOUNTING'), 'read', 'maintenance')).toBe(true)
     expect(can(session('ACCOUNTING'), 'read', 'truck.financials')).toBe(true)
-    expect(can(session('ACCOUNTING'), 'read', 'maintenance')).toBe(false)
+  })
+
+  it('and records none of it', () => {
+    // THE PAIR for that grant. Read-only: opening a work order is a shop act
+    // and stays with FLEET_WRITE. Without this, a later `crud('maintenance')`
+    // in the ACCOUNTING list would go unnoticed.
     expect(can(session('ACCOUNTING'), 'create', 'maintenance')).toBe(false)
+    expect(can(session('ACCOUNTING'), 'update', 'maintenance')).toBe(false)
+    expect(can(session('ACCOUNTING'), 'delete', 'maintenance')).toBe(false)
   })
 })
 

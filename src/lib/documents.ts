@@ -84,6 +84,10 @@ export const TARGETS = {
   // The structure test now walks every entry against the real client.
   maintenance: { column: 'maintenanceId', model: 'maintenanceRecord' },
   complianceItem: { column: 'complianceItemId', model: 'complianceItem' },
+  // `roadsideInspection`, not `inspection` — the same trap the maintenance
+  // entry fell into. The key is what a caller types; the model is the Prisma
+  // delegate, and the two differ here on purpose.
+  inspection: { column: 'inspectionId', model: 'roadsideInspection' },
   claim: { column: 'claimId', model: 'claim' },
 } as const satisfies Record<string, { column: string; model: string }>
 

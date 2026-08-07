@@ -5,6 +5,8 @@ import { companyIdScopeFilter } from '@/lib/tenancy'
 import { currentAuthority } from '@/lib/fleet'
 import { CompliancePanel } from '../../_reference/CompliancePanel'
 import { compliancePanelData } from '../../_reference/compliance-view'
+import { InspectionPanel } from '../../_reference/InspectionPanel'
+import { inspectionPanelData } from '../../_reference/inspection-view'
 import { MaintenancePanel } from '../../_reference/MaintenancePanel'
 import { maintenancePanelData } from '../../_reference/maintenance-view'
 import { RecordForm } from '@/components/forms/RecordForm'
@@ -52,6 +54,7 @@ export default async function EditTruckPage({
       : null
 
     const compliance = await compliancePanelData(tx, 'truck', id, t)
+    const inspections = await inspectionPanelData(tx, 'truck', id, t)
     const maintenance = await maintenancePanelData(
       tx,
       'truck',
@@ -61,12 +64,27 @@ export default async function EditTruckPage({
       locale,
     )
 
-    return { truck, companies, openCompany, compliance, maintenance }
+    return {
+      truck,
+      companies,
+      openCompany,
+      compliance,
+      maintenance,
+      inspections,
+    }
   })
 
   if (!data) notFound()
-  const { truck, companies, openCompany, compliance, maintenance } = data
+  const {
+    truck,
+    companies,
+    openCompany,
+    compliance,
+    maintenance,
+    inspections,
+  } = data
   const maySeeCompliance = await currentUserCan('read', 'compliance')
+  const maySeeInspections = await currentUserCan('read', 'inspection')
   const mayRenew = await currentUserCan('create', 'compliance')
 
   const maySeeMaintenance = await currentUserCan('read', 'maintenance')
@@ -196,6 +214,23 @@ export default async function EditTruckPage({
               labels={
                 maintenance.labels as Parameters<
                   typeof MaintenancePanel
+                >[0]['labels']
+              }
+            />
+          </div>
+        ) : null}
+
+        {/* PHASE 4 §5 STEP 4. Read-only: an inspection is recorded from
+         * /safety/inspections/new, where the truck, the trailer and the driver
+         * can all be named at once. A panel that could file one from here
+         * would have to guess the other two. */}
+        {maySeeInspections ? (
+          <div className="mt-z4 max-w-[900px]">
+            <InspectionPanel
+              rows={inspections.rows}
+              labels={
+                inspections.labels as Parameters<
+                  typeof InspectionPanel
                 >[0]['labels']
               }
             />

@@ -145,8 +145,15 @@ Recorded rather than resolved, per Phase 1's discipline.
    the compliance panel makes. And the cost gate is a **resource, not a
    column check**: see flag 7.
 
-7. **Maintenance costs are gated on `truck.financials`, and ACCOUNTING holds
-   that resource without holding `maintenance:read`.** §2.5 says a DISPATCHER
+7. **Maintenance costs are gated on `truck.financials`.** ~~And ACCOUNTING holds
+   that resource without holding `maintenance:read`.~~ **The asymmetry was
+   resolved by the owner at the start of Step 4: ACCOUNTING now holds
+   `maintenance:read` and nothing more** — it reconciles the shop's invoice
+   against what was recorded, while opening a work order stays a shop act
+   behind `FLEET_WRITE`. Asserted as a pair in `tests/permissions.test.ts`:
+   read granted, create/update/delete refused.
+
+   The resource choice itself stands. §2.5 says a DISPATCHER
    "sees the work order and not the cost" and does not name the resource. There
    was no `maintenance.cost` resource and there is now no need for one:
    `truck.financials` was introduced in Phase 3's sweep for exactly this shape —
@@ -156,9 +163,73 @@ Recorded rather than resolved, per Phase 1's discipline.
    different audience from a truck's purchase price, that is a one-line split
    and the call sites are the three named in `tests/permissions.test.ts`.
 
-   The asymmetry that falls out of it, recorded rather than fixed: **ACCOUNTING
-   can read `truck.financials` and cannot read `maintenance`**, so `/maintenance`
-   404s for the one role most likely to be reconciling a shop invoice. The
-   parallel is flag 5 — compliance had the same shape and was resolved by an
-   explicit ruling, not by a step quietly widening a role. Asserted as it stands
-   in `tests/permissions.test.ts` so the answer is visible rather than implied.
+   Original text of the asymmetry: **ACCOUNTING can read `truck.financials` and
+   cannot read `maintenance`**, so `/maintenance` 404s for the one role most
+   likely to be reconciling a shop invoice. The parallel is flag 5 — compliance
+   had the same shape and was resolved by an explicit ruling, not by a step
+   quietly widening a role.
+
+8. **Step 4 is the first step in this phase that actually needed a migration —
+   and it needed two tables, not one.** Flags 1 and 6 found `ComplianceItem`
+   and `MaintenanceRecord` already waiting. There is no inspection table
+   anywhere in the schema, and `Document` had no column to hang a report off.
+   `20260807144838_roadside_inspections` creates `RoadsideInspection` and
+   `InspectionViolation`, adds `Document.inspectionId`, and carries by hand the
+   three things Prisma cannot express:
+   - RLS **enabled, forced and policied** on both tables;
+   - a `set_org` trigger deriving `InspectionViolation.organizationId` from its
+     inspection — the table has no `companyId` of its own, and a child row is
+     exactly where a cross-tenant write is invisible because the child looks
+     valid alone;
+   - a CHECK constraint, `inspection_has_a_subject`, refusing a row that names
+     no truck, trailer or driver. All three columns are nullable because a
+     Level III has no truck and a Level V has no driver, so no NOT NULL can say
+     "at least one". `tests/structure.test.ts` asserts the constraint exists,
+     and the integration suite proves it fires by going around the service.
+
+9. **Two facts on an inspection are derived, and one decision follows from
+   §2.2 rather than from anything §3 says.** "OOS flags" (§3 step 4) are stored
+   **per violation**, because that is where the officer writes them and because
+   a DataQs challenge (step 5) has to name the violation it is challenging. The
+   inspection's own out-of-service state, and whether it was **clean**, are read
+   off the violations at read time — the same argument §2.2 makes for compliance
+   status. Withdrawing a mistyped violation therefore makes an inspection clean
+   again, which a stored flag would have got wrong.
+
+   Related, and stated so step 5 does not have to rediscover it: **withdrawing
+   is for a typo only.** A violation the carrier challenges and wins keeps its
+   row; the outcome is recorded on the challenge, so the history still shows
+   what was written and what became of it.
+
+10. **`inspection` is its own permission resource.** §2.5 names roles for
+    compliance, maintenance costs, claims and DataQs, and is silent on
+    inspections. Reusing `compliance` would weld "who may record an inspection"
+    to "who may renew a registration"; the new resource sits in `FLEET_READ`
+    and `FLEET_WRITE`, so a DISPATCHER reads (an out-of-service driver is a
+    dispatch fact) and does not write. ACCOUNTING gets **read**, and that one is
+    read off the brief rather than invented: §2.5 gives ACCOUNTING read on
+    claims and DataQs, and §1 says a DataQs challenge is tied to a roadside
+    inspection — read on the challenge without read on what it challenges is a
+    screen with a hole in it.
+
+11. **A migration's recorded checksum had drifted from the file on disk, and
+    `prisma migrate dev` refused to run until it was fixed.**
+    `20260806023129_drop_pay_rule_expression` was applied on 6 August and its
+    SQL comments were then rewritten in the Step 7 polish commit — the content
+    changed after it was applied, which Prisma detects and which would have
+    offered to reset the development database.
+
+    The dev branch's `_prisma_migrations.checksum` was realigned to the file
+    (the SQL itself is unchanged; only comments differ). **Production has the
+    same drift and `prisma migrate deploy` validates checksums too**, so the
+    production ritual for Step 4 needs this first:
+
+    ```sql
+    UPDATE _prisma_migrations
+       SET checksum = '9e72473ecbb5ce35fb128bf86d0523fc77f861998b5a6a405b5ce83c1e405c11'
+     WHERE migration_name = '20260806023129_drop_pay_rule_expression';
+    ```
+
+    The rule this earns: **an applied migration file is closed to edits,
+    including its comments.** A prose pass that sweeps the repository must skip
+    `prisma/migrations`.

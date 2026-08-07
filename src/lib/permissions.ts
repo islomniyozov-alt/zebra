@@ -41,6 +41,12 @@ export const RESOURCES = [
   'driver',
   'maintenance',
   'compliance',
+  // A roadside inspection is its own kind of record, not a compliance date: it
+  // is an EVENT with violations hanging off it, it is what a DataQs challenge
+  // is written against (§2.5, step 5), and an out-of-service order on it is a
+  // dispatch fact. Naming it separately means the answer to "who may record an
+  // inspection" is not welded to "who may renew a registration".
+  'inspection',
   // Money
   'invoice',
   'receivable',
@@ -146,6 +152,10 @@ const FLEET_READ: Permission[] = [
   ...read('driver'),
   ...read('maintenance'),
   ...read('compliance'),
+  // A DISPATCHER reads inspections for the same reason they read compliance
+  // dates (§2.5): a driver placed out of service at a scale house is the fact
+  // that decides what happens to the load they are under.
+  ...read('inspection'),
 ]
 
 const FLEET_WRITE: Permission[] = [
@@ -154,6 +164,7 @@ const FLEET_WRITE: Permission[] = [
   ...crud('driver'),
   ...crud('maintenance'),
   ...crud('compliance'),
+  ...crud('inspection'),
 ]
 
 /**
@@ -291,6 +302,17 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     // with the roles that hold FLEET_WRITE. Resolves PHASE-4-BRIEF.md §6
     // flag 5, which §2.5 left open.
     ...read('compliance'),
+    // The same shape one step later, and the same ruling. Accounting already
+    // holds `truck.financials`, so it could see a work order's cost and could
+    // not open the screen the cost is on — it reconciles the shop's invoice
+    // against what was recorded. Recording the work order stays with
+    // FLEET_WRITE. Resolves §6 flag 7.
+    ...read('maintenance'),
+    // Read, from the brief itself rather than from a new ruling: §2.5 gives
+    // ACCOUNTING read on claims and DataQs, and a DataQs challenge is "tied to
+    // a roadside inspection/violation" (§1). Read on the challenge without read
+    // on the thing it is written against would be a screen with a hole in it.
+    ...read('inspection'),
     ...MONEY_READ,
     ...MONEY_WRITE,
     ...RECORDS_READ,

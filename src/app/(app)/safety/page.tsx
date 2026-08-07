@@ -43,6 +43,7 @@ export default async function SafetyPage({
   // `compliance`, not a money resource: a dispatcher reads this because it
   // gates a dispatch decision they make (§2.5).
   if (!(await currentUserCan('read', 'compliance'))) notFound()
+  const maySeeInspections = await currentUserCan('read', 'inspection')
 
   const params = await searchParams
   const { t } = await getLocaleContext()
@@ -181,9 +182,22 @@ export default async function SafetyPage({
     <>
       <div className="flex items-baseline justify-between gap-z4 border-b border-border bg-surface px-gutter py-z3">
         <h1 className="text-lg font-medium text-ink">{t('safety.title')}</h1>
-        <p className="max-w-[60ch] text-sm text-ink-3">
-          {t('safety.hint').replace('{days}', String(leadDays))}
-        </p>
+        <div className="flex items-baseline gap-z4">
+          <p className="max-w-[60ch] text-sm text-ink-3">
+            {t('safety.hint').replace('{days}', String(leadDays))}
+          </p>
+          {/* The queue's sibling. Inspections are not a queue — a clean one
+           * needs nothing done and still belongs on file — so they get their
+           * own screen rather than rows here, and this is the way in. */}
+          {maySeeInspections ? (
+            <Link
+              href="/safety/inspections"
+              className="whitespace-nowrap text-sm text-accent hover:underline"
+            >
+              {t('ins.open')}
+            </Link>
+          ) : null}
+        </div>
       </div>
 
       <FilterBar

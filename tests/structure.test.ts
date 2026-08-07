@@ -208,6 +208,7 @@ describe('child-table triggers', () => {
       CompanySettings: 'zebra_org_from_company',
       CustomerContact: 'zebra_org_from_customer',
       DriverPayRule: 'zebra_org_from_driver',
+      InspectionViolation: 'zebra_org_from_inspection',
       InvoiceLine: 'zebra_org_from_invoice',
       LoadAccessorial: 'zebra_org_from_load',
       LoadAssignment: 'zebra_org_from_load',
@@ -237,7 +238,7 @@ describe('child-table triggers', () => {
        ORDER BY c.relname
     `)
 
-    expect(rows.length).toBe(12)
+    expect(rows.length).toBe(13)
     for (const row of rows) {
       expect(row.columns, `${row.tbl} fires on every UPDATE`).not.toEqual([])
       expect(row.columns, row.tbl).toContain('organizationId')
@@ -255,7 +256,7 @@ describe('child-table triggers', () => {
        ORDER BY p.proname
     `)
 
-    expect(rows.length).toBe(9)
+    expect(rows.length).toBe(10)
     for (const row of rows) {
       expect(row.config, row.proname).toContain('search_path=public, pg_temp')
     }
@@ -279,6 +280,23 @@ describe('constraints Prisma cannot express', () => {
       expect(row.indexdef, row.indexname).toContain('UNIQUE INDEX')
       expect(row.indexdef, row.indexname).toContain('"effectiveTo" IS NULL')
     }
+  })
+
+  it('refuses a roadside inspection that is of nothing', async () => {
+    // All three subject columns are nullable — Level III is driver-only, Level
+    // V is vehicle-only — so no NOT NULL can express "at least one". A row with
+    // all three null would appear on no panel and could never be found again.
+    const rows = await query<{ conname: string; def: string }>(`
+      SELECT con.conname, pg_get_constraintdef(con.oid) AS def
+        FROM pg_constraint con
+        JOIN pg_class c ON c.oid = con.conrelid
+       WHERE c.relname = 'RoadsideInspection' AND con.contype = 'c'
+       ORDER BY con.conname
+    `)
+
+    const subject = rows.find((r) => r.conname === 'inspection_has_a_subject')
+    expect(subject, rows.map((r) => r.conname).join(', ')).toBeDefined()
+    expect(subject?.def).toContain('num_nonnulls')
   })
 })
 

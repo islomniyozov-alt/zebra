@@ -140,6 +140,8 @@ model Organization {
   claims          Claim[]
   communications  Communication[]
   complianceItems ComplianceItem[]
+  inspections     RoadsideInspection[]
+  violations      InspectionViolation[]
   counters        Counter[]
   documents       Document[]
   drivers         Driver[]
@@ -214,6 +216,7 @@ model Company {
   maintenance        MaintenanceRecord[]
   iftaMileage        IftaMileage[]
   complianceItems    ComplianceItem[]
+  inspections        RoadsideInspection[]
   communications     Communication[]
   notifications      Notification[]
   calendarEvents     CalendarEvent[]
@@ -584,6 +587,7 @@ model Truck {
   maintenance     MaintenanceRecord[]
   iftaMileage     IftaMileage[]
   complianceItems ComplianceItem[]
+  inspections     RoadsideInspection[]
 
   // UNIQUENESS IS PARTIAL AND LIVES IN SQL. Prisma cannot express a `WHERE`
   // predicate on an index, so `truck_unit_per_company` is created by hand in
@@ -645,6 +649,7 @@ model Trailer {
   documents       Document[]
   maintenance     MaintenanceRecord[]
   complianceItems ComplianceItem[]
+  inspections     RoadsideInspection[]
 
   // Partial, in SQL, for the reason recorded on Truck above.
   @@index([companyId, unitNumber])
@@ -694,6 +699,7 @@ model Driver {
   expenses        Expense[]
   fuelTxns        FuelTransaction[]
   complianceItems ComplianceItem[]
+  inspections     RoadsideInspection[]
   communications  Communication[]
 
   @@index([companyId, status])
@@ -1350,6 +1356,129 @@ model LoadAssignment {
   @@index([organizationId])
 }
 
+// ============================================================================
+// ROADSIDE INSPECTIONS (Phase 4 §3 step 4)
+//
+// The one part of Phase 4 the schema did NOT already contain — flags 1 and 6
+// found ComplianceItem and MaintenanceRecord waiting; there is no inspection
+// table anywhere, so this step migrates.
+//
+// An inspection is an EVENT, not a status. It happened on a date, at a scale
+// house in a state, to some combination of a truck, a trailer and a driver,
+// and it either wrote violations or it did not. Nothing about it is ever
+// corrected in place: a clean inspection is a CSA asset for two years and a
+// violation removed by a successful DataQs challenge is Step 5's business,
+// recorded as an outcome on the challenge rather than by deleting the row.
+// ============================================================================
+
+model RoadsideInspection {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId      String
+  company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // ALL THREE ARE NULLABLE, and at least one must be set — a CHECK constraint
+  // in the migration enforces the floor, because Prisma cannot express it.
+  // Level III is driver-only and Level V is vehicle-only with no driver
+  // present, so requiring any particular one would make a real inspection
+  // unrecordable.
+  truckId   String?
+  truck     Truck?   @relation(fields: [truckId], references: [id])
+  trailerId String?
+  trailer   Trailer? @relation(fields: [trailerId], references: [id])
+  driverId  String?
+  driver    Driver?  @relation(fields: [driverId], references: [id])
+
+  inspectedAt   DateTime
+  level         InspectionLevel
+  /// Two-letter jurisdiction. The state that wrote it, not where the carrier is.
+  state         String
+  /// The number printed on the report. Not allocated here — it comes off paper.
+  reportNumber  String?
+  location      String?
+  inspectorName String?
+  notes         String?
+
+  // NOT STORED: whether the inspection was clean, and whether anything was put
+  // out of service. Both are read off the violations — see inspections.ts. The
+  // same argument §2.2 makes for compliance status: a stored flag is a cache of
+  // a fact the children already carry, and it goes stale the moment a violation
+  // is added.
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  violations InspectionViolation[]
+  documents  Document[]
+
+  @@index([companyId, inspectedAt])
+  @@index([companyId, truckId, inspectedAt])
+  @@index([companyId, driverId, inspectedAt])
+  @@index([companyId, trailerId, inspectedAt])
+}
+
+model InspectionViolation {
+  id             String       @id @default(cuid())
+  // No companyId of its own: the inspection carries the authority and this
+  // inherits it. `organizationId` is DERIVED by the set_org trigger rather than
+  // trusted from the caller — the same treatment as InvoiceLine and
+  // SettlementLine.
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  inspectionId String
+  inspection   RoadsideInspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+
+  /// The FMCSA section, as written: "393.75(a)(3)". Free text, never an enum —
+  /// the code list runs to thousands of entries and changes without notice.
+  code        String
+  description String?
+  unit        ViolationUnit @default(VEHICLE)
+
+  /// Out of service. Per VIOLATION, because that is where the officer writes it
+  /// and because "which one grounded the truck" is the question a DataQs
+  /// challenge has to answer.
+  outOfService Boolean @default(false)
+
+  /// CSA severity weight, 1–10, when it is known. Optional: the number comes
+  /// from a table nobody has typed in yet, and a guessed weight would produce a
+  /// BASIC score nobody could reproduce.
+  severityWeight Int?
+
+  // Soft delete for a mistyped code, and for nothing else. A violation the
+  // carrier successfully challenged is not deleted — see the note above.
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([inspectionId])
+  @@index([organizationId])
+}
+
+enum InspectionLevel {
+  /// North American Standard — driver and vehicle, the full one.
+  LEVEL_1
+  /// Walk-around: driver and what can be checked without going under.
+  LEVEL_2
+  /// Driver-only: licence, medical card, hours, paperwork.
+  LEVEL_3
+  /// Special study, one-off.
+  LEVEL_4
+  /// Vehicle-only, driver not present.
+  LEVEL_5
+  /// Enhanced NAS for radioactive shipments.
+  LEVEL_6
+}
+
+enum ViolationUnit {
+  DRIVER
+  VEHICLE
+  HAZMAT
+  OTHER
+}
+
 // Cargo claims, accidents, shortages. Not in the original spec; you are
 // actively disputing one right now.
 model Claim {
@@ -1428,29 +1557,31 @@ model Document {
 
   // Documents point outward (convention 7). Exactly one of these is set.
   loadId            String?
-  load              Load?              @relation(fields: [loadId], references: [id])
+  load              Load?               @relation(fields: [loadId], references: [id])
   truckId           String?
-  truck             Truck?             @relation(fields: [truckId], references: [id])
+  truck             Truck?              @relation(fields: [truckId], references: [id])
   trailerId         String?
-  trailer           Trailer?           @relation(fields: [trailerId], references: [id])
+  trailer           Trailer?            @relation(fields: [trailerId], references: [id])
   driverId          String?
-  driver            Driver?            @relation(fields: [driverId], references: [id])
+  driver            Driver?             @relation(fields: [driverId], references: [id])
   customerId        String?
-  customer          Customer?          @relation(fields: [customerId], references: [id])
+  customer          Customer?           @relation(fields: [customerId], references: [id])
   invoiceId         String?
-  invoice           Invoice?           @relation(fields: [invoiceId], references: [id])
+  invoice           Invoice?            @relation(fields: [invoiceId], references: [id])
   settlementId      String?
-  settlement        Settlement?        @relation(fields: [settlementId], references: [id])
+  settlement        Settlement?         @relation(fields: [settlementId], references: [id])
   expenseId         String?
-  expense           Expense?           @relation(fields: [expenseId], references: [id])
+  expense           Expense?            @relation(fields: [expenseId], references: [id])
   fuelTransactionId String?
-  fuelTransaction   FuelTransaction?   @relation(fields: [fuelTransactionId], references: [id])
+  fuelTransaction   FuelTransaction?    @relation(fields: [fuelTransactionId], references: [id])
   maintenanceId     String?
-  maintenance       MaintenanceRecord? @relation(fields: [maintenanceId], references: [id])
+  maintenance       MaintenanceRecord?  @relation(fields: [maintenanceId], references: [id])
   complianceItemId  String?
-  complianceItem    ComplianceItem?    @relation(fields: [complianceItemId], references: [id])
+  complianceItem    ComplianceItem?     @relation(fields: [complianceItemId], references: [id])
+  inspectionId      String?
+  inspection        RoadsideInspection? @relation(fields: [inspectionId], references: [id])
   claimId           String?
-  claim             Claim?             @relation(fields: [claimId], references: [id])
+  claim             Claim?              @relation(fields: [claimId], references: [id])
 
   // Populated later by the OCR pipeline (§32). Present from day one so that
   // enabling AI extraction is a background job, not a migration across
@@ -1471,6 +1602,10 @@ model Document {
   @@index([loadId])
   @@index([driverId])
   @@index([truckId])
+  // The inspection panel reads its reports by `inspectionId IN (…)` on every
+  // asset screen. `complianceItemId` has no index for the same query and should
+  // grow one; that is a separate migration and not this step's to smuggle in.
+  @@index([inspectionId])
   @@index([ocrStatus])
   @@index([sha256])
 }

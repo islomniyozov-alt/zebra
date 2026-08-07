@@ -266,6 +266,7 @@ const DISPATCHER_SCREENS = [
   '/trailers',
   '/drivers',
   '/safety',
+  '/safety/inspections',
   '/maintenance',
   '/brokers',
   '/account',
@@ -395,6 +396,32 @@ record(
     ownerMaint.body.includes(`${TAG} steer axle brake job`) &&
     ownerMaint.body.includes('1,937.11'),
   `HTTP ${ownerMaint.status}`,
+)
+
+// --- an inspection is read, not written (Phase 4 step 4) --------------------
+//
+// §2.5's split, one table over: a DISPATCHER reads inspections because a driver
+// placed out of service at a scale house decides what happens to the load they
+// are under, and files none — recording one is `inspection:create`, FLEET_WRITE.
+//
+// The pair is the same url twice, because a 404 alone proves nothing: a typo in
+// the path gives the same answer, and so does a route that was never deployed.
+const dispatcherNewInspection = await bodyOf(
+  dispatcher.page,
+  '/safety/inspections/new',
+)
+record(
+  'a dispatcher typing /safety/inspections/new is refused',
+  dispatcherNewInspection.status === 404,
+  `HTTP ${dispatcherNewInspection.status}`,
+)
+
+const ownerNewInspection = await bodyOf(owner.page, '/safety/inspections/new')
+record(
+  'and the SAME url works for an owner (rule 11)',
+  ownerNewInspection.status === 200 &&
+    ownerNewInspection.body.includes('inspectedAt'),
+  `HTTP ${ownerNewInspection.status}`,
 )
 
 // The navigation does not offer what the role cannot reach, either (§7).
