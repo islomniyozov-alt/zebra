@@ -171,7 +171,7 @@ export function DataQsPanel({
               options={violations}
             />
             <Input name="basis" label={labels.basis} required />
-            <Input name="referenceNumber" label={labels.reference} />
+            <Input name="referenceNumber" label={labels.reference} identifier />
           </div>
           <div className="flex items-center gap-z3">
             <Button type="submit" variant="secondary" disabled={pending}>
@@ -221,7 +221,7 @@ function MoveChallenge({
         options={[{ value: '', label: labels.noOutcome }, ...outcomes]}
       />
       <Input name="outcomeNote" label={labels.outcomeNote} />
-      <Input name="referenceNumber" label={labels.reference} />
+      <Input name="referenceNumber" label={labels.reference} identifier />
       <Button type="submit" variant="ghost" size="compact" disabled={pending}>
         {labels.move}
       </Button>

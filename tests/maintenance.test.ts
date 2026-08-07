@@ -7,6 +7,7 @@ import {
   shapeWorkOrders,
   type WorkOrderRow,
 } from '@/lib/maintenance'
+import { centsToInput } from '@/lib/money'
 import type { MaintenanceCategory } from '@/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -212,5 +213,82 @@ describe('the category list', () => {
     expect(new Set(MAINTENANCE_CATEGORIES).size).toBe(
       MAINTENANCE_CATEGORIES.length,
     )
+  })
+})
+
+describe('the maintenance money, worked by hand', () => {
+  // §3 step 7 asks for a worked example behind any money math, for the reason
+  // Phase 3 §0 gives: the likeliest failure in this system is a financial
+  // calculation that is PLAUSIBLE. These are the two figures the maintenance
+  // panel prints, arithmetic written out so a reader can check them with a
+  // calculator and no knowledge of the code.
+  //
+  // The fixture is the dev demo truck, so the numbers here are the ones in the
+  // Phase 4 screenshots: three work orders on truck 104.
+
+  const DEMO: WorkOrderRow[] = [
+    // 3 May, PM A at 400,000 miles — $429.50
+    row({ id: 'pm', costCents: 42_950, odometer: 400_000 }),
+    // 27 June, two steer tires at 406,500 miles — $1,180.00
+    row({ id: 'tires', costCents: 118_000, odometer: 406_500 }),
+    // 3 August, steer brake job at 412,000 miles — $1,840.00
+    row({ id: 'brakes', costCents: 184_000, odometer: 412_000 }),
+  ]
+
+  it('totals what a reader gets by adding the column', () => {
+    //     429.50
+    //   1,180.00
+    //   1,840.00
+    //   --------
+    //   3,449.50   ->  344950 cents
+    const totals = runningTotals(DEMO)
+    expect(totals.costCents).toBe(344_950)
+    expect(centsToInput(totals.costCents)).toBe('3449.50')
+  })
+
+  it('and a cost per mile a reader gets by dividing it', () => {
+    // The span is the odometer readings the work orders themselves carry:
+    //   412,000 - 400,000 = 12,000 miles
+    //
+    //   344950 cents / 12000 miles = 28.745... cents a mile
+    //                              -> 29 cents, rounded half up
+    //
+    // Rounded to whole cents on purpose. A cost per mile is a comparison
+    // figure — this tractor against that one — and a fraction of a cent in it
+    // is precision the odometer readings do not support.
+    const totals = runningTotals(DEMO)
+    expect(totals.fromOdometer).toBe(400_000)
+    expect(totals.toOdometer).toBe(412_000)
+    expect(totals.perMileCents).toBe(29)
+
+    // The same sum, spelled out, so the assertion above is not the only place
+    // the arithmetic exists.
+    expect(Math.round(344_950 / 12_000)).toBe(29)
+  })
+
+  it('rounds half up rather than truncating, and it matters at a half', () => {
+    // 6,000 cents over 400 miles is exactly 15; add 200 cents and it is 15.5,
+    // which truncation would report as 15 — a 3% understatement of the figure
+    // an owner uses to decide whether to keep a truck.
+    const exact = runningTotals([
+      row({ id: 'a', costCents: 0, odometer: 100_000 }),
+      row({ id: 'b', costCents: 6_000, odometer: 100_400 }),
+    ])
+    expect(exact.perMileCents).toBe(15)
+
+    const half = runningTotals([
+      row({ id: 'a', costCents: 0, odometer: 100_000 }),
+      row({ id: 'b', costCents: 6_200, odometer: 100_400 }),
+    ])
+    expect(half.perMileCents).toBe(16)
+  })
+
+  it('and the fleet total is the same addition over more assets', () => {
+    // The /maintenance screen totals what is ON SCREEN, so a reader can check
+    // it the same way — by adding the cost column. $3,449.50 on the truck plus
+    // $615.00 on a trailer.
+    const fleet = [...DEMO, row({ id: 'reefer', costCents: 61_500 })]
+    expect(runningTotals(fleet).costCents).toBe(406_450)
+    expect(centsToInput(406_450)).toBe('4064.50')
   })
 })

@@ -16,6 +16,15 @@ interface InputProps
   /** Marks required. Optional fields are never marked (§7.5). */
   required?: boolean
   hint?: string | undefined
+  /**
+   * The value is a Latin identifier — a prefix, a code, a reference number.
+   *
+   * §12: forces `dir="ltr"` so the bidi algorithm does not reorder the
+   * punctuation inside it. `INV-` rendered as `-INV` in Farsi until the Phase 4
+   * RTL pass photographed it, and a violation code reverses its brackets the
+   * same way. Also sets the mono face, since §4 reserves it for exactly this.
+   */
+  identifier?: boolean
 }
 
 export function Input({
@@ -23,6 +32,7 @@ export function Input({
   error,
   hint,
   required,
+  identifier,
   id,
   className,
   ...rest
@@ -44,6 +54,7 @@ export function Input({
 
       <input
         {...rest}
+        {...(identifier ? { dir: 'ltr' } : {})}
         id={inputId}
         required={required}
         aria-invalid={error ? true : undefined}
@@ -57,6 +68,7 @@ export function Input({
           'transition-colors duration-120 ease-out',
           'disabled:cursor-not-allowed disabled:bg-surface-2 disabled:text-ink-3',
           error ? 'border-danger' : 'border-border-strong',
+          identifier && 'font-mono',
           className,
         )}
       />

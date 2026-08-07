@@ -162,6 +162,7 @@ export function ViolationPanel({
                 name="code"
                 label={labels.code}
                 hint={labels.codeHint}
+                identifier
                 required
               />
               <Input name="description" label={labels.description} />

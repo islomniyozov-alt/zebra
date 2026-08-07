@@ -91,7 +91,7 @@ export function ClaimForm({
         <Select name="truckId" label={labels.truck} options={trucks} />
         <Select name="driverId" label={labels.driver} options={drivers} />
         <Input name="claimantName" label={labels.claimant} />
-        <Input name="claimNumber" label={labels.number} />
+        <Input name="claimNumber" label={labels.number} identifier />
         <Input name="amountClaimed" label={labels.amount} inputMode="decimal" />
       </div>
 

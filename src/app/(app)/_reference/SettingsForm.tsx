@@ -99,6 +99,7 @@ export function SettingsForm({
               name="invoiceNumberPrefix"
               label={labels.prefix}
               hint={labels.prefixHint}
+              identifier
               defaultValue={values.invoiceNumberPrefix}
               required
             />

@@ -137,7 +137,7 @@ export function ClaimParties({
           <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-z3">
             <Select name="role" label={labels.role} options={roles} />
             <Input name="name" label={labels.name} required />
-            <Input name="reference" label={labels.reference} />
+            <Input name="reference" label={labels.reference} identifier />
             <Input name="phone" label={labels.phone} inputMode="tel" />
             <Input name="email" label={labels.email} inputMode="email" />
             <Input name="notes" label={labels.notes} />

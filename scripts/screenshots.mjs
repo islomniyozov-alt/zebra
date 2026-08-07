@@ -78,14 +78,26 @@ const SHOTS = [
   ...money('receivables', '/receivables'),
   ...money('payments', '/payments'),
   ...money('settlements', '/settlements'),
+  // PHASE 4 steps 3-6. Four screens that did not exist when the last shot list
+  // was written, each a dense table beside a translated label — which is where
+  // §12's "Russian runs ~30% longer" bites and where Farsi mirrors the lot.
+  ...money('maintenance', '/maintenance'),
+  ...money('inspections', '/safety/inspections'),
+  ...money('claims', '/safety/claims'),
+  ...money('documents', '/documents'),
+  // Settings is a FORM, and the only one in the application with four field
+  // groups stacked. Scrolled to the bottom so the settlement-week control is
+  // in frame — it is the field this phase added and the reason the screen
+  // exists at all.
+  ...money('settings', '/settings', { scroll: 'bottom' }),
 ]
 
 /** One screen in all three locales. The RTL shot is named so it sorts last. */
-function money(name, path) {
+function money(name, path, extra = {}) {
   return [
-    { name: `${name}-en`, path, locale: 'en', authed: true },
-    { name: `${name}-ru`, path, locale: 'ru', authed: true },
-    { name: `${name}-fa-rtl`, path, locale: 'fa', authed: true },
+    { name: `${name}-en`, path, locale: 'en', authed: true, ...extra },
+    { name: `${name}-ru`, path, locale: 'ru', authed: true, ...extra },
+    { name: `${name}-fa-rtl`, path, locale: 'fa', authed: true, ...extra },
   ]
 }
 
@@ -119,7 +131,40 @@ if (process.env.DIRECT_DATABASE_URL) {
           'select id from "Truck" where "deletedAt" is null order by "createdAt" desc limit 1',
         )
       ).rows[0]?.id ?? null
-    if (truck) SHOTS.push(...money('truck-detail', '/trucks/' + truck))
+    if (truck) {
+      SHOTS.push(...money('truck-detail', '/trucks/' + truck))
+      // AND THE SAME SCREEN SCROLLED. Step 2 found that a full-page shot does
+      // not reach the panels, because the shell scrolls INSIDE a container
+      // rather than the page — so the compliance, maintenance and inspection
+      // panels are simply below the fold and unphotographed. This is that note
+      // turned into shots.
+      SHOTS.push(
+        ...money('truck-detail-panels', '/trucks/' + truck, {
+          scroll: 'bottom',
+        }),
+      )
+    }
+
+    const inspection = await newest('RoadsideInspection')
+    if (inspection) {
+      // Scrolled, because the violations and the DataQs challenge — the two
+      // links of §4's trace this screen is responsible for — are under the
+      // fold on a 1080p viewport.
+      SHOTS.push(
+        ...money('inspection-detail', `/safety/inspections/${inspection}`, {
+          scroll: 'bottom',
+        }),
+      )
+    }
+
+    const claim = await newest('Claim')
+    if (claim) {
+      SHOTS.push(
+        ...money('claim-detail', `/safety/claims/${claim}`, {
+          scroll: 'bottom',
+        }),
+      )
+    }
     if (settlement) {
       SHOTS.push(...money('settlement-detail', `/settlements/${settlement}`))
     }
@@ -201,6 +246,29 @@ for (const shot of SHOTS) {
   // fallback stack.
   await page.evaluate(() => document.fonts.ready)
   await page.waitForTimeout(500)
+
+  // THE CONTAINER SCROLLS, NOT THE PAGE. The shell is a flex column with a
+  // `min-h-0 flex-1 overflow-y-auto` region inside it, so `window.scrollTo`
+  // and `fullPage: true` both do nothing and every panel below the fold goes
+  // unphotographed — which is what Step 2 found the hard way when a compliance
+  // panel it had just seeded did not appear in a single shot.
+  //
+  // So: find the element that actually scrolls, and scroll THAT.
+  if (shot.scroll === 'bottom') {
+    await page.evaluate(() => {
+      const scrollable = [...document.querySelectorAll('*')].filter(
+        (element) => element.scrollHeight > element.clientHeight + 8,
+      )
+      // The tallest overflow wins. On a detail screen that is the panel
+      // column; on a list it is the table body.
+      const target = scrollable.sort(
+        (a, b) =>
+          b.scrollHeight - b.clientHeight - (a.scrollHeight - a.clientHeight),
+      )[0]
+      if (target) target.scrollTop = target.scrollHeight
+    })
+    await page.waitForTimeout(400)
+  }
 
   const dir = await page.evaluate(() => document.documentElement.dir)
   const lang = await page.evaluate(() => document.documentElement.lang)

@@ -81,9 +81,10 @@ export function InspectionForm({
           hint={labels.stateHint}
           required
           maxLength={2}
+          identifier
           className="uppercase"
         />
-        <Input name="reportNumber" label={labels.report} />
+        <Input name="reportNumber" label={labels.report} identifier />
         <Input name="location" label={labels.location} />
         <Input name="inspectorName" label={labels.inspector} />
       </div>
