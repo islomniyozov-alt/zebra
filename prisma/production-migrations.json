@@ -17,7 +17,8 @@
     "20260805194823_factoring_company_per_carrier",
     "20260805212540_payment_load_application",
     "20260806023129_drop_pay_rule_expression",
-    "20260807144838_roadside_inspections"
+    "20260807144838_roadside_inspections",
+    "20260807182143_claims_and_dataqs"
   ],
   "recordedAt": "2026-08-07",
   "verified": false
