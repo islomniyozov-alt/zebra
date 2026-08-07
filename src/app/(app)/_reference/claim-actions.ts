@@ -26,6 +26,7 @@ import type { MessageKey } from '@/lib/i18n'
 const OPEN_ERRORS: Record<string, MessageKey> = {
   no_authority: 'claims.error.noAuthority',
   load_not_found: 'claims.error.loadNotFound',
+  asset_not_found: 'claims.error.assetNotFound',
   bad_amount: 'claims.error.badAmount',
   no_description: 'claims.error.noDescription',
 }
@@ -63,6 +64,8 @@ export async function openClaimAction(
       companyId: text(formData, 'companyId'),
       type: text(formData, 'type') as ClaimType,
       loadId: text(formData, 'loadId') || null,
+      truckId: text(formData, 'truckId') || null,
+      driverId: text(formData, 'driverId') || null,
       claimNumber: text(formData, 'claimNumber'),
       claimantName: text(formData, 'claimantName'),
       incidentAt: incident ? utcMidnight(incident) : null,

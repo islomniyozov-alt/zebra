@@ -11,11 +11,11 @@ export default async function NewClaimPage() {
 
   const { t } = await getLocaleContext()
 
-  const { companies, loads } = await withCurrentOrg(
+  const { companies, loads, trucks, drivers } = await withCurrentOrg(
     'read',
     'claim',
     async (tx, session) => {
-      const [companies, loads] = await Promise.all([
+      const [companies, loads, trucks, drivers] = await Promise.all([
         tx.company.findMany({
           // `id`, not `companyId` — Company IS the authority. See tenancy.ts.
           where: {
@@ -34,9 +34,25 @@ export default async function NewClaimPage() {
           take: 200,
           select: { id: true, loadNumber: true, companyId: true },
         }),
+        tx.truck.findMany({
+          where: {
+            ...companyScopeFilter(session.companyScopes),
+            deletedAt: null,
+          },
+          orderBy: { unitNumber: 'asc' },
+          select: { id: true, unitNumber: true },
+        }),
+        tx.driver.findMany({
+          where: {
+            ...companyScopeFilter(session.companyScopes),
+            deletedAt: null,
+          },
+          orderBy: { lastName: 'asc' },
+          select: { id: true, firstName: true, lastName: true },
+        }),
       ])
 
-      return { companies, loads }
+      return { companies, loads, trucks, drivers }
     },
   )
 
@@ -67,10 +83,25 @@ export default async function NewClaimPage() {
               label: load.loadNumber,
             })),
           ]}
+          trucks={[
+            { value: '', label: t('claims.new.none') },
+            ...trucks.map((truck) => ({
+              value: truck.id,
+              label: truck.unitNumber,
+            })),
+          ]}
+          drivers={[
+            { value: '', label: t('claims.new.none') },
+            ...drivers.map((driver) => ({
+              value: driver.id,
+              label: `${driver.firstName} ${driver.lastName}`.trim(),
+            })),
+          ]}
           today={new Date().toISOString().slice(0, 10)}
           translate={{
             'claims.error.noAuthority': t('claims.error.noAuthority'),
             'claims.error.loadNotFound': t('claims.error.loadNotFound'),
+            'claims.error.assetNotFound': t('claims.error.assetNotFound'),
             'claims.error.badAmount': t('claims.error.badAmount'),
             'claims.error.noDescription': t('claims.error.noDescription'),
           }}
@@ -82,6 +113,9 @@ export default async function NewClaimPage() {
             incidentHint: t('claims.new.incidentHint'),
             load: t('claims.new.load'),
             loadHint: t('claims.new.loadHint'),
+            truck: t('claims.new.truck'),
+            driver: t('claims.new.driver'),
+            assetHint: t('claims.new.assetHint'),
             claimant: t('claims.new.claimant'),
             number: t('claims.new.number'),
             amount: t('claims.new.amount'),

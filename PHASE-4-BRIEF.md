@@ -81,8 +81,17 @@ Recorded rather than resolved, per Phase 1's discipline.
    in Phase 2, and it would arrive with none of the RLS, the trigger or the
    document wiring this one already has.
 
-2. **The `CompanySettings` settlement period-boundary field does NOT exist, and
-   Phase 3 §11 was wrong to say it did.** §5 here inherits it as though it were
+2. ~~**The `CompanySettings` settlement period-boundary field does NOT exist.**~~
+   **Resolved at Step 6.** `settlementWeekEndsOn` now exists, with a CHECK
+   keeping it inside 0–6 (`Date.getUTCDay()` numbering, so nothing translates),
+   and `lastFullWeek` — Phase 3's hard-coded Monday-to-Sunday — is now the
+   Sunday case of one computation in `settings.ts`. Where a user is scoped to
+   authorities whose weeks end on different days, the settlement screen offers
+   the week finished for ALL of them; offering either one alone would settle a
+   driver mid-week under the carrier still running.
+
+   Original text: **the field does NOT exist, and Phase 3 §11 was wrong to say
+   it did.** §5 here inherits it as though it were
    waiting to be read. It is not: `CompanySettings` carries the invoice fields,
    the profitability assumptions and three notification lead-times, and nothing
    resembling a week boundary. Phase 3 step 6 defaulted the settlement screen to
@@ -282,10 +291,50 @@ Recorded rather than resolved, per Phase 1's discipline.
     already run. Recorded here because it is a business rule invented in this
     step, not one the brief states.
 
-15. **`Claim` has no truck or driver link, and Step 5 did not add one.** An
-    accident claim involves a tractor and a person, and the schema reaches them
-    only through the optional load — which a bobtail accident does not have.
-    §3 step 5 asks for "optional load link, parties" and nothing more, so
-    nothing more was built. If the owner wants an accident filed against a unit
-    directly, that is two nullable columns and a screen change, and it belongs
-    to whoever asks for it rather than to a step that guessed.
+15. ~~**`Claim` has no truck or driver link.**~~ **Resolved by the owner at
+    Step 6**, as a ride-along in that step's migration. `Claim.truckId` and
+    `Claim.driverId` are nullable — a cargo claim names neither — and both are
+    checked against the SAME authority as the claim, the way the load link
+    already was: a tractor from the other carrier on this carrier's claim would
+    put the accident on the wrong DOT number.
+
+    Original text: an accident claim involves a tractor and a person, and the
+    schema reaches them only through the optional load — which a bobtail
+    accident does not have. §3 step 5 asks for "optional load link, parties" and
+    nothing more, so nothing more was built.
+
+16. **The documents browser found a hole in the download endpoint, and Step 6
+    closed it.** `/api/documents/{id}/download-url` gated on `document:read`
+    alone. A DISPATCHER holds that — they upload PODs all day — so with an id
+    they could mint a signed URL for a **settlement PDF**, which is driver pay.
+
+    That was true before this step; what the browser changed is that it made
+    the ids discoverable by listing what exists. A screen that hides a row while
+    the API still serves it hides nothing, so the endpoint now asks the same
+    question the listing does: the permission on the ENTITY the document hangs
+    off, from the same `ENTITY_RESOURCE` map, with a 404 either way so "not
+    yours" and "not there" stay indistinguishable.
+
+    The map is keyed off `TARGETS`, and `tests/document-browser.test.ts`
+    asserts the two cannot drift — an attachment target nobody maps would
+    otherwise become invisible to everyone or visible to everyone, depending on
+    how the omission was written.
+
+17. **Settings audit nothing of their own, deliberately.** §4 asks that
+    "Settings edits are audited with field-level diffs". The Prisma audit
+    extension has written `{ field: { from, to } }` for every changed field on
+    every write through the scoped client since Phase 1 — so what the settings
+    service owes the requirement is not a mechanism but a SHAPE: one update per
+    save, so the audit row is one diff of the whole save with untouched fields
+    absent. A second mechanism would be a second story about what changed.
+
+    The integration suite asserts the diff itself, that unchanged fields are
+    absent from it, that five changed fields still produce ONE row, and that a
+    refused save leaves `updatedAt` untouched.
+
+18. **Reading the settings screen CREATES a settings row for any authority that
+    has none.** The seed writes one and nothing else ever has, so an authority
+    added by hand would open the screen with nothing to edit. The created row is
+    entirely defaults, so it changes no behaviour — but it is a write on a read
+    path, which is unusual enough to name here rather than leave for somebody to
+    find in a diff.

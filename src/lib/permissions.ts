@@ -506,13 +506,11 @@ export const NAVIGATION: readonly NavGroup[] = [
     labelKey: 'nav.group.records',
     items: [
       item('brokers', '/brokers', 'customer'),
-      // The document PIPELINE exists — upload, confirm, download, all on the
-      // load screen. A standalone browser over every document is what is
-      // missing, and no brief asks for one.
-      // §2.7: assigned to Phase 4 step 6. The pipeline exists — upload,
-      // confirm, download, all on the load screen — and what is missing is
-      // the reading room over it.
-      unbuilt('documents', '/documents', 'document', 'Phase 4'),
+      // Phase 4 step 6 — the reading room over the pipeline. `document:read`
+      // is held by everyone who uploads one, and the screen is permission-aware
+      // per ENTITY rather than per role: a dispatcher sees the PODs they filed
+      // and not the settlement PDFs beside them. See document-browser.ts.
+      item('documents', '/documents', 'document'),
       unbuilt('reports', '/reports', 'report', 'Phase 5'),
     ],
   },
@@ -521,11 +519,11 @@ export const NAVIGATION: readonly NavGroup[] = [
     labelKey: 'nav.group.admin',
     items: [
       item('users', '/users', 'user'),
-      // CompanySettings is written by the seed and read by the invoice and
-      // settlement services; nothing edits it through a screen.
-      // §2.7: assigned to Phase 4 step 6, and it needs a migration first —
-      // see PHASE-4-BRIEF.md §6 flag 2.
-      unbuilt('settings', '/settings', 'organization', 'Phase 4'),
+      // Phase 4 step 6. `organization:update` is what the screen asks to save;
+      // reading is `organization:read`, which OWNER and ADMIN hold and nobody
+      // else does — settings decide invoice terms and the settlement week, and
+      // both are the owner's call.
+      item('settings', '/settings', 'organization'),
     ],
   },
 ]

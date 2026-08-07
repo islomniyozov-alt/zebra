@@ -118,6 +118,36 @@ export default async function ClaimPage({
                   <dd className="z-identifier text-ink">{fact.value}</dd>
                 </div>
               ))}
+              {claim.truck ? (
+                <div className="flex flex-col gap-z1">
+                  <dt className="text-xs uppercase tracking-[0.04em] text-ink-3">
+                    {t('claims.detail.truck')}
+                  </dt>
+                  <dd>
+                    <Link
+                      href={`/trucks/${claim.truck.id}`}
+                      className="z-identifier text-accent hover:underline"
+                    >
+                      {claim.truck.unitNumber}
+                    </Link>
+                  </dd>
+                </div>
+              ) : null}
+              {claim.driver ? (
+                <div className="flex flex-col gap-z1">
+                  <dt className="text-xs uppercase tracking-[0.04em] text-ink-3">
+                    {t('claims.detail.driver')}
+                  </dt>
+                  <dd>
+                    <Link
+                      href={`/drivers/${claim.driver.id}`}
+                      className="z-identifier text-accent hover:underline"
+                    >
+                      {claim.driver.name}
+                    </Link>
+                  </dd>
+                </div>
+              ) : null}
               {claim.load ? (
                 <div className="flex flex-col gap-z1">
                   <dt className="text-xs uppercase tracking-[0.04em] text-ink-3">

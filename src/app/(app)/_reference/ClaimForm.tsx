@@ -24,6 +24,8 @@ interface Props {
   authorities: readonly SelectOption[]
   types: readonly SelectOption[]
   loads: readonly SelectOption[]
+  trucks: readonly SelectOption[]
+  drivers: readonly SelectOption[]
   today: string
   translate: Record<string, string>
   labels: {
@@ -34,6 +36,9 @@ interface Props {
     incidentHint: string
     load: string
     loadHint: string
+    truck: string
+    driver: string
+    assetHint: string
     claimant: string
     number: string
     amount: string
@@ -47,6 +52,8 @@ export function ClaimForm({
   authorities,
   types,
   loads,
+  trucks,
+  drivers,
   today,
   translate,
   labels,
@@ -75,15 +82,21 @@ export function ClaimForm({
           defaultValue={today}
           inputMode="numeric"
         />
-        {/* `Select` carries no hint slot, so the sentence that explains why
-         * this one is optional sits under the grid rather than being dropped. */}
+        {/* `Select` carries no hint slot, so the sentences explaining why
+         * these three are optional sit under the grid. */}
         <Select name="loadId" label={labels.load} options={loads} />
+        {/* §6 flag 15, resolved at Step 6: an accident names a tractor and a
+         * person, and until now the schema reached them only through a load a
+         * bobtail accident does not have. */}
+        <Select name="truckId" label={labels.truck} options={trucks} />
+        <Select name="driverId" label={labels.driver} options={drivers} />
         <Input name="claimantName" label={labels.claimant} />
         <Input name="claimNumber" label={labels.number} />
         <Input name="amountClaimed" label={labels.amount} inputMode="decimal" />
       </div>
 
       <p className="text-sm text-ink-3">{labels.loadHint}</p>
+      <p className="text-sm text-ink-3">{labels.assetHint}</p>
 
       <Input name="description" label={labels.description} required />
 

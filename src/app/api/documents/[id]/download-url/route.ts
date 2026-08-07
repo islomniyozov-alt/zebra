@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { withCurrentOrg } from '@/lib/auth-context'
 import { mintDownloadUrl } from '@/lib/documents'
+import { ENTITY_RESOURCE, entityOfDocument } from '@/lib/document-browser'
+import { can } from '@/lib/permissions'
 import { apiError, authFailureResponse } from '../../../_lib/respond'
 
 // GET /api/documents/{id}/download-url
@@ -12,6 +14,14 @@ import { apiError, authFailureResponse } from '../../../_lib/respond'
 //
 // Returns the URL rather than redirecting to it: a redirect would put a signed
 // R2 URL in the browser's history and in any referrer log along the way.
+//
+// `document:read` IS NOT ENOUGH, and was until Phase 4 step 6. A DISPATCHER
+// holds it — they upload PODs all day — so with an id they could mint a URL for
+// a settlement PDF, which is driver pay. The documents browser made that
+// reachable by listing what exists, and a browser that hides a row while this
+// endpoint still serves it is the CSS-hiding bug in a different coat. So the
+// permission on the THING IT HANGS OFF is checked here too, from the same map
+// the browser uses.
 
 export async function GET(
   _request: Request,
@@ -20,8 +30,18 @@ export async function GET(
   const { id } = await context.params
 
   try {
-    const signed = await withCurrentOrg('read', 'document', (tx) =>
-      mintDownloadUrl(tx, id),
+    const signed = await withCurrentOrg(
+      'read',
+      'document',
+      async (tx, session) => {
+        const entity = await entityOfDocument(tx, id)
+        // No entity means no permission covers it: not in this tenant, or
+        // attached to nothing. Both are a 404 below.
+        if (!entity) return null
+        if (!can(session, 'read', ENTITY_RESOURCE[entity])) return null
+
+        return mintDownloadUrl(tx, id)
+      },
     )
 
     if (!signed) {

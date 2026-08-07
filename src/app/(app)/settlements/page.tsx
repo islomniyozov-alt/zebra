@@ -3,11 +3,8 @@ import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyScopeFilter } from '@/lib/tenancy'
-import {
-  lastFullWeek,
-  listSettlements,
-  type SettlementRow,
-} from '@/lib/settlements'
+import { listSettlements, type SettlementRow } from '@/lib/settlements'
+import { lastFullWeekAcross } from '@/lib/settings'
 import { formatCents } from '@/lib/money'
 import { Table, type Column } from '@/components/ui/Table'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -64,12 +61,24 @@ export default async function SettlementsPage() {
             })
           : Promise.resolve([]),
       ])
-      return { settlements, drivers }
+      // THE BOUNDARY, READ FROM THE AUTHORITY. Phase 3 hard-coded Sunday;
+      // Phase 4 step 6 gave it a column. Scoped, so a dispatcher settling for
+      // one carrier is not offered the other carrier's week.
+      const boundaries = await tx.companySettings.findMany({
+        where: { ...scope, company: { isActive: true } },
+        select: { settlementWeekEndsOn: true },
+      })
+
+      return {
+        settlements,
+        drivers,
+        endsOn: boundaries.map((row) => row.settlementWeekEndsOn),
+      }
     },
   )
 
   const day = (value: Date) => value.toISOString().slice(0, 10)
-  const week = lastFullWeek(new Date())
+  const week = lastFullWeekAcross(new Date(), data.endsOn)
   const translate = Object.fromEntries(ERROR_KEYS.map((key) => [key, t(key)]))
 
   const columns: Column<SettlementRow>[] = [

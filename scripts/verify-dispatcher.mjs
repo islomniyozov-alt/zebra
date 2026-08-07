@@ -268,6 +268,7 @@ const DISPATCHER_SCREENS = [
   '/safety',
   '/safety/inspections',
   '/maintenance',
+  '/documents',
   '/brokers',
   '/account',
 ]
@@ -455,6 +456,52 @@ record(
   'and the DataQs panel never reaches a dispatcher',
   !inspectionsList.body.includes('DataQs'),
   'no challenge panel in the payload',
+)
+
+// --- settings and the documents browser (Phase 4 step 6) --------------------
+//
+// Settings is `organization:read` — OWNER and ADMIN. A MANAGER who could move
+// the settlement week boundary could move every driver's pay period without
+// touching a pay rule, so a DISPATCHER certainly cannot.
+const dispatcherSettings = await bodyOf(dispatcher.page, '/settings')
+record(
+  'a dispatcher typing /settings is refused',
+  dispatcherSettings.status === 404,
+  `HTTP ${dispatcherSettings.status}`,
+)
+
+const ownerSettings = await bodyOf(owner.page, '/settings')
+record(
+  'and the SAME url works for an owner (rule 11)',
+  ownerSettings.status === 200 &&
+    ownerSettings.body.includes('settlementWeekEndsOn'),
+  `HTTP ${ownerSettings.status}`,
+)
+
+// THE BROWSER IS A DIFFERENT SHAPE OF CHECK. Both roles open it; what differs
+// is what is IN it. A dispatcher holds `document:read` because they upload
+// PODs, and the screen is gated per ENTITY — so the settlement PDF filed for
+// the seeded driver is absent from their payload and present in the owner's.
+const dispatcherDocs = await bodyOf(dispatcher.page, '/documents')
+record(
+  'a dispatcher can open /documents',
+  dispatcherDocs.status === 200,
+  `HTTP ${dispatcherDocs.status}`,
+)
+record(
+  'and is offered no chip for a kind they cannot read',
+  !dispatcherDocs.body.includes('>Settlement<') &&
+    !dispatcherDocs.body.includes('>Invoice<'),
+  'no settlement or invoice chip',
+)
+
+const ownerDocs = await bodyOf(owner.page, '/documents')
+record(
+  'while an owner is offered both (rule 11)',
+  ownerDocs.status === 200 &&
+    ownerDocs.body.includes('Settlement') &&
+    ownerDocs.body.includes('Invoice'),
+  `HTTP ${ownerDocs.status}`,
 )
 
 // The navigation does not offer what the role cannot reach, either (§7).

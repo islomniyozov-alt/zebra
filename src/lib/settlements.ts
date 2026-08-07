@@ -5,6 +5,7 @@ import type {
   PaymentMethod,
 } from '@/generated/prisma/client'
 import type { TxClient } from './tenancy'
+import { lastFullWeekEnding } from './settings'
 import { allocateNumber } from './counters'
 import {
   amountFromSnapshot,
@@ -164,19 +165,11 @@ export async function settleableLoads(
  * is not finished, so the answer is the week before it.
  */
 export function lastFullWeek(today: Date): { start: string; end: string } {
-  const end = new Date(
-    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()),
-  )
-  const back = end.getUTCDay() === 0 ? 7 : end.getUTCDay()
-  end.setUTCDate(end.getUTCDate() - back)
-
-  const start = new Date(end)
-  start.setUTCDate(start.getUTCDate() - 6)
-
-  return {
-    start: start.toISOString().slice(0, 10),
-    end: end.toISOString().slice(0, 10),
-  }
+  // Sunday, which is what this function hard-coded before Phase 4 step 6 gave
+  // the boundary a column. One computation, in settings.ts — two would be two
+  // answers to "which week is being settled" the first time somebody moved the
+  // boundary and only one of them noticed.
+  return lastFullWeekEnding(today, 0)
 }
 
 // --- generation --------------------------------------------------------------

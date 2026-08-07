@@ -119,6 +119,8 @@ export interface ClaimRow {
   description: string | null
   resolution: string | null
   load: { id: string; loadNumber: string } | null
+  truck: { id: string; unitNumber: string } | null
+  driver: { id: string; name: string } | null
   customer: { id: string; name: string } | null
   parties: ClaimPartyRow[]
   timeline: ClaimTimelineRow[]
@@ -141,6 +143,8 @@ const SELECT = {
   createdAt: true,
   company: { select: { name: true } },
   load: { select: { id: true, loadNumber: true } },
+  truck: { select: { id: true, unitNumber: true } },
+  driver: { select: { id: true, firstName: true, lastName: true } },
   customer: { select: { id: true, name: true } },
   parties: {
     where: { deletedAt: null },
@@ -190,6 +194,13 @@ export function shapeClaims(rows: readonly Stored[]): ClaimRow[] {
     description: row.description,
     resolution: row.resolution,
     load: row.load,
+    truck: row.truck,
+    driver: row.driver
+      ? {
+          id: row.driver.id,
+          name: `${row.driver.firstName} ${row.driver.lastName}`.trim(),
+        }
+      : null,
     customer: row.customer,
     parties: row.parties,
     timeline: row.notes_.map((note) => ({
@@ -251,6 +262,7 @@ export async function claimById(
 export type ClaimFailure =
   | 'no_authority'
   | 'load_not_found'
+  | 'asset_not_found'
   | 'bad_amount'
   | 'no_description'
 
@@ -263,6 +275,11 @@ export interface OpenClaimInput {
   type: ClaimType
   /** Optional (§3 step 5). An accident on a bobtail has no load. */
   loadId?: string | null
+  // PHASE-4-BRIEF.md §6 flag 15, resolved at Step 6. An accident names a
+  // tractor and a person; a cargo claim names neither. Both optional, both
+  // checked against the same authority as the claim.
+  truckId?: string | null
+  driverId?: string | null
   customerId?: string | null
   claimNumber?: string
   claimantName?: string
@@ -310,12 +327,37 @@ export async function openClaim(
     loadId = load.id
   }
 
+  // THE SAME RULE FOR THE UNITS. A tractor from the other carrier on this
+  // carrier's claim would put the accident on the wrong DOT number, which is
+  // the mistake the inspection service refuses one table over.
+  let truckId: string | null = null
+  if (input.truckId) {
+    const truck = await tx.truck.findFirst({
+      where: { id: input.truckId, companyId: company.id },
+      select: { id: true },
+    })
+    if (!truck) return { ok: false, reason: 'asset_not_found' }
+    truckId = truck.id
+  }
+
+  let driverId: string | null = null
+  if (input.driverId) {
+    const driver = await tx.driver.findFirst({
+      where: { id: input.driverId, companyId: company.id },
+      select: { id: true },
+    })
+    if (!driver) return { ok: false, reason: 'asset_not_found' }
+    driverId = driver.id
+  }
+
   const created = await tx.claim.create({
     data: {
       organizationId: company.organizationId,
       companyId: company.id,
       type: input.type,
       loadId,
+      truckId,
+      driverId,
       customerId: input.customerId || null,
       claimNumber: input.claimNumber?.trim() || null,
       claimantName: input.claimantName?.trim() || null,

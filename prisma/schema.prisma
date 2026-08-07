@@ -257,6 +257,16 @@ model CompanySettings {
   podMissingAlertDays Int @default(3)
   invoiceOverdueDays  Int @default(1)
 
+  /// The day a settlement week ENDS on.
+  ///
+  /// Phase 3 §11 said this field was here and unread; it was not here at all —
+  /// PHASE-4-BRIEF.md §6 flag 2. Phase 3 step 6 hard-coded a Monday-to-Sunday
+  /// week in `lastFullWeek`, and this is that constant made per-authority.
+  ///
+  /// 0 is Sunday, matching `Date.getUTCDay()` — the same numbering the code
+  /// that reads it already speaks, so nothing has to translate.
+  settlementWeekEndsOn Int @default(0)
+
   // Anything that doesn't deserve a column yet.
   extra Json?
 
@@ -593,6 +603,7 @@ model Truck {
   iftaMileage     IftaMileage[]
   complianceItems ComplianceItem[]
   inspections     RoadsideInspection[]
+  claims          Claim[]
 
   // UNIQUENESS IS PARTIAL AND LIVES IN SQL. Prisma cannot express a `WHERE`
   // predicate on an index, so `truck_unit_per_company` is created by hand in
@@ -705,6 +716,7 @@ model Driver {
   fuelTxns        FuelTransaction[]
   complianceItems ComplianceItem[]
   inspections     RoadsideInspection[]
+  claims          Claim[]
   communications  Communication[]
 
   @@index([companyId, status])
@@ -1566,6 +1578,15 @@ model Claim {
   customerId String?
   customer   Customer? @relation(fields: [customerId], references: [id])
 
+  // PHASE-4-BRIEF.md §6 flag 15, resolved by the owner at Step 6. An accident
+  // claim involves a tractor and a person, and until now the schema reached
+  // them only through the optional load — which a bobtail accident does not
+  // have. Both nullable: a cargo claim names neither.
+  truckId  String?
+  truck    Truck?  @relation(fields: [truckId], references: [id])
+  driverId String?
+  driver   Driver? @relation(fields: [driverId], references: [id])
+
   type               ClaimType
   claimNumber        String?
   claimantName       String?
@@ -1586,6 +1607,8 @@ model Claim {
 
   @@index([companyId, status])
   @@index([loadId])
+  @@index([truckId])
+  @@index([driverId])
 }
 
 // Everyone with a stake in a claim. A cargo claim has at minimum a claimant

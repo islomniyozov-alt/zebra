@@ -252,13 +252,17 @@ describe('navigationFor', () => {
 
   it('drops individual items too, not just whole groups', () => {
     // A DISPATCHER holds `document:read` and `customer:read` but not
-    // `report:read`, so Records loses Reports on permission. It now shows
-    // BROKERS ALONE, because Documents was hidden as unbuilt — the standalone
-    // document browser does not exist, only the pipeline on the load screen.
+    // `report:read`, so Records loses Reports on permission and keeps the other
+    // two. Documents joined the list when Phase 4 step 6 built the browser —
+    // and the browser is permission-aware per ENTITY, so what they see INSIDE
+    // it is a separate question with its own tests.
     const records = navigationFor(session('DISPATCHER')).find(
       (g) => g.key === 'records',
     )
-    expect(records?.items.map((item) => item.key)).toEqual(['brokers'])
+    expect(records?.items.map((item) => item.key)).toEqual([
+      'brokers',
+      'documents',
+    ])
 
     // The permission half of that is still true and still worth asserting,
     // separately from the built half — the two filters must not be confused
@@ -559,6 +563,24 @@ describe('the sidebar only offers screens that exist', () => {
     ])
   })
 
+  it('offers Settings to the two roles that hold it, and no others', () => {
+    // It stopped being an unbuilt marker at Phase 4 step 6 and became an
+    // ordinary permission question. `organization:read` is OWNER and ADMIN —
+    // invoice terms and the settlement week boundary are the owner's call, and
+    // a MANAGER who could move the boundary could move every driver's pay
+    // period without touching a pay rule.
+    const offers = (role: Role) =>
+      navigationFor({ ...owner, role })
+        .flatMap((group) => group.items.map((entry) => entry.href))
+        .includes('/settings')
+
+    expect(offers('OWNER')).toBe(true)
+    expect(offers('ADMIN')).toBe(true)
+    expect(offers('MANAGER')).toBe(false)
+    expect(offers('DISPATCHER')).toBe(false)
+    expect(offers('ACCOUNTING')).toBe(false)
+  })
+
   it('hides the unbuilt from every role, not just from the ones without rights', () => {
     // A screen nobody can open is not a permission question. If it were, an
     // OWNER would see it and a DISPATCHER would not, for two different reasons
@@ -575,7 +597,6 @@ describe('the sidebar only offers screens that exist', () => {
         group.items.map((entry) => entry.href),
       )
       expect(offered.includes('/calendar'), role).toBe(false)
-      expect(offered.includes('/settings'), role).toBe(false)
       expect(offered.includes('/'), role).toBe(false)
     }
   })
