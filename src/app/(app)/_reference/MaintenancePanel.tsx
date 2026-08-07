@@ -71,9 +71,13 @@ interface Props {
     nextOdometer: string
     notes: string
     save: string
-    total: string
-    perMile: string
-    over: string
+    // The three money labels travel only when the totals do. A label is not a
+    // field, so leaving them in would not leak a number — but "Spent on this
+    // asset" sitting unused in a dispatcher's payload still announces a figure
+    // they are not being shown, and there is no reason to send it.
+    total?: string
+    perMile?: string
+    over?: string
     nextDue: string
     attach: string
     preparing: string

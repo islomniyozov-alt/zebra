@@ -121,9 +121,15 @@ export async function maintenancePanelData(
       nextOdometer: t('maintPanel.nextOdometer'),
       notes: t('maintPanel.notes'),
       save: t('maintPanel.save'),
-      total: t('maint.total'),
-      perMile: t('maint.perMile'),
-      over: t('maint.over'),
+      // Only where there is a total to label — see the note on the panel's
+      // props. `maySeeCost` decides this the same way it decides the figure.
+      ...(maySeeCost
+        ? {
+            total: t('maint.total'),
+            perMile: t('maint.perMile'),
+            over: t('maint.over'),
+          }
+        : {}),
       nextDue: t('maint.nextDue'),
       attach: t('maintPanel.attach'),
       preparing: t('compliancePanel.preparing'),
