@@ -16,8 +16,9 @@
     "20260804214642_customer_settles_directly",
     "20260805194823_factoring_company_per_carrier",
     "20260805212540_payment_load_application",
-    "20260806023129_drop_pay_rule_expression"
+    "20260806023129_drop_pay_rule_expression",
+    "20260807144838_roadside_inspections"
   ],
-  "recordedAt": "2026-08-06",
+  "recordedAt": "2026-08-07",
   "verified": false
 }
