@@ -338,3 +338,59 @@ Recorded rather than resolved, per Phase 1's discipline.
     entirely defaults, so it changes no behaviour — but it is a write on a read
     path, which is unusual enough to name here rather than leave for somebody to
     find in a diff.
+
+19. **§4's third box had no step behind it, and the acceptance run is what
+    found that.** §2.4 decides that an expired truck or driver warns at
+    dispatch without blocking, and §4 asks for it as an acceptance criterion —
+    but §3's step table never assigns it to a step. Steps 1 and 2 built the
+    queue and the panels; nothing touched the assignment flow.
+
+    Step 7 built it rather than closing the phase with a criterion silently
+    unmet: `dispatchWarnings` in `compliance.ts` (the same derivation the queue
+    and the panels use, so the three cannot disagree), a first submit that comes
+    back with the expiries in words, a confirm that changes its own label and
+    colour, and the acknowledgement recorded in `LoadAssignment.reason` — which
+    IS the audit row, diffed field by field by the extension like every other
+    write. Superseded records are excluded, or a truck renewed last week would
+    be flagged at dispatch by the very rule §2.1 exists to prevent.
+
+    The lesson is about the brief rather than the code: a decision in §2 and a
+    box in §4 do not add up to a step in §3, and only the acceptance run
+    notices.
+
+---
+
+## 7. How §4 closed
+
+Each box, and where the evidence lives. Run `npm run check`,
+`npm run test:integration`, and the four walkthroughs to reproduce.
+
+| Box                                                                           | Closed by                                                                                                                                                                |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Expiring inspection: queue, dashboard row and panel from one derivation       | `tests/integration/compliance.test.ts` — "shows up in all three exactly at the lead time, and not a day early", asking all three about the same truck on the same day    |
+| Renewal supersedes; nothing overwritten                                       | `tests/integration/compliance.test.ts` — "creates a new record and never touches the old one"; `updatedAt` unchanged is the proof                                        |
+| Expired insurance warns at dispatch, proceeds on confirm, audited             | `scripts/verify-dispatch-warning.mjs` (6/6) and `tests/integration/compliance.test.ts` — "§4: an expired truck warns at dispatch and does not block"                     |
+| Work order cost in the running total; DISPATCHER sees the order, not the cost | `tests/maintenance.test.ts` worked examples, `tests/integration/maintenance.test.ts`, and `scripts/verify-dispatcher.mjs` — cost cell, cost header and total all absent  |
+| DataQs traces inspection → violation → challenge → outcome                    | `tests/integration/claims.test.ts` — the §4 test reading the whole chain back in one query; `scripts/verify-claims.mjs` (13/13) drives it through the panels             |
+| Settings audited with field-level diffs; the period boundary read             | `tests/integration/settings.test.ts` — the diff, the absent unchanged fields, one row per save; `lastFullWeek` now delegates to `lastFullWeekEnding`                     |
+| Documents browser shows only what the role may see                            | `tests/document-browser.test.ts`, `tests/integration/settings.test.ts`, and `scripts/verify-dispatcher.mjs` — and the download endpoint asks the same question (flag 16) |
+| Dispatcher walkthrough green; RU/RTL screenshots; drift clean                 | `scripts/verify-dispatcher.mjs` (39/39), `scripts/screenshots.mjs` (30 Phase 4 shots incl. scrolled panels), `scripts/check-deploy-drift.mjs`                            |
+
+## 8. What Phase 5 inherits
+
+- **Flag 3's untouched enum members.** `DRUG_TEST` and `MVR` are in
+  `ComplianceType` with no screen behind them, by the owner's choice.
+- **`nextServiceDate` and `nextServiceOdometer`** are stored and displayed and
+  nothing queues off them (flag 6). A PM-due queue is a screen, not a migration.
+- **A maintenance work order has no screen of its own.** The documents browser
+  names one and links nowhere, because it lives on its asset (flag 18's
+  neighbour). Same for expenses and fuel, which §2.6 moved to Phase 5.
+- **`complianceItemId` has no index on `Document`** while `inspectionId` and
+  `dataQsId` now do. The compliance panel reads by it on every asset screen;
+  that is a one-line migration nobody has needed yet.
+- **The severity weights are typed in by hand.** `InspectionViolation.severityWeight`
+  is optional because the CSA table has never been loaded; a BASIC percentile
+  computed from partial weights would be a figure nobody could reproduce.
+- Phase 3's inheritance that Phase 4 did not touch: PDF pagination, an embedded
+  font subset for a Cyrillic or Farsi name on an invoice, and the notifications
+  engine.

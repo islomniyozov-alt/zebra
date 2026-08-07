@@ -9,6 +9,8 @@ import {
   loadWindow,
   DispatchConflictError,
 } from '@/lib/dispatch'
+import { describeWarnings, dispatchWarnings } from '@/lib/compliance'
+import type { MessageKey } from '@/lib/i18n'
 import type { AssignState } from './assign-state'
 
 // Assignment from the board.
@@ -32,7 +34,37 @@ export async function assignAction(
   // own data has nothing to go stale.
   const truckId = String(formData.get('truckId') ?? '')
   const driverId = String(formData.get('driverId') ?? '') || null
-  if (truckId === '') return { error: t('ref.error.required'), moved: null }
+  if (truckId === '') {
+    return { error: t('ref.error.required'), moved: null, warnings: null }
+  }
+
+  // §2.4 — WARN, DO NOT BLOCK. Refusing outright turns a paperwork lag into a
+  // stranded load, so the first submit comes back with the expiries in words
+  // and the second one carries the acknowledgement.
+  const acknowledged = formData.get('acknowledged') !== null
+  const warnings = await withCurrentOrg('read', 'compliance', (tx) =>
+    dispatchWarnings(tx, { truckId, driverId }),
+  )
+
+  if (warnings.length > 0 && !acknowledged) {
+    const when = (days: number) =>
+      days === 0
+        ? t('safety.dueToday')
+        : days < 0
+          ? t('safety.overdue').replace('{days}', String(-days))
+          : t('safety.daysLeft').replace('{days}', String(days))
+
+    return {
+      error: null,
+      moved: null,
+      warnings: warnings.map((warning) => ({
+        subjectLabel: warning.subjectLabel,
+        typeLabel: t(`complianceType.${warning.type}` as MessageKey),
+        when: when(warning.daysLeft),
+        expired: warning.status === 'expired',
+      })),
+    }
+  }
 
   try {
     const outcome = await withCurrentOrg(
@@ -63,6 +95,12 @@ export async function assignAction(
 
         // Custody history, which is what answers "who had trailer X on the
         // 14th" — the question the Amazon Relay claim turned on.
+        //
+        // AND THE WARNING THAT WAS SHOWN, when there was one. §2.4 asks that
+        // "the audit row records that the warning was displayed", and this row
+        // is the audit row: the assignment's own reason, audited field by
+        // field by the extension like every other write. Recording it anywhere
+        // else would be a second story about the same decision.
         await tx.loadAssignment.create({
           data: {
             loadId,
@@ -70,6 +108,9 @@ export async function assignAction(
             truckId,
             driverId: driver,
             assignedByUserId: session.userId,
+            ...(warnings.length > 0
+              ? { reason: `dispatched over: ${describeWarnings(warnings)}` }
+              : {}),
           },
         })
 
@@ -87,6 +128,9 @@ export async function assignAction(
     return {
       error: null,
       moved: outcome?.result === 'moved' ? t('status.DISPATCHED') : null,
+      // Empty, not null: the board can tell "we never asked" from "we asked
+      // and they went ahead".
+      warnings: [],
     }
   } catch (error) {
     if (error instanceof DispatchConflictError) {
@@ -102,6 +146,7 @@ export async function assignAction(
           )
           .join(' '),
         moved: null,
+        warnings: null,
       }
     }
     throw error

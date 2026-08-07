@@ -374,6 +374,10 @@ const en = {
     'The truck takes its current driver. Conflicts are refused before anything is saved.',
   'dispatch.driverNone':
     'This truck has no driver. Pick one — a load with no driver stays Booked.',
+  'dispatch.warnTitle': 'Paperwork on this pairing',
+  'dispatch.warnBody':
+    'This does not stop the dispatch. Assign anyway if the business says so — the assignment records that you were shown this.',
+  'dispatch.warnConfirm': 'Assign anyway',
   'dispatch.driverKeep': 'Driving: {driver}',
   'dispatch.empty': 'Nothing scheduled.',
   'dispatch.noTrucks': 'No trucks under this authority yet.',
@@ -1652,6 +1656,10 @@ const ru: Dictionary = {
     'Тягач берётся вместе с текущим водителем. Конфликты отклоняются до сохранения.',
   'dispatch.driverNone':
     'За этим тягачом нет водителя. Выберите его — груз без водителя останется в статусе «Забронирован».',
+  'dispatch.warnTitle': 'Документы по этой связке',
+  'dispatch.warnBody':
+    'Это не блокирует назначение. Назначайте, если так решил бизнес — в записи назначения останется, что вам это показали.',
+  'dispatch.warnConfirm': 'Всё равно назначить',
   'dispatch.driverKeep': 'За рулём: {driver}',
   'dispatch.empty': 'Ничего не запланировано.',
   'dispatch.noTrucks': 'У этого перевозчика пока нет тягачей.',
@@ -2924,6 +2932,10 @@ const fa: Dictionary = {
     'کامیون با رانندهٔ فعلی‌اش می‌رود. تداخل‌ها پیش از ذخیره رد می‌شوند.',
   'dispatch.driverNone':
     'این کامیون راننده ندارد. یکی را انتخاب کنید — باری بدون راننده در وضعیت «رزرو‌شده» می‌ماند.',
+  'dispatch.warnTitle': 'مدارک این ترکیب',
+  'dispatch.warnBody':
+    'این جلوی اعزام را نمی‌گیرد. اگر شرکت صلاح می‌داند اختصاص دهید — در رکورد اختصاص ثبت می‌شود که این را دیده‌اید.',
+  'dispatch.warnConfirm': 'با این حال اختصاص بده',
   'dispatch.driverKeep': 'راننده: {driver}',
   'dispatch.empty': 'برنامه‌ای نیست.',
   'dispatch.noTrucks': 'هنوز کامیونی زیر نظر این شرکت نیست.',

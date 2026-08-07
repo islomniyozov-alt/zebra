@@ -8,13 +8,19 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 # Zebra
 
-Current phase: **Phase 4 — fleet & safety.** Read `PHASE-4-BRIEF.md` first;
-§6 lists what has been flagged against it.
+Current phase: **between phases.** Phase 4 is closed — `PHASE-4-BRIEF.md` §7
+records how each acceptance box was met and §8 what Phase 5 inherits.
 
-Phases 1, 2 and 3 are closed and all still binding: Phase 1 for the mechanisms
-in its §6–§10, Phase 2 for its engine patterns, Phase 3 for money. Each brief's
-flag section is the list of what was argued with rather than obeyed —
-`PHASE-2-BRIEF.md` §16, `PHASE-3-BRIEF.md` §9, `PHASE-4-BRIEF.md` §6.
+Phases 1, 2, 3 and 4 are closed and all still binding: Phase 1 for the
+mechanisms in its §6–§10, Phase 2 for its engine patterns, Phase 3 for money,
+Phase 4 for fleet and safety. Each brief's flag section is the list of what was
+argued with rather than obeyed — `PHASE-2-BRIEF.md` §16, `PHASE-3-BRIEF.md` §9,
+`PHASE-4-BRIEF.md` §6.
+
+A decision in a brief's §2 and a box in its §4 do not add up to a step in its
+§3. Phase 4 §6 flag 19 is what that costs: the dispatch-time compliance warning
+was decided, was an acceptance criterion, and had no step behind it — the
+acceptance run found it, in the last session of the phase.
 
 Read `prisma/schema.prisma` and `TMS-DESIGN-SYSTEM.md` before writing anything,
 plus the brief for whatever is being built. Where a brief disagrees with those

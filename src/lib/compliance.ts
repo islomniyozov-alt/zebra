@@ -567,3 +567,75 @@ export async function documentsForRecords(
   }
   return byRecord
 }
+
+// --- the dispatch warning (§2.4) ---------------------------------------------
+
+export interface DispatchWarning {
+  subject: ComplianceSubject
+  /** The unit number or the driver's name — what a dispatcher recognises. */
+  subjectLabel: string
+  type: ComplianceType
+  status: 'expiring' | 'expired'
+  /** Negative once past. Same number the queue and the panels print. */
+  daysLeft: number
+  expiresAt: Date
+}
+
+/**
+ * What is wrong with the paperwork on a truck and driver about to be dispatched.
+ *
+ * §2.4: "An expired truck/driver warns at dispatch, doesn't block. The
+ * assignment flow surfaces the expiry in words next to the confirm; the
+ * dispatcher proceeds if the business says so. Refusing outright turns a
+ * paperwork lag into a stranded load; the audit row records that the warning
+ * was shown."
+ *
+ * So this RETURNS rather than throws, and the caller decides. Only records that
+ * are current-and-live are ignored: an expiring one is worth saying out loud
+ * because the load may still be under way when it lapses, and a superseded one
+ * is history and says nothing about today.
+ *
+ * The same derivation as the queue and the panels — `shapeRecords` — so a truck
+ * flagged here is a truck flagged on /safety, and the three cannot disagree.
+ */
+export async function dispatchWarnings(
+  tx: TxClient,
+  pair: { truckId?: string | null; driverId?: string | null },
+  now: Date = new Date(),
+): Promise<DispatchWarning[]> {
+  const warnings: DispatchWarning[] = []
+
+  const look = async (subject: ComplianceSubject, id: string) => {
+    const rows = await recordsForSubject(tx, subject, id, now)
+    for (const row of rows) {
+      if (row.isSuperseded || row.status === 'current') continue
+      warnings.push({
+        subject,
+        subjectLabel: row.subjectLabel,
+        type: row.type,
+        status: row.status,
+        daysLeft: row.daysLeft,
+        expiresAt: row.expiresAt,
+      })
+    }
+  }
+
+  if (pair.truckId) await look('truck', pair.truckId)
+  if (pair.driverId) await look('driver', pair.driverId)
+
+  // Worst first: expired before expiring, and within each the one that has
+  // been wrong longest. A dispatcher reads the first line and acts on it.
+  return warnings.sort((a, b) => a.daysLeft - b.daysLeft)
+}
+
+/** One line per warning, for the audit row. Never shown to a user. */
+export function describeWarnings(warnings: readonly DispatchWarning[]): string {
+  return warnings
+    .map(
+      (warning) =>
+        `${warning.subject} ${warning.subjectLabel} ${warning.type} ${
+          warning.status
+        } ${warning.expiresAt.toISOString().slice(0, 10)}`,
+    )
+    .join('; ')
+}

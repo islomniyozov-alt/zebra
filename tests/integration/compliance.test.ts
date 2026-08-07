@@ -4,6 +4,8 @@ import { withOrg } from '@/lib/tenancy'
 import {
   complianceCount,
   complianceQueue,
+  describeWarnings,
+  dispatchWarnings,
   documentTypeFor,
   recordRenewal,
   recordsForSubject,
@@ -400,5 +402,127 @@ describe('§4: recording a renewal (step 2)', () => {
     expect(documentTypeFor('CDL')).toBe('CDL_COPY')
     // Anything unmapped still uploads, under OTHER.
     expect(documentTypeFor('PERMIT')).toBe('OTHER')
+  })
+})
+
+describe('§4: an expired truck warns at dispatch and does not block', () => {
+  // §2.4, and the box Phase 4's acceptance run found nobody had built: "An
+  // expired truck/driver warns at dispatch, doesn't block. The assignment flow
+  // surfaces the expiry in words next to the confirm; the dispatcher proceeds
+  // if the business says so; the audit row records that the warning was shown."
+  //
+  // The derivation is asserted here; the screen and the acknowledgement round
+  // trip are asserted in scripts/verify-dispatch-warning.mjs on the deployed
+  // worker, because a warning nobody sees is not a warning.
+
+  it('names an expired insurance policy on the truck being assigned', async () => {
+    const lapsed = new Date(NOW.getTime())
+    lapsed.setUTCDate(lapsed.getUTCDate() - 40)
+    const item = await owner.complianceItem.create({
+      data: {
+        organizationId,
+        companyId,
+        type: 'INSURANCE_LIABILITY',
+        truckId,
+        expiresAt: lapsed,
+        identifier: `POL-${nonce}`,
+      },
+      select: { id: true },
+    })
+
+    const warnings = await inOrg((tx) => dispatchWarnings(tx, { truckId }, NOW))
+    const insurance = warnings.find(
+      (warning) => warning.type === 'INSURANCE_LIABILITY',
+    )
+    expect(insurance).toMatchObject({
+      subject: 'truck',
+      status: 'expired',
+      daysLeft: -40,
+    })
+
+    // WORST FIRST. A dispatcher reads the top line and acts on it, so the
+    // thing that has been wrong longest has to be there.
+    expect(warnings[0]?.daysLeft).toBeLessThanOrEqual(
+      warnings[warnings.length - 1]!.daysLeft,
+    )
+
+    await owner.complianceItem.delete({ where: { id: item.id } })
+  }, 300_000)
+
+  it('says nothing about a truck whose paperwork is in date', async () => {
+    // The pair. A warning that fires on everything is a warning nobody reads,
+    // and the whole mechanism would be noise within a week.
+    const clean = await owner.truck.create({
+      data: { organizationId, companyId, unitNumber: `clean-${nonce}` },
+      select: { id: true },
+    })
+    const future = new Date(NOW.getTime())
+    future.setUTCDate(future.getUTCDate() + 300)
+    await owner.complianceItem.create({
+      data: {
+        organizationId,
+        companyId,
+        type: 'REGISTRATION',
+        truckId: clean.id,
+        expiresAt: future,
+      },
+    })
+
+    expect(
+      await inOrg((tx) => dispatchWarnings(tx, { truckId: clean.id }, NOW)),
+    ).toEqual([])
+  }, 300_000)
+
+  it('and nothing about a lapsed record a renewal has superseded', async () => {
+    // §2.1 keeps the old registration visible as history. Warning on it at
+    // dispatch would ground a truck that was renewed last week — the exact
+    // failure the supersession rule exists to prevent, one screen over.
+    const renewed = await owner.truck.create({
+      data: { organizationId, companyId, unitNumber: `renewed-${nonce}` },
+      select: { id: true },
+    })
+    const past = new Date(NOW.getTime())
+    past.setUTCDate(past.getUTCDate() - 30)
+    const ahead = new Date(NOW.getTime())
+    ahead.setUTCDate(ahead.getUTCDate() + 335)
+
+    await owner.complianceItem.create({
+      data: {
+        organizationId,
+        companyId,
+        type: 'REGISTRATION',
+        truckId: renewed.id,
+        expiresAt: past,
+      },
+    })
+    await owner.complianceItem.create({
+      data: {
+        organizationId,
+        companyId,
+        type: 'REGISTRATION',
+        truckId: renewed.id,
+        expiresAt: ahead,
+      },
+    })
+
+    expect(
+      await inOrg((tx) => dispatchWarnings(tx, { truckId: renewed.id }, NOW)),
+    ).toEqual([])
+  }, 300_000)
+
+  it('describes them for the audit row in one line', () => {
+    // What lands in `LoadAssignment.reason`, which IS the audit row — the
+    // extension diffs it field by field like every other write.
+    const line = describeWarnings([
+      {
+        subject: 'truck',
+        subjectLabel: '104',
+        type: 'INSURANCE_LIABILITY',
+        status: 'expired',
+        daysLeft: -40,
+        expiresAt: new Date('2026-06-27T00:00:00Z'),
+      },
+    ])
+    expect(line).toBe('truck 104 INSURANCE_LIABILITY expired 2026-06-27')
   })
 })

@@ -60,6 +60,9 @@ interface Props {
     assign: string
     assignTitle: string
     assignBody: string
+    warnTitle: string
+    warnBody: string
+    warnConfirm: string
     driverNone: string
     driverKeep: string
     cancel: string
@@ -348,16 +351,59 @@ function AssignModal({
           </p>
         ) : null}
 
+        {/* §2.4 — THE EXPIRY IN WORDS, NEXT TO THE CONFIRM, and no further.
+         * The load is not blocked: refusing outright turns a paperwork lag
+         * into a stranded load, and the dispatcher proceeds if the business
+         * says so. What changes is that they cannot do it without reading
+         * this, and the assignment row records that they saw it. */}
+        {state.warnings && state.warnings.length > 0 ? (
+          <div
+            role="alert"
+            className="flex flex-col gap-z1 rounded-card border border-danger bg-danger-soft p-z3"
+          >
+            <p className="text-sm font-medium text-ink">{labels.warnTitle}</p>
+            <ul className="flex flex-col gap-z1">
+              {state.warnings.map((warning) => (
+                <li
+                  key={`${warning.subjectLabel}-${warning.typeLabel}`}
+                  className="flex flex-wrap items-baseline gap-z2 text-sm"
+                >
+                  <span className="z-identifier font-medium text-ink">
+                    {warning.subjectLabel}
+                  </span>
+                  <span className="text-ink">{warning.typeLabel}</span>
+                  <span
+                    className={warning.expired ? 'text-danger' : 'text-ink-2'}
+                  >
+                    {warning.when}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="text-sm text-ink-2">{labels.warnBody}</p>
+          </div>
+        ) : null}
+
         <div className="flex justify-end gap-z2">
           <Button type="button" variant="ghost" onClick={onClose}>
             {labels.cancel}
           </Button>
+          {/* The acknowledgement travels in the FORM, like the truck choice —
+           * see the note in ./actions.ts about the closure that silently did
+           * nothing. Present only after the warning has been shown. */}
+          {state.warnings && state.warnings.length > 0 ? (
+            <input type="hidden" name="acknowledged" value="1" />
+          ) : null}
           <Button
             type="submit"
-            variant="primary"
+            variant={
+              state.warnings && state.warnings.length > 0 ? 'danger' : 'primary'
+            }
             disabled={pending || choice === null}
           >
-            {labels.assign}
+            {state.warnings && state.warnings.length > 0
+              ? labels.warnConfirm
+              : labels.assign}
           </Button>
         </div>
       </form>
