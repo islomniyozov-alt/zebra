@@ -467,6 +467,15 @@ English, Russian, Farsi from day one — keys from the first component, never re
 - **Russian runs roughly 30% longer than English.** No fixed-width buttons, labels, or table headers. Test every screen in Russian.
 - Locale drives number and date formatting via `Intl`. **Timezone comes from the stop, not the locale** (rule 3).
 - **Never translate:** load numbers, invoice numbers, VINs, MC/DOT numbers, status codes in CSV and Excel exports. Exports are machine-read downstream.
+- **An identifier field is `dir="ltr"`, even in Farsi.** Not translating one is not
+  enough: the bidi algorithm reorders the punctuation inside it. An invoice
+  prefix of `INV-` renders as `-INV` in an RTL input, and a violation code of
+  `393.75(a)(3)` reverses its brackets — the value is correct in the database
+  and wrong on the screen, which is the worst of the two. Any input whose value
+  is a Latin identifier — prefixes, codes, reference numbers, plates, VINs —
+  sets `dir="ltr"` so it reads the way it will be typed into somebody else's
+  system. Found in the Phase 4 RTL pass, on the one field that lands in an
+  invoice number people read down a phone.
 - Developer-facing API errors stay in English. _(carried from the portal)_
 
 ---
