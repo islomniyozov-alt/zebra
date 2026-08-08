@@ -508,6 +508,78 @@ record(
   `HTTP ${ownerDocs.status}`,
 )
 
+// --- extraction money, per Phase 5 §1.3 and §5 -------------------------------
+//
+// "A dispatcher's prefill carries no money key and no money label; the same
+// document's figures reach OWNER/ACCOUNTING on the rate panel as extracted
+// values — pair-asserted."
+//
+// Both halves, on the same seeded document. A dispatcher's extraction response
+// has the money key REMOVED, and the create-load form renders no rate input at
+// all; an owner's response carries the cents and their form does.
+const extraction = await pool.query(
+  `select id from "Document" where "ocrStatus" = 'COMPLETED'
+     and "extractedJson" is not null
+     and "companyId" = $1 order by "uploadedAt" desc limit 1`,
+  [companyId],
+)
+const readable = extraction.rows[0]?.id ?? null
+
+if (readable) {
+  const askAs = async (page) =>
+    page.evaluate(async (id) => {
+      const response = await fetch(`/api/documents/${id}/extract`, {
+        method: 'POST',
+      })
+      return { status: response.status, text: await response.text() }
+    }, readable)
+
+  const asDispatcher = await askAs(dispatcher.page)
+  record(
+    'a dispatcher can read a rate confirmation',
+    asDispatcher.status === 200,
+    `HTTP ${asDispatcher.status}`,
+  )
+  record(
+    'and the extraction carries no money key at all',
+    !asDispatcher.text.includes('"money"') &&
+      !asDispatcher.text.includes('linehaul'),
+    'no money in the payload',
+  )
+
+  const asOwner = await askAs(owner.page)
+  record(
+    'while an OWNER gets the figures in cents (rule 11)',
+    asOwner.status === 200 &&
+      asOwner.text.includes('"money"') &&
+      asOwner.text.includes('linehaulCents'),
+    `HTTP ${asOwner.status}`,
+  )
+} else {
+  record(
+    'a document with a completed extraction exists to ask about',
+    false,
+    'none seeded — run scripts/verify-extraction.mjs first',
+  )
+}
+
+// AND THE FORM ITSELF. §5 asks for "no money LABEL", which is a claim about the
+// screen rather than the wire: a rate box that is merely disabled still tells a
+// dispatcher a rate exists.
+const newLoad = await bodyOf(dispatcher.page, '/loads/new')
+record(
+  'a dispatcher gets no rate field on the create form',
+  newLoad.status === 200 && !newLoad.body.includes('name="rate"'),
+  `HTTP ${newLoad.status}`,
+)
+
+const ownerNewLoad = await bodyOf(owner.page, '/loads/new')
+record(
+  'while an owner does (rule 11)',
+  ownerNewLoad.status === 200 && ownerNewLoad.body.includes('name="rate"'),
+  `HTTP ${ownerNewLoad.status}`,
+)
+
 // The navigation does not offer what the role cannot reach, either (§7).
 const nav = await dispatcher.page.goto(`${BASE}/loads`, {
   waitUntil: 'domcontentloaded',

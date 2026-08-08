@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { withCurrentOrg } from '@/lib/auth-context'
+import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { confirmUpload } from '@/lib/documents'
 import { createLoad, LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
@@ -95,6 +95,8 @@ export async function createLoadAction(
     }
   }
 
+  const maySetRate = await currentUserCan('update', 'load.financials')
+
   try {
     const load = await withCurrentOrg(
       'create',
@@ -120,7 +122,18 @@ export async function createLoadAction(
             truckId: optionalText(formData.get('truckId')),
             driverId: optionalText(formData.get('driverId')),
             dispatchedMiles: formData.get('miles'),
-            linehaulCents: cents(formData.get('rate')),
+            // §1.3 AND PHASE 3's RATE_ENTRY, ENFORCED HERE. `load.financials`
+            // update is OWNER/ADMIN/ACCOUNTING; a DISPATCHER books the freight
+            // and accounting puts the money on it. Until Phase 5 went looking,
+            // this line took whatever was posted — so a dispatcher's form could
+            // set a rate, and the wall Phase 3 built had a gap in exactly the
+            // screen freight enters through.
+            //
+            // IGNORED RATHER THAN REFUSED. Refusing would fail the save and
+            // strand a load somebody just typed; ignoring books the freight
+            // with no rate, which is what a dispatcher's load looks like
+            // anyway. See PHASE-5-BRIEF.md §7 flag 6.
+            linehaulCents: maySetRate ? cents(formData.get('rate')) : 0,
             stops: [
               {
                 type: 'PICKUP',

@@ -17,6 +17,9 @@ export default async function NewLoadPage() {
 
   const { t } = await getLocaleContext()
   const mayeeFinancials = await currentUserCan('read', 'load.financials')
+  // Reading a rate and SETTING one are different permissions — §1 of Phase 3:
+  // "a MANAGER reads the number and does not set it".
+  const mayEnterRate = await currentUserCan('update', 'load.financials')
 
   const data = await withCurrentOrg('read', 'load', async (tx, session) => {
     const scope = companyScopeFilter(session.companyScopes)
@@ -109,6 +112,7 @@ export default async function NewLoadPage() {
           }))}
           places={data.places.map((place) => place.name)}
           economics={data.economics}
+          mayEnterRate={mayEnterRate}
           labels={{
             authority: t('ref.authority'),
             broker: t('loads.column.customer'),

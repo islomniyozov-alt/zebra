@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useMemo, useRef, useState } from 'react'
 import { RateConOffer, type Prefill } from './RateConOffer'
+import { centsToInput, parseMoneyToCents } from '@/lib/money'
 import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -48,6 +49,8 @@ interface Props {
   drivers: readonly Option[]
   places: readonly string[]
   /** Absent entirely for a role without `load.financials` (§7). */
+  /** `load.financials:update` — Phase 3's RATE_ENTRY. Decided by the page. */
+  mayEnterRate: boolean
   economics: {
     fuelCostPerMileCents: number
     driverPayPercentBps: number
@@ -123,6 +126,7 @@ export function CreateLoadForm({
   drivers,
   places,
   economics,
+  mayEnterRate,
   labels,
 }: Props) {
   const [state, action, pending] = useActionState(createLoadAction, INITIAL)
@@ -165,6 +169,37 @@ export function CreateLoadForm({
   // unsure about. `null` means nobody uploaded anything, which is the normal
   // case and must stay the fast one.
   const [prefill, setPrefill] = useState<Prefill | null>(null)
+
+  /**
+   * The controlled fields, filled when an extraction lands.
+   *
+   * The uncontrolled ones use `defaultValue` and a changing `key`; these three
+   * hold their own state for reasons that predate this phase — the typed-date
+   * blur normalisation and the live economics — so the prefill has to go
+   * through their setters or the screen would show one thing and submit
+   * another.
+   *
+   * ONLY WHERE THE FIELD IS EMPTY. A dispatcher who typed a date and then
+   * uploaded the confirmation must not watch their own typing disappear.
+   */
+  const applyPrefill = (next: Prefill) => {
+    setPrefill(next)
+
+    const pickupDate = typedDateFrom(next, 'stops[0]')
+    const deliveryDate = typedDateFrom(next, 'stops[1]')
+    if (pickupDate) setPickupAt((current) => current || pickupDate)
+    if (deliveryDate) setDeliveryAt((current) => current || deliveryDate)
+
+    // §1.3 — THE RATE ONLY IF THIS ROLE MAY SEE ONE. The endpoint already
+    // stripped the money for a dispatcher, so `extractedRate` is undefined for
+    // them and this does nothing; the check is here as well because a form
+    // that would have filled the field if the payload had carried it is a form
+    // one API change away from filling it.
+    if (mayEnterRate) {
+      const linehaul = extractedRate(next)
+      if (linehaul) setRate((current) => current || linehaul)
+    }
+  }
   const [authority, setAuthority] = useState(defaultAuthority)
 
   const [file, setFile] = useState<File | null>(null)
@@ -254,7 +289,7 @@ export function CreateLoadForm({
        * repeat-load path the brief refuses to slow down. */}
       <RateConOffer
         companyId={authority}
-        onExtracted={setPrefill}
+        onExtracted={applyPrefill}
         labels={{
           title: labels.offerTitle,
           hint: labels.offerHint,
@@ -361,7 +396,7 @@ export function CreateLoadForm({
             label={labels.pickupDate}
             inputMode="numeric"
             placeholder={labels.datePlaceholder}
-            hint={labels.dateHint}
+            hint={hintFor('stops[0].scheduledAt', labels.dateHint)}
             value={pickupAt}
             onChange={(event) => setPickupAt(event.target.value)}
             onBlur={(event) =>
@@ -379,6 +414,7 @@ export function CreateLoadForm({
             label={labels.deliveryDate}
             inputMode="numeric"
             placeholder={labels.datePlaceholder}
+            hint={hintFor('stops[1].scheduledAt', undefined)}
             value={deliveryAt}
             onChange={(event) => setDeliveryAt(event.target.value)}
             onBlur={(event) =>
@@ -405,14 +441,22 @@ export function CreateLoadForm({
         }
       />
 
-      <Input
-        name="rate"
-        label={labels.rate}
-        inputMode="decimal"
-        value={rate}
-        onChange={(event) => setRate(event.target.value)}
-        className="font-mono"
-      />
+      {/* §5's box: "a dispatcher's prefill carries no money key AND NO MONEY
+       * LABEL". The field is absent rather than disabled — a greyed rate box
+       * still tells a dispatcher a rate exists and invites the question of
+       * whose it is. The action ignores a posted rate from this role too;
+       * neither half is sufficient alone. */}
+      {mayEnterRate ? (
+        <Input
+          name="rate"
+          label={labels.rate}
+          inputMode="decimal"
+          value={rate}
+          onChange={(event) => setRate(event.target.value)}
+          hint={hintFor('money.linehaul', undefined)}
+          className="font-mono"
+        />
+      ) : null}
 
       {/* §7.6 — the computed line sits UNDER the rate field, never in a panel
        * the dispatcher has to go looking for. Absent entirely, not hidden,
@@ -512,12 +556,64 @@ function fieldAt(
   const stop = /^stops\[(\d+)\]\.(\w+)$/.exec(path)
   const source = prefill.extracted as unknown as Record<string, unknown>
 
+  // Three shapes, and the third is the one that was missing: `money.linehaul`
+  // was looked up as a literal key called "money.linehaul", found nothing, and
+  // left the rate field empty on a form that had everything else right. The
+  // walkthrough caught it; a type could not, because the payload is `unknown`
+  // by the time it gets here.
+  const money = /^money\.(\w+)$/.exec(path)
+
   const raw = stop
     ? ((source['stops'] as Record<string, unknown>[] | undefined)?.[
         Number(stop[1])
       ]?.[stop[2]!] ?? null)
-    : (source[path] ?? null)
+    : money
+      ? ((source['money'] as Record<string, unknown> | undefined)?.[
+          money[1]!
+        ] ?? null)
+      : (source[path] ?? null)
 
   if (!raw || typeof raw !== 'object') return null
   return raw as { value: unknown; confidence: string }
+}
+
+/**
+ * A stop's date, in the form's own typed-date convention.
+ *
+ * The model returns `2026-08-14T07:00` — a local ISO value with no zone, which
+ * is what the document printed. `normalizeTypedDate` already accepts the date
+ * half of that, so the conversion is a slice rather than a parse: no Date
+ * object is constructed, and therefore no timezone is applied to a value that
+ * never had one. A document saying 14 August must not become the 13th because
+ * the browser is west of UTC.
+ *
+ * The window start is preferred over the appointment when both are present:
+ * "06:00 - 10:00" means the driver may arrive at six, and the earlier number is
+ * the one a dispatcher plans against.
+ */
+function typedDateFrom(prefill: Prefill, stopPath: string): string | null {
+  const scheduled = fieldAt(prefill, `${stopPath}.scheduledAt`)
+  const windowStart = fieldAt(prefill, `${stopPath}.windowStart`)
+  const raw = windowStart?.value ?? scheduled?.value
+  if (typeof raw !== 'string') return null
+
+  const day = raw.slice(0, 10)
+  return normalizeTypedDate(day)
+}
+
+/** The linehaul as the rate field expects it: a plain decimal, no symbol. */
+function extractedRate(prefill: Prefill): string | null {
+  const linehaul = fieldAt(prefill, 'money.linehaul')
+  if (!linehaul || typeof linehaul.value !== 'string') return null
+
+  // Parsed and re-rendered through money.ts rather than passed along as the
+  // model printed it. "$2,450.00" in a decimal input is a value the form would
+  // then have to strip, and rule 9-money says the cents are what is real: this
+  // round-trips through the same parser the action will use, so what the user
+  // sees is what will be saved or nothing is.
+  try {
+    return centsToInput(parseMoneyToCents(linehaul.value))
+  } catch {
+    return null
+  }
 }
