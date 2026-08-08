@@ -93,6 +93,19 @@ Each step assumes the ones above it.
    printf '%s\n' "<secret>"  | npx wrangler secret put R2_SECRET_ACCESS_KEY --env production
    printf '%s\n' "<url>"     | npx wrangler secret put R2_ENDPOINT         --env production
    printf '%s\n' "<key>"     | npx wrangler secret put RESEND_API_KEY      --env production
+   printf '%s
+   ' "<key>"     | npx wrangler secret put ANTHROPIC_API_KEY   --env production
+   ```
+
+   `ANTHROPIC_API_KEY` arrived with Phase 5. Without it the extraction service
+   throws `no_api_key` by name rather than returning empty extractions that
+   look like documents nothing could be read from — the same discipline as
+   `RESEND_API_KEY`, and for the same reason. The dev worker needs it too, with
+   the flag omitted:
+
+   ```bash
+   printf '%s
+   ' "<key>" | npx wrangler secret put ANTHROPIC_API_KEY
    ```
 
    `DATABASE_URL` is `zebra_app` at the **pooled** production endpoint.

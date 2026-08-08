@@ -70,7 +70,21 @@ describe('an asset agrees with its own history', () => {
 
     // Printed rather than merely counted: an assertion that fails with
     // "expected 3 to be 0" sends somebody hunting. This one names the assets.
-    expect(drift, JSON.stringify(drift, null, 2)).toEqual([])
+    //
+    // AND NAMES THE INNOCENT EXPLANATION FIRST. This check reads the WHOLE
+    // database across every organization, so an integration suite running at
+    // the same time — whose fixtures live between `beforeAll` and `afterAll` —
+    // shows up here as drift that vanishes on its own. Real drift persists;
+    // `npm run check` and `npm run test:integration` should not be run
+    // concurrently against the same branch.
+    expect(
+      drift,
+      `${JSON.stringify(drift, null, 2)}
+
+` +
+        'If an integration run is in flight against this branch, these are its ' +
+        'live fixtures rather than drift. Re-run when it finishes.',
+    ).toEqual([])
   })
 })
 

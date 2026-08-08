@@ -1,0 +1,227 @@
+// ---------------------------------------------------------------------------
+// THE CLAUDE API, FROM THE WORKER (Phase 5 §1.2).
+//
+// One module, `fetch` only — no SDK. The Anthropic SDK pulls in Node streams
+// and its own retry machinery, and this runs on workerd where the first is
+// absent and the second is a second story about what a timeout means. The
+// Messages API over `fetch` is a POST with a JSON body; that is the whole
+// surface this phase needs.
+//
+// THE MODEL IS A NAMED CONSTANT, per §1.2: "model string a named constant, not
+// scattered". One place to change it, one place to read it in a cost report.
+//
+// THE TOKEN CAP IS ENFORCED BEFORE THE CALL, not after. A cap that only limits
+// the RESPONSE still lets a 90-page scanned PDF cost real money on its way in,
+// and the acceptance box asks for "the token cap proven by a document that
+// exceeds it failing cleanly" — which means refusing to send it, not truncating
+// it into a wrong answer.
+// ---------------------------------------------------------------------------
+
+/** §1.2. Changed here or nowhere. */
+export const EXTRACTION_MODEL = 'claude-sonnet-5'
+
+/** What the response may cost. Generous for a rate confirmation; finite. */
+export const MAX_OUTPUT_TOKENS = 4_096
+
+/**
+ * The biggest document worth sending, in bytes of base64.
+ *
+ * A rate confirmation is one or two pages. Ten megabytes of base64 is roughly
+ * 7.5MB of PDF — a scan at 600dpi, or somebody's whole load file. Neither is a
+ * rate confirmation, and sending one buys a slow, expensive, wrong answer.
+ *
+ * Deliberately below `MAX_UPLOAD_BYTES` (25MB) in documents.ts: the pipeline
+ * will store a bigger file happily, and extraction is the thing that declines.
+ */
+export const MAX_DOCUMENT_BASE64_BYTES = 10 * 1024 * 1024
+
+/**
+ * Published prices for the extraction model, in cents per million tokens.
+ *
+ * Kept here so the walkthrough can print a real number rather than "a few
+ * cents" (§5). It is a CONSTANT COPIED FROM A PRICE LIST — if Anthropic moves
+ * its prices this figure is stale, and stale is why it says so out loud in the
+ * report rather than being buried in a total.
+ */
+export const PRICE_CENTS_PER_MTOK = { input: 300, output: 1_500 } as const
+
+export interface Usage {
+  inputTokens: number
+  outputTokens: number
+}
+
+/** What one call cost, in integer cents, rounded half up (rule 9-money). */
+export function costCents(usage: Usage): number {
+  const millionths =
+    usage.inputTokens * PRICE_CENTS_PER_MTOK.input +
+    usage.outputTokens * PRICE_CENTS_PER_MTOK.output
+  return Math.round(millionths / 1_000_000)
+}
+
+/**
+ * The same cost in THOUSANDTHS of a cent.
+ *
+ * Because whole cents cannot tell 0.6¢ from 1.4¢, and those are different
+ * claims about a thousand loads a month — which is exactly the number §5 asks
+ * to be a measured fact rather than a hope. A rate confirmation lands around
+ * 2,500 of these, i.e. two and a half cents.
+ */
+export function costMilliCents(usage: Usage): number {
+  return Math.round(
+    (usage.inputTokens * PRICE_CENTS_PER_MTOK.input +
+      usage.outputTokens * PRICE_CENTS_PER_MTOK.output) /
+      1_000,
+  )
+}
+
+/** "2.583¢" — the figure a walkthrough prints. */
+export function formatCostMilliCents(milliCents: number): string {
+  return `${(milliCents / 1_000).toFixed(3)}¢`
+}
+
+export type ClaudeFailure =
+  | 'no_api_key'
+  | 'document_too_large'
+  | 'unsupported_media_type'
+  | 'refused'
+  | 'http_error'
+  | 'no_text'
+
+export class ClaudeError extends Error {
+  constructor(
+    readonly reason: ClaudeFailure,
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message)
+    this.name = 'ClaudeError'
+  }
+}
+
+/** What the API accepts as a document block, and what it accepts as an image. */
+const DOCUMENT_TYPES = new Set(['application/pdf'])
+const IMAGE_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+])
+
+export interface AskInput {
+  /** The file, base64 — the pipeline already has the bytes in R2. */
+  base64: string
+  mimeType: string
+  system: string
+  prompt: string
+  /** Injected in tests. The real one is `globalThis.fetch`. */
+  fetchImpl?: typeof fetch
+  apiKey?: string
+}
+
+export interface AskResult {
+  text: string
+  usage: Usage
+  model: string
+}
+
+/**
+ * One document, one question, one answer.
+ *
+ * Returns the raw text. Parsing is `extraction.ts`'s job and refusing a
+ * malformed answer is its rule — this module's contract ends at "the model
+ * said something".
+ */
+export async function askAboutDocument(input: AskInput): Promise<AskResult> {
+  const apiKey = input.apiKey ?? process.env.ANTHROPIC_API_KEY
+  if (!apiKey) {
+    // Named, not silent. A worker without the secret should say so once, in a
+    // way that reaches a log, rather than returning empty extractions that
+    // look like documents nothing could be read from.
+    throw new ClaudeError(
+      'no_api_key',
+      'ANTHROPIC_API_KEY is not set on this worker.',
+    )
+  }
+
+  if (input.base64.length > MAX_DOCUMENT_BASE64_BYTES) {
+    throw new ClaudeError(
+      'document_too_large',
+      `Document is ${Math.round(input.base64.length / 1024 / 1024)}MB of base64; the cap is ${MAX_DOCUMENT_BASE64_BYTES / 1024 / 1024}MB.`,
+    )
+  }
+
+  const isPdf = DOCUMENT_TYPES.has(input.mimeType)
+  const isImage = IMAGE_TYPES.has(input.mimeType)
+  if (!isPdf && !isImage) {
+    throw new ClaudeError(
+      'unsupported_media_type',
+      `${input.mimeType} cannot be read as a document.`,
+    )
+  }
+
+  const call = input.fetchImpl ?? fetch
+  const response = await call('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: EXTRACTION_MODEL,
+      max_tokens: MAX_OUTPUT_TOKENS,
+      system: input.system,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: isPdf ? 'document' : 'image',
+              source: {
+                type: 'base64',
+                media_type: input.mimeType,
+                data: input.base64,
+              },
+            },
+            { type: 'text', text: input.prompt },
+          ],
+        },
+      ],
+    }),
+  })
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    throw new ClaudeError(
+      'http_error',
+      `Claude returned ${response.status}: ${body.slice(0, 300)}`,
+      response.status,
+    )
+  }
+
+  const payload = (await response.json()) as {
+    content?: { type: string; text?: string }[]
+    usage?: { input_tokens?: number; output_tokens?: number }
+    model?: string
+    stop_reason?: string
+  }
+
+  const text = (payload.content ?? [])
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text ?? '')
+    .join('')
+    .trim()
+
+  if (text === '') {
+    throw new ClaudeError('no_text', 'Claude returned no text block.')
+  }
+
+  return {
+    text,
+    usage: {
+      inputTokens: payload.usage?.input_tokens ?? 0,
+      outputTokens: payload.usage?.output_tokens ?? 0,
+    },
+    model: payload.model ?? EXTRACTION_MODEL,
+  }
+}
