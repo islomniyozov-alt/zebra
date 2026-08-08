@@ -214,6 +214,113 @@ export async function extractRateConfirmation(
   }
 }
 
+/**
+ * The same reading, against a mint rather than a Document (§1.5).
+ *
+ * Upload-first extraction happens BEFORE the load exists, so there is no
+ * Document to write to yet — the answer lives on the `PendingUpload` and
+ * `confirmUpload` carries it across. The columns are named identically on both
+ * tables so this function is the same code with one delegate swapped, and a
+ * reader comparing the two has nothing to translate.
+ */
+export async function extractPendingUpload(
+  tx: TxClient,
+  input: ExtractInput,
+): Promise<ExtractionOutcome> {
+  const pending = await tx.pendingUpload.findFirst({
+    where: { id: input.documentId },
+    select: { id: true },
+  })
+  if (!pending) {
+    return {
+      ok: false,
+      documentId: input.documentId,
+      reason: 'no_document',
+      detail: 'No such pending upload in this tenant.',
+    }
+  }
+
+  await tx.pendingUpload.update({
+    where: { id: pending.id },
+    data: { ocrStatus: 'PROCESSING', ocrError: null },
+  })
+
+  const fail = async (
+    reason: ExtractionFailure,
+    detail: string,
+  ): Promise<ExtractionRefusal> => {
+    await tx.pendingUpload.update({
+      where: { id: pending.id },
+      data: { ocrStatus: 'FAILED', ocrError: detail.slice(0, 500) },
+    })
+    return { ok: false, documentId: pending.id, reason, detail }
+  }
+
+  let answer
+  try {
+    answer = await askAboutDocument({
+      base64: input.base64,
+      mimeType: input.mimeType,
+      system: EXTRACTION_SYSTEM,
+      prompt: extractionPrompt(),
+      ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+      ...(input.apiKey ? { apiKey: input.apiKey } : {}),
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const reason: ExtractionFailure =
+      error instanceof Error &&
+      'reason' in error &&
+      (error.reason === 'document_too_large' ||
+        error.reason === 'unsupported_media_type')
+        ? 'not_readable'
+        : 'call_failed'
+    return fail(reason, message)
+  }
+
+  let extracted: Extracted
+  try {
+    extracted = parseExtraction(answer.text)
+  } catch (error) {
+    if (error instanceof ExtractionParseError) {
+      await tx.pendingUpload.update({
+        where: { id: pending.id },
+        data: { ocrText: answer.text.slice(0, 20_000) },
+      })
+      return fail('unparsable', `${error.reason} at ${error.path}`)
+    }
+    throw error
+  }
+
+  const money = moneyToCents(extracted)
+
+  await tx.pendingUpload.update({
+    where: { id: pending.id },
+    data: {
+      ocrStatus: 'COMPLETED',
+      ocrError: null,
+      ocrText: answer.text.slice(0, 20_000),
+      extractedJson: {
+        extracted,
+        money,
+        usage: answer.usage,
+        model: answer.model,
+        costMilliCents: costMilliCents(answer.usage),
+      } as never,
+    },
+  })
+
+  return {
+    ok: true,
+    documentId: pending.id,
+    extracted,
+    money,
+    usage: answer.usage,
+    costMilliCents: costMilliCents(answer.usage),
+    model: answer.model,
+  }
+}
+
 /** What was stored, for Step 2's form to read without calling anything. */
 export async function storedExtraction(
   tx: TxClient,

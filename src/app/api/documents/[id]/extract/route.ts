@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server'
 import { withCurrentOrg } from '@/lib/auth-context'
 import { objectBytes, r2ConfigFromEnv } from '@/lib/r2'
-import { extractRateConfirmation } from '@/lib/rate-confirmation'
+import {
+  extractPendingUpload,
+  extractRateConfirmation,
+} from '@/lib/rate-confirmation'
 import { formatCostMilliCents } from '@/lib/claude'
 import { withoutMoney } from '@/lib/extraction'
 import { apiError, authFailureResponse } from '../../../_lib/respond'
@@ -35,21 +38,35 @@ export async function POST(
       'create',
       'document',
       async (tx, session) => {
+        // THE ID IS EITHER, and which one it is decides where the answer is
+        // written. Upload-first extraction (§1.5) happens before the load and
+        // therefore before the Document, so the mint carries the result until
+        // confirm moves it across. One endpoint rather than two because the
+        // caller's question is the same either way: read this file.
         const document = await tx.document.findFirst({
           where: { id, deletedAt: null },
           select: { id: true, r2Key: true, mimeType: true },
         })
-        if (!document) return null
+        const pending = document
+          ? null
+          : await tx.pendingUpload.findFirst({
+              where: { id },
+              select: { id: true, r2Key: true, mimeType: true },
+            })
+
+        const file = document ?? pending
+        if (!file) return null
 
         // Fetched inside the scoped transaction so the row was proved to be
         // this tenant's before a byte is read out of the bucket.
-        const bytes = await objectBytes(r2ConfigFromEnv(), document.r2Key)
+        const bytes = await objectBytes(r2ConfigFromEnv(), file.r2Key)
         if (!bytes) return { missing: true as const }
 
-        const outcome = await extractRateConfirmation(tx, {
-          documentId: document.id,
+        const read = document ? extractRateConfirmation : extractPendingUpload
+        const outcome = await read(tx, {
+          documentId: file.id,
           base64: base64Of(bytes),
-          mimeType: document.mimeType,
+          mimeType: file.mimeType,
         })
 
         return { outcome, session }

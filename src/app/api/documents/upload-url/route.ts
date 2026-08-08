@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { withCurrentOrg } from '@/lib/auth-context'
 import { DocumentPolicyError, mintUpload } from '@/lib/documents'
+import { isCompanyInScope } from '@/lib/tenancy'
 import { apiError, authFailureResponse, readJson } from '../../_lib/respond'
 import type { DocumentType } from '@/generated/prisma/client'
 
@@ -15,6 +16,8 @@ import type { DocumentType } from '@/generated/prisma/client'
 interface Body {
   entity?: unknown
   entityId?: unknown
+  /** Which authority a TARGETLESS mint belongs to. Validated against scope. */
+  companyId?: unknown
   filename?: unknown
   mimeType?: unknown
   sizeBytes?: unknown
@@ -29,6 +32,7 @@ export async function POST(request: Request): Promise<Response> {
   const {
     entity,
     entityId,
+    companyId,
     filename,
     mimeType,
     sizeBytes,
@@ -36,9 +40,20 @@ export async function POST(request: Request): Promise<Response> {
     documentType,
   } = parsed.value
 
+  // ENTITY IS OPTIONAL SINCE PHASE 5. Upload-first create mints before the
+  // load exists (§1.5); the target arrives at confirm, from the server action
+  // that just created it.
+  const targetless = entity === undefined && entityId === undefined
+  if (targetless && typeof companyId !== 'string') {
+    return apiError(
+      400,
+      'invalid_body',
+      'A mint with no entity must name the authority it belongs to.',
+    )
+  }
   if (
-    typeof entity !== 'string' ||
-    typeof entityId !== 'string' ||
+    (!targetless &&
+      (typeof entity !== 'string' || typeof entityId !== 'string')) ||
     typeof filename !== 'string' ||
     typeof mimeType !== 'string' ||
     typeof sizeBytes !== 'number' ||
@@ -53,22 +68,42 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
-    const minted = await withCurrentOrg('create', 'document', (tx, session) =>
-      mintUpload(
+    const minted = await withCurrentOrg('create', 'document', (tx, session) => {
+      if (
+        targetless &&
+        !isCompanyInScope(session.companyScopes, companyId as string)
+      ) {
+        // Out of scope reads as "no such authority" rather than "not yours":
+        // the caller is not entitled to learn which authorities exist.
+        throw new DocumentPolicyError(
+          'entity_not_found',
+          'No such authority for this user.',
+        )
+      }
+      return mintUpload(
         tx,
         session.organizationId,
         {
-          entity,
-          entityId,
+          ...(targetless
+            ? {}
+            : { entity: entity as string, entityId: entityId as string }),
           filename,
           mimeType,
           sizeBytes,
           sha256Base64: sha256,
           documentType: documentType as DocumentType,
         },
-        { requestedByUserId: session.userId },
-      ),
-    )
+        {
+          requestedByUserId: session.userId,
+          // The authority for a targetless mint. The CLIENT names it — it is
+          // the carrier the user picked on the create-load form — and the
+          // SERVER checks it is one they may act for. An owner's `companyScopes`
+          // is empty, meaning every authority, so taking `[0]` would have
+          // produced `undefined` for exactly the role that can do the most.
+          companyId: targetless ? (companyId as string) : null,
+        },
+      )
+    })
 
     return NextResponse.json(
       {

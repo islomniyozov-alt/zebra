@@ -160,8 +160,16 @@ export function buildObjectKey(input: {
 }
 
 export interface UploadRequest {
-  entity: string
-  entityId: string
+  /**
+   * What the finished Document will hang off — or absent.
+   *
+   * PHASE 5 §1.5: upload-first create reads a rate confirmation BEFORE the load
+   * exists, so there is nothing to name yet. A targetless mint still belongs to
+   * a tenant and an authority; what it does not yet belong to is a record, and
+   * confirm is where that arrives.
+   */
+  entity?: string
+  entityId?: string
   filename: string
   mimeType: string
   sizeBytes: number
@@ -170,15 +178,19 @@ export interface UploadRequest {
   documentType: DocumentType
 }
 
-function assertPolicy(
-  request: UploadRequest,
-): asserts request is UploadRequest & {
-  entity: TargetEntity
-} {
-  if (!isTargetEntity(request.entity)) {
+function assertPolicy(request: UploadRequest): void {
+  // A named entity must be a real one; an ABSENT entity is upload-first and is
+  // checked at confirm instead, when the record it attaches to exists.
+  if (request.entity !== undefined && !isTargetEntity(request.entity)) {
     throw new DocumentPolicyError(
       'unknown_entity',
       `Cannot attach a document to "${request.entity}".`,
+    )
+  }
+  if ((request.entity === undefined) !== (request.entityId === undefined)) {
+    throw new DocumentPolicyError(
+      'unknown_entity',
+      'Name both the entity and its id, or neither.',
     )
   }
   if (!Number.isInteger(request.sizeBytes) || request.sizeBytes <= 0) {
@@ -233,36 +245,60 @@ export async function mintUpload(
   tx: TxClient,
   organizationId: string,
   request: UploadRequest,
-  options: { requestedByUserId?: string | null; config?: R2Config } = {},
+  options: {
+    requestedByUserId?: string | null
+    config?: R2Config
+    /** The authority for a targetless mint. From the session, never the body. */
+    companyId?: string | null
+  } = {},
 ): Promise<MintedUpload> {
   assertPolicy(request)
 
-  const target = TARGETS[request.entity]
+  // A TARGETLESS MINT still needs an authority, because `companyId` is not
+  // nullable and a document has to belong to a carrier even before it belongs
+  // to a load. The session's own scope supplies it — see `options.companyId`,
+  // which the route fills from the session and the client cannot.
+  let companyId = options.companyId ?? null
 
-  // Read through the tenant-scoped client. A load in another organization
-  // returns null here, so no URL is ever minted for it.
-  const delegate = (
-    tx as unknown as Record<
-      string,
-      { findUnique(args: unknown): Promise<unknown> }
-    >
-  )[target.model]
-  const entity = (await delegate!.findUnique({
-    where: { id: request.entityId },
-    select: { id: true, companyId: true },
-  })) as { id: string; companyId: string } | null
+  if (request.entity !== undefined) {
+    const target = TARGETS[request.entity as TargetEntity]
 
-  if (!entity) {
+    // Read through the tenant-scoped client. A load in another organization
+    // returns null here, so no URL is ever minted for it.
+    const delegate = (
+      tx as unknown as Record<
+        string,
+        { findUnique(args: unknown): Promise<unknown> }
+      >
+    )[target.model]
+    const entity = (await delegate!.findUnique({
+      where: { id: request.entityId },
+      select: { id: true, companyId: true },
+    })) as { id: string; companyId: string } | null
+
+    if (!entity) {
+      throw new DocumentPolicyError(
+        'entity_not_found',
+        `No ${request.entity} with that id in this organization.`,
+      )
+    }
+    companyId = entity.companyId
+  }
+
+  if (!companyId) {
     throw new DocumentPolicyError(
       'entity_not_found',
-      `No ${request.entity} with that id in this organization.`,
+      'A document needs an authority: name an entity, or name a company.',
     )
   }
 
   const key = buildObjectKey({
     organizationId,
-    entity: request.entity,
-    entityId: request.entityId,
+    // `pending` is not a TargetEntity and is not meant to be — it is the
+    // key prefix for a document that has no record yet, and it reads that way
+    // in the bucket, which is where somebody will meet it.
+    entity: (request.entity ?? 'pending') as TargetEntity,
+    entityId: request.entityId ?? 'unattached',
     filename: request.filename,
   })
 
@@ -280,15 +316,15 @@ export async function mintUpload(
   const pending = await tx.pendingUpload.create({
     data: {
       organizationId,
-      companyId: entity.companyId,
+      companyId,
       r2Key: key,
       filename: sanitizeFilename(request.filename),
       mimeType: request.mimeType,
       sizeBytes: request.sizeBytes,
       sha256: request.sha256Base64,
       type: request.documentType,
-      targetEntity: request.entity,
-      targetId: request.entityId,
+      targetEntity: request.entity ?? null,
+      targetId: request.entityId ?? null,
       requestedByUserId: options.requestedByUserId ?? null,
       expiresAt: presigned.expiresAt,
     },
@@ -325,7 +361,18 @@ export async function confirmUpload(
   tx: TxClient,
   organizationId: string,
   pendingUploadId: string,
-  options: { uploadedByUserId?: string | null; config?: R2Config } = {},
+  options: {
+    uploadedByUserId?: string | null
+    config?: R2Config
+    /**
+     * Where it attaches, for a mint that had no target (Phase 5 §1.5).
+     *
+     * Supplied by the SERVER ACTION that just created the load, never by a
+     * client: the id it names is one the action made a moment ago inside the
+     * same request.
+     */
+    target?: { entity: TargetEntity; id: string }
+  } = {},
 ): Promise<{ documentId: string; r2Key: string }> {
   // Tenant-scoped: another organization's mint is not found.
   const pending = await tx.pendingUpload.findUnique({
@@ -362,6 +409,27 @@ export async function confirmUpload(
     )
   }
 
+  // The target is the mint's own, or the one supplied now. A mint that named
+  // one cannot be redirected — that would let a confirm move a document to a
+  // record the mint was never authorized against.
+  const targetEntity = (pending.targetEntity ?? options.target?.entity) as
+    | TargetEntity
+    | undefined
+  const targetId = pending.targetId ?? options.target?.id ?? null
+
+  if (!targetEntity || !targetId) {
+    throw new ConfirmError(
+      'unknown_mint',
+      'This upload has no target. Name the record it attaches to.',
+    )
+  }
+  if (pending.targetEntity && options.target) {
+    throw new ConfirmError(
+      'mismatch',
+      'This upload already names its target and cannot be redirected.',
+    )
+  }
+
   const document = await tx.document.create({
     data: {
       organizationId,
@@ -372,8 +440,15 @@ export async function confirmUpload(
       sizeBytes: pending.sizeBytes,
       sha256: facts.checksumSha256 ?? pending.sha256,
       type: pending.type,
-      [TARGETS[pending.targetEntity as TargetEntity].column]: pending.targetId,
+      [TARGETS[targetEntity].column]: targetId,
       uploadedByUserId: options.uploadedByUserId ?? null,
+      // EXTRACTION CARRIED ACROSS. It was read before the record existed, so
+      // it lived on the mint; the Document is where it belongs now, and the
+      // columns are named the same on both so nothing has to be translated.
+      ocrStatus: pending.ocrStatus,
+      ocrText: pending.ocrText,
+      extractedJson: pending.extractedJson ?? undefined,
+      ocrError: pending.ocrError,
     },
     select: { id: true, r2Key: true },
   })
@@ -390,8 +465,8 @@ export async function confirmUpload(
   // more than anywhere: a confirm retried after a timeout arrives twice, and
   // a POD can be confirmed before the manual Delivered click ever happens.
   // Both are handled by the engine rather than by a condition here.
-  if (pending.type === 'POD' && pending.targetEntity === 'load') {
-    await podConfirmed(tx, pending.targetId, options.uploadedByUserId ?? null)
+  if (pending.type === 'POD' && targetEntity === 'load') {
+    await podConfirmed(tx, targetId, options.uploadedByUserId ?? null)
   }
 
   return { documentId: document.id, r2Key: document.r2Key }

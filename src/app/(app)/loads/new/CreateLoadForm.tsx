@@ -1,6 +1,7 @@
 'use client'
 
 import { useActionState, useEffect, useMemo, useRef, useState } from 'react'
+import { RateConOffer, type Prefill } from './RateConOffer'
 import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -64,6 +65,17 @@ interface Props {
  * `Dictionary` type makes in src/lib/i18n.ts.
  */
 export interface CreateLoadLabels {
+  offerTitle: string
+  offerHint: string
+  offerChoose: string
+  offerHashing: string
+  offerUploading: string
+  offerReading: string
+  offerDone: string
+  offerFailed: string
+  offerTypeInstead: string
+  extracted: string
+  extractedUnsure: string
   authority: string
   broker: string
   truck: string
@@ -114,12 +126,46 @@ export function CreateLoadForm({
   labels,
 }: Props) {
   const [state, action, pending] = useActionState(createLoadAction, INITIAL)
+
+  /**
+   * PROVENANCE, kept and shown (§3 step 2).
+   *
+   * A field the model filled says so, and one it was unsure about says that
+   * too. The difference matters because a dispatcher verifies what they typed
+   * and trusts what appeared — so the appearing has to carry its own warning.
+   */
+  const valueOf = (path: string): string | undefined => {
+    const field = fieldAt(prefill, path)
+    return field === null ? undefined : String(field.value)
+  }
+
+  const hintFor = (path: string, fallback: string | undefined) => {
+    const field = fieldAt(prefill, path)
+    if (!field) return fallback
+    return field.confidence === 'low'
+      ? labels.extractedUnsure
+      : labels.extracted
+  }
+
+  /** "Chicago, IL" from a stop, which is what the place field expects. */
+  const stopPlace = (index: number): string | undefined => {
+    const city = fieldAt(prefill, `stops[${index}].city`)
+    const state_ = fieldAt(prefill, `stops[${index}].state`)
+    if (!city) return undefined
+    return state_ ? `${city.value}, ${state_.value}` : String(city.value)
+  }
   const formRef = useRef<HTMLFormElement>(null)
 
   const [pickupAt, setPickupAt] = useState('')
   const [deliveryAt, setDeliveryAt] = useState('')
   const [miles, setMiles] = useState('')
   const [rate, setRate] = useState('')
+
+  // PHASE 5 §3 STEP 2. What the extraction gave us, and which fields it was
+  // unsure about. `null` means nobody uploaded anything, which is the normal
+  // case and must stay the fast one.
+  const [prefill, setPrefill] = useState<Prefill | null>(null)
+  const [authority, setAuthority] = useState(defaultAuthority)
 
   const [file, setFile] = useState<File | null>(null)
   const [phase, setPhase] = useState<UploadPhase>('idle')
@@ -203,11 +249,38 @@ export function CreateLoadForm({
       {/* 1. Authority — the FIRST field, defaulting to last-used (§6.3). An
        * authority chosen elsewhere and carried invisibly is the worst outcome
        * this interface can produce. */}
+      {/* §1: an OFFER above the form, never a gate through it. Everything
+       * below works untouched if this is ignored, which is the 6.4-second
+       * repeat-load path the brief refuses to slow down. */}
+      <RateConOffer
+        companyId={authority}
+        onExtracted={setPrefill}
+        labels={{
+          title: labels.offerTitle,
+          hint: labels.offerHint,
+          choose: labels.offerChoose,
+          hashing: labels.offerHashing,
+          uploading: labels.offerUploading,
+          reading: labels.offerReading,
+          done: labels.offerDone,
+          failed: labels.offerFailed,
+          typeInstead: labels.offerTypeInstead,
+        }}
+      />
+      {prefill ? (
+        <input
+          type="hidden"
+          name="pendingUploadId"
+          value={prefill.pendingUploadId}
+        />
+      ) : null}
+
       <Select
         name="companyId"
         label={labels.authority}
         options={authorities}
         defaultValue={defaultAuthority}
+        onChange={(event) => setAuthority(event.target.value)}
         required
         autoFocus
         error={
@@ -219,7 +292,9 @@ export function CreateLoadForm({
         name="broker"
         label={labels.broker}
         list="broker-options"
-        hint={labels.createOnMiss}
+        hint={hintFor('brokerName', labels.createOnMiss)}
+        key={`broker-${prefill?.pendingUploadId ?? 'typed'}`}
+        defaultValue={valueOf('brokerName')}
         required
         error={
           state.field === 'customerId' ? (state.error ?? undefined) : undefined
@@ -252,13 +327,18 @@ export function CreateLoadForm({
         name="pickup"
         label={labels.pickup}
         list="place-options"
-        hint={labels.placeHint}
+        hint={hintFor('stops[0].city', labels.placeHint)}
+        key={`pickup-${prefill?.pendingUploadId ?? 'typed'}`}
+        defaultValue={stopPlace(0)}
         required
       />
       <Input
         name="delivery"
         label={labels.delivery}
         list="place-options"
+        hint={hintFor('stops[1].city', undefined)}
+        key={`delivery-${prefill?.pendingUploadId ?? 'typed'}`}
+        defaultValue={stopPlace(1)}
         required
       />
       <datalist id="place-options">
@@ -413,4 +493,31 @@ export function CreateLoadForm({
       </div>
     </form>
   )
+}
+
+/**
+ * One field out of an extraction, by dotted path.
+ *
+ * Returns null when the model did not carry it OR when the whole extraction is
+ * absent — the caller then falls back to an empty input, which is exactly the
+ * typing path. A missing field must never become an empty string in a form,
+ * because an empty string is a value somebody has to notice is wrong.
+ */
+function fieldAt(
+  prefill: Prefill | null,
+  path: string,
+): { value: unknown; confidence: string } | null {
+  if (!prefill) return null
+
+  const stop = /^stops\[(\d+)\]\.(\w+)$/.exec(path)
+  const source = prefill.extracted as unknown as Record<string, unknown>
+
+  const raw = stop
+    ? ((source['stops'] as Record<string, unknown>[] | undefined)?.[
+        Number(stop[1])
+      ]?.[stop[2]!] ?? null)
+    : (source[path] ?? null)
+
+  if (!raw || typeof raw !== 'object') return null
+  return raw as { value: unknown; confidence: string }
 }

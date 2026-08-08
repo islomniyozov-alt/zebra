@@ -320,6 +320,18 @@ const en = {
   'loads.rateCon': 'Rate confirmation',
   'loads.rateConHint':
     'Attaches after the load saves. Saving never waits for it.',
+  'loads.offerTitle': 'Have the rate confirmation?',
+  'loads.offerHint':
+    'Upload it and the form fills itself. Nothing is saved until you press Save.',
+  'loads.offerChoose': 'Choose a file',
+  'loads.offerHashing': 'Preparing…',
+  'loads.offerUploading': 'Uploading…',
+  'loads.offerReading': 'Reading it — about ten seconds.',
+  'loads.offerDone': 'Read. Check the fields it filled.',
+  'loads.offerFailed': 'Could not read that one. Type it instead.',
+  'loads.offerTypeInstead': 'Or just type — this is an offer, not a step.',
+  'loads.extracted': 'From the document.',
+  'loads.extractedUnsure': 'From the document — CHECK THIS ONE.',
   'loads.createOnMiss': 'Type a new name to create it.',
   'loads.placeHint': 'City, ST — or a facility name.',
   'loads.saved': 'Load {number} saved.',
@@ -1602,6 +1614,19 @@ const ru: Dictionary = {
   'loads.rateCon': 'Подтверждение ставки',
   'loads.rateConHint':
     'Прикрепится после сохранения груза. Сохранение его не ждёт.',
+  'loads.offerTitle': 'Есть подтверждение ставки?',
+  'loads.offerHint':
+    'Загрузите — форма заполнится сама. Ничего не сохраняется, пока вы не нажмёте «Сохранить».',
+  'loads.offerChoose': 'Выбрать файл',
+  'loads.offerHashing': 'Подготовка…',
+  'loads.offerUploading': 'Загрузка…',
+  'loads.offerReading': 'Читаем — около десяти секунд.',
+  'loads.offerDone': 'Прочитано. Проверьте заполненные поля.',
+  'loads.offerFailed': 'Не удалось прочитать. Введите вручную.',
+  'loads.offerTypeInstead':
+    'Или просто печатайте — это предложение, а не этап.',
+  'loads.extracted': 'Из документа.',
+  'loads.extractedUnsure': 'Из документа — ПРОВЕРЬТЕ.',
   'loads.createOnMiss': 'Введите новое название, чтобы создать его.',
   'loads.placeHint': 'Город, штат — или название площадки.',
   'loads.saved': 'Груз {number} сохранён.',
@@ -2878,6 +2903,19 @@ const fa: Dictionary = {
   'loads.rateCon': 'تأییدیهٔ نرخ',
   'loads.rateConHint':
     'پس از ذخیرهٔ بار پیوست می‌شود. ذخیره منتظر آن نمی‌ماند.',
+  'loads.offerTitle': 'تأیید نرخ را دارید؟',
+  'loads.offerHint':
+    'بارگذاری کنید تا فرم خودش پر شود. تا زمانی که ذخیره نزنید چیزی ثبت نمی‌شود.',
+  'loads.offerChoose': 'انتخاب پرونده',
+  'loads.offerHashing': 'در حال آماده‌سازی…',
+  'loads.offerUploading': 'در حال بارگذاری…',
+  'loads.offerReading': 'در حال خواندن — حدود ده ثانیه.',
+  'loads.offerDone': 'خوانده شد. فیلدهای پرشده را بررسی کنید.',
+  'loads.offerFailed': 'خوانده نشد. دستی وارد کنید.',
+  'loads.offerTypeInstead':
+    'یا فقط تایپ کنید — این یک پیشنهاد است، نه یک مرحله.',
+  'loads.extracted': 'از روی سند.',
+  'loads.extractedUnsure': 'از روی سند — این یکی را بررسی کنید.',
   'loads.createOnMiss': 'برای ساختن مورد تازه، نام آن را بنویسید.',
   'loads.placeHint': 'شهر، ایالت — یا نام محل.',
   'loads.saved': 'بار {number} ذخیره شد.',

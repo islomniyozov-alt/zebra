@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
+import { confirmUpload } from '@/lib/documents'
 import { createLoad, LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import { resolveBroker, resolveLocation } from '@/lib/locations'
 import { DispatchConflictError } from '@/lib/dispatch'
@@ -149,6 +150,27 @@ export async function createLoadAction(
 
     await rememberAuthority(companyId)
     revalidatePath('/loads')
+
+    // PHASE 5 §1.5 — the mint attaches HERE, at save, to the load that now
+    // exists. The document was uploaded and read before there was anything to
+    // hang it on; this is the moment there is. Failing to attach must not lose
+    // the load, so it is caught: a booked load with an unattached rate
+    // confirmation is recoverable, and a refused save is not.
+    const pendingUploadId = String(formData.get('pendingUploadId') ?? '')
+    if (pendingUploadId) {
+      try {
+        await withCurrentOrg('create', 'document', (tx, session) =>
+          confirmUpload(tx, session.organizationId, pendingUploadId, {
+            uploadedByUserId: session.userId,
+            target: { entity: 'load', id: load.id },
+          }),
+        )
+      } catch {
+        // Swallowed on purpose and visible in the pending row, which
+        // reconciliation sweeps. The alternative — failing the save — throws
+        // away a load somebody just typed because a file did not attach.
+      }
+    }
 
     // NOT a redirect. The form has a rate confirmation to attach and needs to
     // stay mounted to do it — §9's "the load save is never blocked by a
