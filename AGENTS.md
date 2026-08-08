@@ -23,6 +23,14 @@ A decision in a brief's §2 and a box in its §4 do not add up to a step in its
 was decided, was an acceptance criterion, and had no step behind it — the
 acceptance run found it, in the last session of the phase.
 
+**A new table that carries `organizationId` needs a row in
+`tests/integration/fixtures.ts`, in the same commit.** Row-level security being
+enabled is not proof that it hides anything: "sees no rows from the other
+organization" is true of a table with nothing in it, which is the most
+comfortable way to be wrong. `tests/isolation-coverage.test.ts` fails by name in
+`npm run check` for any tenant model the fixture never seeds — it was written
+after five Phase 4 tables went two phases with a policy and no proof.
+
 Read `prisma/schema.prisma` and `TMS-DESIGN-SYSTEM.md` before writing anything,
 plus the brief for whatever is being built. Where a brief disagrees with those
 two, the two win and the contradiction gets flagged rather than silently
