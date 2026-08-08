@@ -471,6 +471,33 @@ export async function seedOrganization(
       },
     }),
   )
+  // PHASE 5's TWO. `tests/isolation-coverage.test.ts` named them by the time
+  // the migration had finished applying, which is the whole point of writing
+  // that guard — five Phase 4 tables went two phases without one.
+  record(
+    'customerAlias',
+    await db.customerAlias.create({
+      data: {
+        organizationId,
+        customerId: customer.id,
+        alias: `${tag} Freight Partners`,
+        normalized: `${tag.toUpperCase()} FREIGHT PARTNERS`,
+      },
+    }),
+  )
+  record(
+    'extractionCorrection',
+    await db.extractionCorrection.create({
+      data: {
+        organizationId,
+        loadId: load.id,
+        field: 'brokerName',
+        extractedValue: 'Mispelled Logistics',
+        correctedValue: `${tag} Freight Partners`,
+        confidence: 'medium',
+      },
+    }),
+  )
   record(
     'iftaMileage',
     await db.iftaMileage.create({

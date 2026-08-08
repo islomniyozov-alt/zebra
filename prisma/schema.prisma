@@ -145,6 +145,8 @@ model Organization {
   dataQs          DataQsChallenge[]
   claimParties    ClaimParty[]
   claimNotes      ClaimNote[]
+  customerAliases CustomerAlias[]
+  corrections     ExtractionCorrection[]
   counters        Counter[]
   documents       Document[]
   drivers         Driver[]
@@ -300,6 +302,8 @@ model User {
   assetTransfers    AssetAssignment[]
   documentsUploaded Document[]
   claimNotes        ClaimNote[]
+  aliasesLearned    CustomerAlias[]
+  correctionsMade   ExtractionCorrection[]
   accessorialsOk    LoadAccessorial[]
   paymentsRecorded  Payment[]
   settlementsOk     Settlement[]
@@ -878,6 +882,8 @@ model Customer {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
+  aliases CustomerAlias[]
+
   name      String
   type      CustomerType @default(BROKER)
   mcNumber  String?
@@ -1140,6 +1146,7 @@ model Load {
   // Money paid against the LOAD rather than against an invoice. Only ever
   // populated for direct-settled freight — see PaymentLoadApplication.
   paymentApplications PaymentLoadApplication[]
+  corrections         ExtractionCorrection[]
 
   @@unique([companyId, loadNumber])
   @@index([companyId, operationalStatus])
@@ -1703,6 +1710,95 @@ enum ClaimStatus {
 }
 
 // ============================================================================
+// CORRECTION MEMORY (Phase 5 §3 step 3)
+//
+// §1.4 is the whole design and it is a restraint rather than a feature: "'
+// Learning' is data, not ML. Broker-name aliases and facility memory, written
+// on dispatcher correction, applied on the next upload. No fine-tuning, no
+// models trained."
+//
+// So there is no model here and no scoring. There are two tables: one that
+// remembers a name, and one that remembers a correction. Everything the phase
+// calls "learning" is a row in the first, written because somebody typed over
+// what was extracted.
+// ============================================================================
+
+/// A broker name as it appears on paper, pointed at the Customer it means.
+///
+/// "ITS Logistics LLC" and "ITS National LLC" are DIFFERENT companies, which is
+/// why the normalisation this table keys on folds case and spacing and nothing
+/// else. Stripping legal suffixes would merge two of the owner's real brokers.
+model CustomerAlias {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  /// Exactly as the document printed it, for a human reading the row.
+  alias      String
+  /// Case- and space-folded. What the lookup matches on.
+  normalized String
+
+  /// How many uploads it has answered. A number to notice, not to act on.
+  timesApplied Int @default(0)
+
+  learnedByUserId String?
+  learnedBy       User?   @relation(fields: [learnedByUserId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // ONE MEANING PER SPELLING, per tenant. A second alias for the same string
+  // would make the lookup order-dependent, and the order would be whatever the
+  // database felt like.
+  @@unique([organizationId, normalized])
+  @@index([customerId])
+}
+
+/// One field somebody typed over after an extraction filled it.
+///
+/// §3 step 3: "the raw material for §5's accuracy numbers and nothing more."
+/// Nothing reads this to change behaviour — the alias table is what changes
+/// behaviour, and it is written from the same moment. This is the record.
+model ExtractionCorrection {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  /// The load the correction was made while creating, when there was one.
+  loadId String?
+  load   Load?   @relation(fields: [loadId], references: [id], onDelete: SetNull)
+
+  /// The document it was extracted from. Kept after the mint becomes a
+  /// Document so a correction can be traced to the page it disagreed with.
+  documentId String?
+  document   Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  /// Dotted, the same paths the extraction uses: `brokerName`,
+  /// `stops[0].city`, `money.linehaulCents`.
+  field String
+
+  /// BOTH SIDES, always. A correction that recorded only the new value would
+  /// answer "what is it now" and not "what was wrong", and the second is the
+  /// question §5's accuracy table asks.
+  extractedValue String?
+  correctedValue String?
+  /// What the model claimed when it produced the value that was wrong.
+  confidence     String?
+
+  correctedByUserId String?
+  correctedBy       User?   @relation(fields: [correctedByUserId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId, field])
+  @@index([documentId])
+  @@index([loadId])
+}
+
+// ============================================================================
 // DOCUMENTS
 // ============================================================================
 
@@ -1770,6 +1866,8 @@ model Document {
 
   deletedAt DateTime?
   updatedAt DateTime  @updatedAt
+
+  corrections ExtractionCorrection[]
 
   @@index([companyId, type])
   @@index([loadId])

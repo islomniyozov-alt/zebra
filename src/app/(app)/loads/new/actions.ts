@@ -4,6 +4,11 @@ import { revalidatePath } from 'next/cache'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { confirmUpload } from '@/lib/documents'
+import {
+  diffExtraction,
+  learnAlias,
+  recordCorrections,
+} from '@/lib/correction-memory'
 import { createLoad, LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import { resolveBroker, resolveLocation } from '@/lib/locations'
 import { DispatchConflictError } from '@/lib/dispatch'
@@ -84,6 +89,9 @@ export async function createLoadAction(
   const { t } = await getLocaleContext()
 
   const companyId = String(formData.get('companyId') ?? '')
+  // The typed broker name, kept for the correction diff below. `createLoad`
+  // resolves it to a Customer; this is what the person actually wrote.
+  const broker = String(formData.get('broker') ?? '').trim()
   const pickup = String(formData.get('pickup') ?? '').trim()
   const delivery = String(formData.get('delivery') ?? '').trim()
 
@@ -171,6 +179,69 @@ export async function createLoadAction(
     // confirmation is recoverable, and a refused save is not.
     const pendingUploadId = String(formData.get('pendingUploadId') ?? '')
     if (pendingUploadId) {
+      // §3 STEP 3, AND IT HAPPENS BEFORE THE CONFIRM DELETES THE MINT. The
+      // extraction lives on the pending row; once `confirmUpload` moves it to
+      // the Document and deletes the mint, there is nothing here to compare
+      // against. Read first, write after.
+      //
+      // THE EXTRACTION IS READ FROM THE SERVER'S OWN COPY, never from the
+      // browser. A dispatcher's page was never sent the money fields (§1.3),
+      // and a form that posted back "what the model said" would be a form that
+      // could say anything.
+      try {
+        await withCurrentOrg('update', 'load', async (tx, session) => {
+          const mint = await tx.pendingUpload.findFirst({
+            where: { id: pendingUploadId },
+            select: { extractedJson: true },
+          })
+          const stored = (mint?.extractedJson ?? null) as {
+            extracted?: Record<string, unknown>
+          } | null
+          if (!stored?.extracted) return
+
+          const changes = diffExtraction(stored.extracted, {
+            brokerName: broker || null,
+            // `.place`, not `.city` — the form has one field per stop and it
+            // holds "Salem, OR". Diffing it against the extracted city alone
+            // logged a correction on every upload nobody corrected.
+            'stops[0].place': pickup || null,
+            'stops[1].place': delivery || null,
+          })
+
+          await recordCorrections(tx, {
+            organizationId: session.organizationId,
+            loadId: load.id,
+            userId: session.userId,
+            changes,
+          })
+
+          // AND THE ONE CORRECTION THAT CHANGES ANYTHING. The dispatcher chose
+          // a broker; if the document printed a different string, that string
+          // now means this customer.
+          const printed = (
+            stored.extracted['brokerName'] as { value?: string } | null
+          )?.value
+          if (printed && broker) {
+            const saved = await tx.load.findFirst({
+              where: { id: load.id },
+              select: { customer: { select: { id: true, name: true } } },
+            })
+            const customer = saved?.customer ?? null
+            if (customer) {
+              await learnAlias(tx, {
+                organizationId: session.organizationId,
+                extractedName: printed,
+                customerId: customer.id,
+                customerName: customer.name,
+                userId: session.userId,
+              })
+            }
+          }
+        })
+      } catch {
+        // Memory is a convenience. Failing to learn must never fail a save.
+      }
+
       try {
         await withCurrentOrg('create', 'document', (tx, session) =>
           confirmUpload(tx, session.organizationId, pendingUploadId, {

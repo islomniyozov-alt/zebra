@@ -144,6 +144,7 @@ export default async function NewLoadPage() {
             offerTypeInstead: t('loads.offerTypeInstead'),
             extracted: t('loads.extracted'),
             extractedUnsure: t('loads.extractedUnsure'),
+            extractedRemembered: t('loads.extractedRemembered'),
             preparing: t('upload.preparing'),
             uploading: t('upload.uploading'),
             uploaded: t('upload.done'),

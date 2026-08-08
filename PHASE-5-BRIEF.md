@@ -199,3 +199,67 @@ Recorded rather than resolved, per Phase 1's discipline.
     None of these is fixed yet, deliberately: the corrections are the evidence
     for whether the prompt changes, and changing it first would mean tuning
     against the model's own answer.
+
+11. **The sheets are marked verified in conversation but not in the files, and
+    the accuracy run must keep refusing them.** Step 3 was authorised with
+    "Sheets verified"; all 13 still read `"verified": false`, and not one of
+    478 `truth` values differs from `extracted`. So the golden set is currently
+    the model grading its own homework, which is the one thing §2 exists to
+    prevent.
+
+    This blocks §5's accuracy claim at Step 6, not Step 3 — correction memory
+    is measured by behaviour a walkthrough can assert without it. Recorded
+    here rather than worked around: the run refuses an unverified sheet, that
+    refusal stays, and flag 10's three findings are the specific lines most
+    worth a pen.
+
+12. **Normalising a broker name harder than case, space and punctuation would
+    merge two of this carrier's real customers.** `ITS Logistics LLC` and
+    `ITS National LLC` are both in the corpus and are different companies. The
+    obvious next step for a matcher — strip the legal suffix, compare the
+    leading token — folds them into one, and the failure is silent: the screen
+    shows a name that looks right and the invoice goes to the wrong company.
+
+    So `normalizeAlias` folds case, collapses whitespace and drops `.` and `,`
+    (because "Big M II, Inc." and "Big M II Inc" are one broker on two
+    documents) and stops. `resolveBroker` returns null rather than a best
+    guess. The restraint is asserted in both directions, in a unit test and
+    against real Postgres, because a later "improvement" is exactly what would
+    undo it.
+
+13. **The correction diff was comparing a field against half of itself, and the
+    walkthrough is what found it.** The create form has ONE input per stop
+    holding `Salem, OR`; the diff compared it against the extracted `city`
+    alone, so every upload where nobody touched the stops logged two
+    corrections. The first walkthrough run wrote 3 correction rows for 1
+    correction — and had the assertion been a range rather than an exact count,
+    it would have passed and §5's accuracy table would have counted unedited
+    loads as mistakes.
+
+    Fixed with a `stops[n].place` path that assembles the value the way the
+    form does. The general shape is worth carrying: **a correction log has to
+    compare against what the person SAW, and what they saw is the form's
+    fields, not the extraction's.**
+
+14. **Memory substituting a name silently is a false statement on the screen,
+    so it now discloses.** The offer replaced the extracted broker with the
+    remembered customer and left the hint reading "From the document" — under a
+    name the document does not contain, on the single field where being quietly
+    wrong sends an invoice to the wrong company.
+
+    The hint now reads "From a past correction — the document says X", naming
+    the printed string so the substitution can be seen and undone. The
+    document's own words stay in `extracted`, untouched, so the correction log
+    still compares against what the model said rather than against what memory
+    put there.
+
+15. **The correction log is written by a path that swallows its own failures,
+    and that is deliberate.** `createLoadAction` records corrections and learns
+    the alias inside a `try {} catch {}` that does nothing. Memory is a
+    convenience; failing to learn must never fail a save that a dispatcher has
+    already made and watched succeed.
+
+    The cost is that a persistent write failure here is invisible — the feature
+    would quietly stop learning and nothing would say so. Named because the
+    honest fix is a counter on the accuracy run ("N loads created from an
+    upload, M with a correction row"), which Step 6 is the place for.

@@ -79,6 +79,8 @@ export interface CreateLoadLabels {
   offerTypeInstead: string
   extracted: string
   extractedUnsure: string
+  /** Carries `{printed}`, replaced with what the document actually said. */
+  extractedRemembered: string
   authority: string
   broker: string
   truck: string
@@ -144,6 +146,16 @@ export function CreateLoadForm({
   }
 
   const hintFor = (path: string, fallback: string | undefined) => {
+    // §1.4's only visible effect, and it says so. When the broker name came
+    // from a past correction rather than from this document, the hint names the
+    // string the document actually printed — so a dispatcher can see the
+    // substitution and undo it, rather than discovering it on an invoice.
+    if (path === 'brokerName' && prefill?.remembered) {
+      return labels.extractedRemembered.replace(
+        '{printed}',
+        prefill.remembered.printed,
+      )
+    }
     const field = fieldAt(prefill, path)
     if (!field) return fallback
     return field.confidence === 'low'

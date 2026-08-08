@@ -7,6 +7,11 @@ import {
 } from '@/lib/rate-confirmation'
 import { formatCostMilliCents } from '@/lib/claude'
 import { withoutMoney } from '@/lib/extraction'
+import {
+  noteAliasApplied,
+  normalizeAlias,
+  resolveBroker,
+} from '@/lib/correction-memory'
 import { apiError, authFailureResponse } from '../../../_lib/respond'
 
 // POST /api/documents/{id}/extract — read a rate confirmation (Phase 5 §3).
@@ -69,7 +74,17 @@ export async function POST(
           mimeType: file.mimeType,
         })
 
-        return { outcome, session }
+        // §1.4 — APPLIED ON THE NEXT UPLOAD. If somebody has already typed
+        // over this printed name, the customer they chose is what the form
+        // should offer, not the string on the page. Read here rather than in
+        // the client because the alias table is tenant data.
+        const printed = outcome.ok ? outcome.extracted.brokerName?.value : null
+        const broker = printed ? await resolveBroker(tx, printed) : null
+        if (broker?.via === 'alias' && printed) {
+          await noteAliasApplied(tx, normalizeAlias(printed))
+        }
+
+        return { outcome, session, broker }
       },
       // The model takes seconds, not milliseconds, and the transaction is open
       // across it. Generous on purpose and still finite.
@@ -81,7 +96,7 @@ export async function POST(
       return apiError(404, 'not_found', 'The document has no stored object.')
     }
 
-    const { outcome, session } = result
+    const { outcome, session, broker } = result
 
     if (!outcome.ok) {
       // 422, not 500: the request was fine and the document could not be read.
@@ -99,6 +114,11 @@ export async function POST(
         ? outcome.extracted
         : withoutMoney(outcome.extracted),
       ...(maySeeMoney ? { money: outcome.money } : {}),
+      // What the printed name resolves to, when it resolves. The form shows
+      // the CUSTOMER's name rather than the document's — that is the whole
+      // visible effect of the memory, and it is why the row says which way it
+      // was found.
+      ...(broker ? { broker } : {}),
       cost: {
         milliCents: outcome.costMilliCents,
         display: formatCostMilliCents(outcome.costMilliCents),

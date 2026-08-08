@@ -32,6 +32,16 @@ export interface Prefill {
   /** Dotted paths the model was unsure about, for the form to mark. */
   lowConfidence: string[]
   cost: string
+  /**
+   * A broker name that came from a PAST CORRECTION rather than from this page.
+   *
+   * Carried separately, and carrying the printed string with it, because the
+   * substitution has to be visible. A field showing a name the document does
+   * not contain, under a hint reading "From the document", is a false
+   * statement — and the one field where being quietly wrong routes a load to
+   * the wrong company's invoice.
+   */
+  remembered?: { name: string; printed: string }
 }
 
 interface Props {
@@ -109,7 +119,27 @@ export function RateConOffer({ companyId, onExtracted, labels }: Props) {
 
       const answer = (await read.json()) as {
         extracted: Extracted
+        broker?: { customerId: string; name: string; via: 'alias' | 'exact' }
         cost: { display: string }
+      }
+
+      // §1.4 — THE MEMORY'S ONLY VISIBLE EFFECT. If somebody has typed over
+      // this printed name before, the form offers the customer they chose
+      // rather than the string on the page. The document's own words stay in
+      // `extracted`, so the correction log still compares against what the
+      // model said and not against what memory substituted.
+      let remembered: Prefill['remembered']
+      if (answer.broker && answer.extracted.brokerName) {
+        const printed = String(answer.extracted.brokerName.value ?? '')
+        // Only when memory changed the answer. An alias that resolves to the
+        // name already on the page has nothing to disclose.
+        if (answer.broker.via === 'alias' && answer.broker.name !== printed) {
+          remembered = { name: answer.broker.name, printed }
+        }
+        answer.extracted.brokerName = {
+          ...answer.extracted.brokerName,
+          value: answer.broker.name,
+        }
       }
 
       setPhase('done')
@@ -120,6 +150,7 @@ export function RateConOffer({ companyId, onExtracted, labels }: Props) {
           answer.extracted as unknown as Record<string, unknown>,
         ),
         cost: answer.cost.display,
+        remembered,
       })
     } catch (error) {
       setPhase('failed')

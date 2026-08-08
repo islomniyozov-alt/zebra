@@ -332,6 +332,8 @@ const en = {
   'loads.offerTypeInstead': 'Or just type — this is an offer, not a step.',
   'loads.extracted': 'From the document.',
   'loads.extractedUnsure': 'From the document — CHECK THIS ONE.',
+  'loads.extractedRemembered':
+    'From a past correction — the document says “{printed}”.',
   'loads.createOnMiss': 'Type a new name to create it.',
   'loads.placeHint': 'City, ST — or a facility name.',
   'loads.saved': 'Load {number} saved.',
@@ -1627,6 +1629,8 @@ const ru: Dictionary = {
     'Или просто печатайте — это предложение, а не этап.',
   'loads.extracted': 'Из документа.',
   'loads.extractedUnsure': 'Из документа — ПРОВЕРЬТЕ.',
+  'loads.extractedRemembered':
+    'Из прошлого исправления — в документе указано «{printed}».',
   'loads.createOnMiss': 'Введите новое название, чтобы создать его.',
   'loads.placeHint': 'Город, штат — или название площадки.',
   'loads.saved': 'Груз {number} сохранён.',
@@ -2916,6 +2920,8 @@ const fa: Dictionary = {
     'یا فقط تایپ کنید — این یک پیشنهاد است، نه یک مرحله.',
   'loads.extracted': 'از روی سند.',
   'loads.extractedUnsure': 'از روی سند — این یکی را بررسی کنید.',
+  'loads.extractedRemembered':
+    'از روی یک اصلاح پیشین — سند می‌گوید «{printed}».',
   'loads.createOnMiss': 'برای ساختن مورد تازه، نام آن را بنویسید.',
   'loads.placeHint': 'شهر، ایالت — یا نام محل.',
   'loads.saved': 'بار {number} ذخیره شد.',
