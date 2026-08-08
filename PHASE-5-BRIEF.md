@@ -119,3 +119,44 @@ Recorded rather than resolved, per Phase 1's discipline.
    service throws `no_api_key` by name — which is why it is a named failure and
    not an empty result. **Owed:** two `wrangler secret put`, one per worker; the
    README carries the exact commands.
+
+6. **Phase 3's rate-entry wall had a gap on the create form, and wiring the
+   prefill is what found it.** `createLoadAction` wrote `linehaulCents` from
+   whatever was posted, with no permission check — so a DISPATCHER's create
+   form could set a rate, on the one screen every load enters through.
+   `load.financials:update` has been OWNER/ADMIN/ACCOUNTING since Phase 3 §1
+   and the rate panel honoured it; this screen never asked.
+
+   Closed on both sides: the action IGNORES a rate it may not accept (refusing
+   would strand a load somebody just typed, and a dispatcher's load having no
+   rate is what it looks like anyway), and the form renders no rate input at
+   all for that role — §5 asks for no money LABEL, and a greyed box still
+   announces one. Neither half is sufficient alone, which is why both are
+   asserted in `verify-dispatcher`.
+
+7. **A server-rendered form accepts a file before React can hear about it, and
+   that is what made the upload-first walkthrough flake.** Not a race between
+   reads, which is what it looked like: `setInputFiles` succeeds on an
+   unhydrated page, the file lands in the input, no `change` handler exists
+   yet, and the offer sits at idle while the script waits for fields that were
+   never going to fill. Fast runs hydrated first and passed; slow ones scored
+   2/14 on a feature that was working.
+
+   The walkthrough now gates on hydration by typing into a CONTROLLED input and
+   reading the value back — a controlled input holds a typed value only once
+   React is listening, so it is a direct question rather than a sleep that hopes
+   — and re-sends the file once if the offer has not moved off idle. Four
+   consecutive 16/16 runs.
+
+   Worth carrying beyond this script: any walkthrough that drives a React form
+   on a server-rendered page has the same hole, and a passing one may simply be
+   fast enough today.
+
+8. **Reading a form field at a time is reading several different moments.** The
+   same script polled one field until it filled and then read six more, one
+   round trip each; a re-render between any two produced a report where the rate
+   was "(empty)" on a form that then saved 245,000 cents. It takes ONE
+   `page.evaluate` snapshot now, and waits for two consecutive snapshots to
+   agree before asserting — which is what "the form has settled" means and what
+   the first version assumed without checking. The save side had the same shape:
+   two independent polls, one query now.

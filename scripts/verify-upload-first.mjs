@@ -65,6 +65,33 @@ record(
   'save enabled, fields editable — no gate',
 )
 
+// --- wait for React to be listening ---------------------------------------------
+//
+// THE REAL CAUSE OF THE FLAKE, and it was never a race between reads.
+// `setInputFiles` on a server-rendered page succeeds whether or not React has
+// hydrated: the file lands in the input, no `change` handler exists yet, and
+// the offer sits at "idle" forever while the script waits for fields that were
+// never going to fill. Fast runs hydrated first and passed; slow ones did not.
+//
+// `miles` is a CONTROLLED input, so it holds a typed value only once React's
+// onChange is attached. Typing into it and reading it back is therefore a
+// direct question — is this page live yet — rather than a sleep that hopes so.
+let hydrated = false
+for (let attempt = 0; attempt < 30; attempt++) {
+  await page.fill('input[name="miles"]', '620')
+  await page.waitForTimeout(200)
+  if ((await page.locator('input[name="miles"]').inputValue()) === '620') {
+    hydrated = true
+    break
+  }
+  await page.waitForTimeout(500)
+}
+record(
+  'the page is hydrated before anything is uploaded',
+  hydrated,
+  hydrated ? 'controlled input holds a typed value' : 'never hydrated',
+)
+
 // --- upload through the offer slot ----------------------------------------------
 const before = Date.now()
 await page.setInputFiles('section input[type="file"]', {
@@ -73,148 +100,209 @@ await page.setInputFiles('section input[type="file"]', {
   buffer: Buffer.from(bytes),
 })
 
-// Wait for the OFFER TO SAY IT IS DONE, rather than for a clock — the model
-// takes about eleven seconds and a fixed sleep would be flaky or slow.
+// And if the offer still has not moved off idle a few seconds later, the change
+// event was lost anyway — so it is sent again rather than waited out. One retry,
+// because a second silent failure is a bug rather than a timing accident.
+await page.waitForTimeout(3_000)
+const idle = await page.evaluate(() =>
+  [...document.querySelectorAll('[role="status"]')].some((n) =>
+    (n.textContent ?? '').includes('form fills itself'),
+  ),
+)
+if (idle) {
+  await page.setInputFiles('section input[type="file"]', {
+    name: `${TAG}-ratecon.pdf`,
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(bytes),
+  })
+}
+
+// ONE ATOMIC SNAPSHOT OF THE WHOLE FORM, and everything is asserted from it.
 //
-// Not for an attribute selector, either: `input[value*="…"]` matches the DOM
-// ATTRIBUTE, and React sets the live property. The first version of this script
-// waited ninety seconds on a form that had filled correctly in twelve.
-// POLL THE VALUE ITSELF. Two earlier versions waited on a selector instead:
-// `input[value*="…"]` matches the DOM ATTRIBUTE while React sets the live
-// property, and a `[role="status"]` text filter proved just as indirect. The
-// thing this script is actually asking about is what is IN the field, so it
-// reads that.
+// THE RACE THIS REPLACES, because it is worth naming: the previous version
+// polled `broker` until it was non-empty, then read the other six fields one
+// `inputValue()` at a time. Each read is a separate round trip to the browser,
+// so a re-render between any two of them — and React does several while the
+// extraction lands — produced a report where the rate was "(empty)" on a form
+// that then saved 245,000 cents. The feature was right every time; the script
+// said 12/14, then 6/14, then 2/14.
+//
+// A snapshot cannot disagree with itself. `page.evaluate` runs once, in the
+// page, and reads every field in the same tick.
+const snapshot = async () =>
+  page.evaluate(() => {
+    const value = (name) =>
+      document.querySelector(`input[name="${name}"]`)?.value?.trim() ?? null
+    return {
+      broker: value('broker'),
+      pickup: value('pickup'),
+      delivery: value('delivery'),
+      pickupAt: value('pickupAt'),
+      deliveryAt: value('deliveryAt'),
+      // null rather than '' when the input does not exist at all — the
+      // difference between "a dispatcher has no rate field" and "the rate did
+      // not fill", which are opposite outcomes.
+      rate: document.querySelector('input[name="rate"]') ? value('rate') : null,
+      hasRateField: Boolean(document.querySelector('input[name="rate"]')),
+      marked: [...document.querySelectorAll('p')].filter((p) =>
+        (p.textContent ?? '').includes('From the document'),
+      ).length,
+      status: [...document.querySelectorAll('[role="status"]')].map((n) =>
+        (n.textContent ?? '').trim(),
+      ),
+    }
+  })
+
+// WAIT FOR THE FORM TO SETTLE, not for one field to appear. The extraction
+// fills several fields in one commit, but "several" is the thing under test —
+// so this waits until two consecutive snapshots agree, which is what "settled"
+// means and what the previous version assumed without checking.
+let form = await snapshot()
 let filled = 0
-for (let attempt = 0; attempt < 60; attempt++) {
-  const current = await page.locator('input[name="broker"]').inputValue()
-  if (current.trim() !== '') {
-    filled = Date.now() - before
-    break
-  }
+let stable = 0
+for (let attempt = 0; attempt < 90; attempt++) {
   await page.waitForTimeout(1_000)
-}
-if (filled === 0) {
-  const said = await page.locator('[role="status"]').allInnerTexts()
-  record('the offer fills the form', false, said.join(' | ').slice(0, 90))
+  const next = await snapshot()
+  const same = JSON.stringify(next) === JSON.stringify(form)
+  form = next
+
+  if (!form.broker) {
+    stable = 0
+    continue
+  }
+  // Filled AND unchanged since the last look.
+  if (same) {
+    stable += 1
+    if (stable >= 2) {
+      filled = Date.now() - before
+      break
+    }
+  } else {
+    stable = 0
+  }
 }
 
-if (filled > 0) {
-  record('the offer fills the form', true, `${filled} ms end to end`)
-}
+record(
+  'the offer fills the form',
+  filled > 0,
+  filled > 0
+    ? `${filled} ms, settled`
+    : `never settled — ${form.status.join(' | ').slice(0, 70)}`,
+)
 
-const valueOf = async (name) =>
-  (await page.locator(`input[name="${name}"]`).inputValue()).trim()
-
-const field = async (name, expected, label) => {
-  const actual = await valueOf(name)
+const field = (actual, expected, label) =>
   record(
     `fills ${label}`,
-    actual.toLowerCase().includes(String(expected).toLowerCase()),
-    `${actual || '(empty)'}${actual.toLowerCase().includes(String(expected).toLowerCase()) ? '' : `  != ${expected}`}`,
+    String(actual ?? '')
+      .toLowerCase()
+      .includes(String(expected).toLowerCase()),
+    `${actual || '(empty)'}`,
   )
-}
 
-await field('broker', TRUTH.broker, 'the broker')
-await field('pickup', TRUTH.pickupCity, 'the pickup')
-await field('delivery', TRUTH.deliveryCity, 'the delivery')
+field(form.broker, TRUTH.broker, 'the broker')
+field(form.pickup, TRUTH.pickupCity, 'the pickup')
+field(form.delivery, TRUTH.deliveryCity, 'the delivery')
 
 // THE DATE, in the form's own convention and not a day out. The document says
 // 08/14/2026; a Date object built from it in a browser west of UTC would show
 // the 13th, which is why the conversion is a slice rather than a parse.
-const pickupAt = await valueOf('pickupAt')
 record(
   'fills the pickup date, in the typed-date convention, on the right day',
-  pickupAt === '2026-08-14',
-  `${pickupAt || '(empty)'}${pickupAt === '2026-08-14' ? '' : '  != 2026-08-14'}`,
+  form.pickupAt === '2026-08-14',
+  `${form.pickupAt || '(empty)'}`,
 )
-const deliveryAt = await valueOf('deliveryAt')
 record(
   'and the delivery date from the window START, not the appointment',
-  deliveryAt === '2026-08-15',
-  `${deliveryAt || '(empty)'}`,
+  form.deliveryAt === '2026-08-15',
+  `${form.deliveryAt || '(empty)'}`,
 )
 
 // The rate, for an owner, through money.ts: "$2,450.00" -> "2450.00".
-const rate = await valueOf('rate')
+record(
+  'this role has a rate field at all',
+  form.hasRateField === true,
+  'owner — §1.3 gives a dispatcher none',
+)
 record(
   'fills the rate as a plain decimal, parsed through money.ts',
-  rate === '2450.00',
-  `${rate || '(empty)'}`,
+  form.rate === '2450.00',
+  `${form.rate ?? '(no field)'}`,
 )
 
 // The provenance is on the screen, not only in the payload.
-const hints = await page.locator('p:text-matches("From the document")').count()
 record(
   'and says which fields came from the document',
-  hints > 0,
-  `${hints} fields marked`,
+  form.marked > 0,
+  `${form.marked} fields marked`,
 )
 
 // --- save once -------------------------------------------------------------------
-await page.fill('input[name="miles"]', '620')
 await page.locator('button[type="submit"]').first().click()
 
-let load = null
-for (let attempt = 0; attempt < 20; attempt++) {
-  load = (
+// ONE QUERY FOR THE WHOLE OUTCOME, polled until the load exists.
+//
+// The previous version polled the Load, then separately polled the Document —
+// so a run could see the load and miss the attachment that had not landed yet,
+// and report the attach as broken. The attach happens in the same request as
+// the save; asking about both in one query asks the question that has one
+// answer.
+const outcome = async () =>
+  (
     await pool.query(
-      `select l.id, l."linehaulCents", c.name broker
-         from "Load" l join "Customer" c on c.id = l."customerId"
-        where c.name = $1 order by l."createdAt" desc limit 1`,
-      [TRUTH.broker],
+      `select l.id,
+              l."linehaulCents",
+              d.id                        "documentId",
+              d.type                      "documentType",
+              d."ocrStatus"               "documentStatus",
+              d."extractedJson" is not null carried,
+              (select count(*)::int from "PendingUpload" p
+                where p.filename like $2)  pending
+         from "Load" l
+         join "Customer" c on c.id = l."customerId"
+         left join "Document" d on d."loadId" = l.id
+        where c.name = $1
+        order by l."createdAt" desc limit 1`,
+      [TRUTH.broker, `%${TAG}%`],
     )
-  ).rows[0]
-  if (load) break
-  await page.waitForTimeout(1000)
+  ).rows[0] ?? null
+
+let saved = null
+for (let attempt = 0; attempt < 30; attempt++) {
+  saved = await outcome()
+  // Wait for the DOCUMENT too, not only the load: the attach is the claim.
+  if (saved?.documentId) break
+  await page.waitForTimeout(1_000)
 }
 
 record(
   'saving books the load with the broker from the document',
-  Boolean(load),
-  load?.id ?? '(not saved)',
+  Boolean(saved?.id),
+  saved?.id ?? '(not saved)',
 )
 record(
   'and the rate reaches cents',
-  load?.linehaulCents === 245000,
-  `${load?.linehaulCents} cents`,
+  saved?.linehaulCents === 245000,
+  `${saved?.linehaulCents ?? '(none)'} cents`,
 )
 
 // --- the document attached at save (§1.5) -----------------------------------------
-let document = null
-for (let attempt = 0; attempt < 20; attempt++) {
-  document = (
-    await pool.query(
-      `select id, type, "ocrStatus", "extractedJson" is not null carried
-         from "Document" where "loadId" = $1 order by "uploadedAt" desc limit 1`,
-      [load?.id ?? ''],
-    )
-  ).rows[0]
-  if (document) break
-  await page.waitForTimeout(1000)
-}
-
 record(
   'the rate confirmation attached to the load it created',
-  document?.type === 'RATE_CONFIRMATION',
-  `${document?.type ?? '(none)'}`,
+  saved?.documentType === 'RATE_CONFIRMATION',
+  `${saved?.documentType ?? '(none)'}`,
 )
 record(
   'carrying its extraction across from the mint',
-  document?.ocrStatus === 'COMPLETED' && document?.carried === true,
-  `${document?.ocrStatus}, extractedJson ${document?.carried ? 'present' : 'MISSING'}`,
+  saved?.documentStatus === 'COMPLETED' && saved?.carried === true,
+  `${saved?.documentStatus ?? '(none)'}, extractedJson ${saved?.carried ? 'present' : 'MISSING'}`,
 )
-
-const orphans = (
-  await pool.query(
-    `select count(*)::int n from "PendingUpload" where "filename" like $1`,
-    [`%${TAG}%`],
-  )
-).rows[0].n
 record(
   'and the mint is gone — no orphan pending row',
-  orphans === 0,
-  `${orphans} left behind`,
+  saved?.pending === 0,
+  `${saved?.pending ?? '?'} left behind`,
 )
+
+const load = saved
 
 await browser.close()
 

@@ -1,5 +1,6 @@
 import { chromium } from 'playwright'
 import { neonConfig, Pool } from '@neondatabase/serverless'
+import { rateConFixture } from './_ratecon-fixture.mjs'
 
 // ---------------------------------------------------------------------------
 // §13.10 — a DISPATCHER session, on the deployed worker.
@@ -511,56 +512,92 @@ record(
 // --- extraction money, per Phase 5 §1.3 and §5 -------------------------------
 //
 // "A dispatcher's prefill carries no money key and no money label; the same
-// document's figures reach OWNER/ACCOUNTING on the rate panel as extracted
-// values — pair-asserted."
+// document's figures reach OWNER/ACCOUNTING ... — pair-asserted."
 //
-// Both halves, on the same seeded document. A dispatcher's extraction response
-// has the money key REMOVED, and the create-load form renders no rate input at
-// all; an owner's response carries the cents and their form does.
-const extraction = await pool.query(
-  `select id from "Document" where "ocrStatus" = 'COMPLETED'
-     and "extractedJson" is not null
-     and "companyId" = $1 order by "uploadedAt" desc limit 1`,
-  [companyId],
+// ONE MODEL CALL, not two. The extraction is run as the DISPATCHER, which is
+// the half that has to be true on the wire; the other half is read out of the
+// row it wrote, where the cents are stored for the roles that may see them. Two
+// calls would prove the same thing at twice the cost, and this walkthrough runs
+// on every step boundary.
+//
+// It seeds its own document, because a walkthrough that fails for want of
+// fixture data is a walkthrough people learn to ignore.
+const ratecon = rateConFixture(TAG)
+
+const seeded = await dispatcher.page.evaluate(
+  async ({ bytes, companyId, filename }) => {
+    const data = new Uint8Array(bytes)
+    const digest = await crypto.subtle.digest('SHA-256', data)
+    const sha256 = btoa(String.fromCharCode(...new Uint8Array(digest)))
+
+    const minted = await fetch('/api/documents/upload-url', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        companyId,
+        filename,
+        mimeType: 'application/pdf',
+        sizeBytes: data.byteLength,
+        sha256,
+        documentType: 'RATE_CONFIRMATION',
+      }),
+    })
+    if (!minted.ok) return { error: `mint ${minted.status}` }
+    const { pendingUploadId, url, headers } = await minted.json()
+
+    const put = await fetch(url, { method: 'PUT', headers, body: data })
+    if (!put.ok) return { error: `put ${put.status}` }
+
+    const read = await fetch(`/api/documents/${pendingUploadId}/extract`, {
+      method: 'POST',
+    })
+    return { pendingUploadId, status: read.status, text: await read.text() }
+  },
+  {
+    bytes: Array.from(ratecon.bytes),
+    companyId,
+    filename: `${TAG}-ratecon.pdf`,
+  },
 )
-const readable = extraction.rows[0]?.id ?? null
 
-if (readable) {
-  const askAs = async (page) =>
-    page.evaluate(async (id) => {
-      const response = await fetch(`/api/documents/${id}/extract`, {
-        method: 'POST',
-      })
-      return { status: response.status, text: await response.text() }
-    }, readable)
+record(
+  'a dispatcher can upload and read a rate confirmation',
+  seeded.status === 200,
+  seeded.error ?? `HTTP ${seeded.status}`,
+)
+record(
+  'and the extraction carries no money key at all',
+  Boolean(seeded.text) &&
+    !seeded.text.includes('"money"') &&
+    !seeded.text.includes('linehaul'),
+  'no money on the dispatcher wire',
+)
 
-  const asDispatcher = await askAs(dispatcher.page)
-  record(
-    'a dispatcher can read a rate confirmation',
-    asDispatcher.status === 200,
-    `HTTP ${asDispatcher.status}`,
-  )
-  record(
-    'and the extraction carries no money key at all',
-    !asDispatcher.text.includes('"money"') &&
-      !asDispatcher.text.includes('linehaul'),
-    'no money in the payload',
-  )
+// THE OTHER HALF, from the row that call wrote: the figures did reach cents,
+// they simply did not reach the dispatcher.
+const stored = seeded.pendingUploadId
+  ? (
+      await pool.query(
+        'select "extractedJson"::text json from "PendingUpload" where id = $1',
+        [seeded.pendingUploadId],
+      )
+    ).rows[0]
+  : null
+// `jsonb::text` normalises with a space after the colon, which a substring
+// match does not allow for — the first version of this check failed on a row
+// that was perfectly correct, and printed "linehaulCents present" while doing
+// it. The detail line now shows what was actually found.
+const linehaul = /"linehaulCents":\s*(\d+)/.exec(stored?.json ?? '')
+record(
+  'while the same document’s figures are stored in cents (rule 11)',
+  linehaul?.[1] === '245000',
+  linehaul ? `${linehaul[1]} cents` : '(not stored)',
+)
 
-  const asOwner = await askAs(owner.page)
-  record(
-    'while an OWNER gets the figures in cents (rule 11)',
-    asOwner.status === 200 &&
-      asOwner.text.includes('"money"') &&
-      asOwner.text.includes('linehaulCents'),
-    `HTTP ${asOwner.status}`,
-  )
-} else {
-  record(
-    'a document with a completed extraction exists to ask about',
-    false,
-    'none seeded — run scripts/verify-extraction.mjs first',
-  )
+if (seeded.pendingUploadId) {
+  await pool.query('delete from "PendingUpload" where id = $1', [
+    seeded.pendingUploadId,
+  ])
 }
 
 // AND THE FORM ITSELF. §5 asks for "no money LABEL", which is a claim about the
