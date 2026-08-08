@@ -189,6 +189,32 @@ export async function headObject(
   }
 }
 
+/**
+ * The object's bytes, or null if nothing is stored at that key.
+ *
+ * Signed the same way `headObject` is — an authenticated GET rather than a
+ * presigned URL fetched afterwards, because nothing outside the worker needs
+ * to see this one and a URL is a capability that would then exist.
+ *
+ * Used by extraction (Phase 5), which is the only caller that needs the FILE
+ * rather than a link to it: the model reads the document.
+ */
+export async function objectBytes(
+  config: R2Config,
+  key: string,
+): Promise<Uint8Array | null> {
+  const response = await client(config).fetch(objectUrl(config, key), {
+    method: 'GET',
+  })
+
+  if (response.status === 404) return null
+  if (!response.ok) {
+    throw new Error(`R2 GET ${key} failed: ${response.status}`)
+  }
+
+  return new Uint8Array(await response.arrayBuffer())
+}
+
 /** Used by reconciliation to clear orphans. Absent is success. */
 export async function deleteObject(
   config: R2Config,
