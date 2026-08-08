@@ -19,8 +19,9 @@
     "20260806023129_drop_pay_rule_expression",
     "20260807144838_roadside_inspections",
     "20260807182143_claims_and_dataqs",
-    "20260807204338_settings_boundary_and_claim_assets"
+    "20260807204338_settings_boundary_and_claim_assets",
+    "20260808010001_pending_upload_extraction"
   ],
-  "recordedAt": "2026-08-07",
+  "recordedAt": "2026-08-08",
   "verified": false
 }
