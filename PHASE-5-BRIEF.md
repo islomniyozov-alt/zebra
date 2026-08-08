@@ -160,3 +160,42 @@ Recorded rather than resolved, per Phase 1's discipline.
    agree before asserting — which is what "the form has settled" means and what
    the first version assumed without checking. The save side had the same shape:
    two independent polls, one query now.
+
+9. **The truth sheets are gitignored with the corpus, and the accuracy run is
+   therefore not reproducible from a clean checkout.** §2 says the documents
+   "stay in the dev bucket"; the sheets derived from them carry the same
+   content — `brokerName: ITS Logistics LLC, linehaulCents: 400000` is the
+   customer's information in a form that is easier to read than the PDF, not
+   less sensitive than it.
+
+   The first draft of the ignore rule committed them, on the reasoning that
+   they hold "field values rather than documents". That reasoning was wrong and
+   is recorded here rather than quietly corrected: whose information it is does
+   not change because it was retyped.
+
+   The cost is real — §5's per-field accuracy table has to be pasted from a run
+   on the owner's machine rather than re-derived by a reviewer from the
+   repository. That is the owner's trade to reverse.
+
+10. **The first draft of the golden set already shows three things worth
+    deciding before the accuracy run, not after.** All 13 documents were read;
+    none was refused. 478 fields, 151 of them null, and only 3 marked
+    low-confidence — which is itself a finding, because the confidence signal
+    is what Step 2's form marks and a model that is almost never unsure gives
+    the marking nothing to do.
+    - **Zero is being returned where null was asked for.** `werner-1` has
+      `weightLbs: 0`, `pieces: 0` and `pallets: 0`, all at HIGH confidence, on
+      a document that plainly does not print them. The system prompt says "a
+      field the document does not carry is null. Never guess, never default" —
+      and 0 at high confidence is the most dangerous available answer, because
+      it prefills a form with a weight.
+    - **Two documents extracted a $0.00 linehaul** (`semail (4) (5)`,
+      `semail (58)`), and a third from the same broker read $1,150.00. A zero
+      rate is not a rate.
+    - **Three documents produced no rate at all.** Whether those pages carry
+      one is exactly what the owner's review answers, and it is the difference
+      between a prompt problem and a corpus fact.
+
+    None of these is fixed yet, deliberately: the corrections are the evidence
+    for whether the prompt changes, and changing it first would mean tuning
+    against the model's own answer.

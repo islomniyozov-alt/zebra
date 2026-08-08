@@ -64,3 +64,22 @@ prod-url.txt
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# The rate-confirmation corpus (Phase 5 §2), AND its truth sheets.
+#
+# Real broker documents from live freight: names, addresses, phone numbers,
+# rates and reference numbers belonging to the carrier's actual customers.
+# They stay on the machine and in the dev bucket, and never in git — the
+# repository is not the place for another company's paperwork.
+#
+# THE TRUTH SHEETS ARE IGNORED TOO, and the first draft of this rule was wrong
+# to say otherwise. A sheet reading `brokerName: Cascade Freight Partners,
+# rate: $2,450` is the same customer data as the PDF it came from, in a form
+# that is easier to read. That it is derived rather than scanned changes
+# nothing about whose information it is.
+#
+# The cost: §5's accuracy run is not reproducible from a clean checkout — the
+# instrument lives beside the corpus on the owner's machine, and a number
+# printed from it has to be pasted rather than re-derived by a reviewer. That
+# is the trade this makes, and it is the owner's to reverse.
+/corpus/
