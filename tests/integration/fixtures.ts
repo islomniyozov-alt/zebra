@@ -225,7 +225,7 @@ export async function seedOrganization(
       },
     }),
   )
-  record(
+  const claim = record(
     'claim',
     await db.claim.create({
       data: {
@@ -398,6 +398,76 @@ export async function seedOrganization(
         truckId: truck.id,
         servicedAt: new Date('2026-06-15'),
         category: 'OIL_CHANGE',
+      },
+    }),
+  )
+  // PHASE 4's FIVE. Added when the full integration suite failed this
+  // fixture's own coverage check — `roadsideInspection`, `inspectionViolation`,
+  // `dataQsChallenge`, `claimParty` and `claimNote` all carry a tenant, all
+  // have an `org_isolation` policy, and none of them had a row here. The
+  // coverage test's comment had already named the failure: "sees no rows from
+  // the other organization" passes for any table the fixture forgot, which is
+  // the most comfortable way to be wrong.
+  const inspection = record(
+    'roadsideInspection',
+    await db.roadsideInspection.create({
+      data: {
+        organizationId,
+        companyId,
+        truckId: truck.id,
+        inspectedAt: new Date('2026-06-20'),
+        level: 'LEVEL_1',
+        state: 'IN',
+        reportNumber: `${tag}-IN26`,
+      },
+    }),
+  )
+  const violation = record(
+    'inspectionViolation',
+    await db.inspectionViolation.create({
+      data: {
+        // Written by the set_org trigger from the inspection; passed only
+        // because Prisma requires the field.
+        organizationId: '',
+        inspectionId: inspection.id,
+        code: '393.75A3',
+        unit: 'VEHICLE',
+        outOfService: true,
+      },
+    }),
+  )
+  record(
+    'dataQsChallenge',
+    await db.dataQsChallenge.create({
+      data: {
+        organizationId,
+        companyId,
+        inspectionId: inspection.id,
+        violationId: violation.id,
+        basis: 'The tire was on a trailer we had already dropped.',
+      },
+    }),
+  )
+  record(
+    'claimParty',
+    await db.claimParty.create({
+      data: {
+        // Derived by set_org from the claim, like the violation above.
+        organizationId: '',
+        claimId: claim.id,
+        role: 'ADJUSTER',
+        name: `${tag} Adjuster`,
+      },
+    }),
+  )
+  record(
+    'claimNote',
+    await db.claimNote.create({
+      data: {
+        organizationId: '',
+        claimId: claim.id,
+        body: 'Photographs requested.',
+        toStatus: 'OPEN',
       },
     }),
   )

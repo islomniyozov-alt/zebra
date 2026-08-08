@@ -28,7 +28,26 @@ const nonce = Math.random().toString(36).slice(2, 8)
 // Each allocation is its own interactive transaction, and each holds a pooled
 // connection for its life. Fifty at once queue behind the pool; the default 2s
 // wait is not enough and the refusal would be about the pool, not the counter.
-const WAIT = { maxWaitMs: 60_000, timeoutMs: 20_000 } as const
+//
+// THE TRANSACTION TIMEOUT IS A QUEUE-DEPTH BUDGET, NOT A LATENCY BUDGET, and
+// saying so is the difference between a test and a flake. A hundred callers
+// serialise on ONE row lock by design, so the last one's transaction stays open
+// for the whole queue. Measured against Neon from a developer machine:
+//
+//   one transaction, cold   2,178 ms
+//   twenty concurrent       5,553 ms  ->  278 ms per caller
+//   a hundred, projected   27,765 ms
+//
+// The original 20,000 was under that projection and had been marginal since the
+// day it was written; it finally tipped over and failed with P2028 — a timeout,
+// reported as if the counter were broken. 60,000 is the measured queue depth
+// with room. It is NOT a licence for the allocation to get slower: at double
+// the per-caller latency this fails again, which is the regression signal worth
+// keeping.
+//
+// None of this describes production, where a load allocates one number and
+// waits on nobody.
+const WAIT = { maxWaitMs: 60_000, timeoutMs: 60_000 } as const
 
 beforeAll(async () => {
   owner = retryingClient(process.env.DIRECT_DATABASE_URL!)
