@@ -263,3 +263,73 @@ Recorded rather than resolved, per Phase 1's discipline.
     would quietly stop learning and nothing would say so. Named because the
     honest fix is a counter on the accuracy run ("N loads created from an
     upload, M with a correction row"), which Step 6 is the place for.
+
+16. **Four of §3 step 4's six columns already existed, so this step added two
+    and a key.** The step reads "`Location` gains gate code, dock notes, hours,
+    check-in instructions, contact, internal notes"; `hours`, `instructions`,
+    `contactName`/`contactPhone` and `notes` have been on the model since
+    Phase 2. Added: `gateCode`, `dockNotes`, and `normalizedAddress` — the
+    match key, which the step's second clause needs and its first does not
+    name.
+
+    `instructions` is what §3 calls check-in instructions and `notes` is what
+    it calls internal notes; both keep their older names, with a comment
+    saying so, rather than a rename migration that would touch every read of
+    them for a word.
+
+17. **The match key was wrong in a way only the second document could show,
+    and the integration test is what showed it.** The first version put the
+    postal code in the key when the document printed one and the city when it
+    did not — so the same dock got two keys depending on which broker's
+    template printed it, and never recognised itself. Every unit test passed:
+    each of them folded two addresses that both had zips.
+
+    The key is now the coarse part — street line and state — and the rest is
+    compared in `placeAgrees`, where a value counts against a match only if
+    BOTH documents printed it. The weakest match it makes is named in its own
+    comment: two documents that each omit the city and the zip, with street
+    lines that fold identically, are taken to be one dock.
+
+    Worth carrying: **a fold is not tested by folding two things that are
+    alike.** It is tested by the pair that differ in the way real documents
+    differ, which here was "one of them has a zip".
+
+18. **A street suffix can be canonicalised where a company suffix cannot, and
+    the two folds sit ten files apart.** `Turner Road` and `Turner Rd` are one
+    street; `ITS Logistics LLC` and `ITS National LLC` are two brokers. So
+    `facility-memory.ts` has a street-word table and `correction-memory.ts`
+    deliberately has nothing of the kind — an asymmetry that looks like an
+    inconsistency until the failure modes are named, which is why both files
+    say why in the code rather than here.
+
+    Directionals and suite numbers stay: "100 Main St N" and "100 Main St S"
+    are a mile apart, and Ste 3's gate code does not open Ste 4.
+
+19. **Facility memory is gated on `location.manage:read`, separately from the
+    `document:create` that pays for the extraction.** ACCOUNTING holds the
+    second and not the first — it uploads paperwork at billing time — so it is
+    the exact role a payload built on "whoever can extract can see everything
+    extracted" would have leaked a gate code and a dock contact to. The
+    `facilities` key is absent from its answer rather than present and empty,
+    and `verify-facility-memory` asserts the pair: 200 on the extraction, no
+    key in the body.
+
+20. **A saved facility takes the stop away from create-on-miss, and that is a
+    behaviour change on the create form.** Before this step every stop resolved
+    through `resolveLocation`, which creates a Location named after whatever
+    was typed — "Salem, OR". A stop whose dock is known or was just saved now
+    points at the FACILITY instead, and the stop's name is the facility's.
+
+    Guarded by an agreement check: the facility is used only if the place field
+    still reads what the extraction said. A dispatcher who typed "Portland, OR"
+    over "Salem, OR" has changed where the freight goes, and attaching a Salem
+    dock with a Salem gate code to it would be the extraction overruling the
+    person. The same comparison the correction log makes, for the same reason.
+
+21. **Nothing backfills `normalizedAddress`, so every Location that existed
+    before this migration is unmatchable.** Not a defect today — every one of
+    them is a lane endpoint with no street address, which would get a null key
+    anyway — but it will be one the moment a facility is created by any path
+    that does not go through `saveFacility`. There is no Locations screen yet;
+    when Phase 6 builds one, writing the key on save is the whole of the fix,
+    and this flag is the reminder that it is not automatic.

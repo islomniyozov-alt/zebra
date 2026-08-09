@@ -12,6 +12,14 @@ import {
   normalizeAlias,
   resolveBroker,
 } from '@/lib/correction-memory'
+import {
+  matchFacility,
+  normalizeAddress,
+  type FacilityMemory,
+} from '@/lib/facility-memory'
+import { can } from '@/lib/permissions'
+import type { ExtractedStop } from '@/lib/extraction-shape'
+import type { TxClient } from '@/lib/tenancy'
 import { apiError, authFailureResponse } from '../../../_lib/respond'
 
 // POST /api/documents/{id}/extract — read a rate confirmation (Phase 5 §3).
@@ -84,7 +92,21 @@ export async function POST(
           await noteAliasApplied(tx, normalizeAlias(printed))
         }
 
-        return { outcome, session, broker }
+        // §3 STEP 4 — THE SAME QUESTION FOR THE DOCKS. Has the office been to
+        // this address before, and what did they write down about it. Asked
+        // once per stop, on the folded address only.
+        //
+        // GATED SEPARATELY. `document:create` is what lets a role spend money
+        // reading a file; a gate code and a contact phone are `location.manage`
+        // data, and a payload that carried them to a role without it would be
+        // the rule about never sending an invisible field, broken by a feature
+        // rather than by a screen.
+        const facilities =
+          outcome.ok && can(session, 'read', 'location.manage')
+            ? await facilitiesForStops(tx, outcome.extracted.stops)
+            : []
+
+        return { outcome, session, broker, facilities }
       },
       // The model takes seconds, not milliseconds, and the transaction is open
       // across it. Generous on purpose and still finite.
@@ -96,7 +118,7 @@ export async function POST(
       return apiError(404, 'not_found', 'The document has no stored object.')
     }
 
-    const { outcome, session, broker } = result
+    const { outcome, session, broker, facilities } = result
 
     if (!outcome.ok) {
       // 422, not 500: the request was fine and the document could not be read.
@@ -119,6 +141,10 @@ export async function POST(
       // visible effect of the memory, and it is why the row says which way it
       // was found.
       ...(broker ? { broker } : {}),
+      // §3 step 4. One entry per stop that HAS an address — known docks carry
+      // what the office wrote down, new ones carry only what the document
+      // said, and stops with no street are absent rather than empty.
+      ...(facilities.length ? { facilities } : {}),
       cost: {
         milliCents: outcome.costMilliCents,
         display: formatCostMilliCents(outcome.costMilliCents),
@@ -133,6 +159,72 @@ export async function POST(
     throw error
   }
 }
+
+/**
+ * Each stop's facility, as one of three answers the form says differently.
+ *
+ *   `known`   — the office has been here; the memory travels with it
+ *   `new`     — a real address nobody has saved; offer to save it at confirm
+ *   (absent)  — no street address, so nothing to match on and nothing to offer
+ *
+ * The third is the common one, and saying nothing about it is the point. A
+ * stop the document printed as "Salem, OR" is a lane endpoint, and offering to
+ * save it as a facility would fill the list with docks that are really towns.
+ */
+async function facilitiesForStops(
+  tx: TxClient,
+  stops: readonly ExtractedStop[],
+): Promise<FacilityAnswer[]> {
+  const answers: FacilityAnswer[] = []
+
+  for (const [index, stop] of stops.entries()) {
+    const parts = {
+      addressLine1: stop.addressLine1?.value ?? null,
+      city: stop.city?.value ?? null,
+      state: stop.state?.value ?? null,
+      postalCode: stop.postalCode?.value ?? null,
+    }
+    if (!normalizeAddress(parts)) continue
+
+    const found = await matchFacility(tx, parts)
+    answers.push(
+      found
+        ? {
+            index,
+            status: 'known',
+            locationId: found.locationId,
+            name: found.name,
+            memory: found.memory,
+            hasMemory: found.hasMemory,
+          }
+        : {
+            index,
+            status: 'new',
+            name: stop.name?.value ?? null,
+            address: [
+              parts.addressLine1,
+              [parts.city, parts.state].filter(Boolean).join(', '),
+              parts.postalCode,
+            ]
+              .filter(Boolean)
+              .join(' · '),
+          },
+    )
+  }
+
+  return answers
+}
+
+type FacilityAnswer =
+  | {
+      index: number
+      status: 'known'
+      locationId: string
+      name: string
+      memory: FacilityMemory
+      hasMemory: boolean
+    }
+  | { index: number; status: 'new'; name: string | null; address: string }
 
 /** Bytes to base64, without Buffer — this runs on workerd. */
 function base64Of(bytes: Uint8Array): string {

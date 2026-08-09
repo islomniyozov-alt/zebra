@@ -1,7 +1,14 @@
 'use client'
 
-import { useActionState, useEffect, useMemo, useRef, useState } from 'react'
-import { RateConOffer, type Prefill } from './RateConOffer'
+import {
+  Fragment,
+  useActionState,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import { RateConOffer, type Facility, type Prefill } from './RateConOffer'
 import { centsToInput, parseMoneyToCents } from '@/lib/money'
 import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
@@ -106,6 +113,15 @@ export interface CreateLoadLabels {
   uploadFailed: string
   createOnMiss: string
   placeHint: string
+  facilityKnown: string
+  facilityNothingYet: string
+  facilitySave: string
+  facilityGateCode: string
+  facilityHours: string
+  facilityDock: string
+  facilityCheckIn: string
+  facilityContact: string
+  facilityNotes: string
   save: string
   cancel: string
 }
@@ -162,6 +178,10 @@ export function CreateLoadForm({
       ? labels.extractedUnsure
       : labels.extracted
   }
+
+  /** What the extraction knows about this stop's dock, if anything (§3 step 4). */
+  const facilityAt = (index: number) =>
+    prefill?.facilities?.find((facility) => facility.index === index) ?? null
 
   /** "Chicago, IL" from a stop, which is what the place field expects. */
   const stopPlace = (index: number): string | undefined => {
@@ -379,6 +399,7 @@ export function CreateLoadForm({
         defaultValue={stopPlace(0)}
         required
       />
+      <FacilityNote facility={facilityAt(0)} labels={labels} />
       <Input
         name="delivery"
         label={labels.delivery}
@@ -388,6 +409,7 @@ export function CreateLoadForm({
         defaultValue={stopPlace(1)}
         required
       />
+      <FacilityNote facility={facilityAt(1)} labels={labels} />
       <datalist id="place-options">
         {places.map((name) => (
           <option key={name} value={name} />
@@ -628,4 +650,97 @@ function extractedRate(prefill: Prefill): string | null {
   } catch {
     return null
   }
+}
+
+/**
+ * What the office knows about this dock, or an offer to start knowing (§3.4).
+ *
+ * Three states and three different sentences:
+ *
+ *   a KNOWN dock with notes  — the notes, because that is the whole point: the
+ *                              gate code arrives with the address instead of
+ *                              being remembered by whoever is on shift;
+ *   a KNOWN dock with none   — one line saying it is known, so nobody re-saves
+ *                              it and nobody wonders whether the match worked;
+ *   a NEW address            — the offer, unticked. §3 says unknown facilities
+ *                              are OFFERED for saving, and a box that saved
+ *                              every extracted address would fill the list
+ *                              with docks nobody chose.
+ *
+ * A stop with no street address gets nothing at all, which is most of them.
+ */
+function FacilityNote({
+  facility,
+  labels,
+}: {
+  facility: Facility | null
+  labels: CreateLoadLabels
+}) {
+  if (!facility) return null
+
+  if (facility.status === 'new') {
+    return (
+      <label className="-mt-z2 flex items-start gap-z2 rounded-card border border-dashed border-border-strong p-z2 text-sm text-ink-2">
+        {/* The NAME is what identifies it for a person; the checkbox posts
+         * only the decision. What gets saved is read from the server's own
+         * copy of the extraction — a form that posted the address could post
+         * any address. */}
+        <input
+          type="checkbox"
+          name={`saveFacility${facility.index}`}
+          value="1"
+          className="mt-[2px]"
+        />
+        <span>
+          <span className="font-medium text-ink">{labels.facilitySave}</span>{' '}
+          {facility.name ? `${facility.name} — ` : ''}
+          {facility.address}
+        </span>
+      </label>
+    )
+  }
+
+  const memory = facility.memory
+  const lines: [string, string | null][] = [
+    [labels.facilityGateCode, memory.gateCode],
+    [labels.facilityHours, memory.hours],
+    [labels.facilityDock, memory.dockNotes],
+    [labels.facilityCheckIn, memory.instructions],
+    [labels.facilityContact, contactLine(memory)],
+    [labels.facilityNotes, memory.notes],
+  ]
+
+  return (
+    <div className="-mt-z2 rounded-card bg-surface-2 p-z2 text-sm">
+      <p className="font-medium text-ink">
+        {labels.facilityKnown} {facility.name}
+      </p>
+      {facility.hasMemory ? (
+        <dl className="mt-z1 grid grid-cols-[auto_1fr] gap-x-z2 gap-y-[2px] text-ink-2">
+          {lines
+            .filter((line): line is [string, string] => Boolean(line[1]))
+            .map(([label, value]) => (
+              <Fragment key={label}>
+                <dt className="text-ink-3">{label}</dt>
+                <dd className="text-ink">{value}</dd>
+              </Fragment>
+            ))}
+        </dl>
+      ) : (
+        // Known and blank is a fact worth printing: it stops a dispatcher
+        // wondering whether the match failed, and it is the prompt to write
+        // something down after the driver calls from the gate.
+        <p className="mt-z1 text-ink-3">{labels.facilityNothingYet}</p>
+      )}
+    </div>
+  )
+}
+
+/** "Dana — (503) 555-0134", or whichever half exists. */
+function contactLine(memory: {
+  contactName: string | null
+  contactPhone: string | null
+}): string | null {
+  const parts = [memory.contactName, memory.contactPhone].filter(Boolean)
+  return parts.length ? parts.join(' — ') : null
 }

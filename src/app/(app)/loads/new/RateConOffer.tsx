@@ -42,7 +42,36 @@ export interface Prefill {
    * the wrong company's invoice.
    */
   remembered?: { name: string; printed: string }
+  /** One per stop the document gave a street address for (§3 step 4). */
+  facilities?: Facility[]
 }
+
+/**
+ * A stop's dock, as the server answered it.
+ *
+ * `known` carries what the office wrote down; `new` carries only what the
+ * document said, and exists so the form can OFFER to save it. Neither is
+ * present for a stop with no street address, which is most of them — a lane
+ * endpoint typed "Salem, OR" is not a facility.
+ */
+export type Facility =
+  | {
+      index: number
+      status: 'known'
+      locationId: string
+      name: string
+      hasMemory: boolean
+      memory: {
+        gateCode: string | null
+        dockNotes: string | null
+        hours: string | null
+        instructions: string | null
+        contactName: string | null
+        contactPhone: string | null
+        notes: string | null
+      }
+    }
+  | { index: number; status: 'new'; name: string | null; address: string }
 
 interface Props {
   /** The authority the form currently has selected. A mint needs one. */
@@ -120,6 +149,7 @@ export function RateConOffer({ companyId, onExtracted, labels }: Props) {
       const answer = (await read.json()) as {
         extracted: Extracted
         broker?: { customerId: string; name: string; via: 'alias' | 'exact' }
+        facilities?: Facility[]
         cost: { display: string }
       }
 
@@ -151,6 +181,7 @@ export function RateConOffer({ companyId, onExtracted, labels }: Props) {
         ),
         cost: answer.cost.display,
         remembered,
+        facilities: answer.facilities,
       })
     } catch (error) {
       setPhase('failed')

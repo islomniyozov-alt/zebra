@@ -998,8 +998,24 @@ model Location {
   contactName  String?
   contactPhone String?
   hours        String?
+  // What a driver is told to do on arrival. Phase 5 §3 step 4 calls this
+  // "check-in instructions"; the column predates the name and keeps it.
   instructions String?
+  // Internal. Not printed on anything a broker or a facility sees.
   notes        String?
+
+  // PHASE 5 §3 STEP 4 — the two of the six the Location did not already carry.
+  // A gate code is short, secret-ish and asked for at the gate; dock notes are
+  // the sentence that saves an hour ("dock 4 only, back in from Elder Creek").
+  gateCode  String?
+  dockNotes String?
+
+  // The address, folded, for matching an extracted stop to this facility.
+  // Nullable because most Locations are lane endpoints typed as "Salem, OR" —
+  // no street address means no key, and no key means no match, which is the
+  // correct answer rather than a weak one. See src/lib/facility-memory.ts for
+  // what the fold does and, more importantly, what it refuses to do.
+  normalizedAddress String?
 
   deletedAt DateTime?
   createdAt DateTime  @default(now())
@@ -1009,6 +1025,7 @@ model Location {
 
   @@index([organizationId, name])
   @@index([organizationId, state, city])
+  @@index([organizationId, normalizedAddress])
 }
 
 model FactoringCompany {

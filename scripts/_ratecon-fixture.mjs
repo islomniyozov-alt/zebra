@@ -5,7 +5,14 @@
 // TRUTH is what the PDF says, so every assertion is a comparison rather than
 // an impression.
 
-export function rateConFixture(TAG) {
+export function rateConFixture(TAG, printing = {}) {
+  // HOW THIS BROKER'S TEMPLATE PRINTS THE PICKUP DOCK. The facility walkthrough
+  // needs one dock printed two ways — "Turner Road SE" with a zip on one
+  // confirmation and "Turner Rd SE" without one on the next — because that is
+  // what two brokers' templates actually differ by, and recognising the dock
+  // across that difference is the whole of §3 step 4.
+  const pickupStreet = printing.pickupStreet ?? `3120 Turner Road SE ${TAG}`
+  const pickupZip = printing.pickupZip ?? '97302'
   // --- the document -------------------------------------------------------------
   //
   // Everything on it is a value this script knows, so "did it read the document"
@@ -36,8 +43,12 @@ export function rateConFixture(TAG) {
     ['F1', 10, ''],
     ['F2', 11, 'PICKUP'],
     ['F1', 10, 'Willamette Cold Storage'],
-    ['F1', 10, '3120 Turner Road SE'],
-    ['F1', 10, `${TRUTH.pickupCity}, ${TRUTH.pickupState} 97302`],
+    ['F1', 10, pickupStreet],
+    [
+      'F1',
+      10,
+      `${TRUTH.pickupCity}, ${TRUTH.pickupState}${pickupZip ? ` ${pickupZip}` : ''}`,
+    ],
     ['F1', 10, 'Date: 08/14/2026   Time: 07:00'],
     ['F1', 10, 'PU Number: PU-99341'],
     ['F1', 10, ''],

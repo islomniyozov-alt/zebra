@@ -11,6 +11,7 @@ import {
 } from '@/lib/correction-memory'
 import { createLoad, LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import { resolveBroker, resolveLocation } from '@/lib/locations'
+import { matchFacility, saveFacility } from '@/lib/facility-memory'
 import { DispatchConflictError } from '@/lib/dispatch'
 import {
   REFERENCE_ERROR_KEYS,
@@ -92,6 +93,9 @@ export async function createLoadAction(
   // The typed broker name, kept for the correction diff below. `createLoad`
   // resolves it to a Customer; this is what the person actually wrote.
   const broker = String(formData.get('broker') ?? '').trim()
+  // Read once, up here: the facilities need it BEFORE the load is written and
+  // the attach needs it after.
+  const pendingUploadId = String(formData.get('pendingUploadId') ?? '')
   const pickup = String(formData.get('pickup') ?? '').trim()
   const delivery = String(formData.get('delivery') ?? '').trim()
 
@@ -118,8 +122,28 @@ export async function createLoadAction(
           session.organizationId,
           formData.get('broker'),
         )
-        const from = await resolveLocation(tx, session.organizationId, pickup)
-        const to = await resolveLocation(tx, session.organizationId, delivery)
+        // §3 step 4. A known dock, or one the dispatcher asked to save; either
+        // way it wins over create-on-miss, which would otherwise make a second
+        // Location named after the town.
+        const facilities = pendingUploadId
+          ? await facilitiesForStops(
+              tx,
+              session.organizationId,
+              pendingUploadId,
+              { 0: pickup, 1: delivery },
+              {
+                0: formData.get('saveFacility0') === '1',
+                1: formData.get('saveFacility1') === '1',
+              },
+            )
+          : {}
+
+        const from =
+          facilities[0] ??
+          (await resolveLocation(tx, session.organizationId, pickup))
+        const to =
+          facilities[1] ??
+          (await resolveLocation(tx, session.organizationId, delivery))
 
         return createLoad(
           tx,
@@ -146,7 +170,7 @@ export async function createLoadAction(
               {
                 type: 'PICKUP',
                 locationId: from.locationId,
-                name: pickup,
+                name: facilities[0]?.name ?? pickup,
                 city: from.city,
                 state: from.state,
                 scheduledAt: stopDate(formData.get('pickupAt'), from),
@@ -154,7 +178,7 @@ export async function createLoadAction(
               {
                 type: 'DELIVERY',
                 locationId: to.locationId,
-                name: delivery,
+                name: facilities[1]?.name ?? delivery,
                 city: to.city,
                 state: to.state,
                 scheduledAt: stopDate(formData.get('deliveryAt'), to),
@@ -177,7 +201,6 @@ export async function createLoadAction(
     // hang it on; this is the moment there is. Failing to attach must not lose
     // the load, so it is caught: a booked load with an unattached rate
     // confirmation is recoverable, and a refused save is not.
-    const pendingUploadId = String(formData.get('pendingUploadId') ?? '')
     if (pendingUploadId) {
       // §3 STEP 3, AND IT HAPPENS BEFORE THE CONFIRM DELETES THE MINT. The
       // extraction lives on the pending row; once `confirmUpload` moves it to
@@ -287,4 +310,101 @@ export async function createLoadAction(
     }
     throw error
   }
+}
+
+/**
+ * The Location each stop should point at, when the document knew a facility.
+ *
+ * §3 STEP 4, THE WRITING HALF. Two things happen here and both read the
+ * SERVER'S copy of the extraction rather than the form:
+ *
+ *   * a dock the office already knows is linked to directly, so the second
+ *     load down a lane points at the facility and not at a second row named
+ *     after the town;
+ *   * a dock nobody has saved is created only if somebody ticked the box —
+ *     §3 says unknown facilities are OFFERED, and a form that posted the
+ *     address could post any address.
+ *
+ * AND ONLY IF THE STOP STILL AGREES WITH THE DOCUMENT. The offer was rendered
+ * against `Salem, OR`; a dispatcher who typed `Portland, OR` over it has
+ * changed where the freight goes, and attaching a Salem dock to it — with a
+ * Salem gate code — would be the extraction overruling the person.
+ */
+async function facilitiesForStops(
+  tx: Parameters<typeof resolveLocation>[0],
+  organizationId: string,
+  pendingUploadId: string,
+  typed: Record<number, string>,
+  save: Record<number, boolean>,
+): Promise<Record<number, ResolvedStop>> {
+  const mint = await tx.pendingUpload.findFirst({
+    where: { id: pendingUploadId },
+    select: { extractedJson: true },
+  })
+  const stored = (mint?.extractedJson ?? null) as {
+    extracted?: { stops?: Record<string, { value?: unknown } | null>[] }
+  } | null
+  const stops = stored?.extracted?.stops
+  if (!stops) return {}
+
+  const resolved: Record<number, ResolvedStop> = {}
+
+  for (const [index, place] of Object.entries(typed)) {
+    const stop = stops[Number(index)]
+    if (!stop) continue
+
+    const read = (key: string) => {
+      const value = stop[key]?.value
+      return typeof value === 'string' ? value : null
+    }
+
+    const parts = {
+      addressLine1: read('addressLine1'),
+      city: read('city'),
+      state: read('state'),
+      postalCode: read('postalCode'),
+    }
+
+    // The agreement check. `stops[n].place` is assembled the way the form
+    // assembles it — the same comparison the correction log makes, and for the
+    // same reason: what the person saw is the form's field, not the
+    // extraction's parts.
+    const printed = parts.state
+      ? `${parts.city ?? ''}, ${parts.state}`
+      : (parts.city ?? '')
+    if (place.trim().toLowerCase() !== printed.trim().toLowerCase()) continue
+
+    const known = await matchFacility(tx, parts)
+    const facility =
+      known ??
+      (save[Number(index)]
+        ? await saveFacility(tx, organizationId, {
+            ...parts,
+            name: read('name'),
+            addressLine2: read('addressLine2'),
+            contactName: read('contactName'),
+            contactPhone: read('contactPhone'),
+            instructions: read('instructions'),
+          })
+        : null)
+    if (!facility) continue
+
+    resolved[Number(index)] = {
+      locationId: facility.locationId,
+      name: facility.name,
+      city: facility.city,
+      state: facility.state,
+      timezone: facility.timezone,
+    }
+  }
+
+  return resolved
+}
+
+interface ResolvedStop {
+  locationId: string
+  name: string
+  city: string | null
+  state: string | null
+  timezone: string | null
 }
