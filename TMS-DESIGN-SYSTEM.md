@@ -467,15 +467,21 @@ English, Russian, Farsi from day one — keys from the first component, never re
 - **Russian runs roughly 30% longer than English.** No fixed-width buttons, labels, or table headers. Test every screen in Russian.
 - Locale drives number and date formatting via `Intl`. **Timezone comes from the stop, not the locale** (rule 3).
 - **Never translate:** load numbers, invoice numbers, VINs, MC/DOT numbers, status codes in CSV and Excel exports. Exports are machine-read downstream.
-- **An identifier field is `dir="ltr"`, even in Farsi.** Not translating one is not
-  enough: the bidi algorithm reorders the punctuation inside it. An invoice
-  prefix of `INV-` renders as `-INV` in an RTL input, and a violation code of
-  `393.75(a)(3)` reverses its brackets — the value is correct in the database
-  and wrong on the screen, which is the worst of the two. Any input whose value
-  is a Latin identifier — prefixes, codes, reference numbers, plates, VINs —
-  sets `dir="ltr"` so it reads the way it will be typed into somebody else's
-  system. Found in the Phase 4 RTL pass, on the one field that lands in an
-  invoice number people read down a phone.
+- **An identifier is `dir="ltr"`, even in Farsi — whether it is typed or only
+  read.** Not translating one is not enough: the bidi algorithm reorders the
+  punctuation inside it. An invoice prefix of `INV-` renders as `-INV` in an RTL
+  input, and a violation code of `393.75(a)(3)` reverses its brackets — the
+  value is correct in the database and wrong on the screen, which is the worst
+  of the two. Any Latin identifier — prefixes, codes, reference numbers, plates,
+  VINs, gate codes, phone numbers — sets `dir="ltr"` so it reads the way it will
+  be typed into somebody else's system, or dialled, or read out at a gate.
+
+  Found in the Phase 4 RTL pass on an invoice-number INPUT, and stated for
+  inputs only. The Phase 5 RTL pass found the same bug in read-only text: a
+  gate code of `#4417` rendered as `4417#` in a facility panel, where nothing
+  is typed at all. **The rule is about the VALUE, not the control** — a driver
+  reads a gate code off a screen and punches it into a keypad, and the reversed
+  one does not open the gate.
 - Developer-facing API errors stay in English. _(carried from the portal)_
 
 ---
