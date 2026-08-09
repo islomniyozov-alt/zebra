@@ -14,6 +14,11 @@ import { resolveBroker, resolveLocation } from '@/lib/locations'
 import { matchFacility, saveFacility } from '@/lib/facility-memory'
 import { DispatchConflictError } from '@/lib/dispatch'
 import {
+  LoadWarningsError,
+  loadWarnings,
+  warningSignature,
+} from '@/lib/load-warnings'
+import {
   REFERENCE_ERROR_KEYS,
   ReferenceError,
   optionalText,
@@ -33,6 +38,13 @@ export interface CreateLoadState {
    * other way round.
    */
   loadId: string | null
+  /**
+   * §3 step 5 — sentences, already translated, each naming the record it
+   * conflicts with. Present means the save DID NOT happen and is waiting for a
+   * confirm; `acknowledge` is what the form posts back to get past them.
+   */
+  warnings?: string[]
+  acknowledge?: string
 }
 
 /**
@@ -98,6 +110,12 @@ export async function createLoadAction(
   const pendingUploadId = String(formData.get('pendingUploadId') ?? '')
   const pickup = String(formData.get('pickup') ?? '').trim()
   const delivery = String(formData.get('delivery') ?? '').trim()
+  // The shipper's numbers. Kept because §3 step 5 asks to warn about repeats of
+  // them, and a warning about a number nothing stores cannot be written.
+  const bolNumber = optionalText(formData.get('bol'))
+  const poNumber = optionalText(formData.get('po'))
+  // What the dispatcher was shown last time, if they were shown anything.
+  const acknowledged = String(formData.get('acknowledge') ?? '')
 
   if (!pickup || !delivery) {
     return {
@@ -145,12 +163,44 @@ export async function createLoadAction(
           facilities[1] ??
           (await resolveLocation(tx, session.organizationId, delivery))
 
+        const pickupAt = stopDate(formData.get('pickupAt'), from)
+        const deliveryAt = stopDate(formData.get('deliveryAt'), to)
+        const linehaulCents = maySetRate ? cents(formData.get('rate')) : 0
+
+        // §3 STEP 5 — WARN, DO NOT BLOCK, AND ONLY ONCE.
+        //
+        // Thrown rather than returned, so the transaction rolls back and takes
+        // the broker and the two locations create-on-miss just made with it.
+        // A load nobody booked must not leave a customer behind.
+        const warnings = await loadWarnings(tx, {
+          customerId,
+          customerName: broker,
+          bolNumber,
+          poNumber,
+          pickupAt,
+          deliveryAt,
+          pickup: { city: from.city, state: from.state },
+          delivery: { city: to.city, state: to.state },
+          // NULL, not zero, for a role with no rate field: §1.3 keeps money
+          // out of a dispatcher's screen entirely, and "no rate" is a money
+          // label — it would tell them the load has one and that it is empty.
+          linehaulCents: maySetRate ? linehaulCents : null,
+        })
+        if (
+          warnings.length > 0 &&
+          warningSignature(warnings) !== acknowledged
+        ) {
+          throw new LoadWarningsError(warnings)
+        }
+
         return createLoad(
           tx,
           session.organizationId,
           {
             companyId,
             customerId,
+            bolNumber,
+            poNumber,
             truckId: optionalText(formData.get('truckId')),
             driverId: optionalText(formData.get('driverId')),
             dispatchedMiles: formData.get('miles'),
@@ -165,7 +215,7 @@ export async function createLoadAction(
             // strand a load somebody just typed; ignoring books the freight
             // with no rate, which is what a dispatcher's load looks like
             // anyway. See PHASE-5-BRIEF.md §7 flag 6.
-            linehaulCents: maySetRate ? cents(formData.get('rate')) : 0,
+            linehaulCents,
             stops: [
               {
                 type: 'PICKUP',
@@ -173,7 +223,7 @@ export async function createLoadAction(
                 name: facilities[0]?.name ?? pickup,
                 city: from.city,
                 state: from.state,
-                scheduledAt: stopDate(formData.get('pickupAt'), from),
+                scheduledAt: pickupAt,
               },
               {
                 type: 'DELIVERY',
@@ -181,7 +231,7 @@ export async function createLoadAction(
                 name: facilities[1]?.name ?? delivery,
                 city: to.city,
                 state: to.state,
-                scheduledAt: stopDate(formData.get('deliveryAt'), to),
+                scheduledAt: deliveryAt,
               },
             ],
           },
@@ -284,6 +334,25 @@ export async function createLoadAction(
     // still-uploading document" cuts both ways.
     return { error: null, field: null, loadId: load.id }
   } catch (error) {
+    if (error instanceof LoadWarningsError) {
+      // NOT an error slot. Each warning is its own sentence naming its own
+      // record, and the form renders them above a button that books it anyway
+      // — carrying the signature of exactly these warnings, so a dispatcher who
+      // then changes the BOL is warned again rather than waved through by a
+      // tick from a moment ago.
+      return {
+        error: null,
+        field: null,
+        loadId: null,
+        warnings: error.warnings.map((warning) =>
+          Object.entries(warning.values).reduce(
+            (message, [key, value]) => message.replaceAll(`{${key}}`, value),
+            t(warning.messageKey),
+          ),
+        ),
+        acknowledge: warningSignature(error.warnings),
+      }
+    }
     if (error instanceof DispatchConflictError) {
       // Every refusal at once, not the first (§8). Joined into one sentence
       // because a form has one error slot and a dispatcher fixing one problem

@@ -333,3 +333,85 @@ Recorded rather than resolved, per Phase 1's discipline.
     that does not go through `saveFacility`. There is no Locations screen yet;
     when Phase 6 builds one, writing the key on save is the whole of the fix,
     and this flag is the reminder that it is not automatic.
+
+22. **§3 step 5 asks for a duplicate-BOL warning against a number the schema
+    never kept.** The extraction has read `bolNumber` and `poNumber` since step
+    1 and dropped both at save: `Load` had `referenceNumber` — the broker's
+    load number — and nothing for the shipper's. A warning about a repeated BOL
+    cannot be written against a column that does not exist, so this step added
+    `Load.bolNumber` and `Load.poNumber`.
+
+    Neither is unique, deliberately. Two loads legitimately carry one BOL when
+    a shipment is split, which is the case the whole warn-not-block posture
+    exists for: the office is told and decides.
+
+23. **The BOL and PO fields appear only when a document brought them, because
+    §5's last box is the typing path.** "Typing path untouched: the repeat-load
+    walkthrough still passes at its Phase 2 timing" — and two more tab stops on
+    the hot path is exactly how that stops being true. A typed load has no BOL
+    at booking anyway; it is known at pickup.
+
+    The cost is real and is the flag: **a load booked by typing can never be
+    given a BOL**, because there is no edit screen for one either. Until there
+    is, the duplicate-BOL warning only protects freight that arrived as a
+    document. Phase 6's load-edit work is where that closes.
+
+24. **The warnings are thrown, not returned, and that is what keeps the
+    create-on-miss litter out.** By the time the checks run, `resolveBroker`
+    and `resolveLocation` have already made a Customer and two Locations inside
+    the transaction. Returning the warnings normally would COMMIT them — a
+    broker and two places for a load nobody booked, one set per press of a
+    button somebody is about to think better of. `LoadWarningsError` rolls the
+    transaction back; the walkthrough asserts one customer after a warned
+    attempt, not one per attempt.
+
+25. **A confirmation confirms THESE warnings, not "warnings in general".** The
+    form posts back a signature of the exact set it was shown — kinds and
+    values, sorted — and the action recomputes it. Change the BOL after being
+    warned about it and the set changes, the signature does not match, and the
+    new conflict is shown rather than waved through by a tick from a moment
+    ago. A confirmation keyed on the warning KIND alone would wave it through,
+    which is the version this nearly was.
+
+26. **"Missing rate" is a money label, so a DISPATCHER is never told it.**
+    §1.3 keeps money off that screen entirely; a warning saying the rate is
+    empty announces that the load has one. `WarningInput.linehaulCents` is
+    `null` for a role with no rate field and `0` for a role that left it blank,
+    and the two must not collapse — a check written as `!linehaulCents` would
+    have told every dispatcher about the money they are not allowed to see.
+
+27. **What counts as "missing-required" is this step's own ruling, not the
+    brief's.** §3 step 5 says "missing-required flags" without saying which
+    fields. Chosen: pickup date, delivery date, and rate — the three that make
+    a load invisible on a screen that sorts by them or un-invoiceable. NOT
+    chosen: truck, driver, weight, commodity. A load is routinely booked before
+    it has a truck, and warning about that on every booking is how an office
+    learns to click through warnings without reading them.
+
+    The probable-duplicate rule is the same kind of ruling: broker + pickup day
+    - lane, and deliberately not the rate. Two loads for one broker down one
+      lane on one day at different rates are still probably one load booked
+      twice — and comparing rates would suppress the warning exactly when the
+      second booking has a typo in it.
+
+28. **The integration suite cannot share the dev database with a browser
+    walkthrough, and I proved it the expensive way.** Four Playwright
+    walkthroughs were run against the deployed dev worker while the suite was
+    running — same Neon branch — and the suite came back **22 failed, 3 files**,
+    every failure a dropped WebSocket or `A query cannot be executed on an
+expired transaction … 30516 ms passed` against a 20 s budget. All of them in
+    `auth.test.ts` and `settlements.test.ts`, none in anything this step
+    touched. The run took 3768 s against a usual ~1800.
+
+    Re-run alone: **24 files, 363 tests, 0 failed, 2982 s.**
+
+    Phase 4 already learned this for the integrity check and put the reason in
+    that check's failure message. The rule is wider than the check: **nothing
+    else may touch the dev branch while the integration suite runs** — not
+    another suite, not a walkthrough, not a seed. Worth a guard rather than a
+    paragraph, which is Step 6's ride-along if there is room for one.
+
+    The near-miss worth naming: a red suite whose failures are all in files the
+    change never touched is the shape of an environment problem, and it is also
+    exactly the shape of a real bug in something shared. Being right about which
+    one it was required re-running it alone, not reasoning about it.

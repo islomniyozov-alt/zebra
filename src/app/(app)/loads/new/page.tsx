@@ -160,6 +160,10 @@ export default async function NewLoadPage() {
             facilityCheckIn: t('loads.facilityCheckIn'),
             facilityContact: t('loads.facilityContact'),
             facilityNotes: t('loads.facilityNotes'),
+            bol: t('loads.bol'),
+            po: t('loads.po'),
+            warnTitle: t('loads.warn.title'),
+            warnSaveAnyway: t('loads.warn.saveAnyway'),
             save: t('loads.save'),
             cancel: t('ref.cancel'),
           }}

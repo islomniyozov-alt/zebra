@@ -88,6 +88,9 @@ export interface LoadInput {
   companyId: string
   customerId: string
   referenceNumber?: unknown
+  /** The shipper's numbers, recorded and never allocated here (§3 step 5). */
+  bolNumber?: unknown
+  poNumber?: unknown
   truckId?: string | null
   driverId?: string | null
   trailerId?: string | null
@@ -294,6 +297,8 @@ export async function createLoad(
         companyId,
         loadNumber: String(number),
         referenceNumber: optionalText(input.referenceNumber),
+        bolNumber: optionalText(input.bolNumber),
+        poNumber: optionalText(input.poNumber),
         customerId,
         truckId: input.truckId ?? null,
         driverId: input.driverId ?? null,
@@ -473,6 +478,12 @@ export async function updateLoad(
     ...(input.customerId !== undefined ? { customerId: input.customerId } : {}),
     ...(input.referenceNumber !== undefined
       ? { referenceNumber: optionalText(input.referenceNumber) }
+      : {}),
+    ...(input.bolNumber !== undefined
+      ? { bolNumber: optionalText(input.bolNumber) }
+      : {}),
+    ...(input.poNumber !== undefined
+      ? { poNumber: optionalText(input.poNumber) }
       : {}),
     ...(input.truckId !== undefined ? { truckId } : {}),
     ...(input.driverId !== undefined ? { driverId } : {}),

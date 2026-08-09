@@ -336,6 +336,20 @@ const en = {
     'From a past correction — the document says “{printed}”.',
   'loads.createOnMiss': 'Type a new name to create it.',
   'loads.placeHint': 'City, ST — or a facility name.',
+  'loads.bol': 'BOL',
+  'loads.po': 'PO',
+  'loads.warn.title': 'Worth checking before you book this:',
+  'loads.warn.saveAnyway': 'Book it anyway',
+  'loads.warn.duplicateBol':
+    'BOL {bol} is already on load {load} for {customer}, booked {date}.',
+  'loads.warn.duplicatePo':
+    'PO {po} is already on load {load} for {customer}, booked {date}.',
+  'loads.warn.duplicateLoad':
+    'Load {load} is already booked for {customer} on this lane that day — {lane}, booked {date}.',
+  'loads.warn.missingPickupDate':
+    'No pickup date, so this load will not appear on any screen that sorts by one.',
+  'loads.warn.missingDeliveryDate': 'No delivery date.',
+  'loads.warn.missingRate': 'No rate, so this load cannot be invoiced yet.',
   'loads.facilityKnown': 'Known facility:',
   'loads.facilityNothingYet': 'Nothing written down about it yet.',
   'loads.facilitySave': 'Save this facility',
@@ -1642,6 +1656,21 @@ const ru: Dictionary = {
     'Из прошлого исправления — в документе указано «{printed}».',
   'loads.createOnMiss': 'Введите новое название, чтобы создать его.',
   'loads.placeHint': 'Город, штат — или название площадки.',
+  'loads.bol': 'Коносамент',
+  'loads.po': 'Заказ',
+  'loads.warn.title': 'Проверьте перед бронированием:',
+  'loads.warn.saveAnyway': 'Всё равно забронировать',
+  'loads.warn.duplicateBol':
+    'Коносамент {bol} уже указан в рейсе {load} для {customer}, забронирован {date}.',
+  'loads.warn.duplicatePo':
+    'Заказ {po} уже указан в рейсе {load} для {customer}, забронирован {date}.',
+  'loads.warn.duplicateLoad':
+    'Рейс {load} для {customer} на этом маршруте в тот же день уже забронирован — {lane}, {date}.',
+  'loads.warn.missingPickupDate':
+    'Нет даты погрузки — рейс не появится там, где сортировка по ней.',
+  'loads.warn.missingDeliveryDate': 'Нет даты выгрузки.',
+  'loads.warn.missingRate':
+    'Нет ставки — счёт по этому рейсу выставить нельзя.',
   'loads.facilityKnown': 'Известная площадка:',
   'loads.facilityNothingYet': 'Пока ничего не записано.',
   'loads.facilitySave': 'Сохранить площадку',
@@ -2942,6 +2971,21 @@ const fa: Dictionary = {
     'از روی یک اصلاح پیشین — سند می‌گوید «{printed}».',
   'loads.createOnMiss': 'برای ساختن مورد تازه، نام آن را بنویسید.',
   'loads.placeHint': 'شهر، ایالت — یا نام محل.',
+  'loads.bol': 'بارنامه',
+  'loads.po': 'سفارش خرید',
+  'loads.warn.title': 'پیش از ثبت، این‌ها را بررسی کنید:',
+  'loads.warn.saveAnyway': 'با این حال ثبت کن',
+  'loads.warn.duplicateBol':
+    'بارنامهٔ {bol} از پیش روی بار {load} برای {customer} است، ثبت‌شده در {date}.',
+  'loads.warn.duplicatePo':
+    'سفارش {po} از پیش روی بار {load} برای {customer} است، ثبت‌شده در {date}.',
+  'loads.warn.duplicateLoad':
+    'بار {load} برای {customer} در همان روز و همان مسیر ثبت شده است — {lane}، {date}.',
+  'loads.warn.missingPickupDate':
+    'تاریخ بارگیری ندارد، پس در صفحه‌هایی که بر پایهٔ آن مرتب می‌شوند دیده نمی‌شود.',
+  'loads.warn.missingDeliveryDate': 'تاریخ تحویل ندارد.',
+  'loads.warn.missingRate':
+    'نرخ ندارد، پس هنوز نمی‌توان برایش صورتحساب صادر کرد.',
   'loads.facilityKnown': 'محل شناخته‌شده:',
   'loads.facilityNothingYet': 'هنوز چیزی درباره‌اش نوشته نشده است.',
   'loads.facilitySave': 'ذخیرهٔ این محل',

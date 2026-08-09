@@ -122,6 +122,10 @@ export interface CreateLoadLabels {
   facilityCheckIn: string
   facilityContact: string
   facilityNotes: string
+  bol: string
+  po: string
+  warnTitle: string
+  warnSaveAnyway: string
   save: string
   cancel: string
 }
@@ -462,6 +466,41 @@ export function CreateLoadForm({
         </div>
       </div>
 
+      {/* THE SHIPPER'S NUMBERS, and only when a document brought them.
+       *
+       * §5's last box is "typing path untouched: the repeat-load walkthrough
+       * still passes at its Phase 2 timing", and two more tab stops on the hot
+       * path is exactly how that stops being true. A load that was typed has no
+       * BOL yet anyway — it is known at pickup, not at booking — so the fields
+       * appear because an extraction filled them, and the duplicate warnings
+       * they feed are about numbers a document actually carried. */}
+      {prefill && (valueOf('bolNumber') || valueOf('poNumber')) ? (
+        <div className="flex gap-z3">
+          <div className="flex-1">
+            <Input
+              name="bol"
+              label={labels.bol}
+              identifier
+              hint={hintFor('bolNumber', undefined)}
+              key={`bol-${prefill.pendingUploadId}`}
+              defaultValue={valueOf('bolNumber')}
+              className="font-mono"
+            />
+          </div>
+          <div className="flex-1">
+            <Input
+              name="po"
+              label={labels.po}
+              identifier
+              hint={hintFor('poNumber', undefined)}
+              key={`po-${prefill.pendingUploadId}`}
+              defaultValue={valueOf('poNumber')}
+              className="font-mono"
+            />
+          </div>
+        </div>
+      ) : null}
+
       <Input
         name="miles"
         label={labels.miles}
@@ -557,9 +596,35 @@ export function CreateLoadForm({
         </p>
       ) : null}
 
+      {/* §3 STEP 5 — WARN, NOT BLOCK. In warning colours rather than danger,
+       * because none of this is an error: the load is bookable and the office
+       * knows things the database does not. Each sentence names the record it
+       * conflicts with, which is the difference between "duplicate BOL" and
+       * something a dispatcher can act on without opening another screen. */}
+      {state.warnings?.length ? (
+        <div
+          role="alert"
+          className="flex flex-col gap-z1 rounded-card border border-warning bg-warning-soft p-z3"
+        >
+          <p className="text-sm font-medium text-ink">{labels.warnTitle}</p>
+          <ul className="flex list-disc flex-col gap-[2px] ps-z3 text-sm text-ink-2">
+            {state.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {/* THE SIGNATURE OF EXACTLY THESE WARNINGS. Recomputed on arrival, so a
+       * dispatcher who changes the BOL after being warned about it is warned
+       * again rather than waved through by a tick from a moment ago. */}
+      {state.acknowledge ? (
+        <input type="hidden" name="acknowledge" value={state.acknowledge} />
+      ) : null}
+
       <div className="flex items-center gap-z2">
         <Button type="submit" variant="primary" disabled={pending}>
-          {labels.save}
+          {state.warnings?.length ? labels.warnSaveAnyway : labels.save}
         </Button>
         <Link
           href="/loads"

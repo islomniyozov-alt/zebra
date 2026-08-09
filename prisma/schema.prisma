@@ -1075,6 +1075,15 @@ model Load {
   loadNumber      String // allocated via Counter
   referenceNumber String? // the broker's load/PRO number
 
+  // PHASE 5 §3 STEP 5. The extraction has read both since step 1 and had
+  // nowhere to put them: the step asks for a duplicate-BOL warning, and a
+  // warning about a number the system never keeps cannot be written. Both are
+  // the SHIPPER'S numbers rather than ours — never allocated here, only
+  // recorded — which is why neither is unique: two loads legitimately carry one
+  // BOL when a shipment is split, and the office wants to be told, not refused.
+  bolNumber String?
+  poNumber  String?
+
   customerId String
   customer   Customer @relation(fields: [customerId], references: [id])
 
@@ -1172,6 +1181,8 @@ model Load {
   @@index([companyId, driverId, bookedAt])
   @@index([companyId, truckId, bookedAt])
   @@index([referenceNumber])
+  @@index([organizationId, bolNumber])
+  @@index([organizationId, poNumber])
 }
 
 enum LoadOperationalStatus {
