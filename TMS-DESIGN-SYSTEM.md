@@ -482,6 +482,7 @@ English, Russian, Farsi from day one — keys from the first component, never re
   is typed at all. **The rule is about the VALUE, not the control** — a driver
   reads a gate code off a screen and punches it into a keypad, and the reversed
   one does not open the gate.
+
 - Developer-facing API errors stay in English. _(carried from the portal)_
 
 ---

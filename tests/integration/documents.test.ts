@@ -429,6 +429,39 @@ describe('reconciliation', () => {
     ).toBe(0)
   })
 
+  it('takes an ABANDONED EXTRACTION with it — §5, no orphan anything', async () => {
+    // PHASE 5 §5's box. Upload-first means the extraction exists BEFORE the
+    // load does: the answer, and what it cost, live on the pending row until a
+    // save moves them across. So a dispatcher who uploads a rate confirmation,
+    // watches the form fill and then closes the tab must leave nothing at all —
+    // and "nothing" now includes an extraction that was paid for.
+    const abandoned = await mint()
+    await put(abandoned.url, abandoned.headers, PDF)
+    await owner.pendingUpload.update({
+      where: { id: abandoned.pendingUploadId },
+      data: {
+        ocrStatus: 'COMPLETED',
+        extractedJson: { extracted: { brokerName: { value: 'Nobody Ltd' } } },
+        expiresAt: new Date(Date.now() - 60_000),
+      },
+    })
+
+    await runInOrg(app, orgA, (tx) => reconcileExpiredUploads(tx), {
+      attribution: unattributed('scheduled reconciliation sweep'),
+    })
+
+    expect(
+      await owner.pendingUpload.count({
+        where: { id: abandoned.pendingUploadId },
+      }),
+    ).toBe(0)
+    // The object too, and no Document was ever made from it.
+    expect(await headObject(config, abandoned.key)).toBeNull()
+    expect(
+      await owner.document.count({ where: { r2Key: abandoned.key } }),
+    ).toBe(0)
+  })
+
   it('leaves a live mint alone', async () => {
     const live = await mint()
     const result = await runInOrg(

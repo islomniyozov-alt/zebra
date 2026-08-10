@@ -67,115 +67,115 @@ edits, including its comments — `tests/migration-checksums.test.ts` enforces i
 
 Recorded rather than resolved, per Phase 1's discipline.
 
-1. **The strict shape is enforced on OUR side, not by the API's structured
-   output.** §1.2 says "Structured output: a strict JSON shape". The Messages
-   API can be made to emit guaranteed-shaped JSON via tool use; this step
-   instead sends the JSON Schema in the prompt and parses the answer with a
-   parser that refuses everything the schema forbids.
+1.  **The strict shape is enforced on OUR side, not by the API's structured
+    output.** §1.2 says "Structured output: a strict JSON shape". The Messages
+    API can be made to emit guaranteed-shaped JSON via tool use; this step
+    instead sends the JSON Schema in the prompt and parses the answer with a
+    parser that refuses everything the schema forbids.
 
-   The choice is deliberate and worth stating because it looks like the weaker
-   one. A tool-use guarantee binds the model to a shape; it does not bind it to
-   a MEANING — `{"value": "42,000"}` where a number belongs, or a confidence of
-   `0.82`, are both schema-valid in the shapes an API will accept and both are
-   wrong here. The parser refuses them by name and says where. And a refusal on
-   our side keeps working if the API's guarantee changes, is testable without a
-   network, and is the same code path whichever model answers.
+    The choice is deliberate and worth stating because it looks like the weaker
+    one. A tool-use guarantee binds the model to a shape; it does not bind it to
+    a MEANING — `{"value": "42,000"}` where a number belongs, or a confidence of
+    `0.82`, are both schema-valid in the shapes an API will accept and both are
+    wrong here. The parser refuses them by name and says where. And a refusal on
+    our side keeps working if the API's guarantee changes, is testable without a
+    network, and is the same code path whichever model answers.
 
-   The cost: the model can spend output tokens on an answer we then throw away.
-   Measured in Step 6 against the golden set — if unparsable answers are common
-   rather than rare, tool use is the fix and this flag is where to start.
+    The cost: the model can spend output tokens on an answer we then throw away.
+    Measured in Step 6 against the golden set — if unparsable answers are common
+    rather than rare, tool use is the fix and this flag is where to start.
 
-2. **The token cap is a BYTE cap, because input tokens cannot be counted before
-   sending them.** §1.2 asks for a "token cap per document". The output side is
-   a real token cap (`MAX_OUTPUT_TOKENS`). The input side is
-   `MAX_DOCUMENT_BASE64_BYTES` — 10MB of base64, roughly 7.5MB of PDF — because
-   counting a PDF's tokens requires the tokenizer, and the tokenizer requires
-   sending it, which is the thing the cap exists to avoid.
+2.  **The token cap is a BYTE cap, because input tokens cannot be counted before
+    sending them.** §1.2 asks for a "token cap per document". The output side is
+    a real token cap (`MAX_OUTPUT_TOKENS`). The input side is
+    `MAX_DOCUMENT_BASE64_BYTES` — 10MB of base64, roughly 7.5MB of PDF — because
+    counting a PDF's tokens requires the tokenizer, and the tokenizer requires
+    sending it, which is the thing the cap exists to avoid.
 
-   It is a proxy and it is enforced BEFORE the call, which is the half that
-   matters: §5's box asks for "a document that exceeds it failing cleanly", and
-   clean means the fetch never happens. `tests/claude.test.ts` asserts exactly
-   that — the refusal, and an empty call log.
+    It is a proxy and it is enforced BEFORE the call, which is the half that
+    matters: §5's box asks for "a document that exceeds it failing cleanly", and
+    clean means the fetch never happens. `tests/claude.test.ts` asserts exactly
+    that — the refusal, and an empty call log.
 
-3. **The price list is a copied constant and will go stale.**
-   `PRICE_CENTS_PER_MTOK` in `claude.ts` is what the walkthrough multiplies by
-   to print §5's cost-per-document. Nothing checks it against Anthropic's
-   published prices, and nothing can without a network call on every run. When
-   the figure is printed it should be printed as what it is — a computation from
-   a constant recorded on a date — rather than as a measurement of a bill.
+3.  **The price list is a copied constant and will go stale.**
+    `PRICE_CENTS_PER_MTOK` in `claude.ts` is what the walkthrough multiplies by
+    to print §5's cost-per-document. Nothing checks it against Anthropic's
+    published prices, and nothing can without a network call on every run. When
+    the figure is printed it should be printed as what it is — a computation from
+    a constant recorded on a date — rather than as a measurement of a bill.
 
-4. **§2's corpus is owed before Step 3, and the phase should stop at Step 2
-   without it.** The brief is explicit: "No golden set, no accuracy claim — the
-   phase can build to Step 2 without it, not past." Recorded here at Step 1 so
-   the reminder arrives before the work does rather than after: **8–12 real rate
-   confirmations with hand-checked truth per field**, dropped in the dev bucket.
+4.  **§2's corpus is owed before Step 3, and the phase should stop at Step 2
+    without it.** The brief is explicit: "No golden set, no accuracy claim — the
+    phase can build to Step 2 without it, not past." Recorded here at Step 1 so
+    the reminder arrives before the work does rather than after: **8–12 real rate
+    confirmations with hand-checked truth per field**, dropped in the dev bucket.
 
-   Step 3 is correction memory, which is measured by the accuracy it moves;
-   without a golden set there is nothing to move and nothing to report.
+    Step 3 is correction memory, which is measured by the accuracy it moves;
+    without a golden set there is nothing to move and nothing to report.
 
-5. **`ANTHROPIC_API_KEY` is not set on either worker.** The same shape as Phase
-   2's flag 18 about `RESEND_API_KEY`: the code is built, deployed and tested,
-   and the secret is an account-level act the owner performs. Until then the
-   service throws `no_api_key` by name — which is why it is a named failure and
-   not an empty result. **Owed:** two `wrangler secret put`, one per worker; the
-   README carries the exact commands.
+5.  **`ANTHROPIC_API_KEY` is not set on either worker.** The same shape as Phase
+    2's flag 18 about `RESEND_API_KEY`: the code is built, deployed and tested,
+    and the secret is an account-level act the owner performs. Until then the
+    service throws `no_api_key` by name — which is why it is a named failure and
+    not an empty result. **Owed:** two `wrangler secret put`, one per worker; the
+    README carries the exact commands.
 
-6. **Phase 3's rate-entry wall had a gap on the create form, and wiring the
-   prefill is what found it.** `createLoadAction` wrote `linehaulCents` from
-   whatever was posted, with no permission check — so a DISPATCHER's create
-   form could set a rate, on the one screen every load enters through.
-   `load.financials:update` has been OWNER/ADMIN/ACCOUNTING since Phase 3 §1
-   and the rate panel honoured it; this screen never asked.
+6.  **Phase 3's rate-entry wall had a gap on the create form, and wiring the
+    prefill is what found it.** `createLoadAction` wrote `linehaulCents` from
+    whatever was posted, with no permission check — so a DISPATCHER's create
+    form could set a rate, on the one screen every load enters through.
+    `load.financials:update` has been OWNER/ADMIN/ACCOUNTING since Phase 3 §1
+    and the rate panel honoured it; this screen never asked.
 
-   Closed on both sides: the action IGNORES a rate it may not accept (refusing
-   would strand a load somebody just typed, and a dispatcher's load having no
-   rate is what it looks like anyway), and the form renders no rate input at
-   all for that role — §5 asks for no money LABEL, and a greyed box still
-   announces one. Neither half is sufficient alone, which is why both are
-   asserted in `verify-dispatcher`.
+    Closed on both sides: the action IGNORES a rate it may not accept (refusing
+    would strand a load somebody just typed, and a dispatcher's load having no
+    rate is what it looks like anyway), and the form renders no rate input at
+    all for that role — §5 asks for no money LABEL, and a greyed box still
+    announces one. Neither half is sufficient alone, which is why both are
+    asserted in `verify-dispatcher`.
 
-7. **A server-rendered form accepts a file before React can hear about it, and
-   that is what made the upload-first walkthrough flake.** Not a race between
-   reads, which is what it looked like: `setInputFiles` succeeds on an
-   unhydrated page, the file lands in the input, no `change` handler exists
-   yet, and the offer sits at idle while the script waits for fields that were
-   never going to fill. Fast runs hydrated first and passed; slow ones scored
-   2/14 on a feature that was working.
+7.  **A server-rendered form accepts a file before React can hear about it, and
+    that is what made the upload-first walkthrough flake.** Not a race between
+    reads, which is what it looked like: `setInputFiles` succeeds on an
+    unhydrated page, the file lands in the input, no `change` handler exists
+    yet, and the offer sits at idle while the script waits for fields that were
+    never going to fill. Fast runs hydrated first and passed; slow ones scored
+    2/14 on a feature that was working.
 
-   The walkthrough now gates on hydration by typing into a CONTROLLED input and
-   reading the value back — a controlled input holds a typed value only once
-   React is listening, so it is a direct question rather than a sleep that hopes
-   — and re-sends the file once if the offer has not moved off idle. Four
-   consecutive 16/16 runs.
+    The walkthrough now gates on hydration by typing into a CONTROLLED input and
+    reading the value back — a controlled input holds a typed value only once
+    React is listening, so it is a direct question rather than a sleep that hopes
+    — and re-sends the file once if the offer has not moved off idle. Four
+    consecutive 16/16 runs.
 
-   Worth carrying beyond this script: any walkthrough that drives a React form
-   on a server-rendered page has the same hole, and a passing one may simply be
-   fast enough today.
+    Worth carrying beyond this script: any walkthrough that drives a React form
+    on a server-rendered page has the same hole, and a passing one may simply be
+    fast enough today.
 
-8. **Reading a form field at a time is reading several different moments.** The
-   same script polled one field until it filled and then read six more, one
-   round trip each; a re-render between any two produced a report where the rate
-   was "(empty)" on a form that then saved 245,000 cents. It takes ONE
-   `page.evaluate` snapshot now, and waits for two consecutive snapshots to
-   agree before asserting — which is what "the form has settled" means and what
-   the first version assumed without checking. The save side had the same shape:
-   two independent polls, one query now.
+8.  **Reading a form field at a time is reading several different moments.** The
+    same script polled one field until it filled and then read six more, one
+    round trip each; a re-render between any two produced a report where the rate
+    was "(empty)" on a form that then saved 245,000 cents. It takes ONE
+    `page.evaluate` snapshot now, and waits for two consecutive snapshots to
+    agree before asserting — which is what "the form has settled" means and what
+    the first version assumed without checking. The save side had the same shape:
+    two independent polls, one query now.
 
-9. **The truth sheets are gitignored with the corpus, and the accuracy run is
-   therefore not reproducible from a clean checkout.** §2 says the documents
-   "stay in the dev bucket"; the sheets derived from them carry the same
-   content — `brokerName: ITS Logistics LLC, linehaulCents: 400000` is the
-   customer's information in a form that is easier to read than the PDF, not
-   less sensitive than it.
+9.  **The truth sheets are gitignored with the corpus, and the accuracy run is
+    therefore not reproducible from a clean checkout.** §2 says the documents
+    "stay in the dev bucket"; the sheets derived from them carry the same
+    content — `brokerName: ITS Logistics LLC, linehaulCents: 400000` is the
+    customer's information in a form that is easier to read than the PDF, not
+    less sensitive than it.
 
-   The first draft of the ignore rule committed them, on the reasoning that
-   they hold "field values rather than documents". That reasoning was wrong and
-   is recorded here rather than quietly corrected: whose information it is does
-   not change because it was retyped.
+    The first draft of the ignore rule committed them, on the reasoning that
+    they hold "field values rather than documents". That reasoning was wrong and
+    is recorded here rather than quietly corrected: whose information it is does
+    not change because it was retyped.
 
-   The cost is real — §5's per-field accuracy table has to be pasted from a run
-   on the owner's machine rather than re-derived by a reviewer from the
-   repository. That is the owner's trade to reverse.
+    The cost is real — §5's per-field accuracy table has to be pasted from a run
+    on the owner's machine rather than re-derived by a reviewer from the
+    repository. That is the owner's trade to reverse.
 
 10. **The first draft of the golden set already shows three things worth
     deciding before the accuracy run, not after.** All 13 documents were read;
@@ -397,11 +397,11 @@ Recorded rather than resolved, per Phase 1's discipline.
 28. **The integration suite cannot share the dev database with a browser
     walkthrough, and I proved it the expensive way.** Four Playwright
     walkthroughs were run against the deployed dev worker while the suite was
-    running — same Neon branch — and the suite came back **22 failed, 3 files**,
-    every failure a dropped WebSocket or `A query cannot be executed on an
-expired transaction … 30516 ms passed` against a 20 s budget. All of them in
-    `auth.test.ts` and `settlements.test.ts`, none in anything this step
-    touched. The run took 3768 s against a usual ~1800.
+    running — same Neon branch — and the suite came back **22 failed across 3
+    files**, every failure a dropped WebSocket or an expired transaction
+    (30516 ms against a 20 s budget). All of them in `auth.test.ts` and
+    `settlements.test.ts`, none in anything this step touched. The run took
+    3768 s against a usual ~1800.
 
     Re-run alone: **24 files, 363 tests, 0 failed, 2982 s.**
 
@@ -409,9 +409,172 @@ expired transaction … 30516 ms passed` against a 20 s budget. All of them in
     that check's failure message. The rule is wider than the check: **nothing
     else may touch the dev branch while the integration suite runs** — not
     another suite, not a walkthrough, not a seed. Worth a guard rather than a
-    paragraph, which is Step 6's ride-along if there is room for one.
+    paragraph, and one was not built here.
 
     The near-miss worth naming: a red suite whose failures are all in files the
     change never touched is the shape of an environment problem, and it is also
-    exactly the shape of a real bug in something shared. Being right about which
-    one it was required re-running it alone, not reasoning about it.
+    exactly the shape of a real bug in something shared. Being right about
+    which one it was required re-running it alone, not reasoning about it.
+
+29. **Making a date warn meant taking `required` off it, which reverses a
+    Phase 2 decision.** §3 step 5 asks for "missing-required flags,
+    warn-not-block". The two date inputs carried HTML `required`, so the
+    browser refused the submit and the warning sentence could never be printed:
+    a block and a warning for one field are a contradiction, and the step's own
+    posture picks the warning. Found by the dispatcher walkthrough, which
+    reported zero warnings for both roles on a form that was working exactly as
+    Phase 2 built it.
+
+    The case this now serves is the dispatcher taking a call who does not have
+    the appointment time yet. The cost is that a load can be booked with no
+    dates at all — said out loud on the screen, in a sentence that names what it
+    costs, rather than prevented.
+
+30. **The RTL pass found the Phase 4 bidi bug again, in a place the Phase 4 fix
+    could not reach.** A facility's gate code of `#4417` rendered as `4417#` in
+    Farsi. The design-system rule was written against the field that found it —
+    an invoice-number INPUT — and said "any input whose value is a Latin
+    identifier"; a gate code in a read-only panel is not an input.
+
+    The rule is about the VALUE, not the control. Amended in its own commit
+    before the code, per AGENTS.md, and gate codes and phone numbers are now
+    named in it. The failure is worth keeping in view: a driver reads a gate
+    code off this screen and punches it into a keypad, and the reversed one does
+    not open the gate — the value is right in the database and wrong where
+    somebody acts on it.
+
+31. **§5's "typing path untouched at its Phase 2 timing" is NOT met, and the
+    measurement says how much of that is this phase.** Phase 2 recorded a
+    repeat load at **6.4 s**. Today, on the deployed dev worker:
+
+    |                                          | repeat load, keyboard only |
+    | ---------------------------------------- | -------------------------- |
+    | Phase 2 (recorded)                       | 6.4 s                      |
+    | HEAD                                     | 12.34 s / 12.47 s          |
+    | HEAD with Step 5's warning query removed | 11.64 s / 11.80 s          |
+
+    So Phase 5 costs the typed path about **0.7 s** — one duplicate-load lookup,
+    the only Phase 5 query a typed load reaches (the facility and correction
+    paths need a `pendingUploadId` and skip entirely). The other **~5 s** was
+    already there before this phase opened.
+
+    `wrangler tail` on one save: **CPU 477 ms, wall 21.8 s.** It is not
+    computation, it is round trips — which is Phase 2 §16 flag 20 exactly
+    ("~300 ms of CPU against ~18 s of wall … the fix is fewer statements inside
+    the lock, not a longer timeout"), now costing the single-user case rather
+    than only the concurrent one.
+
+    Under the forty-second target by a wide margin, and roughly double the
+    number the brief holds it to. Not fixed here: the fix is a statement count,
+    which is a Phase 6 job with its own measurement, and doing it during an
+    acceptance run would mean changing the thing being accepted.
+
+32. **The acceptance instrument has its own tests, because it is code that
+    certifies code.** `scripts/_accuracy-score.mjs` is separated from the run so
+    `tests/accuracy-score.test.ts` can exercise it without a network, a browser
+    or a corpus. Those tests immediately found a real defect in it: `normalize`
+    stripped any trailing `:00`, which turned a stop time of `07:00` into `07` —
+    so two documents scheduled an hour apart would have scored as agreeing, on
+    the field most likely to be wrong.
+
+    An instrument whose only evidence is that the code looked right measures
+    nothing twice.
+
+---
+
+## 8. How each acceptance box closed
+
+The §5 excerpt, box by box, with what proves it. Two are unmet and say so.
+
+- [ ] **Golden set: per-field accuracy printed as a table; every money figure
+      that reached cents did so through `money.ts`.** **NOT MET, AND NOT
+      MEASURABLE FROM HERE.** The instrument is built and tested
+      (`scripts/accuracy-run.mjs`, `scripts/_accuracy-score.mjs`,
+      `tests/accuracy-score.test.ts` 10/10) and it REFUSES the corpus by name:
+      all 13 sheets still read `"verified": false`, and not one of 478 `truth`
+      values differs from `extracted`. The run spends nothing and exits 2 with
+      the list. §2 puts the hand-checked truth on the owner; until it lands,
+      the only honest accuracy number is none. Flags 11 and 32.
+
+- [x] **A dispatcher's prefill carries no money key and no money label; the
+      same document's figures reach OWNER/ACCOUNTING on the rate panel as
+      extracted values — pair-asserted.** `verify-dispatcher` 48/48: no
+      `"money"` and no `linehaul` on the dispatcher's wire, no `name="rate"` on
+      their form, `245000` cents stored from the same document, and the owner's
+      form does have the field. §1.3 removes the key rather than emptying it.
+
+- [x] **A corrected broker match is applied on the next upload of the same
+      string; the correction row records both.** `verify-correction-memory`
+      15/15 — same document twice with a correction between, second upload
+      arrives carrying the corrected customer, correction row holding both
+      sides plus the confidence the model claimed when it was wrong.
+
+- [x] **A known facility's gate code prefills; an unknown one is offered for
+      save and appears on the `Location` afterwards.** `verify-facility-memory`
+      11/11 — one dock printed two ways ("Road" with a zip, "Rd" without),
+      offered unticked, saved on confirm, gate code written down between the
+      two uploads and on the screen at the end.
+
+- [x] **Duplicate BOL warns in words, names the load, and proceeds only on
+      confirm.** `verify-load-warnings` 13/13, including the half a screenshot
+      cannot show: **one** load after the warning, **two** after the confirm,
+      and one customer rather than one per attempt.
+
+- [x] **An abandoned extraction expires with the pending row; no orphan loads,
+      no orphan documents.** `tests/integration/documents.test.ts` — a mint
+      carrying a COMPLETED extraction, swept after expiry: pending row gone,
+      R2 object gone, no `Document` ever made from it.
+
+- [x] **One document's cost printed in the walkthrough output; the token cap
+      proven by a document that exceeds it failing cleanly.** `verify-extraction`
+      prints the per-document cost line; `tests/claude.test.ts` asserts the
+      refusal AND an empty call log — the fetch never happens, which is what
+      "cleanly" has to mean for a cap that exists to avoid sending the bytes.
+
+- [ ] **Typing path untouched: the repeat-load walkthrough still passes at its
+      Phase 2 timing.** **NOT MET.** 12.34 s against Phase 2's 6.4 s; Phase 5's
+      share of that is ~0.7 s, measured by removing its query and re-deploying.
+      Under the forty-second target throughout. Flag 31 carries the numbers and
+      the `wrangler tail` decomposition (CPU 477 ms, wall 21.8 s).
+
+- [x] **RU/RTL on the new surfaces.** `scripts/screenshots-phase5.mjs` — six
+      shots, three locales, of the two states that only exist after something
+      happens: the prefilled form with its provenance hints and facility panel,
+      and the warning list. The Farsi pass found flag 30.
+
+---
+
+## 9. What Phase 6 inherits
+
+1. **The golden set is still owed**, and with it §5's accuracy claim. The
+   instrument refuses until the sheets say `"verified": true`. Flag 10 names
+   the three findings worth a pen first: zeros returned where null was asked
+   for at HIGH confidence, two $0.00 linehauls, three documents with no rate.
+
+2. **The create transaction is roughly twice Phase 2's statement count**, and
+   that is now the single-user cost, not just the concurrent one. Flag 31 has
+   the measurement; Phase 2 §16 flag 20 has the remedy — fewer statements
+   inside the lock. It is a measurable job with a number to beat: 6.4 s.
+
+3. **A typed load can never be given a BOL or a PO**, because the fields only
+   render from an extraction and there is no load-edit screen. Flag 23.
+
+4. **`Location.normalizedAddress` is written only by `saveFacility`.** Any
+   other path that creates a facility must write the key or the dock is
+   unmatchable. There is no Locations screen yet; when one is built, that is
+   the whole of the fix. Flag 21.
+
+5. **Correction memory learns silently and fails silently.** The learn-and-log
+   path is wrapped in a bare `catch` so a save is never lost to it, which means
+   a persistent write failure would stop the learning with nothing saying so.
+   The honest fix is a counter on the accuracy run. Flag 15.
+
+6. **Nothing enforces that the integration suite runs alone.** Flag 28 is the
+   evidence that it must — 22 failures, none of them in code that had changed.
+   A guard is cheap and was not built here.
+
+7. **The prompt has not been tuned against anything.** Every extraction result
+   in this phase came from the first prompt written in Step 1, deliberately:
+   changing it before the corpus is verified would be tuning against the
+   model's own answers. Flag 10's findings are the list to start from once
+   there is truth to tune against.

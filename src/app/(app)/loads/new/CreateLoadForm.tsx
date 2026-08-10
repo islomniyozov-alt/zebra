@@ -17,6 +17,7 @@ import { Select } from '@/components/ui/Select'
 import { uploadDocument, type UploadPhase } from '@/lib/upload-client'
 import { normalizeTypedDate } from '@/lib/typed-date'
 import { createLoadAction, type CreateLoadState } from './actions'
+import { cx } from '@/lib/cx'
 
 // ---------------------------------------------------------------------------
 // ADD LOAD — the hot path (design system §7.6, brief §9).
@@ -420,7 +421,16 @@ export function CreateLoadForm({
         ))}
       </datalist>
 
-      {/* TEXT, not type="date", and the forty-second measurement is why. A
+      {/* NOT `required`, since §3 step 5. A missing date is now a WARNING that
+       * names what it costs — "no pickup date, so this load will not appear on
+       * any screen that sorts by one" — and an HTML `required` on the same
+       * field makes that warning unreachable: the browser refuses the submit
+       * and the sentence is never printed. A block and a warning for one field
+       * are a contradiction, and the step's posture picks the warning. The
+       * dispatcher taking a call who does not have the appointment time yet is
+       * the case this exists for. See PHASE-5-BRIEF.md §7 flag 30.
+       *
+       * TEXT, not type="date", and the forty-second measurement is why. A
        * native date input holds three internal segments and Tab moves between
        * them, so two dates cost six tab stops instead of two — §9 lists
        * "dates" as one step. The first timed run put every keystroke after the
@@ -442,7 +452,6 @@ export function CreateLoadForm({
                 normalizeTypedDate(event.target.value) ?? event.target.value,
               )
             }
-            required
             className="font-mono"
           />
         </div>
@@ -460,7 +469,6 @@ export function CreateLoadForm({
                 normalizeTypedDate(event.target.value) ?? event.target.value,
               )
             }
-            required
             className="font-mono"
           />
         </div>
@@ -766,13 +774,17 @@ function FacilityNote({
   }
 
   const memory = facility.memory
-  const lines: [string, string | null][] = [
-    [labels.facilityGateCode, memory.gateCode],
-    [labels.facilityHours, memory.hours],
-    [labels.facilityDock, memory.dockNotes],
-    [labels.facilityCheckIn, memory.instructions],
-    [labels.facilityContact, contactLine(memory)],
-    [labels.facilityNotes, memory.notes],
+  // `ltr` marks the values that are IDENTIFIERS rather than prose — design
+  // system §12. A gate code of "#4417" renders as "4417#" in Farsi otherwise,
+  // and a driver reading it off this screen punches it into a keypad that does
+  // not open. Found in this phase's RTL pass, in a panel where nothing is typed.
+  const lines: [string, string | null, boolean][] = [
+    [labels.facilityGateCode, memory.gateCode, true],
+    [labels.facilityHours, memory.hours, true],
+    [labels.facilityDock, memory.dockNotes, false],
+    [labels.facilityCheckIn, memory.instructions, false],
+    [labels.facilityContact, contactLine(memory), true],
+    [labels.facilityNotes, memory.notes, false],
   ]
 
   return (
@@ -783,11 +795,18 @@ function FacilityNote({
       {facility.hasMemory ? (
         <dl className="mt-z1 grid grid-cols-[auto_1fr] gap-x-z2 gap-y-[2px] text-ink-2">
           {lines
-            .filter((line): line is [string, string] => Boolean(line[1]))
-            .map(([label, value]) => (
+            .filter((line): line is [string, string, boolean] =>
+              Boolean(line[1]),
+            )
+            .map(([label, value, isIdentifier]) => (
               <Fragment key={label}>
                 <dt className="text-ink-3">{label}</dt>
-                <dd className="text-ink">{value}</dd>
+                <dd
+                  className={cx('text-ink', isIdentifier && 'text-start')}
+                  dir={isIdentifier ? 'ltr' : undefined}
+                >
+                  {value}
+                </dd>
               </Fragment>
             ))}
         </dl>

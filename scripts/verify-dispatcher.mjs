@@ -617,6 +617,104 @@ record(
   `HTTP ${ownerNewLoad.status}`,
 )
 
+// --- PHASE 5 STEP 4: the dock memory a dispatcher IS allowed --------------------
+//
+// The facility payload is gated on `location.manage:read`, which a DISPATCHER
+// holds and ACCOUNTING does not. Both halves matter: a gate code is operational
+// information the 6am user needs, and it is not money.
+const facilityAnswer = seeded.text ? JSON.parse(seeded.text) : {}
+record(
+  'a dispatcher DOES get facility memory — a gate code is not money',
+  Array.isArray(facilityAnswer.facilities),
+  `${facilityAnswer.facilities?.length ?? 0} facility answer(s)`,
+)
+
+// --- PHASE 5 STEP 5: a warning that would name money, on a screen with none ----
+//
+// "No rate" is a money label: it announces that the load has a rate and that it
+// is empty, on the one screen §1.3 keeps money off entirely. So a dispatcher
+// booking a load with no dates must be told about the DATES and not about the
+// money — and the only way to see the warning list is to make one happen.
+//
+// DRIVEN THROUGH THE FORM, because the first version of this check POSTed to
+// /loads/new directly. A server action is not a plain POST, so that request
+// returned the page unchanged, no warnings were produced, and "no rate label
+// found" was true because nothing had been found at all. A negative assertion
+// against an empty screen passes for the wrong reason every time.
+await dispatcher.page.goto(`${BASE}/loads/new`, {
+  waitUntil: 'domcontentloaded',
+})
+for (let attempt = 0; attempt < 30; attempt++) {
+  await dispatcher.page.fill('input[name="miles"]', '410')
+  await dispatcher.page.waitForTimeout(200)
+  if (
+    (await dispatcher.page.locator('input[name="miles"]').inputValue()) ===
+    '410'
+  ) {
+    break
+  }
+  await dispatcher.page.waitForTimeout(500)
+}
+await dispatcher.page.fill('input[name="broker"]', `Warned ${TAG}`)
+await dispatcher.page.fill('input[name="pickup"]', 'Boise, ID')
+await dispatcher.page.fill('input[name="delivery"]', 'Reno, NV')
+await dispatcher.page.locator('button[type="submit"]').first().click()
+
+let warnings = []
+for (let attempt = 0; attempt < 30; attempt++) {
+  await dispatcher.page.waitForTimeout(1_000)
+  warnings = await dispatcher.page.evaluate(() =>
+    [...document.querySelectorAll('[role="alert"] li')].map((n) =>
+      (n.textContent ?? '').trim(),
+    ),
+  )
+  if (warnings.length > 0) break
+}
+
+record(
+  'a dispatcher IS warned about the missing dates',
+  warnings.length === 2,
+  `${warnings.length} warning(s): ${warnings.join(' / ').slice(0, 60)}`,
+)
+record(
+  'and the rate warning is absent from a screen with no rate field',
+  warnings.length > 0 && !warnings.some((line) => /rate/i.test(line)),
+  'no money label among warnings the dispatcher was shown',
+)
+
+// THE PAIR. The same booking, by an owner, DOES say the rate is missing —
+// which is what makes the line above a permission rule rather than a feature
+// nobody built.
+await owner.page.goto(`${BASE}/loads/new`, { waitUntil: 'domcontentloaded' })
+for (let attempt = 0; attempt < 30; attempt++) {
+  await owner.page.fill('input[name="miles"]', '410')
+  await owner.page.waitForTimeout(200)
+  if ((await owner.page.locator('input[name="miles"]').inputValue()) === '410')
+    break
+  await owner.page.waitForTimeout(500)
+}
+await owner.page.fill('input[name="broker"]', `Warned owner ${TAG}`)
+await owner.page.fill('input[name="pickup"]', 'Boise, ID')
+await owner.page.fill('input[name="delivery"]', 'Reno, NV')
+await owner.page.locator('button[type="submit"]').first().click()
+
+let ownerWarnings = []
+for (let attempt = 0; attempt < 30; attempt++) {
+  await owner.page.waitForTimeout(1_000)
+  ownerWarnings = await owner.page.evaluate(() =>
+    [...document.querySelectorAll('[role="alert"] li')].map((n) =>
+      (n.textContent ?? '').trim(),
+    ),
+  )
+  if (ownerWarnings.length > 0) break
+}
+
+record(
+  'while an owner IS told the rate is missing (rule 11 pair)',
+  ownerWarnings.some((line) => /rate/i.test(line)),
+  `${ownerWarnings.length} warning(s) for the owner`,
+)
+
 // The navigation does not offer what the role cannot reach, either (§7).
 const nav = await dispatcher.page.goto(`${BASE}/loads`, {
   waitUntil: 'domcontentloaded',
@@ -647,6 +745,9 @@ await pool.query('delete from "AssetAssignment" where "truckId" = $1', [
 ])
 await pool.query('delete from "Truck" where id = $1', [truck.id])
 await pool.query('delete from "Customer" where id = $1', [broker.id])
+await pool.query('delete from "Customer" where name like $1', [
+  `Warned%${TAG}%`,
+])
 
 console.log(
   `\nleft behind — users: ${(await pool.query('select count(*)::int n from "User" where email = $1', [EMAIL])).rows[0].n}`,

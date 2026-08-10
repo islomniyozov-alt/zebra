@@ -21,8 +21,10 @@
     "20260807182143_claims_and_dataqs",
     "20260807204338_settings_boundary_and_claim_assets",
     "20260808010001_pending_upload_extraction",
-    "20260808191602_correction_memory"
+    "20260808191602_correction_memory",
+    "20260808214627_facility_memory",
+    "20260809050322_load_bol_and_po"
   ],
-  "recordedAt": "2026-08-08",
+  "recordedAt": "2026-08-09",
   "verified": false
 }
