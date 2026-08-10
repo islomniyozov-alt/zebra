@@ -486,15 +486,54 @@ Recorded rather than resolved, per Phase 1's discipline.
 
 The §5 excerpt, box by box, with what proves it. Two are unmet and say so.
 
-- [ ] **Golden set: per-field accuracy printed as a table; every money figure
-      that reached cents did so through `money.ts`.** **NOT MET, AND NOT
-      MEASURABLE FROM HERE.** The instrument is built and tested
-      (`scripts/accuracy-run.mjs`, `scripts/_accuracy-score.mjs`,
-      `tests/accuracy-score.test.ts` 10/10) and it REFUSES the corpus by name:
-      all 13 sheets still read `"verified": false`, and not one of 478 `truth`
-      values differs from `extracted`. The run spends nothing and exits 2 with
-      the list. §2 puts the hand-checked truth on the owner; until it lands,
-      the only honest accuracy number is none. Flags 11 and 32.
+- [x] **Golden set: per-field accuracy printed as a table; every money figure
+      that reached cents did so through `money.ts`.** **MET, after the owner
+      verified all 13 sheets field by field.** This box read NOT MET at the
+      close of Step 6 and is corrected here rather than rewritten: the
+      instrument was built and refused the corpus, the owner then verified it
+      in an interview session, and the run produced a number.
+
+      **First run, against the prompt as Step 1 wrote it: 86.0%** — 283 right
+      of 329 scored field-instances, 13 of 13 documents read, 5.659¢ per
+      document. **After the contract's rules were baked into the prompt:
+      96.6%** — 285 right of 295, 6.728¢ per document.
+
+      | outcome | before | after |
+      | --- | --- | --- |
+      | **made up** — a value where the truth is absence | **35** | **1** |
+      | wrong — read the wrong thing | 6 | 5 |
+      | missed — left a printed value out | 5 | 4 |
+
+      **Three quarters of every original failure was invention, not
+      misreading**, and that is the part the rules removed: 35 fabricated
+      values became 1. Misreadings barely moved — 6 to 5 — which is the honest
+      shape of the result. The reader could always read these documents; it
+      could not leave a field alone.
+
+      **The denominator shrinks from 329 to 295 and that is not a trick.** An
+      agreed absence is not scored, so every slot the reader now correctly
+      leaves empty stops being a scored instance. The rate is over the fields
+      where somebody had an answer.
+
+      Cost of the longer prompt: **+1.07¢ per document**, +19%, for 10.6
+      points.
+
+      **Two caveats that travel with the number.**
+
+      1. **Each figure is ONE RUN, and the reader is not deterministic.**
+         `brokerName` scored 11/13 in BOTH runs, against truth taken from the
+         drafting run — so either two names drift between runs or the drafting
+         run read them differently, and **the table cannot say which, because
+         it prints that a field was wrong and not what it said.** Printing the
+         disagreeing values is the instrument's next improvement and it is not
+         built. A single percentage quoted without this line is a stronger
+         claim than the run can make.
+      2. **The corpus is 13 documents and 12 loads.** `semail (4) (5)` and
+         `semail (58)` are one order before and after a layover was added, so
+         Big M's template is weighted twice in every per-field rate.
+
+      The 45 hand-corrections and the rules they produced are in
+      `EXTRACTION-CONTRACT.md`, which is the tuning list §9 item 7 asked for.
 
 - [x] **A dispatcher's prefill carries no money key and no money label; the
       same document's figures reach OWNER/ACCOUNTING on the rate panel as
@@ -546,10 +585,21 @@ The §5 excerpt, box by box, with what proves it. Two are unmet and say so.
 
 ## 9. What Phase 6 inherits
 
-1. **The golden set is still owed**, and with it §5's accuracy claim. The
-   instrument refuses until the sheets say `"verified": true`. Flag 10 names
-   the three findings worth a pen first: zeros returned where null was asked
-   for at HIGH confidence, two $0.00 linehauls, three documents with no rate.
+0. **THE ACCESSORIAL GAP, PROMOTED TO THE TOP BY THE CORPUS ITSELF.**
+   `EXTRACTION_SCHEMA` has no room for charge lines, and `LoadAccessorial` has
+   held them since Phase 3. Three documents show the cost: a TONU where the
+   accessorial IS the entire pay; the same load re-issued with a $150 layover
+   added, where **that line is the only difference between the two documents
+   and the only thing the reader cannot see**; and `werner-1`, where
+   `Capacity Surcharge $152.60` and `Deadhead Miles Charge $202.50` are exactly
+   the $355.10 between the money extracted and the money owed.
+
+1. ~~**The golden set is still owed**~~ — **DONE.** All 13 sheets verified by
+   the owner, field by field, in an interview session; the accuracy table is in
+   §8 and flag 10 is fully closed. What it produced instead is
+   `EXTRACTION-CONTRACT.md`: eight rules, one of them overturned by the corpus
+   after being made, plus the dialect table, the instability findings and the
+   gaps below.
 
 2. **The create transaction is roughly twice Phase 2's statement count**, and
    that is now the single-user cost, not just the concurrent one. Flag 31 has
@@ -569,11 +619,29 @@ The §5 excerpt, box by box, with what proves it. Two are unmet and say so.
    a persistent write failure would stop the learning with nothing saying so.
    The honest fix is a counter on the accuracy run. Flag 15.
 
-6. **Nothing enforces that the integration suite runs alone.** Flag 28 is the
+6. **Three defects the verification session filed, in the state it filed
+   them.** All three are recorded with evidence in `EXTRACTION-CONTRACT.md`;
+   the first two are fixed in the session that followed, the third is item 0
+   above.
+   - **A decimal weight cannot be saved.** `ratecon-tk-25120034` prints
+     `44,857.46 LBS`, the reader returns it faithfully, and `wholeNumber()` in
+     `src/lib/loads.ts` refuses any non-integer — so a prefilled form carrying
+     a correct reading fails to save. Every gross weight on a drayage ratecon
+     is a decimal. Owner's fix: floor it at prefill, and leave the sheet's
+     truth as the decimal the page prints.
+   - **Nothing refuses a window that ends before it starts.**
+     `rateconfirmation-2-3` produced `windowStart 08:00, windowEnd 06:00` from
+     a malformed `0800-600`, and the parser, the prefill and `createLoad` all
+     accepted it. Phase 2 §8 refuses a load whose delivery precedes its pickup;
+     a single stop whose own window inverts had no such check.
+   - **Accessorial charge lines are not extracted at all** — item 0 of this
+     list, not a code defect so much as a hole the shape was never given.
+
+7. **Nothing enforces that the integration suite runs alone.** Flag 28 is the
    evidence that it must — 22 failures, none of them in code that had changed.
    A guard is cheap and was not built here.
 
-7. **The prompt has not been tuned against anything.** Every extraction result
+8. **The prompt has not been tuned against anything.** Every extraction result
    in this phase came from the first prompt written in Step 1, deliberately:
    changing it before the corpus is verified would be tuning against the
    model's own answers. Flag 10's findings are the list to start from once

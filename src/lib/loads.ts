@@ -173,6 +173,29 @@ async function writeStops(
   // interactive transaction with a 5 second ceiling, and a round trip to Neon
   // is ~200ms from a laptop. A three-stop load written one row at a time spent
   // a fifth of the whole budget on stops alone.
+  // A WINDOW THAT ENDS BEFORE IT STARTS IS REFUSED (Phase 5 verification
+  // session). Every layer used to accept one: the extraction parser, because
+  // both ends are valid ISO local times; the prefill; and this. A malformed
+  // "0800-600" on a real rate confirmation produced windowStart 08:00 with
+  // windowEnd 06:00, and the load saved.
+  //
+  // Refused rather than repaired, for the same reason the reader is told not
+  // to straighten a malformed value: the correct end is unknown, and Phase 2's
+  // §8 already refuses a load whose delivery precedes its pickup. This is the
+  // same rule one level down, and it catches a typed window as well as a read
+  // one.
+  for (const [index, stop] of stops.entries()) {
+    if (
+      stop.windowStart instanceof Date &&
+      stop.windowEnd instanceof Date &&
+      stop.windowEnd.getTime() < stop.windowStart.getTime()
+    ) {
+      throw new ReferenceError('window_inverted', {
+        field: `stops[${index}].windowEnd`,
+      })
+    }
+  }
+
   await tx.loadStop.deleteMany({ where: { loadId } })
 
   await tx.loadStop.createMany({

@@ -188,6 +188,8 @@ const en = {
   'ref.error.invalidAuthority': 'Choose an authority you work under.',
   'ref.error.truckOtherAuthority':
     'That truck runs under a different authority. A driver and their truck must be under the same one — transfer the truck first, or pick another.',
+  'ref.error.windowInverted':
+    'That stop’s arrival window ends before it starts. Check the times.',
   'ref.error.sameAuthority': 'It already works under that authority.',
   'ref.error.doubleOpen':
     'That asset already has an open period. Reload and try again.',
@@ -1507,6 +1509,8 @@ const ru: Dictionary = {
   'ref.error.invalidAuthority': 'Выберите перевозчика, с которым вы работаете.',
   'ref.error.truckOtherAuthority':
     'Этот тягач числится за другим перевозчиком. Водитель и его тягач должны быть под одним — сначала переведите тягач или выберите другой.',
+  'ref.error.windowInverted':
+    'Окно прибытия на этой остановке заканчивается раньше, чем начинается. Проверьте время.',
   'ref.error.sameAuthority': 'Уже работает под этим перевозчиком.',
   'ref.error.doubleOpen':
     'У этого объекта уже есть открытый период. Обновите страницу и повторите.',
@@ -2823,6 +2827,8 @@ const fa: Dictionary = {
   'ref.error.invalidAuthority': 'شرکتی را انتخاب کنید که با آن کار می‌کنید.',
   'ref.error.truckOtherAuthority':
     'این کامیون زیر شرکت دیگری کار می‌کند. راننده و کامیونش باید زیر یک شرکت باشند — نخست کامیون را منتقل کنید یا کامیون دیگری برگزینید.',
+  'ref.error.windowInverted':
+    'بازهٔ ورود این توقف پیش از آغازش پایان می‌یابد. زمان‌ها را بررسی کنید.',
   'ref.error.sameAuthority': 'هم‌اکنون زیر نظر همان شرکت است.',
   'ref.error.doubleOpen':
     'این دارایی دورهٔ باز دارد. صفحه را تازه کنید و دوباره تلاش کنید.',

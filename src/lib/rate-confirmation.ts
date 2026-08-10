@@ -33,6 +33,19 @@ import type { TxClient } from './tenancy'
  * the explanation is where a confident wrong answer comes from. What it needs
  * is the shape of the answer and permission to say "not present".
  */
+// ---------------------------------------------------------------------------
+// THE READER'S INSTRUCTIONS.
+//
+// Every rule below the first block came out of the owner verifying the golden
+// set document by document — `EXTRACTION-CONTRACT.md` carries each one with the
+// sheet it was ruled on and the failure it is aimed at. The first run against
+// verified truth scored 86.0%, and THREE QUARTERS OF EVERY FAILURE WAS A VALUE
+// INVENTED WHERE THE TRUTH WAS ABSENCE — not misreading. So the weight of this
+// prompt is on refusing to fill slots.
+//
+// Do not add a rule here without a document that produced it.
+// ---------------------------------------------------------------------------
+
 export const EXTRACTION_SYSTEM = [
   'You read freight rate confirmations and return structured JSON.',
   '',
@@ -48,6 +61,73 @@ export const EXTRACTION_SYSTEM = [
   '  YYYY-MM-DDTHH:mm. Do not convert to UTC and do not add a zone.',
   '- Stops are in the order the document lists them; pickups before deliveries',
   '  only if that is how it reads.',
+  '',
+  'ABSENCE OVER INVENTION. An empty field is a correct answer and the most',
+  'common one. A wrong value costs more than a missing one: a missing value is',
+  'visible on the form and a wrong one is not.',
+  '',
+  '- NEVER COMPUTE A VALUE. Only what the page prints. No averages, no',
+  '  midpoints, no unit conversions, no sums the document did not do itself.',
+  '  "Temp: 33.0 to 38.0" is NOT tempF 35.5 - a single-temperature field',
+  '  cannot hold a range, so tempF is null.',
+  '- A PRINTED negative is a value; an EMPTY SLOT is not. "Hazmat? No" means',
+  '  isHazmat false. A blank "Driver 2" line does NOT mean isTeam false - it',
+  '  means isTeam null. "Team Drivers" under special requirements means true.',
+  '- A MALFORMED value is reported, not repaired. If a printed range reads',
+  '  "0800-600", the start is 08:00 and the end is null. Never straighten a',
+  '  value into something plausible.',
+  '',
+  'PLACEHOLDERS ARE ABSENT VALUES. Templates print filler where they require a',
+  'value and the shipper gave none.',
+  '',
+  '- All-zero and filler strings are null: "0000000" as a bill of lading,',
+  '  "N/A", "TBD", "XXX", "-".',
+  '- A NONSENSE QUANTITY is a placeholder: "Weight (lbs): 01" on a full',
+  '  truckload, a pallet count of 0, a piece count of 0, "Total Wgt: 0 lb".',
+  '  Judge by IMPOSSIBILITY, not by "unusually low" - 3,000 lb of empty',
+  '  pallets is a real weight and must be kept.',
+  '',
+  'LABEL DISCIPLINE. Read the value, not only the label above it.',
+  '',
+  '- A value that NAMES ITSELF something else IS that something else.',
+  '  "BOL: LOAD ID 538581-104" is a load id, not a bill of lading, so',
+  '  bolNumber is null. An address in a "Name:" slot is an address, so the',
+  '  stop name is null.',
+  '- A CUSTOMER REFERENCE is not a PO. Take poNumber only from a field that',
+  '  says PO.',
+  '- OUR OWN identifiers are never cargo data. A seal number or stop field',
+  '  holding the carrier phone, MC or DOT number is a template artifact: null.',
+  '- EQUIPMENT IS NOT A COMMODITY. "Commodity: VAN" beside "Trailer: Power',
+  '  Only" names no freight: commodity is null, and the equipment word belongs',
+  '  to equipmentType.',
+  '- A LABELLED fact attaches even from a header: "Customer Pickup #: 4301" is',
+  '  the pickup stop referenceNumber when there is exactly one pickup. A number',
+  '  matched out of an instruction SENTENCE by its shape attaches to nothing.',
+  '',
+  'WINDOWS NEED TWO DIFFERENT ENDS.',
+  '',
+  '- One printed time is scheduledAt, with windowStart and windowEnd null.',
+  '  That includes a time printed TWICE IDENTICALLY (early equal to late is an',
+  '  appointment) and a one-sided "Arrive Between: 01/22/2026 1200 / And:".',
+  '- Two different times are scheduledAt null, windowStart and windowEnd set.',
+  '- Facility operating hours printed against an FCFS stop ARE that window.',
+  '',
+  'MONEY.',
+  '',
+  '- A single UNNAMED rate is the linehaul: "CONFIRMED RATE - $950.00 ALL-IN"',
+  '  is linehaul and total, fuel null.',
+  '- A single rate that NAMES ITSELF an accessorial is not the linehaul.',
+  '  "TRUCK ORDERED & NOT USED $150.00" alone means linehaul null.',
+  '- A printed "$0.00" freight line IS a value: keep the zero. An absent',
+  '  freight line is null. They are different facts.',
+  '',
+  'EQUIPMENT DIALECT. Some brokers never print "power only":',
+  '',
+  '- "53 ITS Asset", or any broker-owned trailer beside a "Hook" event, is',
+  '  POWER_ONLY.',
+  '- "Power Only (DAT)", "Power Only,Van 53", or a loading type of "Drop',
+  '  Empty, Hook Loaded" is POWER_ONLY.',
+  '- "53 Van" or "Van" with no hook language is DRY_VAN.',
 ].join('\n')
 
 export function extractionPrompt(): string {

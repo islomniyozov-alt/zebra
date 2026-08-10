@@ -163,6 +163,22 @@ export async function createLoadAction(
           facilities[1] ??
           (await resolveLocation(tx, session.organizationId, delivery))
 
+        // THE WEIGHT, FROM THE SERVER'S OWN COPY OF THE EXTRACTION.
+        //
+        // The create form has no weight field — §9's tab order is the reason —
+        // so an extracted weight was read, priced into nothing and dropped.
+        // Carried here rather than through the browser for the same reason the
+        // corrections are: what the model said is the server's to know.
+        //
+        // FLOORED, because `wholeNumber` refuses a decimal outright and every
+        // gross weight on a drayage ratecon is one. `44,857.46 LBS` is a
+        // correct reading of the page and 44857 is what a dispatcher would
+        // file; refusing the save over the .46 is the tail wagging the load.
+        // Filed in the verification session, fixed here.
+        const extractedWeight = pendingUploadId
+          ? await weightFromMint(tx, pendingUploadId)
+          : null
+
         const pickupAt = stopDate(formData.get('pickupAt'), from)
         const deliveryAt = stopDate(formData.get('deliveryAt'), to)
         const linehaulCents = maySetRate ? cents(formData.get('rate')) : 0
@@ -204,6 +220,7 @@ export async function createLoadAction(
             truckId: optionalText(formData.get('truckId')),
             driverId: optionalText(formData.get('driverId')),
             dispatchedMiles: formData.get('miles'),
+            ...(extractedWeight === null ? {} : { weightLbs: extractedWeight }),
             // §1.3 AND PHASE 3's RATE_ENTRY, ENFORCED HERE. `load.financials`
             // update is OWNER/ADMIN/ACCOUNTING; a DISPATCHER books the freight
             // and accounting puts the money on it. Until Phase 5 went looking,
@@ -476,4 +493,35 @@ interface ResolvedStop {
   city: string | null
   state: string | null
   timezone: string | null
+}
+
+/**
+ * The extracted gross weight, as a whole number of pounds, or null.
+ *
+ * FLOOR, not round: a weight is a limit as much as a fact, and rounding 44,857.6
+ * up to 44,858 is inventing six ounces the document did not print. Rule 5 of
+ * EXTRACTION-CONTRACT.md forbids the reader computing values; this is the form
+ * doing the one conversion the schema requires, in the direction that cannot
+ * overstate.
+ *
+ * A zero or a negative is dropped: Werner's template prints `Total Wgt: 0 lb`
+ * as structural filler on a drop-and-hook, and a zero-pound load is a
+ * placeholder rather than a weight.
+ */
+async function weightFromMint(
+  tx: Parameters<typeof resolveLocation>[0],
+  pendingUploadId: string,
+): Promise<number | null> {
+  const mint = await tx.pendingUpload.findFirst({
+    where: { id: pendingUploadId },
+    select: { extractedJson: true },
+  })
+  const stored = (mint?.extractedJson ?? null) as {
+    extracted?: { weightLbs?: { value?: unknown } | null }
+  } | null
+
+  const raw = stored?.extracted?.weightLbs?.value
+  const value = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isFinite(value) || value <= 0) return null
+  return Math.floor(value)
 }

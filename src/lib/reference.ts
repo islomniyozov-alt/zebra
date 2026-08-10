@@ -25,6 +25,8 @@ export type ReferenceFailure =
   | 'number_taken_since'
   /** Pairing a driver with a truck that runs under a different authority. */
   | 'truck_other_authority'
+  /** A stop whose arrival window ends before it starts (Phase 5). */
+  | 'window_inverted'
 
 export class ReferenceError extends Error {
   readonly code: ReferenceFailure
@@ -54,6 +56,7 @@ export const REFERENCE_ERROR_KEYS: Record<ReferenceFailure, MessageKey> = {
   invalid_authority: 'ref.error.invalidAuthority',
   number_taken_since: 'ref.error.numberTakenSince',
   truck_other_authority: 'ref.error.truckOtherAuthority',
+  window_inverted: 'ref.error.windowInverted',
 }
 
 /**

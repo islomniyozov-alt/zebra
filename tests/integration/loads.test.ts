@@ -206,6 +206,61 @@ describe('creating a load', () => {
     ])
   })
 
+  it('REFUSES a stop whose window ends before it starts', async () => {
+    // Filed in the Phase 5 verification session. A real rate confirmation
+    // printed `Hours : 0800-600`, the reader turned it into a window ending
+    // two hours before its own start, and every layer accepted it — the
+    // parser, because both ends are valid ISO local times, the prefill, and
+    // this service. Phase 2 §8 refuses a load whose delivery precedes its
+    // pickup; this is the same rule one stop down.
+    await expect(
+      inOrg((tx) =>
+        createLoad(tx, organizationId, {
+          companyId: alphaId,
+          customerId: brokerId,
+          stops: [
+            {
+              type: 'PICKUP',
+              city: 'Chicago',
+              state: 'IL',
+              scheduledAt: day(1),
+            },
+            {
+              type: 'DELIVERY',
+              city: 'Dallas',
+              state: 'TX',
+              windowStart: day(3),
+              windowEnd: day(2),
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow(/window_inverted/)
+  })
+
+  it('and allows a window that ends exactly when it starts', async () => {
+    // THE PAIR. An instant-wide window is degenerate but not backwards, and a
+    // check written with `<=` would refuse a legitimate appointment that some
+    // templates print as a zero-length range.
+    const load = await inOrg((tx) =>
+      createLoad(tx, organizationId, {
+        companyId: alphaId,
+        customerId: brokerId,
+        stops: [
+          { type: 'PICKUP', city: 'Chicago', state: 'IL', scheduledAt: day(1) },
+          {
+            type: 'DELIVERY',
+            city: 'Dallas',
+            state: 'TX',
+            windowStart: day(2),
+            windowEnd: day(2),
+          },
+        ],
+      }),
+    )
+    expect(load.id).toBeTruthy()
+  })
+
   it('opens the status log at BOOKED', async () => {
     const load = await inOrg((tx) =>
       createLoad(tx, organizationId, {
