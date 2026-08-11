@@ -72,11 +72,21 @@ export const PRICE_CENTS_PER_MTOK = { input: 300, output: 1_500 } as const
 export const MODEL_PRICES = {
   'claude-sonnet-5': { input: 300, output: 1_500 },
   'claude-haiku-4-5-20251001': { input: 100, output: 500 },
-  // Google, same units. UNVERIFIED AGAINST A BILL — recorded from published
-  // list prices on the date above and never checked since, exactly like the
-  // Anthropic rows. A figure computed from these is arithmetic, not a reading.
+  // Google, same units.
+  //
+  // WORSE THAN UNVERIFIED — ASSUMED. The Anthropic rows are list prices copied
+  // on a date. These are the 2.5-generation list prices applied to models two
+  // generations newer, because the current names were discovered by asking the
+  // API what it would answer to (`gemini-2.5-flash-lite` is already 404 for
+  // new keys) and no price list came with them.
+  //
+  // The TOKEN COUNTS in any table using these are measured and real; the CENTS
+  // are those tokens multiplied by a guess. The owner must substitute the real
+  // rates before ruling on cost. Flagged in the run's own output, not only
+  // here.
+  'gemini-3.6-flash': { input: 30, output: 250 },
+  'gemini-3.5-flash-lite': { input: 10, output: 40 },
   'gemini-2.5-flash': { input: 30, output: 250 },
-  'gemini-2.5-flash-lite': { input: 10, output: 40 },
 } as const
 
 export type PricedModel = keyof typeof MODEL_PRICES

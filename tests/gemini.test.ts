@@ -57,10 +57,10 @@ describe('the request it builds', () => {
     // Never a query parameter: a key in a URL lands in access logs, proxies
     // and browser history, and this one is billable.
     const { calls, impl } = spy()
-    await askGemini({ ...ask(), model: 'gemini-2.5-flash', fetchImpl: impl })
+    await askGemini({ ...ask(), model: 'gemini-3.6-flash', fetchImpl: impl })
 
     expect(calls[0]!.url).toBe(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent',
     )
     expect(calls[0]!.url).not.toContain('key=')
     const headers = calls[0]!.init.headers as Record<string, string>
@@ -125,11 +125,11 @@ describe('the answer', () => {
     const { impl } = spy()
     const answer = await askGemini({
       ...ask(),
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.6-flash',
       fetchImpl: impl,
     })
     expect(answer.text).toBe('{"ok":true}')
-    expect(answer.model).toBe('gemini-2.5-flash')
+    expect(answer.model).toBe('gemini-3.6-flash')
     expect(answer.usage).toEqual({
       inputTokens: 3_100,
       outputTokens: 640,
@@ -178,7 +178,7 @@ describe('the routing seam', () => {
     const { calls, impl } = spy()
     await askModel({
       ...ask(),
-      model: 'gemini-2.5-flash-lite',
+      model: 'gemini-3.5-flash-lite',
       fetchImpl: impl,
     })
     expect(calls[0]!.url).toContain('generativelanguage.googleapis.com')
@@ -202,7 +202,7 @@ describe('the routing seam', () => {
   })
 
   it('routes on the NAME and nothing else', () => {
-    expect(isGeminiModel('gemini-2.5-flash')).toBe(true)
+    expect(isGeminiModel('gemini-3.6-flash')).toBe(true)
     expect(isGeminiModel('claude-sonnet-5')).toBe(false)
     expect(isGeminiModel('')).toBe(false)
   })
@@ -213,13 +213,13 @@ describe('what a Gemini call costs', () => {
     expect(
       costMilliCents(
         { inputTokens: 1_000_000, outputTokens: 1_000_000 },
-        'gemini-2.5-flash',
+        'gemini-3.6-flash',
       ),
     ).toBe(280_000)
     expect(
       costMilliCents(
         { inputTokens: 1_000_000, outputTokens: 1_000_000 },
-        'gemini-2.5-flash-lite',
+        'gemini-3.5-flash-lite',
       ),
     ).toBe(50_000)
   })

@@ -80,6 +80,47 @@ Caveats unchanged: each figure is ONE run, the reader is not deterministic, and
 
 ---
 
+## The engine experiment — five columns over the same 13 documents
+
+Run on 2026-08-11. Invoice-making fields first, per the owner's ruling.
+
+|                    | Sonnet + caching | Gemini 3.6 Flash | Gemini 3.5 Flash-Lite | Haiku 4.5 + caching |
+| ------------------ | ---------------- | ---------------- | --------------------- | ------------------- |
+| **invoice fields** | **96.6%**        | 94.5%            | 84.0%                 | 74.3%               |
+| all fields         | 97.3%            | 95.6%            | 87.3%                 | 76.3%               |
+| cost / document    | 5.847¢           | **0.407¢** ‡     | **0.083¢** ‡          | 1.446¢              |
+| refused            | 0 / 13           | 0 / 13           | 0 / 13                | **2 / 13**          |
+| tokens in / out    | 69,616 / 34,203  | 59,706 / 13,986  | 59,706 / 11,886       | —                   |
+
+‡ **The Gemini cents are ASSUMED, not published.** The token counts are
+measured and real; the rates behind them are the 2.5-generation list prices
+applied to models two generations newer, because the current model names had to
+be discovered by asking the API what it would answer to and no price list came
+with them. **Substitute the real rates before ruling on cost** — the run prints
+the token counts for exactly this reason.
+
+**The model names were not what anybody assumed.** `gemini-2.5-flash-lite`
+answers 404: _"no longer available to new users"_. The list this key can
+actually call runs to `gemini-3.6-flash` and `gemini-3.5-flash-lite`, and both
+were pinned rather than using the `-latest` aliases, which would make every
+future run a different measurement.
+
+**What each engine gets wrong is nearly the same list**, which is the finding
+under the numbers. Reference numbers lead every column: `stops[1].referenceNumber`
+is 0/2 on Sonnet AND on Flash. Sonnet then loses one broker name and one
+equipment type; Flash loses three broker names and invents two stop references;
+Flash-Lite starts inventing windows and missing BOLs, and on one document —
+`broker-x-1`, three stops — it is 10 fields off where Flash is 1.
+
+**Haiku is the only engine that fails to answer at all** (2 of 13 unparseable),
+and that is a different kind of defect from being wrong: a dispatcher gets
+nothing back and types the load by hand.
+
+Caveats unchanged: each figure is ONE run, no reader is deterministic, and 13
+documents are 12 loads.
+
+---
+
 ## The standard every field is judged against
 
 > **Truth is what a careful dispatcher would enter in the form from this

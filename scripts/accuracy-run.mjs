@@ -147,6 +147,8 @@ const outcomes = []
 let totalMilliCents = 0
 let cacheWrite = 0
 let cacheRead = 0
+let inTokens = 0
+let outTokens = 0
 let read = 0
 const refused = []
 const worst = []
@@ -226,6 +228,8 @@ for (const { name, sheet } of sheets) {
   totalMilliCents += answer.body.cost?.milliCents ?? 0
   cacheWrite += answer.body.cost?.cacheWriteTokens ?? 0
   cacheRead += answer.body.cost?.cacheReadTokens ?? 0
+  inTokens += answer.body.cost?.inputTokens ?? 0
+  outTokens += answer.body.cost?.outputTokens ?? 0
 
   const scored = scoreDocument(
     sheet.fields,
@@ -308,9 +312,21 @@ if (cacheWrite || cacheRead) {
   )
 }
 console.log(
-  '         computed from PRICE_CENTS_PER_MTOK in src/lib/claude.ts, which is',
+  `         tokens: ${inTokens.toLocaleString()} in, ${outTokens.toLocaleString()} out` +
+    ` — MEASURED, so the cents above can be recomputed at any rate`,
 )
-console.log('         a constant recorded on a date — not a reading of a bill.')
+console.log(
+  '         cents computed from MODEL_PRICES in src/lib/claude.ts, a constant',
+)
+console.log('         recorded on a date — not a reading of a bill.')
+if (MODEL && MODEL.startsWith('gemini-')) {
+  console.log(
+    '         WARNING: the Gemini rates are ASSUMED, not published for this',
+  )
+  console.log(
+    '         model generation. Tokens are real; the cents are a guess.',
+  )
+}
 
 if (refused.length) {
   console.log('')
