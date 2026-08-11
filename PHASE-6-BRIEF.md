@@ -2,7 +2,8 @@
 
 **Version 1** — 2026-08-11
 **For:** Claude Code, working in the zebra repo
-**Reads with:** the five closed briefs, `EXTRACTION-CONTRACT.md`,
+**Reads with:** `PHASE-6-SPEC.md` (the owner's spec, transcribed verbatim),
+the five closed briefs, `EXTRACTION-CONTRACT.md`,
 `TMS-DESIGN-SYSTEM.md`, `prisma/schema.prisma`. All standing rules carry. The
 owner's full feature spec is the source dream; this brief is its honest
 translation.
@@ -18,7 +19,7 @@ An inventory before any new table is invented (the ComplianceItem lesson):
 - **The extraction shape already speaks stops[]** — the golden set scored a
   three-stop document. The contract, confidence-per-field, all-or-nothing
   parse, money discipline: all inherited, not rebuilt.
-- **Learning (§17 of the spec) exists**: CustomerAlias + facility memory.
+- **Learning ([spec §17](PHASE-6-SPEC.md#17-learning-system)) exists**: CustomerAlias + facility memory.
   Amazon FC codes (SAT4 …) are facility-memory rows waiting to happen.
 - **Validation (§6) mostly exists**: dup BOL/PO/probable-load,
   missing-required, warn-not-block with signed confirms. Phase 6 adds
@@ -42,7 +43,8 @@ An inventory before any new table is invented (the ComplianceItem lesson):
 
 ## 2. The domain is now a prerequisite, not a parked item
 
-Email-in (spec §1, §13–15) requires receiving mail at an address you own —
+Email-in ([spec §1](PHASE-6-SPEC.md#1-amazon-email-integration),
+[§13](PHASE-6-SPEC.md#13-email-thread-matching)–[§15](PHASE-6-SPEC.md#15-email-to-tms-fallback)) requires receiving mail at an address you own —
 Cloudflare Email Routing on a registered domain. This is the **fourth** feature
 blocked on the ~$10 purchase (broker invoice email, dispatcher reset emails,
 email-in extraction, and now the Amazon inbox). Steps 1–3 build without it;
@@ -63,7 +65,7 @@ executes then.
 
 | Step | Work                                                                                                                                                                                                                                                                                                                                        |
 | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1    | **Create Load v2, part 1 — multi-stop**: the form gains add/remove/reorder stops over the existing schema; stop timeline rendering (§8 of the spec) in Zebra's design language; manually-modified indicators; the typed single-stop path keeps its current speed, measured before/after                                                     |
+| 1    | **Create Load v2, part 1 — multi-stop**: the form gains add/remove/reorder stops over the existing schema; stop timeline rendering ([spec §8](PHASE-6-SPEC.md#8-visual-route--stop-timeline)) in Zebra's design language; manually-modified indicators; the typed single-stop path keeps its current speed, measured before/after           |
 | 2    | **Create Load v2, part 2 — the chooser**: method tabs (Manual · Upload document · Paste text · Amazon), MC-first, recent-customers quick-pick, dropzone on the same surface; paste-text runs the same extraction contract on raw text                                                                                                       |
 | 3    | **Excel ingestion + Amazon profile**: .xlsx parsing server-side into the extraction pipeline; Amazon Load Information sheets extracted to multi-stop loads; golden mini-set from the owner's samples with truth interview; manual upload of the Excel works end to end — this alone kills the Datatruck download-upload ritual's worst half |
 | 4    | **Email-in** (domain-gated): Cloudflare Email Routing → worker → same pipeline → Draft Load; the Incoming Loads inbox (ready / review / conflict states from real validation results, not vibes); forward-to-address works identically (§15)                                                                                                |
@@ -72,7 +74,7 @@ executes then.
 
 ## 5. Parked, with names
 
-- **Travel-time feasibility warnings** (spec §6's "1h20m estimated") — requires
+- **Travel-time feasibility warnings** ([spec §6](PHASE-6-SPEC.md#6-ai-validation)'s "1h20m estimated") — requires
   a mileage/routing source; a real decision, later.
 - **IMAP/OAuth mailbox monitoring** — Email Routing on the owned domain is the
   mechanism; connecting to Gmail inboxes is not.
@@ -98,27 +100,46 @@ executes then.
 
 Recorded rather than resolved, per Phase 1's discipline.
 
-1. **The brief cites a spec this repository does not contain.** Step 1 asks for
-   "stop timeline rendering (§8 of the spec)"; §0 cites the spec's §17, §19,
-   §6; §4 cites §15. The owner's full feature spec is named as the source dream
-   and has not been transcribed here — so those section numbers cannot be
-   cited in review, which is the exact failure `AGENTS.md` records against
-   Phase 3 ("a rule that lives only in a chat log cannot be cited in review").
+1. ~~**The brief cites a spec this repository does not contain.**~~ —
+   **CLOSED.** The owner's spec is transcribed verbatim as `PHASE-6-SPEC.md`
+   and every citation in this brief now links into it. Step 1 was built against
+   the brief's words alone; flag 2 records what the spec turned out to say when
+   it arrived, and what was reconciled.
 
-   Built from the brief's own words plus `TMS-DESIGN-SYSTEM.md` where the spec
-   is silent, and the places where that judgment was exercised are named in the
-   step reports. **Owed:** the spec transcribed, or its §6, §8, §15, §17 and
-   §19 quoted into this brief.
+2. **§8 arrived after Step 1 shipped, and it asks for three things the
+   numbered list does not do.** Reconciled here in words rather than left as a
+   silent disagreement.
 
-2. **The stop TIMELINE is a numbered list with a rule down its leading edge,
-   not a graphic.** Step 1 asks for "stop timeline rendering (§8 of the spec)"
-   and §8 is not in this repository (flag 1). `TMS-DESIGN-SYSTEM.md` has no
-   timeline component, and inventing one during a form step would be a new
-   pattern with no rule behind it.
+   [§8](PHASE-6-SPEC.md#8-visual-route--stop-timeline) shows a **route summary**
+   — `Chicago, IL ↓ Gary, IN ↓ Columbus, OH ↓ Pittsburgh, PA` — above per-stop
+   blocks headed `Stop 1 — PICKUP`, each carrying a facility name, a city and
+   state, a date, and **a time window** (`08:00–10:00`).
 
-   So: each stop is a numbered row against a `border-s-2` rule. It reads the
-   same mirrored in Farsi, it prints, and a screen reader gets a list. If §8
-   asks for something else, this is the paragraph to argue with.
+   What Step 1 built is the editable list: a numbered row per stop against a
+   leading rule, with place, type and date. Three differences, and only one of
+   them is a disagreement:
+   - **No route summary.** §8's arrow chain is a READING view; the create form
+     is a writing one, and a summary of four cities above four inputs that
+     contain those cities is duplication on the screen where §9's forty seconds
+     is measured. It belongs on the load DETAIL screen, which is where a
+     dispatcher looks at a load rather than types one. Owed there, not here.
+   - **`Stop 1 — PICKUP` as a heading.** The form carries the same two facts as
+     a number and a type SELECT, because on this screen the type is editable —
+     [§9](PHASE-6-SPEC.md#9-editable-stop-sequence) requires "change
+     pickup/delivery type". A heading would be a label for something the
+     dispatcher has to change elsewhere.
+   - **THE TIME WINDOW IS A REAL GAP.** §8 shows `08:00–10:00` per stop and the
+     form takes a DATE only. `LoadStop` has carried `scheduledAt`,
+     `windowStart` and `windowEnd` since Phase 1, and the extraction reads all
+     three — so a window that arrives on a document is currently **read,
+     prefilled nowhere, and dropped at save**, exactly as it was before Phase 6.
+     Not introduced by Step 1 and not fixed by it. Owed as its own step.
+
+   And **[§9](PHASE-6-SPEC.md#9-editable-stop-sequence) asks for drag-and-drop
+   reordering; Step 1 built ↑/↓ buttons.** Buttons are keyboard-reachable and
+   drag-and-drop is not without a second implementation for the keyboard; the
+   spec's requirement is "reorder", and the buttons meet it. If the owner wants
+   the drag as well, it is additive rather than a replacement.
 
 3. **The stop type is a real control in the tab order, and it costs two tab
    stops per stop.** The alternative was `tabIndex={-1}`, which would keep §9's
