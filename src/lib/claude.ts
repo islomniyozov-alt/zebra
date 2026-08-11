@@ -21,7 +21,18 @@
 export const EXTRACTION_MODEL = 'claude-sonnet-5'
 
 /** What the response may cost. Generous for a rate confirmation; finite. */
-export const MAX_OUTPUT_TOKENS = 4_096
+// 8k, RAISED FROM 4k after the golden-set runs.
+//
+// A three-stop confirmation with a long instructions block and a 128-character
+// commodity string does not fit in 4,096 output tokens. When it did not, the
+// answer came back TRUNCATED — valid JSON up to the cut, garbage after it — and
+// the strict parser reported `not_json`, which sent a session hunting for
+// prose the model had never written. Two of thirteen documents refused on one
+// run and a different one on the next, intermittently, because output length
+// varies with the page.
+//
+// Costs nothing unless used: output tokens are billed as generated.
+export const MAX_OUTPUT_TOKENS = 8_192
 
 /**
  * The biggest document worth sending, in bytes of base64.
@@ -86,6 +97,8 @@ export type ClaudeFailure =
   | 'refused'
   | 'http_error'
   | 'no_text'
+  /** The answer hit `max_tokens` and stops mid-value. Named, not guessed at. */
+  | 'truncated'
 
 export class ClaudeError extends Error {
   constructor(
@@ -214,6 +227,21 @@ export async function askAboutDocument(input: AskInput): Promise<AskResult> {
 
   if (text === '') {
     throw new ClaudeError('no_text', 'Claude returned no text block.')
+  }
+
+  // TRUNCATION IS ITS OWN FAILURE, said in its own words.
+  //
+  // `stop_reason` was read into this type and never checked, so an answer cut
+  // off at the token cap reached the parser as a broken string and was
+  // reported as `not_json`. That is a true statement about the text and a
+  // misleading one about the cause: nothing was malformed, the answer simply
+  // did not finish. Raising the cap is the fix; saying so is what makes the
+  // next one diagnosable in a log rather than in a re-run.
+  if (payload.stop_reason === 'max_tokens') {
+    throw new ClaudeError(
+      'truncated',
+      `The answer hit the ${MAX_OUTPUT_TOKENS}-token cap and stops mid-value.`,
+    )
   }
 
   return {

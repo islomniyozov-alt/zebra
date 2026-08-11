@@ -211,3 +211,36 @@ describe('what one document costs', () => {
     expect(costCents({ inputTokens: 0, outputTokens: 0 })).toBe(0)
   })
 })
+
+describe('an answer that does not finish', () => {
+  it('is TRUNCATED by name, not "not_json" three layers later', () => {
+    // `stop_reason` was read into the response type and never checked, so an
+    // answer cut off at the cap reached the strict parser as a broken string
+    // and was reported as malformed JSON. True about the text, misleading
+    // about the cause — and it cost a session and two golden-set runs to find.
+    const calls: unknown[] = []
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      calls.push(init)
+      return new Response(
+        JSON.stringify({
+          content: [{ type: 'text', text: '{"brokerName": {"value": "Cas' }],
+          usage: { input_tokens: 900, output_tokens: MAX_OUTPUT_TOKENS },
+          stop_reason: 'max_tokens',
+          model: 'claude-sonnet-5',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    }) as unknown as typeof fetch
+
+    return expect(
+      askAboutDocument({
+        base64: 'JVBERi0=',
+        mimeType: 'application/pdf',
+        system: 'system',
+        prompt: 'prompt',
+        apiKey: 'test-key',
+        fetchImpl,
+      }),
+    ).rejects.toMatchObject({ reason: 'truncated' })
+  })
+})

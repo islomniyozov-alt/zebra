@@ -37,6 +37,19 @@ export interface InvoicePdfInput {
   termsDays: number
   carrier: { name: string; dotNumber?: string | null; mcNumber?: string | null }
   billTo: { name: string; address?: string | null }
+  /**
+   * WHERE THE MONEY GOES, and it is never typed per invoice.
+   *
+   * An authority that factors has sold its receivables: the broker must pay
+   * the FACTOR, not us, and an invoice that omits that gets paid to the wrong
+   * bank account — which is a real loss, not a formatting error. Configured
+   * once against the authority and printed on every invoice it issues.
+   *
+   * An authority that does not factor prints its own address here, so the
+   * block is never absent and never has to be reasoned about: a reader always
+   * knows where to send the cheque.
+   */
+  remitTo: { name: string; lines: readonly string[] }
   lines: readonly InvoicePdfLine[]
   subtotalCents: number
   accessorialsCents: number
@@ -136,6 +149,20 @@ export function renderInvoicePdf(input: InvoicePdfInput): Uint8Array {
   money(input.totalCents, 12, true)
   y -= 26
 
+  // REMIT TO, under the total, where somebody about to pay is already looking.
+  // Above the notes, because a note is context and this is an instruction.
+  rule()
+  y -= 16
+  text('REMIT TO', LEFT, 8, true)
+  y -= 13
+  text(input.remitTo.name, LEFT, 10, true)
+  y -= 12
+  for (const line of input.remitTo.lines) {
+    text(line, LEFT, 9)
+    y -= 11
+  }
+  y -= 10
+
   if (input.notes) {
     text(input.notes, LEFT, 9)
   }
@@ -146,3 +173,77 @@ export function renderInvoicePdf(input: InvoicePdfInput): Uint8Array {
 
 /** How many lines fit on the one page this renders. */
 export const MAX_PDF_LINES = 34
+
+// ---------------------------------------------------------------------------
+// WHOSE ADDRESS GOES IN THE REMIT-TO BLOCK.
+//
+// Separated from the route so the CHOICE can be tested without a database. The
+// renderer's tests prove the block prints what it is handed; this is what
+// decides what to hand it, and it is the half that loses money when it is
+// wrong.
+// ---------------------------------------------------------------------------
+
+export interface RemitParty {
+  name: string
+  contactName?: string | null
+  phone?: string | null
+  email?: string | null
+}
+
+export interface RemitCompany {
+  name: string
+  addressLine1?: string | null
+  addressLine2?: string | null
+  city?: string | null
+  state?: string | null
+  postalCode?: string | null
+  phone?: string | null
+}
+
+/**
+ * The remit-to for one invoice.
+ *
+ * Precedence, most specific first:
+ *
+ *   1. the invoice's OWN factor, where the factoring flow has sold it — an
+ *      invoice sold to one factor must never print another;
+ *   2. the authority's configured factor, which is the ordinary case and the
+ *      one the owner asked for: set up once, printed on every invoice that
+ *      authority issues, never entered per invoice;
+ *   3. the authority's own address, so the block is never absent. "No factor"
+ *      must not mean "no instruction" — a reader always knows where to send
+ *      the cheque.
+ */
+export function remitToFor(input: {
+  company: RemitCompany
+  invoiceFactor?: RemitParty | null
+  authorityFactor?: RemitParty | null
+}): { name: string; lines: string[] } {
+  const factor = input.invoiceFactor ?? input.authorityFactor ?? null
+
+  if (factor) {
+    return {
+      name: factor.name,
+      // A FactoringCompany carries no postal address in the schema — who to
+      // call and where to send the paperwork is what it has. A street address
+      // is owed; see EXTRACTION-CONTRACT.md's schema gaps.
+      lines: [factor.contactName, factor.email, factor.phone].filter(
+        (line): line is string => Boolean(line),
+      ),
+    }
+  }
+
+  const { company } = input
+  const cityLine = [company.city, company.state, company.postalCode]
+    .filter(Boolean)
+    .join(', ')
+  return {
+    name: company.name,
+    lines: [
+      company.addressLine1,
+      company.addressLine2,
+      cityLine || null,
+      company.phone,
+    ].filter((line): line is string => Boolean(line)),
+  }
+}

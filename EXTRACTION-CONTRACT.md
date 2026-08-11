@@ -327,6 +327,32 @@ weight) and `werner-1` (three printed structural zeros)._
 
 ---
 
+## The broker on the rate con is not always the broker on the invoice
+
+**Werner tenders as `Werner Logistics` and bills as `Werner Enterprises`.**
+Owner's note, from a real Datatruck invoice for Werner freight. The rate
+confirmation this corpus carries (`werner-1`) prints `Werner Logistics` in its
+footer and `Werner Enterprises, Inc.` in the terms on page 3 — one company, two
+names, and the invoice has to carry the billing one.
+
+**The two must map to ONE Customer**, or the same freight books against two
+broker records: aging split across both, a credit limit that means nothing, and
+a duplicate-load warning that never fires because the two loads are against
+different customers.
+
+`normalizeAlias` deliberately does NOT fold them — `tests/correction-memory.test.ts`
+asserts `Werner Logistics` and `Werner Enterprises` stay distinct, and that is
+right: they are different strings and no automatic rule should merge two
+companies on a shared first word. **The alias table is the mechanism**: a
+dispatcher types the billing entity over the tendering one once, and every
+later `Werner Logistics` resolves to that Customer.
+
+So this is not a bug to fix; it is a correction somebody must make once per
+broker, and the reason the alias table exists. Worth knowing that it has not
+been made yet on this data.
+
+---
+
 ## Broker dialect — mappings worth learning rather than prompting
 
 Phrases that mean something specific to one broker and nothing in general.
@@ -492,6 +518,14 @@ home.
   the system cannot store is a charge nobody is warned about, which is the same
   shape as the Phase 4 compliance warning and probably wants the same
   treatment.
+
+- **A `FactoringCompany` has no postal address.** It carries `name`,
+  `contactName`, `phone`, `email` and the commercial terms — so the invoice's
+  REMIT TO block can print who to contact and where to send paperwork, and
+  cannot print a street address to mail a cheque to. Most factors are paid
+  electronically and the portal address is what matters, which is why this was
+  not noticed; it is still a hole in a block whose entire job is telling
+  somebody where to send money.
 
 - **A facility's own location code has nowhere to land.** `Location Code #:
 B106091-1` and `AVP1` on `werner-1`. It is the code the facility uses for

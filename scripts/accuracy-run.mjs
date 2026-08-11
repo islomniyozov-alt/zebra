@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import {
   accuracyTable,
   flatten,
+  INVOICE_FIELDS,
+  invoiceTotals,
   scoreDocument,
   scoreRefusal,
 } from './_accuracy-score.mjs'
@@ -177,8 +179,16 @@ for (const { name, sheet } of sheets) {
   }
 
   if (answer.error || answer.status !== 200) {
-    console.log('REFUSED')
-    refused.push(name)
+    // THE REASON, not just the fact. A refusal counts every field on the sheet
+    // as missed, so it moves the headline by several points — and a run that
+    // prints only "REFUSED" cannot tell a transient API failure from a
+    // document the reader genuinely cannot handle. One of these was transient
+    // and cost a re-run to find out.
+    const why =
+      answer.error ??
+      `${answer.body?.error ?? answer.status}: ${answer.body?.message ?? ''}`
+    console.log(`REFUSED  ${String(why).slice(0, 60)}`)
+    refused.push({ name, why: String(why) })
     // A REFUSED DOCUMENT SCORES ZERO ON EVERY FIELD IT SHOULD HAVE HAD. Leaving
     // it out would make the corpus smaller and the number better, which is the
     // most comfortable way to publish a wrong one.
@@ -231,6 +241,22 @@ const totals = rows.reduce(
   }),
   { right: 0, total: 0 },
 )
+// THE INVOICE-MAKING FIELDS, BROKEN OUT (owner's ruling). Judged first,
+// printed first among the totals, because a corpus that reads `pallets`
+// perfectly and `stops[1].referenceNumber` badly is worse at the only job the
+// extraction has.
+const invoice = invoiceTotals(outcomes)
+console.log('  ' + '-'.repeat(78))
+console.log(
+  `  ${'INVOICE-MAKING FIELDS'.padEnd(30)} ${String(invoice.right).padStart(6)} ` +
+    `${String(invoice.wrong).padStart(6)} ${String(invoice.missed).padStart(7)} ` +
+    `${String(invoice.invented).padStart(8)} ` +
+    `${(invoice.rate * 100).toFixed(1).padStart(5)}%`,
+)
+console.log(
+  `  ${`  ${INVOICE_FIELDS.length} fields: who to bill, their load`.padEnd(30)}`,
+)
+console.log(`  ${'  number, the rate, both stops'.padEnd(30)}`)
 console.log('  ' + '-'.repeat(78))
 console.log(
   `  ${'ALL FIELDS'.padEnd(30)} ${String(totals.right).padStart(6)} ` +
@@ -251,8 +277,11 @@ console.log('         a constant recorded on a date — not a reading of a bill.
 
 if (refused.length) {
   console.log('')
-  for (const name of refused) {
-    console.log(`  REFUSED  ${name} — every field on its sheet counted missed`)
+  for (const entry of refused) {
+    console.log(
+      `  REFUSED  ${entry.name} — every field on its sheet counted missed`,
+    )
+    console.log(`           ${entry.why.slice(0, 70)}`)
   }
 }
 

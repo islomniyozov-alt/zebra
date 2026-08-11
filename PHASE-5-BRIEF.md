@@ -518,6 +518,31 @@ The §5 excerpt, box by box, with what proves it. Two are unmet and say so.
       Cost of the longer prompt: **+1.07¢ per document**, +19%, for 10.6
       points.
 
+      **The invoice-making fields, broken out** (owner's ruling, from a real
+      Datatruck invoice): **95.0% — 171 right of 180**, over the 19 fields that
+      decide whether a load can be billed at all — who to bill, their load
+      number, the rate, and both stops with their dates and reference numbers.
+      Every table from here carries this row first: a reader that scores
+      `pallets` perfectly and `stops[1].referenceNumber` badly is worse at the
+      only job the extraction has.
+
+      What is left, all of it in that row: `stops[1].referenceNumber` 0/2,
+      `stops[0].referenceNumber` 3/5, `brokerName` 11/13, one stop name and two
+      stop dates. Reference numbers are the least stable fields in the corpus.
+
+      **A regression the runs found, and it was the instrument's fault as much
+      as the reader's.** After the prompt grew, one or two of thirteen
+      documents began refusing per run with `unparsable: not_json` —
+      intermittently, a different document each time. The answers were not
+      malformed: they were **truncated at the 4,096-token output cap**, which a
+      long instructions block and a 128-character commodity string overrun.
+      `stop_reason` was read into the response type and never checked, so a cut
+      -off answer was reported three layers later as broken JSON. The cap is now
+      8,192, truncation is its own named failure, and the accuracy run prints
+      the reason beside a refusal instead of the word REFUSED alone. A refusal
+      counts every field on its sheet as missed, so an unexplained one moves
+      the headline by six points.
+
       **Two caveats that travel with the number.**
 
       1. **Each figure is ONE RUN, and the reader is not deterministic.**

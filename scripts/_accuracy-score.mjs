@@ -90,6 +90,49 @@ export function scoreRefusal(sheetFields) {
     .map(([field]) => [field, 'missed'])
 }
 
+/**
+ * THE FIELDS AN INVOICE CANNOT BE MADE WITHOUT (owner's ruling, from a real
+ * Datatruck invoice for Werner freight).
+ *
+ * Not every field is worth the same. These are the ones that decide whether a
+ * load can be billed at all: who to bill, under which of their load numbers,
+ * for how much, and the two stops with their dates and reference numbers that
+ * a broker's AP will check the invoice against before paying it. Getting
+ * `pallets` wrong costs nothing; getting `stops[1].referenceNumber` wrong gets
+ * an invoice rejected and re-submitted three weeks later.
+ *
+ * `brokerReference` is the load number here — ours is allocated by us and is
+ * not on the document. Both stops' dates are counted through all three date
+ * fields, because whichever one the document carries is the date the invoice
+ * is checked against.
+ */
+export const INVOICE_FIELDS = [
+  'brokerName',
+  'brokerReference',
+  'money.linehaulCents',
+  ...[0, 1].flatMap((i) => [
+    `stops[${i}].name`,
+    `stops[${i}].city`,
+    `stops[${i}].state`,
+    `stops[${i}].postalCode`,
+    `stops[${i}].scheduledAt`,
+    `stops[${i}].windowStart`,
+    `stops[${i}].windowEnd`,
+    `stops[${i}].referenceNumber`,
+  ]),
+]
+
+/** The same tally, over the invoice-making fields alone. */
+export function invoiceTotals(outcomes) {
+  const set = new Set(INVOICE_FIELDS)
+  const row = { right: 0, wrong: 0, missed: 0, invented: 0 }
+  for (const [field, outcome] of outcomes) {
+    if (set.has(field)) row[outcome] += 1
+  }
+  const total = row.right + row.wrong + row.missed + row.invented
+  return { ...row, total, rate: total ? row.right / total : 1 }
+}
+
 /** Outcomes, per field, worst first — which is the order somebody fixes them. */
 export function accuracyTable(outcomes) {
   const tally = new Map()

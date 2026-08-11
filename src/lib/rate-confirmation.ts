@@ -95,6 +95,10 @@ export const EXTRACTION_SYSTEM = [
   '  stop name is null.',
   '- A CUSTOMER REFERENCE is not a PO. Take poNumber only from a field that',
   '  says PO.',
+  '- brokerReference is THE NUMBER THE BROKER REQUIRES ON THE INVOICE: the',
+  '  PRO #, Order #, Route # or Load Confirmation number in the header. Where',
+  '  several numbers are printed, prefer the one the page says must appear on',
+  '  invoices. A shipper LOAD ID printed in a Reference field is not it.',
   '- OUR OWN identifiers are never cargo data. A seal number or stop field',
   '  holding the carrier phone, MC or DOT number is a template artifact: null.',
   '- EQUIPMENT IS NOT A COMMODITY. "Commodity: VAN" beside "Trailer: Power',
@@ -239,7 +243,10 @@ export async function extractRateConfirmation(
       error instanceof Error &&
       'reason' in error &&
       (error.reason === 'document_too_large' ||
-        error.reason === 'unsupported_media_type')
+        error.reason === 'unsupported_media_type' ||
+        // A truncated answer is the DOCUMENT being too much to say back, not
+        // the network failing. "Try again" is the wrong advice for it.
+        error.reason === 'truncated')
         ? 'not_readable'
         : 'call_failed'
     return fail(reason, message)
@@ -352,7 +359,10 @@ export async function extractPendingUpload(
       error instanceof Error &&
       'reason' in error &&
       (error.reason === 'document_too_large' ||
-        error.reason === 'unsupported_media_type')
+        error.reason === 'unsupported_media_type' ||
+        // A truncated answer is the DOCUMENT being too much to say back, not
+        // the network failing. "Try again" is the wrong advice for it.
+        error.reason === 'truncated')
         ? 'not_readable'
         : 'call_failed'
     return fail(reason, message)

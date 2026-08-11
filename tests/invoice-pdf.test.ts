@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { renderInvoicePdf, type InvoicePdfInput } from '@/lib/invoice-pdf'
+import {
+  remitToFor,
+  renderInvoicePdf,
+  type InvoicePdfInput,
+} from '@/lib/invoice-pdf'
 
 // The PDF is what a broker's clerk opens and what a factoring portal ingests.
 // It has to be a real file, not a plausible-looking blob.
@@ -15,6 +19,10 @@ const input: InvoicePdfInput = {
     mcNumber: '112499',
   },
   billTo: { name: 'TQL', address: '4289 Ivy Pointe Blvd, Cincinnati OH' },
+  remitTo: {
+    name: 'Triumph Financial Services',
+    lines: ['payments@triumphpay.com', '(469) 312-7222'],
+  },
   lines: [
     { description: 'Linehaul — 1042', amountCents: 245000 },
     { description: 'Fuel surcharge — 1042', amountCents: 38000 },
@@ -68,6 +76,45 @@ describe('the invoice PDF', () => {
     expect(text).toContain('MC 112499')
   })
 
+  // --- REMIT TO (owner's ruling, from a real Datatruck invoice) -------------
+  //
+  // An authority that factors has SOLD its receivables. The broker must pay
+  // the FACTOR, and an invoice that does not say so gets paid into the wrong
+  // bank account — a real loss, not a formatting complaint.
+
+  it('prints the factor as the remit-to, so the money goes where it was sold', () => {
+    expect(text).toContain('REMIT TO')
+    expect(text).toContain('Triumph Financial Services')
+    expect(text).toContain('payments@triumphpay.com')
+  })
+
+  it('and an authority with NO factor remits to its own address instead', () => {
+    // THE PAIR. The block is never absent: a reader always knows where to send
+    // the cheque, and "no factor" must not mean "no instruction".
+    const unfactored = decode(
+      renderInvoicePdf({
+        ...input,
+        remitTo: {
+          name: 'RAM Haulage LLC',
+          lines: ['1200 W Main St', 'Bolingbrook, IL, 60490', '(630) 716-3311'],
+        },
+      }),
+    )
+    expect(unfactored).toContain('REMIT TO')
+    expect(unfactored).toContain('1200 W Main St')
+    expect(unfactored).toContain('Bolingbrook, IL, 60490')
+    // And it is NOT the factor's, which is the half that would go unnoticed.
+    expect(unfactored).not.toContain('Triumph Financial Services')
+  })
+
+  it('keeps the remit-to distinct from the bill-to', () => {
+    // Two addresses on one page, and confusing them sends an invoice to the
+    // factor and a payment to the broker.
+    expect(text).toContain('BILL TO')
+    expect(text).toContain('TQL')
+    expect(text.indexOf('BILL TO')).toBeLessThan(text.indexOf('REMIT TO'))
+  })
+
   it('is byte-identical on a second render', () => {
     // "Regenerate it" has to be a safe thing to say — a factoring portal that
     // receives two different files for one invoice number asks why.
@@ -101,5 +148,59 @@ describe('the invoice PDF', () => {
       billTo: { name: 'Грузы', address: null },
     })
     expect(decode(cyrillic)).toContain('?????')
+  })
+})
+
+describe('whose address the remit-to carries', () => {
+  const company = {
+    name: 'RAM Haulage LLC',
+    addressLine1: '1200 W Main St',
+    city: 'Bolingbrook',
+    state: 'IL',
+    postalCode: '60490',
+    phone: '(630) 716-3311',
+  }
+  const triumph = {
+    name: 'Triumph Financial Services',
+    email: 'payments@triumphpay.com',
+  }
+  const otherFactor = { name: 'RTS Financial', email: 'ap@rtsfinancial.com' }
+
+  it('an authority that factors remits to its factor, on EVERY invoice', () => {
+    // Configured once, never entered per invoice — which is the whole ruling.
+    const remit = remitToFor({ company, authorityFactor: triumph })
+    expect(remit.name).toBe('Triumph Financial Services')
+    expect(remit.lines).toContain('payments@triumphpay.com')
+  })
+
+  it('an authority with NO factor remits to its own address', () => {
+    const remit = remitToFor({ company })
+    expect(remit.name).toBe('RAM Haulage LLC')
+    expect(remit.lines).toEqual([
+      '1200 W Main St',
+      'Bolingbrook, IL, 60490',
+      '(630) 716-3311',
+    ])
+  })
+
+  it('and the invoice’s OWN factor beats the authority default', () => {
+    // An invoice already sold to one factor must never print another: the
+    // broker pays whoever the block names, and the wrong name is a payment to
+    // a company with no claim on it.
+    const remit = remitToFor({
+      company,
+      invoiceFactor: otherFactor,
+      authorityFactor: triumph,
+    })
+    expect(remit.name).toBe('RTS Financial')
+    expect(remit.lines).not.toContain('payments@triumphpay.com')
+  })
+
+  it('never returns an empty block, even for a company with no address', () => {
+    // "No factor" must not become "no instruction". A name alone is thin, and
+    // it is still an answer to "who do I pay".
+    const remit = remitToFor({ company: { name: 'Dolphins Transport Inc' } })
+    expect(remit.name).toBe('Dolphins Transport Inc')
+    expect(remit.lines).toEqual([])
   })
 })

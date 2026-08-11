@@ -1,6 +1,6 @@
 import { withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { renderInvoicePdf } from '@/lib/invoice-pdf'
+import { remitToFor, renderInvoicePdf } from '@/lib/invoice-pdf'
 import { apiError, authFailureResponse } from '../../../_lib/respond'
 
 // GET /api/invoices/{id}/pdf
@@ -32,8 +32,30 @@ export async function GET(
           accessorialsCents: true,
           totalCents: true,
           notes: true,
+          companyId: true,
           company: {
-            select: { name: true, dotNumber: true, mcNumber: true },
+            select: {
+              name: true,
+              dotNumber: true,
+              mcNumber: true,
+              addressLine1: true,
+              addressLine2: true,
+              city: true,
+              state: true,
+              postalCode: true,
+              phone: true,
+            },
+          },
+          // The invoice's OWN factor, where the factoring flow has already
+          // sold it. More specific than the authority's default and therefore
+          // preferred — an invoice sold to one factor must not print another.
+          factoringCompany: {
+            select: {
+              name: true,
+              contactName: true,
+              phone: true,
+              email: true,
+            },
           },
           customer: { select: { name: true, billingEmail: true } },
           lines: {
@@ -43,6 +65,33 @@ export async function GET(
         },
       })
       if (!invoice) return null
+
+      // REMIT TO — configured once against the authority, never entered per
+      // invoice. An authority that factors has SOLD its receivables and the
+      // broker must pay the factor; an invoice that omits that gets paid into
+      // the wrong account.
+      //
+      // The invoice's own factor wins where the factoring flow has set one,
+      // then the authority's configured factor, then the authority's own
+      // address. The block is never empty.
+      const authorityFactor = invoice.factoringCompany
+        ? null
+        : await tx.factoringCompany.findFirst({
+            where: { companyId: invoice.companyId, deletedAt: null },
+            orderBy: { createdAt: 'asc' },
+            select: {
+              name: true,
+              contactName: true,
+              phone: true,
+              email: true,
+            },
+          })
+
+      const remitTo = remitToFor({
+        company: invoice.company,
+        invoiceFactor: invoice.factoringCompany,
+        authorityFactor,
+      })
 
       const day = (value: Date | null) =>
         value ? value.toISOString().slice(0, 10) : '—'
@@ -61,6 +110,7 @@ export async function GET(
           name: invoice.customer.name,
           address: invoice.customer.billingEmail,
         },
+        remitTo,
         lines: invoice.lines,
         subtotalCents: invoice.subtotalCents,
         accessorialsCents: invoice.accessorialsCents,
