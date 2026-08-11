@@ -142,8 +142,8 @@ for (const locale of ['en', 'ru', 'fa']) {
   // AND THE WARNINGS. The dates are cleared first — §3 step 5 made them warn
   // rather than block, so this is the state a dispatcher reaches by booking a
   // load whose appointment time is not known yet.
-  await page.fill('input[name="pickupAt"]', '')
-  await page.fill('input[name="deliveryAt"]', '')
+  await page.fill('input[name="stops[0].date"]', '')
+  await page.fill('input[name="stops[1].date"]', '')
   await page.locator('button[type="submit"]').first().click()
   for (let attempt = 0; attempt < 30; attempt++) {
     await page.waitForTimeout(1_000)

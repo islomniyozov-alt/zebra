@@ -89,6 +89,8 @@ export interface CreateLoadLabels {
   extractedUnsure: string
   /** Carries `{printed}`, replaced with what the document actually said. */
   extractedRemembered: string
+  /** Carries `{was}` — the value the document had before somebody changed it. */
+  extractedChanged: string
   authority: string
   broker: string
   truck: string
@@ -123,6 +125,16 @@ export interface CreateLoadLabels {
   facilityCheckIn: string
   facilityContact: string
   facilityNotes: string
+  stopPlace: string
+  stopType: string
+  stopDate: string
+  stopPickup: string
+  stopDelivery: string
+  stopIntermediate: string
+  stopAdd: string
+  stopRemove: string
+  stopMoveUp: string
+  stopMoveDown: string
   bol: string
   po: string
   warnTitle: string
@@ -132,6 +144,29 @@ export interface CreateLoadLabels {
 }
 
 const INITIAL: CreateLoadState = { error: null, field: null, loadId: null }
+
+/** A stop as the FORM holds it. The place lives in the DOM, uncontrolled. */
+interface StopRow {
+  /** Identity across reorders, so React never reuses a moved row's input. */
+  key: string
+  type: 'PICKUP' | 'DELIVERY' | 'INTERMEDIATE'
+  date: string
+}
+
+/**
+ * The type the extraction READ for a stop, if it read one.
+ *
+ * Null rather than a guess. §6's acceptance says "types read not assumed", and
+ * the position of a stop in a list is exactly the assumption it forbids: a
+ * four-stop Amazon run can be pick, pick, drop, drop.
+ */
+function stopTypeFrom(prefill: Prefill, index: number): StopRow['type'] | null {
+  const field = fieldAt(prefill, `stops[${index}].type`)
+  const value = typeof field?.value === 'string' ? field.value : null
+  return value === 'PICKUP' || value === 'DELIVERY' || value === 'INTERMEDIATE'
+    ? value
+    : null
+}
 
 const money = (cents: number) =>
   (cents / 100).toLocaleString(undefined, {
@@ -167,6 +202,13 @@ export function CreateLoadForm({
   }
 
   const hintFor = (path: string, fallback: string | undefined) => {
+    // A CHANGED field says so first. It outranks the provenance hint because
+    // it is the more surprising fact: "from the document" on a value nobody
+    // touched is background, and "you changed this" is not.
+    const was = changed[path]
+    if (was !== undefined) {
+      return labels.extractedChanged.replace('{was}', was)
+    }
     // §1.4's only visible effect, and it says so. When the broker name came
     // from a past correction rather than from this document, the hint names the
     // string the document actually printed — so a dispatcher can see the
@@ -197,8 +239,64 @@ export function CreateLoadForm({
   }
   const formRef = useRef<HTMLFormElement>(null)
 
-  const [pickupAt, setPickupAt] = useState('')
-  const [deliveryAt, setDeliveryAt] = useState('')
+  /**
+   * THE STOPS, AS A LIST (Phase 6 §4 step 1).
+   *
+   * `Load -> LoadStop` has been the schema since Phase 1 and the recorded
+   * decision was "multi-stop in the data, single-stop in the UI". This is the
+   * UI half arriving; the database needed nothing.
+   *
+   * TWO ROWS BY DEFAULT, in the same order and with the same tab stops as the
+   * pair they replace, because §9's forty seconds is measured on the typed
+   * path and a third row nobody asked for is a third row everybody tabs
+   * through. Adding one is a button.
+   *
+   * The DATE is state and the place is not: the typed-date convention
+   * normalises on blur, and the place field is an uncontrolled `defaultValue`
+   * with a changing key, exactly as before. A stop's identity is its `key`,
+   * not its index, so reordering does not make React reuse the wrong row's
+   * uncontrolled input.
+   */
+  const [stops, setStops] = useState<StopRow[]>(() => [
+    { key: 'stop-0', type: 'PICKUP', date: '' },
+    { key: 'stop-1', type: 'DELIVERY', date: '' },
+  ])
+  const nextKey = useRef(2)
+
+  const setStop = (index: number, patch: Partial<StopRow>) =>
+    setStops((current) =>
+      current.map((stop, at) => (at === index ? { ...stop, ...patch } : stop)),
+    )
+
+  const addStop = () =>
+    setStops((current) => {
+      const key = `stop-${nextKey.current++}`
+      // Inserted BEFORE the last row, not appended: the last stop is the
+      // delivery on almost every load, and a dispatcher adding a stop is
+      // adding one on the way rather than after the end. They can change its
+      // type; they should not have to reorder to get the common case.
+      return [
+        ...current.slice(0, -1),
+        { key, type: 'DELIVERY' as const, date: '' },
+        ...current.slice(-1),
+      ]
+    })
+
+  const removeStop = (index: number) =>
+    setStops((current) =>
+      current.length <= 2 ? current : current.filter((_, at) => at !== index),
+    )
+
+  const moveStop = (index: number, by: -1 | 1) =>
+    setStops((current) => {
+      const to = index + by
+      if (to < 0 || to >= current.length) return current
+      const next = [...current]
+      const [row] = next.splice(index, 1)
+      next.splice(to, 0, row!)
+      return next
+    })
+
   const [miles, setMiles] = useState('')
   const [rate, setRate] = useState('')
 
@@ -206,6 +304,38 @@ export function CreateLoadForm({
   // unsure about. `null` means nobody uploaded anything, which is the normal
   // case and must stay the fast one.
   const [prefill, setPrefill] = useState<Prefill | null>(null)
+
+  /**
+   * MANUALLY-MODIFIED INDICATORS (Phase 6 §4 step 1).
+   *
+   * Which prefilled fields the dispatcher has since typed over, and what the
+   * document had said. The provenance hint from Phase 5 answers "where did
+   * this come from"; this answers the question after it — "and did somebody
+   * change it" — which is the one an argument three weeks later turns on.
+   *
+   * Keyed by the same dotted path the correction log uses, so the screen and
+   * the audit row are talking about the same field.
+   *
+   * TRACKED ONLY WHEN THERE IS A PREFILL. The typed path has nothing to
+   * diverge from, so it attaches no handler and pays nothing — §9's forty
+   * seconds is measured on exactly that path.
+   */
+  const [changed, setChanged] = useState<Record<string, string>>({})
+
+  const noteChange = (path: string, value: string) => {
+    const was = fieldAt(prefill, path)
+    const original = was === null ? null : String(was.value)
+    setChanged((current) => {
+      const isBack = original !== null && value.trim() === original.trim()
+      if (isBack) {
+        if (!(path in current)) return current
+        const { [path]: _dropped, ...rest } = current
+        return rest
+      }
+      if (original === null || current[path] === original) return current
+      return { ...current, [path]: original }
+    })
+  }
 
   /**
    * The controlled fields, filled when an extraction lands.
@@ -222,10 +352,25 @@ export function CreateLoadForm({
   const applyPrefill = (next: Prefill) => {
     setPrefill(next)
 
-    const pickupDate = typedDateFrom(next, 'stops[0]')
-    const deliveryDate = typedDateFrom(next, 'stops[1]')
-    if (pickupDate) setPickupAt((current) => current || pickupDate)
-    if (deliveryDate) setDeliveryAt((current) => current || deliveryDate)
+    // AS MANY STOPS AS THE DOCUMENT HAD, and their types as it READ them —
+    // never as the position implies. A three-stop confirmation whose second
+    // stop is a delivery and whose third is another delivery is a real load,
+    // and assuming pickup-then-delivery would silently rewrite it.
+    const extractedStops = (next.extracted as { stops?: unknown[] }).stops ?? []
+    if (extractedStops.length >= 2) {
+      setStops((current) =>
+        extractedStops.map((_, index) => ({
+          key: current[index]?.key ?? `stop-${nextKey.current++}`,
+          type: stopTypeFrom(next, index) ?? current[index]?.type ?? 'DELIVERY',
+          // A date the dispatcher already typed is never overwritten — the
+          // same rule the rate and the old two dates followed.
+          date:
+            current[index]?.date ||
+            typedDateFrom(next, `stops[${index}]`) ||
+            '',
+        })),
+      )
+    }
 
     // §1.3 — THE RATE ONLY IF THIS ROLE MAY SEE ONE. The endpoint already
     // stripped the money for a dispatcher, so `extractedRate` is undefined for
@@ -366,6 +511,12 @@ export function CreateLoadForm({
         list="broker-options"
         hint={hintFor('brokerName', labels.createOnMiss)}
         key={`broker-${prefill?.pendingUploadId ?? 'typed'}`}
+        {...(prefill
+          ? {
+              onChange: (event: React.ChangeEvent<HTMLInputElement>) =>
+                noteChange('brokerName', event.target.value),
+            }
+          : {})}
         defaultValue={valueOf('brokerName')}
         required
         error={
@@ -395,84 +546,164 @@ export function CreateLoadForm({
         }
       />
 
-      <Input
-        name="pickup"
-        label={labels.pickup}
-        list="place-options"
-        hint={hintFor('stops[0].city', labels.placeHint)}
-        key={`pickup-${prefill?.pendingUploadId ?? 'typed'}`}
-        defaultValue={stopPlace(0)}
-        required
-      />
-      <FacilityNote facility={facilityAt(0)} labels={labels} />
-      <Input
-        name="delivery"
-        label={labels.delivery}
-        list="place-options"
-        hint={hintFor('stops[1].city', undefined)}
-        key={`delivery-${prefill?.pendingUploadId ?? 'typed'}`}
-        defaultValue={stopPlace(1)}
-        required
-      />
-      <FacilityNote facility={facilityAt(1)} labels={labels} />
+      {/* THE STOP LIST (Phase 6 §4 step 1).
+       *
+       * Each row is place + type + date on one line, in the order the load
+       * runs. TWO ROWS BY DEFAULT and the tab order through them is exactly
+       * what the pair of place fields and the pair of dates used to be — the
+       * forty-second path is measured, and a row of new controls between the
+       * places and the dates would cost it.
+       *
+       * §8's timeline in Zebra's own language: the sequence is carried by a
+       * NUMBER and a rule down the leading edge rather than by a graphic.
+       * The design system has no timeline component and this phase is not the
+       * place to invent one; a numbered list reads the same in RTL, prints,
+       * and survives a screen reader. Named in the report as a judgment made
+       * where the spec is not in the repository. */}
+      <div className="flex flex-col gap-z2">
+        {stops.map((stop, index) => (
+          <div
+            key={stop.key}
+            className="flex flex-col gap-z1 border-s-2 border-border-strong ps-z3"
+          >
+            <div className="flex items-end gap-z2">
+              <span className="pb-z2 font-mono text-xs text-ink-3">
+                {index + 1}
+              </span>
+              <div className="flex-1">
+                <Input
+                  name={`stops[${index}].place`}
+                  label={
+                    index === 0
+                      ? labels.pickup
+                      : index === stops.length - 1
+                        ? labels.delivery
+                        : labels.stopPlace
+                  }
+                  list="place-options"
+                  hint={hintFor(
+                    `stops[${index}].city`,
+                    index === 0 ? labels.placeHint : undefined,
+                  )}
+                  key={`place-${stop.key}-${prefill?.pendingUploadId ?? 'typed'}`}
+                  defaultValue={stopPlace(index)}
+                  {...(prefill
+                    ? {
+                        onChange: (
+                          event: React.ChangeEvent<HTMLInputElement>,
+                        ) =>
+                          noteChange(
+                            `stops[${index}].place`,
+                            event.target.value,
+                          ),
+                      }
+                    : {})}
+                  required
+                />
+              </div>
+              <Select
+                name={`stops[${index}].type`}
+                label={labels.stopType}
+                value={stop.type}
+                onChange={(event) =>
+                  setStop(index, {
+                    type: event.target.value as StopRow['type'],
+                  })
+                }
+                options={[
+                  { value: 'PICKUP', label: labels.stopPickup },
+                  { value: 'DELIVERY', label: labels.stopDelivery },
+                  { value: 'INTERMEDIATE', label: labels.stopIntermediate },
+                ]}
+                className="w-[130px]"
+              />
+              <div className="w-[130px]">
+                {/* NOT `required`, since Phase 5 §3 step 5: a missing date is a
+                 * WARNING naming what it costs, and an HTML `required` makes
+                 * that warning unreachable — the browser refuses the submit
+                 * and the sentence is never printed.
+                 *
+                 * TEXT, not type="date". A native date input holds three
+                 * internal segments and Tab moves between them, so the dates
+                 * cost three tab stops each instead of one. The first timed
+                 * run put every keystroke after the first date into the wrong
+                 * field and saved a delivery in the year 1. */}
+                <Input
+                  name={`stops[${index}].date`}
+                  label={labels.stopDate}
+                  inputMode="numeric"
+                  placeholder={labels.datePlaceholder}
+                  hint={hintFor(
+                    `stops[${index}].scheduledAt`,
+                    index === 0 ? labels.dateHint : undefined,
+                  )}
+                  value={stop.date}
+                  onChange={(event) =>
+                    setStop(index, { date: event.target.value })
+                  }
+                  onBlur={(event) =>
+                    setStop(index, {
+                      date:
+                        normalizeTypedDate(event.target.value) ??
+                        event.target.value,
+                    })
+                  }
+                  className="font-mono"
+                />
+              </div>
+              {/* Reorder and remove are BUTTONS AFTER the fields, so a typist
+               * tabbing through a two-stop load never lands on them before
+               * the next stop. Disabled rather than hidden at the ends: a
+               * control that vanishes moves everything after it. */}
+              <div className="flex gap-[2px] pb-z2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => moveStop(index, -1)}
+                  disabled={index === 0}
+                  aria-label={labels.stopMoveUp}
+                  tabIndex={-1}
+                >
+                  ↑
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => moveStop(index, 1)}
+                  disabled={index === stops.length - 1}
+                  aria-label={labels.stopMoveDown}
+                  tabIndex={-1}
+                >
+                  ↓
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => removeStop(index)}
+                  disabled={stops.length <= 2}
+                  aria-label={labels.stopRemove}
+                  tabIndex={-1}
+                >
+                  ×
+                </Button>
+              </div>
+            </div>
+            <FacilityNote facility={facilityAt(index)} labels={labels} />
+          </div>
+        ))}
+
+        <div>
+          <Button type="button" variant="ghost" onClick={addStop} tabIndex={-1}>
+            {labels.stopAdd}
+          </Button>
+        </div>
+      </div>
+
       <datalist id="place-options">
         {places.map((name) => (
           <option key={name} value={name} />
         ))}
       </datalist>
-
-      {/* NOT `required`, since §3 step 5. A missing date is now a WARNING that
-       * names what it costs — "no pickup date, so this load will not appear on
-       * any screen that sorts by one" — and an HTML `required` on the same
-       * field makes that warning unreachable: the browser refuses the submit
-       * and the sentence is never printed. A block and a warning for one field
-       * are a contradiction, and the step's posture picks the warning. The
-       * dispatcher taking a call who does not have the appointment time yet is
-       * the case this exists for. See PHASE-5-BRIEF.md §7 flag 30.
-       *
-       * TEXT, not type="date", and the forty-second measurement is why. A
-       * native date input holds three internal segments and Tab moves between
-       * them, so two dates cost six tab stops instead of two — §9 lists
-       * "dates" as one step. The first timed run put every keystroke after the
-       * pickup date into the wrong field and saved a delivery date in the
-       * year 1. `normalizeTypedDate` accepts 810, 8/10, 08/10/26 and
-       * 2026-08-10 alike. */}
-      <div className="flex gap-z3">
-        <div className="flex-1">
-          <Input
-            name="pickupAt"
-            label={labels.pickupDate}
-            inputMode="numeric"
-            placeholder={labels.datePlaceholder}
-            hint={hintFor('stops[0].scheduledAt', labels.dateHint)}
-            value={pickupAt}
-            onChange={(event) => setPickupAt(event.target.value)}
-            onBlur={(event) =>
-              setPickupAt(
-                normalizeTypedDate(event.target.value) ?? event.target.value,
-              )
-            }
-            className="font-mono"
-          />
-        </div>
-        <div className="flex-1">
-          <Input
-            name="deliveryAt"
-            label={labels.deliveryDate}
-            inputMode="numeric"
-            placeholder={labels.datePlaceholder}
-            hint={hintFor('stops[1].scheduledAt', undefined)}
-            value={deliveryAt}
-            onChange={(event) => setDeliveryAt(event.target.value)}
-            onBlur={(event) =>
-              setDeliveryAt(
-                normalizeTypedDate(event.target.value) ?? event.target.value,
-              )
-            }
-            className="font-mono"
-          />
-        </div>
-      </div>
 
       {/* THE SHIPPER'S NUMBERS, and only when a document brought them.
        *

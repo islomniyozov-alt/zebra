@@ -23,8 +23,9 @@
     "20260808010001_pending_upload_extraction",
     "20260808191602_correction_memory",
     "20260808214627_facility_memory",
-    "20260809050322_load_bol_and_po"
+    "20260809050322_load_bol_and_po",
+    "20260811153140_factor_remittance_address"
   ],
-  "recordedAt": "2026-08-09",
+  "recordedAt": "2026-08-11",
   "verified": false
 }

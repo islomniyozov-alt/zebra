@@ -61,10 +61,10 @@ await page.waitForURL(/\/drivers(\?|$)/, { timeout: 60_000 })
 const book = async (pickDay, dropDay) => {
   await page.goto(`${BASE}/loads/new`, { waitUntil: 'domcontentloaded' })
   await page.fill('input[name="broker"]', `Board ${TAG}`)
-  await page.fill('input[name="pickup"]', 'Chicago, IL')
-  await page.fill('input[name="delivery"]', 'Dallas, TX')
-  await page.fill('input[name="pickupAt"]', pickDay)
-  await page.fill('input[name="deliveryAt"]', dropDay)
+  await page.fill('input[name="stops[0].place"]', 'Chicago, IL')
+  await page.fill('input[name="stops[1].place"]', 'Dallas, TX')
+  await page.fill('input[name="stops[0].date"]', pickDay)
+  await page.fill('input[name="stops[1].date"]', dropDay)
   await page.click('form button[type="submit"]')
   const before = ids.length
   const deadline = Date.now() + 90_000

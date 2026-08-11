@@ -656,8 +656,8 @@ for (let attempt = 0; attempt < 30; attempt++) {
   await dispatcher.page.waitForTimeout(500)
 }
 await dispatcher.page.fill('input[name="broker"]', `Warned ${TAG}`)
-await dispatcher.page.fill('input[name="pickup"]', 'Boise, ID')
-await dispatcher.page.fill('input[name="delivery"]', 'Reno, NV')
+await dispatcher.page.fill('input[name="stops[0].place"]', 'Boise, ID')
+await dispatcher.page.fill('input[name="stops[1].place"]', 'Reno, NV')
 await dispatcher.page.locator('button[type="submit"]').first().click()
 
 let warnings = []
@@ -694,8 +694,8 @@ for (let attempt = 0; attempt < 30; attempt++) {
   await owner.page.waitForTimeout(500)
 }
 await owner.page.fill('input[name="broker"]', `Warned owner ${TAG}`)
-await owner.page.fill('input[name="pickup"]', 'Boise, ID')
-await owner.page.fill('input[name="delivery"]', 'Reno, NV')
+await owner.page.fill('input[name="stops[0].place"]', 'Boise, ID')
+await owner.page.fill('input[name="stops[1].place"]', 'Reno, NV')
 await owner.page.locator('button[type="submit"]').first().click()
 
 let ownerWarnings = []

@@ -108,8 +108,10 @@ export async function createLoadAction(
   // Read once, up here: the facilities need it BEFORE the load is written and
   // the attach needs it after.
   const pendingUploadId = String(formData.get('pendingUploadId') ?? '')
-  const pickup = String(formData.get('pickup') ?? '').trim()
-  const delivery = String(formData.get('delivery') ?? '').trim()
+  // THE STOPS, AS MANY AS THE FORM SENT (Phase 6 §4 step 1). Indexed names,
+  // read until they run out — the form decides how many there are, and the
+  // schema has carried a list since Phase 1.
+  const stops = readStops(formData)
   // The shipper's numbers. Kept because §3 step 5 asks to warn about repeats of
   // them, and a warning about a number nothing stores cannot be written.
   const bolNumber = optionalText(formData.get('bol'))
@@ -117,10 +119,13 @@ export async function createLoadAction(
   // What the dispatcher was shown last time, if they were shown anything.
   const acknowledged = String(formData.get('acknowledge') ?? '')
 
-  if (!pickup || !delivery) {
+  // Every stop needs a place. The field named is the FIRST empty one, so the
+  // error lands on the row a dispatcher has to fix rather than on the last.
+  const emptyAt = stops.findIndex((stop) => stop.place === '')
+  if (stops.length < 2 || emptyAt !== -1) {
     return {
       error: t('ref.error.required'),
-      field: pickup ? 'delivery' : 'pickup',
+      field: `stops[${emptyAt === -1 ? stops.length : emptyAt}].place`,
       loadId: null,
     }
   }
@@ -148,20 +153,28 @@ export async function createLoadAction(
               tx,
               session.organizationId,
               pendingUploadId,
-              { 0: pickup, 1: delivery },
-              {
-                0: formData.get('saveFacility0') === '1',
-                1: formData.get('saveFacility1') === '1',
-              },
+              Object.fromEntries(stops.map((stop, i) => [i, stop.place])),
+              Object.fromEntries(
+                stops.map((_, i) => [
+                  i,
+                  formData.get(`saveFacility${i}`) === '1',
+                ]),
+              ),
             )
           : {}
 
-        const from =
-          facilities[0] ??
-          (await resolveLocation(tx, session.organizationId, pickup))
-        const to =
-          facilities[1] ??
-          (await resolveLocation(tx, session.organizationId, delivery))
+        // One resolution per stop, in order. A known facility wins over
+        // create-on-miss, which would otherwise make a second Location named
+        // after the town.
+        const places: ResolvedStop[] = []
+        for (const [index, stop] of stops.entries()) {
+          places.push(
+            facilities[index] ??
+              (await resolveLocation(tx, session.organizationId, stop.place)),
+          )
+        }
+        const from = places[0]!
+        const to = places[places.length - 1]!
 
         // THE WEIGHT, FROM THE SERVER'S OWN COPY OF THE EXTRACTION.
         //
@@ -179,8 +192,10 @@ export async function createLoadAction(
           ? await weightFromMint(tx, pendingUploadId)
           : null
 
-        const pickupAt = stopDate(formData.get('pickupAt'), from)
-        const deliveryAt = stopDate(formData.get('deliveryAt'), to)
+        // The warnings still ask "when does this load start and end", which
+        // is the first stop's date and the last stop's.
+        const pickupAt = stopDate(stops[0]!.date, from)
+        const deliveryAt = stopDate(stops[stops.length - 1]!.date, to)
         const linehaulCents = maySetRate ? cents(formData.get('rate')) : 0
 
         // §3 STEP 5 — WARN, DO NOT BLOCK, AND ONLY ONCE.
@@ -233,24 +248,18 @@ export async function createLoadAction(
             // with no rate, which is what a dispatcher's load looks like
             // anyway. See PHASE-5-BRIEF.md §7 flag 6.
             linehaulCents,
-            stops: [
-              {
-                type: 'PICKUP',
-                locationId: from.locationId,
-                name: facilities[0]?.name ?? pickup,
-                city: from.city,
-                state: from.state,
-                scheduledAt: pickupAt,
-              },
-              {
-                type: 'DELIVERY',
-                locationId: to.locationId,
-                name: facilities[1]?.name ?? delivery,
-                city: to.city,
-                state: to.state,
-                scheduledAt: deliveryAt,
-              },
-            ],
+            // SEQUENCE IS ARRAY ORDER — `writeStops` assigns it from the
+            // index — and the TYPE is the one the form sent, never the one
+            // the position implies. §6: "types read not assumed". A run of
+            // pick, pick, drop, drop is a real Amazon load.
+            stops: stops.map((stop, index) => ({
+              type: stop.type,
+              locationId: places[index]!.locationId,
+              name: facilities[index]?.name ?? stop.place,
+              city: places[index]!.city,
+              state: places[index]!.state,
+              scheduledAt: stopDate(stop.date, places[index]!),
+            })),
           },
           { byUserId: session.userId },
         )
@@ -294,8 +303,9 @@ export async function createLoadAction(
             // `.place`, not `.city` — the form has one field per stop and it
             // holds "Salem, OR". Diffing it against the extracted city alone
             // logged a correction on every upload nobody corrected.
-            'stops[0].place': pickup || null,
-            'stops[1].place': delivery || null,
+            ...Object.fromEntries(
+              stops.map((stop, i) => [`stops[${i}].place`, stop.place || null]),
+            ),
           })
 
           await recordCorrections(tx, {
@@ -489,7 +499,8 @@ async function facilitiesForStops(
 
 interface ResolvedStop {
   locationId: string
-  name: string
+  /** Present only for a KNOWN facility; a create-on-miss place has none. */
+  name?: string
   city: string | null
   state: string | null
   timezone: string | null
@@ -524,4 +535,41 @@ async function weightFromMint(
   const value = typeof raw === 'number' ? raw : Number(raw)
   if (!Number.isFinite(value) || value <= 0) return null
   return Math.floor(value)
+}
+
+interface FormStop {
+  place: string
+  type: 'PICKUP' | 'DELIVERY' | 'INTERMEDIATE'
+  date: string
+}
+
+/**
+ * The stops the form sent, in order.
+ *
+ * Read until the indices run out rather than to a fixed count: the form owns
+ * how many there are, and a load with four stops posts four. A row with no
+ * place at all still counts, so the required check can name which one is
+ * empty instead of silently dropping it.
+ */
+function readStops(formData: FormData): FormStop[] {
+  const stops: FormStop[] = []
+  for (let index = 0; ; index++) {
+    const place = formData.get(`stops[${index}].place`)
+    if (place === null) break
+    const type = String(formData.get(`stops[${index}].type`) ?? '')
+    stops.push({
+      place: String(place).trim(),
+      // Defaulted by POSITION only when the form did not say — a form that
+      // always sends the field never reaches this, and a caller that does not
+      // is choosing the ordinary shape rather than having one assumed of it.
+      type:
+        type === 'PICKUP' || type === 'DELIVERY' || type === 'INTERMEDIATE'
+          ? type
+          : index === 0
+            ? 'PICKUP'
+            : 'DELIVERY',
+      date: String(formData.get(`stops[${index}].date`) ?? ''),
+    })
+  }
+  return stops
 }

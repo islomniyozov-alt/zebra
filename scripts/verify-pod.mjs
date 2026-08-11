@@ -66,10 +66,10 @@ await Promise.all([
 // --- book a load through the form ------------------------------------------
 await page.goto(`${BASE}/loads/new`, { waitUntil: 'domcontentloaded' })
 await page.fill('input[name="broker"]', `POD ${TAG}`)
-await page.fill('input[name="pickup"]', 'Chicago, IL')
-await page.fill('input[name="delivery"]', 'Dallas, TX')
-await page.fill('input[name="pickupAt"]', '901')
-await page.fill('input[name="deliveryAt"]', '903')
+await page.fill('input[name="stops[0].place"]', 'Chicago, IL')
+await page.fill('input[name="stops[1].place"]', 'Dallas, TX')
+await page.fill('input[name="stops[0].date"]', '901')
+await page.fill('input[name="stops[1].date"]', '903')
 await page.fill('input[name="rate"]', '2450')
 // The BUTTON, not Ctrl+Enter. The hotkey is bound in a useEffect, so it needs
 // hydration, and this script raced it: one run submitted nothing and reported
@@ -173,10 +173,10 @@ record(
 // same server.
 await page.goto(`${BASE}/loads/new`, { waitUntil: 'domcontentloaded' })
 await page.fill('input[name="broker"]', `POD ${TAG}`)
-await page.fill('input[name="pickup"]', 'Chicago, IL')
-await page.fill('input[name="delivery"]', 'Dallas, TX')
-await page.fill('input[name="pickupAt"]', '915')
-await page.fill('input[name="deliveryAt"]', '917')
+await page.fill('input[name="stops[0].place"]', 'Chicago, IL')
+await page.fill('input[name="stops[1].place"]', 'Dallas, TX')
+await page.fill('input[name="stops[0].date"]', '915')
+await page.fill('input[name="stops[1].date"]', '917')
 // The BUTTON, not Ctrl+Enter. The hotkey is bound in a useEffect, so it needs
 // hydration, and this script raced it: one run submitted nothing and reported
 // no error because there was no error. The hotkey is proven by the Step 4

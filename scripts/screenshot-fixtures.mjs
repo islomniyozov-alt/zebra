@@ -251,10 +251,10 @@ try {
   ] of LOADS) {
     await page.goto(`${BASE}/loads/new`, { waitUntil: 'domcontentloaded' })
     await page.fill('input[name="broker"]', broker)
-    await page.fill('input[name="pickup"]', pickup)
-    await page.fill('input[name="delivery"]', delivery)
-    await page.fill('input[name="pickupAt"]', day(pickDay))
-    await page.fill('input[name="deliveryAt"]', day(dropDay))
+    await page.fill('input[name="stops[0].place"]', pickup)
+    await page.fill('input[name="stops[1].place"]', delivery)
+    await page.fill('input[name="stops[0].date"]', day(pickDay))
+    await page.fill('input[name="stops[1].date"]', day(dropDay))
     await page.fill('input[name="rate"]', rate)
     await page.fill('input[name="miles"]', miles)
     if (truckIndex >= 0) {

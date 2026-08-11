@@ -94,13 +94,21 @@ async function keyboardRun(label, { broker, from, to, pickDay, dropDay }) {
   await page.keyboard.press('ArrowDown') // first real option
   await page.keyboard.press('Tab') // → driver
   await page.keyboard.press('ArrowDown')
-  await page.keyboard.press('Tab') // → pickup
+  // THE STOP LIST, since Phase 6 §4 step 1. Each stop is place -> type ->
+  // date, so a two-stop load costs two more tab stops than the old pair of
+  // places followed by the pair of dates. The type select is LEFT ALONE on the
+  // way past — its default is right for the ordinary load, and a typist who
+  // needs to change it arrives at it deliberately. Counted here rather than
+  // designed around: that is what the before/after measurement is for.
+  await page.keyboard.press('Tab') // → stop 1 place
   await page.keyboard.type(from)
-  await page.keyboard.press('Tab') // → delivery
-  await page.keyboard.type(to)
-  await page.keyboard.press('Tab') // → pickup date
+  await page.keyboard.press('Tab') // → stop 1 type
+  await page.keyboard.press('Tab') // → stop 1 date
   await page.keyboard.type(pickDay)
-  await page.keyboard.press('Tab') // → delivery date
+  await page.keyboard.press('Tab') // → stop 2 place
+  await page.keyboard.type(to)
+  await page.keyboard.press('Tab') // → stop 2 type
+  await page.keyboard.press('Tab') // → stop 2 date
   await page.keyboard.type(dropDay)
   await page.keyboard.press('Tab') // → miles
   await page.keyboard.type('1080')
@@ -117,13 +125,15 @@ async function keyboardRun(label, { broker, from, to, pickDay, dropDay }) {
   // measuring a typo.
   const filled = await page.evaluate(() =>
     Object.fromEntries(
-      ['pickupAt', 'deliveryAt', 'miles', 'rate', 'broker'].map((name) => [
-        name,
-        document.querySelector(`[name="${name}"]`)?.value ?? '',
-      ]),
+      ['stops[0].date', 'stops[1].date', 'miles', 'rate', 'broker'].map(
+        (name) => [
+          name,
+          document.querySelector(`[name="${name}"]`)?.value ?? '',
+        ],
+      ),
     ),
   )
-  if (!filled.pickupAt || !filled.deliveryAt) {
+  if (!filled['stops[0].date'] || !filled['stops[1].date']) {
     console.log(`  ! dates did not land: ${JSON.stringify(filled)}`)
   }
 

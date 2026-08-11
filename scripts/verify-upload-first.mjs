@@ -61,7 +61,7 @@ await page.goto(`${BASE}/loads/new`, { waitUntil: 'domcontentloaded' })
 record(
   'the form is complete before anything is uploaded',
   (await page.locator('button[type="submit"]').first().isEnabled()) &&
-    (await page.locator('input[name="pickup"]').isEditable()),
+    (await page.locator('input[name="stops[0].place"]').isEditable()),
   'save enabled, fields editable — no gate',
 )
 
@@ -135,10 +135,10 @@ const snapshot = async () =>
       document.querySelector(`input[name="${name}"]`)?.value?.trim() ?? null
     return {
       broker: value('broker'),
-      pickup: value('pickup'),
-      delivery: value('delivery'),
-      pickupAt: value('pickupAt'),
-      deliveryAt: value('deliveryAt'),
+      pickup: value('stops[0].place'),
+      delivery: value('stops[1].place'),
+      pickupAt: value('stops[0].date'),
+      deliveryAt: value('stops[1].date'),
       // null rather than '' when the input does not exist at all — the
       // difference between "a dispatcher has no rate field" and "the rate did
       // not fill", which are opposite outcomes.

@@ -104,7 +104,8 @@ async function uploadAndSettle(bytes, label) {
   const snapshot = () =>
     page.evaluate(() => ({
       pickup:
-        document.querySelector('input[name="pickup"]')?.value?.trim() ?? null,
+        document.querySelector('input[name="stops[0].place"]')?.value?.trim() ??
+        null,
       // The offer to save, and whether it is ticked. Its presence is the claim
       // for a new dock; its ABSENCE is the claim for a known one.
       offers: [...document.querySelectorAll('input[type="checkbox"]')]

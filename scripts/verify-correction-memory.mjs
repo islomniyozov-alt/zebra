@@ -124,8 +124,8 @@ async function uploadAndSettle(label) {
         document.querySelector(`input[name="${name}"]`)?.value?.trim() ?? null
       return {
         broker: value('broker'),
-        pickup: value('pickup'),
-        delivery: value('delivery'),
+        pickup: value('stops[0].place'),
+        delivery: value('stops[1].place'),
         pendingUploadId:
           document.querySelector('input[name="pendingUploadId"]')?.value ??
           null,

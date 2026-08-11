@@ -261,6 +261,90 @@ describe('creating a load', () => {
     expect(load.id).toBeTruthy()
   })
 
+  it('takes FOUR stops with the types it was given, not the ones position implies', async () => {
+    // PHASE 6 §6: "a four-stop Amazon sheet becomes a four-stop draft with
+    // sequence preserved, types read not assumed". Pick, pick, drop, drop is a
+    // real Amazon run — two FCs loaded, two unloaded — and a service that
+    // decided the type from the index would rewrite it into pick, drop, drop,
+    // drop and dispatch it that way.
+    const load = await inOrg((tx) =>
+      createLoad(tx, organizationId, {
+        companyId: alphaId,
+        customerId: brokerId,
+        stops: [
+          {
+            type: 'PICKUP',
+            city: 'San Antonio',
+            state: 'TX',
+            scheduledAt: day(1),
+          },
+          { type: 'PICKUP', city: 'Austin', state: 'TX', scheduledAt: day(1) },
+          {
+            type: 'DELIVERY',
+            city: 'Dallas',
+            state: 'TX',
+            scheduledAt: day(2),
+          },
+          {
+            type: 'DELIVERY',
+            city: 'Houston',
+            state: 'TX',
+            scheduledAt: day(3),
+          },
+        ],
+      }),
+    )
+
+    const written = await inOrg((tx) =>
+      tx.loadStop.findMany({
+        where: { loadId: load.id },
+        orderBy: { sequence: 'asc' },
+      }),
+    )
+    expect(
+      written.map((stop) => [stop.sequence, stop.type, stop.city]),
+    ).toEqual([
+      [1, 'PICKUP', 'San Antonio'],
+      [2, 'PICKUP', 'Austin'],
+      [3, 'DELIVERY', 'Dallas'],
+      [4, 'DELIVERY', 'Houston'],
+    ])
+  })
+
+  it('and each stop keeps its OWN time', async () => {
+    // Not the load's window flattened onto every row: an Amazon sheet gives a
+    // time per FC and the driver is held to each one.
+    const load = await inOrg((tx) =>
+      createLoad(tx, organizationId, {
+        companyId: alphaId,
+        customerId: brokerId,
+        stops: [
+          { type: 'PICKUP', city: 'Salem', state: 'OR', scheduledAt: day(1) },
+          {
+            type: 'INTERMEDIATE',
+            city: 'Reno',
+            state: 'NV',
+            scheduledAt: day(2),
+          },
+          { type: 'DELIVERY', city: 'Chino', state: 'CA', scheduledAt: day(3) },
+        ],
+      }),
+    )
+    const written = await inOrg((tx) =>
+      tx.loadStop.findMany({
+        where: { loadId: load.id },
+        orderBy: { sequence: 'asc' },
+      }),
+    )
+    expect(
+      written.map((stop) => stop.scheduledAt?.toISOString().slice(0, 10)),
+    ).toEqual([
+      day(1).toISOString().slice(0, 10),
+      day(2).toISOString().slice(0, 10),
+      day(3).toISOString().slice(0, 10),
+    ])
+  })
+
   it('opens the status log at BOOKED', async () => {
     const load = await inOrg((tx) =>
       createLoad(tx, organizationId, {

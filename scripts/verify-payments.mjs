@@ -77,10 +77,10 @@ const PAYER = `Relay ${TAG}`
 async function bookDelivered(rate, pickupDay, deliveryDay) {
   await page.goto(`${BASE}/loads/new`, { waitUntil: 'domcontentloaded' })
   await page.fill('input[name="broker"]', PAYER)
-  await page.fill('input[name="pickup"]', 'Chicago, IL')
-  await page.fill('input[name="delivery"]', 'Dallas, TX')
-  await page.fill('input[name="pickupAt"]', pickupDay)
-  await page.fill('input[name="deliveryAt"]', deliveryDay)
+  await page.fill('input[name="stops[0].place"]', 'Chicago, IL')
+  await page.fill('input[name="stops[1].place"]', 'Dallas, TX')
+  await page.fill('input[name="stops[0].date"]', pickupDay)
+  await page.fill('input[name="stops[1].date"]', deliveryDay)
   await page.fill('input[name="rate"]', rate)
   await page.click('form button[type="submit"]')
 

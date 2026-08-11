@@ -117,13 +117,13 @@ await second.close()
 // exists for.
 await page.goto(`${BASE}/loads/new`, { waitUntil: 'domcontentloaded' })
 await page.fill('input[name="broker"]', `Views ${TAG}`)
-await page.fill('input[name="pickup"]', 'Chicago, IL')
-await page.fill('input[name="delivery"]', `El Paso ${TAG}, TX`)
+await page.fill('input[name="stops[0].place"]', 'Chicago, IL')
+await page.fill('input[name="stops[1].place"]', `El Paso ${TAG}, TX`)
 const soon = new Date()
 soon.setDate(soon.getDate() + 3)
 const md = `${String(soon.getMonth() + 1).padStart(2, '0')}${String(soon.getDate()).padStart(2, '0')}`
-await page.fill('input[name="pickupAt"]', md)
-await page.fill('input[name="deliveryAt"]', md)
+await page.fill('input[name="stops[0].date"]', md)
+await page.fill('input[name="stops[1].date"]', md)
 await page.click('form button[type="submit"]')
 await page.waitForTimeout(14_000)
 

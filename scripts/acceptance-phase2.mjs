@@ -251,10 +251,10 @@ const book = async (own, companyId, index) => {
   await own.goto(`${BASE}/loads/new`, { waitUntil: 'domcontentloaded' })
   await own.selectOption('select[name="companyId"]', companyId)
   await own.fill('input[name="broker"]', `${TAG} Broker`)
-  await own.fill('input[name="pickup"]', 'Chicago, IL')
-  await own.fill('input[name="delivery"]', 'Dallas, TX')
-  await own.fill('input[name="pickupAt"]', day(10 + index))
-  await own.fill('input[name="deliveryAt"]', day(11 + index))
+  await own.fill('input[name="stops[0].place"]', 'Chicago, IL')
+  await own.fill('input[name="stops[1].place"]', 'Dallas, TX')
+  await own.fill('input[name="stops[0].date"]', day(10 + index))
+  await own.fill('input[name="stops[1].date"]', day(11 + index))
   await own.click('form button[type="submit"]')
   // Six at once is SLOW. Measured on the deployed worker with `wrangler tail`,
   // a concurrent /loads/new takes 16.5–19.6s of wall clock against ~300ms of
@@ -350,10 +350,10 @@ const attemptAssign = async (truckLabel, driverLabel, offset) => {
   await page.goto(`${BASE}/loads/new`, { waitUntil: 'domcontentloaded' })
   await page.selectOption('select[name="companyId"]', alpha.id)
   await page.fill('input[name="broker"]', `${TAG} Broker`)
-  await page.fill('input[name="pickup"]', 'Chicago, IL')
-  await page.fill('input[name="delivery"]', 'Dallas, TX')
-  await page.fill('input[name="pickupAt"]', day(offset))
-  await page.fill('input[name="deliveryAt"]', day(offset + 1))
+  await page.fill('input[name="stops[0].place"]', 'Chicago, IL')
+  await page.fill('input[name="stops[1].place"]', 'Dallas, TX')
+  await page.fill('input[name="stops[0].date"]', day(offset))
+  await page.fill('input[name="stops[1].date"]', day(offset + 1))
 
   const trucks = await page
     .locator('select[name="truckId"] option')
