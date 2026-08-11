@@ -134,14 +134,24 @@ export const EXTRACTION_SYSTEM = [
   '- "53 Van" or "Van" with no hook language is DRY_VAN.',
 ].join('\n')
 
+/**
+ * The schema rides in the SYSTEM block, not beside the document.
+ *
+ * It is the same bytes on every call and it is large — which makes it the
+ * other half of what prompt caching is for. The user message keeps only the
+ * instruction to answer, so the cacheable prefix is instructions + schema and
+ * the uncacheable remainder is the document alone.
+ */
+export const EXTRACTION_SYSTEM_WITH_SCHEMA = [
+  EXTRACTION_SYSTEM,
+  '',
+  'Answer with JSON matching this schema exactly:',
+  '',
+  JSON.stringify(EXTRACTION_SCHEMA),
+].join('\n')
+
 export function extractionPrompt(): string {
-  return [
-    'Extract this rate confirmation into JSON matching this schema exactly:',
-    '',
-    JSON.stringify(EXTRACTION_SCHEMA),
-    '',
-    'Return the JSON object and nothing else.',
-  ].join('\n')
+  return 'Extract this rate confirmation. Return the JSON object and nothing else.'
 }
 
 export type ExtractionFailure =
@@ -177,6 +187,9 @@ export interface ExtractInput {
   /** Injected in tests; the real one is `globalThis.fetch`. */
   fetchImpl?: typeof fetch
   apiKey?: string
+  /** The cost experiment's two knobs. Both default to the shipped behaviour. */
+  model?: string
+  cache?: boolean
 }
 
 /**
@@ -229,8 +242,10 @@ export async function extractRateConfirmation(
     answer = await askAboutDocument({
       base64: input.base64,
       mimeType: input.mimeType,
-      system: EXTRACTION_SYSTEM,
+      system: EXTRACTION_SYSTEM_WITH_SCHEMA,
       prompt: extractionPrompt(),
+      ...(input.model ? { model: input.model } : {}),
+      ...(input.cache ? { cache: true } : {}),
       ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
       ...(input.apiKey ? { apiKey: input.apiKey } : {}),
     })
@@ -285,7 +300,7 @@ export async function extractRateConfirmation(
         model: answer.model,
         // Not `new Date()` — the audit layer stamps rows and this is a fact
         // about the CALL, so it travels with the usage it belongs to.
-        costMilliCents: costMilliCents(answer.usage),
+        costMilliCents: costMilliCents(answer.usage, answer.model),
       } as never,
     },
   })
@@ -296,7 +311,7 @@ export async function extractRateConfirmation(
     extracted,
     money,
     usage: answer.usage,
-    costMilliCents: costMilliCents(answer.usage),
+    costMilliCents: costMilliCents(answer.usage, answer.model),
     model: answer.model,
   }
 }
@@ -348,8 +363,10 @@ export async function extractPendingUpload(
     answer = await askAboutDocument({
       base64: input.base64,
       mimeType: input.mimeType,
-      system: EXTRACTION_SYSTEM,
+      system: EXTRACTION_SYSTEM_WITH_SCHEMA,
       prompt: extractionPrompt(),
+      ...(input.model ? { model: input.model } : {}),
+      ...(input.cache ? { cache: true } : {}),
       ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
       ...(input.apiKey ? { apiKey: input.apiKey } : {}),
     })
@@ -395,7 +412,7 @@ export async function extractPendingUpload(
         money,
         usage: answer.usage,
         model: answer.model,
-        costMilliCents: costMilliCents(answer.usage),
+        costMilliCents: costMilliCents(answer.usage, answer.model),
       } as never,
     },
   })
@@ -406,7 +423,7 @@ export async function extractPendingUpload(
     extracted,
     money,
     usage: answer.usage,
-    costMilliCents: costMilliCents(answer.usage),
+    costMilliCents: costMilliCents(answer.usage, answer.model),
     model: answer.model,
   }
 }

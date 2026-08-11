@@ -42,6 +42,44 @@ per-stop reference numbers, which remain the least stable fields in the set.
 
 ---
 
+## The cost experiment — three ways over the same 13 documents
+
+Run on 2026-08-11, invoice-making fields first per the owner's ruling.
+
+|                     | invoice fields | all fields | cost / document | refused     |
+| ------------------- | -------------- | ---------- | --------------- | ----------- |
+| Sonnet, no caching  | **96.1%**      | 96.9%      | 6.958¢          | 0 of 13     |
+| Sonnet + caching    | 95.0%          | 96.6%      | **6.082¢**      | 0 of 13     |
+| Haiku 4.5 + caching | 74.3%          | 76.3%      | **1.446¢**      | **2 of 13** |
+
+**Caching is free accuracy-wise and 12.6% cheaper.** The difference between
+the first two rows is run-to-run noise and nothing else — caching does not
+change a single token the model sees, so a 1.1-point gap between them is the
+measurement's own variance, and a useful calibration of how much to trust any
+single figure in this table.
+
+Cache behaviour after the breakpoint was fixed: **5,208 tokens written, 62,496
+read** across the corpus. Before it, the same run wrote 115,582 and read
+21,660 — because a `cache_control` marker caches everything up to and including
+its block, and the first version put one after the document. Every unique PDF
+was being written into the cache at 1.25x and never read.
+
+**Haiku is not 74% — it is about 88% when it answers, and it fails to answer.**
+Two of thirteen documents came back unparseable (`bad_value_type at
+$.bolNumber`, `not_json at $`), and a refusal scores every field on its sheet
+as missed, which is 31 of its 40 invoice-field failures. Excluding the two it
+refused, its invoice-field rate is roughly 88.5%. Both readings matter and
+neither is the whole story: a reader that is cheap and right most of the time
+but silently produces nothing on one document in seven is a different
+proposition from one that is dearer and always answers.
+
+What it costs to know: **five corpus runs, about $3.67.**
+
+Caveats unchanged: each figure is ONE run, the reader is not deterministic, and
+13 documents are 12 loads.
+
+---
+
 ## The standard every field is judged against
 
 > **Truth is what a careful dispatcher would enter in the form from this

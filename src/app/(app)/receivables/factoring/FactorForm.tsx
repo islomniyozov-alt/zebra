@@ -19,6 +19,11 @@ export interface FactorDraft {
   contactName: string | null
   phone: string | null
   email: string | null
+  remitAddressLine1: string | null
+  remitAddressLine2: string | null
+  remitCity: string | null
+  remitState: string | null
+  remitPostalCode: string | null
   /** Already rendered as a percentage string by the server. */
   advanceRate: string
   feeRate: string
@@ -40,6 +45,13 @@ interface Props {
     feeRate: string
     percentHint: string
     notes: string
+    remitHeading: string
+    remitHint: string
+    remitLine1: string
+    remitLine2: string
+    remitCity: string
+    remitState: string
+    remitPostalCode: string
     save: string
     cancel: string
     saved: string
@@ -116,6 +128,49 @@ export function FactorForm({ factor, companies, translate, labels }: Props) {
           label={labels.notes}
           defaultValue={factor?.notes ?? ''}
         />
+      </div>
+
+      {/* THE REMITTANCE ADDRESS, entered once here and printed on every
+       * invoice this authority issues. Its own group with its own heading
+       * because it is not the factor's corporate address: a factor's cheques
+       * go to a lockbox, frequently in another state, and somebody filling
+       * this in from a factoring agreement needs to be told which one to
+       * copy. */}
+      <div className="flex flex-col gap-z1">
+        <h2 className="text-sm font-medium text-ink">{labels.remitHeading}</h2>
+        <p className="text-sm text-ink-2">{labels.remitHint}</p>
+      </div>
+      <div className="grid grid-cols-2 gap-z3">
+        <Input
+          name="remitAddressLine1"
+          label={labels.remitLine1}
+          defaultValue={factor?.remitAddressLine1 ?? ''}
+        />
+        <Input
+          name="remitAddressLine2"
+          label={labels.remitLine2}
+          defaultValue={factor?.remitAddressLine2 ?? ''}
+        />
+        <Input
+          name="remitCity"
+          label={labels.remitCity}
+          defaultValue={factor?.remitCity ?? ''}
+        />
+        <div className="flex gap-z3">
+          <Input
+            name="remitState"
+            label={labels.remitState}
+            defaultValue={factor?.remitState ?? ''}
+            className="w-[80px]"
+            identifier
+          />
+          <Input
+            name="remitPostalCode"
+            label={labels.remitPostalCode}
+            defaultValue={factor?.remitPostalCode ?? ''}
+            identifier
+          />
+        </div>
       </div>
 
       <div className="flex items-center gap-z3">

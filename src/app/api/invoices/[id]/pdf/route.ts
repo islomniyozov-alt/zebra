@@ -55,6 +55,11 @@ export async function GET(
               contactName: true,
               phone: true,
               email: true,
+              remitAddressLine1: true,
+              remitAddressLine2: true,
+              remitCity: true,
+              remitState: true,
+              remitPostalCode: true,
             },
           },
           customer: { select: { name: true, billingEmail: true } },
@@ -84,6 +89,11 @@ export async function GET(
               contactName: true,
               phone: true,
               email: true,
+              remitAddressLine1: true,
+              remitAddressLine2: true,
+              remitCity: true,
+              remitState: true,
+              remitPostalCode: true,
             },
           })
 

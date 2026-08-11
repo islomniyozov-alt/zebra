@@ -62,6 +62,11 @@ export default async function FactoringSetupPage({
         contactName: target.contactName,
         phone: target.phone,
         email: target.email,
+        remitAddressLine1: target.remitAddressLine1,
+        remitAddressLine2: target.remitAddressLine2,
+        remitCity: target.remitCity,
+        remitState: target.remitState,
+        remitPostalCode: target.remitPostalCode,
         // Rendered from basis points, never from a float: 9700 -> "97".
         advanceRate:
           target.advanceRateBps === null
@@ -158,6 +163,13 @@ export default async function FactoringSetupPage({
               feeRate: t('factoring.feeRate'),
               percentHint: t('factoring.percentHint'),
               notes: t('factoring.notes'),
+              remitHeading: t('factoring.remitHeading'),
+              remitHint: t('factoring.remitHint'),
+              remitLine1: t('factoring.remitLine1'),
+              remitLine2: t('factoring.remitLine2'),
+              remitCity: t('factoring.remitCity'),
+              remitState: t('factoring.remitState'),
+              remitPostalCode: t('factoring.remitPostalCode'),
               save: t('factoring.save'),
               cancel: t('factoring.cancel'),
               saved: t('factoring.saved'),

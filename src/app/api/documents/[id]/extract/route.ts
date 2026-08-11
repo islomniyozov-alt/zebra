@@ -5,7 +5,11 @@ import {
   extractPendingUpload,
   extractRateConfirmation,
 } from '@/lib/rate-confirmation'
-import { formatCostMilliCents } from '@/lib/claude'
+import {
+  ALLOWED_MODELS,
+  formatCostMilliCents,
+  isPricedModel,
+} from '@/lib/claude'
 import { withoutMoney } from '@/lib/extraction'
 import {
   noteAliasApplied,
@@ -41,10 +45,35 @@ import { apiError, authFailureResponse } from '../../../_lib/respond'
 // Document's OCR columns for the rate panel, which asks a different permission.
 
 export async function POST(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await context.params
+
+  // TWO KNOBS FOR THE COST EXPERIMENT, and both default to what ships.
+  //
+  // The model is ALLOWLISTED against the price table rather than passed
+  // through: an unpriced model would produce a cost figure computed from the
+  // wrong rate, which is worse than refusing. Caching is a boolean because
+  // there is nothing to get wrong about it — the document is never cached and
+  // the instructions always can be.
+  //
+  // Gated by the same `document:create` as the extraction itself: choosing a
+  // model is choosing what to spend, which is the permission this endpoint
+  // already asks for.
+  const body = (await request.json().catch(() => ({}))) as {
+    model?: unknown
+    cache?: unknown
+  }
+  const requested = typeof body.model === 'string' ? body.model : null
+  if (requested && !isPricedModel(requested)) {
+    return apiError(
+      400,
+      'unknown_model',
+      `${requested} is not a priced model. Allowed: ${ALLOWED_MODELS.join(', ')}.`,
+    )
+  }
+  const cache = body.cache === true
 
   try {
     const result = await withCurrentOrg(
@@ -80,6 +109,8 @@ export async function POST(
           documentId: file.id,
           base64: base64Of(bytes),
           mimeType: file.mimeType,
+          ...(requested ? { model: requested } : {}),
+          ...(cache ? { cache: true } : {}),
         })
 
         // §1.4 — APPLIED ON THE NEXT UPLOAD. If somebody has already typed
@@ -150,6 +181,8 @@ export async function POST(
         display: formatCostMilliCents(outcome.costMilliCents),
         inputTokens: outcome.usage.inputTokens,
         outputTokens: outcome.usage.outputTokens,
+        cacheWriteTokens: outcome.usage.cacheWriteTokens ?? 0,
+        cacheReadTokens: outcome.usage.cacheReadTokens ?? 0,
         model: outcome.model,
       },
     })

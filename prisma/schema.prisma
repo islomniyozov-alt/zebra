@@ -1046,6 +1046,21 @@ model FactoringCompany {
   contactName    String?
   phone          String?
   email          String?
+
+  // THE REMITTANCE ADDRESS, printed on every invoice this factor's authority
+  // issues. Its own fields rather than the factor's corporate address, because
+  // a factor's cheques go to a lockbox that is frequently in another state
+  // from its offices — and the block on the invoice exists to tell somebody
+  // where to send money, not who the company is.
+  //
+  // Nullable: a factor can be on file before the lockbox is confirmed, and an
+  // invoice prints the lines it has.
+  remitAddressLine1 String?
+  remitAddressLine2 String?
+  remitCity         String?
+  remitState        String?
+  remitPostalCode   String?
+
   advanceRateBps Int? // e.g. 9700 = 97% advance
   feeBps         Int? // e.g. 300 = 3%
   notes          String?

@@ -142,7 +142,14 @@ describe('what it does with the answer', () => {
     const { impl } = spy()
     const answer = await askAboutDocument({ ...ask(), fetchImpl: impl })
     expect(answer.text).toBe('{"ok":true}')
-    expect(answer.usage).toEqual({ inputTokens: 4_210, outputTokens: 880 })
+    // Cache counts ride along at zero when nothing was cached — they are part
+    // of what a call cost and are read whether or not caching was asked for.
+    expect(answer.usage).toEqual({
+      inputTokens: 4_210,
+      outputTokens: 880,
+      cacheWriteTokens: 0,
+      cacheReadTokens: 0,
+    })
   })
 
   it('joins several text blocks rather than taking the first', async () => {
@@ -242,5 +249,81 @@ describe('an answer that does not finish', () => {
         fetchImpl,
       }),
     ).rejects.toMatchObject({ reason: 'truncated' })
+  })
+})
+
+describe('prompt caching and the price of a model', () => {
+  it('marks the instructions cacheable and NEVER the document', () => {
+    // The document is different every time and is most of the input; the
+    // system block and the schema are the same bytes on every call. Caching
+    // the wrong one costs 1.25x for nothing.
+    const { impl, calls } = spy()
+    return askAboutDocument({ ...ask(), cache: true, fetchImpl: impl }).then(
+      () => {
+        const body = JSON.parse(String(calls[0]!.init.body))
+        expect(body.system[0].cache_control).toEqual({ type: 'ephemeral' })
+        const parts = body.messages[0].content
+        const document = parts.find(
+          (part: { type: string }) =>
+            part.type === 'document' || part.type === 'image',
+        )
+        expect(document.cache_control).toBeUndefined()
+        // AND THE USER TEXT BLOCK IS NOT A BREAKPOINT EITHER. A marker caches
+        // everything up to and including its block, and this one FOLLOWS the
+        // document — the first version marked it and wrote every unique PDF
+        // into the cache. 115,582 tokens written against 21,660 read is what
+        // that looks like from the outside.
+        expect(
+          parts.find((part: { type: string }) => part.type === 'text')
+            .cache_control,
+        ).toBeUndefined()
+      },
+    )
+  })
+
+  it('sends no cache_control at all when caching is off', () => {
+    const { impl, calls } = spy()
+    return askAboutDocument({ ...ask(), fetchImpl: impl }).then(() => {
+      const body = String(calls[0]!.init.body)
+      expect(body).not.toContain('cache_control')
+    })
+  })
+
+  it('prices a cache read at a tenth and a write at five quarters', () => {
+    // Anthropic's published multiples, computed from the input rate rather
+    // than typed, so the two cannot drift apart.
+    const read = costMilliCents(
+      { inputTokens: 0, outputTokens: 0, cacheReadTokens: 1_000_000 },
+      'claude-sonnet-5',
+    )
+    const write = costMilliCents(
+      { inputTokens: 0, outputTokens: 0, cacheWriteTokens: 1_000_000 },
+      'claude-sonnet-5',
+    )
+    const plain = costMilliCents(
+      { inputTokens: 1_000_000, outputTokens: 0 },
+      'claude-sonnet-5',
+    )
+    expect(plain).toBe(300_000)
+    expect(read).toBe(30_000)
+    expect(write).toBe(375_000)
+  })
+
+  it('prices Haiku at its own rate, not Sonnet’s', () => {
+    expect(
+      costMilliCents(
+        { inputTokens: 1_000_000, outputTokens: 1_000_000 },
+        'claude-haiku-4-5-20251001',
+      ),
+    ).toBe(600_000)
+  })
+
+  it('and an UNPRICED model falls back to the dearest, never to free', () => {
+    // A cost that is wrong is worse than one that is missing, and a zero would
+    // report an unpriced model as free — which is the number somebody would
+    // then make a decision on.
+    expect(
+      costMilliCents({ inputTokens: 1_000_000, outputTokens: 0 }, 'claude-x'),
+    ).toBe(300_000)
   })
 })

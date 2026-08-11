@@ -188,6 +188,12 @@ export interface RemitParty {
   contactName?: string | null
   phone?: string | null
   email?: string | null
+  /** The lockbox. Frequently in another state from the factor's offices. */
+  remitAddressLine1?: string | null
+  remitAddressLine2?: string | null
+  remitCity?: string | null
+  remitState?: string | null
+  remitPostalCode?: string | null
 }
 
 export interface RemitCompany {
@@ -222,14 +228,27 @@ export function remitToFor(input: {
   const factor = input.invoiceFactor ?? input.authorityFactor ?? null
 
   if (factor) {
+    // THE STREET FIRST, then who to ask about it. A remit-to block is read by
+    // somebody sending money: the address is the instruction and the contact
+    // is the follow-up. Where the lockbox is not on file the block degrades to
+    // the contact lines rather than disappearing.
+    const factorCity = [
+      factor.remitCity,
+      factor.remitState,
+      factor.remitPostalCode,
+    ]
+      .filter(Boolean)
+      .join(', ')
     return {
       name: factor.name,
-      // A FactoringCompany carries no postal address in the schema — who to
-      // call and where to send the paperwork is what it has. A street address
-      // is owed; see EXTRACTION-CONTRACT.md's schema gaps.
-      lines: [factor.contactName, factor.email, factor.phone].filter(
-        (line): line is string => Boolean(line),
-      ),
+      lines: [
+        factor.remitAddressLine1,
+        factor.remitAddressLine2,
+        factorCity || null,
+        factor.contactName,
+        factor.email,
+        factor.phone,
+      ].filter((line): line is string => Boolean(line)),
     }
   }
 

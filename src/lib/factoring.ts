@@ -36,6 +36,12 @@ export interface FactorRow {
   contactName: string | null
   phone: string | null
   email: string | null
+  /** The lockbox, printed on every invoice this authority issues. */
+  remitAddressLine1: string | null
+  remitAddressLine2: string | null
+  remitCity: string | null
+  remitState: string | null
+  remitPostalCode: string | null
   advanceRateBps: number | null
   feeBps: number | null
   notes: string | null
@@ -62,6 +68,11 @@ export async function factorsForCompanies(
       contactName: true,
       phone: true,
       email: true,
+      remitAddressLine1: true,
+      remitAddressLine2: true,
+      remitCity: true,
+      remitState: true,
+      remitPostalCode: true,
       advanceRateBps: true,
       feeBps: true,
       notes: true,
@@ -77,6 +88,11 @@ export async function factorsForCompanies(
     contactName: factor.contactName,
     phone: factor.phone,
     email: factor.email,
+    remitAddressLine1: factor.remitAddressLine1,
+    remitAddressLine2: factor.remitAddressLine2,
+    remitCity: factor.remitCity,
+    remitState: factor.remitState,
+    remitPostalCode: factor.remitPostalCode,
     advanceRateBps: factor.advanceRateBps,
     feeBps: factor.feeBps,
     notes: factor.notes,
@@ -90,6 +106,12 @@ export interface SaveFactorInput {
   contactName?: string | null
   phone?: string | null
   email?: string | null
+  /** Where the cheque goes. Printed on every invoice this authority issues. */
+  remitAddressLine1?: string | null
+  remitAddressLine2?: string | null
+  remitCity?: string | null
+  remitState?: string | null
+  remitPostalCode?: string | null
   advanceRateBps: number
   feeBps: number
   notes?: string | null
@@ -143,6 +165,11 @@ export async function saveFactor(
     contactName: input.contactName?.trim() || null,
     phone: input.phone?.trim() || null,
     email: input.email?.trim() || null,
+    remitAddressLine1: input.remitAddressLine1?.trim() || null,
+    remitAddressLine2: input.remitAddressLine2?.trim() || null,
+    remitCity: input.remitCity?.trim() || null,
+    remitState: input.remitState?.trim() || null,
+    remitPostalCode: input.remitPostalCode?.trim() || null,
     advanceRateBps: input.advanceRateBps,
     feeBps: input.feeBps,
     notes: input.notes?.trim() || null,

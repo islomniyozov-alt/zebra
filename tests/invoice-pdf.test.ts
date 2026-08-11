@@ -21,7 +21,12 @@ const input: InvoicePdfInput = {
   billTo: { name: 'TQL', address: '4289 Ivy Pointe Blvd, Cincinnati OH' },
   remitTo: {
     name: 'Triumph Financial Services',
-    lines: ['payments@triumphpay.com', '(469) 312-7222'],
+    lines: [
+      'PO Box 610028',
+      'Dallas, TX, 75261',
+      'payments@triumphpay.com',
+      '(469) 312-7222',
+    ],
   },
   lines: [
     { description: 'Linehaul — 1042', amountCents: 245000 },
@@ -85,6 +90,8 @@ describe('the invoice PDF', () => {
   it('prints the factor as the remit-to, so the money goes where it was sold', () => {
     expect(text).toContain('REMIT TO')
     expect(text).toContain('Triumph Financial Services')
+    expect(text).toContain('PO Box 610028')
+    expect(text).toContain('Dallas, TX, 75261')
     expect(text).toContain('payments@triumphpay.com')
   })
 
@@ -163,6 +170,10 @@ describe('whose address the remit-to carries', () => {
   const triumph = {
     name: 'Triumph Financial Services',
     email: 'payments@triumphpay.com',
+    remitAddressLine1: 'PO Box 610028',
+    remitCity: 'Dallas',
+    remitState: 'TX',
+    remitPostalCode: '75261',
   }
   const otherFactor = { name: 'RTS Financial', email: 'ap@rtsfinancial.com' }
 
@@ -171,6 +182,30 @@ describe('whose address the remit-to carries', () => {
     const remit = remitToFor({ company, authorityFactor: triumph })
     expect(remit.name).toBe('Triumph Financial Services')
     expect(remit.lines).toContain('payments@triumphpay.com')
+  })
+
+  it('and prints the LOCKBOX STREET first, because that is the instruction', () => {
+    // A factor's cheques go to a lockbox, frequently in another state from its
+    // offices. The address is what somebody sending money needs; the contact
+    // is the follow-up, and it comes after.
+    const remit = remitToFor({ company, authorityFactor: triumph })
+    expect(remit.lines[0]).toBe('PO Box 610028')
+    expect(remit.lines[1]).toBe('Dallas, TX, 75261')
+    expect(remit.lines.indexOf('PO Box 610028')).toBeLessThan(
+      remit.lines.indexOf('payments@triumphpay.com'),
+    )
+  })
+
+  it('and degrades to the contact lines when no lockbox is on file', () => {
+    // A factor can be set up before the agreement's remittance page is to
+    // hand. The block still names who to pay and how to reach them rather
+    // than vanishing.
+    const remit = remitToFor({
+      company,
+      authorityFactor: { name: 'RTS Financial', email: 'ap@rtsfinancial.com' },
+    })
+    expect(remit.name).toBe('RTS Financial')
+    expect(remit.lines).toEqual(['ap@rtsfinancial.com'])
   })
 
   it('an authority with NO factor remits to its own address', () => {

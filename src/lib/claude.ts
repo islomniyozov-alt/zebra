@@ -56,17 +56,70 @@ export const MAX_DOCUMENT_BASE64_BYTES = 10 * 1024 * 1024
  */
 export const PRICE_CENTS_PER_MTOK = { input: 300, output: 1_500 } as const
 
+/**
+ * Cents per million tokens, per model, recorded on 2026-08-11.
+ *
+ * A COPIED CONSTANT AND IT WILL GO STALE — `PHASE-5-BRIEF.md` §7 flag 3 says
+ * so, and adding models multiplies the ways it can. Nothing checks it against
+ * a published price list and nothing can without a network call on every run,
+ * so every figure computed from it is printed as what it is: arithmetic from a
+ * constant recorded on a date, never a reading of a bill.
+ *
+ * Cache pricing is Anthropic's published multiple of the input rate — a write
+ * costs 1.25x and a read 0.1x — computed here rather than typed, so the two
+ * cannot drift apart.
+ */
+export const MODEL_PRICES = {
+  'claude-sonnet-5': { input: 300, output: 1_500 },
+  'claude-haiku-4-5-20251001': { input: 100, output: 500 },
+} as const
+
+export type PricedModel = keyof typeof MODEL_PRICES
+
+/** The models this system will send a document to. Nothing else is accepted. */
+export const ALLOWED_MODELS = Object.keys(MODEL_PRICES) as PricedModel[]
+
+export function isPricedModel(value: string): value is PricedModel {
+  return Object.hasOwn(MODEL_PRICES, value)
+}
+
 export interface Usage {
   inputTokens: number
   outputTokens: number
+  /** Tokens written INTO the cache, billed at 1.25x input. */
+  cacheWriteTokens?: number
+  /** Tokens read FROM the cache, billed at 0.1x input. */
+  cacheReadTokens?: number
+}
+
+/**
+ * Cents per million tokens for one model, cache rates included.
+ *
+ * Falls back to the Sonnet price for a model nobody has priced: a cost that is
+ * WRONG is worse than a cost that is missing, so the fallback is the most
+ * expensive one on file rather than zero. A zero would quietly report that an
+ * unpriced model is free.
+ */
+export function pricesFor(model: string): {
+  input: number
+  output: number
+  cacheWrite: number
+  cacheRead: number
+} {
+  const base = isPricedModel(model)
+    ? MODEL_PRICES[model]
+    : MODEL_PRICES['claude-sonnet-5']
+  return {
+    input: base.input,
+    output: base.output,
+    cacheWrite: base.input * 1.25,
+    cacheRead: base.input * 0.1,
+  }
 }
 
 /** What one call cost, in integer cents, rounded half up (rule 9-money). */
-export function costCents(usage: Usage): number {
-  const millionths =
-    usage.inputTokens * PRICE_CENTS_PER_MTOK.input +
-    usage.outputTokens * PRICE_CENTS_PER_MTOK.output
-  return Math.round(millionths / 1_000_000)
+export function costCents(usage: Usage, model = EXTRACTION_MODEL): number {
+  return Math.round(costMilliCents(usage, model) / 1_000)
 }
 
 /**
@@ -77,10 +130,13 @@ export function costCents(usage: Usage): number {
  * to be a measured fact rather than a hope. A rate confirmation lands around
  * 2,500 of these, i.e. two and a half cents.
  */
-export function costMilliCents(usage: Usage): number {
+export function costMilliCents(usage: Usage, model = EXTRACTION_MODEL): number {
+  const price = pricesFor(model)
   return Math.round(
-    (usage.inputTokens * PRICE_CENTS_PER_MTOK.input +
-      usage.outputTokens * PRICE_CENTS_PER_MTOK.output) /
+    (usage.inputTokens * price.input +
+      usage.outputTokens * price.output +
+      (usage.cacheWriteTokens ?? 0) * price.cacheWrite +
+      (usage.cacheReadTokens ?? 0) * price.cacheRead) /
       1_000,
   )
 }
@@ -129,6 +185,16 @@ export interface AskInput {
   /** Injected in tests. The real one is `globalThis.fetch`. */
   fetchImpl?: typeof fetch
   apiKey?: string
+  /** Defaults to EXTRACTION_MODEL. Only a priced model is ever sent. */
+  model?: string
+  /**
+   * Ask Anthropic to cache the system block and the schema.
+   *
+   * The DOCUMENT is never cacheable — it is different every time and it is
+   * most of the input. What repeats is the instructions and the JSON schema,
+   * which together are the same bytes on every call.
+   */
+  cache?: boolean
 }
 
 export interface AskResult {
@@ -181,9 +247,29 @@ export async function askAboutDocument(input: AskInput): Promise<AskResult> {
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: EXTRACTION_MODEL,
+      model: input.model ?? EXTRACTION_MODEL,
       max_tokens: MAX_OUTPUT_TOKENS,
-      system: input.system,
+      // CACHE THE INSTRUCTIONS, NEVER THE DOCUMENT — and the breakpoint goes
+      // on the SYSTEM block only.
+      //
+      // A `cache_control` marker caches everything UP TO AND INCLUDING the
+      // block it sits on. The first version of this also marked the user's
+      // text block, which comes after the document — so every unique PDF was
+      // written into the cache and never read again. The run said so plainly:
+      // 115,582 tokens written against 21,660 read, on a corpus whose entire
+      // repeated prefix is about 22,000. Writes cost 1.25x.
+      //
+      // So: one breakpoint, on the system block, which is the only part that
+      // is the same bytes every time.
+      system: input.cache
+        ? [
+            {
+              type: 'text',
+              text: input.system,
+              cache_control: { type: 'ephemeral' },
+            },
+          ]
+        : input.system,
       messages: [
         {
           role: 'user',
@@ -196,6 +282,8 @@ export async function askAboutDocument(input: AskInput): Promise<AskResult> {
                 data: input.base64,
               },
             },
+            // NEVER a breakpoint here: this block follows the document, and
+            // caching up to it would cache the document.
             { type: 'text', text: input.prompt },
           ],
         },
@@ -214,7 +302,12 @@ export async function askAboutDocument(input: AskInput): Promise<AskResult> {
 
   const payload = (await response.json()) as {
     content?: { type: string; text?: string }[]
-    usage?: { input_tokens?: number; output_tokens?: number }
+    usage?: {
+      input_tokens?: number
+      output_tokens?: number
+      cache_creation_input_tokens?: number
+      cache_read_input_tokens?: number
+    }
     model?: string
     stop_reason?: string
   }
@@ -249,6 +342,8 @@ export async function askAboutDocument(input: AskInput): Promise<AskResult> {
     usage: {
       inputTokens: payload.usage?.input_tokens ?? 0,
       outputTokens: payload.usage?.output_tokens ?? 0,
+      cacheWriteTokens: payload.usage?.cache_creation_input_tokens ?? 0,
+      cacheReadTokens: payload.usage?.cache_read_input_tokens ?? 0,
     },
     model: payload.model ?? EXTRACTION_MODEL,
   }

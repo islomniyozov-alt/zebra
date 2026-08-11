@@ -33,6 +33,20 @@ import {
 
 const BASE =
   process.env.VERIFY_BASE ?? 'https://zebra-dev.tajikcargollc.workers.dev'
+
+// THE COST EXPERIMENT'S TWO KNOBS, defaulting to what ships.
+//
+//   node scripts/accuracy-run.mjs --cache
+//   node scripts/accuracy-run.mjs --model claude-haiku-4-5-20251001 --cache
+//
+// The endpoint allowlists the model against its price table, so a typo is a
+// 400 rather than a figure computed at the wrong rate.
+const argv = process.argv.slice(2)
+const MODEL = argv.includes('--model')
+  ? argv[argv.indexOf('--model') + 1]
+  : null
+const CACHE = argv.includes('--cache')
+const VARIANT = `${MODEL ?? 'default model'}${CACHE ? ' + caching' : ', no caching'}`
 const CORPUS = 'corpus'
 const SHEETS = join(CORPUS, 'truth')
 
@@ -131,6 +145,8 @@ await page.waitForURL(/\/(loads|dashboard)/, { timeout: 60_000 })
 const outcomes = []
 
 let totalMilliCents = 0
+let cacheWrite = 0
+let cacheRead = 0
 let read = 0
 const refused = []
 const worst = []
@@ -140,7 +156,7 @@ for (const { name, sheet } of sheets) {
   process.stdout.write(`  ${name.padEnd(52)} `)
 
   const answer = await page.evaluate(
-    async ({ data, filename, company }) => {
+    async ({ data, filename, company, knobs }) => {
       const file = new Uint8Array(data)
       const digest = await crypto.subtle.digest('SHA-256', file)
       const sha256 = btoa(String.fromCharCode(...new Uint8Array(digest)))
@@ -162,6 +178,8 @@ for (const { name, sheet } of sheets) {
       if (!put.ok) return { error: `put ${put.status}` }
       const extract = await fetch(`/api/documents/${pendingUploadId}/extract`, {
         method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(knobs),
       })
       return {
         pendingUploadId,
@@ -169,7 +187,15 @@ for (const { name, sheet } of sheets) {
         body: await extract.json().catch(() => ({})),
       }
     },
-    { data: Array.from(bytes), filename: name, company: companyId },
+    {
+      data: Array.from(bytes),
+      filename: name,
+      company: companyId,
+      knobs: {
+        ...(MODEL ? { model: MODEL } : {}),
+        ...(CACHE ? { cache: true } : {}),
+      },
+    },
   )
 
   if (answer.pendingUploadId) {
@@ -198,6 +224,8 @@ for (const { name, sheet } of sheets) {
 
   read += 1
   totalMilliCents += answer.body.cost?.milliCents ?? 0
+  cacheWrite += answer.body.cost?.cacheWriteTokens ?? 0
+  cacheRead += answer.body.cost?.cacheReadTokens ?? 0
 
   const scored = scoreDocument(
     sheet.fields,
@@ -218,7 +246,9 @@ const rows = accuracyTable(outcomes)
 
 console.log('')
 console.log('  ' + '='.repeat(78))
-console.log(`  PER-FIELD ACCURACY — ${read} of ${sheets.length} documents read`)
+console.log(
+  `  PER-FIELD ACCURACY — ${read} of ${sheets.length} read — ${VARIANT}`,
+)
 console.log('  ' + '='.repeat(78))
 console.log(
   `  ${'field'.padEnd(30)} ${'right'.padStart(6)} ${'wrong'.padStart(6)} ` +
@@ -268,8 +298,15 @@ console.log(
 console.log('')
 console.log(
   `  COST   ${(totalMilliCents / 1000).toFixed(1)}¢ total, ` +
-    `${read ? (totalMilliCents / read / 1000).toFixed(3) : '—'}¢ per document`,
+    `${read ? (totalMilliCents / read / 1000).toFixed(3) : '—'}¢ per document` +
+    `   [${VARIANT}]`,
 )
+if (cacheWrite || cacheRead) {
+  console.log(
+    `         cache: ${cacheWrite.toLocaleString()} tokens written, ` +
+      `${cacheRead.toLocaleString()} read`,
+  )
+}
 console.log(
   '         computed from PRICE_CENTS_PER_MTOK in src/lib/claude.ts, which is',
 )
