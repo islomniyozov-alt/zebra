@@ -6,7 +6,7 @@ import {
   costMilliCents,
 } from '@/lib/claude'
 import { askGemini, isGeminiModel } from '@/lib/gemini'
-import { askModel } from '@/lib/model-engine'
+import { FALLBACK_MODEL, askModel, isOutage } from '@/lib/model-engine'
 
 // ---------------------------------------------------------------------------
 // THE GEMINI ADAPTER, OFFLINE.
@@ -258,5 +258,161 @@ describe('what a Gemini call costs', () => {
         'gemini-9-imaginary',
       ),
     ).toBe(1_800_000)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE FALLBACK (owner's ruling, after a 429 stopped a walkthrough).
+//
+// A quota or a dropped connection means nobody read the document, and retrying
+// on Sonnet beats telling a dispatcher to try again. A BAD ANSWER is not an
+// outage — that is the pair, and it is the whole rule.
+// ---------------------------------------------------------------------------
+
+/** A spy whose first call fails and whose second succeeds. */
+function failingThenOk(first: Response | Error) {
+  const calls: { url: string; init: RequestInit }[] = []
+  const impl = (async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(url), init: init ?? {} })
+    if (calls.length === 1) {
+      if (first instanceof Error) throw first
+      return first.clone()
+    }
+    return new Response(
+      JSON.stringify({
+        content: [{ type: 'text', text: '{"ok":"from sonnet"}' }],
+        usage: { input_tokens: 100, output_tokens: 50 },
+        model: 'claude-sonnet-5',
+        stop_reason: 'end_turn',
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )
+  }) as unknown as typeof fetch
+  return { calls, impl }
+}
+
+const quota = () =>
+  new Response(
+    JSON.stringify({ error: { code: 429, message: 'quota exceeded' } }),
+    { status: 429, headers: { 'content-type': 'application/json' } },
+  )
+
+describe('the fallback FIRES', () => {
+  it('on a 429, and the answer comes from Sonnet', async () => {
+    const { calls, impl } = failingThenOk(quota())
+    const answer = await askModel({ ...ask(), fetchImpl: impl })
+
+    expect(calls).toHaveLength(2)
+    expect(calls[0]!.url).toContain('generativelanguage.googleapis.com')
+    expect(calls[1]!.url).toContain('api.anthropic.com')
+    expect(answer.text).toBe('{"ok":"from sonnet"}')
+    expect(answer.model).toBe('claude-sonnet-5')
+  })
+
+  it('and RECORDS THE SWAP — model alone would not show it', async () => {
+    // The requirement in one assertion: who answered, who was asked, and why.
+    const { impl } = failingThenOk(quota())
+    const answer = await askModel({ ...ask(), fetchImpl: impl })
+
+    expect(answer.fellBackFrom).toEqual({
+      model: EXTRACTION_MODEL,
+      reason: 'http_error',
+      status: 429,
+    })
+  })
+
+  it('on a 503, because an outage is theirs and not ours', async () => {
+    const { calls, impl } = failingThenOk(
+      new Response('upstream', { status: 503 }),
+    )
+    await askModel({ ...ask(), fetchImpl: impl })
+    expect(calls).toHaveLength(2)
+  })
+
+  it('and on a fetch that never reached the other end', async () => {
+    const { calls, impl } = failingThenOk(new TypeError('network failure'))
+    const answer = await askModel({ ...ask(), fetchImpl: impl })
+    expect(calls).toHaveLength(2)
+    expect(answer.model).toBe(FALLBACK_MODEL)
+  })
+})
+
+describe('the fallback DOES NOT FIRE', () => {
+  it('on an answer the parser will reject — a bad answer is not an outage', async () => {
+    // THE OTHER HALF OF THE PAIR. Gemini answered; the answer is rubbish; the
+    // parse fails downstream. Paying a second engine to disagree is not a
+    // fallback, and the run must attribute the failure to the engine that
+    // produced it.
+    const { calls, impl } = spy({
+      candidates: [
+        {
+          content: { parts: [{ text: 'not json at all' }] },
+          finishReason: 'STOP',
+        },
+      ],
+      usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 5 },
+    })
+    const answer = await askModel({ ...ask(), fetchImpl: impl })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.url).toContain('generativelanguage.googleapis.com')
+    expect(answer.text).toBe('not json at all')
+    expect(answer.model).toBe(EXTRACTION_MODEL)
+    expect(answer.fellBackFrom).toBeUndefined()
+  })
+
+  it('on a truncated answer — the engine answered, at length', async () => {
+    const { calls, impl } = failingThenOk(
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: { parts: [{ text: '{"a"' }] },
+              finishReason: 'MAX_TOKENS',
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    )
+    await expect(askModel({ ...ask(), fetchImpl: impl })).rejects.toMatchObject(
+      { reason: 'truncated' },
+    )
+    expect(calls).toHaveLength(1)
+  })
+
+  it('on a 404 — a wrong model name is configuration, not an outage', async () => {
+    // Falling back here would hide a broken deployment behind a working system
+    // and a larger bill.
+    const { calls, impl } = failingThenOk(
+      new Response('no such model', { status: 404 }),
+    )
+    await expect(askModel({ ...ask(), fetchImpl: impl })).rejects.toMatchObject(
+      { reason: 'http_error', status: 404 },
+    )
+    expect(calls).toHaveLength(1)
+  })
+
+  it('and NEVER for an explicitly named model, so a measurement stays honest', async () => {
+    // The engine table names one model per column. A silent swap there would
+    // make a column secretly Sonnet — a measurement reporting the wrong engine
+    // is worse than one that stops.
+    const { calls, impl } = failingThenOk(quota())
+    await expect(
+      askModel({ ...ask(), model: 'gemini-3.5-flash-lite', fetchImpl: impl }),
+    ).rejects.toMatchObject({ status: 429 })
+    expect(calls).toHaveLength(1)
+  })
+})
+
+describe('what counts as an outage', () => {
+  it('sorts the reasons without needing a network', () => {
+    expect(isOutage(new TypeError('socket hang up'))).toBe(true)
+    expect(isOutage(new ClaudeError('http_error', '429', 429))).toBe(true)
+    expect(isOutage(new ClaudeError('http_error', '500', 500))).toBe(true)
+    expect(isOutage(new ClaudeError('http_error', '404', 404))).toBe(false)
+    expect(isOutage(new ClaudeError('truncated', 'too long'))).toBe(false)
+    expect(isOutage(new ClaudeError('refused', 'blocked'))).toBe(false)
+    expect(isOutage(new ClaudeError('no_api_key', 'unset'))).toBe(false)
   })
 })

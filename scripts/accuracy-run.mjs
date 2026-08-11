@@ -149,6 +149,9 @@ let cacheWrite = 0
 let cacheRead = 0
 let inTokens = 0
 let outTokens = 0
+// A default-model run can now silently be answered by the fallback. Counted,
+// or a column reports an engine that did not read half of it.
+const fellBack = []
 let read = 0
 const refused = []
 const worst = []
@@ -228,6 +231,9 @@ for (const { name, sheet } of sheets) {
   totalMilliCents += answer.body.cost?.milliCents ?? 0
   cacheWrite += answer.body.cost?.cacheWriteTokens ?? 0
   cacheRead += answer.body.cost?.cacheReadTokens ?? 0
+  if (answer.body.cost?.fellBackFrom) {
+    fellBack.push({ name, ...answer.body.cost.fellBackFrom })
+  }
   inTokens += answer.body.cost?.inputTokens ?? 0
   outTokens += answer.body.cost?.outputTokens ?? 0
 
@@ -326,6 +332,20 @@ if (MODEL && MODEL.startsWith('gemini-')) {
   console.log(
     '         model generation. Tokens are real; the cents are a guess.',
   )
+}
+
+if (fellBack.length) {
+  console.log('')
+  console.log(
+    `  FELL BACK on ${fellBack.length} document(s) — these were NOT read by`,
+  )
+  console.log('  the engine this column names:')
+  for (const entry of fellBack) {
+    console.log(
+      `    ${entry.name} — ${entry.model} failed ${entry.reason}` +
+        `${entry.status ? ` ${entry.status}` : ''}`,
+    )
+  }
 }
 
 if (refused.length) {

@@ -225,6 +225,16 @@ export interface AskResult {
   text: string
   usage: Usage
   model: string
+  /**
+   * Set when the engine that was ASKED failed and this answer came from the
+   * fallback instead.
+   *
+   * A silent swap must stay visible in the data (owner's ruling). `model`
+   * alone says who answered; this says who was supposed to, and why they did
+   * not — so a month of quiet Sonnet bills is a question somebody can answer
+   * from a row rather than a hunch.
+   */
+  fellBackFrom?: { model: string; reason: ClaudeFailure; status?: number }
 }
 
 /**

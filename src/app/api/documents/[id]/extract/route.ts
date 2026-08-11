@@ -184,6 +184,9 @@ export async function POST(
         cacheWriteTokens: outcome.usage.cacheWriteTokens ?? 0,
         cacheReadTokens: outcome.usage.cacheReadTokens ?? 0,
         model: outcome.model,
+        // The swap, on the wire as well as in the row — so a measurement run
+        // can count fallbacks instead of silently reporting the wrong engine.
+        ...(outcome.fellBackFrom ? { fellBackFrom: outcome.fellBackFrom } : {}),
       },
     })
   } catch (error) {

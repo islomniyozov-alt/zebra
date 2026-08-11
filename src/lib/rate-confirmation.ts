@@ -164,6 +164,8 @@ export type ExtractionFailure =
 export interface ExtractionSuccess {
   ok: true
   documentId: string
+  /** Present when the default engine failed and Sonnet answered instead. */
+  fellBackFrom?: { model: string; reason: string; status?: number }
   extracted: Extracted
   money: ExtractedMoneyCents
   usage: Usage
@@ -299,6 +301,10 @@ export async function extractRateConfirmation(
         money,
         usage: answer.usage,
         model: answer.model,
+        // WHICH ENGINE ACTUALLY ANSWERED, and who was asked. A swap that is
+        // only inferable from the model name is a swap nobody notices for a
+        // month; this makes it a field.
+        ...(answer.fellBackFrom ? { fellBackFrom: answer.fellBackFrom } : {}),
         // Not `new Date()` — the audit layer stamps rows and this is a fact
         // about the CALL, so it travels with the usage it belongs to.
         costMilliCents: costMilliCents(answer.usage, answer.model),
@@ -314,6 +320,7 @@ export async function extractRateConfirmation(
     usage: answer.usage,
     costMilliCents: costMilliCents(answer.usage, answer.model),
     model: answer.model,
+    ...(answer.fellBackFrom ? { fellBackFrom: answer.fellBackFrom } : {}),
   }
 }
 
@@ -413,6 +420,10 @@ export async function extractPendingUpload(
         money,
         usage: answer.usage,
         model: answer.model,
+        // WHICH ENGINE ACTUALLY ANSWERED, and who was asked. A swap that is
+        // only inferable from the model name is a swap nobody notices for a
+        // month; this makes it a field.
+        ...(answer.fellBackFrom ? { fellBackFrom: answer.fellBackFrom } : {}),
         costMilliCents: costMilliCents(answer.usage, answer.model),
       } as never,
     },
@@ -426,6 +437,7 @@ export async function extractPendingUpload(
     usage: answer.usage,
     costMilliCents: costMilliCents(answer.usage, answer.model),
     model: answer.model,
+    ...(answer.fellBackFrom ? { fellBackFrom: answer.fellBackFrom } : {}),
   }
 }
 
