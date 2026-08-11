@@ -1,4 +1,5 @@
-import { askAboutDocument, costMilliCents, type Usage } from './claude'
+import { costMilliCents, type Usage } from './claude'
+import { askModel } from './model-engine'
 import { EXTRACTION_SCHEMA } from './extraction-shape'
 import {
   ExtractionParseError,
@@ -239,7 +240,7 @@ export async function extractRateConfirmation(
 
   let answer
   try {
-    answer = await askAboutDocument({
+    answer = await askModel({
       base64: input.base64,
       mimeType: input.mimeType,
       system: EXTRACTION_SYSTEM_WITH_SCHEMA,
@@ -360,7 +361,7 @@ export async function extractPendingUpload(
 
   let answer
   try {
-    answer = await askAboutDocument({
+    answer = await askModel({
       base64: input.base64,
       mimeType: input.mimeType,
       system: EXTRACTION_SYSTEM_WITH_SCHEMA,

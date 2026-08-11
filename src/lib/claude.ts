@@ -72,6 +72,11 @@ export const PRICE_CENTS_PER_MTOK = { input: 300, output: 1_500 } as const
 export const MODEL_PRICES = {
   'claude-sonnet-5': { input: 300, output: 1_500 },
   'claude-haiku-4-5-20251001': { input: 100, output: 500 },
+  // Google, same units. UNVERIFIED AGAINST A BILL — recorded from published
+  // list prices on the date above and never checked since, exactly like the
+  // Anthropic rows. A figure computed from these is arithmetic, not a reading.
+  'gemini-2.5-flash': { input: 30, output: 250 },
+  'gemini-2.5-flash-lite': { input: 10, output: 40 },
 } as const
 
 export type PricedModel = keyof typeof MODEL_PRICES
@@ -106,9 +111,14 @@ export function pricesFor(model: string): {
   cacheWrite: number
   cacheRead: number
 } {
-  const base = isPricedModel(model)
-    ? MODEL_PRICES[model]
-    : MODEL_PRICES['claude-sonnet-5']
+  // THE DEAREST ON FILE, computed rather than named. When there were two rows
+  // this pointed at Sonnet by hand; with five it has to be derived, or adding
+  // a cheap model would quietly make the fallback cheap and an unpriced model
+  // would be reported as costing less than it does.
+  const dearest = Object.values(MODEL_PRICES).reduce((worst, price) =>
+    price.input + price.output > worst.input + worst.output ? price : worst,
+  )
+  const base = isPricedModel(model) ? MODEL_PRICES[model] : dearest
   return {
     input: base.input,
     output: base.output,
@@ -168,8 +178,8 @@ export class ClaudeError extends Error {
 }
 
 /** What the API accepts as a document block, and what it accepts as an image. */
-const DOCUMENT_TYPES = new Set(['application/pdf'])
-const IMAGE_TYPES = new Set([
+export const DOCUMENT_TYPES = new Set(['application/pdf'])
+export const IMAGE_TYPES = new Set([
   'image/jpeg',
   'image/png',
   'image/gif',

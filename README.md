@@ -108,6 +108,17 @@ Each step assumes the ones above it.
    ' "<key>" | npx wrangler secret put ANTHROPIC_API_KEY
    ```
 
+   `GEMINI_API_KEY` is **experiment-only** and is needed on the DEV worker
+   alone. It exists so the corpus table can be run against Gemini beside
+   Anthropic; nothing in the shipped path asks for it, and without it a Gemini
+   model answers `no_api_key` by name exactly as Anthropic's does. Production
+   does not need it unless the owner rules for Gemini.
+
+   ```bash
+   printf '%s
+   ' "<key>" | npx wrangler secret put GEMINI_API_KEY
+   ```
+
    `DATABASE_URL` is `zebra_app` at the **pooled** production endpoint.
    `sslmode=require&channel_binding=require` is what Neon hands you and it is
    what dev has run on since Phase 1 — an earlier draft of this runbook said to
