@@ -88,16 +88,21 @@ Run on 2026-08-11. Invoice-making fields first, per the owner's ruling.
 | ------------------ | ---------------- | ---------------- | --------------------- | ------------------- |
 | **invoice fields** | **96.6%**        | 94.5%            | 84.0%                 | 74.3%               |
 | all fields         | 97.3%            | 95.6%            | 87.3%                 | 76.3%               |
-| cost / document    | 5.847¢           | **0.407¢** ‡     | **0.083¢** ‡          | 1.446¢              |
+| cost / document    | 5.847¢           | **1.496¢**       | **0.366¢**            | 1.446¢              |
 | refused            | 0 / 13           | 0 / 13           | 0 / 13                | **2 / 13**          |
 | tokens in / out    | 69,616 / 34,203  | 59,706 / 13,986  | 59,706 / 11,886       | —                   |
 
-‡ **The Gemini cents are ASSUMED, not published.** The token counts are
-measured and real; the rates behind them are the 2.5-generation list prices
-applied to models two generations newer, because the current model names had to
-be discovered by asking the API what it would answer to and no price list came
-with them. **Substitute the real rates before ruling on cost** — the run prints
-the token counts for exactly this reason.
+**The Gemini cost cells are CORRECTED.** They were first computed from assumed
+rates and read 0.407¢ and 0.083¢; the owner supplied the list rates
+($1.50/$7.50 per Mtok for 3.6 Flash, $0.30/$2.50 for 3.5 Flash-Lite) and the
+same measured tokens now give 1.496¢ and 0.366¢ — **the assumption understated
+by 3.7x.** It changed the ratio the ruling was made on — Flash is about 3.9x
+cheaper than Sonnet, not 14x — and did not change the ruling.
+
+It also puts Flash and Haiku within 3% of each other on price, 1.496¢ against
+1.446¢, which is the cleanest way to read this table: at the same money, Flash
+scores 94.5% on the invoice fields against Haiku's 74.3% and refuses nothing
+where Haiku refuses two documents in thirteen.
 
 **The model names were not what anybody assumed.** `gemini-2.5-flash-lite`
 answers 404: _"no longer available to new users"_. The list this key can
@@ -118,6 +123,31 @@ nothing back and types the load by hand.
 
 Caveats unchanged: each figure is ONE run, no reader is deterministic, and 13
 documents are 12 loads.
+
+### What the switch to Gemini then found
+
+- **No free caching on this path.** Gemini has no `cache_control`; it caches a
+  leading PREFIX implicitly. The adapter now sends the stable prompt text
+  before the unique document so the prefix can repeat — and three identical
+  extractions in a row still reported `cachedContentTokenCount: 0`. The reorder
+  is kept because it is correct in principle and costs nothing, but **no saving
+  was measured and none is claimed.** The remaining option is Google's explicit
+  `cachedContents` API: a second object with its own lifetime to maintain, for
+  a prefix worth about 2,600 tokens.
+
+- **THE KEY'S QUOTA IS A PRODUCTION RISK, and it stopped this session.**
+  `verify-facility-memory` failed its second upload with HTTP 429 — _"You
+  exceeded your current quota, please check your plan and billing details"_ —
+  and the quota had not recovered 90 seconds later, so it is a project quota
+  rather than a burst limit. Five Anthropic corpus runs never hit one.
+
+  The application behaves correctly: a 429 becomes `call_failed` with the
+  message on the offer slot, a named failure rather than an empty extraction.
+  But with Gemini as the shipped default, an exhausted quota means **a
+  dispatcher's upload stops working**, and the fallback is a constant a
+  developer edits rather than anything the running system can do. Worth
+  settling the billing tier before production, and worth deciding whether
+  `askModel` should fall back to Sonnet on a 429 rather than surfacing it.
 
 ---
 

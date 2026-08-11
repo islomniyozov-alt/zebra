@@ -1,5 +1,6 @@
 import {
   ClaudeError,
+  EXTRACTION_MODEL,
   DOCUMENT_TYPES,
   IMAGE_TYPES,
   MAX_DOCUMENT_BASE64_BYTES,
@@ -72,7 +73,10 @@ export async function askGemini(input: AskInput): Promise<AskResult> {
     )
   }
 
-  const model = input.model ?? 'gemini-2.5-flash'
+  // The seam resolves the default and passes it down, so this is only ever
+  // reached by a direct caller. Named rather than a literal: a second opinion
+  // about the default is how the two engines drift apart.
+  const model = input.model ?? EXTRACTION_MODEL
   const call = input.fetchImpl ?? fetch
 
   const response = await call(`${ENDPOINT}/${model}:generateContent`, {
@@ -83,14 +87,25 @@ export async function askGemini(input: AskInput): Promise<AskResult> {
     },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: input.system }] },
+      // THE STABLE TEXT FIRST, THE UNIQUE DOCUMENT LAST.
+      //
+      // Gemini caches implicitly and it caches a PREFIX: the longest run of
+      // leading tokens it has seen before. Putting the PDF first — which the
+      // first version did, mirroring the Anthropic body — makes the prefix
+      // unique on every call and there is nothing to hit. Moving the prompt
+      // ahead of it costs nothing, changes no meaning, and is the only free
+      // saving on this path: there is no cache_control to set and no cache to
+      // create, so the alternative is Google's explicit cachedContents API,
+      // which is a second object with its own lifetime for a prefix worth
+      // about 2,600 tokens.
       contents: [
         {
           role: 'user',
           parts: [
+            { text: input.prompt },
             {
               inlineData: { mimeType: input.mimeType, data: input.base64 },
             },
-            { text: input.prompt },
           ],
         },
       ],

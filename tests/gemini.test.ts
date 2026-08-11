@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { ClaudeError, MAX_OUTPUT_TOKENS, costMilliCents } from '@/lib/claude'
+import {
+  ClaudeError,
+  EXTRACTION_MODEL,
+  MAX_OUTPUT_TOKENS,
+  costMilliCents,
+} from '@/lib/claude'
 import { askGemini, isGeminiModel } from '@/lib/gemini'
 import { askModel } from '@/lib/model-engine'
 
@@ -73,11 +78,14 @@ describe('the request it builds', () => {
     const body = JSON.parse(String(calls[0]!.init.body))
 
     expect(body.systemInstruction.parts[0].text).toBe('system')
-    expect(body.contents[0].parts[0].inlineData).toEqual({
+    // THE ORDER IS THE CACHE. Gemini caches a leading prefix implicitly, so
+    // the stable text goes first and the unique document last; the other way
+    // round makes every call's prefix unique and nothing ever hits.
+    expect(body.contents[0].parts[0].text).toBe('prompt')
+    expect(body.contents[0].parts[1].inlineData).toEqual({
       mimeType: 'application/pdf',
       data: 'JVBERi0xLjQK',
     })
-    expect(body.contents[0].parts[1].text).toBe('prompt')
   })
 
   it('asks for JSON and the same output cap as the other engine', async () => {
@@ -184,19 +192,36 @@ describe('the routing seam', () => {
     expect(calls[0]!.url).toContain('generativelanguage.googleapis.com')
   })
 
-  it('and everything else to Anthropic, including no model at all', async () => {
+  it('follows the DEFAULT when no model is asked for', async () => {
+    // THE BUG THIS REPLACES. The first version of this test asserted that no
+    // model meant Anthropic — which was the letter of the routing and not its
+    // intent, so it went green through the day the default became a Gemini
+    // model. Every default extraction then 404'd: the call went to
+    // api.anthropic.com carrying `gemini-3.6-flash`.
+    //
+    // Asserted against the constant rather than a name, so this test follows
+    // the default wherever the owner moves it.
+    const { calls, impl } = spy()
+    await askModel({ ...ask(), fetchImpl: impl })
+    const host = isGeminiModel(EXTRACTION_MODEL)
+      ? 'generativelanguage.googleapis.com'
+      : 'api.anthropic.com'
+    expect(calls[0]!.url).toContain(host)
+  })
+
+  it('and an explicitly named Anthropic model still goes to Anthropic', async () => {
     const { calls, impl } = spy({
       content: [{ type: 'text', text: '{"ok":true}' }],
       usage: { input_tokens: 10, output_tokens: 10 },
       model: 'claude-sonnet-5',
       stop_reason: 'end_turn',
     })
-    await askModel({ ...ask(), fetchImpl: impl })
     await askModel({
       ...ask(),
       model: 'claude-haiku-4-5-20251001',
       fetchImpl: impl,
     })
+    await askModel({ ...ask(), model: 'claude-sonnet-5', fetchImpl: impl })
     expect(calls[0]!.url).toContain('api.anthropic.com')
     expect(calls[1]!.url).toContain('api.anthropic.com')
   })
@@ -215,13 +240,13 @@ describe('what a Gemini call costs', () => {
         { inputTokens: 1_000_000, outputTokens: 1_000_000 },
         'gemini-3.6-flash',
       ),
-    ).toBe(280_000)
+    ).toBe(900_000)
     expect(
       costMilliCents(
         { inputTokens: 1_000_000, outputTokens: 1_000_000 },
         'gemini-3.5-flash-lite',
       ),
-    ).toBe(50_000)
+    ).toBe(280_000)
   })
 
   it('and an unpriced model still falls to the DEAREST on file', () => {

@@ -1,4 +1,9 @@
-import { askAboutDocument, type AskInput, type AskResult } from './claude'
+import {
+  EXTRACTION_MODEL,
+  askAboutDocument,
+  type AskInput,
+  type AskResult,
+} from './claude'
 import { askGemini, isGeminiModel } from './gemini'
 
 // ---------------------------------------------------------------------------
@@ -10,14 +15,18 @@ import { askGemini, isGeminiModel } from './gemini'
 // engine-agnostic, and they stay that way as long as the branch lives here and
 // nowhere else.
 //
-// ROUTED ON THE MODEL NAME, because the model is already an allowlisted value
-// checked against the price table — so there is no second thing to configure,
-// no engine field to keep in step with it, and no way to ask for a Gemini
-// model and be answered by Anthropic.
+// ROUTED ON THE RESOLVED MODEL — the requested one OR THE DEFAULT — because
+// the first version routed on the requested model alone. With no model asked
+// for it saw an empty string, sent the call to Anthropic, and Anthropic was
+// handed `EXTRACTION_MODEL`, which by then named a Gemini model. Every default
+// extraction 404'd with "model: gemini-3.6-flash" from api.anthropic.com.
+//
+// The default is resolved HERE and passed down, so neither adapter carries its
+// own idea of what to use when nobody says.
 // ---------------------------------------------------------------------------
 
 export async function askModel(input: AskInput): Promise<AskResult> {
-  return isGeminiModel(input.model ?? '')
-    ? askGemini(input)
-    : askAboutDocument(input)
+  const model = input.model ?? EXTRACTION_MODEL
+  const resolved = { ...input, model }
+  return isGeminiModel(model) ? askGemini(resolved) : askAboutDocument(resolved)
 }

@@ -17,8 +17,16 @@
 // it into a wrong answer.
 // ---------------------------------------------------------------------------
 
-/** §1.2. Changed here or nowhere. */
-export const EXTRACTION_MODEL = 'claude-sonnet-5'
+/**
+ * §1.2. Changed here or nowhere.
+ *
+ * GEMINI 3.6 FLASH SINCE THE ENGINE TABLE (owner's ruling, 2026-08-11): 94.5%
+ * on the invoice-making fields against Sonnet's 96.6%, no refusals across the
+ * corpus, and roughly a quarter of the cost. Sonnet stays allowlisted as the
+ * fallback — one word in this constant moves the whole pipeline back, and the
+ * adapter seam means nothing else changes when it does.
+ */
+export const EXTRACTION_MODEL = 'gemini-3.6-flash'
 
 /** What the response may cost. Generous for a rate confirmation; finite. */
 // 8k, RAISED FROM 4k after the golden-set runs.
@@ -72,21 +80,17 @@ export const PRICE_CENTS_PER_MTOK = { input: 300, output: 1_500 } as const
 export const MODEL_PRICES = {
   'claude-sonnet-5': { input: 300, output: 1_500 },
   'claude-haiku-4-5-20251001': { input: 100, output: 500 },
-  // Google, same units.
+  // Google, same units. LIST RATES, supplied by the owner on 2026-08-11 and
+  // replacing the assumed ones the engine table was first computed with.
   //
-  // WORSE THAN UNVERIFIED — ASSUMED. The Anthropic rows are list prices copied
-  // on a date. These are the 2.5-generation list prices applied to models two
-  // generations newer, because the current names were discovered by asking the
-  // API what it would answer to (`gemini-2.5-flash-lite` is already 404 for
-  // new keys) and no price list came with them.
-  //
-  // The TOKEN COUNTS in any table using these are measured and real; the CENTS
-  // are those tokens multiplied by a guess. The owner must substitute the real
-  // rates before ruling on cost. Flagged in the run's own output, not only
-  // here.
-  'gemini-3.6-flash': { input: 30, output: 250 },
-  'gemini-3.5-flash-lite': { input: 10, output: 40 },
-  'gemini-2.5-flash': { input: 30, output: 250 },
+  // The assumption was wrong by 5x on input and 3x on output, so the table's
+  // Gemini cost column understated by roughly 3.7x — Flash at 0.407¢ per
+  // document was really 1.496¢. It changed the ratio and not the ruling, and
+  // it is the reason the run prints MEASURED TOKENS beside every cost line:
+  // a cost is arithmetic over a constant somebody typed, and the tokens are
+  // the only part of it that was observed.
+  'gemini-3.6-flash': { input: 150, output: 750 },
+  'gemini-3.5-flash-lite': { input: 30, output: 250 },
 } as const
 
 export type PricedModel = keyof typeof MODEL_PRICES

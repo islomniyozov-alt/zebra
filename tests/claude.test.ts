@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   ClaudeError,
+  MODEL_PRICES,
   EXTRACTION_MODEL,
   MAX_DOCUMENT_BASE64_BYTES,
   MAX_OUTPUT_TOKENS,
@@ -192,11 +193,18 @@ describe('what one document costs', () => {
     //                        ----------
     //                         2,583,000 millionths of a cent
     //                      =  2.583¢ -> 3¢ at whole cents
+    //
+    // NAMED, not defaulted. These worked examples used to lean on
+    // EXTRACTION_MODEL and broke the day the default became Gemini — correctly,
+    // because the arithmetic had silently changed. A worked example states its
+    // rate.
     const usage = { inputTokens: 4_210, outputTokens: 880 }
-    expect(costCents(usage)).toBe(3)
+    expect(costCents(usage, 'claude-sonnet-5')).toBe(3)
     // Thousandths, because whole cents cannot tell 2.583 from 3.
-    expect(costMilliCents(usage)).toBe(2_583)
-    expect(formatCostMilliCents(costMilliCents(usage))).toBe('2.583¢')
+    expect(costMilliCents(usage, 'claude-sonnet-5')).toBe(2_583)
+    expect(formatCostMilliCents(costMilliCents(usage, 'claude-sonnet-5'))).toBe(
+      '2.583¢',
+    )
   })
 
   it('a small document lands under a cent and says so honestly', () => {
@@ -209,8 +217,8 @@ describe('what one document costs', () => {
     // Over a thousand loads a month those differ by $3.50, which is small and
     // is still the difference between a measured figure and a shrug.
     const usage = { inputTokens: 1_500, outputTokens: 400 }
-    expect(costCents(usage)).toBe(1)
-    expect(costMilliCents(usage)).toBe(1_050)
+    expect(costCents(usage, 'claude-sonnet-5')).toBe(1)
+    expect(costMilliCents(usage, 'claude-sonnet-5')).toBe(1_050)
     expect(formatCostMilliCents(1_050)).toBe('1.050¢')
   })
 
@@ -325,5 +333,29 @@ describe('prompt caching and the price of a model', () => {
     expect(
       costMilliCents({ inputTokens: 1_000_000, outputTokens: 0 }, 'claude-x'),
     ).toBe(300_000)
+  })
+})
+
+describe('the shipped default', () => {
+  it('is Gemini 3.6 Flash, and a document costs what its rate says', () => {
+    // The owner's ruling from the engine table. Asserted here because the
+    // constant is the whole of the switch: one word moves the pipeline, and a
+    // silent revert would otherwise be caught only by a cost line nobody read.
+    expect(EXTRACTION_MODEL).toBe('gemini-3.6-flash')
+
+    //   4210 input  x 150 =   631,500
+    //   1270 output x 750 =   952,500
+    //                        ---------
+    //                        1,584,000 millionths -> 1.584¢
+    expect(costMilliCents({ inputTokens: 4_210, outputTokens: 1_270 })).toBe(
+      1_584,
+    )
+  })
+
+  it('and Sonnet stays priced, because it stays the fallback', () => {
+    expect(MODEL_PRICES['claude-sonnet-5']).toEqual({
+      input: 300,
+      output: 1_500,
+    })
   })
 })
