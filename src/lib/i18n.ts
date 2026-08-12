@@ -450,6 +450,8 @@ const en = {
   'relay.error.too_many_rows':
     'That file has more rows than one import covers.',
   'relay.error.noFile': 'Choose a CSV first.',
+  'loads.warn.offsetDisagrees':
+    'Stop {facility} is being read in {zone}, which was UTC{actual} that day, but the file says UTC{column}. If that facility is not in {zone}, record its timezone and import again.',
   'loads.facilityKnown': 'Known facility:',
   'loads.facilityNothingYet': 'Nothing written down about it yet.',
   'loads.facilitySave': 'Save this facility',
@@ -1893,6 +1895,8 @@ const ru: Dictionary = {
   'relay.error.too_many_rows':
     'В файле больше строк, чем помещается в один импорт.',
   'relay.error.noFile': 'Сначала выберите CSV.',
+  'loads.warn.offsetDisagrees':
+    'Точка {facility} читается в зоне {zone} — в тот день это UTC{actual}, а в файле указано UTC{column}. Если площадка не в зоне {zone}, укажите её часовой пояс и повторите импорт.',
   'loads.facilityKnown': 'Известная площадка:',
   'loads.facilityNothingYet': 'Пока ничего не записано.',
   'loads.facilitySave': 'Сохранить площадку',
@@ -3326,6 +3330,8 @@ const fa: Dictionary = {
   'relay.error.no_rows': 'آن فایل فقط سرستون دارد و هیچ سفری در آن نیست.',
   'relay.error.too_many_rows': 'آن فایل بیش از حد یک بار وارد کردن سطر دارد.',
   'relay.error.noFile': 'اول یک فایل CSV انتخاب کنید.',
+  'loads.warn.offsetDisagrees':
+    'توقف {facility} در منطقهٔ {zone} خوانده می‌شود که آن روز UTC{actual} بود، ولی فایل UTC{column} می‌گوید. اگر آن محل در {zone} نیست، منطقهٔ زمانی‌اش را ثبت کنید و دوباره وارد کنید.',
   'loads.facilityKnown': 'محل شناخته‌شده:',
   'loads.facilityNothingYet': 'هنوز چیزی درباره‌اش نوشته نشده است.',
   'loads.facilitySave': 'ذخیرهٔ این محل',

@@ -341,36 +341,72 @@ Recorded rather than resolved, per Phase 1's discipline.
              same signature-gated confirm, the same `createLoad`, the same status
              engine.
 
-14. **THE OFFSETS IN THE EXPORT ARE STANDARD-TIME OFFSETS, AND AUGUST IS NOT
-    STANDARD TIME.** This is the one finding in §3a that needs the owner's
-    ruling, and it is flagged rather than resolved because resolving it would
-    be inventing a fact.
+14. ~~**THE OFFSETS IN THE EXPORT ARE STANDARD-TIME OFFSETS**~~ — **SETTLED
+    BY THE RELAY PORTAL, AND FIXED.** The owner checked the same trips in
+    Amazon's own interface: identical wall clocks, labelled **CDT**. So the
+    printed clock is the facility's wall clock, and `Stop N UTC Offset` is
+    static standard-time metadata that reads −6 all summer while Central is on
+    −5. Subtracting it, which the first version did, landed every August
+    instant an hour late.
 
-    Every stop in the corpus carries a `Stop N UTC Offset` column and every
-    value is the facility's STANDARD offset, not its current one:
+    The evidence that made this worth asking rather than assuming:
 
-    | Facility               | Region  | File says | Actual, August 2026 |
-    | ---------------------- | ------- | --------- | ------------------- |
-    | FOE1, MCI4, JAN1, BNA6 | Central | −6        | −5 (CDT)            |
-    | LG_ELECT_37040...      | Central | −6        | −5 (CDT)            |
-    | NSRR-ATLANTA, AGS1     | Eastern | −5        | −4 (EDT)            |
-    | BNSF-FAIRBURN-EFC      | Eastern | −5        | −4 (EDT)            |
+    | Facility               | Region  | Column says | Actual, August 2026 |
+    | ---------------------- | ------- | ----------- | ------------------- |
+    | FOE1, MCI4, JAN1, BNA6 | Central | −6          | −5 (CDT)            |
+    | LG_ELECT_37040...      | Central | −6          | −5 (CDT)            |
+    | NSRR-ATLANTA, AGS1     | Eastern | −5          | −4 (EDT)            |
+    | BNSF-FAIRBURN-EFC      | Eastern | −5          | −4 (EDT)            |
 
-    Consistent across all five loads and both zones — this is not noise, it is
-    what the column means. The ruling was "UTC offsets honored per stop", so
-    they are honored literally: instant = printed clock − printed offset.
+    **THE FIX IS STRUCTURAL, NOT ARITHMETIC.** `relay-csv.ts` no longer
+    produces `Date`s at all — it returns `RelayClock`, the printed date and
+    hands, validated and not rearranged. A parser that cannot see a facility
+    cannot know its zone, and the zone is now part of the answer. Instants are
+    built in `relay-import.ts` by `zoneWallClock`, which is `zoneMidnight`
+    generalised past midnight: the same two-pass DST-aware conversion every
+    typed date in the create form already goes through, so a clock is never
+    turned into a moment by adding hours to something.
 
-    THE CONSEQUENCE, IF THE PRINTED CLOCK IS THE FACILITY'S WALL CLOCK: every
-    imported instant is one hour late. Relative arithmetic is unaffected — both
-    ends of a cross-zone run shift equally, so a 6h30 transit stays 6h30 — but
-    an appointment stored an hour late is an appointment a driver can be late
-    for. The preview prints `Aug 11, 23:30 UTC−6` rather than an abbreviation
-    precisely so this is visible and correctable: `CST` would be a claim the
-    file never made, and would have hidden the question.
+    Re-verified against the corpus: `FOE1` reads back **Aug 11, 23:30 CDT** and
+    `JAN1` **Aug 13, 01:51 CDT** — the two faces the portal shows. Every stop
+    in all three files round-trips to the clock it was printed with, and the
+    preview now renders through `renderStopTime` with the real abbreviation
+    instead of the `UTC−6` placeholder the old reading forced.
 
-    What settles it is one imported load compared against the Relay app.
+15. **The zone comes from the offset column's ZONE FAMILY, and that is a
+    deliberate reading of "demote it to a cross-check".** Three sources, in
+    order (`zoneForRelayStop`):
+    1. **`Location.timezone`**, when the facility has one — design rule 3 says
+       the recorded zone wins, and a dispatcher who has filled in where `AGS1`
+       is has said something the file cannot.
+    2. **The zone the standard offset names** — −6 Central, −5 Eastern, −7
+       Mountain, −8 Pacific.
+    3. **The company fallback.**
 
-15. **The export has NO ADDRESSES, so imported stops are facility codes.**
+    WITHOUT SOURCE 2 THE FIX WOULD BE HALF A FIX, silently. A facility code has
+    no state, so `resolveZone` falls to `America/Chicago` for every imported
+    stop — and an Augusta appointment read as Central is still an hour late,
+    with the cross-check agreeing that −5 is −5 and saying nothing. The failure
+    would be invisible exactly where it matters. The offset is not converting
+    anything; it is answering "which zone", which is the one geographic fact
+    the file states.
+
+    THE CROSS-CHECK is `offsetDisagrees`: after the instant is built, compare
+    the resolved zone's real offset at that moment against the column. Expected
+    is `actual − column ∈ {0, +1}` — zero in winter, one in summer. Outside
+    that, a `offset_disagrees` warning naming the facility, both offsets and
+    the zone, in front of the confirm. Not a refusal: the times are still the
+    best reading available, and the fix is to record the facility's timezone,
+    which is source 1 and makes every later import of that dock right.
+
+    **ARIZONA IS THE KNOWN HOLE.** −7 maps to `America/Denver`, which observes
+    DST; Phoenix does not, so a Phoenix facility's summer clocks land an hour
+    EARLY and the cross-check calls the one-hour gap explainable. Not resolved
+    by guessing between two zones that share an offset — resolved by source 1,
+    a dispatcher recording the zone. Relay runs little into Arizona and the
+    corpus has none, so this is named rather than pre-empted.
+
+16. **The export has NO ADDRESSES, so imported stops are facility codes.**
     `FOE1`, `BNSF-FAIRBURN-EFC`, `LG_ELECT_37040_1720_825` — a name and nothing
     else. Each becomes a `Location` with that name and null city, state and
     timezone, which is the truth rather than a town parsed out of a code.
@@ -380,13 +416,17 @@ Recorded rather than resolved, per Phase 1's discipline.
     string Amazon composed for its own reasons, and rule 5 of the extraction
     contract forbids exactly that on the other path.
 
-    THE CONSEQUENCE IS A DISPLAY ONE and it compounds flag 14: with no state
-    and no zone, `resolveZone` falls back to `America/Chicago`, so an Augusta
-    stop renders in Central time on the load screen. Phase 5's facility memory
-    is the fix already built — the first time a dispatcher fills an address in,
-    the code has a dock behind it and every later import finds it.
+    THE CONSEQUENCE WAS GOING TO BE A DISPLAY ONE — with no state and no zone,
+    `resolveZone` falls back to `America/Chicago`, so an Augusta stop would
+    render in Central on the load screen. Flag 15's second source closes it for
+    the IMPORT, which writes `Location.timezone` from the offset column's zone
+    family, so the row is created knowing it is Eastern. What is still missing
+    is the street: a facility with a zone and no address cannot be matched by
+    Phase 5's facility memory, which keys on a folded address. The first time a
+    dispatcher fills one in, the code has a dock behind it and every later
+    import finds it.
 
-16. **The driver is NAMED on the load and not ASSIGNED to it, and the corpus
+17. **The driver is NAMED on the load and not ASSIGNED to it, and the corpus
     proves why.** `Driver Name`, `Tractor Vehicle ID` and `Trailer ID` are all
     in the export and all go into `dispatcherNotes` as text.
 
@@ -399,7 +439,7 @@ Recorded rather than resolved, per Phase 1's discipline.
 
     Assignment stays a human act on the dispatch board.
 
-17. **`LoadInput` types its scalar fields `unknown`, and passing a NUMBER to
+18. **`LoadInput` types its scalar fields `unknown`, and passing a NUMBER to
     one silently stores nothing.** `createLoad` reads `dispatchedMiles`,
     `weightLbs` and the rest through `optionalText`, which returns null for
     anything that is not a string. The first version of `importRelayLoad`
@@ -415,7 +455,7 @@ Recorded rather than resolved, per Phase 1's discipline.
     create form pass raw `FormData` values, which is the right design for the
     caller that has them. Flagged as a trap for the next non-form caller.
 
-18. **A one-click forty-five-load write cannot share one transaction, so it
+19. **A one-click forty-five-load write cannot share one transaction, so it
     does not.** A create is ~31 statements (`LOAD_WRITE_TIMEOUT_MS`), and
     Prisma's ceiling is wall-clock: forty-five in one interactive transaction
     cannot finish on any connection. Phase 5 flag 31's rule is "fewer
@@ -433,7 +473,7 @@ Recorded rather than resolved, per Phase 1's discipline.
     30 s cap is CPU, not time spent waiting on a socket — but it has not been
     run at that size, and `MAX_IMPORT_ROWS` is 200.
 
-19. **The preview-confirm step is the ONLY review screen in Zebra, and §1.1
+20. **The preview-confirm step is the ONLY review screen in Zebra, and §1.1
     still stands.** The no-review-screen rule governed a single prefilled load
     a dispatcher reads field by field: the form IS the review. Forty-five loads
     written by one click cannot be reviewed that way — nobody can review what
@@ -444,7 +484,7 @@ Recorded rather than resolved, per Phase 1's discipline.
     customer, not a location, not a load. This is a distinction between acts,
     not a repeal.
 
-20. **`duplicate_reference` is a new warning kind, and the export forced it.**
+21. **`duplicate_reference` is a new warning kind, and the export forced it.**
     The owner's ruling was "the trip/load ID column is the duplicate key
     through the existing warnings" — and the existing warnings had no hook for
     it. A Relay export carries no BOL, no PO and no addresses, so
@@ -460,7 +500,7 @@ Recorded rather than resolved, per Phase 1's discipline.
     the input is optional rather than nullable: omitting it says "not
     applicable", which is different from having one and leaving it empty.
 
-21. **The stop TYPE is assigned by position, which §6 forbids everywhere
+22. **The stop TYPE is assigned by position, which §6 forbids everywhere
     else.** "Types read not assumed" is the rule, and every other path obeys it
     because a rate confirmation prints the words PICKUP and DELIVERY.
 
@@ -473,7 +513,7 @@ Recorded rather than resolved, per Phase 1's discipline.
     If a Relay export ever ships three stops on one Load ID, the middle one
     will be honestly labelled INTERMEDIATE and honestly wrong half the time.
 
-22. **`Estimated Cost` is imported as the linehaul, and it is an ESTIMATE.**
+23. **`Estimated Cost` is imported as the linehaul, and it is an ESTIMATE.**
     The column is Amazon's estimate of what the trip pays and it is the only
     rate figure in the export. Two of the five corpus loads are $17.18 and
     $1.47 — a bobtail move and a container-pool adjustment — which are real

@@ -8,6 +8,7 @@ import {
   importRelayLoad,
   planRelayImport,
   planSignature,
+  previewMoment,
 } from '@/lib/relay-import'
 import { RELAY_HEADER, relayRow } from '../fixtures/relay'
 import type { PrismaClient } from '@/generated/prisma/client'
@@ -116,17 +117,26 @@ describe('importing upcoming trips as booked', () => {
     expect(load.dispatchedMiles).toBe(241)
     expect(load.stops).toHaveLength(2)
 
-    // THE WINDOW REACHED ITS COLUMNS, at the stop's own offset. 23:30 at
-    // UTC−6 is 05:30Z the next day; the departure is 00:01 the day after
-    // that, which is 31 minutes later and NOT 23 hours earlier.
+    // THE WINDOW REACHED ITS COLUMNS, READ AS A WALL CLOCK IN THE STOP'S OWN
+    // ZONE — flag 14, settled against the Relay portal.
+    //
+    // 23:30 at a facility whose offset column says −6 is 23:30 CDT, because
+    // August is not standard time: 2026-08-12T04:30Z. The first version
+    // subtracted the column and produced 05:30Z, an hour late, on every stop
+    // of every summer import.
     const [first, second] = load.stops
     expect(first!.type).toBe('PICKUP')
-    expect(first!.windowStart!.toISOString()).toBe('2026-08-12T05:30:00.000Z')
-    expect(first!.windowEnd!.toISOString()).toBe('2026-08-12T06:01:00.000Z')
+    expect(first!.windowStart!.toISOString()).toBe('2026-08-12T04:30:00.000Z')
+    // 00:01 the NEXT day, 31 minutes later — the departure's own date column.
+    expect(first!.windowEnd!.toISOString()).toBe('2026-08-12T05:01:00.000Z')
     expect(first!.appointmentType).toBe('WINDOW')
     expect(second!.type).toBe('DELIVERY')
-    // A different offset on the same load — a cross-zone run.
-    expect(second!.windowStart!.toISOString()).toBe('2026-08-12T11:31:00.000Z')
+    // A −5 column is EASTERN, and in August Eastern is EDT: 06:31 EDT is
+    // 10:31Z. Reading it as −5 would have given 11:31Z; reading it in the
+    // fallback zone, as a stop with no address otherwise would, gives the
+    // SAME 11:31Z — which is why the zone comes from the offset column's zone
+    // family and not from the fallback.
+    expect(second!.windowStart!.toISOString()).toBe('2026-08-12T10:31:00.000Z')
 
     // Booked, not run: the actual columns are in the file and are NOT written.
     expect(first!.arrivedAt).toBeNull()
@@ -168,6 +178,10 @@ describe('importing upcoming trips as booked', () => {
     // a town parsed out of a facility code.
     expect(places[0]!.city).toBeNull()
     expect(places[0]!.state).toBeNull()
+    // THE ZONE IS RECORDED THOUGH, and it has to be: with no state and no
+    // timezone, the load screen's `renderStopTime` falls back to the company
+    // zone and renders a correctly-stored Eastern appointment an hour out.
+    expect(places[0]!.timezone).toBe('America/Chicago')
   })
 })
 
@@ -203,8 +217,9 @@ describe('importing finished trips as delivered', () => {
     // a delivered load whose appointment was erased cannot be asked whether
     // it was late, which is the question a Relay scorecard turns on.
     const [first] = load.stops
-    expect(first!.arrivedAt!.toISOString()).toBe('2026-08-12T04:16:00.000Z')
-    expect(first!.departedAt!.toISOString()).toBe('2026-08-12T04:40:00.000Z')
+    // 22:16 and 22:40 CDT on the 11th.
+    expect(first!.arrivedAt!.toISOString()).toBe('2026-08-12T03:16:00.000Z')
+    expect(first!.departedAt!.toISOString()).toBe('2026-08-12T03:40:00.000Z')
     expect(first!.windowStart).not.toBeNull()
   })
 
@@ -364,5 +379,145 @@ describe('the money wall and the settlement terms', () => {
     )
     const numbers = written.map((load) => Number(load.loadNumber))
     expect(numbers[1]).toBe(numbers[0]! + 1)
+  })
+})
+
+describe('which zone a stop’s clocks are read in (flag 14)', () => {
+  // SOURCE 2: the offset column names a zone FAMILY even though it cannot
+  // convert a clock. −5 is Eastern, and in August Eastern is EDT.
+  it('reads a −5 facility as Eastern, DST and all', async () => {
+    const { written } = await importFile(
+      file(
+        relayRow({
+          loadId: `TZE-${nonce}`,
+          s1: `EAST-${nonce}`,
+          s1offset: '-5',
+          s1planArrDate: '08/11/2026',
+          s1planArrTime: '23:30',
+          s1planDepDate: '08/11/2026',
+          s1planDepTime: '23:45',
+        }),
+      ),
+      { mode: 'booked' },
+    )
+    const load = await inOrg((tx) =>
+      tx.load.findFirstOrThrow({
+        where: { id: written[0]!.id },
+        include: { stops: { orderBy: { sequence: 'asc' } } },
+      }),
+    )
+    // 23:30 EDT is 03:30Z. Reading the column literally would give 04:30Z.
+    expect(load.stops[0]!.windowStart!.toISOString()).toBe(
+      '2026-08-12T03:30:00.000Z',
+    )
+  })
+
+  // SOURCE 1: a dispatcher who has recorded where the dock actually is has
+  // said something the file cannot, and it wins.
+  it('lets a recorded facility timezone beat the offset column', async () => {
+    await inOrg((tx) =>
+      tx.location.create({
+        data: {
+          organizationId,
+          name: `WEST-${nonce}`,
+          timezone: 'America/Los_Angeles',
+        },
+      }),
+    )
+
+    const { plan, written } = await importFile(
+      file(
+        relayRow({
+          loadId: `TZW-${nonce}`,
+          s1: `WEST-${nonce}`,
+          // The file still claims Eastern. The recorded facility says Pacific.
+          s1offset: '-5',
+          s1planArrDate: '08/11/2026',
+          s1planArrTime: '09:00',
+          s1planDepDate: '08/11/2026',
+          s1planDepTime: '10:00',
+        }),
+      ),
+      { mode: 'booked' },
+    )
+
+    const load = await inOrg((tx) =>
+      tx.load.findFirstOrThrow({
+        where: { id: written[0]!.id },
+        include: { stops: { orderBy: { sequence: 'asc' } } },
+      }),
+    )
+    // 09:00 PDT is 16:00Z, not 13:00Z.
+    expect(load.stops[0]!.windowStart!.toISOString()).toBe(
+      '2026-08-11T16:00:00.000Z',
+    )
+
+    // AND THE CROSS-CHECK SAYS SO. Pacific was UTC−7 that day and the column
+    // says −5: two hours apart, which DST cannot explain. The stop is being
+    // read somewhere the file did not describe, and somebody is told.
+    const warning = plan.create[0]!.warnings.find(
+      (entry) => entry.kind === 'offset_disagrees',
+    )
+    expect(warning).toBeDefined()
+    expect(warning!.values['facility']).toBe(`WEST-${nonce}`)
+    expect(warning!.values['zone']).toBe('America/Los_Angeles')
+    expect(warning!.values['column']).toBe('-5')
+    expect(warning!.values['actual']).toBe('-7')
+  })
+
+  // The ordinary summer case: the column is standard time and the zone is on
+  // DST, exactly one hour apart. That is the expected state of every row in
+  // the corpus and must never produce a warning — a warning on every stop of
+  // every file is a warning nobody reads.
+  it('says nothing when the gap is the hour DST explains', async () => {
+    const { plan } = await importFile(
+      file(relayRow({ loadId: `TZQ-${nonce}` })),
+      { mode: 'booked' },
+    )
+    expect(
+      plan.create[0]!.warnings.filter(
+        (entry) => entry.kind === 'offset_disagrees',
+      ),
+    ).toHaveLength(0)
+  })
+
+  // THE PORTAL'S OWN CLOCKS, which is what settled flag 14: the first stop
+  // reads 23:30 CDT going in and the last reads 01:51 CDT two days later.
+  // Round-tripping the stored instants back through the stop's zone must
+  // reproduce those faces exactly.
+  it('round-trips to the clock faces the Relay portal shows', async () => {
+    const trips = parseRelayCsv(
+      file(
+        relayRow({
+          loadId: `PORTAL-${nonce}`,
+          // FACILITIES OF ITS OWN. The default row's `BBB2` is registered as
+          // Eastern by an earlier test in this file, and a recorded zone beats
+          // the offset column — which is source 1 working exactly as intended
+          // and would quietly make this assertion about the wrong thing.
+          s1: `PFOE-${nonce}`,
+          s2: `PJAN-${nonce}`,
+          s1offset: '-6',
+          s1planArrDate: '08/11/2026',
+          s1planArrTime: '23:30',
+          s1planDepDate: '08/12/2026',
+          s1planDepTime: '00:01',
+          s2offset: '-6',
+          s2planArrDate: '08/13/2026',
+          s2planArrTime: '01:51',
+          s2planDepDate: '08/13/2026',
+          s2planDepTime: '02:22',
+        }),
+      ),
+    )
+    const plan = await inOrg((tx) =>
+      planRelayImport(tx, { trips, mode: 'booked', maySeeMoney: true }),
+    )
+    const [first, last] = plan.create[0]!.stops
+    expect(previewMoment(first!.scheduledAt, first!.zone)).toBe(
+      'Aug 11, 23:30 CDT',
+    )
+    expect(previewMoment(last!.scheduledAt, last!.zone)).toBe(
+      'Aug 13, 01:51 CDT',
+    )
   })
 })

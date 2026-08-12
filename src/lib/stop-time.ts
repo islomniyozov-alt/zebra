@@ -183,12 +183,42 @@ export function resolveZone(
  * "how many hours is Chicago behind UTC" has two answers.
  */
 export function zoneMidnight(isoDate: string, zone: string): Date {
+  return zoneWallClock(isoDate, 0, 0, zone)
+}
+
+/**
+ * A wall-clock reading **in `zone`**, as an instant.
+ *
+ * `zoneMidnight` is this with the hands at twelve, and was this function until
+ * Phase 6 §3a needed the general case: an Amazon Relay export prints
+ * `08/11/2026 23:30` at a facility and means 23:30 THERE. Turning that into an
+ * instant is the same problem as midnight and has the same two-pass answer.
+ *
+ * DST-AWARE BY CONSTRUCTION, and that is the whole reason it exists rather
+ * than the caller adding hours to `zoneMidnight`. Adding 23.5 hours to a
+ * midnight is wrong on the two days a year a zone changes offset — the day is
+ * 23 or 25 hours long and the arithmetic does not know. It is also wrong
+ * whenever a stored offset disagrees with the real one, which is exactly the
+ * case flag 14 turned out to be.
+ *
+ * Ambiguous and non-existent local times (the hour that repeats in autumn, the
+ * hour that does not exist in spring) resolve to whatever the second pass
+ * settles on. Freight is not booked into those hours often enough to invent a
+ * policy for them, and inventing one silently would be worse than landing an
+ * hour out on a stop nobody scheduled.
+ */
+export function zoneWallClock(
+  isoDate: string,
+  hour: number,
+  minute: number,
+  zone: string,
+): Date {
   const [year, month, day] = isoDate.split('-').map(Number) as [
     number,
     number,
     number,
   ]
-  const wallClock = Date.UTC(year, month - 1, day)
+  const wallClock = Date.UTC(year, month - 1, day, hour, minute)
 
   // Twice, because the offset depends on the instant and the instant depends
   // on the offset. One pass is right except within an hour of a DST change;
@@ -198,6 +228,18 @@ export function zoneMidnight(isoDate: string, zone: string): Date {
     instant = wallClock + offsetMs(new Date(instant), zone)
   }
   return new Date(instant)
+}
+
+/**
+ * How far `zone` is from UTC at this instant, in whole hours. `-5` for Chicago
+ * in August, `-6` in January.
+ *
+ * The cross-check half of flag 14: an export that ships a static offset can be
+ * compared against what the resolved zone actually was at that moment, and a
+ * disagreement bigger than the hour DST explains means the zone is wrong.
+ */
+export function zoneOffsetHours(at: Date, zone: string): number {
+  return -offsetMs(at, zone) / 3_600_000
 }
 
 /**

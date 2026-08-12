@@ -15,13 +15,23 @@ import { MoneyFormatError, parseMoneyToCents } from './money'
 // extraction contract's own observed-instability tables are the argument. A
 // column is a mapping. Only a page is an extraction.
 //
+// IT DOES NOT PRODUCE INSTANTS, and that is flag 14's ruling made structural.
+//
+// The first version turned each printed clock into a `Date` right here, using
+// the row's own `Stop N UTC Offset` column as the authority. The Relay portal
+// then settled what that column is: the printed clock is the FACILITY'S WALL
+// CLOCK — `23:30` at FOE1 is 23:30 CDT — and the offset column is STATIC
+// standard-time metadata that reads −6 all summer while Central is on −5.
+// Subtracting it landed every August instant an hour late.
+//
+// So this file now hands back exactly what the file printed — a date and a
+// clock, validated and not rearranged — and `relay-import.ts` turns them into
+// instants in the stop's own zone, DST-aware, through the same machinery every
+// other stop in Zebra uses. A parser that cannot see a facility cannot know
+// its zone, and the zone is now part of the answer.
+//
 // WHAT THIS FILE REFUSES TO DO is as important as what it does:
 //
-//   * it does not GUESS A TIMEZONE. Every stop carries its own UTC offset
-//     column and that column is the authority. The facility codes — `FOE1`,
-//     `BNSF-FAIRBURN-EFC` — carry no address at all, so there is nothing else
-//     to derive a zone from, and deriving one from a code would be inventing
-//     a fact. A time with no offset beside it is a refusal, not a guess.
 //   * it does not SPLIT `LG_ELECT_37040_1720_825` into a street and a ZIP.
 //     37040 is Clarksville, Tennessee and 1720 looks like a building number,
 //     and both of those are inferences about a string Amazon composed for its
@@ -55,15 +65,37 @@ export class RelayCsvError extends Error {
  */
 export const MAX_IMPORT_ROWS = 200
 
+/**
+ * A clock face, as the export printed it — no zone attached.
+ *
+ * NOT a `Date`, on purpose. `08/11/2026 23:30` is a reading at a facility, and
+ * it is not a moment in time until somebody says where the facility is. Making
+ * it a `Date` here is what produced flag 14: it forced this file to pick an
+ * offset, and the only one to hand was the wrong one.
+ */
+export interface RelayClock {
+  /** ISO, so it can go straight into `zoneWallClock`. `2026-08-11`. */
+  date: string
+  hour: number
+  minute: number
+}
+
 export interface RelayStop {
   /** The facility CODE, verbatim. `FOE1`, `BNSF-FAIRBURN-EFC`. */
   facility: string
-  /** Hours from UTC, as the file gives it: `-6`. Null when the column is empty. */
+  /**
+   * The `Stop N UTC Offset` column, as the file gives it: `-6`.
+   *
+   * STATIC STANDARD-TIME METADATA, not the offset in force on the day — the
+   * Relay portal settled that (flag 14). Kept because it still says which zone
+   * family the facility is in and because it is worth cross-checking against
+   * the resolved zone, but it no longer converts anything.
+   */
   utcOffsetHours: number | null
-  plannedArrival: Date | null
-  plannedDeparture: Date | null
-  actualArrival: Date | null
-  actualDeparture: Date | null
+  plannedArrival: RelayClock | null
+  plannedDeparture: RelayClock | null
+  actualArrival: RelayClock | null
+  actualDeparture: RelayClock | null
   containerId: string | null
 }
 
@@ -197,30 +229,23 @@ function hourMinute(value: string): [number, number] | null {
 }
 
 /**
- * A date, a clock time and the stop's own offset, as an instant.
+ * A printed date and a printed time, as a clock face. No zone, no instant.
  *
- * THE OFFSET COLUMN IS THE AUTHORITY — the owner's ruling, and the only
- * defensible reading: a facility code has no address, so there is no zone to
- * look up and no state to fall back on. `zoneMidnight` cannot help here
- * because it needs an IANA zone and this file has none.
- *
- * Returns null unless all three are present and valid. A time with a date and
- * no offset is reported as a refusal by the caller rather than anchored to a
- * zone somebody assumed.
+ * Null unless both halves are there and both are exactly what the export
+ * prints. Nothing is repaired and nothing is rearranged: `2026-08-11` in a
+ * column documented as `MM/DD/YYYY` is a file that has changed shape, and
+ * reading it anyway would be this parser deciding which of two readings of
+ * `01/02/2026` it prefers.
  */
-export function relayInstant(
-  date: string,
-  time: string,
-  utcOffsetHours: number | null,
-): Date | null {
-  if (utcOffsetHours === null) return null
+export function relayClock(date: string, time: string): RelayClock | null {
   const day = monthDayYear(date)
   const clock = hourMinute(time)
   if (!day || !clock) return null
-  return new Date(
-    Date.UTC(day[0], day[1] - 1, day[2], clock[0], clock[1]) -
-      utcOffsetHours * 3_600_000,
-  )
+  return {
+    date: `${day[0]}-${String(day[1]).padStart(2, '0')}-${String(day[2]).padStart(2, '0')}`,
+    hour: clock[0],
+    minute: clock[1],
+  }
 }
 
 /** `-6` → -6. Refuses anything that is not a plain signed hour count. */
@@ -305,7 +330,7 @@ export function parseRelayCsv(text: string): RelayTrip[] {
 
       const offset = offsetHours(at(`Stop ${number} UTC Offset`))
       const moment = (date: string, time: string) =>
-        relayInstant(at(date), at(time), offset)
+        relayClock(at(date), at(time))
 
       stops.push({
         facility,

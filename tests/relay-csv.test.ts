@@ -4,7 +4,7 @@ import {
   RelayCsvError,
   parseCsv,
   parseRelayCsv,
-  relayInstant,
+  relayClock,
 } from '@/lib/relay-csv'
 import { RELAY_HEADER, relayRow as row } from './fixtures/relay'
 
@@ -59,25 +59,38 @@ describe('the Relay columns', () => {
   it('reads a window that crosses midnight without inverting it', () => {
     const [trip] = parseRelayCsv(file(row()))
     const stop = trip!.stops[0]!
-    expect(stop.plannedDeparture!.getTime()).toBeGreaterThan(
-      stop.plannedArrival!.getTime(),
-    )
-    expect(
-      stop.plannedDeparture!.getTime() - stop.plannedArrival!.getTime(),
-    ).toBe(31 * 60_000)
+    expect(stop.plannedArrival).toEqual({
+      date: '2026-08-11',
+      hour: 23,
+      minute: 30,
+    })
+    expect(stop.plannedDeparture).toEqual({
+      date: '2026-08-12',
+      hour: 0,
+      minute: 1,
+    })
   })
 
-  it('honours each stop’s own UTC offset', () => {
+  // FLAG 14. The parser hands back the clock face the export PRINTED and does
+  // not turn it into an instant, because the printed clock is the facility's
+  // wall clock and this file cannot know where the facility is. The offset
+  // column is carried through untouched, as the static standard-time metadata
+  // the Relay portal proved it to be.
+  it('keeps the printed clock and does not convert it', () => {
     const [trip] = parseRelayCsv(file(row()))
-    // 23:30 at UTC−6 is 05:30Z the next day.
-    expect(trip!.stops[0]!.plannedArrival!.toISOString()).toBe(
-      '2026-08-12T05:30:00.000Z',
-    )
-    // 06:31 at UTC−5 is 11:31Z the same day — a different offset on the same
-    // load, which is what a cross-zone run looks like.
-    expect(trip!.stops[1]!.plannedArrival!.toISOString()).toBe(
-      '2026-08-12T11:31:00.000Z',
-    )
+    expect(trip!.stops[0]!.plannedArrival).toEqual({
+      date: '2026-08-11',
+      hour: 23,
+      minute: 30,
+    })
+    expect(trip!.stops[0]!.utcOffsetHours).toBe(-6)
+    // A different offset on the same load — what a cross-zone run looks like.
+    expect(trip!.stops[1]!.utcOffsetHours).toBe(-5)
+    expect(trip!.stops[1]!.plannedArrival).toEqual({
+      date: '2026-08-12',
+      hour: 6,
+      minute: 31,
+    })
   })
 
   it('floors the distance rather than refusing the decimal every row has', () => {
@@ -164,22 +177,39 @@ describe('what it refuses', () => {
   })
 })
 
-describe('an instant from a Relay row', () => {
-  it('is null without an offset, rather than anchored to a guess', () => {
-    expect(relayInstant('08/11/2026', '23:30', null)).toBeNull()
+describe('a clock face from a Relay row', () => {
+  it('reads a date and a time into ISO plus hands', () => {
+    expect(relayClock('08/11/2026', '23:30')).toEqual({
+      date: '2026-08-11',
+      hour: 23,
+      minute: 30,
+    })
+    // Single-digit month and day, padded — `zoneWallClock` splits on the
+    // dashes and 2026-8-1 would parse as August anyway, but the stored shape
+    // is what gets compared and logged.
+    expect(relayClock('1/2/2026', '07:05')).toEqual({
+      date: '2026-01-02',
+      hour: 7,
+      minute: 5,
+    })
+  })
+
+  it('is null when either half is missing', () => {
+    expect(relayClock('', '10:00')).toBeNull()
+    expect(relayClock('08/11/2026', '')).toBeNull()
   })
 
   it('refuses a date that does not exist', () => {
-    expect(relayInstant('02/30/2026', '10:00', -6)).toBeNull()
-    expect(relayInstant('13/01/2026', '10:00', -6)).toBeNull()
+    expect(relayClock('02/30/2026', '10:00')).toBeNull()
+    expect(relayClock('13/01/2026', '10:00')).toBeNull()
   })
 
   it('refuses a clock time that does not exist', () => {
-    expect(relayInstant('08/11/2026', '24:00', -6)).toBeNull()
-    expect(relayInstant('08/11/2026', '10:60', -6)).toBeNull()
+    expect(relayClock('08/11/2026', '24:00')).toBeNull()
+    expect(relayClock('08/11/2026', '10:60')).toBeNull()
   })
 
   it('refuses a date it would have to rearrange to read', () => {
-    expect(relayInstant('2026-08-11', '10:00', -6)).toBeNull()
+    expect(relayClock('2026-08-11', '10:00')).toBeNull()
   })
 })

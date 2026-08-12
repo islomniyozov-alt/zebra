@@ -1,10 +1,10 @@
 import type { TxClient } from './tenancy'
-import type { RelayStop, RelayTrip } from './relay-csv'
+import type { RelayClock, RelayStop, RelayTrip } from './relay-csv'
 import { type LoadWarning, loadWarnings } from './load-warnings'
 import { createLoad } from './loads'
 import { transitionOperational } from './load-status'
 import { resolveLocation } from './locations'
-import { renderDateOnly } from './stop-time'
+import { renderStopTime, zoneOffsetHours, zoneWallClock } from './stop-time'
 
 // ---------------------------------------------------------------------------
 // A RELAY EXPORT, AS LOADS (Phase 6 §3a).
@@ -49,6 +49,15 @@ export type ImportMode = 'booked' | 'delivered'
  */
 export const RELAY_CUSTOMER_NAME = 'Amazon Relay'
 
+/**
+ * Where a stop with no offset and no recorded facility is assumed to be.
+ *
+ * The same constant the create form uses, and the same admission: it is a
+ * fallback, not an answer. `refuse` skips a stop with no offset column
+ * precisely so this is almost never reached.
+ */
+export const COMPANY_FALLBACK_ZONE = 'America/Chicago'
+
 export type RowRefusal =
   | 'no_load_id'
   | 'too_few_stops'
@@ -61,8 +70,10 @@ export type RowRefusal =
 export interface PlannedStop {
   type: 'PICKUP' | 'DELIVERY' | 'INTERMEDIATE'
   facility: string
-  /** Carried so the preview can print the time the FILE printed. */
+  /** The export's static standard-time offset, kept for the cross-check. */
   utcOffsetHours: number | null
+  /** The IANA zone every clock on this stop was read in. See `zoneForRelayStop`. */
+  zone: string
   scheduledAt: Date | null
   windowStart: Date | null
   windowEnd: Date | null
@@ -123,8 +134,12 @@ export async function planRelayImport(
     mode: ImportMode
     /** `load.financials:update`. Decides whether money is in the plan at all. */
     maySeeMoney: boolean
+    /** Where a stop with no offset and no recorded facility is assumed to be. */
+    fallbackZone?: string
   },
 ): Promise<ImportPlan> {
+  const fallbackZone = input.fallbackZone ?? COMPANY_FALLBACK_ZONE
+
   const customer = await tx.customer.findFirst({
     where: {
       name: { equals: RELAY_CUSTOMER_NAME, mode: 'insensitive' },
@@ -132,6 +147,31 @@ export async function planRelayImport(
     },
     select: { id: true, settlesDirectly: true },
   })
+
+  // EVERY FACILITY THIS FILE MENTIONS, IN ONE QUERY, so a dispatcher's recorded
+  // zone beats the offset column's zone family (`zoneForRelayStop` source 1).
+  // One `findMany` rather than a lookup per stop: the plan runs on every
+  // keystroke of a preview and a forty-five-row file has ninety stops.
+  const facilities = await tx.location.findMany({
+    where: {
+      name: {
+        in: [
+          ...new Set(
+            input.trips.flatMap((trip) =>
+              trip.stops.map((stop) => stop.facility),
+            ),
+          ),
+        ],
+      },
+      deletedAt: null,
+    },
+    select: { name: true, timezone: true },
+  })
+  // Lower-cased, because `resolveLocation` matches case-insensitively and a
+  // map that did not would miss the very row the import is about to reuse.
+  const recorded = new Map(
+    facilities.map((place) => [place.name.toLowerCase(), place.timezone]),
+  )
 
   const create: PlannedLoad[] = []
   const skip: SkippedRow[] = []
@@ -152,7 +192,17 @@ export async function planRelayImport(
     seen.add(loadId.toLowerCase())
 
     const stops = trip.stops.map((stop, index) =>
-      plannedStop(stop, index, trip.stops.length, input.mode),
+      plannedStop(
+        stop,
+        index,
+        trip.stops.length,
+        input.mode,
+        zoneForRelayStop(
+          recorded.get(stop.facility.toLowerCase()) ?? null,
+          stop.utcOffsetHours,
+          fallbackZone,
+        ),
+      ),
     )
     const costCents = input.maySeeMoney ? (trip.costCents ?? 0) : null
 
@@ -175,6 +225,28 @@ export async function planRelayImport(
       delivery: { city: null, state: null },
       linehaulCents: costCents,
     })
+
+    // FLAG 14'S CROSS-CHECK, ONE PER STOP THAT FAILS IT. Not a refusal: the
+    // load is importable and the times are the best reading available. It is a
+    // sentence naming the facility, both offsets and the zone the clocks were
+    // read in, so somebody can say "AGS1 is not in Central" and fix it on the
+    // facility — which is source 1 of `zoneForRelayStop` and makes every later
+    // import of that dock right.
+    for (const stop of stops) {
+      if (!offsetDisagrees(stop.scheduledAt, stop.zone, stop.utcOffsetHours)) {
+        continue
+      }
+      warnings.push({
+        kind: 'offset_disagrees',
+        messageKey: 'loads.warn.offsetDisagrees',
+        values: {
+          facility: stop.facility,
+          zone: stop.zone,
+          column: String(stop.utcOffsetHours),
+          actual: String(zoneOffsetHours(stop.scheduledAt!, stop.zone)),
+        },
+      })
+    }
 
     create.push({
       rowNumber: trip.rowNumber,
@@ -224,18 +296,27 @@ function refuse(
   if (trip.stops.length < 2) return 'too_few_stops'
 
   for (const stop of trip.stops) {
-    // A TIME WITH NO OFFSET IS NOT A MOMENT. `relayInstant` already returned
-    // null for every time on this stop; importing it would produce a load with
-    // no dates at all and no explanation, so the row says why instead.
+    // A STOP WITH NO OFFSET HAS NO ZONE TO BE READ IN.
+    //
+    // It stopped meaning "no instant can be computed" when flag 14 was settled
+    // — the printed clocks are still perfectly readable without it — and it
+    // still means the facility cannot be placed. With no offset and no
+    // recorded `Location.timezone`, every clock on the stop would fall back to
+    // the company's zone, which is a guess about somewhere that could be three
+    // hours away. Skipped and named, rather than imported an hour or three out.
     if (stop.utcOffsetHours === null) return 'missing_offset'
 
     // Caught here rather than in `writeStops`, which throws and would take the
     // whole transaction — and, more to the point, would surface as a failure
     // AFTER the confirm rather than as a skipped row in the preview.
+    //
+    // COMPARED AS CLOCK FACES, not as instants, and it is exact: both readings
+    // are at the SAME facility, so they share a zone whatever that zone turns
+    // out to be, and the comparison does not need one.
     if (
       stop.plannedArrival &&
       stop.plannedDeparture &&
-      stop.plannedDeparture.getTime() < stop.plannedArrival.getTime()
+      clockBefore(stop.plannedDeparture, stop.plannedArrival)
     ) {
       return 'window_inverted'
     }
@@ -258,6 +339,12 @@ function refuse(
   return null
 }
 
+/** Is `a` earlier on the clock than `b`? Same facility, so the zone cancels. */
+function clockBefore(a: RelayClock, b: RelayClock): boolean {
+  if (a.date !== b.date) return a.date < b.date
+  return a.hour * 60 + a.minute < b.hour * 60 + b.minute
+}
+
 /**
  * One stop, in the mode's own times.
  *
@@ -273,8 +360,17 @@ function plannedStop(
   index: number,
   count: number,
   mode: ImportMode,
+  zone: string,
 ): PlannedStop {
   const delivered = mode === 'delivered'
+  // EVERY PRINTED CLOCK, READ WHERE THE FACILITY IS. Flag 14's fix: the export
+  // prints wall clocks and `zoneWallClock` is the same DST-aware conversion
+  // the create form's typed dates go through.
+  const at = (clock: RelayClock | null) =>
+    clock === null
+      ? null
+      : zoneWallClock(clock.date, clock.hour, clock.minute, zone)
+
   return {
     type:
       index === 0
@@ -284,16 +380,93 @@ function plannedStop(
           : 'INTERMEDIATE',
     facility: stop.facility,
     utcOffsetHours: stop.utcOffsetHours,
+    zone,
     // THE PLANNED WINDOW IS KEPT IN BOTH MODES. A delivered load whose
     // appointment is erased cannot be asked "was it late", which is the
     // question a Relay scorecard is decided on.
-    scheduledAt: stop.plannedArrival,
-    windowStart: stop.plannedArrival,
-    windowEnd: stop.plannedDeparture,
-    arrivedAt: delivered ? stop.actualArrival : null,
-    departedAt: delivered ? stop.actualDeparture : null,
+    scheduledAt: at(stop.plannedArrival),
+    windowStart: at(stop.plannedArrival),
+    windowEnd: at(stop.plannedDeparture),
+    arrivedAt: delivered ? at(stop.actualArrival) : null,
+    departedAt: delivered ? at(stop.actualDeparture) : null,
     containerId: stop.containerId,
   }
+}
+
+/**
+ * The IANA zone a Relay stop's clocks are read in.
+ *
+ * THREE SOURCES, IN THIS ORDER, and the order is the argument:
+ *
+ *   1. **The facility's own recorded zone.** `Location.timezone` exists for
+ *      exactly this and design rule 3 says it wins. A dispatcher who has
+ *      filled in where `AGS1` actually is has said something this file cannot.
+ *   2. **The zone family the offset column names.** The export's offset is
+ *      static STANDARD-time metadata (flag 14) — which is useless for
+ *      converting a clock and precise about which zone the facility is in.
+ *      −6 is Central, −5 is Eastern, and that is not a guess about a facility
+ *      code, it is the one geographic fact the file states.
+ *   3. **The company fallback**, when the column is empty too.
+ *
+ * WITHOUT STEP 2 THIS WOULD BE SILENTLY WRONG for half the corpus. A facility
+ * code has no state, so `resolveZone` would fall to America/Chicago for every
+ * stop — and an Augusta appointment read as Central is an hour late, with the
+ * cross-check below agreeing that −5 is −5 and saying nothing. The failure is
+ * invisible precisely where it matters.
+ *
+ * ARIZONA IS THE KNOWN HOLE. `-7` maps to America/Denver, which observes DST;
+ * Phoenix does not, so a Phoenix facility's summer clocks land an hour early.
+ * Not resolved by guessing between two zones with one offset — resolved by a
+ * dispatcher recording the facility's zone, which is source 1. Flagged.
+ */
+export function zoneForRelayStop(
+  recorded: string | null,
+  utcOffsetHours: number | null,
+  fallback: string,
+): string {
+  if (recorded) return recorded
+  if (utcOffsetHours !== null) {
+    const zone = STANDARD_OFFSET_ZONES[utcOffsetHours]
+    if (zone) return zone
+  }
+  return fallback
+}
+
+/**
+ * US standard-time offset → the zone that keeps it.
+ *
+ * Standard offsets, not current ones: this table is read against a column that
+ * says −6 in July. Alaska and Hawaii are included because Relay runs neither
+ * and their absence would be a silent fallback rather than an answer.
+ */
+const STANDARD_OFFSET_ZONES: Record<number, string> = {
+  [-5]: 'America/New_York',
+  [-6]: 'America/Chicago',
+  [-7]: 'America/Denver',
+  [-8]: 'America/Los_Angeles',
+  [-9]: 'America/Anchorage',
+  [-10]: 'Pacific/Honolulu',
+}
+
+/**
+ * Whether the offset column still agrees with the zone this stop resolved to.
+ *
+ * THE CROSS-CHECK HALF OF FLAG 14. The column is standard time, so in summer
+ * the real zone is one hour ahead of it and that difference is expected — it
+ * is the whole reason the column stopped being the authority. Anything OUTSIDE
+ * that range means the stop is being read in the wrong zone, and a stop read
+ * in the wrong zone is an appointment nobody can meet.
+ *
+ * Expected is `actual − column ∈ {0, +1}`: zero in winter, one in summer.
+ */
+export function offsetDisagrees(
+  at: Date | null,
+  zone: string,
+  column: number | null,
+): boolean {
+  if (!at || column === null) return false
+  const drift = zoneOffsetHours(at, zone) - column
+  return drift < 0 || drift > 1
 }
 
 /**
@@ -415,6 +588,25 @@ export async function importRelayLoad(
   for (const stop of planned.stops) {
     const location = await resolveLocation(tx, organizationId, stop.facility)
     places.push(location.locationId)
+
+    // AND THE ZONE IS RECORDED ON THE FACILITY, which is not bookkeeping.
+    //
+    // The instant is right without this; the SCREEN is not. `renderStopTime`
+    // resolves a stop's zone from `Location.timezone`, then the state, then
+    // the company fallback — and a facility code has no state, so an Augusta
+    // appointment stored correctly at 23:09Z would render "18:09 CDT" on the
+    // load detail screen. Right in the database, an hour wrong in front of the
+    // dispatcher, which is the failure design rule 3 exists to prevent.
+    //
+    // ONLY WHEN THE ROW HAS NONE. A zone somebody recorded deliberately is
+    // source 1 of `zoneForRelayStop` and it beat this import's guess when the
+    // plan was built; overwriting it here would let the file win after all.
+    if (location.timezone === null) {
+      await tx.location.update({
+        where: { id: location.locationId },
+        data: { timezone: stop.zone },
+      })
+    }
   }
 
   const load = await createLoad(
@@ -497,38 +689,26 @@ export async function importRelayLoad(
 }
 
 /**
- * `Aug 11, 23:30 UTC−6` — a stop time, in the preview.
+ * `Aug 11, 23:30 CDT` — a stop time, in the preview.
  *
- * RENDERED BACK AT THE STOP'S OWN OFFSET, so the preview shows the dispatcher
- * the same clock face the file did. Design rule 3 says a stop time renders in
- * the STOP's zone, and this is the closest that rule can be honoured with what
- * the export contains: there is no IANA zone here and no address to look one
- * up from, so the offset is printed rather than an abbreviation invented for
- * it. A dispatcher who can see `UTC−6` beside the time can tell us it is
- * wrong; `CST` would be a claim the file never made.
+ * DESIGN RULE 3, PROPERLY, which it could not be before flag 14 was settled.
+ * The first version printed `UTC−6` because there was no zone to name and an
+ * abbreviation would have been a claim the file never made. Now every stop has
+ * a real IANA zone, so this is `renderStopTime` — the same renderer the load
+ * screen and the dispatch board use, showing the same abbreviation.
+ *
+ * That the preview reads `23:30 CDT` where the Relay portal reads `23:30 CDT`
+ * is the whole verification: it is the printed clock, back where it came from.
  */
 export function previewMoment(
   at: Date | null,
-  offsetHours: number | null,
+  zone: string,
+  locale?: string,
 ): string {
-  if (!at) return '—'
-  if (offsetHours === null) return renderDateOnly(at) ?? '—'
-
-  // Shifted, then formatted as UTC. `Intl` takes a zone and there is no zone —
-  // moving the instant by the offset and reading it in UTC is the same
-  // arithmetic the file's own columns describe.
-  const local = new Date(at.getTime() + offsetHours * 3_600_000)
-  const face = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'UTC',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(local)
-
-  // U+2212 MINUS, not a hyphen: this is a signed number, and the design
-  // system's own money rule uses the same character for the same reason.
-  const sign = offsetHours < 0 ? '−' : '+'
-  return `${face} UTC${sign}${Math.abs(offsetHours)}`
+  const rendered = renderStopTime(at, null, {
+    fallbackZone: zone,
+    zone,
+    ...(locale ? { locale } : {}),
+  })
+  return rendered?.text ?? '—'
 }

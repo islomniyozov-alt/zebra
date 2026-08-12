@@ -169,8 +169,12 @@ function renderPlan(
         loadId: load.loadId,
         lane: load.lane,
         stops: load.stops.length,
-        first: previewMoment(first.scheduledAt, first.utcOffsetHours),
-        last: previewMoment(last.scheduledAt, last.utcOffsetHours),
+        // EACH IN ITS OWN STOP'S ZONE, which on a cross-zone run is two
+        // different zones on one row — `23:30 CDT` out and `16:30 EDT` in.
+        // That is design rule 3 and it is also the check: these are the
+        // clock faces the Relay portal shows.
+        first: previewMoment(first.scheduledAt, first.zone, context.locale),
+        last: previewMoment(last.scheduledAt, last.zone, context.locale),
         miles: load.distanceMiles === null ? '—' : String(load.distanceMiles),
         ...(load.costCents === null
           ? {}

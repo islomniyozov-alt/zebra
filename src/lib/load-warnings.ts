@@ -36,6 +36,13 @@ export type WarningKind =
   | 'missing_pickup_date'
   | 'missing_delivery_date'
   | 'missing_rate'
+  // PHASE 6 §3a, flag 14's cross-check. A Relay export ships a STATIC
+  // standard-time offset per stop; the clocks beside it are the facility's
+  // wall clock and are read in the facility's zone. In summer the real zone is
+  // one hour ahead of the column and that is expected. Anything else means the
+  // stop is being read in the WRONG ZONE, which is an appointment nobody can
+  // meet — said out loud rather than silently trusted either way.
+  | 'offset_disagrees'
 
 export interface LoadWarning {
   kind: WarningKind
