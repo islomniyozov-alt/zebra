@@ -23,6 +23,15 @@ import { renderDateOnly } from './stop-time'
 export type WarningKind =
   | 'duplicate_bol'
   | 'duplicate_po'
+  // PHASE 6 §3a. The broker's own load number, which for a Relay import is
+  // Amazon's `Load ID` column and the only exact key the export contains: it
+  // has no BOL, no PO and no addresses, so broker+date+lane cannot fire and
+  // this is what stands between one file uploaded twice and two of every load.
+  //
+  // A WARNING RATHER THAN A CONSTRAINT, like the other two and for the same
+  // reason. A broker really does reissue a load number, and `referenceNumber`
+  // has never been unique. The office is told which load it is already on.
+  | 'duplicate_reference'
   | 'duplicate_load'
   | 'missing_pickup_date'
   | 'missing_delivery_date'
@@ -58,6 +67,12 @@ export interface WarningInput {
   customerName: string
   bolNumber: string | null
   poNumber: string | null
+  /**
+   * The broker's own load number. Optional because the create form has never
+   * had a field for it — omitting it is how a caller says "not applicable",
+   * which is different from a caller that has one and left it empty.
+   */
+  referenceNumber?: string | null
   pickupAt: Date | null
   deliveryAt: Date | null
   pickup: { city: string | null; state: string | null }
@@ -108,6 +123,21 @@ export async function loadWarnings(
         kind: 'duplicate_po',
         messageKey: 'loads.warn.duplicatePo',
         values: { po: input.poNumber, ...named(existing) },
+      })
+    }
+  }
+
+  if (input.referenceNumber) {
+    const existing = await findByNumber(
+      tx,
+      'referenceNumber',
+      input.referenceNumber,
+    )
+    if (existing) {
+      warnings.push({
+        kind: 'duplicate_reference',
+        messageKey: 'loads.warn.duplicateReference',
+        values: { reference: input.referenceNumber, ...named(existing) },
       })
     }
   }
@@ -188,7 +218,7 @@ const LOAD_SUMMARY = {
  */
 async function findByNumber(
   tx: TxClient,
-  field: 'bolNumber' | 'poNumber',
+  field: 'bolNumber' | 'poNumber' | 'referenceNumber',
   value: string,
 ) {
   return tx.load.findFirst({

@@ -168,6 +168,7 @@ export default async function NewLoadPage() {
             methodUpload: t('loads.methodUpload'),
             methodPaste: t('loads.methodPaste'),
             methodAmazon: t('loads.methodAmazon'),
+            methodAmazonImport: t('loads.methodAmazonImport'),
             methodManualHint: t('loads.methodManualHint'),
             methodDropHint: t('loads.methodDropHint'),
             methodPastePlaceholder: t('loads.methodPastePlaceholder'),

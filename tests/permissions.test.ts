@@ -669,3 +669,57 @@ describe('adding an authority is the owner’s act', () => {
     expect(sidebar('ACCOUNTING')).not.toContain('/companies')
   })
 })
+
+describe('the Relay bulk import (Phase 6 §3a)', () => {
+  const roles = [
+    'OWNER',
+    'ADMIN',
+    'MANAGER',
+    'DISPATCHER',
+    'ACCOUNTING',
+  ] as const
+
+  const session = (role: (typeof roles)[number]) =>
+    ({
+      role,
+      organizationId: 'org',
+      userId: 'u',
+      companyScopes: [],
+    }) as never
+
+  // THE SCREEN IS `load:create` AND NOTHING NEW. Importing forty-five loads is
+  // booking forty-five loads; inventing an `import:create` permission would be
+  // a second wall around the same act, and a role that held one and not the
+  // other would be a role nobody could explain.
+  it('is reachable by exactly the roles that may book a load', () => {
+    const may = roles.filter((role) => can(session(role), 'create', 'load'))
+    expect(may).toEqual(['OWNER', 'ADMIN', 'MANAGER', 'DISPATCHER'])
+  })
+
+  // The pair, and the one that matters: ACCOUNTING reads every load in the
+  // system and may not create one, so the import screen 404s for them.
+  it('is closed to ACCOUNTING, which reads loads and books none', () => {
+    expect(can(session('ACCOUNTING'), 'read', 'load')).toBe(true)
+    expect(can(session('ACCOUNTING'), 'create', 'load')).toBe(false)
+  })
+
+  // §1.3 — a DISPATCHER may run the import and must not see a rate in it. The
+  // preview's money column and the linehaul the write sets are both decided by
+  // this one answer.
+  it('shows no money to a DISPATCHER who may run it', () => {
+    expect(can(session('DISPATCHER'), 'create', 'load')).toBe(true)
+    expect(can(session('DISPATCHER'), 'update', 'load.financials')).toBe(false)
+    expect(can(session('OWNER'), 'update', 'load.financials')).toBe(true)
+  })
+
+  // The customer write the import makes on its way through. Every role that
+  // may book a load already holds this for the create-on-miss broker field —
+  // if that ever stopped being true, the import would fail at the first file.
+  it('can create the Amazon Relay customer under its own permission', () => {
+    for (const role of roles.filter((entry) =>
+      can(session(entry), 'create', 'load'),
+    )) {
+      expect(can(session(role), 'create', 'customer')).toBe(true)
+    }
+  })
+})

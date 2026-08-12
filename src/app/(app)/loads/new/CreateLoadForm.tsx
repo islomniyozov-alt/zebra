@@ -92,6 +92,7 @@ export interface CreateLoadLabels {
   methodUpload: string
   methodPaste: string
   methodAmazon: string
+  methodAmazonImport: string
   methodManualHint: string
   methodDropHint: string
   methodPastePlaceholder: string
@@ -472,6 +473,7 @@ export function CreateLoadForm({
           methodUpload: labels.methodUpload,
           methodPaste: labels.methodPaste,
           methodAmazon: labels.methodAmazon,
+          methodAmazonImport: labels.methodAmazonImport,
           methodManualHint: labels.methodManualHint,
           methodDropHint: labels.methodDropHint,
           methodPastePlaceholder: labels.methodPastePlaceholder,

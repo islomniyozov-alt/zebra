@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { cx } from '@/lib/cx'
 import { Button } from '@/components/ui/Button'
 import type { ExtractedWithoutMoney } from '@/lib/extraction'
@@ -97,6 +98,7 @@ interface Props {
     methodDropHint: string
     methodManualHint: string
     methodAmazon: string
+    methodAmazonImport: string
     methodPaste: string
     methodUpload: string
     methodManual: string
@@ -336,10 +338,19 @@ export function RateConOffer({ companyId, onExtracted, labels }: Props) {
       ) : null}
 
       {method === 'amazon' ? (
-        // NAMED, NOT FAKED. The Amazon path is Step 3's Excel ingestion and
-        // Step 4's inbox; a tab that silently did nothing would be worse than
-        // one that says what it is waiting for.
-        <p className="text-sm text-ink-2">{labels.methodAmazonSoon}</p>
+        // §3a LANDED HALF OF THIS. The Relay Trips export is a bulk import and
+        // therefore a screen of its own — it creates many loads and this form
+        // creates one, so the tab points at it rather than pretending a
+        // forty-five-row file belongs in a single-load form. The booking
+        // sheet, which IS one load, is still §3b's.
+        <div className="flex flex-col gap-z2">
+          <Link href="/loads/import" tabIndex={-1}>
+            <Button type="button" variant="secondary">
+              {labels.methodAmazonImport}
+            </Button>
+          </Link>
+          <p className="text-sm text-ink-2">{labels.methodAmazonSoon}</p>
+        </div>
       ) : null}
 
       <p

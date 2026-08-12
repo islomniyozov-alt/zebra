@@ -735,6 +735,37 @@ record(
   `HTTP ${dispatcherAdd.status}`,
 )
 
+// --- THE RELAY IMPORT IS A BOOKING ACT (Phase 6 §3a) ----------------------
+//
+// Gated on `load:create` and nothing new, so a dispatcher — who books all day
+// — reaches it, and the money column inside it is decided separately. Asserted
+// on the deployed worker because a screen that typechecks is not a screen that
+// mounts: §3a's whole surface is a client component, an action and a lint rule
+// about what a "use server" file may export, and the last one only fails at
+// runtime.
+const dispatcherImport = await bodyOf(dispatcher.page, '/loads/import')
+record(
+  'a dispatcher can reach the Relay import screen',
+  dispatcherImport.status === 200,
+  `HTTP ${dispatcherImport.status}`,
+)
+
+record(
+  'and it names both of Datatruck’s two buttons',
+  /Upcoming trips/i.test(dispatcherImport.body) &&
+    /Finished trips/i.test(dispatcherImport.body),
+  'booked and delivered are both offered',
+)
+
+// §1.3 — THE MONEY COLUMN IS NOT ON A DISPATCHER'S IMPORT. The preview's rate
+// header is rendered only when the server said the role may set one, so its
+// absence here is the payload rule holding on a new screen.
+record(
+  'and the import preview offers a dispatcher no rate column',
+  !/>Rate</.test(dispatcherImport.body),
+  'absent from the payload, not hidden in CSS',
+)
+
 // The navigation does not offer what the role cannot reach, either (§7).
 const nav = await dispatcher.page.goto(`${BASE}/loads`, {
   waitUntil: 'domcontentloaded',

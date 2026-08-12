@@ -365,6 +365,7 @@ const en = {
   'loads.methodDropHint': 'or drop a file anywhere in this box',
   'loads.methodPastePlaceholder': 'Paste the booking email or message here.',
   'loads.methodPasteRead': 'Read this text',
+  'loads.methodAmazonImport': 'Import a Relay Trips export',
   'loads.methodAmazonSoon':
     'Amazon booking sheets arrive in a later step. Upload the Excel under Upload document, or paste the email.',
   'loads.extracted': 'From the document.',
@@ -388,6 +389,67 @@ const en = {
     'No pickup date, so this load will not appear on any screen that sorts by one.',
   'loads.warn.missingDeliveryDate': 'No delivery date.',
   'loads.warn.missingRate': 'No rate, so this load cannot be invoiced yet.',
+  'loads.warn.duplicateReference':
+    'Load reference {reference} is already on load {load} for {customer}, booked {date}.',
+  'relay.title': 'Import from Amazon Relay',
+  'relay.subtitle':
+    'The Trips export, as loads. Columns are read directly — nothing is guessed and no document is sent anywhere.',
+  'relay.authority': 'Authority',
+  'relay.mode': 'What is in this file',
+  'relay.modeBooked': 'Upcoming trips — book them',
+  'relay.modeBookedHint':
+    'Planned arrival and departure become each stop’s window. Loads land as Booked.',
+  'relay.modeDelivered': 'Finished trips — file them as delivered',
+  'relay.modeDeliveredHint':
+    'Actual check-in and departure are kept beside the plan. Loads land as Delivered. A trip that has not finished is skipped.',
+  'relay.choose': 'Choose the CSV',
+  'relay.file': 'File',
+  'relay.preview': 'Show me what this would create',
+  'relay.previewTitle': 'This would create {count} loads',
+  'relay.previewOne': 'This would create 1 load',
+  'relay.previewNone': 'Nothing in this file can be imported.',
+  'relay.confirm': 'Create these loads',
+  'relay.back': 'Choose a different file',
+  'relay.row': 'Row',
+  'relay.loadId': 'Load ID',
+  'relay.lane': 'Lane',
+  'relay.stops': 'Stops',
+  'relay.first': 'First stop',
+  'relay.last': 'Last stop',
+  'relay.miles': 'Miles',
+  'relay.rate': 'Rate',
+  'relay.skippedTitle': 'Skipped — {count} of them',
+  'relay.customerNew':
+    'Amazon Relay will be created as a customer that settles directly: these loads are paid by weekly statement and never become invoices.',
+  'relay.customerDirect':
+    'Amazon Relay settles directly, so these loads are paid by weekly statement and never become invoices.',
+  'relay.customerInvoiced':
+    'Amazon Relay is NOT set to settle directly, so these loads will be invoiced like any broker’s. Change it on the customer if that is wrong.',
+  'relay.warningsTitle': 'Worth checking before you create these:',
+  'relay.skip.no_load_id': 'No Load ID in this row.',
+  'relay.skip.too_few_stops': 'Fewer than two stops.',
+  'relay.skip.missing_offset': 'A stop has times but no UTC offset.',
+  'relay.skip.window_inverted':
+    'A stop is planned out before it is planned in.',
+  'relay.skip.not_completed':
+    'Not completed yet — import it as an upcoming trip.',
+  'relay.skip.no_actual_times':
+    'No actual times at the last stop, so it has not delivered.',
+  'relay.skip.repeated_in_file':
+    'This Load ID appears earlier in the same file.',
+  'relay.toLoads': 'Go to loads',
+  'relay.why': 'Why',
+  'relay.done': 'Created {created} loads.',
+  'relay.doneFailed': 'Created {created} loads. {failed} could not be written.',
+  'relay.stale':
+    'The file or the loads already in Zebra changed since this preview. Here is the plan again.',
+  'relay.error.empty': 'That file is empty.',
+  'relay.error.not_relay':
+    'That is not a Relay Trips export — it has no Load ID or Stop 1 column.',
+  'relay.error.no_rows': 'That file has a header and no trips in it.',
+  'relay.error.too_many_rows':
+    'That file has more rows than one import covers.',
+  'relay.error.noFile': 'Choose a CSV first.',
   'loads.facilityKnown': 'Known facility:',
   'loads.facilityNothingYet': 'Nothing written down about it yet.',
   'loads.facilitySave': 'Save this facility',
@@ -1745,6 +1807,7 @@ const ru: Dictionary = {
   'loads.methodPastePlaceholder':
     'Вставьте письмо о бронировании или сообщение.',
   'loads.methodPasteRead': 'Прочитать текст',
+  'loads.methodAmazonImport': 'Импортировать выгрузку Relay Trips',
   'loads.methodAmazonSoon':
     'Листы Amazon появятся позже. Загрузите Excel во вкладке «Загрузить документ» или вставьте письмо.',
   'loads.extracted': 'Из документа.',
@@ -1769,6 +1832,67 @@ const ru: Dictionary = {
   'loads.warn.missingDeliveryDate': 'Нет даты выгрузки.',
   'loads.warn.missingRate':
     'Нет ставки — счёт по этому рейсу выставить нельзя.',
+  'loads.warn.duplicateReference':
+    'Номер {reference} уже стоит на грузе {load} для {customer}, оформлен {date}.',
+  'relay.title': 'Импорт из Amazon Relay',
+  'relay.subtitle':
+    'Выгрузка Trips как грузы. Столбцы читаются напрямую — ничего не угадывается и никуда не отправляется.',
+  'relay.authority': 'Перевозчик',
+  'relay.mode': 'Что в этом файле',
+  'relay.modeBooked': 'Предстоящие рейсы — оформить их',
+  'relay.modeBookedHint':
+    'Плановые прибытие и убытие становятся окном каждой точки. Грузы создаются как «Оформлен».',
+  'relay.modeDelivered': 'Завершённые рейсы — записать как доставленные',
+  'relay.modeDeliveredHint':
+    'Фактические заезд и выезд сохраняются рядом с планом. Грузы создаются как «Доставлен». Незавершённый рейс пропускается.',
+  'relay.choose': 'Выбрать CSV',
+  'relay.file': 'Файл',
+  'relay.preview': 'Показать, что будет создано',
+  'relay.previewTitle': 'Будет создано грузов: {count}',
+  'relay.previewOne': 'Будет создан 1 груз',
+  'relay.previewNone': 'В этом файле нечего импортировать.',
+  'relay.confirm': 'Создать эти грузы',
+  'relay.back': 'Выбрать другой файл',
+  'relay.row': 'Строка',
+  'relay.loadId': 'Load ID',
+  'relay.lane': 'Направление',
+  'relay.stops': 'Точки',
+  'relay.first': 'Первая точка',
+  'relay.last': 'Последняя точка',
+  'relay.miles': 'Мили',
+  'relay.rate': 'Ставка',
+  'relay.skippedTitle': 'Пропущено — строк: {count}',
+  'relay.customerNew':
+    'Amazon Relay будет создан как клиент с прямым расчётом: такие грузы оплачиваются недельным отчётом и не превращаются в счета.',
+  'relay.customerDirect':
+    'Amazon Relay рассчитывается напрямую, поэтому эти грузы оплачиваются недельным отчётом и не превращаются в счета.',
+  'relay.customerInvoiced':
+    'У Amazon Relay НЕ включён прямой расчёт, поэтому по этим грузам будут выставлены счета, как любому брокеру. Если это неверно, измените карточку клиента.',
+  'relay.warningsTitle': 'Стоит проверить до создания:',
+  'relay.skip.no_load_id': 'В строке нет Load ID.',
+  'relay.skip.too_few_stops': 'Меньше двух точек.',
+  'relay.skip.missing_offset': 'У точки есть время, но нет смещения UTC.',
+  'relay.skip.window_inverted': 'Убытие с точки запланировано раньше прибытия.',
+  'relay.skip.not_completed':
+    'Рейс не завершён — импортируйте его как предстоящий.',
+  'relay.skip.no_actual_times':
+    'Нет фактического времени на последней точке — доставки не было.',
+  'relay.skip.repeated_in_file':
+    'Этот Load ID уже встречался выше в том же файле.',
+  'relay.toLoads': 'Перейти к грузам',
+  'relay.why': 'Причина',
+  'relay.done': 'Создано грузов: {created}.',
+  'relay.doneFailed':
+    'Создано грузов: {created}. Не удалось записать: {failed}.',
+  'relay.stale':
+    'Файл или грузы в Zebra изменились с момента предпросмотра. Вот план заново.',
+  'relay.error.empty': 'Файл пустой.',
+  'relay.error.not_relay':
+    'Это не выгрузка Relay Trips — в ней нет столбцов Load ID или Stop 1.',
+  'relay.error.no_rows': 'В файле только заголовок, рейсов нет.',
+  'relay.error.too_many_rows':
+    'В файле больше строк, чем помещается в один импорт.',
+  'relay.error.noFile': 'Сначала выберите CSV.',
   'loads.facilityKnown': 'Известная площадка:',
   'loads.facilityNothingYet': 'Пока ничего не записано.',
   'loads.facilitySave': 'Сохранить площадку',
@@ -3118,6 +3242,7 @@ const fa: Dictionary = {
   'loads.methodDropHint': 'یا فایل را در هر جای این کادر رها کنید',
   'loads.methodPastePlaceholder': 'ایمیل یا پیام رزرو را اینجا بچسبانید.',
   'loads.methodPasteRead': 'خواندن این متن',
+  'loads.methodAmazonImport': 'وارد کردن خروجی Relay Trips',
   'loads.methodAmazonSoon':
     'برگه‌های آمازون در مرحله‌ای بعد می‌آیند. اکسل را در «بارگذاری سند» بگذارید یا ایمیل را بچسبانید.',
   'loads.extracted': 'از روی سند.',
@@ -3142,6 +3267,65 @@ const fa: Dictionary = {
   'loads.warn.missingDeliveryDate': 'تاریخ تحویل ندارد.',
   'loads.warn.missingRate':
     'نرخ ندارد، پس هنوز نمی‌توان برایش صورتحساب صادر کرد.',
+  'loads.warn.duplicateReference':
+    'شمارهٔ مرجع {reference} از پیش روی بار {load} برای {customer} است، ثبت‌شده در {date}.',
+  'relay.title': 'وارد کردن از Amazon Relay',
+  'relay.subtitle':
+    'خروجی Trips به‌صورت بار. ستون‌ها مستقیم خوانده می‌شوند — چیزی حدس زده نمی‌شود و سندی جایی فرستاده نمی‌شود.',
+  'relay.authority': 'شرکت',
+  'relay.mode': 'محتوای این فایل',
+  'relay.modeBooked': 'سفرهای پیش‌رو — ثبتشان کن',
+  'relay.modeBookedHint':
+    'ورود و خروج برنامه‌ریزی‌شده بازهٔ زمانی هر توقف می‌شود. بارها با وضعیت «ثبت‌شده» ساخته می‌شوند.',
+  'relay.modeDelivered': 'سفرهای تمام‌شده — به‌عنوان تحویل‌شده ثبت کن',
+  'relay.modeDeliveredHint':
+    'ورود و خروج واقعی کنار برنامه نگه داشته می‌شود. بارها با وضعیت «تحویل‌شده» ساخته می‌شوند. سفر ناتمام رد می‌شود.',
+  'relay.choose': 'انتخاب فایل CSV',
+  'relay.file': 'فایل',
+  'relay.preview': 'نشانم بده چه چیزی ساخته می‌شود',
+  'relay.previewTitle': '{count} بار ساخته می‌شود',
+  'relay.previewOne': '۱ بار ساخته می‌شود',
+  'relay.previewNone': 'چیزی در این فایل قابل وارد کردن نیست.',
+  'relay.confirm': 'این بارها را بساز',
+  'relay.back': 'انتخاب فایل دیگر',
+  'relay.row': 'سطر',
+  'relay.loadId': 'شناسهٔ بار',
+  'relay.lane': 'مسیر',
+  'relay.stops': 'توقف‌ها',
+  'relay.first': 'اولین توقف',
+  'relay.last': 'آخرین توقف',
+  'relay.miles': 'مایل',
+  'relay.rate': 'نرخ',
+  'relay.skippedTitle': 'رد شد — {count} مورد',
+  'relay.customerNew':
+    'Amazon Relay به‌عنوان مشتری با تسویهٔ مستقیم ساخته می‌شود: این بارها با صورت‌حساب هفتگی پرداخت می‌شوند و هرگز به فاکتور تبدیل نمی‌شوند.',
+  'relay.customerDirect':
+    'Amazon Relay مستقیم تسویه می‌کند، پس این بارها با صورت‌حساب هفتگی پرداخت می‌شوند و به فاکتور تبدیل نمی‌شوند.',
+  'relay.customerInvoiced':
+    'برای Amazon Relay تسویهٔ مستقیم روشن نیست، پس برای این بارها مثل هر دلال دیگری فاکتور صادر می‌شود. اگر درست نیست، در کارت مشتری تغییرش دهید.',
+  'relay.warningsTitle': 'پیش از ساختن، اینها را ببینید:',
+  'relay.skip.no_load_id': 'این سطر شناسهٔ بار ندارد.',
+  'relay.skip.too_few_stops': 'کمتر از دو توقف.',
+  'relay.skip.missing_offset': 'یک توقف زمان دارد ولی اختلاف UTC ندارد.',
+  'relay.skip.window_inverted':
+    'خروج از یک توقف پیش از ورود به آن برنامه‌ریزی شده.',
+  'relay.skip.not_completed':
+    'هنوز تمام نشده — آن را به‌عنوان سفر پیش‌رو وارد کنید.',
+  'relay.skip.no_actual_times':
+    'در آخرین توقف زمان واقعی نیست، پس تحویلی رخ نداده.',
+  'relay.skip.repeated_in_file': 'این شناسهٔ بار بالاتر در همین فایل آمده است.',
+  'relay.toLoads': 'رفتن به بارها',
+  'relay.why': 'چرا',
+  'relay.done': '{created} بار ساخته شد.',
+  'relay.doneFailed': '{created} بار ساخته شد. {failed} مورد نوشته نشد.',
+  'relay.stale':
+    'فایل یا بارهای داخل Zebra از زمان پیش‌نمایش عوض شده‌اند. این هم دوبارهٔ برنامه.',
+  'relay.error.empty': 'آن فایل خالی است.',
+  'relay.error.not_relay':
+    'این خروجی Relay Trips نیست — ستون Load ID یا Stop 1 ندارد.',
+  'relay.error.no_rows': 'آن فایل فقط سرستون دارد و هیچ سفری در آن نیست.',
+  'relay.error.too_many_rows': 'آن فایل بیش از حد یک بار وارد کردن سطر دارد.',
+  'relay.error.noFile': 'اول یک فایل CSV انتخاب کنید.',
   'loads.facilityKnown': 'محل شناخته‌شده:',
   'loads.facilityNothingYet': 'هنوز چیزی درباره‌اش نوشته نشده است.',
   'loads.facilitySave': 'ذخیرهٔ این محل',
