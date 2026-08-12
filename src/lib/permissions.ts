@@ -519,6 +519,14 @@ export const NAVIGATION: readonly NavGroup[] = [
     labelKey: 'nav.group.admin',
     items: [
       item('users', '/users', 'user'),
+      // Phase 6 §7 flag 11. GATED ON `create`, NOT `read`.
+      //
+      // Every operator role holds `company:read` — the authority switcher in
+      // the topbar is built from those rows — so a read-gated entry here put
+      // the whole Administration group in a dispatcher's sidebar, which the
+      // permissions test caught on the first run. Managing authorities is
+      // create work and OWNER/ADMIN hold it alone.
+      item('companies', '/companies', 'company', 'create'),
       // Phase 4 step 6. `organization:update` is what the screen asks to save;
       // reading is `organization:read`, which OWNER and ADMIN hold and nobody
       // else does — settings decide invoice terms and the settlement week, and

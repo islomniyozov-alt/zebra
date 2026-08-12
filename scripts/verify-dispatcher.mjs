@@ -715,6 +715,26 @@ record(
   `${ownerWarnings.length} warning(s) for the owner`,
 )
 
+// --- ADDING AN AUTHORITY IS THE OWNER'S ACT (Phase 6 §7 flag 11) ----------
+//
+// `Company.id` IS the authority every scoped query filters by, and
+// `maxCompanies` is what the plan sells — so this is a tenancy act and a
+// billing one. The pair, on the deployed worker: an owner reaches the screen,
+// a dispatcher gets a 404 rather than a form that refuses on submit.
+const ownerAdd = await bodyOf(owner.page, '/companies/new')
+record(
+  'an owner can reach the Add authority screen',
+  ownerAdd.status === 200,
+  `HTTP ${ownerAdd.status}`,
+)
+
+const dispatcherAdd = await bodyOf(dispatcher.page, '/companies/new')
+record(
+  'and a dispatcher gets a closed door, not a refused form',
+  dispatcherAdd.status === 404,
+  `HTTP ${dispatcherAdd.status}`,
+)
+
 // The navigation does not offer what the role cannot reach, either (§7).
 const nav = await dispatcher.page.goto(`${BASE}/loads`, {
   waitUntil: 'domcontentloaded',

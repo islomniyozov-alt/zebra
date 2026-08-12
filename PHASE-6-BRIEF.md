@@ -260,8 +260,35 @@ Recorded rather than resolved, per Phase 1's discipline.
     onto a measurement session: raw SQL under RLS with a dynamic authority
     filter is the shape that produced the seven wrong screens in Phase 2.
 
-11. **Companies are seed-only: there is no Add Company screen, and the
-    five-carrier dropdown depends on one.** `company` is a resource in
+11. ~~**Companies are seed-only**~~ — **CLOSED.** An owner-gated Add authority
+    screen exists at `/companies`, and the original flag is kept below because
+    the reasoning it records is why the screen is shaped the way it is.
+
+    Three decisions worth naming:
+    - **The plan limit is enforced at create, and the refusal says the
+      number.** `maxCompanies` has defaulted to 1 since the init migration and
+      nothing ever checked it — nothing could, because nothing could create a
+      company. It is counted INSIDE the caller's transaction, so two people
+      adding the last authority at once cannot both pass a check that was true
+      when each of them read it. The list screen prints "2 of 2 used" beside
+      the heading, so somebody knows they will be refused before filling in a
+      form rather than after.
+    - **The state field is stricter here than everywhere else.** The shared
+      `stateCode` TRUNCATES — "Texas" becomes "TE" — which on a stop is a wrong
+      label and on an authority is a wrong state at the top of every invoice
+      that carrier sends. Refused rather than silently shortened, and the
+      shared helper is left alone because stops chose leniency deliberately.
+    - **The nav entry is gated on `create`, not `read`.** Every operator role
+      holds `company:read` — the topbar's authority switcher is built from
+      these rows — so a read-gated entry put the whole Administration group in
+      a dispatcher's sidebar. The permissions test caught it on the first run.
+
+    No counter is seeded: the per-authority series starts at the first booking,
+    and an integration test asserts a new authority has no counter row until it
+    books, then numbers from its own start rather than continuing another
+    carrier's.
+
+    THE ORIGINAL FLAG: `company` is a resource in
     `permissions.ts` and OWNER/ADMIN hold `company:create` through EVERYTHING —
     and nothing implements it. The only ways an authority exists today are the
     seed script and hand-written SQL.

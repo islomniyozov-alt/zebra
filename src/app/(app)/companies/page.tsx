@@ -1,0 +1,127 @@
+import Link from 'next/link'
+import { notFound } from 'next/navigation'
+import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
+import { getLocaleContext } from '@/lib/locale'
+import { Table, type Column } from '@/components/ui/Table'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { Button } from '@/components/ui/Button'
+
+// Admin → Authorities (Phase 6 §7 flag 11).
+//
+// A COMPANY IS AN OPERATING AUTHORITY. `Company.id` IS the authority every
+// scoped query filters by (tenancy.ts), so this list is the set of carriers
+// the whole application books, invoices and settles under — and until this
+// screen it could only be changed with SQL.
+//
+// READ IS `company:read`, which every operator role holds — a dispatcher's
+// authority switcher is built from the same rows. ADDING is `company:create`,
+// which only OWNER and ADMIN hold, and the button is absent rather than
+// disabled for everybody else.
+
+interface Row {
+  id: string
+  name: string
+  mc: string
+  dot: string
+  where: string
+}
+
+export default async function CompaniesPage() {
+  const { t } = await getLocaleContext()
+
+  if (!(await currentUserCan('read', 'company'))) notFound()
+  const mayAdd = await currentUserCan('create', 'company')
+
+  const data = await withCurrentOrg('read', 'company', async (tx) => {
+    const [companies, organization] = await Promise.all([
+      tx.company.findMany({
+        orderBy: { name: 'asc' },
+        select: {
+          id: true,
+          name: true,
+          mcNumber: true,
+          dotNumber: true,
+          city: true,
+          state: true,
+          isActive: true,
+        },
+      }),
+      tx.organization.findFirst({ select: { maxCompanies: true } }),
+    ])
+    return { companies, limit: organization?.maxCompanies ?? 1 }
+  })
+
+  const rows: Row[] = data.companies.map((company) => ({
+    id: company.id,
+    name: company.name,
+    mc: company.mcNumber ?? '—',
+    dot: company.dotNumber ?? '—',
+    where: [company.city, company.state].filter(Boolean).join(', ') || '—',
+  }))
+
+  const columns: Column<Row>[] = [
+    {
+      key: 'name',
+      header: t('companies.name'),
+      render: (row: Row) => row.name,
+    },
+    {
+      key: 'mc',
+      header: t('companies.mcNumber'),
+      render: (row: Row) => (
+        <span className="font-mono" dir="ltr">
+          {row.mc}
+        </span>
+      ),
+    },
+    {
+      key: 'dot',
+      header: t('companies.dotNumber'),
+      render: (row: Row) => (
+        <span className="font-mono" dir="ltr">
+          {row.dot}
+        </span>
+      ),
+    },
+    {
+      key: 'where',
+      header: t('companies.city'),
+      render: (row: Row) => row.where,
+    },
+  ]
+
+  return (
+    <div className="flex flex-col gap-z4">
+      <div className="flex items-center justify-between gap-z3">
+        <div className="flex items-baseline gap-z3">
+          <h1 className="text-xl font-semibold text-ink">
+            {t('companies.title')}
+          </h1>
+          {/* THE LEVER, IN PLAIN SIGHT. `maxCompanies` is what the plan sells;
+           * showing the count spent against it is how somebody knows they are
+           * about to be refused before they fill in a form. */}
+          <span className="text-sm text-ink-2">
+            {t('companies.usage')
+              .replace('{used}', String(rows.length))
+              .replace('{limit}', String(data.limit))}
+          </span>
+        </div>
+        {mayAdd ? (
+          <Link href="/companies/new">
+            <Button variant="primary">{t('companies.add')}</Button>
+          </Link>
+        ) : null}
+      </div>
+
+      <Table
+        rows={rows}
+        columns={columns}
+        rowKey={(row) => row.id}
+        caption={t('companies.title')}
+        empty={
+          <EmptyState title={t('companies.empty')} body={t('companies.hint')} />
+        }
+      />
+    </div>
+  )
+}

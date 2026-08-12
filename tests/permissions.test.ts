@@ -601,3 +601,71 @@ describe('the sidebar only offers screens that exist', () => {
     }
   })
 })
+
+describe('adding an authority is the owner’s act', () => {
+  // Phase 6 §7 flag 11. `Company.id` IS the authority every scoped query
+  // filters by, and `maxCompanies` is what the plan sells — so creating one is
+  // both a tenancy act and a billing one.
+  const roles = [
+    'OWNER',
+    'ADMIN',
+    'MANAGER',
+    'DISPATCHER',
+    'ACCOUNTING',
+  ] as const
+
+  it('OWNER and ADMIN may, and NOBODY ELSE', () => {
+    const may = roles.filter((role) =>
+      can(
+        {
+          role,
+          organizationId: 'org',
+          userId: 'u',
+          companyScopes: [],
+        } as never,
+        'create',
+        'company',
+      ),
+    )
+    expect(may).toEqual(['OWNER', 'ADMIN'])
+  })
+
+  it('while every operator role may READ them, because the switcher does', () => {
+    // The pair. `company:read` is deliberately broad — the topbar's authority
+    // switcher is built from these rows for a dispatcher too — which is
+    // exactly why the NAV entry is gated on `create` instead. A read-gated
+    // entry put the whole Administration group in a dispatcher's sidebar.
+    for (const role of roles) {
+      expect(
+        can(
+          {
+            role,
+            organizationId: 'org',
+            userId: 'u',
+            companyScopes: [],
+          } as never,
+          'read',
+          'company',
+        ),
+      ).toBe(true)
+    }
+  })
+
+  it('and the Authorities entry is absent from a MANAGER’s sidebar', () => {
+    const sidebar = (role: (typeof roles)[number]) =>
+      navigationFor({
+        role,
+        organizationId: 'org',
+        userId: 'u',
+        companyScopes: [],
+      } as never)
+        .flatMap((group) => group.items)
+        .map((item) => item.href)
+
+    expect(sidebar('OWNER')).toContain('/companies')
+    expect(sidebar('ADMIN')).toContain('/companies')
+    expect(sidebar('MANAGER')).not.toContain('/companies')
+    expect(sidebar('DISPATCHER')).not.toContain('/companies')
+    expect(sidebar('ACCOUNTING')).not.toContain('/companies')
+  })
+})
