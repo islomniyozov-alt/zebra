@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { cx } from '@/lib/cx'
+import { Button } from '@/components/ui/Button'
 import type { ExtractedWithoutMoney } from '@/lib/extraction'
 import type { Extracted } from '@/lib/extraction-shape'
 
@@ -25,6 +26,9 @@ import type { Extracted } from '@/lib/extraction-shape'
 // real shape rather than a load created early to hang a file on.
 
 type Phase = 'idle' | 'hashing' | 'uploading' | 'reading' | 'done' | 'failed'
+
+/** The four ways a load gets into Zebra (spec §16). */
+type Method = 'manual' | 'upload' | 'paste' | 'amazon'
 
 export interface Prefill {
   pendingUploadId: string
@@ -87,12 +91,24 @@ interface Props {
     done: string
     failed: string
     typeInstead: string
+    methodAmazonSoon: string
+    methodPasteRead: string
+    methodPastePlaceholder: string
+    methodDropHint: string
+    methodManualHint: string
+    methodAmazon: string
+    methodPaste: string
+    methodUpload: string
+    methodManual: string
   }
 }
 
 export function RateConOffer({ companyId, onExtracted, labels }: Props) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [detail, setDetail] = useState<string | null>(null)
+  const [method, setMethod] = useState<Method>('manual')
+  const [pasted, setPasted] = useState('')
+  const [dragging, setDragging] = useState(false)
 
   const caption =
     phase === 'hashing'
@@ -106,6 +122,22 @@ export function RateConOffer({ companyId, onExtracted, labels }: Props) {
             : phase === 'failed'
               ? (detail ?? labels.failed)
               : labels.hint
+
+  /**
+   * A PASTE IS A DOCUMENT (Phase 6 §1.2, spec §16).
+   *
+   * The words a dispatcher pastes are minted, stored and extracted by exactly
+   * the same path a PDF takes — so the correction memory, the facility memory,
+   * the attachment at save and the audit trail all work without knowing which
+   * method was used. Spec §16: "All three methods should create the same
+   * standardized Load/Stop data structure."
+   */
+  async function handleText(text: string) {
+    const body = new TextEncoder().encode(text)
+    await handle(
+      new File([body], `pasted-${Date.now()}.txt`, { type: 'text/plain' }),
+    )
+  }
 
   async function handle(file: File) {
     setDetail(null)
@@ -195,38 +227,130 @@ export function RateConOffer({ companyId, onExtracted, labels }: Props) {
     <section
       className={cx(
         'flex flex-col gap-z2 rounded-card border border-dashed p-z3',
-        phase === 'failed' ? 'border-danger' : 'border-border-strong',
+        phase === 'failed'
+          ? 'border-danger'
+          : dragging
+            ? 'border-accent bg-accent-soft'
+            : 'border-border-strong',
       )}
+      // THE DROPZONE IS THE WHOLE SURFACE, not a target inside it. A
+      // dispatcher dragging a rate confirmation out of an email aims at the
+      // box, and a smaller hit area inside a box that already looks droppable
+      // is a trap. `preventDefault` on dragOver is what makes a drop land at
+      // all — without it the browser navigates to the file.
+      onDragOver={(event) => {
+        event.preventDefault()
+        setDragging(true)
+      }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={(event) => {
+        event.preventDefault()
+        setDragging(false)
+        const file = event.dataTransfer.files?.[0]
+        if (file) {
+          setMethod('upload')
+          void handle(file)
+        }
+      }}
     >
       <h2 className="text-sm font-medium text-ink">{labels.title}</h2>
 
-      <div className="flex flex-wrap items-center gap-z3">
-        {/* A label wrapping the input, styled as the secondary button — the
-         * file control has no accessible way to be a <button>, and a real
-         * button that clicks a hidden input is two things to keep in step. */}
-        <label className="inline-flex h-control-compact cursor-pointer items-center rounded-control border border-border-strong bg-surface px-z3 text-xs font-medium text-ink hover:bg-surface-3">
-          {labels.choose}
-          <input
-            type="file"
-            accept="application/pdf,image/*"
-            className="sr-only"
-            onChange={(event) => {
-              const file = event.target.files?.[0]
-              if (file) void handle(file)
-            }}
-          />
-        </label>
-
-        <p
-          role="status"
-          className={cx(
-            'text-sm',
-            phase === 'failed' ? 'text-danger' : 'text-ink-2',
-          )}
-        >
-          {caption}
-        </p>
+      {/* THE METHOD CHOOSER (Phase 6 §4 step 2, spec §16's three ways in).
+       *
+       * Tabs rather than a select: there are four, they are the first
+       * decision on the screen, and a select hides three of them behind a
+       * click. Manual is first and selected, because the typed path is the
+       * one §9 measures and the one that must not feel like a fallback. */}
+      <div role="tablist" className="flex flex-wrap gap-z1">
+        {(
+          [
+            ['manual', labels.methodManual],
+            ['upload', labels.methodUpload],
+            ['paste', labels.methodPaste],
+            ['amazon', labels.methodAmazon],
+          ] as const
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            role="tab"
+            aria-selected={method === value}
+            onClick={() => setMethod(value)}
+            className={cx(
+              'h-control-compact rounded-control px-z3 text-xs font-medium',
+              method === value
+                ? 'bg-accent-soft text-accent'
+                : 'text-ink-2 hover:bg-surface-3',
+            )}
+          >
+            {label}
+          </button>
+        ))}
       </div>
+
+      {method === 'manual' ? (
+        <p className="text-sm text-ink-2">{labels.methodManualHint}</p>
+      ) : null}
+
+      {method === 'upload' ? (
+        <div className="flex flex-wrap items-center gap-z3">
+          {/* A label wrapping the input, styled as the secondary button — the
+           * file control has no accessible way to be a <button>, and a real
+           * button that clicks a hidden input is two things to keep in step. */}
+          <label className="inline-flex h-control-compact cursor-pointer items-center rounded-control border border-border-strong bg-surface px-z3 text-xs font-medium text-ink hover:bg-surface-3">
+            {labels.choose}
+            <input
+              type="file"
+              accept="application/pdf,image/*"
+              className="sr-only"
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                if (file) void handle(file)
+              }}
+            />
+          </label>
+          <p className="text-xs text-ink-3">{labels.methodDropHint}</p>
+        </div>
+      ) : null}
+
+      {method === 'paste' ? (
+        <div className="flex flex-col gap-z2">
+          <textarea
+            value={pasted}
+            onChange={(event) => setPasted(event.target.value)}
+            rows={6}
+            placeholder={labels.methodPastePlaceholder}
+            className="w-full rounded-control border border-border-strong bg-surface p-z2 text-sm text-ink"
+          />
+          <div>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={pasted.trim().length < 20 || phase === 'reading'}
+              onClick={() => void handleText(pasted)}
+            >
+              {labels.methodPasteRead}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {method === 'amazon' ? (
+        // NAMED, NOT FAKED. The Amazon path is Step 3's Excel ingestion and
+        // Step 4's inbox; a tab that silently did nothing would be worse than
+        // one that says what it is waiting for.
+        <p className="text-sm text-ink-2">{labels.methodAmazonSoon}</p>
+      ) : null}
+
+      <p
+        role="status"
+        className={cx(
+          'text-sm',
+          phase === 'failed' ? 'text-danger' : 'text-ink-2',
+        )}
+      >
+        {caption}
+      </p>
 
       {/* The way out, always visible. An offer that looks like a step is a
        * gate, whatever the copy says. */}

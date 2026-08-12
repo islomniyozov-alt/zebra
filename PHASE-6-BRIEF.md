@@ -170,3 +170,47 @@ Recorded rather than resolved, per Phase 1's discipline.
    would make React reuse the moved row's uncontrolled place input, so dragging
    stop 3 above stop 2 would leave the text behind. The rows carry a minted
    key; the fields are keyed by it.
+
+6. **Flag 4's unexplained 47/48 has a name: the dashboard's transaction
+   expires.** Captured in full this time, under `wrangler tail`:
+
+   ```
+   PrismaClientKnownRequestError: Transaction API error: A commit cannot be
+   executed on an expired transaction. The timeout for this transaction was
+   5000 ms, however 6034 ms passed since the start of the transaction.
+   ```
+
+   `/dashboard` runs the queue, the fleet and the week in ONE interactive
+   transaction against the 5 s default, and whether it fits depends on how
+   quickly Neon answers a dozen queries. An owner gets a 500 on the main
+   screen. It is the Phase 4 `/documents` failure exactly, and it was already
+   there before Phase 6 — the walkthrough had been reporting it as an
+   unattributed flake.
+
+   Raised to 20 s, which converts a broken screen into a slow one. **That is
+   not the fix and does not pretend to be**: Phase 5 §7 flag 31 says the answer
+   to a slow transaction is fewer statements inside it, and this screen is the
+   next candidate. Two dispatcher runs clean afterwards.
+
+7. **The chooser moved the file input behind a tab, and five walkthroughs went
+   looking for it where it used to be.** `section input[type="file"]` only
+   exists on the Upload panel now. Every affected script clicks the tab first —
+   which is what a dispatcher does, so the walkthrough got more faithful rather
+   than less.
+
+8. **`stopRowsFrom` and `typedDateFrom` were lifted out of the component
+   because nothing in it can be tested.** `CreateLoadForm` is a client
+   component whose imports reach `server-only`, so a unit test of it fails at
+   import. The paste walkthrough found three stops arriving with no dates and
+   two readings of the code did not find why; moving the three pure readers
+   into `prefill.ts` and testing them directly found it in one run.
+
+   The bug: `windowStart?.value ?? scheduledAt?.value` falls through on `null`
+   and `undefined` **and not on `''`**, so a model that sends an empty window
+   start beats a perfectly good appointment, slices to an empty string and
+   normalises to null. Emptiness is absence now, and eleven tests cover the
+   readers.
+
+   Worth carrying: **a client component that imports a server action cannot be
+   unit tested at all**, so anything in one that is worth testing does not
+   belong in it.

@@ -1,6 +1,7 @@
 import {
   ClaudeError,
   EXTRACTION_MODEL,
+  decodeBase64Text,
   DOCUMENT_TYPES,
   IMAGE_TYPES,
   MAX_DOCUMENT_BASE64_BYTES,
@@ -66,7 +67,12 @@ export async function askGemini(input: AskInput): Promise<AskResult> {
     )
   }
 
-  if (!DOCUMENT_TYPES.has(input.mimeType) && !IMAGE_TYPES.has(input.mimeType)) {
+  const isText = input.mimeType === 'text/plain'
+  if (
+    !isText &&
+    !DOCUMENT_TYPES.has(input.mimeType) &&
+    !IMAGE_TYPES.has(input.mimeType)
+  ) {
     throw new ClaudeError(
       'unsupported_media_type',
       `${input.mimeType} cannot be read as a document.`,
@@ -103,9 +109,13 @@ export async function askGemini(input: AskInput): Promise<AskResult> {
           role: 'user',
           parts: [
             { text: input.prompt },
-            {
-              inlineData: { mimeType: input.mimeType, data: input.base64 },
-            },
+            // Text as text, a file as a file — the same rule the other adapter
+            // follows, so a paste reads identically on both engines.
+            isText
+              ? { text: decodeBase64Text(input.base64) }
+              : {
+                  inlineData: { mimeType: input.mimeType, data: input.base64 },
+                },
           ],
         },
       ],

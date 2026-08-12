@@ -25,38 +25,52 @@ export default async function NewLoadPage() {
     const scope = companyScopeFilter(session.companyScopes)
     const companyIdScope = companyIdScopeFilter(session.companyScopes)
 
-    const [companies, brokers, trucks, drivers, places] = await Promise.all([
-      tx.company.findMany({
-        // `id`, not `companyId` — Company IS the authority. See tenancy.ts.
-        where: { isActive: true, ...companyIdScope },
-        orderBy: { name: 'asc' },
-        select: { id: true, name: true },
-      }),
-      tx.customer.findMany({
-        where: { deletedAt: null, status: { not: 'BLOCKED' } },
-        orderBy: { name: 'asc' },
-        take: 500,
-        select: { name: true },
-      }),
-      tx.truck.findMany({
-        where: { deletedAt: null, ...scope },
-        orderBy: { unitNumber: 'asc' },
-        take: 500,
-        select: { id: true, unitNumber: true },
-      }),
-      tx.driver.findMany({
-        where: { deletedAt: null, ...scope },
-        orderBy: { lastName: 'asc' },
-        take: 500,
-        select: { id: true, firstName: true, lastName: true },
-      }),
-      tx.location.findMany({
-        where: { deletedAt: null },
-        orderBy: { name: 'asc' },
-        take: 500,
-        select: { name: true },
-      }),
-    ])
+    const [companies, brokers, trucks, drivers, places, recent] =
+      await Promise.all([
+        tx.company.findMany({
+          // `id`, not `companyId` — Company IS the authority. See tenancy.ts.
+          where: { isActive: true, ...companyIdScope },
+          orderBy: { name: 'asc' },
+          select: { id: true, name: true },
+        }),
+        tx.customer.findMany({
+          where: { deletedAt: null, status: { not: 'BLOCKED' } },
+          orderBy: { name: 'asc' },
+          take: 500,
+          select: { name: true },
+        }),
+        tx.truck.findMany({
+          where: { deletedAt: null, ...scope },
+          orderBy: { unitNumber: 'asc' },
+          take: 500,
+          select: { id: true, unitNumber: true },
+        }),
+        tx.driver.findMany({
+          where: { deletedAt: null, ...scope },
+          orderBy: { lastName: 'asc' },
+          take: 500,
+          select: { id: true, firstName: true, lastName: true },
+        }),
+        tx.location.findMany({
+          where: { deletedAt: null },
+          orderBy: { name: 'asc' },
+          take: 500,
+          select: { name: true },
+        }),
+        // RECENT CUSTOMERS, BY WHAT WAS BOOKED — not the alphabet.
+        //
+        // The broker datalist is 500 names in name order, which is a lookup;
+        // this is a memory. A dispatcher books the same handful of brokers all
+        // week, so the quick-pick is the last few loads' customers, most recent
+        // first. Six of them: enough to hold the week, short enough to read
+        // without scanning.
+        tx.load.findMany({
+          where: { deletedAt: null, ...scope },
+          orderBy: { createdAt: 'desc' },
+          take: 40,
+          select: { customer: { select: { name: true } } },
+        }),
+      ])
 
     // §7 — a field a role cannot see is ABSENT from the payload, never hidden
     // in CSS. A dispatcher's page never carries the fuel cost or the pay
@@ -77,8 +91,15 @@ export default async function NewLoadPage() {
           }))
       : null
 
-    return { companies, brokers, trucks, drivers, places, economics }
+    return { companies, brokers, trucks, drivers, places, recent, economics }
   })
+
+  // Distinct, in the order they were last booked. Deduped here rather than in
+  // SQL: a DISTINCT ON would need raw SQL for the ordering, and forty rows is
+  // nothing to walk.
+  const recentCustomers = [
+    ...new Set(data.recent.map((load) => load.customer.name)),
+  ].slice(0, 6)
 
   const authorities = data.companies.map((company) => ({
     value: company.id,
@@ -102,6 +123,7 @@ export default async function NewLoadPage() {
           authorities={authorities}
           defaultAuthority={defaultAuthority}
           brokers={data.brokers.map((broker) => broker.name)}
+          recentCustomers={recentCustomers}
           trucks={data.trucks.map((truck) => ({
             value: truck.id,
             label: truck.unitNumber,
@@ -142,6 +164,15 @@ export default async function NewLoadPage() {
             offerDone: t('loads.offerDone'),
             offerFailed: t('loads.offerFailed'),
             offerTypeInstead: t('loads.offerTypeInstead'),
+            methodManual: t('loads.methodManual'),
+            methodUpload: t('loads.methodUpload'),
+            methodPaste: t('loads.methodPaste'),
+            methodAmazon: t('loads.methodAmazon'),
+            methodManualHint: t('loads.methodManualHint'),
+            methodDropHint: t('loads.methodDropHint'),
+            methodPastePlaceholder: t('loads.methodPastePlaceholder'),
+            methodPasteRead: t('loads.methodPasteRead'),
+            methodAmazonSoon: t('loads.methodAmazonSoon'),
             extracted: t('loads.extracted'),
             extractedUnsure: t('loads.extractedUnsure'),
             extractedRemembered: t('loads.extractedRemembered'),

@@ -10,3 +10,9 @@ src/generated
 cloudflare-env.d.ts
 next-env.d.ts
 prisma/migrations
+
+# THE OWNER'S SPEC, TRANSCRIBED VERBATIM. Prettier reflows markdown, and a
+# reflow of a document whose value is that it is unaltered would quietly edit
+# the thing every citation in PHASE-6-BRIEF.md points at. Left exactly as it
+# was written.
+PHASE-6-SPEC.md

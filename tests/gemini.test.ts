@@ -416,3 +416,53 @@ describe('what counts as an outage', () => {
     expect(isOutage(new ClaudeError('no_api_key', 'unset'))).toBe(false)
   })
 })
+
+describe('a pasted booking is text, not a file', () => {
+  it('sends the words as a text part on Gemini', async () => {
+    // Phase 6 §1.2: a pasted prompt is a document, so it rides the same mint
+    // and the same extraction. But base64ing language into an inlineData blob
+    // asks a reader to open a file that is already words.
+    const { calls, impl } = spy()
+    await askGemini({
+      ...ask({
+        mimeType: 'text/plain',
+        base64: btoa('Amazon load 48291, Chicago IL to Gary IN'),
+      }),
+      fetchImpl: impl,
+    })
+    const body = JSON.parse(String(calls[0]!.init.body))
+    const parts = body.contents[0].parts
+    expect(
+      parts.some((part: { inlineData?: unknown }) => part.inlineData),
+    ).toBe(false)
+    expect(parts[1].text).toBe('Amazon load 48291, Chicago IL to Gary IN')
+  })
+
+  it('and on Anthropic, so one contract covers a PDF and a paste', async () => {
+    const { calls, impl } = spy({
+      content: [{ type: 'text', text: '{"ok":true}' }],
+      usage: { input_tokens: 10, output_tokens: 10 },
+      model: 'claude-sonnet-5',
+      stop_reason: 'end_turn',
+    })
+    await askModel({
+      ...ask({ mimeType: 'text/plain', base64: btoa('pasted words') }),
+      model: 'claude-sonnet-5',
+      fetchImpl: impl,
+    })
+    const body = JSON.parse(String(calls[0]!.init.body))
+    const parts = body.messages[0].content
+    expect(
+      parts.some((part: { type: string }) => part.type === 'document'),
+    ).toBe(false)
+    expect(parts[0]).toEqual({ type: 'text', text: 'pasted words' })
+  })
+
+  it('and a type neither engine reads is still refused', async () => {
+    const { calls, impl } = spy()
+    await expect(
+      askGemini({ ...ask({ mimeType: 'text/csv' }), fetchImpl: impl }),
+    ).rejects.toMatchObject({ reason: 'unsupported_media_type' })
+    expect(calls).toHaveLength(0)
+  })
+})

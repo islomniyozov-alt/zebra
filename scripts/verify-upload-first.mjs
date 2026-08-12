@@ -93,6 +93,15 @@ record(
 )
 
 // --- upload through the offer slot ----------------------------------------------
+//
+// THE UPLOAD TAB FIRST, since Phase 6 §4 step 2 put the four methods behind
+// tabs. The file input only exists on the Upload panel — which is what a
+// dispatcher clicks too, so the walkthrough now does what they do.
+await page
+  .locator('[role="tab"]', { hasText: 'Upload document' })
+  .click()
+  .catch(() => {})
+
 const before = Date.now()
 await page.setInputFiles('section input[type="file"]', {
   name: `${TAG}-ratecon.pdf`,
@@ -110,6 +119,14 @@ const idle = await page.evaluate(() =>
   ),
 )
 if (idle) {
+  // THE UPLOAD TAB FIRST, since Phase 6 §4 step 2 put the four methods behind
+  // tabs. The file input only exists on the Upload panel — which is what a
+  // dispatcher clicks too, so the walkthrough now does what they do.
+  await page
+    .locator('[role="tab"]', { hasText: 'Upload document' })
+    .click()
+    .catch(() => {})
+
   await page.setInputFiles('section input[type="file"]', {
     name: `${TAG}-ratecon.pdf`,
     mimeType: 'application/pdf',

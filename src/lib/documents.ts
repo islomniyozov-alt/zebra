@@ -52,6 +52,12 @@ export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
  */
 export const ALLOWED_MIME_TYPES: readonly string[] = [
   'application/pdf',
+  // PASTED TEXT IS A DOCUMENT (Phase 6 §1.2: "an Excel sheet, a pasted prompt,
+  // and a PDF are all just documents"). A dispatcher who pastes a booking
+  // email into the form gets the same mint, the same extraction, the same
+  // correction memory and the same attachment at save — and the pasted words
+  // are kept, which is what spec §19's audit trail asks for.
+  'text/plain',
   'image/jpeg',
   'image/png',
   'image/heic',

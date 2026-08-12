@@ -34,33 +34,50 @@ export default async function DashboardPage() {
   const mayBookLoad = await currentUserCan('create', 'load')
   const mayAddTruck = await currentUserCan('create', 'truck')
 
-  const data = await withCurrentOrg('read', 'dashboard', async (tx, ctx) => {
-    const scope = companyScopeFilter(ctx.companyScopes)
+  const data = await withCurrentOrg(
+    'read',
+    'dashboard',
+    async (tx, ctx) => {
+      const scope = companyScopeFilter(ctx.companyScopes)
 
-    const [queue, fleet, companies] = await Promise.all([
-      actionQueue(tx, ctx, scope),
-      fleetGlance(tx, scope),
-      maySeeWeek
-        ? tx.company.findMany({
-            // `id`, not `companyId` — Company IS the authority (tenancy.ts).
-            where: {
-              isActive: true,
-              ...companyIdScopeFilter(ctx.companyScopes),
-            },
-            select: { id: true },
-          })
-        : Promise.resolve([]),
-    ])
+      const [queue, fleet, companies] = await Promise.all([
+        actionQueue(tx, ctx, scope),
+        fleetGlance(tx, scope),
+        maySeeWeek
+          ? tx.company.findMany({
+              // `id`, not `companyId` — Company IS the authority (tenancy.ts).
+              where: {
+                isActive: true,
+                ...companyIdScopeFilter(ctx.companyScopes),
+              },
+              select: { id: true },
+            })
+          : Promise.resolve([]),
+      ])
 
-    const week = maySeeWeek
-      ? await thisWeek(
-          tx,
-          companies.map((company) => company.id),
-        )
-      : []
+      const week = maySeeWeek
+        ? await thisWeek(
+            tx,
+            companies.map((company) => company.id),
+          )
+        : []
 
-    return { queue, fleet, week }
-  })
+      return { queue, fleet, week }
+    },
+    // 20s, not the 5s default, because this transaction EXPIRED in production:
+    // "A commit cannot be executed on an expired transaction … 6034 ms passed",
+    // caught with `wrangler tail` while the dispatcher walkthrough was running.
+    // Intermittent, because it depends on how quickly Neon answers a dozen
+    // queries — which is why it showed up as an unexplained 47/48 twice before
+    // anybody caught it in the act.
+    //
+    // A CEILING IS NOT THE FIX AND IS NOT PRETENDING TO BE. Phase 5 §7 flag 31
+    // is explicit that the answer to a slow transaction is fewer statements
+    // inside it, and this screen runs the queue, the fleet and the week in one.
+    // What raising the ceiling buys is that an owner sees a slow dashboard
+    // instead of a 500 while that work waits its turn.
+    { timeoutMs: 20_000 },
+  )
 
   // BY ASSIGNMENT STATE. "Nine trucks" is inventory; "seven paired, two idle"
   // is a decision somebody can act on before the load board closes.

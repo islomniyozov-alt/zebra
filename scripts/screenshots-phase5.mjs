@@ -114,6 +114,22 @@ for (const locale of ['en', 'ru', 'fa']) {
     await page.waitForTimeout(500)
   }
 
+  // THE UPLOAD TAB FIRST, since Phase 6 §4 step 2 put the four methods behind
+  // tabs. The file input only exists on the Upload panel — which is what a
+  // dispatcher clicks too, so the walkthrough now does what they do.
+  await page
+    .locator('[role="tab"]', { hasText: 'Upload document' })
+    .click()
+    .catch(() => {})
+
+  // THE UPLOAD TAB FIRST, since Phase 6 §4 step 2 put the four methods behind
+  // tabs. The file input only exists on the Upload panel — which is what a
+  // dispatcher clicks too, so the walkthrough now does what they do.
+  await page
+    .locator('[role="tab"]', { hasText: 'Upload document' })
+    .click()
+    .catch(() => {})
+
   await page.setInputFiles('section input[type="file"]', {
     name: `${TAG}-${locale}.pdf`,
     mimeType: 'application/pdf',

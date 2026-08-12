@@ -263,9 +263,15 @@ export async function askAboutDocument(input: AskInput): Promise<AskResult> {
     )
   }
 
+  // TEXT IS SENT AS TEXT. A pasted booking email arrives here as a
+  // `text/plain` document because the whole pipeline is built on documents —
+  // but base64ing words into a document block asks the model to read a file
+  // that is already language. Decoded and sent as a text part instead, on
+  // both engines, so one contract covers a PDF and a paste.
+  const isText = input.mimeType === 'text/plain'
   const isPdf = DOCUMENT_TYPES.has(input.mimeType)
   const isImage = IMAGE_TYPES.has(input.mimeType)
-  if (!isPdf && !isImage) {
+  if (!isPdf && !isImage && !isText) {
     throw new ClaudeError(
       'unsupported_media_type',
       `${input.mimeType} cannot be read as a document.`,
@@ -308,14 +314,18 @@ export async function askAboutDocument(input: AskInput): Promise<AskResult> {
         {
           role: 'user',
           content: [
-            {
-              type: isPdf ? 'document' : 'image',
-              source: {
-                type: 'base64',
-                media_type: input.mimeType,
-                data: input.base64,
-              },
-            },
+            ...(isText
+              ? [{ type: 'text', text: decodeBase64Text(input.base64) }]
+              : [
+                  {
+                    type: isPdf ? 'document' : 'image',
+                    source: {
+                      type: 'base64',
+                      media_type: input.mimeType,
+                      data: input.base64,
+                    },
+                  },
+                ]),
             // NEVER a breakpoint here: this block follows the document, and
             // caching up to it would cache the document.
             { type: 'text', text: input.prompt },
@@ -381,4 +391,14 @@ export async function askAboutDocument(input: AskInput): Promise<AskResult> {
     },
     model: payload.model ?? EXTRACTION_MODEL,
   }
+}
+
+/** base64 back to the words somebody pasted. `atob` exists on workerd. */
+export function decodeBase64Text(base64: string): string {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index++) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return new TextDecoder().decode(bytes)
 }

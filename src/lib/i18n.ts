@@ -332,6 +332,16 @@ const en = {
   'loads.offerDone': 'Read. Check the fields it filled.',
   'loads.offerFailed': 'Could not read that one. Type it instead.',
   'loads.offerTypeInstead': 'Or just type — this is an offer, not a step.',
+  'loads.methodManual': 'Manual',
+  'loads.methodUpload': 'Upload document',
+  'loads.methodPaste': 'Paste text',
+  'loads.methodAmazon': 'Amazon',
+  'loads.methodManualHint': 'Type the load. Everything below is optional.',
+  'loads.methodDropHint': 'or drop a file anywhere in this box',
+  'loads.methodPastePlaceholder': 'Paste the booking email or message here.',
+  'loads.methodPasteRead': 'Read this text',
+  'loads.methodAmazonSoon':
+    'Amazon booking sheets arrive in a later step. Upload the Excel under Upload document, or paste the email.',
   'loads.extracted': 'From the document.',
   'loads.extractedUnsure': 'From the document — CHECK THIS ONE.',
   'loads.extractedRemembered':
@@ -1673,6 +1683,17 @@ const ru: Dictionary = {
   'loads.offerFailed': 'Не удалось прочитать. Введите вручную.',
   'loads.offerTypeInstead':
     'Или просто печатайте — это предложение, а не этап.',
+  'loads.methodManual': 'Вручную',
+  'loads.methodUpload': 'Загрузить документ',
+  'loads.methodPaste': 'Вставить текст',
+  'loads.methodAmazon': 'Amazon',
+  'loads.methodManualHint': 'Введите рейс. Всё ниже необязательно.',
+  'loads.methodDropHint': 'или перетащите файл в эту область',
+  'loads.methodPastePlaceholder':
+    'Вставьте письмо о бронировании или сообщение.',
+  'loads.methodPasteRead': 'Прочитать текст',
+  'loads.methodAmazonSoon':
+    'Листы Amazon появятся позже. Загрузите Excel во вкладке «Загрузить документ» или вставьте письмо.',
   'loads.extracted': 'Из документа.',
   'loads.extractedUnsure': 'Из документа — ПРОВЕРЬТЕ.',
   'loads.extractedRemembered':
@@ -3009,6 +3030,16 @@ const fa: Dictionary = {
   'loads.offerFailed': 'خوانده نشد. دستی وارد کنید.',
   'loads.offerTypeInstead':
     'یا فقط تایپ کنید — این یک پیشنهاد است، نه یک مرحله.',
+  'loads.methodManual': 'دستی',
+  'loads.methodUpload': 'بارگذاری سند',
+  'loads.methodPaste': 'چسباندن متن',
+  'loads.methodAmazon': 'آمازون',
+  'loads.methodManualHint': 'بار را تایپ کنید. باقی موارد اختیاری است.',
+  'loads.methodDropHint': 'یا فایل را در هر جای این کادر رها کنید',
+  'loads.methodPastePlaceholder': 'ایمیل یا پیام رزرو را اینجا بچسبانید.',
+  'loads.methodPasteRead': 'خواندن این متن',
+  'loads.methodAmazonSoon':
+    'برگه‌های آمازون در مرحله‌ای بعد می‌آیند. اکسل را در «بارگذاری سند» بگذارید یا ایمیل را بچسبانید.',
   'loads.extracted': 'از روی سند.',
   'loads.extractedUnsure': 'از روی سند — این یکی را بررسی کنید.',
   'loads.extractedRemembered':

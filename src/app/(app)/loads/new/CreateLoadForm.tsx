@@ -17,6 +17,7 @@ import { Select } from '@/components/ui/Select'
 import { uploadDocument, type UploadPhase } from '@/lib/upload-client'
 import { normalizeTypedDate } from '@/lib/typed-date'
 import { createLoadAction, type CreateLoadState } from './actions'
+import { fieldAt, stopRowsFrom, type StopKind } from './prefill'
 import { cx } from '@/lib/cx'
 
 // ---------------------------------------------------------------------------
@@ -53,6 +54,8 @@ interface Props {
   authorities: readonly Option[]
   defaultAuthority: string
   brokers: readonly string[]
+  /** Most-recently-booked first, deduped. A memory, not a lookup. */
+  recentCustomers: readonly string[]
   trucks: readonly Option[]
   drivers: readonly Option[]
   places: readonly string[]
@@ -85,6 +88,15 @@ export interface CreateLoadLabels {
   offerDone: string
   offerFailed: string
   offerTypeInstead: string
+  methodManual: string
+  methodUpload: string
+  methodPaste: string
+  methodAmazon: string
+  methodManualHint: string
+  methodDropHint: string
+  methodPastePlaceholder: string
+  methodPasteRead: string
+  methodAmazonSoon: string
   extracted: string
   extractedUnsure: string
   /** Carries `{printed}`, replaced with what the document actually said. */
@@ -149,23 +161,8 @@ const INITIAL: CreateLoadState = { error: null, field: null, loadId: null }
 interface StopRow {
   /** Identity across reorders, so React never reuses a moved row's input. */
   key: string
-  type: 'PICKUP' | 'DELIVERY' | 'INTERMEDIATE'
+  type: StopKind
   date: string
-}
-
-/**
- * The type the extraction READ for a stop, if it read one.
- *
- * Null rather than a guess. §6's acceptance says "types read not assumed", and
- * the position of a stop in a list is exactly the assumption it forbids: a
- * four-stop Amazon run can be pick, pick, drop, drop.
- */
-function stopTypeFrom(prefill: Prefill, index: number): StopRow['type'] | null {
-  const field = fieldAt(prefill, `stops[${index}].type`)
-  const value = typeof field?.value === 'string' ? field.value : null
-  return value === 'PICKUP' || value === 'DELIVERY' || value === 'INTERMEDIATE'
-    ? value
-    : null
 }
 
 const money = (cents: number) =>
@@ -180,6 +177,7 @@ export function CreateLoadForm({
   authorities,
   defaultAuthority,
   brokers,
+  recentCustomers,
   trucks,
   drivers,
   places,
@@ -352,25 +350,15 @@ export function CreateLoadForm({
   const applyPrefill = (next: Prefill) => {
     setPrefill(next)
 
-    // AS MANY STOPS AS THE DOCUMENT HAD, and their types as it READ them —
-    // never as the position implies. A three-stop confirmation whose second
-    // stop is a delivery and whose third is another delivery is a real load,
-    // and assuming pickup-then-delivery would silently rewrite it.
-    const extractedStops = (next.extracted as { stops?: unknown[] }).stops ?? []
-    if (extractedStops.length >= 2) {
-      setStops((current) =>
-        extractedStops.map((_, index) => ({
-          key: current[index]?.key ?? `stop-${nextKey.current++}`,
-          type: stopTypeFrom(next, index) ?? current[index]?.type ?? 'DELIVERY',
-          // A date the dispatcher already typed is never overwritten — the
-          // same rule the rate and the old two dates followed.
-          date:
-            current[index]?.date ||
-            typedDateFrom(next, `stops[${index}]`) ||
-            '',
-        })),
+    // AS MANY STOPS AS THE DOCUMENT HAD, and their types as it READ them.
+    setStops((current) => {
+      const rows = stopRowsFrom(
+        next,
+        current,
+        () => `stop-${nextKey.current++}`,
       )
-    }
+      return rows ?? current
+    })
 
     // §1.3 — THE RATE ONLY IF THIS ROLE MAY SEE ONE. The endpoint already
     // stripped the money for a dispatcher, so `extractedRate` is undefined for
@@ -482,6 +470,15 @@ export function CreateLoadForm({
           done: labels.offerDone,
           failed: labels.offerFailed,
           typeInstead: labels.offerTypeInstead,
+          methodManual: labels.methodManual,
+          methodUpload: labels.methodUpload,
+          methodPaste: labels.methodPaste,
+          methodAmazon: labels.methodAmazon,
+          methodManualHint: labels.methodManualHint,
+          methodDropHint: labels.methodDropHint,
+          methodPastePlaceholder: labels.methodPastePlaceholder,
+          methodPasteRead: labels.methodPasteRead,
+          methodAmazonSoon: labels.methodAmazonSoon,
         }}
       />
       {prefill ? (
@@ -528,6 +525,40 @@ export function CreateLoadForm({
           <option key={name} value={name} />
         ))}
       </datalist>
+
+      {/* RECENT CUSTOMERS (Phase 6 §4 step 2). One click instead of typing a
+       * name booked yesterday. Buttons rather than a second list: the datalist
+       * above already holds every broker in alphabetical order, which is a
+       * lookup — this is the short answer to "who am I probably booking".
+       *
+       * `tabIndex={-1}`, so the typed path still tabs from the broker straight
+       * to the truck. Six buttons in the way would be six tab stops before the
+       * next field, and §9's forty seconds is measured on exactly that path. */}
+      {recentCustomers.length > 0 ? (
+        <div className="-mt-z2 flex flex-wrap gap-z1">
+          {recentCustomers.map((name) => (
+            <button
+              key={name}
+              type="button"
+              tabIndex={-1}
+              onClick={() => {
+                const input = formRef.current?.querySelector<HTMLInputElement>(
+                  'input[name="broker"]',
+                )
+                if (!input) return
+                input.value = name
+                // Setting `.value` programmatically does not fire React's
+                // onChange, so the manually-modified indicator would never
+                // hear about it. Told directly instead.
+                if (prefill) noteChange('brokerName', name)
+              }}
+              className="h-control-compact rounded-control border border-border bg-surface px-z2 text-xs text-ink-2 hover:bg-surface-3 hover:text-ink"
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <Select
         name="truckId"
@@ -875,68 +906,6 @@ export function CreateLoadForm({
       </div>
     </form>
   )
-}
-
-/**
- * One field out of an extraction, by dotted path.
- *
- * Returns null when the model did not carry it OR when the whole extraction is
- * absent — the caller then falls back to an empty input, which is exactly the
- * typing path. A missing field must never become an empty string in a form,
- * because an empty string is a value somebody has to notice is wrong.
- */
-function fieldAt(
-  prefill: Prefill | null,
-  path: string,
-): { value: unknown; confidence: string } | null {
-  if (!prefill) return null
-
-  const stop = /^stops\[(\d+)\]\.(\w+)$/.exec(path)
-  const source = prefill.extracted as unknown as Record<string, unknown>
-
-  // Three shapes, and the third is the one that was missing: `money.linehaul`
-  // was looked up as a literal key called "money.linehaul", found nothing, and
-  // left the rate field empty on a form that had everything else right. The
-  // walkthrough caught it; a type could not, because the payload is `unknown`
-  // by the time it gets here.
-  const money = /^money\.(\w+)$/.exec(path)
-
-  const raw = stop
-    ? ((source['stops'] as Record<string, unknown>[] | undefined)?.[
-        Number(stop[1])
-      ]?.[stop[2]!] ?? null)
-    : money
-      ? ((source['money'] as Record<string, unknown> | undefined)?.[
-          money[1]!
-        ] ?? null)
-      : (source[path] ?? null)
-
-  if (!raw || typeof raw !== 'object') return null
-  return raw as { value: unknown; confidence: string }
-}
-
-/**
- * A stop's date, in the form's own typed-date convention.
- *
- * The model returns `2026-08-14T07:00` — a local ISO value with no zone, which
- * is what the document printed. `normalizeTypedDate` already accepts the date
- * half of that, so the conversion is a slice rather than a parse: no Date
- * object is constructed, and therefore no timezone is applied to a value that
- * never had one. A document saying 14 August must not become the 13th because
- * the browser is west of UTC.
- *
- * The window start is preferred over the appointment when both are present:
- * "06:00 - 10:00" means the driver may arrive at six, and the earlier number is
- * the one a dispatcher plans against.
- */
-function typedDateFrom(prefill: Prefill, stopPath: string): string | null {
-  const scheduled = fieldAt(prefill, `${stopPath}.scheduledAt`)
-  const windowStart = fieldAt(prefill, `${stopPath}.windowStart`)
-  const raw = windowStart?.value ?? scheduled?.value
-  if (typeof raw !== 'string') return null
-
-  const day = raw.slice(0, 10)
-  return normalizeTypedDate(day)
 }
 
 /** The linehaul as the rate field expects it: a plain decimal, no symbol. */
