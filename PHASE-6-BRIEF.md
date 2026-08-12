@@ -214,3 +214,48 @@ Recorded rather than resolved, per Phase 1's discipline.
    Worth carrying: **a client component that imports a server action cannot be
    unit tested at all**, so anything in one that is worth testing does not
    belong in it.
+
+9. **The window gap is closed, and it cost four tab stops.** `LoadStop`'s
+   `windowStart`/`windowEnd` have existed since Phase 1 and the extraction has
+   read them since Phase 5; the form had nowhere to put them, so every printed
+   `08:00–10:00` was read and dropped at save. Each stop row now carries From
+   and To beside the date, prefilled from the extraction and written to the
+   columns as instants **in the stop's own zone** (design rule 3) — the
+   fixture's `06:00–10:00` delivery lands as `13:00–17:00 UTC`, which is
+   Pacific in August, and `verify-upload-first` asserts the pair rather than
+   the clock face.
+
+   TWO FIELDS, NOT ONE RANGE. A range needs parsing and `0800-600` is a real
+   thing a broker prints (Phase 5 flag 30). Two plain times cannot be
+   malformed, only empty — and empty is the ordinary answer, because rule 1 of
+   `EXTRACTION-CONTRACT.md` says a window needs two DIFFERENT ends and most
+   stops carry an appointment.
+
+   **Measured cost to §9's typed path: 101 ms → 147 ms of typing**, which is
+   four extra tab stops on a two-stop load. The save is unchanged
+   (12.5/12.9 s against 12.2 s, inside its own noise). Under the forty-second
+   target by a wide margin, and named here rather than discovered later.
+
+10. **The dashboard diet: 7.0 s → 5.7 s, and the 5 s default is still not
+    earned.** Five loads each, before and after, under `wrangler tail`.
+
+    The screen ran eighteen statements in ONE interactive transaction — the
+    thing that expired at 6034 ms and 500'd for an owner. It now runs three
+    SHORT reads CONCURRENTLY: the queue, the fleet, and the week (whose two
+    statements stay together because the second needs the first). The wall
+    clock is the slowest section rather than the sum, and no single transaction
+    is open long enough to expire.
+
+    The 20 s bandage is gone; the ceiling is **10 s**, not the 5 s default,
+    and the reason is the measurement rather than caution: 5.7 s of client wall
+    across three CONCURRENT transactions puts the slowest of them close enough
+    to five seconds that returning to the default would bet the screen on a
+    quiet network. Worker CPU is ~260 ms of it either way — this was never
+    computation.
+
+    **What earns the default: fewer statements.** `fleetGlance` runs five
+    counts and `actionQueue` several more, and Prisma serialises them onto the
+    transaction's single connection however they are written. Collapsing the
+    counts into one query is the next cut, and it is deliberately not bolted
+    onto a measurement session: raw SQL under RLS with a dynamic authority
+    filter is the shape that produced the seven wrong screens in Phase 2.

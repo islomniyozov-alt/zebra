@@ -23,7 +23,7 @@ import {
   ReferenceError,
   optionalText,
 } from '@/lib/reference'
-import { normalizeTypedDate } from '@/lib/typed-date'
+import { normalizeTypedDate, normalizeTypedTime } from '@/lib/typed-date'
 import { resolveZone, zoneMidnight } from '@/lib/stop-time'
 import { rememberAuthority } from '../../_reference/shared'
 
@@ -86,6 +86,36 @@ function stopDate(
  * present. Flagged in the Step 5 report.
  */
 const COMPANY_FALLBACK_ZONE = 'America/Chicago'
+
+/**
+ * A date and a clock time, as an instant in the STOP's own zone.
+ *
+ * The same rule `stopDate` follows and for the same reason: design rule 3 says
+ * the stop's zone decides, and a window built at UTC midnight-plus-eight shows
+ * a Florida dock opening at three in the morning. Null unless BOTH halves are
+ * there — a time with no date is not a moment, and `createLoad` refuses a
+ * window that ends before it starts, so half a window is worse than none.
+ */
+function stopMoment(
+  date: string,
+  time: string,
+  place: { state: string | null; timezone: string | null },
+): Date | null {
+  const day = normalizeTypedDate(date.trim())
+  const clock = normalizeTypedTime(time)
+  if (day === null || clock === null) return null
+
+  const { zone } = resolveZone(
+    place.timezone,
+    place.state,
+    COMPANY_FALLBACK_ZONE,
+  )
+  const midnight = zoneMidnight(day, zone)
+  const [hour, minute] = clock.split(':').map(Number)
+  return new Date(
+    midnight.getTime() + (hour ?? 0) * 3_600_000 + (minute ?? 0) * 60_000,
+  )
+}
 
 /** "$2,450.00" → 245000. Money is an integer of cents the moment it is read. */
 function cents(value: unknown): number {
@@ -259,6 +289,11 @@ export async function createLoadAction(
               city: places[index]!.city,
               state: places[index]!.state,
               scheduledAt: stopDate(stop.date, places[index]!),
+              // THE WINDOW REACHES ITS COLUMNS. `windowStart`/`windowEnd` have
+              // been on LoadStop since Phase 1 and nothing has ever written
+              // them from this form.
+              windowStart: stopMoment(stop.date, stop.from, places[index]!),
+              windowEnd: stopMoment(stop.date, stop.to, places[index]!),
             })),
           },
           { byUserId: session.userId },
@@ -541,6 +576,9 @@ interface FormStop {
   place: string
   type: 'PICKUP' | 'DELIVERY' | 'INTERMEDIATE'
   date: string
+  /** `HH:MM`, the window's ends. Empty on most stops. */
+  from: string
+  to: string
 }
 
 /**
@@ -569,6 +607,8 @@ function readStops(formData: FormData): FormStop[] {
             ? 'PICKUP'
             : 'DELIVERY',
       date: String(formData.get(`stops[${index}].date`) ?? ''),
+      from: String(formData.get(`stops[${index}].from`) ?? ''),
+      to: String(formData.get(`stops[${index}].to`) ?? ''),
     })
   }
   return stops

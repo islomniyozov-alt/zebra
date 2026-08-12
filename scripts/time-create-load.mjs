@@ -105,11 +105,15 @@ async function keyboardRun(label, { broker, from, to, pickDay, dropDay }) {
   await page.keyboard.press('Tab') // → stop 1 type
   await page.keyboard.press('Tab') // → stop 1 date
   await page.keyboard.type(pickDay)
+  await page.keyboard.press('Tab') // → stop 1 window from
+  await page.keyboard.press('Tab') // → stop 1 window to
   await page.keyboard.press('Tab') // → stop 2 place
   await page.keyboard.type(to)
   await page.keyboard.press('Tab') // → stop 2 type
   await page.keyboard.press('Tab') // → stop 2 date
   await page.keyboard.type(dropDay)
+  await page.keyboard.press('Tab') // → stop 2 window from
+  await page.keyboard.press('Tab') // → stop 2 window to
   await page.keyboard.press('Tab') // → miles
   await page.keyboard.type('1080')
   await page.keyboard.press('Tab') // → rate

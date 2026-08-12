@@ -80,3 +80,36 @@ function valid(year: number, month: number, day: number): string | null {
 export function utcMidnight(isoDate: string): Date {
   return new Date(`${isoDate}T00:00:00.000Z`)
 }
+
+/**
+ * A typed time, normalised to `HH:MM` — or null.
+ *
+ * The same bargain `normalizeTypedDate` makes, for the same reason: a
+ * dispatcher on the phone types `8`, `800` or `8:00` and means eight in the
+ * morning, and a control that demands `08:00` costs the keystrokes §9 counts.
+ *
+ * 24-HOUR ONLY, and no am/pm. Every appointment on every document in the
+ * corpus is printed 24-hour (`0800-1600`, `Appt: 02/12/2026 11:00`), the
+ * driver's ELD is 24-hour, and a `7` that could mean seven in the evening is
+ * the ambiguity this field exists to remove. `7` is 07:00; somebody who means
+ * the evening types `19`.
+ */
+export function normalizeTypedTime(typed: string): string | null {
+  const text = typed.trim()
+  if (text === '') return null
+
+  const digits = text.replace(/\D/g, '')
+  if (digits.length === 0 || digits.length > 4) return null
+
+  // 8 -> 08:00, 19 -> 19:00, 830 -> 08:30, 1830 -> 18:30
+  const hour =
+    digits.length <= 2
+      ? Number(digits)
+      : Number(digits.slice(0, digits.length - 2))
+  const minute = digits.length <= 2 ? 0 : Number(digits.slice(-2))
+
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) return null
+  if (!Number.isInteger(minute) || minute < 0 || minute > 59) return null
+
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+}

@@ -272,6 +272,10 @@ const outcome = async () =>
               d.type                      "documentType",
               d."ocrStatus"               "documentStatus",
               d."extractedJson" is not null carried,
+              (select to_char(s."windowStart" at time zone 'UTC', 'HH24:MI')
+                 from "LoadStop" s where s."loadId" = l.id and s.sequence = 2) "winFrom",
+              (select to_char(s."windowEnd" at time zone 'UTC', 'HH24:MI')
+                 from "LoadStop" s where s."loadId" = l.id and s.sequence = 2) "winTo",
               (select count(*)::int from "PendingUpload" p
                 where p.filename like $2)  pending
          from "Load" l
@@ -313,6 +317,22 @@ record(
   saved?.documentStatus === 'COMPLETED' && saved?.carried === true,
   `${saved?.documentStatus ?? '(none)'}, extractedJson ${saved?.carried ? 'present' : 'MISSING'}`,
 )
+// THE WINDOW REACHES ITS COLUMNS (Phase 6, the window gap). The fixture's
+// delivery prints `06:00 - 10:00`; `LoadStop.windowStart`/`windowEnd` have
+// existed since Phase 1 and nothing ever wrote them from this form. Stored as
+// an instant in the STOP's zone, so this reads them back in UTC and asserts
+// the pair rather than the clock face.
+record(
+  'the printed delivery window is saved, not dropped',
+  Boolean(saved?.winFrom) && Boolean(saved?.winTo),
+  `${saved?.winFrom ?? '(none)'} - ${saved?.winTo ?? '(none)'} UTC`,
+)
+record(
+  'and it is a real window — two DIFFERENT ends',
+  Boolean(saved?.winFrom) && saved?.winFrom !== saved?.winTo,
+  `${saved?.winFrom} vs ${saved?.winTo}`,
+)
+
 record(
   'and the mint is gone — no orphan pending row',
   saved?.pending === 0,

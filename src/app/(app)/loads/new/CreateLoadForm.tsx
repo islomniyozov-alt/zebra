@@ -15,9 +15,9 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { uploadDocument, type UploadPhase } from '@/lib/upload-client'
-import { normalizeTypedDate } from '@/lib/typed-date'
+import { normalizeTypedDate, normalizeTypedTime } from '@/lib/typed-date'
 import { createLoadAction, type CreateLoadState } from './actions'
-import { fieldAt, stopRowsFrom, type StopKind } from './prefill'
+import { fieldAt, stopRowsFrom, type StopRowValues } from './prefill'
 import { cx } from '@/lib/cx'
 
 // ---------------------------------------------------------------------------
@@ -147,6 +147,9 @@ export interface CreateLoadLabels {
   stopRemove: string
   stopMoveUp: string
   stopMoveDown: string
+  timePlaceholder: string
+  stopTo: string
+  stopFrom: string
   bol: string
   po: string
   warnTitle: string
@@ -158,12 +161,7 @@ export interface CreateLoadLabels {
 const INITIAL: CreateLoadState = { error: null, field: null, loadId: null }
 
 /** A stop as the FORM holds it. The place lives in the DOM, uncontrolled. */
-interface StopRow {
-  /** Identity across reorders, so React never reuses a moved row's input. */
-  key: string
-  type: StopKind
-  date: string
-}
+type StopRow = StopRowValues
 
 const money = (cents: number) =>
   (cents / 100).toLocaleString(undefined, {
@@ -256,8 +254,8 @@ export function CreateLoadForm({
    * uncontrolled input.
    */
   const [stops, setStops] = useState<StopRow[]>(() => [
-    { key: 'stop-0', type: 'PICKUP', date: '' },
-    { key: 'stop-1', type: 'DELIVERY', date: '' },
+    { key: 'stop-0', type: 'PICKUP', date: '', from: '', to: '' },
+    { key: 'stop-1', type: 'DELIVERY', date: '', from: '', to: '' },
   ])
   const nextKey = useRef(2)
 
@@ -275,7 +273,7 @@ export function CreateLoadForm({
       // type; they should not have to reorder to get the common case.
       return [
         ...current.slice(0, -1),
-        { key, type: 'DELIVERY' as const, date: '' },
+        { key, type: 'DELIVERY' as const, date: '', from: '', to: '' },
         ...current.slice(-1),
       ]
     })
@@ -682,6 +680,62 @@ export function CreateLoadForm({
                   className="font-mono"
                 />
               </div>
+              {/* THE APPOINTMENT WINDOW (Phase 6, the window gap).
+               *
+               * `LoadStop.windowStart` and `windowEnd` have been columns
+               * since Phase 1 and the extraction has read them since Phase 5
+               * — and until now the form had nowhere to put them, so every
+               * printed `08:00–10:00` was read and dropped at save. Amazon
+               * paper is window-rich, so this lands before Step 3 meets it.
+               *
+               * Two fields rather than one range input: a range needs parsing
+               * and `0800-600` is a real thing a broker prints (Phase 5 flag
+               * 30). Two plain times cannot be malformed, only empty.
+               *
+               * Empty is the ordinary answer. Most stops carry an
+               * appointment, not a window, and rule 1 of the extraction
+               * contract says a window needs two DIFFERENT ends. */}
+              <div className="w-[86px]">
+                <Input
+                  name={`stops[${index}].from`}
+                  label={labels.stopFrom}
+                  inputMode="numeric"
+                  placeholder={labels.timePlaceholder}
+                  value={stop.from}
+                  onChange={(event) =>
+                    setStop(index, { from: event.target.value })
+                  }
+                  onBlur={(event) =>
+                    setStop(index, {
+                      from:
+                        normalizeTypedTime(event.target.value) ??
+                        event.target.value,
+                    })
+                  }
+                  className="font-mono"
+                />
+              </div>
+              <div className="w-[86px]">
+                <Input
+                  name={`stops[${index}].to`}
+                  label={labels.stopTo}
+                  inputMode="numeric"
+                  placeholder={labels.timePlaceholder}
+                  value={stop.to}
+                  onChange={(event) =>
+                    setStop(index, { to: event.target.value })
+                  }
+                  onBlur={(event) =>
+                    setStop(index, {
+                      to:
+                        normalizeTypedTime(event.target.value) ??
+                        event.target.value,
+                    })
+                  }
+                  className="font-mono"
+                />
+              </div>
+
               {/* Reorder and remove are BUTTONS AFTER the fields, so a typist
                * tabbing through a two-stop load never lands on them before
                * the next stop. Disabled rather than hidden at the ends: a

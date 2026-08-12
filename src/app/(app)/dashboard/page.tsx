@@ -34,17 +34,57 @@ export default async function DashboardPage() {
   const mayBookLoad = await currentUserCan('create', 'load')
   const mayAddTruck = await currentUserCan('create', 'truck')
 
-  const data = await withCurrentOrg(
-    'read',
-    'dashboard',
-    async (tx, ctx) => {
-      const scope = companyScopeFilter(ctx.companyScopes)
-
-      const [queue, fleet, companies] = await Promise.all([
-        actionQueue(tx, ctx, scope),
-        fleetGlance(tx, scope),
-        maySeeWeek
-          ? tx.company.findMany({
+  // THREE SHORT READS, NOT ONE LONG TRANSACTION (Phase 6, the statement diet).
+  //
+  // This screen used to open a single interactive transaction and run the
+  // queue, the fleet and the week inside it — eighteen statements, each a
+  // round trip to us-east-2, against Prisma's 5 s ceiling. It expired in
+  // production: "A commit cannot be executed on an expired transaction …
+  // 6034 ms passed", caught under `wrangler tail`, and an owner got a 500 on
+  // the main screen. Twice it had been reported as an unexplained walkthrough
+  // flake before anybody caught it in the act.
+  //
+  // Phase 5 §7 flag 31's ruling was that the answer is fewer statements inside
+  // the lock, not a longer lock. So: each section gets its OWN transaction,
+  // and the three run CONCURRENTLY — the wall clock becomes the slowest
+  // section rather than the sum of all three, and no single transaction is
+  // open long enough to expire.
+  //
+  // The week keeps its two statements together because the second needs the
+  // first: the authority ids decide which loads to total.
+  const [queue, fleet, week] = await Promise.all([
+    // 10 s, NOT the 5 s default and no longer the 20 s bandage.
+    //
+    // Measured, before and after, five loads each under `wrangler tail`:
+    // ~7.0 s of client wall before the split, ~5.7 s after — and that 5.7 s is
+    // three CONCURRENT transactions, so the slowest of them is still close
+    // enough to five seconds that returning to the default would be betting
+    // the screen on a quiet network. The numbers do not allow it yet.
+    //
+    // What would: fewer statements. `fleetGlance` runs five counts and
+    // `actionQueue` several more, each a round trip, and Prisma serialises
+    // them on the transaction's single connection however they are written.
+    // Collapsing the counts is the next cut and is its own change — raw SQL
+    // under RLS with a dynamic authority filter is not a thing to bolt onto a
+    // measurement session.
+    withCurrentOrg(
+      'read',
+      'dashboard',
+      (tx, ctx) => actionQueue(tx, ctx, companyScopeFilter(ctx.companyScopes)),
+      { timeoutMs: 10_000 },
+    ),
+    withCurrentOrg(
+      'read',
+      'dashboard',
+      (tx, ctx) => fleetGlance(tx, companyScopeFilter(ctx.companyScopes)),
+      { timeoutMs: 10_000 },
+    ),
+    maySeeWeek
+      ? withCurrentOrg(
+          'read',
+          'dashboard',
+          async (tx, ctx) => {
+            const companies = await tx.company.findMany({
               // `id`, not `companyId` — Company IS the authority (tenancy.ts).
               where: {
                 isActive: true,
@@ -52,32 +92,17 @@ export default async function DashboardPage() {
               },
               select: { id: true },
             })
-          : Promise.resolve([]),
-      ])
+            return thisWeek(
+              tx,
+              companies.map((company) => company.id),
+            )
+          },
+          { timeoutMs: 10_000 },
+        )
+      : Promise.resolve([]),
+  ])
 
-      const week = maySeeWeek
-        ? await thisWeek(
-            tx,
-            companies.map((company) => company.id),
-          )
-        : []
-
-      return { queue, fleet, week }
-    },
-    // 20s, not the 5s default, because this transaction EXPIRED in production:
-    // "A commit cannot be executed on an expired transaction … 6034 ms passed",
-    // caught with `wrangler tail` while the dispatcher walkthrough was running.
-    // Intermittent, because it depends on how quickly Neon answers a dozen
-    // queries — which is why it showed up as an unexplained 47/48 twice before
-    // anybody caught it in the act.
-    //
-    // A CEILING IS NOT THE FIX AND IS NOT PRETENDING TO BE. Phase 5 §7 flag 31
-    // is explicit that the answer to a slow transaction is fewer statements
-    // inside it, and this screen runs the queue, the fleet and the week in one.
-    // What raising the ceiling buys is that an owner sees a slow dashboard
-    // instead of a 500 while that work waits its turn.
-    { timeoutMs: 20_000 },
-  )
+  const data = { queue, fleet, week }
 
   // BY ASSIGNMENT STATE. "Nine trucks" is inventory; "seven paired, two idle"
   // is a decision somebody can act on before the load board closes.

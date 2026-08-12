@@ -108,8 +108,8 @@ describe('the rows a prefill produces', () => {
         { type: { value: 'DELIVERY' }, scheduledAt: { value: '2026-08-22' } },
       ]),
       [
-        { key: 'stop-0', type: 'PICKUP', date: '' },
-        { key: 'stop-1', type: 'DELIVERY', date: '' },
+        { key: 'stop-0', type: 'PICKUP', date: '', from: '', to: '' },
+        { key: 'stop-1', type: 'DELIVERY', date: '', from: '', to: '' },
       ],
       mint,
     )
@@ -132,8 +132,8 @@ describe('the rows a prefill produces', () => {
         { scheduledAt: { value: '2026-08-22' } },
       ]),
       [
-        { key: 'stop-0', type: 'PICKUP', date: '2026-01-01' },
-        { key: 'stop-1', type: 'DELIVERY', date: '' },
+        { key: 'stop-0', type: 'PICKUP', date: '2026-01-01', from: '', to: '' },
+        { key: 'stop-1', type: 'DELIVERY', date: '', from: '', to: '' },
       ],
       mint,
     )
@@ -149,8 +149,8 @@ describe('the rows a prefill produces', () => {
         { city: { value: 'C' } },
       ]),
       [
-        { key: 'stop-0', type: 'PICKUP', date: '' },
-        { key: 'stop-1', type: 'DELIVERY', date: '' },
+        { key: 'stop-0', type: 'PICKUP', date: '', from: '', to: '' },
+        { key: 'stop-1', type: 'DELIVERY', date: '', from: '', to: '' },
       ],
       mint,
     )
@@ -161,5 +161,89 @@ describe('the rows a prefill produces', () => {
     expect(
       stopRowsFrom(prefill([{ city: { value: 'A' } }]), [], mint),
     ).toBeNull()
+  })
+})
+
+describe('the window, which the columns have waited for since Phase 1', () => {
+  const mint = () => 'minted'
+
+  it('fills both ends when the document printed a real window', () => {
+    const rows = stopRowsFrom(
+      prefill([
+        {
+          scheduledAt: { value: '2026-08-20T08:00' },
+          windowStart: { value: '2026-08-20T08:00' },
+          windowEnd: { value: '2026-08-20T10:00' },
+        },
+        {
+          scheduledAt: { value: '2026-08-22T13:00' },
+          windowStart: { value: '2026-08-22T13:00' },
+          windowEnd: { value: '2026-08-22T17:30' },
+        },
+      ]),
+      [],
+      mint,
+    )
+    expect(rows?.map((row) => [row.date, row.from, row.to])).toEqual([
+      ['2026-08-20', '08:00', '10:00'],
+      ['2026-08-22', '13:00', '17:30'],
+    ])
+  })
+
+  it('and leaves it EMPTY for an appointment, which is most stops', () => {
+    // Rule 1 of EXTRACTION-CONTRACT.md: one printed time is an appointment,
+    // and the reader returns no window at all. The form must not invent one
+    // from the appointment either — a window 08:00-08:00 is not a window.
+    const rows = stopRowsFrom(
+      prefill([
+        { scheduledAt: { value: '2026-08-20T11:00' } },
+        { scheduledAt: { value: '2026-08-22T23:59' } },
+      ]),
+      [],
+      mint,
+    )
+    expect(rows?.map((row) => [row.date, row.from, row.to])).toEqual([
+      ['2026-08-20', '', ''],
+      ['2026-08-22', '', ''],
+    ])
+  })
+
+  it('keeps a window the dispatcher already typed', () => {
+    const rows = stopRowsFrom(
+      prefill([
+        {
+          windowStart: { value: '2026-08-20T08:00' },
+          windowEnd: { value: '2026-08-20T10:00' },
+        },
+        {
+          windowStart: { value: '2026-08-22T13:00' },
+          windowEnd: { value: '2026-08-22T17:00' },
+        },
+      ]),
+      [
+        { key: 'stop-0', type: 'PICKUP', date: '', from: '06:00', to: '' },
+        { key: 'stop-1', type: 'DELIVERY', date: '', from: '', to: '' },
+      ],
+      mint,
+    )
+    expect(rows?.[0]?.from).toBe('06:00')
+    expect(rows?.[0]?.to).toBe('10:00')
+  })
+
+  it('reads a date-only value as no time at all', () => {
+    // A pasted email gives "2026-08-20" with no clock. The date lands; the
+    // window stays empty rather than becoming midnight.
+    const rows = stopRowsFrom(
+      prefill([
+        { windowStart: { value: '2026-08-20' } },
+        { windowStart: { value: '2026-08-22' } },
+      ]),
+      [],
+      mint,
+    )
+    expect(rows?.map((row) => [row.date, row.from])).toEqual([
+      ['2026-08-20', ''],
+      ['2026-08-22', ''],
+    ])
   })
 })

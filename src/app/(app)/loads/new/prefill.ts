@@ -14,6 +14,22 @@ import type { Prefill } from './RateConOffer'
 export type StopKind = 'PICKUP' | 'DELIVERY' | 'INTERMEDIATE'
 
 /**
+ * The clock time on a stop's window end, as `HH:MM` — or null.
+ *
+ * The extraction returns a local ISO instant with no zone (`2026-08-20T08:00`,
+ * the document's own words). The date half is read by `typedDateFrom`; this is
+ * the half that has been read since Phase 5 and dropped on the floor ever
+ * since, because the form had nowhere to put it.
+ */
+export function timeFrom(prefill: Prefill, path: string): string | null {
+  const field = fieldAt(prefill, path)
+  const raw = typeof field?.value === 'string' ? field.value : null
+  if (raw === null) return null
+  const match = /T(\d{2}):(\d{2})/.exec(raw)
+  return match ? `${match[1]}:${match[2]}` : null
+}
+
+/**
  * One field out of an extraction, by dotted path.
  *
  * Returns null when the model did not carry it OR when the whole extraction is
@@ -106,13 +122,20 @@ export function stopTypeFrom(prefill: Prefill, index: number): StopKind | null {
  * because this is where the interesting decisions are: how many rows, whose
  * type wins, and whether a date the dispatcher typed survives.
  */
-export function stopRowsFrom<
-  T extends { key: string; type: StopKind; date: string },
->(
+export interface StopRowValues {
+  key: string
+  type: StopKind
+  date: string
+  /** `HH:MM`. The window's ends, empty when the document printed none. */
+  from: string
+  to: string
+}
+
+export function stopRowsFrom(
   prefill: Prefill,
-  current: readonly T[],
+  current: readonly StopRowValues[],
   mintKey: () => string,
-): { key: string; type: StopKind; date: string }[] | null {
+): StopRowValues[] | null {
   const stops = (prefill.extracted as { stops?: unknown[] }).stops ?? []
   if (stops.length < 2) return null
 
@@ -125,5 +148,20 @@ export function stopRowsFrom<
     // rule the rate follows.
     date:
       current[index]?.date || typedDateFrom(prefill, `stops[${index}]`) || '',
+    // THE WINDOW, at last. `windowStart`/`windowEnd` have been columns since
+    // Phase 1 and read since Phase 5; the form had nowhere to put them, so
+    // every printed 08:00-10:00 was read and dropped at save.
+    //
+    // Empty is the ordinary answer: most stops carry an appointment, and rule
+    // 1 of EXTRACTION-CONTRACT.md says a window needs two DIFFERENT ends — so
+    // the reader does not invent one and neither does this.
+    from:
+      current[index]?.from ||
+      timeFrom(prefill, `stops[${index}].windowStart`) ||
+      '',
+    to:
+      current[index]?.to ||
+      timeFrom(prefill, `stops[${index}].windowEnd`) ||
+      '',
   }))
 }

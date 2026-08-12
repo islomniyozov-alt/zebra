@@ -382,6 +382,9 @@ const en = {
   'loads.stopRemove': 'Remove this stop',
   'loads.stopMoveUp': 'Move this stop earlier',
   'loads.stopMoveDown': 'Move this stop later',
+  'loads.stopFrom': 'From',
+  'loads.stopTo': 'To',
+  'loads.timePlaceholder': 'hh:mm',
   'loads.saved': 'Load {number} saved.',
 
   'loads.summary': 'Load',
@@ -1735,6 +1738,9 @@ const ru: Dictionary = {
   'loads.stopRemove': 'Удалить остановку',
   'loads.stopMoveUp': 'Переместить раньше',
   'loads.stopMoveDown': 'Переместить позже',
+  'loads.stopFrom': 'С',
+  'loads.stopTo': 'До',
+  'loads.timePlaceholder': 'чч:мм',
   'loads.saved': 'Груз {number} сохранён.',
 
   'loads.summary': 'Груз',
@@ -3081,6 +3087,9 @@ const fa: Dictionary = {
   'loads.stopRemove': 'حذف این توقف',
   'loads.stopMoveUp': 'انتقال به جلوتر',
   'loads.stopMoveDown': 'انتقال به عقب‌تر',
+  'loads.stopFrom': 'از',
+  'loads.stopTo': 'تا',
+  'loads.timePlaceholder': 'ساعت:دقیقه',
   'loads.saved': 'بار {number} ذخیره شد.',
 
   'loads.summary': 'بار',
