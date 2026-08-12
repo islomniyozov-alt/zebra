@@ -259,3 +259,31 @@ Recorded rather than resolved, per Phase 1's discipline.
     counts into one query is the next cut, and it is deliberately not bolted
     onto a measurement session: raw SQL under RLS with a dynamic authority
     filter is the shape that produced the seven wrong screens in Phase 2.
+
+11. **Companies are seed-only: there is no Add Company screen, and the
+    five-carrier dropdown depends on one.** `company` is a resource in
+    `permissions.ts` and OWNER/ADMIN hold `company:create` through EVERYTHING —
+    and nothing implements it. The only ways an authority exists today are the
+    seed script and hand-written SQL.
+
+    §3 owes this phase "the MC list: which of the five entities live in Zebra,
+    with MC/DOT numbers", and every one of them has to be typed in somewhere.
+    Until then the authority select on the create form, the per-authority
+    factoring remit-to, the settlement week boundary and the invoice numbering
+    series are all configured for carriers that can only be conjured by a
+    developer.
+
+    **Owed: a minimal owner-gated screen** — name, MC, DOT, address, and the
+    fields the invoice header already reads. Small, and blocking more than it
+    looks: it is the difference between the owner onboarding a carrier and
+    filing a ticket.
+
+12. **`corpus-amazon/` was not in the working tree when Step 3 was called.**
+    The directory does not exist; `corpus/` holds Phase 5's PDFs and nothing
+    else. §3 says the Excel parser is built "against real sheets or not at
+    all", so the step did not start — building a parser against an invented
+    spreadsheet would produce a golden set that grades a guess, which is the
+    failure the Phase 5 interview method exists to prevent.
+
+    The ignore rule is in place ahead of the files, so the corpus and its
+    derived truth sheets cannot be committed by accident the moment they land.

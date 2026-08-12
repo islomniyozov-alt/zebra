@@ -83,3 +83,14 @@ next-env.d.ts
 # printed from it has to be pasted rather than re-derived by a reviewer. That
 # is the trade this makes, and it is the owner's to reverse.
 /corpus/
+
+# THE AMAZON CORPUS — real booking emails and their Excel attachments.
+#
+# Same ruling as ./corpus and for the same reason (PHASE-5-BRIEF.md §7 flag 9):
+# these carry customer names, facility addresses, appointment times, reference
+# numbers and rates. The DERIVED truth sheets carry the same information in a
+# form that is easier to read than the spreadsheet, not less sensitive than it,
+# so they are ignored too — the cost being that an accuracy table has to be
+# pasted from a run on the owner's machine rather than re-derived from a clean
+# checkout.
+/corpus-amazon/
