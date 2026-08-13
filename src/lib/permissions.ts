@@ -465,6 +465,10 @@ export const NAVIGATION: readonly NavGroup[] = [
       item('dashboard', '/dashboard', 'dashboard'),
       item('dispatch', '/dispatch', 'dispatch'),
       item('loads', '/loads', 'load'),
+      // Mail waiting to become freight (Phase 6 §4 step 4). Gated on `create`
+      // rather than `read`, because opening a row leads to the create form —
+      // a queue a role cannot act on is a queue that should not be offered.
+      item('incoming', '/loads/incoming', 'load', 'create'),
       unbuilt('calendar', '/calendar', 'calendar', 'Phase 5'),
     ],
   },

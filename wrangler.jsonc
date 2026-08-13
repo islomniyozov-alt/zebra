@@ -116,6 +116,10 @@
         // custom domain is a four-line block in the README runbook, parked
         // until there is a DNS record to hang it on.
         "APP_ORIGIN": "https://zebra.tajikcargollc.workers.dev",
+        // Which tenant mail to loads@zebratms.com belongs to (Phase 6 §4 step
+        // 4). Checked against `Organization.inboundAddress` on every message —
+        // see src/app/api/inbound-email/route.ts for why it is both.
+        "INBOUND_EMAIL_ORG_ID": "",
         // `no-reply@tajikcargollc.com` needs the domain verified in Resend,
         // and the domain does not exist yet. Rather than leave production
         // mail refused, this is Resend's shared sender — which needs no

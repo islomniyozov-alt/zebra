@@ -1,0 +1,49 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+
+  // THE MAIL RECEIVER, deployed separately from the application.
+  //
+  //   npx wrangler deploy --config workers/email/wrangler.jsonc
+  //   npx wrangler deploy --config workers/email/wrangler.jsonc --env production
+  //
+  // It is inert until Cloudflare Email Routing is pointed at it — see the
+  // runbook. Deploying it changes nothing on its own, which is why it is safe
+  // to have running before the DNS is in place.
+  "name": "zebra-email-dev",
+  "main": "index.ts",
+
+  // Matched to the application's, deliberately. Two workers on two runtime
+  // dates is two sets of behaviour to reason about for one feature.
+  "compatibility_date": "2026-07-22",
+
+  // NO nodejs_compat. This worker parses MIME and makes one fetch; pulling in
+  // the Node shims would be surface area for nothing.
+  "compatibility_flags": [],
+
+  "observability": {
+    "enabled": true,
+  },
+
+  "vars": {
+    "ZEBRA_ORIGIN": "https://zebra-dev.tajikcargollc.workers.dev",
+  },
+
+  // INBOUND_EMAIL_SECRET is a secret, not a var:
+  //   npx wrangler secret put INBOUND_EMAIL_SECRET --config workers/email/wrangler.jsonc
+  // The same value goes on the APPLICATION worker, which is what checks it.
+
+  "env": {
+    "production": {
+      "name": "zebra-email",
+      "vars": {
+        // The application has NOT moved to the custom domain — the owner's
+        // ruling for this step was "the app stays on its current URL for now".
+        // Mail arrives at zebratms.com and is handed to the app where it lives.
+        "ZEBRA_ORIGIN": "https://zebra.tajikcargollc.workers.dev",
+      },
+      "observability": {
+        "enabled": true,
+      },
+    },
+  },
+}

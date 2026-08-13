@@ -127,10 +127,24 @@ model Organization {
   billingEmail String?
   notes        String?
 
+  // WHICH TENANT AN INBOUND EMAIL BELONGS TO (Phase 6 §4 step 4).
+  //
+  // `loads@zebratms.com` is one address on one domain, and the application is
+  // multi-tenant — so the recipient is the routing key, and it lives here
+  // rather than in the mail worker's configuration. A worker that knew which
+  // organization to hand mail to would be a second place tenancy is decided,
+  // and the first rule of this schema is that there is one.
+  //
+  // Unique across the deployment: two organizations claiming one address is
+  // freight delivered to whichever row the query happened to find first.
+  // Nullable because most tenants never turn this on.
+  inboundAddress String? @unique
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   companies       Company[]
+  inboundEmails   InboundEmail[]
   assetHistory    AssetAssignment[]
   customers       Customer[]
   locations       Location[]
@@ -313,6 +327,7 @@ model User {
   auditLogs         AuditLog[]
   calendarEvents    CalendarEvent[]
   pendingUploads    PendingUpload[]
+  inboundEmails     InboundEmail[]
   preferences       UserPreference[]
 
   @@index([isActive])
@@ -1042,10 +1057,10 @@ model FactoringCompany {
   companyId String?
   company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  name           String
-  contactName    String?
-  phone          String?
-  email          String?
+  name        String
+  contactName String?
+  phone       String?
+  email       String?
 
   // THE REMITTANCE ADDRESS, printed on every invoice this factor's authority
   // issues. Its own fields rather than the factor's corporate address, because
@@ -1188,6 +1203,7 @@ model Load {
   // populated for direct-settled freight — see PaymentLoadApplication.
   paymentApplications PaymentLoadApplication[]
   corrections         ExtractionCorrection[]
+  inboundEmails       InboundEmail[]
 
   @@unique([companyId, loadNumber])
   @@index([companyId, operationalStatus])
@@ -1907,12 +1923,19 @@ model Document {
   uploadedBy       User?    @relation(fields: [uploadedByUserId], references: [id])
   uploadedAt       DateTime @default(now())
 
+  // The mail this arrived as an attachment of (Phase 6 §4 step 4). Spec §12
+  // wants the original openable from the load, and this is the thread back to
+  // it — the email keeps the message, the Document keeps the file.
+  inboundEmailId String?
+  inboundEmail   InboundEmail? @relation(fields: [inboundEmailId], references: [id])
+
   deletedAt DateTime?
   updatedAt DateTime  @updatedAt
 
   corrections ExtractionCorrection[]
 
   @@index([companyId, type])
+  @@index([inboundEmailId])
   @@index([loadId])
   @@index([driverId])
   @@index([truckId])
@@ -2658,4 +2681,114 @@ enum AuditAction {
   LOGOUT
   EXPORT
   PERMISSION_CHANGE
+}
+
+// ============================================================================
+// EMAIL-IN (Phase 6 §4 step 4, spec §1 / §10 / §15)
+// ============================================================================
+
+/**
+ * A booking email that arrived at the tenant's load inbox.
+ * NOT A LOAD, AND DELIBERATELY NOT A `Load` ROW IN A DRAFT STATE. Adding DRAFT
+ * to `LoadOperationalStatus` would put unconfirmed, machine-read freight into
+ * every query that already exists — the dispatch board, ready-to-invoice,
+ * settlement lines, the load-number counter — and every one of those would
+ * have to learn to exclude it. One forgotten filter and a draft nobody has
+ * read is on an invoice. So mail lands in its own table and becomes a Load
+ * only when a dispatcher presses Save on the ordinary form.
+ * WHICH IS EXACTLY WHAT §1.1 RULED: "the inbox is a queue of unfinished forms,
+ * not a second editing surface". Opening one lands on `/loads/new` prefilled
+ * from `extractedJson`, with the same validations and the same Save as a
+ * pasted email or an uploaded PDF. There is no second way to create a load.
+ */
+model InboundEmail {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // No companyId. Mail arrives at the ORGANIZATION's address and nobody has
+  // said which authority it belongs to yet — the dispatcher picks that on the
+  // create form, where authority is field 1. A guess here would be a guess
+  // printed on an invoice.
+
+  // --- what arrived ---------------------------------------------------------
+  //
+  // `messageId` is the mail system's own idempotency key. Cloudflare can
+  // deliver the same message more than once, and Amazon really does send a
+  // booking, an update and a final confirmation in one thread — the first is a
+  // duplicate to be ignored, the others are new mail about the same load and
+  // are told apart by their own Message-ID.
+  messageId String @unique
+
+  fromAddress String
+  toAddress   String
+  subject     String?
+  receivedAt  DateTime @default(now())
+
+  /**
+   * The whole message as it arrived. Spec §12: the source is openable.
+   */
+  rawR2Key String?
+  rawBytes Int?
+
+  /**
+   * The body the reader was given, kept for the same reason `ocrText` is.
+   */
+  bodyText String?
+
+  // --- what was read out of it ---------------------------------------------
+  //
+  // Column names match `PendingUpload` and `Document` exactly, so a reader
+  // comparing the three has nothing to translate.
+  ocrStatus     OcrStatus @default(NOT_QUEUED)
+  ocrText       String?
+  extractedJson Json?
+  ocrError      String?
+
+  /**
+   * Which of the three the inbox shows. See InboundEmailState.
+   */
+  state InboundEmailState @default(REVIEW)
+
+  /**
+   * Why it is not READY, in message keys — never sentences.
+   * Spec §10 wants "ready / review / conflict" and the brief adds "from real
+   * validation results, not vibes". These are the results: the same
+   * `LoadWarning` kinds the create form raises, computed when the mail is read
+   * so the list can be sorted by them without re-reading anything.
+   */
+  concerns Json?
+
+  /**
+   * Set when a dispatcher turns it into freight, so it leaves the queue.
+   */
+  loadId          String?
+  load            Load?     @relation(fields: [loadId], references: [id])
+  confirmedAt     DateTime?
+  dismissedAt     DateTime?
+  dismissedReason String?
+
+  handledByUserId String?
+  handledBy       User?   @relation(fields: [handledByUserId], references: [id])
+
+  documents Document[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, state, receivedAt])
+  @@index([organizationId, receivedAt])
+}
+
+enum InboundEmailState {
+  /// Read cleanly, nothing worth stopping for.
+  READY
+  /// Read, but something wants a person: a missing date, a probable duplicate.
+  REVIEW
+  /// Could not be read at all, or contradicts freight already booked.
+  CONFLICT
+  /// A dispatcher turned it into a load.
+  CONFIRMED
+  /// A dispatcher said it was not freight.
+  DISMISSED
 }

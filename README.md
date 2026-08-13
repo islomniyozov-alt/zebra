@@ -288,6 +288,83 @@ Each step assumes the ones above it.
     `companyScopes` only for someone who genuinely works one authority; an empty
     scope means every authority in the organization.
 
+### Email-in: loads@zebratms.com (Phase 6 §4 step 4)
+
+Mail arrives at a domain, gets parsed by a small worker, and lands in
+**Loads → Incoming** as a draft. **The application does not move** — it stays
+on `zebra.tajikcargollc.workers.dev`. `zebratms.com` is a mail domain here and
+nothing else, which is why this is not the parked custom-domain block below.
+
+Five values have to agree, and three of the steps are account-level. Do them in
+this order: the DNS has propagation in it and everything else is instant.
+
+1. **(account) Turn on Email Routing** — Cloudflare → `zebratms.com` → Email →
+   Email Routing → **Enable**. Cloudflare adds three MX records and an SPF TXT
+   itself. Wait for the dashboard to say the records are verified before going
+   on; until it does, mail bounces rather than queues.
+
+   ```bash
+   nslookup -type=mx zebratms.com
+   ```
+
+2. **Deploy the mail worker.** It is inert until step 3 points mail at it, so
+   this is safe to do first and easy to check.
+
+   ```bash
+   npx wrangler deploy --config workers/email/wrangler.jsonc                  # dev
+   npx wrangler deploy --config workers/email/wrangler.jsonc --env production # prod
+   ```
+
+3. **(account) Route the address** — Email Routing → Routing rules →
+   **Create address** → `loads@zebratms.com` → Action **Send to a Worker** →
+   `zebra-email`. Use `zebra-email-dev` if you want to try it against dev first;
+   one address can only go to one worker, so pick one.
+
+4. **The shared secret, on BOTH workers.** The mail worker sends it and the
+   application checks it. Same value, two places — a mismatch is a 401 on every
+   message and nothing in the inbox.
+
+   ```bash
+   SECRET=$(node -e "console.log(crypto.randomUUID()+crypto.randomUUID())")
+   printf '%s\n' "$SECRET" | npx wrangler secret put INBOUND_EMAIL_SECRET --config workers/email/wrangler.jsonc --env production
+   printf '%s\n' "$SECRET" | npx wrangler secret put INBOUND_EMAIL_SECRET --env production
+   ```
+
+5. **Tell the application which tenant and which address.** Two values, and
+   they are checked against each other on every message: the environment names
+   the organization, the database says which address that organization claims.
+   Neither alone is enough, which is deliberate — see the note in
+   `src/app/api/inbound-email/route.ts`.
+
+   ```bash
+   # the organization id
+   psql "$DIRECT_DATABASE_URL" -c 'select id, name from "Organization"'
+
+   # and the address it claims
+   psql "$DIRECT_DATABASE_URL" \
+     -c $'update "Organization" set "inboundAddress" = \'loads@zebratms.com\' where id = \'<org-id>\''
+   ```
+
+   Then `INBOUND_EMAIL_ORG_ID` in `wrangler.jsonc` (production `vars`) → that
+   id, and `npm run deploy:prod`.
+
+Afterwards: send one real booking email to `loads@zebratms.com` and watch it
+arrive.
+
+```bash
+npx wrangler tail zebra-email --env production   # the parse and the POST
+npx wrangler tail zebra --env production         # the read and the state
+```
+
+It should appear in **Loads → Incoming** within about a minute — most of which
+is the model reading it. If it does not, the two tails say which half:
+`no_tenant` means step 5 disagrees with itself, a 401 means step 4 does.
+
+> **Nothing here sends mail.** Outbound is still Resend, still
+> `onboarding@resend.dev`, and still blocked on verifying a sending domain —
+> see the parked block below. Receiving at `zebratms.com` and sending from it
+> are separate purchases of trust and only the first is done.
+
 ### Parked: moving production to a custom domain
 
 Four values name the origin and **all four have to agree**. Moving one at a

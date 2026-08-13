@@ -271,6 +271,25 @@ export async function seedOrganization(
     }),
   )
 
+  // Mail that arrived at this tenant's load inbox (Phase 6 §4 step 4). The one
+  // table freight enters through with no dispatcher present — nobody chose the
+  // tenant, a mail server did — so proving the policy hides it from the other
+  // organization is the whole point of seeding it here.
+  record(
+    'inboundEmail',
+    await db.inboundEmail.create({
+      data: {
+        organizationId,
+        messageId: `<${tag}@zebratms.test>`,
+        fromAddress: 'relay-noreply@amazon.test',
+        toAddress: `loads+${tag}@zebratms.test`,
+        subject: `Load Board - Trip ${tag} booked`,
+        bodyText: `Trip ${tag} booked. AAA1 SPRINGFIELD, OH > BBB2 FRANKLIN, IL`,
+        state: 'REVIEW',
+      },
+    }),
+  )
+
   const invoice = record(
     'invoice',
     await db.invoice.create({
