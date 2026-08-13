@@ -21,12 +21,21 @@
 // things the register does not, and a lookup that refused to fill in a form
 // would be a lookup people work around.
 //
-// UNVERIFIED AGAINST THE LIVE API AT THE TIME OF WRITING. `FMCSA_WEBKEY` is
-// set on the workers by the owner and deliberately absent from this machine,
-// so the shapes below are the DOCUMENTED ones and the tests are written from
-// the documentation rather than from a recorded response. `parseCarrier` is
-// therefore deliberately forgiving about what is missing and strict about what
-// it claims: a field it cannot find is null, never a guess.
+// VERIFIED AGAINST THE LIVE API ON 2026-08-13, by the owner, on production —
+// a carrier filled from a real USDOT and a broker corrected from the register.
+// The shapes below started as the DOCUMENTED ones and are now the observed
+// ones for the fields those two lookups touched.
+//
+// WHAT THAT DID NOT EXERCISE is worth naming, because a module that has been
+// called twice successfully is not a module that has been tested: no record in
+// a bad state has come back, so `concernsFor`'s sentences — out of service,
+// inactive, revoked broker authority — have been proven against constructed
+// payloads and not against the register. Nor has a malformed answer arrived.
+//
+// `parseCarrier` therefore stays deliberately forgiving about what is missing
+// and strict about what it claims: a field it cannot find is null, never a
+// guess. A third party can change a field's type without telling anybody, and
+// two good answers are not evidence that it will not.
 // ---------------------------------------------------------------------------
 
 const ENDPOINT = 'https://mobile.fmcsa.dot.gov/qc/services/carriers'

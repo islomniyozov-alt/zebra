@@ -534,13 +534,32 @@ Recorded rather than resolved, per Phase 1's discipline.
     address, phone and entity type, warning in words on an authority that is
     inactive or out of service.
 
-    `FMCSA_WEBKEY` is set on the workers by the owner and deliberately absent
-    from this machine, so **no call has been made against the real API**. The
-    request and response shapes in `src/lib/fmcsa.ts` are the DOCUMENTED ones
-    and `tests/fmcsa.test.ts` proves the reader is right about that
-    documentation — which is not the same as proving the documentation is right
-    about the API. The first real lookup is the second half of the evidence and
-    it is owed.
+    ~~`FMCSA_WEBKEY` is set on the workers and deliberately absent from this
+    machine, so no call has been made against the real API.~~ — **CLOSED
+    2026-08-13.** The owner ran both lookups on production: the authority form
+    filled from a real USDOT, and the broker lookup corrected a customer
+    recorded as "Warner" to **Werner** from the register.
+
+    That second one is the better evidence of the two. It exercised the broker
+    path end to end AND confirmed flag 28's decision in the field: the legal
+    name landing in `Customer.name` is what caught a misspelling that would
+    otherwise have gone out on an invoice to a company whose name was spelled
+    wrong — and `Customer` has no `legalName` column to hide it in.
+
+    WHAT TWO SUCCESSFUL CALLS DO NOT PROVE, named so the next session does not
+    read this flag as blanket coverage:
+    - No record in a BAD STATE has come back, so `concernsFor`'s sentences —
+      out of service, inactive, revoked broker authority — remain proven
+      against constructed payloads only. The not-getting-paid gate has never
+      fired against a real broker.
+    - No malformed answer has arrived, so `parseCarrier`'s defensive branches
+      are still untested by the register rather than by the suite.
+    - The rate limit has not been near its budget in production.
+
+    The tests still build their payloads by hand rather than recording one,
+    which is deliberate: it keeps them runnable with no credential and no
+    network. What changed is that the shape they assert against is now the
+    shape the register actually sends.
 
     That is why `parseCarrier` is written the way it is: every field is
     null-on-anything-unexpected, and a test feeds it an object where a legal

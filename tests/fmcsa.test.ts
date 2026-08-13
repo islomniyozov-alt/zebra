@@ -8,14 +8,19 @@ import {
 } from '@/lib/fmcsa'
 
 // ---------------------------------------------------------------------------
-// WRITTEN FROM THE DOCUMENTATION, NOT FROM A RECORDED RESPONSE.
+// CONSTRUCTED PAYLOADS, NOW BACKED BY TWO REAL CALLS.
 //
 // `FMCSA_WEBKEY` is a secret on the workers and deliberately not on this
-// machine, so no call has been made against the live API. The payloads below
-// are the QCMobile response shape as documented — which makes these tests a
-// proof that the READER is right about that shape, and not a proof that the
-// shape is right. The first real lookup is the second half of the evidence and
-// it is flagged as owed.
+// machine, so these payloads are still built by hand rather than recorded —
+// which is what keeps them runnable in CI with no credential and no network.
+// What changed on 2026-08-13 is that the owner ran both lookups on production
+// and both filled their forms, so the shape these tests assert against is the
+// shape the register actually sends.
+//
+// THE HAPPY PATH IS THE PART THAT WAS CONFIRMED. Everything below about a
+// missing field, a field of the wrong type, or an authority in a bad state is
+// still a proof about the READER and not about the register — no live record
+// in any of those states has been seen.
 //
 // That is also why `parseCarrier` is tested so hard on absence: everything it
 // cannot find must come back null, because null lands as a blank field on a
