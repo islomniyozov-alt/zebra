@@ -1,9 +1,11 @@
 'use client'
 
-import { useActionState, useState, useTransition } from 'react'
+import { useActionState, useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { FmcsaLookup } from '@/components/forms/FmcsaLookup'
+import type { FmcsaLabels } from '@/components/forms/fmcsa-labels'
 import { addCompanyAction, lookupCarrierAction } from './actions'
 import {
   ADD_COMPANY_INITIAL,
@@ -43,16 +45,6 @@ export interface AddCompanyLabels {
   save: string
   cancel: string
   hint: string
-  lookup: string
-  lookupHint: string
-  lookupPending: string
-  lookupFilled: string
-  fromFmcsa: string
-  fmcsaTitle: string
-  fmcsaEntity: string
-  fmcsaOperation: string
-  fmcsaStatus: string
-  fmcsaRating: string
 }
 
 const BLANK: Record<string, string> = {
@@ -69,14 +61,19 @@ const BLANK: Record<string, string> = {
   email: '',
 }
 
-export function AddCompanyForm({ labels }: { labels: AddCompanyLabels }) {
+export function AddCompanyForm({
+  labels,
+  fmcsa,
+}: {
+  labels: AddCompanyLabels
+  fmcsa: FmcsaLabels
+}) {
   const [state, action, pending] = useActionState(
     addCompanyAction,
     ADD_COMPANY_INITIAL,
   )
   const [values, setValues] = useState(BLANK)
   const [lookup, setLookup] = useState<LookupState>(LOOKUP_INITIAL)
-  const [looking, startLookup] = useTransition()
   // Which fields the register filled and the person has not touched since.
   const [fromLookup, setFromLookup] = useState<ReadonlySet<string>>(new Set())
 
@@ -102,28 +99,24 @@ export function AddCompanyForm({ labels }: { labels: AddCompanyLabels }) {
     error: errorFor(name),
     // §1.4's rule, one source over: a field showing something the person did
     // not type says where it came from.
-    hint: fromLookup.has(name) ? labels.fromFmcsa : undefined,
+    hint: fromLookup.has(name) ? fmcsa.from : undefined,
   })
 
-  const runLookup = () => {
-    startLookup(async () => {
-      const answer = await lookupCarrierAction({
-        dot: values['dotNumber'] ?? '',
-        mc: values['mcNumber'] ?? '',
-      })
-      setLookup(answer)
-      if (!answer.found) return
-
-      // FILLED, NOT SAVED. Exactly the posture the extraction prefill takes:
-      // the values land in the fields, the person reads them, and the only
-      // write on this screen is still the button at the bottom.
-      const prefill = answer.found.prefill
-      setValues((previous) => ({ ...previous, ...prefill }))
-      setFromLookup(new Set(LOOKUP_FIELDS.filter((key) => prefill[key] !== '')))
+  const runLookup = async () => {
+    const answer = await lookupCarrierAction({
+      dot: values['dotNumber'] ?? '',
+      mc: values['mcNumber'] ?? '',
     })
-  }
+    setLookup(answer)
+    if (!answer.found) return
 
-  const found = lookup.found
+    // FILLED, NOT SAVED. Exactly the posture the extraction prefill takes:
+    // the values land in the fields, the person reads them, and the only
+    // write on this screen is still the button at the bottom.
+    const prefill = answer.found.prefill
+    setValues((previous) => ({ ...previous, ...prefill }))
+    setFromLookup(new Set(LOOKUP_FIELDS.filter((key) => prefill[key] !== '')))
+  }
 
   return (
     <form action={action} className="flex max-w-[640px] flex-col gap-z3">
@@ -132,7 +125,7 @@ export function AddCompanyForm({ labels }: { labels: AddCompanyLabels }) {
       <Input label={labels.name} required {...field('name')} />
       <Input label={labels.legalName} {...field('legalName')} />
 
-      <div className="flex items-end gap-z3">
+      <div className="flex gap-z3">
         <div className="flex-1">
           {/* IDENTIFIERS, so `dir="ltr"` even in Farsi — the design system rule
            * the Phase 5 RTL pass widened from inputs to any Latin value. */}
@@ -141,70 +134,16 @@ export function AddCompanyForm({ labels }: { labels: AddCompanyLabels }) {
         <div className="flex-1">
           <Input label={labels.dotNumber} identifier {...field('dotNumber')} />
         </div>
-        {/* NOT `type="submit"`. The one submit on this form is Add authority,
-         * and a lookup that submitted would be the save button wearing a
-         * different word. */}
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={runLookup}
-          disabled={looking}
-        >
-          {looking ? labels.lookupPending : labels.lookup}
-        </Button>
       </div>
 
-      <p className="text-xs text-ink-3">{labels.lookupHint}</p>
-
-      {lookup.error ? (
-        <p role="status" className="text-sm text-warning">
-          {lookup.error}
-        </p>
-      ) : null}
-
-      {found ? (
-        <section
-          role="status"
-          className="flex flex-col gap-z2 rounded-card border border-border bg-surface-2 p-z3"
-        >
-          <h2 className="text-sm font-medium text-ink">{labels.fmcsaTitle}</h2>
-
-          {/* SHOWN, NOT STORED. `Company` has no column for entity type,
-           * operation or safety rating, and inventing three would be a
-           * migration to hold what the register can be asked again. */}
-          <dl className="flex flex-wrap gap-x-z4 gap-y-z1 text-sm">
-            {(
-              [
-                [labels.fmcsaStatus, found.status],
-                [labels.fmcsaEntity, found.entityType],
-                [labels.fmcsaOperation, found.operation],
-                [labels.fmcsaRating, found.safetyRating],
-              ] as const
-            )
-              .filter(([, value]) => value)
-              .map(([term, value]) => (
-                <div key={term} className="flex gap-z1">
-                  <dt className="text-ink-3">{term}</dt>
-                  <dd className="text-ink">{value}</dd>
-                </div>
-              ))}
-          </dl>
-
-          {/* IN WORDS, EACH ITS OWN SENTENCE — the load warnings' posture. A
-           * badge has to be interpreted; a sentence can be acted on. */}
-          {found.concerns.length > 0 ? (
-            <ul className="flex flex-col gap-z1">
-              {found.concerns.map((concern) => (
-                <li key={concern} className="text-sm font-medium text-danger">
-                  {concern}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-
-          <p className="text-xs text-ink-3">{labels.lookupFilled}</p>
-        </section>
-      ) : null}
+      {/* The same control and the same panel the broker form uses. Two screens
+       * asking the register one question must not learn to say two things. */}
+      <FmcsaLookup
+        labels={fmcsa}
+        found={lookup.found}
+        error={lookup.error}
+        onRun={runLookup}
+      />
 
       <Input label={labels.addressLine1} {...field('addressLine1')} />
       <Input label={labels.addressLine2} {...field('addressLine2')} />

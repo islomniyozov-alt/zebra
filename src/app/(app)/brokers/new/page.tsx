@@ -1,9 +1,9 @@
 import { notFound } from 'next/navigation'
 import { currentUserCan } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { RecordForm } from '@/components/forms/RecordForm'
-import { createBrokerAction } from '../actions'
+import { fmcsaLabels } from '@/components/forms/fmcsa-labels'
 import { brokerFields } from '../fields'
+import { NewBrokerForm } from './NewBrokerForm'
 
 // A DISPATCHER holds `customer:create` but not `customer:update` — they can
 // add a broker mid-booking and cannot edit one afterwards. That asymmetry is
@@ -21,16 +21,10 @@ export default async function NewBrokerPage() {
         <h1 className="text-lg font-medium text-ink">{t('brokers.new')}</h1>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto bg-surface-2 px-gutter py-z5">
-        <RecordForm
+        <NewBrokerForm
           fields={brokerFields(t)}
-          values={{
-            type: 'BROKER',
-            status: 'ACTIVE',
-            paymentTermsDays: '30',
-          }}
-          action={createBrokerAction}
-          cancelHref="/brokers"
           labels={{ save: t('ref.save'), cancel: t('ref.cancel') }}
+          fmcsa={fmcsaLabels(t)}
         />
       </div>
     </>

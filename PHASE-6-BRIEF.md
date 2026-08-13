@@ -569,12 +569,12 @@ Recorded rather than resolved, per Phase 1's discipline.
     way. `verify-dispatcher` asserts that neither `webKey` nor the FMCSA
     endpoint appears anywhere in the page payload.
 
-    NOT RATE-LIMITED. The action is gated on `company:create`, which only OWNER
-    and ADMIN hold, so the exposure is a trusted user pressing a button in a
-    loop; FMCSA publishes rate limits and Zebra respects them only by being
-    small. Named rather than solved, and it becomes real the day this same
-    service is pointed at broker verification, where a DISPATCHER might hold
-    the permission and a load list might look them up in bulk.
+    ~~NOT RATE-LIMITED.~~ **LANDED — see flag 26.** The parked reasoning was
+    that the action is gated on `company:create`, which only OWNER and ADMIN
+    hold, so the exposure was a trusted user pressing a button in a loop; and
+    that it "becomes real the day this same service is pointed at broker
+    verification, where a DISPATCHER might hold the permission". That day
+    arrived one session later, and wider than this flag guessed.
 
 25. **`@@unique([organizationId, dotNumber])` has been in the schema since the
     init migration and nothing ever handled it.** A second authority with the
@@ -589,3 +589,110 @@ Recorded rather than resolved, per Phase 1's discipline.
     checked before the insert rather than caught after it — a caught constraint
     error does not carry the value, and "USDOT 3162967 already belongs to
     another authority here" is the whole usefulness of the message.
+
+26. **The broker lookup opened the door to EVERY role, not to dispatchers.**
+    Flag 24 parked the rate limit against the day a DISPATCHER could reach the
+    lookup. `customer:create` turns out to be held by all five roles —
+    DISPATCHER because §9's create-on-miss needs it mid-booking, and ACCOUNTING
+    through `RECORDS_WRITE`, because a broker's billing email, payment terms
+    and block are accounting's to keep current. The pair-assert in
+    `tests/permissions.test.ts` was written asserting four roles and failed;
+    the test was wrong, not the permissions.
+
+    So the second door is the wide one and the budget in `fmcsa-gate.ts` is
+    sized for it: ten lookups per person per minute, sixty overall.
+
+    A SLIDING WINDOW, AND REFUSALS ARE NOT CHARGED. A fixed window lets
+    somebody spend a whole budget in the last second of one and the whole of
+    the next in its first second — twice the limit in two seconds, which is the
+    exact burst this exists for. And recording refused attempts would push the
+    oldest allowed one out of the window on every retry, so a client in a tight
+    loop would never recover: a rate limiter that punishes retrying turns a
+    burst into an outage. Both are asserted.
+
+    IN MEMORY, WHICH IS A REAL LIMITATION AND IS NOT A PRETENCE. Workers share
+    no memory, so this counts within one isolate and Cloudflare may run
+    several. It stops the loop it was built to stop — a runaway client hits one
+    isolate repeatedly — and it does NOT stop a determined authenticated user
+    spreading requests across isolates. The honest fix is a Durable Object or a
+    KV counter, which is a binding and a deploy rather than a code change. Say
+    the word and it becomes one.
+
+    NOT A DATABASE COUNTER, deliberately: a per-request write to Neon on a path
+    whose whole job is to be a convenience would cost more than the thing it
+    guards.
+
+27. **A broker's authority is judged as a broker's, and silence stays
+    silence.** The same JSON means different things depending on who is asking,
+    and `LookupAudience` is the only place that difference is allowed to live:
+    - `operating` — an authority WE book under. Common or contract authority is
+      what matters; broker authority is not expected.
+    - `broker` — somebody who will tender freight and then owe money. Broker
+      authority is the whole question. `I` (granted, then revoked or lapsed) is
+      the not-getting-paid gate and gets its own sentence, because an unpaid
+      invoice against a revoked broker is a claim on a surety bond that may
+      already be spent. `N` (never granted) is a DIFFERENT fact and gets a
+      different, milder sentence.
+    - `shipper` — a factory handing us freight holds no authority of any kind
+      and is not supposed to. Warning that a customer has none would be an
+      accusation built out of the ordinary case, so the general "no active
+      authority" sentence is suppressed entirely for them.
+
+    `null` — the register did not answer about broker authority — says nothing
+    at all, in every audience. Absent data is a gap, not an accusation, and the
+    test that pins this is the one that matters most: a system that invents bad
+    news out of a blank field trains its users to click past the warnings that
+    are real.
+
+    The audience comes from the form's own Type select, so changing a record
+    from BROKER to SHIPPER changes what the next lookup warns about.
+
+28. **The legal name goes in `Customer.name`, and the authority form does the
+    opposite.** `Company` has both `name` and `legalName`, so an authority
+    takes the DBA as its trade name and keeps the legal one for the invoice
+    footer. `Customer` HAS NO `legalName` COLUMN — so the single `name` field
+    is the only place an entity's identity can live, and it takes the LEGAL
+    name first.
+
+    That is the entity who signs the rate confirmation, who the invoice is
+    addressed to, and who a collections letter names; a trade name in that
+    field is a trade name on an invoice a legal person has to pay. The DBA is
+    not lost — it is on the panel beside the fields, and `CustomerAlias` learns
+    whatever the rate confirmations actually print the first time a dispatcher
+    corrects it.
+
+    A `Customer.legalName` column would remove the asymmetry. Not taken: it is
+    a migration, and the alias table already carries the "they print something
+    else" case that motivates one.
+
+29. **`RecordForm` gained prefill by remounting, not by becoming controlled.**
+    Four reference forms share it and three needed nothing. Making all four
+    controlled to serve one would have moved every keystroke in the fleet forms
+    through React state for a feature two screens use.
+
+    Instead a prefilled field's `key` carries its prefilled value: change the
+    value, the input remounts and adopts the new default. Every other field
+    keeps its key, its cursor and whatever was already typed into it. Typing in
+    a field takes it back from the register — the mark clears and the prefill
+    stops applying to it.
+
+    THE ONE THING THIS CANNOT DO is re-prefill a field to the value it already
+    had after somebody typed over it, since the key would not change. Looking
+    the same carrier up twice after editing the city leaves the edit standing.
+    That is arguably correct and is certainly not obvious; named here rather
+    than discovered.
+
+30. **The duplicate-MC refusal is a door, not a law about the column.**
+    `Customer.mcNumber` is indexed and NOT unique, and it stays that way: a
+    unique index would also forbid the legitimate case of one MC recorded twice
+    while a merger settles. The refusal lives at `createBroker`, which is the
+    one door brokers come through.
+
+    Two customers for one broker is the expensive kind of duplicate — it splits
+    the payment history, the credit limit and the aging of a single
+    relationship, and nothing downstream notices, because an unpaid invoice
+    sits under one row while the payments land against the other.
+
+    RETIRED BROKERS COUNT. A `deletedAt` row still holds the freight it ran, so
+    the answer to "we already have them, they were retired" is to restore that
+    record rather than start a second history. Asserted.

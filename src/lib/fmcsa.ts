@@ -107,6 +107,28 @@ export type CarrierConcern =
   | 'inactive'
   | 'no_active_authority'
   | 'unsatisfactory_rating'
+  /** Broker authority granted and then revoked or lapsed. */
+  | 'broker_authority_inactive'
+  /** The register says this entity holds no broker authority at all. */
+  | 'broker_authority_none'
+
+/**
+ * What the record is being looked up FOR.
+ *
+ * The same JSON means different things depending on who is asking, and this is
+ * the only place that difference is allowed to live:
+ *
+ *   * `operating` — an authority WE will book freight under. Common or
+ *     contract authority is the thing that matters; broker authority is not
+ *     expected and its absence says nothing.
+ *   * `broker` — somebody who will TENDER us freight and then owe us money.
+ *     Broker authority is the whole question: an inactive one is the
+ *     not-getting-paid gate, because a revoked broker's surety bond is where
+ *     an unpaid invoice goes to be argued about.
+ *   * `shipper` — a direct customer with no authority of any kind, which is
+ *     the ordinary case for a factory. Silence about authority is correct.
+ */
+export type LookupAudience = 'operating' | 'broker' | 'shipper'
 
 /**
  * A typed register number, as digits.
@@ -301,7 +323,10 @@ export function parseCarrier(payload: unknown): CarrierRecord | null {
  * `allowedToOperate: N` comes first because it is the one that ends the
  * conversation — everything else is a reason it might be N.
  */
-export function concernsFor(carrier: CarrierRecord): CarrierConcern[] {
+export function concernsFor(
+  carrier: CarrierRecord,
+  audience: LookupAudience = 'operating',
+): CarrierConcern[] {
   const concerns: CarrierConcern[] = []
 
   if (carrier.allowedToOperate === false) {
@@ -312,25 +337,52 @@ export function concernsFor(carrier: CarrierRecord): CarrierConcern[] {
     concerns.push('inactive')
   }
 
+  // THE NOT-GETTING-PAID GATE. A broker's authority is not a formality: it is
+  // what the surety bond hangs off, and an unpaid invoice against a revoked
+  // broker is a claim against a bond that may already be exhausted. So for a
+  // broker this is said out loud, separately from anything about trucks.
+  //
+  // `I` and `N` ARE DIFFERENT FACTS AND GET DIFFERENT SENTENCES. `I` means
+  // granted and then revoked or lapsed — somebody was a broker and is not. `N`
+  // means never granted, which for an entity being filed AS a broker is worth
+  // knowing and is not the same accusation.
+  if (audience === 'broker') {
+    const status = carrier.brokerAuthority?.toUpperCase() ?? null
+    if (status === 'I') concerns.push('broker_authority_inactive')
+    if (status === 'N') concerns.push('broker_authority_none')
+    // `null` says nothing, and neither does this. See below.
+  }
+
   // NONE OF THE THREE ACTIVE. Reported only when the register actually
-  // answered about all three: a record with every authority field absent is a
-  // record that says nothing, and "no active authority" would be this module
+  // answered about at least one: a record with every authority field absent is
+  // a record that says nothing, and "no active authority" would be this module
   // inventing bad news out of a gap.
-  const authorities = [
-    carrier.commonAuthority,
-    carrier.contractAuthority,
-    carrier.brokerAuthority,
-  ]
-  if (
-    authorities.some((status) => status !== null) &&
-    !authorities.some((status) => status?.toUpperCase() === 'A')
-  ) {
-    concerns.push('no_active_authority')
+  //
+  // AND ONLY WHERE IT IS A QUESTION. A SHIPPER — a factory that hands us
+  // freight — holds no authority of any kind and is not supposed to; warning
+  // that a customer has none would be an accusation built out of the ordinary
+  // case. A broker gets the sharper, specific sentences above instead, so the
+  // general one would only repeat them.
+  if (audience === 'operating') {
+    const authorities = [
+      carrier.commonAuthority,
+      carrier.contractAuthority,
+      carrier.brokerAuthority,
+    ]
+    if (
+      authorities.some((status) => status !== null) &&
+      !authorities.some((status) => status?.toUpperCase() === 'A')
+    ) {
+      concerns.push('no_active_authority')
+    }
   }
 
   // The register's own word. "Conditional" is not listed: it is a real rating
   // a real carrier hauls under, and warning about it would be this screen
   // taking a position the FMCSA did not.
+  //
+  // Brokers have no safety rating — they run no trucks — so this is silent for
+  // them by absence rather than by a rule.
   if (carrier.safetyRating?.toUpperCase() === 'U') {
     concerns.push('unsatisfactory_rating')
   }

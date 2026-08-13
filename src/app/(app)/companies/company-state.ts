@@ -37,8 +37,9 @@ export interface CarrierLookupView {
     postalCode: string
     phone: string
   }
-  /** Shown, not stored — `Company` has no column for either. */
+  /** Shown, not stored — `Company` has no column for any of these. */
   entityType: string | null
+  dbaName: string | null
   operation: string | null
   safetyRating: string | null
   /** `Active` / `Inactive`, already in the reader's language. */

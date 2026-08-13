@@ -80,39 +80,44 @@ const en = {
     'Your plan covers {limit} authorities and you are using all of them. Ask for more before adding another.',
   'companies.error.duplicateName':
     'An authority with that name already exists.',
-  'companies.lookup': 'Look up',
-  'companies.lookupHint':
-    'Type a USDOT or MC number, then look it up in the FMCSA register. Everything it fills stays editable, and nothing is saved until you press Add authority.',
-  'companies.lookupPending': 'Asking FMCSA…',
-  'companies.lookupFilled':
+  'fmcsa.lookup': 'Look up',
+  'fmcsa.lookupHint':
+    'Type a USDOT or MC number, then look it up in the FMCSA register. Everything it fills stays editable, and nothing is saved until you press Save.',
+  'fmcsa.lookupPending': 'Asking FMCSA…',
+  'fmcsa.lookupFilled':
     'Filled from the FMCSA register — check every line before saving.',
-  'companies.fromFmcsa': 'From FMCSA.',
-  'companies.fmcsaTitle': 'FMCSA register',
-  'companies.fmcsaEntity': 'Entity type',
-  'companies.fmcsaOperation': 'Operation',
-  'companies.fmcsaStatus': 'Operating status',
-  'companies.fmcsaRating': 'Safety rating',
-  'companies.fmcsaActive': 'Active',
-  'companies.fmcsaInactive': 'Inactive',
-  'companies.warn.notAllowedToOperate':
+  'fmcsa.from': 'From FMCSA.',
+  'fmcsa.title': 'FMCSA register',
+  'fmcsa.entity': 'Entity type',
+  'fmcsa.operation': 'Operation',
+  'fmcsa.status': 'Operating status',
+  'fmcsa.rating': 'Safety rating',
+  'fmcsa.dba': 'Doing business as',
+  'fmcsa.active': 'Active',
+  'fmcsa.inactive': 'Inactive',
+  'fmcsa.warn.notAllowedToOperate':
     'FMCSA says this authority is NOT allowed to operate.',
-  'companies.warn.outOfService':
+  'fmcsa.warn.outOfService':
     'FMCSA shows an out-of-service order dated {date}.',
-  'companies.warn.inactive': 'FMCSA shows this authority as inactive.',
-  'companies.warn.noActiveAuthority':
+  'fmcsa.warn.inactive': 'FMCSA shows this record as inactive.',
+  'fmcsa.warn.noActiveAuthority':
     'FMCSA shows no active operating authority — common, contract and broker are all inactive or absent.',
-  'companies.warn.unsatisfactoryRating':
+  'fmcsa.warn.unsatisfactoryRating':
     'The FMCSA safety rating is Unsatisfactory.',
-  'companies.error.lookupNeedNumber':
-    'Type a USDOT or MC number first — digits only.',
-  'companies.error.lookupNotFound':
-    'No carrier with that number in the FMCSA register. Type the details instead.',
-  'companies.error.lookupUnavailable':
+  'fmcsa.warn.brokerAuthorityInactive':
+    'Broker authority is INACTIVE at FMCSA — it was granted and has since been revoked or lapsed. An unpaid invoice against a revoked broker is a claim against a surety bond that may already be spent.',
+  'fmcsa.warn.brokerAuthorityNone':
+    'FMCSA shows no broker authority for this entity at all. If they are tendering freight as a broker, ask why.',
+  'fmcsa.error.needNumber': 'Type a USDOT or MC number first — digits only.',
+  'fmcsa.error.notFound':
+    'No record with that number in the FMCSA register. Type the details instead.',
+  'fmcsa.error.unavailable':
     'The FMCSA register did not answer. Type the details instead — nothing on this form depends on it.',
-  'companies.error.lookupNoKey':
+  'fmcsa.error.noKey':
     'FMCSA lookup is not configured on this server. Type the details instead.',
-  'companies.error.lookupRefused':
-    'You do not have permission to look up carriers.',
+  'fmcsa.error.refused': 'You do not have permission to look up carriers.',
+  'fmcsa.error.tooMany':
+    'That is a lot of lookups. Wait {seconds} seconds and try again — the FMCSA key is shared, so a burst here costs everybody.',
   'companies.error.duplicateDot':
     'USDOT {dot} already belongs to another authority here.',
   'companies.error.badState': 'Use a two-letter state code.',
@@ -326,6 +331,8 @@ const en = {
   'brokers.new': 'New broker',
   'brokers.edit': 'Edit broker',
   'brokers.stripeMeaning': 'Stripe shows whether you can book freight',
+  'brokers.error.duplicateMc':
+    'MC {mc} is already on {name}. Open that record instead of adding a second one.',
   'brokers.name': 'Name',
   'brokers.type': 'Type',
   'brokers.mc': 'MC number',
@@ -1558,38 +1565,45 @@ const ru: Dictionary = {
     'Ваш тариф включает {limit} перевозчиков, и все они используются. Запросите увеличение лимита.',
   'companies.error.duplicateName':
     'Перевозчик с таким названием уже существует.',
-  'companies.lookup': 'Найти',
-  'companies.lookupHint':
-    'Введите номер USDOT или MC и найдите его в реестре FMCSA. Всё, что подставится, можно править, и ничего не сохраняется, пока вы не нажмёте «Добавить перевозчика».',
-  'companies.lookupPending': 'Запрос в FMCSA…',
-  'companies.lookupFilled':
+  'fmcsa.lookup': 'Найти',
+  'fmcsa.lookupHint':
+    'Введите номер USDOT или MC и найдите его в реестре FMCSA. Всё, что подставится, можно править, и ничего не сохраняется, пока вы не нажмёте «Сохранить».',
+  'fmcsa.lookupPending': 'Запрос в FMCSA…',
+  'fmcsa.lookupFilled':
     'Заполнено из реестра FMCSA — проверьте каждую строку перед сохранением.',
-  'companies.fromFmcsa': 'Из FMCSA.',
-  'companies.fmcsaTitle': 'Реестр FMCSA',
-  'companies.fmcsaEntity': 'Тип лица',
-  'companies.fmcsaOperation': 'Вид перевозок',
-  'companies.fmcsaStatus': 'Статус деятельности',
-  'companies.fmcsaRating': 'Рейтинг безопасности',
-  'companies.fmcsaActive': 'Действует',
-  'companies.fmcsaInactive': 'Не действует',
-  'companies.warn.notAllowedToOperate':
-    'По данным FMCSA этому перевозчику НЕ разрешено работать.',
-  'companies.warn.outOfService':
+  'fmcsa.from': 'Из FMCSA.',
+  'fmcsa.title': 'Реестр FMCSA',
+  'fmcsa.entity': 'Тип лица',
+  'fmcsa.operation': 'Вид перевозок',
+  'fmcsa.status': 'Статус деятельности',
+  'fmcsa.rating': 'Рейтинг безопасности',
+  'fmcsa.dba': 'Работает под названием',
+  'fmcsa.active': 'Действует',
+  'fmcsa.inactive': 'Не действует',
+  'fmcsa.warn.notAllowedToOperate':
+    'По данным FMCSA этой компании НЕ разрешено работать.',
+  'fmcsa.warn.outOfService':
     'FMCSA показывает запрет на эксплуатацию от {date}.',
-  'companies.warn.inactive': 'FMCSA показывает этого перевозчика неактивным.',
-  'companies.warn.noActiveAuthority':
+  'fmcsa.warn.inactive': 'FMCSA показывает эту запись неактивной.',
+  'fmcsa.warn.noActiveAuthority':
     'FMCSA не показывает действующих разрешений — common, contract и broker все неактивны или отсутствуют.',
-  'companies.warn.unsatisfactoryRating':
+  'fmcsa.warn.unsatisfactoryRating':
     'Рейтинг безопасности FMCSA — Unsatisfactory.',
-  'companies.error.lookupNeedNumber':
+  'fmcsa.warn.brokerAuthorityInactive':
+    'Брокерская лицензия в FMCSA НЕАКТИВНА — она была выдана и с тех пор отозвана или истекла. Неоплаченный счёт к брокеру без лицензии — это требование к поручительству, которое может быть уже исчерпано.',
+  'fmcsa.warn.brokerAuthorityNone':
+    'FMCSA вообще не показывает брокерской лицензии у этого лица. Если они передают груз как брокер, выясните почему.',
+  'fmcsa.error.needNumber':
     'Сначала введите номер USDOT или MC — только цифры.',
-  'companies.error.lookupNotFound':
-    'В реестре FMCSA нет перевозчика с таким номером. Введите данные вручную.',
-  'companies.error.lookupUnavailable':
+  'fmcsa.error.notFound':
+    'В реестре FMCSA нет записи с таким номером. Введите данные вручную.',
+  'fmcsa.error.unavailable':
     'Реестр FMCSA не ответил. Введите данные вручную — ничего на этой форме от него не зависит.',
-  'companies.error.lookupNoKey':
+  'fmcsa.error.noKey':
     'Поиск в FMCSA не настроен на этом сервере. Введите данные вручную.',
-  'companies.error.lookupRefused': 'У вас нет прав на поиск перевозчиков.',
+  'fmcsa.error.refused': 'У вас нет прав на поиск в реестре.',
+  'fmcsa.error.tooMany':
+    'Слишком много запросов. Подождите {seconds} с и попробуйте снова — ключ FMCSA общий, и всплеск здесь стоит всем.',
   'companies.error.duplicateDot':
     'USDOT {dot} уже принадлежит другому перевозчику здесь.',
   'companies.error.badState': 'Используйте двухбуквенный код штата.',
@@ -1803,6 +1817,8 @@ const ru: Dictionary = {
   'brokers.new': 'Новый брокер',
   'brokers.edit': 'Изменить брокера',
   'brokers.stripeMeaning': 'Полоса показывает, можно ли брать груз',
+  'brokers.error.duplicateMc':
+    'MC {mc} уже указан у «{name}». Откройте эту запись вместо создания второй.',
   'brokers.name': 'Название',
   'brokers.type': 'Тип',
   'brokers.mc': 'Номер MC',
@@ -3034,38 +3050,44 @@ const fa: Dictionary = {
   'companies.error.limitReached':
     'طرح شما {limit} شرکت را پوشش می‌دهد و همه در حال استفاده‌اند. برای افزودن بیشتر، افزایش سقف بخواهید.',
   'companies.error.duplicateName': 'شرکتی با این نام از پیش وجود دارد.',
-  'companies.lookup': 'جست‌وجو',
-  'companies.lookupHint':
-    'شمارهٔ USDOT یا MC را بنویسید و در سامانهٔ FMCSA جست‌وجو کنید. هرچه پر شود قابل ویرایش است و تا زمانی که «افزودن شرکت» را نزنید چیزی ذخیره نمی‌شود.',
-  'companies.lookupPending': 'در حال پرسیدن از FMCSA…',
-  'companies.lookupFilled':
+  'fmcsa.lookup': 'جست‌وجو',
+  'fmcsa.lookupHint':
+    'شمارهٔ USDOT یا MC را بنویسید و در سامانهٔ FMCSA جست‌وجو کنید. هرچه پر شود قابل ویرایش است و تا زمانی که «ذخیره» را نزنید چیزی ذخیره نمی‌شود.',
+  'fmcsa.lookupPending': 'در حال پرسیدن از FMCSA…',
+  'fmcsa.lookupFilled':
     'از سامانهٔ FMCSA پر شد — پیش از ذخیره هر سطر را بررسی کنید.',
-  'companies.fromFmcsa': 'از FMCSA.',
-  'companies.fmcsaTitle': 'سامانهٔ FMCSA',
-  'companies.fmcsaEntity': 'نوع شخصیت',
-  'companies.fmcsaOperation': 'نوع فعالیت',
-  'companies.fmcsaStatus': 'وضعیت فعالیت',
-  'companies.fmcsaRating': 'رتبهٔ ایمنی',
-  'companies.fmcsaActive': 'فعال',
-  'companies.fmcsaInactive': 'غیرفعال',
-  'companies.warn.notAllowedToOperate':
+  'fmcsa.from': 'از FMCSA.',
+  'fmcsa.title': 'سامانهٔ FMCSA',
+  'fmcsa.entity': 'نوع شخصیت',
+  'fmcsa.operation': 'نوع فعالیت',
+  'fmcsa.status': 'وضعیت فعالیت',
+  'fmcsa.rating': 'رتبهٔ ایمنی',
+  'fmcsa.dba': 'با نام تجاری',
+  'fmcsa.active': 'فعال',
+  'fmcsa.inactive': 'غیرفعال',
+  'fmcsa.warn.notAllowedToOperate':
     'به گفتهٔ FMCSA این شرکت اجازهٔ فعالیت ندارد.',
-  'companies.warn.outOfService':
+  'fmcsa.warn.outOfService':
     'FMCSA دستور توقف فعالیت به تاریخ {date} را نشان می‌دهد.',
-  'companies.warn.inactive': 'FMCSA این شرکت را غیرفعال نشان می‌دهد.',
-  'companies.warn.noActiveAuthority':
+  'fmcsa.warn.inactive': 'FMCSA این پرونده را غیرفعال نشان می‌دهد.',
+  'fmcsa.warn.noActiveAuthority':
     'FMCSA هیچ مجوز فعالی نشان نمی‌دهد — common، contract و broker همه غیرفعال یا نبوده‌اند.',
-  'companies.warn.unsatisfactoryRating':
+  'fmcsa.warn.unsatisfactoryRating':
     'رتبهٔ ایمنی FMCSA برابر Unsatisfactory است.',
-  'companies.error.lookupNeedNumber':
-    'اول شمارهٔ USDOT یا MC را بنویسید — فقط رقم.',
-  'companies.error.lookupNotFound':
-    'در سامانهٔ FMCSA شرکتی با این شماره نیست. اطلاعات را دستی وارد کنید.',
-  'companies.error.lookupUnavailable':
+  'fmcsa.warn.brokerAuthorityInactive':
+    'مجوز دلالی در FMCSA غیرفعال است — صادر شده و سپس لغو شده یا اعتبارش تمام شده. فاکتور پرداخت‌نشده از دلالی با مجوز لغوشده یعنی ادعا روی ضمانتی که شاید از پیش خرج شده باشد.',
+  'fmcsa.warn.brokerAuthorityNone':
+    'FMCSA برای این شخصیت هیچ مجوز دلالی نشان نمی‌دهد. اگر بار را به‌عنوان دلال می‌دهند، دلیلش را بپرسید.',
+  'fmcsa.error.needNumber': 'اول شمارهٔ USDOT یا MC را بنویسید — فقط رقم.',
+  'fmcsa.error.notFound':
+    'در سامانهٔ FMCSA پرونده‌ای با این شماره نیست. اطلاعات را دستی وارد کنید.',
+  'fmcsa.error.unavailable':
     'سامانهٔ FMCSA پاسخ نداد. اطلاعات را دستی وارد کنید — هیچ‌چیز این فرم به آن وابسته نیست.',
-  'companies.error.lookupNoKey':
+  'fmcsa.error.noKey':
     'جست‌وجوی FMCSA روی این سرور پیکربندی نشده است. اطلاعات را دستی وارد کنید.',
-  'companies.error.lookupRefused': 'اجازهٔ جست‌وجوی شرکت‌ها را ندارید.',
+  'fmcsa.error.refused': 'اجازهٔ جست‌وجو در این سامانه را ندارید.',
+  'fmcsa.error.tooMany':
+    'تعداد جست‌وجوها زیاد است. {seconds} ثانیه صبر کنید و دوباره تلاش کنید — کلید FMCSA مشترک است و انفجار درخواست اینجا برای همه هزینه دارد.',
   'companies.error.duplicateDot':
     'USDOT {dot} از پیش متعلق به شرکت دیگری در اینجاست.',
   'companies.error.badState': 'از کد دو حرفی ایالت استفاده کنید.',
@@ -3275,6 +3297,8 @@ const fa: Dictionary = {
   'brokers.new': 'کارگزار تازه',
   'brokers.edit': 'ویرایش کارگزار',
   'brokers.stripeMeaning': 'نوار نشان می‌دهد که آیا می‌توان بار گرفت',
+  'brokers.error.duplicateMc':
+    'MC {mc} از پیش روی «{name}» است. به‌جای ساختن رکورد دوم همان را باز کنید.',
   'brokers.name': 'نام',
   'brokers.type': 'نوع',
   'brokers.mc': 'شمارهٔ MC',

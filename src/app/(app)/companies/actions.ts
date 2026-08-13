@@ -4,15 +4,12 @@ import { revalidatePath } from 'next/cache'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { addCompany } from '@/lib/companies'
+import { requireSession } from '@/lib/auth-context'
 import {
-  FmcsaError,
-  type CarrierConcern,
-  type FmcsaFailure,
-  carrierNumber,
-  concernsFor,
-  lookupCarrier,
-} from '@/lib/fmcsa'
-import type { MessageKey } from '@/lib/i18n'
+  renderConcerns,
+  renderStatus,
+  runCarrierLookup,
+} from '@/lib/fmcsa-lookup'
 import {
   ADD_COMPANY_INITIAL,
   type AddCompanyState,
@@ -92,23 +89,26 @@ export async function addCompanyAction(
 }
 
 // ---------------------------------------------------------------------------
-// THE FMCSA LOOKUP.
+// THE FMCSA LOOKUP, for an authority we book freight under.
 //
 // A SERVER FUNCTION, NOT A FORM ACTION, and called from a transition rather
 // than by submitting. The form has one submit and it is Add authority; a
 // lookup that submitted the form would be a button that looks like the save
-// button next to it. Taking a plain object rather than `FormData` also keeps
-// the two paths visibly different in the client.
+// button next to it.
 //
 // THE WEBKEY IS THE REASON THIS IS ON THE SERVER AT ALL. FMCSA takes the key
 // as a query parameter, so a browser fetch would put it in the network tab of
 // anybody who opened this page — and in their history, and in any proxy log
 // between here and Washington.
 //
-// IT NEVER WRITES. Nothing is saved, nothing is audited, nothing is created:
-// the answer goes into the form's fields and waits for a person to press Add
-// authority. That is the extraction contract's posture — prefill, then a human
-// — applied to a different source of the same kind of claim.
+// IT NEVER WRITES. The answer goes into the form's fields and waits for a
+// person to press Add authority. That is the extraction contract's posture —
+// prefill, then a human — applied to a different source of the same kind of
+// claim.
+//
+// The call, the budget and the sentences live in `fmcsa-lookup.ts`, shared
+// with the broker screen. What stays here is the permission and the mapping
+// from register fields onto THIS table's columns.
 // ---------------------------------------------------------------------------
 
 export async function lookupCarrierAction(input: {
@@ -121,94 +121,50 @@ export async function lookupCarrierAction(input: {
   // every permission is. The page already 404s for a role without it; this is
   // the second door, because a server function is reachable without the page.
   if (!(await currentUserCan('create', 'company'))) {
-    return { ...LOOKUP_INITIAL, error: t('companies.error.lookupRefused') }
+    return { ...LOOKUP_INITIAL, error: t('fmcsa.error.refused') }
   }
 
-  // USDOT FIRST WHEN BOTH ARE TYPED. A DOT number identifies exactly one
-  // authority; a docket number can exist as MC, FF and MX at once, and the
-  // register answers that endpoint with a list. Preferring the unambiguous one
-  // is not a preference about which field matters.
-  const dot = carrierNumber(input.dot)
-  const mc = carrierNumber(input.mc)
-  const query = dot
-    ? ({ kind: 'dot', number: dot } as const)
-    : mc
-      ? ({ kind: 'mc', number: mc } as const)
-      : null
+  // WHOSE BUDGET. Read after the permission check, so an unauthenticated call
+  // is refused rather than counted.
+  const session = await requireSession()
 
-  if (!query) {
-    return { ...LOOKUP_INITIAL, error: t('companies.error.lookupNeedNumber') }
+  const outcome = await runCarrierLookup({ ...input, userId: session.userId })
+  if (!outcome.ok) {
+    const message = Object.entries(outcome.values ?? {}).reduce(
+      (sentence, [key, value]) => sentence.replaceAll(`{${key}}`, value),
+      t(outcome.messageKey),
+    )
+    return { ...LOOKUP_INITIAL, error: message }
   }
 
-  try {
-    const carrier = await lookupCarrier(query)
-
-    return {
-      error: null,
-      found: {
-        prefill: {
-          // THE TRADE NAME IS THE DBA WHEN THERE IS ONE. Zebra's `name` is what
-          // the office calls this authority and `legalName` is what the invoice
-          // footer prints; FMCSA's `dbaName` and `legalName` are exactly that
-          // pair, in that order.
-          name: carrier.dbaName ?? carrier.legalName ?? '',
-          legalName: carrier.legalName ?? '',
-          dotNumber: carrier.dotNumber ?? '',
-          addressLine1: carrier.addressLine1 ?? '',
-          city: carrier.city ?? '',
-          state: carrier.state ?? '',
-          postalCode: carrier.postalCode ?? '',
-          phone: carrier.phone ?? '',
-        },
-        entityType: carrier.entityType,
-        operation: carrier.operation,
-        safetyRating: carrier.safetyRating,
-        status:
-          carrier.statusCode === null
-            ? null
-            : carrier.statusCode.toUpperCase() === 'A'
-              ? t('companies.fmcsaActive')
-              : t('companies.fmcsaInactive'),
-        // The out-of-service sentence names the date, because "there is an
-        // order" and "there was an order in 2019" are different facts.
-        concerns: concernsFor(carrier).map((concern) =>
-          t(CONCERN_KEYS[concern]).replace(
-            '{date}',
-            carrier.outOfServiceDate ?? '',
-          ),
-        ),
+  const carrier = outcome.carrier
+  return {
+    error: null,
+    found: {
+      prefill: {
+        // THE TRADE NAME IS THE DBA WHEN THERE IS ONE. Zebra's `name` is what
+        // the office calls this authority and `legalName` is what the invoice
+        // footer prints; FMCSA's `dbaName` and `legalName` are exactly that
+        // pair, in that order. The broker screen reverses this, and the
+        // comment there says why.
+        name: carrier.dbaName ?? carrier.legalName ?? '',
+        legalName: carrier.legalName ?? '',
+        dotNumber: carrier.dotNumber ?? '',
+        addressLine1: carrier.addressLine1 ?? '',
+        city: carrier.city ?? '',
+        state: carrier.state ?? '',
+        postalCode: carrier.postalCode ?? '',
+        phone: carrier.phone ?? '',
       },
-    }
-  } catch (error) {
-    // EVERY FAILURE DEGRADES TO THE MANUAL FORM. Nothing here is cleared,
-    // nothing is disabled, and every sentence ends by saying so — the lookup is
-    // a convenience on a form that worked before it existed.
-    if (error instanceof FmcsaError) {
-      return {
-        ...LOOKUP_INITIAL,
-        error: t(LOOKUP_ERROR_KEYS[error.reason]),
-      }
-    }
-    // An unexpected throw is still not worth a 500 on a form somebody can
-    // finish by typing. Logged by the platform; shown as the generic sentence.
-    return { ...LOOKUP_INITIAL, error: t('companies.error.lookupUnavailable') }
+      entityType: carrier.entityType,
+      operation: carrier.operation,
+      safetyRating: carrier.safetyRating,
+      dbaName: carrier.dbaName,
+      status: renderStatus(carrier, t),
+      // `operating` — this is an authority WE will run freight under, so
+      // common or contract authority is what matters and broker authority is
+      // not expected.
+      concerns: renderConcerns(carrier, 'operating', t),
+    },
   }
-}
-
-/** One sentence per concern, in the catalogue with every other sentence. */
-const CONCERN_KEYS: Record<CarrierConcern, MessageKey> = {
-  not_allowed_to_operate: 'companies.warn.notAllowedToOperate',
-  out_of_service: 'companies.warn.outOfService',
-  inactive: 'companies.warn.inactive',
-  no_active_authority: 'companies.warn.noActiveAuthority',
-  unsatisfactory_rating: 'companies.warn.unsatisfactoryRating',
-}
-
-const LOOKUP_ERROR_KEYS: Record<FmcsaFailure, MessageKey> = {
-  no_web_key: 'companies.error.lookupNoKey',
-  bad_number: 'companies.error.lookupNeedNumber',
-  not_found: 'companies.error.lookupNotFound',
-  http_error: 'companies.error.lookupUnavailable',
-  unreadable: 'companies.error.lookupUnavailable',
-  unreachable: 'companies.error.lookupUnavailable',
 }

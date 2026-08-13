@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import { currentUserCan } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
+import { fmcsaLabels } from '@/components/forms/fmcsa-labels'
 import { AddCompanyForm } from '../AddCompanyForm'
 
 // Admin → Authorities → Add. `company:create` is OWNER and ADMIN only, and a
@@ -30,17 +31,8 @@ export default async function NewCompanyPage() {
           save: t('companies.save'),
           cancel: t('companies.cancel'),
           hint: t('companies.hint'),
-          lookup: t('companies.lookup'),
-          lookupHint: t('companies.lookupHint'),
-          lookupPending: t('companies.lookupPending'),
-          lookupFilled: t('companies.lookupFilled'),
-          fromFmcsa: t('companies.fromFmcsa'),
-          fmcsaTitle: t('companies.fmcsaTitle'),
-          fmcsaEntity: t('companies.fmcsaEntity'),
-          fmcsaOperation: t('companies.fmcsaOperation'),
-          fmcsaStatus: t('companies.fmcsaStatus'),
-          fmcsaRating: t('companies.fmcsaRating'),
         }}
+        fmcsa={fmcsaLabels(t)}
       />
     </div>
   )

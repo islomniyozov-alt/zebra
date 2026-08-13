@@ -723,3 +723,60 @@ describe('the Relay bulk import (Phase 6 §3a)', () => {
     }
   })
 })
+
+describe('the FMCSA lookup, per role', () => {
+  const roles = [
+    'OWNER',
+    'ADMIN',
+    'MANAGER',
+    'DISPATCHER',
+    'ACCOUNTING',
+  ] as const
+
+  const session = (role: (typeof roles)[number]) =>
+    ({
+      role,
+      organizationId: 'org',
+      userId: 'u',
+      companyScopes: [],
+    }) as never
+
+  // TWO DOORS, TWO PERMISSIONS, and they are deliberately different widths.
+  // The authority lookup fills in a carrier WE will book freight under and is
+  // owner-gated; the broker lookup fills in somebody who will tender freight
+  // and owe money, and a dispatcher adds those mid-booking.
+  it('is owner-gated on the authority form', () => {
+    const may = roles.filter((role) => can(session(role), 'create', 'company'))
+    expect(may).toEqual(['OWNER', 'ADMIN'])
+  })
+
+  // THIS IS THE "WIDER HANDS" FLAG 24 PARKED THE RATE LIMIT AGAINST, and the
+  // assertion that says the day arrived — wider than the flag guessed.
+  //
+  // `customer:create` is held by DISPATCHER because §9's create-on-miss needs
+  // it, AND by ACCOUNTING, which holds RECORDS_WRITE because maintaining a
+  // broker's billing email, payment terms and block is accounting's job. So
+  // EVERY role reaches the broker lookup, where the authority lookup reaches
+  // two. The budget in fmcsa-gate.ts is sized for this list, not for that one.
+  it('is reachable by EVERY role on the broker form', () => {
+    const may = roles.filter((role) => can(session(role), 'create', 'customer'))
+    expect(may).toEqual([...roles])
+  })
+
+  // The pair that keeps the two doors honestly different widths: the role that
+  // may add a broker from any screen still may not add an AUTHORITY.
+  it('and none of that widens the authority door', () => {
+    for (const role of ['MANAGER', 'DISPATCHER', 'ACCOUNTING'] as const) {
+      expect(can(session(role), 'create', 'customer')).toBe(true)
+      expect(can(session(role), 'create', 'company')).toBe(false)
+    }
+  })
+
+  // A DISPATCHER may add a broker and may not edit one afterwards — the
+  // asymmetry §9 chose. The lookup rides on create, so it follows the same
+  // shape rather than quietly widening it.
+  it('does not let the broker lookup imply broker EDITING', () => {
+    expect(can(session('DISPATCHER'), 'create', 'customer')).toBe(true)
+    expect(can(session('DISPATCHER'), 'update', 'customer')).toBe(false)
+  })
+})

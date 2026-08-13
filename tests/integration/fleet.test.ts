@@ -427,6 +427,69 @@ describe('brokers', () => {
     )
     expect(lifted.blockedReason).toBeNull()
   })
+
+  // THE DUPLICATE-MC REFUSAL, the same shape the authority form's duplicate
+  // USDOT takes. It mattered less while somebody had to type the number; the
+  // FMCSA lookup fills it in now, and looking a broker up twice is exactly
+  // what a dispatcher does when unsure whether the office already has them.
+  //
+  // Two customers for one broker split the payment history, the credit limit
+  // and the aging of a single relationship — and nothing downstream notices.
+  it('refuses a second broker carrying an MC one already has, and NAMES it', async () => {
+    const first = await inOrg((tx) =>
+      createBroker(tx, organizationId, {
+        name: `Meridian Freight ${nonce}`,
+        mcNumber: '445566',
+      }),
+    )
+
+    await expect(
+      inOrg((tx) =>
+        createBroker(tx, organizationId, {
+          name: `Meridian Logistics ${nonce}`,
+          mcNumber: '445566',
+        }),
+      ),
+    ).rejects.toMatchObject({
+      name: 'DuplicateBrokerError',
+      mcNumber: '445566',
+      // NAMING THE RECORD IS THE WHOLE VALUE. "Duplicate" sends somebody
+      // looking; the broker's own name tells them where to look.
+      existingName: first.name,
+    })
+
+    // RULE 11 — the pair. A different MC on the same name is not a duplicate,
+    // so the refusal is about the number and not about the request's shape.
+    const other = await inOrg((tx) =>
+      createBroker(tx, organizationId, {
+        name: `Meridian Logistics ${nonce}`,
+        mcNumber: '445567',
+      }),
+    )
+    expect(other.mcNumber).toBe('445567')
+  })
+
+  // A retired broker still holds the freight it ran. The answer to "we already
+  // have them, they were retired" is to restore that record, not to start a
+  // second payment history under the same MC.
+  it('counts a retired broker as already having the number', async () => {
+    const retired = await inOrg((tx) =>
+      createBroker(tx, organizationId, {
+        name: `Lapsed Freight ${nonce}`,
+        mcNumber: '778899',
+      }),
+    )
+    await inOrg((tx) => retireBroker(tx, retired.id))
+
+    await expect(
+      inOrg((tx) =>
+        createBroker(tx, organizationId, {
+          name: `Lapsed Freight again ${nonce}`,
+          mcNumber: '778899',
+        }),
+      ),
+    ).rejects.toMatchObject({ name: 'DuplicateBrokerError' })
+  })
 })
 
 describe('transferring an asset between authorities', () => {

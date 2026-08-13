@@ -365,3 +365,80 @@ describe('the call itself', () => {
     ).rejects.toMatchObject({ reason: 'unreadable' })
   })
 })
+
+describe('the same record, judged for who is asking', () => {
+  // A PURE BROKER RUNS NO TRUCKS. Common and contract authority are `N`
+  // because they were never granted, not because anything went wrong, and the
+  // general "no active authority" sentence would be an accusation built out of
+  // the ordinary case.
+  const broker = (brokerAuthorityStatus: string | null) => ({
+    ...HEALTHY,
+    commonAuthorityStatus: 'N',
+    contractAuthorityStatus: 'N',
+    brokerAuthorityStatus,
+    safetyRating: null,
+    censusTypeId: { censusTypeDesc: 'BROKER' },
+  })
+
+  it('says nothing about a broker whose broker authority is active', () => {
+    const carrier = parseCarrier(dotPayload(broker('A')))!
+    expect(concernsFor(carrier, 'broker')).toEqual([])
+  })
+
+  // THE NOT-GETTING-PAID GATE. `I` means granted and since revoked or lapsed,
+  // which is the fact that decides whether an unpaid invoice has a live surety
+  // bond behind it.
+  it('warns in words when broker authority is inactive', () => {
+    const carrier = parseCarrier(dotPayload(broker('I')))!
+    expect(concernsFor(carrier, 'broker')).toContain(
+      'broker_authority_inactive',
+    )
+  })
+
+  it('and says a different thing when there never was any', () => {
+    const carrier = parseCarrier(dotPayload(broker('N')))!
+    const concerns = concernsFor(carrier, 'broker')
+    expect(concerns).toContain('broker_authority_none')
+    expect(concerns).not.toContain('broker_authority_inactive')
+  })
+
+  // ABSENT DATA STAYS A GAP, NOT AN ACCUSATION. A register that did not answer
+  // about broker authority has not said there is none.
+  it('stays silent when the register said nothing about broker authority', () => {
+    const carrier = parseCarrier(dotPayload(broker(null)))!
+    expect(concernsFor(carrier, 'broker')).toEqual([])
+  })
+
+  // A SHIPPER HOLDS NO AUTHORITY OF ANY KIND AND IS NOT SUPPOSED TO. A factory
+  // handing us freight is the ordinary case, and warning about it would train
+  // somebody to click past the warning that matters.
+  it('says nothing at all about a shipper with no authority', () => {
+    const carrier = parseCarrier(dotPayload(broker('N')))!
+    expect(concernsFor(carrier, 'shipper')).toEqual([])
+  })
+
+  // The same record read as an authority WE book under: broker authority is
+  // not the question, and none of the three being active is.
+  it('still reports no active authority for an operating authority', () => {
+    const carrier = parseCarrier(dotPayload(broker('N')))!
+    const concerns = concernsFor(carrier, 'operating')
+    expect(concerns).toContain('no_active_authority')
+    expect(concerns).not.toContain('broker_authority_none')
+  })
+
+  // Whoever is asking, an out-of-service order and a revoked right to operate
+  // are said out loud.
+  it('reports being barred from operating to every audience', () => {
+    const barred = parseCarrier(
+      dotPayload({
+        ...broker('A'),
+        allowedToOperate: 'N',
+        oosDate: '2026-01-09',
+      }),
+    )!
+    for (const audience of ['operating', 'broker', 'shipper'] as const) {
+      expect(concernsFor(barred, audience)).toContain('not_allowed_to_operate')
+      expect(concernsFor(barred, audience)).toContain('out_of_service')
+    }
+  })
+})

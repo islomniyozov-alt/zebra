@@ -755,6 +755,41 @@ record(
   'the lookup runs on the server, so the browser never sees either',
 )
 
+// --- THE SAME REGISTER, THE WIDER DOOR ------------------------------------
+//
+// The broker lookup is gated on `customer:create`, which a DISPATCHER holds so
+// §9's create-on-miss works mid-booking. That is a much wider door than the
+// authority lookup's, and it is the reason the FMCSA budget exists — so the
+// walkthrough proves the door is open to a dispatcher and that the key still
+// is not.
+const dispatcherBroker = await bodyOf(dispatcher.page, '/brokers/new')
+record(
+  'a dispatcher can reach the new broker form',
+  dispatcherBroker.status === 200,
+  `HTTP ${dispatcherBroker.status}`,
+)
+
+record(
+  'and it offers the same FMCSA lookup the authority form does',
+  /Look up/.test(dispatcherBroker.body),
+  'one control, two screens',
+)
+
+record(
+  'while the FMCSA key and endpoint stay off the dispatcher’s wire too',
+  !/webKey/i.test(dispatcherBroker.body) &&
+    !/mobile\.fmcsa\.dot\.gov/i.test(dispatcherBroker.body),
+  'the lookup runs on the server on both screens',
+)
+
+// And the wider door does not widen the other one: the same dispatcher who
+// may add a broker still may not add an authority.
+record(
+  'but a dispatcher adding a broker still cannot add an authority',
+  dispatcherAdd.status === 404 && dispatcherBroker.status === 200,
+  'two doors, two widths',
+)
+
 // --- THE RELAY IMPORT IS A BOOKING ACT (Phase 6 §3a) ----------------------
 //
 // Gated on `load:create` and nothing new, so a dispatcher — who books all day
