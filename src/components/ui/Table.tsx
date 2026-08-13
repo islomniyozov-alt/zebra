@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { TONE_STRIPE, type StatusTone } from '@/lib/status'
+import Link from 'next/link'
 import { cx } from '@/lib/cx'
 
 // §7.1 — the primary interface of the application. Everything else is support.
@@ -40,6 +41,25 @@ interface TableProps<Row> {
   empty: ReactNode
   /** Announced to screen readers; the visible title lives in the page header. */
   caption: string
+  /**
+   * Where this row's detail lives. Makes the WHOLE row clickable.
+   *
+   * §7.1 HAS SPECIFIED THIS SINCE PHASE 1 AND THIS COMPONENT NEVER DID IT:
+   * "The whole row is clickable via a stretched-link `::after` on a real
+   * anchor — middle-click and keyboard both work. Interactive controls inside
+   * the row raise `z-index` as dead zones."
+   *
+   * Every list instead put a link on one cell, so the target was the width of
+   * a name and the other eight columns did nothing. The owner reported it as
+   * "rows aren't clickable"; the design system had been saying so for five
+   * phases.
+   *
+   * A REAL ANCHOR, not an onClick. Middle-click opens a tab, ⌘-click opens a
+   * tab, the keyboard reaches it in tab order, and a screen reader announces
+   * it with the row's own first cell as its name. A `<tr onClick>` gives none
+   * of that and is the reason the rule specifies the mechanism.
+   */
+  rowHref?: (row: Row) => string | null
 }
 
 export function Table<Row>({
@@ -50,6 +70,7 @@ export function Table<Row>({
   isCancelled,
   empty,
   caption,
+  rowHref,
 }: TableProps<Row>) {
   if (columns.length > 9) {
     // §7.1. Anything beyond nine goes behind a column chooser. Failing loudly
@@ -97,12 +118,18 @@ export function Table<Row>({
           ) : (
             rows.map((row) => {
               const cancelled = isCancelled?.(row) ?? false
+              const href = rowHref?.(row) ?? null
               return (
                 <tr
                   key={rowKey(row)}
                   className={cx(
                     'group h-[var(--z-row-height)] border-b border-border',
                     'hover:bg-surface-3',
+                    // `relative` is what the stretched link stretches to, and
+                    // `focus-within` is how a keyboard shows where it is: the
+                    // anchor's own outline would only wrap the name, which on
+                    // a nine-column row is not where the eye goes.
+                    href && 'relative cursor-pointer focus-within:bg-surface-3',
                     // Nothing else in the system reduces text opacity (§2).
                     cancelled && 'opacity-60',
                   )}
@@ -116,7 +143,7 @@ export function Table<Row>({
                       )}
                     />
                   ) : null}
-                  {columns.map((column) => (
+                  {columns.map((column, index) => (
                     <td
                       key={column.key}
                       className={cx(
@@ -128,7 +155,20 @@ export function Table<Row>({
                         column.truncate && 'max-w-[1px] truncate',
                       )}
                     >
-                      {column.render(row)}
+                      {/* THE FIRST CELL CARRIES THE ANCHOR, so the row's
+                       * accessible name is the thing that identifies it —
+                       * the load number, the broker's name — rather than a
+                       * bare "open". Its `::after` covers the whole row. */}
+                      {href && index === 0 ? (
+                        <Link
+                          href={href}
+                          className="font-medium text-ink after:absolute after:inset-0 after:content-[''] hover:text-accent"
+                        >
+                          {column.render(row)}
+                        </Link>
+                      ) : (
+                        column.render(row)
+                      )}
                     </td>
                   ))}
                 </tr>

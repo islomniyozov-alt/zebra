@@ -3,6 +3,7 @@ import { currentUserCan } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { fmcsaLabels } from '@/components/forms/fmcsa-labels'
 import { AddCompanyForm } from '../AddCompanyForm'
+import { addCompanyAction } from '../actions'
 
 // Admin → Authorities → Add. `company:create` is OWNER and ADMIN only, and a
 // MANAGER who types the URL gets a 404 rather than a form that refuses on
@@ -16,6 +17,7 @@ export default async function NewCompanyPage() {
     <div className="flex flex-col gap-z4">
       <h1 className="text-xl font-semibold text-ink">{t('companies.add')}</h1>
       <AddCompanyForm
+        action={addCompanyAction}
         labels={{
           name: t('companies.name'),
           legalName: t('companies.legalName'),

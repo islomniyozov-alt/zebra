@@ -148,3 +148,243 @@ export async function addCompany(
   // decides where a series starts.
   return { ok: true, id: created.id }
 }
+
+// ---------------------------------------------------------------------------
+// EDITING AND RETIRING AN AUTHORITY (owner report: rows are not clickable).
+//
+// Flag 11 built the create half and said so. What it skipped is everything
+// after the first save: a typo in an MC number was uncorrectable, and an
+// authority added by mistake was permanent. Both were reachable only with SQL,
+// which is the state the whole screen exists to end.
+//
+// DEACTIVATE IS THE DEFAULT AND DELETE IS THE EXCEPTION, because `Company.id`
+// IS the tenant scope every query filters by. Deleting one cascades — the
+// schema says `onDelete: Cascade` on every child — so a hard delete of an
+// authority that has run freight would take its loads, its invoices, its
+// settlements and its audit trail with it, silently and in one statement.
+// ---------------------------------------------------------------------------
+
+/**
+ * What is filed under this authority.
+ *
+ * COUNTED ACROSS EVERYTHING THAT CASCADES, not a representative sample. The
+ * whole purpose is to answer "would deleting this destroy anything", and a
+ * check that looked at loads and invoices would happily delete an authority
+ * holding three trucks and a year of inspections.
+ *
+ * Three relations are deliberately NOT counted, because they are bookkeeping
+ * this screen creates rather than history somebody entered:
+ *
+ *   * `settings` — one row per company, written at setup;
+ *   * `memberScopes` — who may see it, which is about people, not freight;
+ *   * `auditLogs` — including the row recording that it was created. Blocking
+ *     on those would make every authority undeletable the moment it existed,
+ *     which is the same as having no delete at all.
+ */
+export interface CompanyUsage {
+  loads: number
+  invoices: number
+  settlements: number
+  /** Everything else that would be destroyed. Summed, because the sentence
+   *  names the three the owner asked for and this is the safety net. */
+  other: number
+  total: number
+}
+
+const CASCADING = {
+  loads: true,
+  invoices: true,
+  settlements: true,
+  payments: true,
+  expenses: true,
+  trucks: true,
+  trailers: true,
+  drivers: true,
+  documents: true,
+  maintenance: true,
+  inspections: true,
+  claims: true,
+  fuelTxns: true,
+  iftaMileage: true,
+  complianceItems: true,
+  dataQs: true,
+  communications: true,
+  notifications: true,
+  calendarEvents: true,
+  pendingUploads: true,
+  factoringCompanies: true,
+  integrations: true,
+  assetHistory: true,
+  // A counter row means this authority allocated a load number at some point,
+  // which is freight even if the load has since gone.
+  counters: true,
+} as const
+
+export async function companyUsage(
+  tx: TxClient,
+  companyId: string,
+): Promise<CompanyUsage> {
+  const row = await tx.company.findFirst({
+    where: { id: companyId },
+    select: { _count: { select: CASCADING } },
+  })
+  const counts = (row?._count ?? {}) as Record<string, number>
+
+  const named = ['loads', 'invoices', 'settlements']
+  const other = Object.entries(counts)
+    .filter(([key]) => !named.includes(key))
+    .reduce((sum, [, count]) => sum + count, 0)
+
+  const loads = counts['loads'] ?? 0
+  const invoices = counts['invoices'] ?? 0
+  const settlements = counts['settlements'] ?? 0
+
+  return {
+    loads,
+    invoices,
+    settlements,
+    other,
+    total: loads + invoices + settlements + other,
+  }
+}
+
+export type UpdateCompanyFailure = AddCompanyFailure | 'not_found'
+
+export type UpdateCompanyResult =
+  | { ok: true; id: string }
+  | { ok: false; reason: UpdateCompanyFailure; dot?: string }
+
+/**
+ * Edit an authority.
+ *
+ * THE SAME REFUSALS AS CREATE AND FOR THE SAME REASONS — a two-letter state
+ * because it prints at the top of every invoice, a unique name because two
+ * "RAM Haulage" rows send invoices out under the wrong one, a unique USDOT
+ * because the schema has always said so. The only difference is that this row
+ * is allowed to be itself: every check excludes the record being edited, which
+ * is the bug an edit form written by copying a create form always has.
+ *
+ * NO LIMIT CHECK. `maxCompanies` governs how many exist; editing one does not
+ * make another.
+ *
+ * FIELD-LEVEL AUDIT COMES FOR FREE and deliberately so: this runs through the
+ * audited Prisma extension, which diffs the row before and after and writes
+ * `{ field: { from, to } }`. Writing a second diff here would be a second
+ * story about what changed.
+ */
+export async function updateCompany(
+  tx: TxClient,
+  id: string,
+  input: AddCompanyInput,
+): Promise<UpdateCompanyResult> {
+  const name = input.name.trim()
+  if (name === '') return { ok: false, reason: 'no_name' }
+
+  const current = await tx.company.findFirst({
+    where: { id },
+    select: { id: true },
+  })
+  if (!current) return { ok: false, reason: 'not_found' }
+
+  const state = optionalText(input.state)
+  if (state !== null && !/^[A-Za-z]{2}$/.test(state)) {
+    return { ok: false, reason: 'bad_state' }
+  }
+
+  // `id: { not: id }` on both — a record is allowed to keep its own name and
+  // its own USDOT, which is what makes this an edit rather than a create that
+  // always refuses.
+  const clash = await tx.company.findFirst({
+    where: { name: { equals: name, mode: 'insensitive' }, id: { not: id } },
+    select: { id: true },
+  })
+  if (clash) return { ok: false, reason: 'duplicate_name' }
+
+  const dotNumber = optionalText(input.dotNumber)
+  if (dotNumber !== null) {
+    const sameDot = await tx.company.findFirst({
+      where: { dotNumber, id: { not: id } },
+      select: { id: true },
+    })
+    if (sameDot) return { ok: false, reason: 'duplicate_dot', dot: dotNumber }
+  }
+
+  await tx.company.update({
+    where: { id },
+    data: {
+      name,
+      legalName: optionalText(input.legalName),
+      mcNumber: optionalText(input.mcNumber),
+      dotNumber,
+      addressLine1: optionalText(input.addressLine1),
+      addressLine2: optionalText(input.addressLine2),
+      city: optionalText(input.city),
+      state: state === null ? null : stateCode(state),
+      postalCode: optionalText(input.postalCode),
+      phone: optionalText(input.phone),
+      email: optionalText(input.email),
+    },
+  })
+
+  return { ok: true, id }
+}
+
+/**
+ * Take an authority out of service without taking its history with it.
+ *
+ * `isActive: false` is all this is, and every screen that offers a choice of
+ * authority already filters on it — the topbar switcher, the create-load
+ * select, the Relay import. A deactivated carrier therefore disappears from
+ * everywhere somebody could file NEW freight under it, and keeps rendering on
+ * every load, invoice and settlement it ever ran, because those join by id and
+ * do not care.
+ */
+export async function setCompanyActive(
+  tx: TxClient,
+  id: string,
+  isActive: boolean,
+): Promise<{ ok: boolean }> {
+  const existing = await tx.company.findFirst({
+    where: { id },
+    select: { id: true },
+  })
+  if (!existing) return { ok: false }
+  await tx.company.update({ where: { id }, data: { isActive } })
+  return { ok: true }
+}
+
+export type DeleteCompanyResult =
+  | { ok: true }
+  | { ok: false; reason: 'not_found' }
+  | { ok: false; reason: 'has_history'; usage: CompanyUsage }
+
+/**
+ * Remove an authority that never did anything.
+ *
+ * THE ONLY CASE THIS ALLOWS is the one the owner named: a mistaken entry with
+ * nothing under it. Everything else is refused in words and offered
+ * deactivation instead, because `onDelete: Cascade` means a delete here is a
+ * delete of every load, invoice, settlement, truck and inspection filed under
+ * it — the single most destructive statement this application could run, and
+ * it would report success.
+ *
+ * The count is taken INSIDE the caller's transaction, immediately before the
+ * delete, so a load booked between somebody reading the screen and pressing
+ * the button cannot be destroyed by a check that was true a minute ago.
+ */
+export async function deleteCompany(
+  tx: TxClient,
+  id: string,
+): Promise<DeleteCompanyResult> {
+  const existing = await tx.company.findFirst({
+    where: { id },
+    select: { id: true },
+  })
+  if (!existing) return { ok: false, reason: 'not_found' }
+
+  const usage = await companyUsage(tx, id)
+  if (usage.total > 0) return { ok: false, reason: 'has_history', usage }
+
+  await tx.company.delete({ where: { id } })
+  return { ok: true }
+}

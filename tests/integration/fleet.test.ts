@@ -14,7 +14,13 @@ import {
   updateDriver,
   updateTruck,
 } from '@/lib/fleet'
-import { createBroker, retireBroker, updateBroker } from '@/lib/brokers'
+import {
+  brokerUsage,
+  createBroker,
+  retireBroker,
+  updateBroker,
+} from '@/lib/brokers'
+import { createLoad } from '@/lib/loads'
 import { ReferenceError } from '@/lib/reference'
 import type { PrismaClient } from '@/generated/prisma/client'
 
@@ -467,6 +473,49 @@ describe('brokers', () => {
       }),
     )
     expect(other.mcNumber).toBe('445567')
+  })
+
+  // RETIRING HIDES A BROKER FROM THE BOOKING PATH, and §9's create-on-miss
+  // will cheerfully make a SECOND customer with the same name the next time a
+  // dispatcher types it — the split-payment-history bug arrived at from the
+  // other side. So a broker with freight is refused and offered ON_HOLD or
+  // BLOCKED, both of which keep the record findable.
+  it('refuses to retire a broker with freight, and names what is under them', async () => {
+    const broker = await inOrg((tx) =>
+      createBroker(tx, organizationId, { name: `Busy Broker ${nonce}` }),
+    )
+    await inOrg((tx) =>
+      createLoad(tx, organizationId, {
+        companyId: alphaId,
+        customerId: broker.id,
+        stops: [
+          { type: 'PICKUP', city: 'Reno', state: 'NV' },
+          { type: 'DELIVERY', city: 'Boise', state: 'ID' },
+        ],
+      }),
+    )
+
+    const usage = await inOrg((tx) => brokerUsage(tx, broker.id))
+    expect(usage.loads).toBe(1)
+
+    await expect(
+      inOrg((tx) => retireBroker(tx, broker.id)),
+    ).rejects.toMatchObject({
+      name: 'BrokerInUseError',
+      brokerName: `Busy Broker ${nonce}`,
+      loads: 1,
+    })
+
+    // RULE 11 — the pair. The refusal is about the freight, not the request:
+    // a broker with nothing under them still retires.
+    const idle = await inOrg((tx) =>
+      createBroker(tx, organizationId, { name: `Idle Broker ${nonce}` }),
+    )
+    await inOrg((tx) => retireBroker(tx, idle.id))
+    const after = await inOrg((tx) =>
+      tx.customer.findUnique({ where: { id: idle.id } }),
+    )
+    expect(after?.deletedAt).toBeInstanceOf(Date)
   })
 
   // A retired broker still holds the freight it ran. The answer to "we already

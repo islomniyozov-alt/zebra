@@ -696,3 +696,100 @@ Recorded rather than resolved, per Phase 1's discipline.
     RETIRED BROKERS COUNT. A `deletedAt` row still holds the freight it ran, so
     the answer to "we already have them, they were retired" is to restore that
     record rather than start a second history. Asserted.
+
+31. **§7.1 SPECIFIED CLICKABLE ROWS IN PHASE 1 AND `Table` NEVER IMPLEMENTED
+    IT.** The owner reported it on Companies and Brokers. The audit finding is
+    wider: the design system has said "the whole row is clickable via a
+    stretched-link `::after` on a real anchor — middle-click and keyboard both
+    work" since Phase 1, and the component had no such prop, so **every** list
+    put a link on one cell and left the other eight columns dead.
+
+    `Table` now takes `rowHref` and wraps the FIRST cell's content in the
+    anchor, so the row's accessible name is the thing that identifies it rather
+    than a bare "open". A real anchor, not an `onClick`: middle-click opens a
+    tab, the keyboard reaches it in tab order, and a screen reader announces
+    it — none of which a `<tr onClick>` gives, which is why the rule specifies
+    the mechanism and not just the behaviour.
+
+    THE BROKER LIST'S NAME CELL LOST ITS OWN `<Link>`. An anchor inside an
+    anchor is invalid HTML that browsers resolve by silently closing the outer
+    one — which would have made the rest of the row unclickable again, the
+    exact bug being fixed. The phone cell gained `relative z-10`, which is the
+    rule's other half: without it the stretched link covers the number and
+    tapping a broker's phone on a tablet opens their detail page.
+
+    ADOPTED ON THE TWO SCREENS THE OWNER REPORTED. Six other lists have detail
+    routes and could take one line each — drivers, invoices, loads, payments,
+    settlements, trailers, trucks. Not done here because the session was scoped
+    to Companies and Brokers, and named so it is a decision rather than an
+    oversight.
+
+32. **Flag 11's "minimal" left an authority uneditable and permanent.** Both
+    were reachable only with SQL, which is the state that whole screen exists
+    to end. The edit form is the create form with a different action and
+    starting values — one form, so the strict two-letter state, the duplicate
+    refusals and the FMCSA lookup cannot drift between adding and correcting.
+
+    EVERY DUPLICATE CHECK EXCLUDES THE RECORD BEING EDITED. That is the bug an
+    edit form written by copying a create form always has: saving a row without
+    touching its name refuses, because its name is taken by itself. Asserted
+    directly rather than assumed.
+
+    FIELD-LEVEL AUDIT DIFFS COME FROM THE PATH, NOT FROM NEW CODE. The audited
+    Prisma extension already reads the row before and after and writes
+    `{ field: { from, to } }`. The test asserts the wiring — that `phone`
+    appears in the diff and `name` does not — because a lib function called
+    outside `withOrg` would leave an audit gap instead, and that failure is
+    silent.
+
+33. **Deactivate is the act; delete is the exception, and the difference is
+    `onDelete: Cascade`.** Every child of `Company` cascades, so an unguarded
+    delete of an authority that has run freight destroys its loads, invoices,
+    settlements and audit trail in one statement — and reports success.
+
+    `companyUsage` therefore counts **twenty-four relations**, not the three
+    the sentence names. A check that looked at loads, invoices and settlements
+    would happily cascade away an authority holding three trucks and a year of
+    inspections; there is a test that builds exactly that authority. Three
+    relations are deliberately not counted — `settings`, `memberScopes` and
+    `auditLogs` — because they are bookkeeping this screen creates rather than
+    history somebody entered, and blocking on them would make every authority
+    undeletable the moment it existed.
+
+    DEACTIVATION NEEDED NO NEW FILTERING. The topbar switcher, the create-load
+    select and the Relay import already filter `isActive`, so a deactivated
+    carrier leaves all three, and every load it ever ran keeps rendering it
+    because those join by id. The test asserts both halves.
+
+34. **A hidden control still ships its words, and the walkthrough caught it.**
+    The remove button is absent once freight is filed under an authority — but
+    the first version passed its labels to the client component anyway and
+    rendered nothing, which serialised "Remove permanently" into the RSC
+    payload of a page where removing is impossible. The deployed assertion
+    grepped the payload and failed.
+
+    Fixed by not sending them: the action and its four sentences are one
+    optional prop, present only when removal is possible. Not a security bug —
+    they are labels, not data — but it is the same discipline the money fields
+    follow, and the walkthrough could not tell the difference. Neither could a
+    reader.
+
+35. **Retiring a broker with freight is refused, and the reason is the
+    duplicate bug from the other side.** Retiring is already a soft delete, so
+    nothing is destroyed; what it does is remove the broker from the booking
+    path, and §9's create-on-miss will then cheerfully make a SECOND customer
+    with the same name the next time a dispatcher types it — splitting the
+    payment history the duplicate-MC refusal (flag 30) exists to protect.
+
+    So the refusal names the counts and points at the states the schema already
+    has: ON_HOLD stops new bookings while the office argues, BLOCKED is the
+    first-class "do not haul for these people" BIG M II bought. Both keep the
+    record findable; retiring hides it.
+
+    THE CONTROL IS ABSENT RATHER THAN FAILING. `retireBrokerAction` returns
+    `void` and has no error channel, so a thrown refusal would be a 500. The
+    detail page reads the usage alongside the broker and renders the sentence
+    in place of the button. The throw in `retireBroker` remains as the wall
+    behind it, for the race where freight is booked between the page rendering
+    and the button being pressed — in which case the action does still 500.
+    Named rather than left to be discovered.

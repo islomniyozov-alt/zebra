@@ -180,7 +180,68 @@ export async function updateBroker(
 }
 
 /** Soft delete. A broker with invoice history is never actually removed. */
+/**
+ * A broker that cannot be retired because freight is filed under it.
+ *
+ * NAMES THE COUNT, like every other refusal on these screens. "Cannot retire"
+ * sends somebody to the database; "42 loads and 7 invoices are filed under
+ * Meridian Freight" tells them what they are actually asking to hide.
+ */
+export class BrokerInUseError extends Error {
+  constructor(
+    readonly brokerName: string,
+    readonly loads: number,
+    readonly invoices: number,
+  ) {
+    super(`${brokerName} has ${loads} load(s) and ${invoices} invoice(s)`)
+    this.name = 'BrokerInUseError'
+  }
+}
+
+/**
+ * What is filed under this broker. Cheap, and taken inside the caller's
+ * transaction so freight booked a minute ago still counts.
+ */
+export async function brokerUsage(
+  tx: TxClient,
+  id: string,
+): Promise<{ loads: number; invoices: number; total: number }> {
+  const row = await tx.customer.findFirst({
+    where: { id },
+    select: { _count: { select: { loads: true, invoices: true } } },
+  })
+  const loads = row?._count.loads ?? 0
+  const invoices = row?._count.invoices ?? 0
+  return { loads, invoices, total: loads + invoices }
+}
+
+/**
+ * Retire a broker — or refuse, in words, when there is freight under it.
+ *
+ * A SOFT DELETE ALREADY, so this is not about destroying anything: the row
+ * keeps its loads and its invoices whatever happens here. What retiring does
+ * is REMOVE THEM FROM THE BOOKING PATH — they leave the broker list, and
+ * §9's create-on-miss will happily make a SECOND customer with the same name
+ * the next time a dispatcher types it, which is the split-payment-history bug
+ * the duplicate-MC refusal exists to prevent, arrived at from the other side.
+ *
+ * So a broker with freight is refused and offered the states the schema
+ * already has: ON_HOLD stops new bookings while the office argues, and BLOCKED
+ * is the first-class "do not haul for these people" that BIG M II bought.
+ * Both keep the record findable; retiring hides it.
+ */
 export async function retireBroker(tx: TxClient, id: string): Promise<void> {
+  const broker = await tx.customer.findUnique({
+    where: { id },
+    select: { name: true },
+  })
+  if (!broker) throw new ReferenceError('not_found')
+
+  const usage = await brokerUsage(tx, id)
+  if (usage.total > 0) {
+    throw new BrokerInUseError(broker.name, usage.loads, usage.invoices)
+  }
+
   await tx.customer.update({
     where: { id },
     data: { deletedAt: new Date() },

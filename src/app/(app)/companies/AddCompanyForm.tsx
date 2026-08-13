@@ -6,9 +6,10 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { FmcsaLookup } from '@/components/forms/FmcsaLookup'
 import type { FmcsaLabels } from '@/components/forms/fmcsa-labels'
-import { addCompanyAction, lookupCarrierAction } from './actions'
+import { lookupCarrierAction } from './actions'
 import {
   ADD_COMPANY_INITIAL,
+  type AddCompanyState,
   LOOKUP_FIELDS,
   LOOKUP_INITIAL,
   type LookupState,
@@ -29,6 +30,12 @@ import {
 // with no web key configured, and for a carrier that is not in the register at
 // all. Every failure is one sentence that ends by saying so, and nothing on
 // this form is disabled while the lookup runs except the lookup button.
+//
+// ONE FORM FOR CREATE AND EDIT. The fields, the strict two-letter state, the
+// duplicate refusals and the register are the same on both; only the action
+// and the starting values differ. A second copy for editing is a second copy
+// that stops matching — and the register is exactly as useful for correcting a
+// mistyped USDOT as it was for entering it.
 
 export interface AddCompanyLabels {
   name: string
@@ -64,15 +71,26 @@ const BLANK: Record<string, string> = {
 export function AddCompanyForm({
   labels,
   fmcsa,
+  action: submitAction,
+  initial,
+  children,
 }: {
   labels: AddCompanyLabels
   fmcsa: FmcsaLabels
+  action: (
+    previous: AddCompanyState,
+    formData: FormData,
+  ) => Promise<AddCompanyState>
+  /** Absent when creating. Present when editing an existing authority. */
+  initial?: Readonly<Record<string, string>>
+  /** Deactivate and Remove, rendered under the buttons on the edit screen. */
+  children?: React.ReactNode
 }) {
   const [state, action, pending] = useActionState(
-    addCompanyAction,
+    submitAction,
     ADD_COMPANY_INITIAL,
   )
-  const [values, setValues] = useState(BLANK)
+  const [values, setValues] = useState({ ...BLANK, ...initial })
   const [lookup, setLookup] = useState<LookupState>(LOOKUP_INITIAL)
   // Which fields the register filled and the person has not touched since.
   const [fromLookup, setFromLookup] = useState<ReadonlySet<string>>(new Set())
@@ -194,6 +212,8 @@ export function AddCompanyForm({
           {labels.cancel}
         </Link>
       </div>
+
+      {children}
     </form>
   )
 }

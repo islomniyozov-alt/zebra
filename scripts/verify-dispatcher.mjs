@@ -755,6 +755,73 @@ record(
   'the lookup runs on the server, so the browser never sees either',
 )
 
+// --- ROWS ARE CLICKABLE, WHICH §7.1 HAS SAID SINCE PHASE 1 -----------------
+//
+// The owner reported that Companies and Brokers rows could not be opened. The
+// design system has specified the whole-row stretched link since Phase 1 and
+// the Table component never implemented it, so every list had a target the
+// width of one name. These check the mechanism on the deployed worker, where a
+// className that does not exist in the build is the failure that typechecking
+// cannot see.
+const ownerCompanies = await bodyOf(owner.page, '/companies')
+record(
+  'the Companies list links each row to its authority',
+  /href="\/companies\/[a-z0-9]+"/.test(ownerCompanies.body),
+  'a real anchor, so middle-click and the keyboard both work',
+)
+
+record(
+  'and the link stretches across the whole row',
+  /after:absolute/.test(ownerCompanies.body),
+  '§7.1 stretched-link ::after',
+)
+
+// The pair: a MANAGER holds `company:read` for the topbar switcher and holds
+// no `company:update`, so their rows must NOT offer a page that 404s.
+const managerCompanies = await bodyOf(dispatcher.page, '/companies')
+record(
+  'while a role that cannot edit is offered no row link at all',
+  managerCompanies.status === 404 ||
+    !/href="\/companies\/[a-z0-9]+"/.test(managerCompanies.body),
+  `HTTP ${managerCompanies.status} — nothing to open, nothing offered`,
+)
+
+const dispatcherBrokers = await bodyOf(dispatcher.page, '/brokers')
+record(
+  'the Brokers list links each row to its broker',
+  /href="\/brokers\/[a-z0-9]+"/.test(dispatcherBrokers.body),
+  'reachable by a dispatcher, who books against them',
+)
+
+// --- THE AUTHORITY EDIT SCREEN, WHICH FLAG 11 SKIPPED ---------------------
+const ownerEdit = await bodyOf(owner.page, `/companies/${companyId}`)
+record(
+  'an owner can open an authority to edit it',
+  ownerEdit.status === 200,
+  `HTTP ${ownerEdit.status}`,
+)
+
+record(
+  'and is offered Deactivate rather than a delete that would cascade',
+  /Deactivate/.test(ownerEdit.body),
+  'history is kept; the carrier leaves the booking path',
+)
+
+// THE REMOVE BUTTON IS ABSENT, NOT DISABLED, once freight is filed under the
+// authority — and this walkthrough has booked several under this one.
+record(
+  'while Remove permanently is absent for an authority with freight',
+  !/Remove permanently/.test(ownerEdit.body),
+  'a disabled button invites somebody to find the way around it',
+)
+
+const dispatcherEdit = await bodyOf(dispatcher.page, `/companies/${companyId}`)
+record(
+  'and a dispatcher gets a closed door on the edit screen too',
+  dispatcherEdit.status === 404,
+  `HTTP ${dispatcherEdit.status}`,
+)
+
 // --- THE SAME REGISTER, THE WIDER DOOR ------------------------------------
 //
 // The broker lookup is gated on `customer:create`, which a DISPATCHER holds so

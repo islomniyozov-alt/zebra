@@ -24,6 +24,7 @@ interface Row {
   mc: string
   dot: string
   where: string
+  isActive: boolean
 }
 
 export default async function CompaniesPage() {
@@ -31,6 +32,7 @@ export default async function CompaniesPage() {
 
   if (!(await currentUserCan('read', 'company'))) notFound()
   const mayAdd = await currentUserCan('create', 'company')
+  const mayEdit = await currentUserCan('update', 'company')
 
   const data = await withCurrentOrg('read', 'company', async (tx) => {
     const [companies, organization] = await Promise.all([
@@ -57,6 +59,7 @@ export default async function CompaniesPage() {
     mc: company.mcNumber ?? '—',
     dot: company.dotNumber ?? '—',
     where: [company.city, company.state].filter(Boolean).join(', ') || '—',
+    isActive: company.isActive,
   }))
 
   const columns: Column<Row>[] = [
@@ -88,6 +91,20 @@ export default async function CompaniesPage() {
       header: t('companies.city'),
       render: (row: Row) => row.where,
     },
+    // DEACTIVATED HAS TO BE VISIBLE ON THE LIST. It is the difference between
+    // an authority freight can be booked under and one that only appears on
+    // history, and until this column it was invisible everywhere except by
+    // noticing an absence in the topbar switcher.
+    {
+      key: 'status',
+      header: t('companies.status'),
+      render: (row: Row) =>
+        row.isActive ? (
+          t('companies.active')
+        ) : (
+          <span className="text-ink-3">{t('companies.inactive')}</span>
+        ),
+    },
   ]
 
   return (
@@ -117,6 +134,10 @@ export default async function CompaniesPage() {
         rows={rows}
         columns={columns}
         rowKey={(row) => row.id}
+        // §7.1's whole-row link, which this list never had — the owner's
+        // report. Only for a role that may actually edit: a MANAGER holds
+        // `company:read` for the switcher and has nothing to open.
+        {...(mayEdit ? { rowHref: (row: Row) => `/companies/${row.id}` } : {})}
         caption={t('companies.title')}
         empty={
           <EmptyState title={t('companies.empty')} body={t('companies.hint')} />

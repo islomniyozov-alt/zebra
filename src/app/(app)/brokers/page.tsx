@@ -83,14 +83,11 @@ export default async function BrokersPage({
       key: 'name',
       header: t('brokers.name'),
       truncate: true,
-      render: (row) => (
-        <Link
-          href={`/brokers/${row.id}`}
-          className="font-medium text-ink hover:text-accent"
-        >
-          {row.name}
-        </Link>
-      ),
+      // NO ANCHOR HERE ANY MORE. `Table` wraps the first cell in the row's
+      // stretched link, and an anchor inside an anchor is invalid HTML that
+      // browsers resolve by silently closing the outer one — which would make
+      // the rest of the row unclickable again, the exact bug being fixed.
+      render: (row) => row.name,
     },
     {
       key: 'mc',
@@ -110,7 +107,13 @@ export default async function BrokersPage({
       header: t('brokers.phone'),
       render: (row) =>
         row.phone ? (
-          <a href={`tel:${row.phone}`} className="font-mono hover:text-accent">
+          // §7.1: "interactive controls inside the row raise z-index as dead
+          // zones". Without this the stretched link sits over the number and
+          // tapping a broker's phone on a tablet opens their detail page.
+          <a
+            href={`tel:${row.phone}`}
+            className="relative z-10 font-mono hover:text-accent"
+          >
             {row.phone}
           </a>
         ) : (
@@ -177,6 +180,7 @@ export default async function BrokersPage({
         columns={columns}
         rows={rows}
         rowKey={(row) => row.id}
+        rowHref={(row) => `/brokers/${row.id}`}
         stripeTone={(row) => brokerTone(row.status)}
         isCancelled={(row) => row.isRetired}
         empty={

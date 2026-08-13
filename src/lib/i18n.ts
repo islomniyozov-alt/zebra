@@ -118,6 +118,27 @@ const en = {
   'fmcsa.error.refused': 'You do not have permission to look up carriers.',
   'fmcsa.error.tooMany':
     'That is a lot of lookups. Wait {seconds} seconds and try again — the FMCSA key is shared, so a burst here costs everybody.',
+  'companies.inactive': 'Deactivated',
+  'companies.editHint':
+    'Correcting an authority changes what prints on every invoice it sends. The FMCSA lookup works here too.',
+  'companies.usageSummary':
+    'Filed under this authority: {loads} loads, {invoices} invoices, {settlements} settlements, {other} other records.',
+  'companies.deactivate': 'Deactivate',
+  'companies.deactivateHint':
+    'It leaves the authority switcher and the create-load list, so no new freight can be filed under it. Everything it has already run keeps showing this carrier.',
+  'companies.reactivate': 'Reactivate',
+  'companies.reactivateHint':
+    'It returns to the authority switcher and the create-load list.',
+  'companies.remove': 'Remove permanently',
+  'companies.removeConfirm': 'Remove this authority?',
+  'companies.removeBody':
+    'Nothing is filed under it, so nothing is lost. This cannot be undone — if you might need the carrier again, deactivate it instead.',
+  'companies.editRow': 'Edit',
+  'companies.status': 'Status',
+  'companies.active': 'Active',
+  'brokers.editRow': 'Edit',
+  'brokers.error.inUse':
+    'Cannot retire {name}: {loads} loads and {invoices} invoices are filed under them. Set them to On hold or Blocked instead — both keep the record findable.',
   'companies.error.duplicateDot':
     'USDOT {dot} already belongs to another authority here.',
   'companies.error.badState': 'Use a two-letter state code.',
@@ -1604,6 +1625,27 @@ const ru: Dictionary = {
   'fmcsa.error.refused': 'У вас нет прав на поиск в реестре.',
   'fmcsa.error.tooMany':
     'Слишком много запросов. Подождите {seconds} с и попробуйте снова — ключ FMCSA общий, и всплеск здесь стоит всем.',
+  'companies.inactive': 'Отключён',
+  'companies.editHint':
+    'Изменение перевозчика меняет то, что печатается на каждом его счёте. Поиск в FMCSA работает и здесь.',
+  'companies.usageSummary':
+    'Под этим перевозчиком: грузов — {loads}, счетов — {invoices}, расчётов — {settlements}, прочих записей — {other}.',
+  'companies.deactivate': 'Отключить',
+  'companies.deactivateHint':
+    'Он исчезнет из переключателя перевозчиков и из списка при создании груза, так что новые грузы под него не оформить. Всё, что уже выполнено, продолжит показывать этого перевозчика.',
+  'companies.reactivate': 'Включить обратно',
+  'companies.reactivateHint':
+    'Он вернётся в переключатель перевозчиков и в список при создании груза.',
+  'companies.remove': 'Удалить навсегда',
+  'companies.removeConfirm': 'Удалить этого перевозчика?',
+  'companies.removeBody':
+    'Под ним ничего не числится, поэтому ничего не потеряется. Отменить нельзя — если перевозчик может понадобиться, отключите его вместо удаления.',
+  'companies.editRow': 'Изменить',
+  'companies.status': 'Статус',
+  'companies.active': 'Действует',
+  'brokers.editRow': 'Изменить',
+  'brokers.error.inUse':
+    'Нельзя убрать «{name}»: под ними числится грузов — {loads}, счетов — {invoices}. Поставьте «На удержании» или «Заблокирован» — запись останется доступной.',
   'companies.error.duplicateDot':
     'USDOT {dot} уже принадлежит другому перевозчику здесь.',
   'companies.error.badState': 'Используйте двухбуквенный код штата.',
@@ -3088,6 +3130,26 @@ const fa: Dictionary = {
   'fmcsa.error.refused': 'اجازهٔ جست‌وجو در این سامانه را ندارید.',
   'fmcsa.error.tooMany':
     'تعداد جست‌وجوها زیاد است. {seconds} ثانیه صبر کنید و دوباره تلاش کنید — کلید FMCSA مشترک است و انفجار درخواست اینجا برای همه هزینه دارد.',
+  'companies.inactive': 'غیرفعال شده',
+  'companies.editHint':
+    'تغییر یک شرکت، چیزی را که روی هر فاکتور آن چاپ می‌شود عوض می‌کند. جست‌وجوی FMCSA اینجا هم کار می‌کند.',
+  'companies.usageSummary':
+    'زیر این شرکت ثبت شده: {loads} بار، {invoices} فاکتور، {settlements} تسویه، {other} رکورد دیگر.',
+  'companies.deactivate': 'غیرفعال کردن',
+  'companies.deactivateHint':
+    'از انتخابگر شرکت و فهرست ساخت بار حذف می‌شود، پس بار تازه‌ای زیرش ثبت نمی‌شود. هرچه پیش‌تر اجرا شده همچنان همین شرکت را نشان می‌دهد.',
+  'companies.reactivate': 'فعال کردن دوباره',
+  'companies.reactivateHint': 'به انتخابگر شرکت و فهرست ساخت بار برمی‌گردد.',
+  'companies.remove': 'حذف همیشگی',
+  'companies.removeConfirm': 'این شرکت حذف شود؟',
+  'companies.removeBody':
+    'چیزی زیرش ثبت نشده، پس چیزی از دست نمی‌رود. برگشت‌پذیر نیست — اگر ممکن است دوباره لازمش داشته باشید، به‌جای حذف غیرفعالش کنید.',
+  'companies.editRow': 'ویرایش',
+  'companies.status': 'وضعیت',
+  'companies.active': 'فعال',
+  'brokers.editRow': 'ویرایش',
+  'brokers.error.inUse':
+    'نمی‌توان «{name}» را بایگانی کرد: {loads} بار و {invoices} فاکتور زیرشان ثبت شده. به‌جایش «در انتظار» یا «مسدود» بگذارید — رکورد قابل یافتن می‌ماند.',
   'companies.error.duplicateDot':
     'USDOT {dot} از پیش متعلق به شرکت دیگری در اینجاست.',
   'companies.error.badState': 'از کد دو حرفی ایالت استفاده کنید.',

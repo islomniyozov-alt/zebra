@@ -780,3 +780,57 @@ describe('the FMCSA lookup, per role', () => {
     expect(can(session('DISPATCHER'), 'update', 'customer')).toBe(false)
   })
 })
+
+describe('editing and retiring records, per role', () => {
+  const roles = [
+    'OWNER',
+    'ADMIN',
+    'MANAGER',
+    'DISPATCHER',
+    'ACCOUNTING',
+  ] as const
+
+  const session = (role: (typeof roles)[number]) =>
+    ({
+      role,
+      organizationId: 'org',
+      userId: 'u',
+      companyScopes: [],
+    }) as never
+
+  // THE EDIT SCREEN IS THE SAME DOOR AS THE ADD SCREEN. Flag 11 gated adding
+  // an authority on `company:create`; correcting one that already prints on
+  // invoices, and deactivating one, are the same kind of act.
+  it('gates the authority edit screen to OWNER and ADMIN', () => {
+    const may = roles.filter((role) => can(session(role), 'update', 'company'))
+    expect(may).toEqual(['OWNER', 'ADMIN'])
+  })
+
+  // The pair that makes the row link correct: every role READS companies for
+  // the topbar switcher, so a row that linked on read would offer a MANAGER a
+  // page that 404s.
+  it('while every role still reads them for the switcher', () => {
+    for (const role of roles) {
+      expect(can(session(role), 'read', 'company')).toBe(true)
+    }
+  })
+
+  it('and removing one is gated the same way', () => {
+    const may = roles.filter((role) => can(session(role), 'delete', 'company'))
+    expect(may).toEqual(['OWNER', 'ADMIN'])
+  })
+
+  // A DISPATCHER adds a broker mid-booking and cannot edit one afterwards —
+  // the asymmetry §9 chose. The broker row still links for them, because the
+  // detail page renders read-only rather than 404ing.
+  it('lets a DISPATCHER read a broker they may not edit', () => {
+    expect(can(session('DISPATCHER'), 'read', 'customer')).toBe(true)
+    expect(can(session('DISPATCHER'), 'update', 'customer')).toBe(false)
+    expect(can(session('DISPATCHER'), 'delete', 'customer')).toBe(false)
+  })
+
+  it('and reserves retiring a broker for the roles that maintain them', () => {
+    const may = roles.filter((role) => can(session(role), 'delete', 'customer'))
+    expect(may).toEqual(['OWNER', 'ADMIN', 'MANAGER', 'ACCOUNTING'])
+  })
+})

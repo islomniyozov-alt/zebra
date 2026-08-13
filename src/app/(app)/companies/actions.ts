@@ -1,9 +1,15 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { addCompany } from '@/lib/companies'
+import {
+  addCompany,
+  deleteCompany,
+  setCompanyActive,
+  updateCompany,
+} from '@/lib/companies'
 import { requireSession } from '@/lib/auth-context'
 import {
   renderConcerns,
@@ -86,6 +92,133 @@ export async function addCompanyAction(
   revalidatePath('/settings')
 
   return { error: null, field: null, companyId: outcome.id }
+}
+
+/**
+ * Every screen that lists or chooses an authority is wrong until it re-reads.
+ *
+ * The topbar switcher, the create-load select and the Relay import all filter
+ * on `isActive`, which is exactly why a deactivation has to reach them.
+ */
+function revalidateAuthorities(id?: string): void {
+  revalidatePath('/companies')
+  if (id) revalidatePath(`/companies/${id}`)
+  revalidatePath('/loads/new')
+  revalidatePath('/loads/import')
+  revalidatePath('/settings')
+  // The layout holds the topbar switcher, so every screen under it is stale.
+  revalidatePath('/', 'layout')
+}
+
+/**
+ * Edit an authority.
+ *
+ * FIELD-LEVEL AUDIT COMES FROM THE PATH, NOT FROM HERE. `withCurrentOrg`
+ * routes through the audited Prisma extension, which reads the row before,
+ * reads it after, and writes `{ field: { from, to } }` — so an edit that
+ * changes one letter of a legal name is recorded as that one letter. Writing a
+ * second diff in this action would be a second story about what changed.
+ */
+export async function updateCompanyAction(
+  id: string,
+  _previous: AddCompanyState,
+  formData: FormData,
+): Promise<AddCompanyState> {
+  const { t } = await getLocaleContext()
+  const text = (name: string) => String(formData.get(name) ?? '')
+
+  const outcome = await withCurrentOrg('update', 'company', (tx) =>
+    updateCompany(tx, id, {
+      name: text('name'),
+      legalName: text('legalName'),
+      mcNumber: text('mcNumber'),
+      dotNumber: text('dotNumber'),
+      addressLine1: text('addressLine1'),
+      addressLine2: text('addressLine2'),
+      city: text('city'),
+      state: text('state'),
+      postalCode: text('postalCode'),
+      phone: text('phone'),
+      email: text('email'),
+    }),
+  )
+
+  if (!outcome.ok) {
+    const error =
+      outcome.reason === 'duplicate_name'
+        ? t('companies.error.duplicateName')
+        : outcome.reason === 'duplicate_dot'
+          ? t('companies.error.duplicateDot').replace(
+              '{dot}',
+              outcome.dot ?? '',
+            )
+          : outcome.reason === 'bad_state'
+            ? t('companies.error.badState')
+            : outcome.reason === 'not_found'
+              ? t('ref.error.notFound')
+              : t('ref.error.required')
+
+    return {
+      ...ADD_COMPANY_INITIAL,
+      error,
+      field:
+        outcome.reason === 'bad_state'
+          ? 'state'
+          : outcome.reason === 'duplicate_dot'
+            ? 'dotNumber'
+            : outcome.reason === 'not_found'
+              ? null
+              : 'name',
+    }
+  }
+
+  revalidateAuthorities(id)
+  return { error: null, field: null, companyId: id }
+}
+
+/**
+ * Take an authority out of service.
+ *
+ * NOT A DELETE, and the distinction is the whole feature: `Company.id` IS the
+ * tenant scope, so the row stays and every load, invoice and settlement it ran
+ * keeps rendering. What changes is that it leaves the topbar switcher and the
+ * create-load select, because both already filter on `isActive` — so nothing
+ * NEW can be filed under it.
+ */
+export async function deactivateCompanyAction(id: string): Promise<void> {
+  await withCurrentOrg('update', 'company', (tx) =>
+    setCompanyActive(tx, id, false),
+  )
+  revalidateAuthorities(id)
+}
+
+export async function reactivateCompanyAction(id: string): Promise<void> {
+  await withCurrentOrg('update', 'company', (tx) =>
+    setCompanyActive(tx, id, true),
+  )
+  revalidateAuthorities(id)
+}
+
+/**
+ * Remove an authority that never did anything.
+ *
+ * THE REFUSAL IS IN `deleteCompany` AND IT IS COUNTED INSIDE THE TRANSACTION,
+ * so a load booked between the page rendering and the button being pressed
+ * cannot be cascaded away by a check that was true a minute ago. The screen
+ * hides the button when anything is filed under the authority; this is the
+ * wall behind that, and it is the one that matters.
+ */
+export async function deleteCompanyAction(id: string): Promise<void> {
+  const outcome = await withCurrentOrg('delete', 'company', (tx) =>
+    deleteCompany(tx, id),
+  )
+
+  revalidateAuthorities(id)
+
+  // A refusal leaves the screen where it is, still showing what is filed under
+  // the authority and still offering deactivation. Redirecting to a list that
+  // still contains the row would read as a silent success.
+  if (outcome.ok) redirect('/companies')
 }
 
 // ---------------------------------------------------------------------------

@@ -11,6 +11,15 @@ import { Modal } from '@/components/ui/Modal'
 
 interface Props {
   isRetired: boolean
+  /**
+   * Why retiring is not on offer — the sentence naming what is filed under
+   * this broker. Present means the button is absent.
+   *
+   * ABSENT RATHER THAN DISABLED. A disabled button invites somebody to go
+   * looking for the way around it; a missing one next to "42 loads and 7
+   * invoices are filed under them" answers the question instead.
+   */
+  inUse?: string | undefined
   retireAction: () => Promise<void>
   restoreAction: () => Promise<void>
   labels: {
@@ -24,6 +33,7 @@ interface Props {
 
 export function RetireActions({
   isRetired,
+  inUse,
   retireAction,
   restoreAction,
   labels,
@@ -38,6 +48,14 @@ export function RetireActions({
             {labels.restore}
           </Button>
         </form>
+      </section>
+    )
+  }
+
+  if (inUse) {
+    return (
+      <section className="mt-z6 max-w-[520px] border-t border-border pt-z4">
+        <p className="text-sm text-ink-2">{inUse}</p>
       </section>
     )
   }

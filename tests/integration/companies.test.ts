@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
 import { withOrg } from '@/lib/tenancy'
-import { addCompany } from '@/lib/companies'
+import {
+  addCompany,
+  companyUsage,
+  deleteCompany,
+  setCompanyActive,
+  updateCompany,
+} from '@/lib/companies'
 import { createLoad } from '@/lib/loads'
 import type { PrismaClient } from '@/generated/prisma/client'
 
@@ -183,5 +189,216 @@ describe('a new authority’s numbering', () => {
     // apart carry the same number under different carriers, which is the whole
     // point of a per-authority series.
     expect(second.loadNumber).toBe(first.loadNumber)
+  }, 300_000)
+})
+
+describe('editing an authority', () => {
+  it('corrects a field, and lets the row keep its own name and USDOT', async () => {
+    // Created directly rather than through `addCompany`: the plan limit is 2
+    // and both are spent by the tests above. These are about editing, and a
+    // fixture that fought the limit would be testing the limit again.
+    const { id } = await owner.company.create({
+      data: {
+        organizationId,
+        name: `Editable ${nonce}`,
+        dotNumber: '9000001',
+        state: 'TX',
+      },
+    })
+
+    // THE BUG AN EDIT FORM WRITTEN BY COPYING A CREATE FORM ALWAYS HAS: every
+    // duplicate check has to exclude the record being edited, or saving a row
+    // without touching its name refuses because its name is taken by itself.
+    const same = await inOrg((tx) =>
+      updateCompany(tx, id, {
+        name: `Editable ${nonce}`,
+        dotNumber: '9000001',
+        legalName: 'Editable Holdings LLC',
+        state: 'TX',
+      }),
+    )
+    expect(same.ok).toBe(true)
+
+    const row = await owner.company.findFirstOrThrow({ where: { id } })
+    expect(row.legalName).toBe('Editable Holdings LLC')
+  }, 300_000)
+
+  it('still refuses a name or USDOT that belongs to a DIFFERENT authority', async () => {
+    const first = await owner.company.findFirstOrThrow({
+      where: { organizationId, name: `RAM Haulage ${nonce}` },
+    })
+    const second = await owner.company.findFirstOrThrow({
+      where: { organizationId, name: `Editable ${nonce}` },
+    })
+
+    const byName = await inOrg((tx) =>
+      updateCompany(tx, second.id, { name: first.name }),
+    )
+    expect(byName).toMatchObject({ ok: false, reason: 'duplicate_name' })
+
+    const byDot = await inOrg((tx) =>
+      updateCompany(tx, second.id, {
+        name: second.name,
+        dotNumber: first.dotNumber ?? '',
+      }),
+    )
+    expect(byDot).toMatchObject({ ok: false, reason: 'duplicate_dot' })
+  }, 300_000)
+
+  it('keeps the strict two-letter state on the way in', async () => {
+    const second = await owner.company.findFirstOrThrow({
+      where: { organizationId, name: `Editable ${nonce}` },
+    })
+    const result = await inOrg((tx) =>
+      updateCompany(tx, second.id, { name: second.name, state: 'Texas' }),
+    )
+    expect(result).toMatchObject({ ok: false, reason: 'bad_state' })
+  }, 300_000)
+
+  // FIELD-LEVEL DIFFS COME FROM THE AUDITED PATH, NOT FROM `updateCompany`.
+  // The Prisma extension reads the row before and after and writes
+  // `{ field: { from, to } }`. This asserts the wiring, because a lib function
+  // called outside `withOrg` would leave an audit gap instead.
+  it('writes a field-level audit diff naming what moved', async () => {
+    const second = await owner.company.findFirstOrThrow({
+      where: { organizationId, name: `Editable ${nonce}` },
+    })
+    await inOrg((tx) =>
+      updateCompany(tx, second.id, {
+        name: second.name,
+        phone: '(555) 010-9999',
+      }),
+    )
+
+    const entry = await owner.auditLog.findFirst({
+      where: {
+        organizationId,
+        entityType: 'Company',
+        entityId: second.id,
+        action: 'UPDATE',
+      },
+      orderBy: { createdAt: 'desc' },
+    })
+    expect(entry).not.toBeNull()
+    const changes = entry!.changes as Record<
+      string,
+      { from: unknown; to: unknown }
+    >
+    expect(changes['phone']).toMatchObject({ to: '(555) 010-9999' })
+    // And NOT every column: a diff that listed the whole row would bury the
+    // field that actually moved, which is audit.ts's own stated reasoning.
+    expect(Object.keys(changes)).not.toContain('name')
+  }, 300_000)
+})
+
+describe('deactivating rather than deleting', () => {
+  it('takes an authority out of the booking path and leaves its history', async () => {
+    const company = await owner.company.findFirstOrThrow({
+      where: { organizationId, name: `Editable ${nonce}` },
+    })
+
+    await inOrg((tx) => setCompanyActive(tx, company.id, false))
+
+    // The topbar switcher, the create-load select and the Relay import all
+    // filter on exactly this, which is what makes deactivation mean something.
+    const bookable = await inOrg((tx) =>
+      tx.company.findMany({ where: { isActive: true }, select: { id: true } }),
+    )
+    expect(bookable.map((row) => row.id)).not.toContain(company.id)
+
+    // And the row is still there, still readable, still joinable by historical freight.
+    const still = await inOrg((tx) =>
+      tx.company.findFirst({ where: { id: company.id } }),
+    )
+    expect(still).not.toBeNull()
+
+    await inOrg((tx) => setCompanyActive(tx, company.id, true))
+    const back = await inOrg((tx) =>
+      tx.company.findMany({ where: { isActive: true }, select: { id: true } }),
+    )
+    expect(back.map((row) => row.id)).toContain(company.id)
+  }, 300_000)
+
+  // THE ONE THAT MATTERS. `onDelete: Cascade` is on every child of Company, so
+  // an unguarded delete of an authority that has run freight destroys its
+  // loads, invoices, settlements and audit trail in one statement — and
+  // reports success.
+  it('REFUSES to delete an authority with freight, and names what is under it', async () => {
+    const company = await owner.company.findFirstOrThrow({
+      where: { organizationId, name: `RAM Haulage ${nonce}` },
+    })
+    const customer = await inOrg((tx) =>
+      tx.customer.create({
+        data: { organizationId, name: `Shipper ${nonce}` },
+      }),
+    )
+    await inOrg((tx) =>
+      createLoad(tx, organizationId, {
+        companyId: company.id,
+        customerId: customer.id,
+        stops: [
+          { type: 'PICKUP', city: 'Chicago', state: 'IL' },
+          { type: 'DELIVERY', city: 'Dallas', state: 'TX' },
+        ],
+      }),
+    )
+
+    const refused = await inOrg((tx) => deleteCompany(tx, company.id))
+    expect(refused.ok).toBe(false)
+    expect(refused).toMatchObject({ reason: 'has_history' })
+    if (!refused.ok && refused.reason === 'has_history') {
+      expect(refused.usage.loads).toBeGreaterThan(0)
+    }
+
+    // RULE 11 — the pair. The refusal is about the freight, not about the
+    // request: the authority is still there afterwards.
+    const survived = await inOrg((tx) =>
+      tx.company.findFirst({ where: { id: company.id } }),
+    )
+    expect(survived).not.toBeNull()
+  }, 300_000)
+
+  it('and ALLOWS removing a mistaken entry with nothing under it', async () => {
+    // Created directly: the plan limit is 2 and both are spent by the tests
+    // above, and this one is about deletion rather than about the limit.
+    const { id } = await owner.company.create({
+      data: { organizationId, name: `Typo ${nonce}` },
+    })
+
+    const usage = await inOrg((tx) => companyUsage(tx, id))
+    expect(usage.total).toBe(0)
+
+    const removed = await inOrg((tx) => deleteCompany(tx, id))
+    expect(removed.ok).toBe(true)
+
+    const gone = await owner.company.findFirst({ where: { id } })
+    expect(gone).toBeNull()
+  }, 300_000)
+
+  // A counter row means this authority allocated a load number at some point,
+  // which is freight even if the load has since gone.
+  it('counts more than the three the sentence names', async () => {
+    const company = await owner.company.create({
+      data: { organizationId, name: `Trucks only ${nonce}` },
+    })
+    await owner.truck.create({
+      data: {
+        organizationId,
+        companyId: company.id,
+        unitNumber: `T-${nonce}`,
+      },
+    })
+
+    const usage = await inOrg((tx) => companyUsage(tx, company.id))
+    expect(usage.loads).toBe(0)
+    expect(usage.invoices).toBe(0)
+    expect(usage.settlements).toBe(0)
+    // The safety net: a check that looked only at the named three would
+    // happily cascade this truck away.
+    expect(usage.other).toBeGreaterThan(0)
+    expect(usage.total).toBeGreaterThan(0)
+
+    const refused = await inOrg((tx) => deleteCompany(tx, company.id))
+    expect(refused).toMatchObject({ ok: false, reason: 'has_history' })
   }, 300_000)
 })

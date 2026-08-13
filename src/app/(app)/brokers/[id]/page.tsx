@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { RecordForm } from '@/components/forms/RecordForm'
+import { brokerUsage } from '@/lib/brokers'
 import { RetireActions } from '../RetireActions'
 import {
   restoreBrokerAction,
@@ -19,10 +20,15 @@ export default async function EditBrokerPage({
   const { id } = await params
   const { t } = await getLocaleContext()
 
-  const broker = await withCurrentOrg('read', 'customer', (tx) =>
-    tx.customer.findUnique({ where: { id } }),
-  )
-  if (!broker) notFound()
+  const found = await withCurrentOrg('read', 'customer', async (tx) => {
+    const row = await tx.customer.findUnique({ where: { id } })
+    // Read alongside the broker rather than in a second round trip: it decides
+    // whether the retire control is offered at all.
+    return row ? { row, usage: await brokerUsage(tx, id) } : null
+  })
+  if (!found) notFound()
+  const broker = found.row
+  const usage = found.usage
 
   const mayEdit = await currentUserCan('update', 'customer')
   const mayDelete = await currentUserCan('delete', 'customer')
@@ -102,6 +108,14 @@ export default async function EditBrokerPage({
         >
           <RetireActions
             isRetired={broker.deletedAt !== null}
+            inUse={
+              usage.total > 0
+                ? t('brokers.error.inUse')
+                    .replace('{name}', broker.name)
+                    .replace('{loads}', String(usage.loads))
+                    .replace('{invoices}', String(usage.invoices))
+                : undefined
+            }
             retireAction={
               mayDelete
                 ? retireBrokerAction.bind(null, id)
