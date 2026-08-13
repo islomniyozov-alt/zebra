@@ -827,3 +827,41 @@ Recorded rather than resolved, per Phase 1's discipline.
         The throw in `retireBroker` is unchanged and is still the wall: the action
         translates it rather than replacing it, so a caller that is not this screen
         still cannot retire a broker with freight by accident.
+
+36. **Step 3b was called and `corpus-amazon/` still holds only the three Step
+    3a CSVs.** No `.xlsx`, no `.eml`, nothing hidden in a subdirectory, and
+    nothing of either kind anywhere in the repository or in Downloads, Desktop
+    or Documents. The directory's own timestamp has not moved since the CSVs
+    landed on 2026-08-12.
+
+    §3 says the parser is built "against real sheets or not at all", and the
+    Phase 5 interview method needs real documents by construction: a truth
+    sheet drafted from an invented spreadsheet grades a guess, which is the
+    exact failure that method exists to prevent. So the step did not start,
+    for the same reason and in the same words as flag 12.
+
+    THE LAYOUT IS THE WHOLE QUESTION AND IT CANNOT BE GUESSED. A Load
+    Information sheet might be a form — labels in one column, values in the
+    next, one stop per block — or a table with a header row, or several sheets
+    in one workbook. Merged cells, a stop count that varies by row, dates as
+    Excel serial numbers versus text: every one of those changes the reader,
+    and none of them can be settled by imagining the file.
+
+37. **What DID land: workerd can open an .xlsx with no dependency, and that is
+    proven rather than assumed.** An `.xlsx` is a ZIP of XML, so step 3b's
+    first blocking question is whether the deployment engine can inflate one —
+    and the answer changes the whole shape of the step if it is no.
+
+    `tests/workers/zip-inflate.test.ts` runs INSIDE workerd, not Node, and
+    round-trips a payload through `deflate-raw`. That argument is the point:
+    ZIP entries are stored with method 8, which is headerless raw DEFLATE, and
+    `new DecompressionStream('deflate')` expects a zlib header and fails on a
+    ZIP member. Testing through `nodejs_compat`'s `zlib` would have proven
+    nothing about the deployed Worker's own primitives. `DataView` is there for
+    the central directory's byte offsets, which is the other half.
+
+    SO NO SHEETJS AND NO DEPENDENCY. A minimal reader — unzip, then pull
+    `sharedStrings.xml` and the sheet XML — is a few hundred lines and matches
+    the fetch-only, no-SDK posture `claude.ts`, `gemini.ts` and `fmcsa.ts`
+    already hold. Recorded now so the decision is made in daylight rather than
+    at the moment somebody wants a parser working.
