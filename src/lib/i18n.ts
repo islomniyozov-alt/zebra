@@ -419,6 +419,12 @@ const en = {
   'loads.offerReading': 'Reading it — about ten seconds.',
   'loads.offerDone': 'Read. Check the fields it filled.',
   'loads.offerFailed': 'Could not read that one. Type it instead.',
+  'loads.offerFailedUnreadable':
+    'That file cannot be read — it is too large, the wrong kind, or longer than the reader handles. Type the load instead.',
+  'loads.offerFailedTryAgain':
+    'The reader could not finish that one. Try again, or type the load instead.',
+  'loads.offerFailedMissing':
+    'That upload is no longer there. Choose the file again, or type the load instead.',
   'loads.offerTypeInstead': 'Or just type — this is an offer, not a step.',
   'loads.methodManual': 'Manual',
   'loads.methodUpload': 'Upload document',
@@ -1925,6 +1931,12 @@ const ru: Dictionary = {
   'loads.offerReading': 'Читаем — около десяти секунд.',
   'loads.offerDone': 'Прочитано. Проверьте заполненные поля.',
   'loads.offerFailed': 'Не удалось прочитать. Введите вручную.',
+  'loads.offerFailedUnreadable':
+    'Этот файл прочитать нельзя — он слишком большой, не того типа или длиннее, чем осиливает чтение. Введите груз вручную.',
+  'loads.offerFailedTryAgain':
+    'Чтение не удалось довести до конца. Попробуйте ещё раз или введите груз вручную.',
+  'loads.offerFailedMissing':
+    'Эта загрузка больше недоступна. Выберите файл заново или введите груз вручную.',
   'loads.offerTypeInstead':
     'Или просто печатайте — это предложение, а не этап.',
   'loads.methodManual': 'Вручную',
@@ -3425,6 +3437,12 @@ const fa: Dictionary = {
   'loads.offerReading': 'در حال خواندن — حدود ده ثانیه.',
   'loads.offerDone': 'خوانده شد. فیلدهای پرشده را بررسی کنید.',
   'loads.offerFailed': 'خوانده نشد. دستی وارد کنید.',
+  'loads.offerFailedUnreadable':
+    'این فایل خوانده نمی‌شود — یا خیلی بزرگ است، یا نوعش درست نیست، یا از توان خواننده بلندتر است. بار را دستی وارد کنید.',
+  'loads.offerFailedTryAgain':
+    'خواننده نتوانست آن را تمام کند. دوباره تلاش کنید یا بار را دستی وارد کنید.',
+  'loads.offerFailedMissing':
+    'آن بارگذاری دیگر موجود نیست. فایل را دوباره انتخاب کنید یا بار را دستی وارد کنید.',
   'loads.offerTypeInstead':
     'یا فقط تایپ کنید — این یک پیشنهاد است، نه یک مرحله.',
   'loads.methodManual': 'دستی',

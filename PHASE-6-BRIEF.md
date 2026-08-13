@@ -865,3 +865,74 @@ Recorded rather than resolved, per Phase 1's discipline.
     the fetch-only, no-SDK posture `claude.ts`, `gemini.ts` and `fmcsa.ts`
     already hold. Recorded now so the decision is made in daylight rather than
     at the moment somebody wants a parser working.
+
+38. **A Relay booking email pasted into production returned a bare 500, and
+    the cause was a model call inside a database transaction.** Reproduced on
+    dev under `wrangler tail`, which named it in full:
+
+    > Transaction API error: A query cannot be executed on an expired
+    > transaction. The timeout for this transaction was 60000 ms, however
+    > 61858 ms passed since the start of the transaction.
+
+    The extract route held an interactive transaction open across the HTTP call
+    to Gemini. Gemini was answering 503 "This model is currently experiencing
+    high demand", the seam fell back to Claude, Claude answered 529
+    "Overloaded", and the retries outlived the lock. The Prisma error that
+    produced is not a `ClaudeError`, so nothing recognised it and the route
+    rethrew it into an empty response.
+
+    **RAISING THE CEILING WOULD HAVE BOUGHT A SLOWER FAILURE.** Measured after
+    the fix, the same paste takes 38–53 seconds against a busy model — which is
+    to say the old 60-second budget was not generously sized, it was a coin
+    toss. Phase 5 flag 31's rule was "fewer statements inside the lock, not a
+    longer lock"; this is that rule one step further, because a third party's
+    latency has no business inside a Postgres transaction at any number.
+
+    So `rate-confirmation.ts` is three functions where it was one:
+    `beginExtraction` claims the row and marks it PROCESSING in a short
+    transaction, `askForExtraction` calls the model and parses with NOTHING
+    open, and `recordExtraction` writes what came back in a second short one.
+    The two old entry points are gone rather than kept as wrappers — a wrapper
+    that rejoined them would be a trap for the next caller.
+
+39. **The bare 500 was the second defect and the one that hid the first.** The
+    route caught auth errors and rethrew everything else, which Next turns into
+    a 500 with an EMPTY body — so the client's `messageOf` had nothing to read
+    and said "Request failed (500)". The worker knew exactly what had happened
+    and said none of it.
+
+    Nothing leaves that route without a sentence now, the detail goes to
+    `console.error` where `wrangler tail` can reach it, and an expired
+    transaction gets its own 503 `too_slow` — because "the model was slow" and
+    "this file cannot be read" deserve opposite advice.
+
+40. **A third defect nobody reported: the dispatcher was being shown the
+    vendor's JSON.** When the extraction DID fail in a handled way, the client
+    printed `body.message` verbatim, so a paste during the outage read
+    `Gemini returned 503: {"error":{"code":503,...,"status":"UNAVAILABLE"}}` off
+    the screen. A stack trace in a nicer font: it names a vendor, it is
+    untranslated in a three-language product, and §10 asks an error to say what
+    happened AND what to do.
+
+    The reason CODE now picks the sentence — the codes are ours and finite —
+    and the upstream detail goes to the browser console. The walkthrough
+    asserts both halves: no `Request failed (NNN)` and no vendor JSON on that
+    screen, ever.
+
+41. **THE EXTRACTION INTEGRATION SUITE HAD BEEN RED SINCE THE ENGINE SWITCH
+    AND NOTHING SAID SO.** Found while proving the refactor: four of the seven
+    tests in `tests/integration/extraction.test.ts` were already failing before
+    a line was changed. The stub still returned Anthropic's response shape —
+    `content[].text`, `usage.input_tokens` — while `EXTRACTION_MODEL` became
+    `gemini-3.6-flash`, so `askModel` routed to Gemini, which said "returned no
+    text" every time.
+
+    THE REASON IT WENT UNSEEN IS THE PART WORTH KEEPING: `npm run check` runs
+    the node and workers projects and NOT the integration project, which needs
+    a database. So the gate everybody runs was green while the suite that
+    exercises the shipped engine was not. A suite outside the gate reports on
+    nothing.
+
+    Fixed by giving the stub the shipped engine's shape and correcting the cost
+    expectations to Gemini's 150/750 per Mtok — including that the two sides
+    are rounded before they are summed, which is 1,292 and not 1,291.

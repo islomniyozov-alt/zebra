@@ -88,6 +88,9 @@ export interface CreateLoadLabels {
   offerDone: string
   offerFailed: string
   offerTypeInstead: string
+  offerFailedUnreadable: string
+  offerFailedTryAgain: string
+  offerFailedMissing: string
   methodManual: string
   methodUpload: string
   methodPaste: string
@@ -469,6 +472,9 @@ export function CreateLoadForm({
           done: labels.offerDone,
           failed: labels.offerFailed,
           typeInstead: labels.offerTypeInstead,
+          failedUnreadable: labels.offerFailedUnreadable,
+          failedTryAgain: labels.offerFailedTryAgain,
+          failedMissing: labels.offerFailedMissing,
           methodManual: labels.methodManual,
           methodUpload: labels.methodUpload,
           methodPaste: labels.methodPaste,

@@ -1,5 +1,6 @@
 import { costMilliCents, type Usage } from './claude'
 import { askModel } from './model-engine'
+import type { AskResult } from './claude'
 import { EXTRACTION_SCHEMA } from './extraction-shape'
 import {
   ExtractionParseError,
@@ -183,8 +184,99 @@ export interface ExtractionRefusal {
 
 export type ExtractionOutcome = ExtractionSuccess | ExtractionRefusal
 
-export interface ExtractInput {
-  documentId: string
+/**
+ * WHICH TABLE THE ANSWER LANDS ON.
+ *
+ * Upload-first extraction (§1.5) happens BEFORE the load exists, so there is
+ * no Document yet — the answer lives on the `PendingUpload` and `confirmUpload`
+ * carries it across. The columns are named identically on both tables, which
+ * is why this is one parameter rather than two copies of the same function.
+ */
+export type ExtractionTarget = 'document' | 'pending'
+
+/**
+ * THE MODEL CALL DOES NOT HAPPEN INSIDE A TRANSACTION, AND THAT IS WHY THIS IS
+ * THREE FUNCTIONS INSTEAD OF ONE.
+ *
+ * It used to. `extractRateConfirmation(tx, …)` held an interactive transaction
+ * open across an HTTP call to Google, and the owner found what that costs:
+ * pasting a Relay booking email into production returned a bare 500. Under
+ * `wrangler tail` the worker said it in full —
+ *
+ *   Transaction API error: A query cannot be executed on an expired
+ *   transaction. The timeout for this transaction was 60000 ms, however
+ *   61858 ms passed since the start of the transaction.
+ *
+ * — because Gemini was returning 503 "high demand", the seam fell back to
+ * Claude, Claude was overloaded too, and the retries outlived the lock. The
+ * thrown Prisma error is not a `ClaudeError`, so nothing downstream recognised
+ * it and the route rethrew it into an empty 500.
+ *
+ * Phase 5 flag 31's rule was "fewer statements inside the lock, not a longer
+ * lock". This is the same rule one step further: a third party's latency has
+ * no business inside a database transaction at all. Raising the 60s ceiling
+ * would have bought a slower failure, not a fix — the model can be slow for
+ * longer than any number worth holding a Postgres transaction open for.
+ *
+ * So: a short transaction to claim the row, NO transaction while the model
+ * thinks, and a short transaction to write what came back.
+ */
+export async function beginExtraction(
+  tx: TxClient,
+  target: ExtractionTarget,
+  documentId: string,
+): Promise<{ ok: true } | ExtractionRefusal> {
+  const found =
+    target === 'document'
+      ? await tx.document.findFirst({
+          where: { id: documentId, deletedAt: null },
+          select: { id: true },
+        })
+      : await tx.pendingUpload.findFirst({
+          where: { id: documentId },
+          select: { id: true },
+        })
+
+  if (!found) {
+    return {
+      ok: false,
+      documentId,
+      reason: 'no_document',
+      detail:
+        target === 'document'
+          ? 'No such document in this tenant.'
+          : 'No such pending upload in this tenant.',
+    }
+  }
+
+  // The status moves NOT_QUEUED → PROCESSING → COMPLETED | FAILED, which is
+  // what the enum has always described. Written in its own transaction now, so
+  // a row that dies mid-call is left saying PROCESSING rather than saying
+  // nothing — which is the honest record of what happened to it.
+  await setStatus(tx, target, documentId, {
+    ocrStatus: 'PROCESSING',
+    ocrError: null,
+  })
+  return { ok: true }
+}
+
+/** What the model said, or why it did not say it. No database, no lock. */
+export type AskedExtraction =
+  | {
+      ok: true
+      answer: AskResult
+      extracted: Extracted
+      money: ReturnType<typeof moneyToCents>
+    }
+  | {
+      ok: false
+      reason: ExtractionFailure
+      detail: string
+      /** The model's own words, when there were some. Kept for `unparsable`. */
+      rawText?: string
+    }
+
+export interface AskForExtractionInput {
   base64: string
   mimeType: string
   /** Injected in tests; the real one is `globalThis.fetch`. */
@@ -196,51 +288,17 @@ export interface ExtractInput {
 }
 
 /**
- * Read one document and record what came back on it.
+ * Ask, and parse. Called with nothing held open.
  *
- * ALWAYS WRITES. A failed extraction is a fact about the document — `FAILED`
- * with the reason in `ocrError` — because the alternative is a row that looks
- * like it was never tried and a screen that offers the button again forever.
- *
- * The status moves NOT_QUEUED → PROCESSING → COMPLETED | FAILED, which is what
- * the enum has always described and nothing has ever written.
+ * The failure taxonomy is unchanged and still matters to the screen:
+ * `not_readable` is the DOCUMENT's fault — too big, wrong type, more than can
+ * be said back — and `call_failed` is ours or the network's. One is "this file
+ * cannot be read", the other is "try again".
  */
-export async function extractRateConfirmation(
-  tx: TxClient,
-  input: ExtractInput,
-): Promise<ExtractionOutcome> {
-  const document = await tx.document.findFirst({
-    where: { id: input.documentId, deletedAt: null },
-    select: { id: true },
-  })
-  if (!document) {
-    return {
-      ok: false,
-      documentId: input.documentId,
-      reason: 'no_document',
-      detail: 'No such document in this tenant.',
-    }
-  }
-
-  await tx.document.update({
-    where: { id: document.id },
-    data: { ocrStatus: 'PROCESSING', ocrError: null },
-  })
-
-  const fail = async (
-    reason: ExtractionFailure,
-    detail: string,
-  ): Promise<ExtractionRefusal> => {
-    await tx.document.update({
-      where: { id: document.id },
-      // The reason is kept where somebody will find it. A truncated message is
-      // still a message; a null one is a mystery.
-      data: { ocrStatus: 'FAILED', ocrError: detail.slice(0, 500) },
-    })
-    return { ok: false, documentId: document.id, reason, detail }
-  }
-
-  let answer
+export async function askForExtraction(
+  input: AskForExtractionInput,
+): Promise<AskedExtraction> {
+  let answer: AskResult
   try {
     answer = await askModel({
       base64: input.base64,
@@ -253,10 +311,7 @@ export async function extractRateConfirmation(
       ...(input.apiKey ? { apiKey: input.apiKey } : {}),
     })
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    // `not_readable` is the document's fault — too big, wrong type — and
-    // `call_failed` is ours or the network's. A screen says different things
-    // about them: one is "this file cannot be read", the other is "try again".
+    const detail = error instanceof Error ? error.message : String(error)
     const reason: ExtractionFailure =
       error instanceof Error &&
       'reason' in error &&
@@ -267,54 +322,82 @@ export async function extractRateConfirmation(
         error.reason === 'truncated')
         ? 'not_readable'
         : 'call_failed'
-    return fail(reason, message)
+    return { ok: false, reason, detail }
   }
 
-  let extracted: Extracted
   try {
-    extracted = parseExtraction(answer.text)
+    const extracted = parseExtraction(answer.text)
+    return { ok: true, answer, extracted, money: moneyToCents(extracted) }
   } catch (error) {
     if (error instanceof ExtractionParseError) {
       // §1.2: a response that does not parse is a FAILED extraction, never a
-      // half-filled form. The raw text is kept so the failure can be read.
-      await tx.document.update({
-        where: { id: document.id },
-        data: { ocrText: answer.text.slice(0, 20_000) },
-      })
-      return fail('unparsable', `${error.reason} at ${error.path}`)
+      // half-filled form. The raw text travels back so it can be kept.
+      return {
+        ok: false,
+        reason: 'unparsable',
+        detail: `${error.reason} at ${error.path}`,
+        rawText: answer.text,
+      }
     }
     throw error
   }
+}
 
-  const money = moneyToCents(extracted)
+/**
+ * Write what came back. Short, and the only part that needs the lock.
+ *
+ * ALWAYS WRITES. A failed extraction is a fact about the document — `FAILED`
+ * with the reason in `ocrError` — because the alternative is a row that looks
+ * like it was never tried and a screen that offers the button again forever.
+ */
+export async function recordExtraction(
+  tx: TxClient,
+  target: ExtractionTarget,
+  documentId: string,
+  asked: AskedExtraction,
+): Promise<ExtractionOutcome> {
+  if (!asked.ok) {
+    await setStatus(tx, target, documentId, {
+      // The reason is kept where somebody will find it. A truncated message is
+      // still a message; a null one is a mystery.
+      ocrStatus: 'FAILED',
+      ocrError: asked.detail.slice(0, 500),
+      ...(asked.rawText ? { ocrText: asked.rawText.slice(0, 20_000) } : {}),
+    })
+    return {
+      ok: false,
+      documentId,
+      reason: asked.reason,
+      detail: asked.detail,
+    }
+  }
 
-  await tx.document.update({
-    where: { id: document.id },
-    data: {
-      ocrStatus: 'COMPLETED',
-      ocrError: null,
-      // The model's own words, kept: an accuracy argument six months from now
-      // is settled by what it said, not by what we stored after reshaping it.
-      ocrText: answer.text.slice(0, 20_000),
-      extractedJson: {
-        extracted,
-        money,
-        usage: answer.usage,
-        model: answer.model,
-        // WHICH ENGINE ACTUALLY ANSWERED, and who was asked. A swap that is
-        // only inferable from the model name is a swap nobody notices for a
-        // month; this makes it a field.
-        ...(answer.fellBackFrom ? { fellBackFrom: answer.fellBackFrom } : {}),
-        // Not `new Date()` — the audit layer stamps rows and this is a fact
-        // about the CALL, so it travels with the usage it belongs to.
-        costMilliCents: costMilliCents(answer.usage, answer.model),
-      } as never,
-    },
+  const { answer, extracted, money } = asked
+
+  await setStatus(tx, target, documentId, {
+    ocrStatus: 'COMPLETED',
+    ocrError: null,
+    // The model's own words, kept: an accuracy argument six months from now is
+    // settled by what it said, not by what we stored after reshaping it.
+    ocrText: answer.text.slice(0, 20_000),
+    extractedJson: {
+      extracted,
+      money,
+      usage: answer.usage,
+      model: answer.model,
+      // WHICH ENGINE ACTUALLY ANSWERED, and who was asked. A swap that is only
+      // inferable from the model name is a swap nobody notices for a month;
+      // this makes it a field.
+      ...(answer.fellBackFrom ? { fellBackFrom: answer.fellBackFrom } : {}),
+      // Not `new Date()` — the audit layer stamps rows and this is a fact
+      // about the CALL, so it travels with the usage it belongs to.
+      costMilliCents: costMilliCents(answer.usage, answer.model),
+    } as never,
   })
 
   return {
     ok: true,
-    documentId: document.id,
+    documentId,
     extracted,
     money,
     usage: answer.usage,
@@ -324,120 +407,17 @@ export async function extractRateConfirmation(
   }
 }
 
-/**
- * The same reading, against a mint rather than a Document (§1.5).
- *
- * Upload-first extraction happens BEFORE the load exists, so there is no
- * Document to write to yet — the answer lives on the `PendingUpload` and
- * `confirmUpload` carries it across. The columns are named identically on both
- * tables so this function is the same code with one delegate swapped, and a
- * reader comparing the two has nothing to translate.
- */
-export async function extractPendingUpload(
+/** One delegate, two tables with identically-named columns. */
+async function setStatus(
   tx: TxClient,
-  input: ExtractInput,
-): Promise<ExtractionOutcome> {
-  const pending = await tx.pendingUpload.findFirst({
-    where: { id: input.documentId },
-    select: { id: true },
-  })
-  if (!pending) {
-    return {
-      ok: false,
-      documentId: input.documentId,
-      reason: 'no_document',
-      detail: 'No such pending upload in this tenant.',
-    }
-  }
-
-  await tx.pendingUpload.update({
-    where: { id: pending.id },
-    data: { ocrStatus: 'PROCESSING', ocrError: null },
-  })
-
-  const fail = async (
-    reason: ExtractionFailure,
-    detail: string,
-  ): Promise<ExtractionRefusal> => {
-    await tx.pendingUpload.update({
-      where: { id: pending.id },
-      data: { ocrStatus: 'FAILED', ocrError: detail.slice(0, 500) },
-    })
-    return { ok: false, documentId: pending.id, reason, detail }
-  }
-
-  let answer
-  try {
-    answer = await askModel({
-      base64: input.base64,
-      mimeType: input.mimeType,
-      system: EXTRACTION_SYSTEM_WITH_SCHEMA,
-      prompt: extractionPrompt(),
-      ...(input.model ? { model: input.model } : {}),
-      ...(input.cache ? { cache: true } : {}),
-      ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
-      ...(input.apiKey ? { apiKey: input.apiKey } : {}),
-    })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    const reason: ExtractionFailure =
-      error instanceof Error &&
-      'reason' in error &&
-      (error.reason === 'document_too_large' ||
-        error.reason === 'unsupported_media_type' ||
-        // A truncated answer is the DOCUMENT being too much to say back, not
-        // the network failing. "Try again" is the wrong advice for it.
-        error.reason === 'truncated')
-        ? 'not_readable'
-        : 'call_failed'
-    return fail(reason, message)
-  }
-
-  let extracted: Extracted
-  try {
-    extracted = parseExtraction(answer.text)
-  } catch (error) {
-    if (error instanceof ExtractionParseError) {
-      await tx.pendingUpload.update({
-        where: { id: pending.id },
-        data: { ocrText: answer.text.slice(0, 20_000) },
-      })
-      return fail('unparsable', `${error.reason} at ${error.path}`)
-    }
-    throw error
-  }
-
-  const money = moneyToCents(extracted)
-
-  await tx.pendingUpload.update({
-    where: { id: pending.id },
-    data: {
-      ocrStatus: 'COMPLETED',
-      ocrError: null,
-      ocrText: answer.text.slice(0, 20_000),
-      extractedJson: {
-        extracted,
-        money,
-        usage: answer.usage,
-        model: answer.model,
-        // WHICH ENGINE ACTUALLY ANSWERED, and who was asked. A swap that is
-        // only inferable from the model name is a swap nobody notices for a
-        // month; this makes it a field.
-        ...(answer.fellBackFrom ? { fellBackFrom: answer.fellBackFrom } : {}),
-        costMilliCents: costMilliCents(answer.usage, answer.model),
-      } as never,
-    },
-  })
-
-  return {
-    ok: true,
-    documentId: pending.id,
-    extracted,
-    money,
-    usage: answer.usage,
-    costMilliCents: costMilliCents(answer.usage, answer.model),
-    model: answer.model,
-    ...(answer.fellBackFrom ? { fellBackFrom: answer.fellBackFrom } : {}),
+  target: ExtractionTarget,
+  id: string,
+  data: Record<string, unknown>,
+): Promise<void> {
+  if (target === 'document') {
+    await tx.document.update({ where: { id }, data: data as never })
+  } else {
+    await tx.pendingUpload.update({ where: { id }, data: data as never })
   }
 }
 

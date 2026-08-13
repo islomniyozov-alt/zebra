@@ -2,8 +2,10 @@ import { NextResponse } from 'next/server'
 import { withCurrentOrg } from '@/lib/auth-context'
 import { objectBytes, r2ConfigFromEnv } from '@/lib/r2'
 import {
-  extractPendingUpload,
-  extractRateConfirmation,
+  type ExtractionTarget,
+  askForExtraction,
+  beginExtraction,
+  recordExtraction,
 } from '@/lib/rate-confirmation'
 import {
   ALLOWED_MODELS,
@@ -44,6 +46,14 @@ import { apiError, authFailureResponse } from '../../../_lib/respond'
 // payload on the wire carries no rate at all. The figures stay on the
 // Document's OCR columns for the rate panel, which asks a different permission.
 
+/** What the claiming transaction hands to the slow part. */
+interface Claimed {
+  target: ExtractionTarget
+  id: string
+  r2Key: string
+  mimeType: string
+}
+
 export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> },
@@ -76,10 +86,12 @@ export async function POST(
   const cache = body.cache === true
 
   try {
-    const result = await withCurrentOrg(
+    // ---- 1. CLAIM THE ROW. A short transaction: prove the file is this
+    // tenant's, and mark it PROCESSING. Nothing slow happens in here.
+    const claimed = await withCurrentOrg(
       'create',
       'document',
-      async (tx, session) => {
+      async (tx): Promise<Claimed | null> => {
         // THE ID IS EITHER, and which one it is decides where the answer is
         // written. Upload-first extraction (§1.5) happens before the load and
         // therefore before the Document, so the mint carries the result until
@@ -99,19 +111,59 @@ export async function POST(
         const file = document ?? pending
         if (!file) return null
 
-        // Fetched inside the scoped transaction so the row was proved to be
-        // this tenant's before a byte is read out of the bucket.
-        const bytes = await objectBytes(r2ConfigFromEnv(), file.r2Key)
-        if (!bytes) return { missing: true as const }
+        const target: ExtractionTarget = document ? 'document' : 'pending'
+        const begun = await beginExtraction(tx, target, file.id)
+        if (!begun.ok) return null
 
-        const read = document ? extractRateConfirmation : extractPendingUpload
-        const outcome = await read(tx, {
-          documentId: file.id,
-          base64: base64Of(bytes),
+        return {
+          target,
+          id: file.id,
+          r2Key: file.r2Key,
           mimeType: file.mimeType,
-          ...(requested ? { model: requested } : {}),
-          ...(cache ? { cache: true } : {}),
-        })
+        }
+      },
+    )
+
+    if (!claimed) return apiError(404, 'not_found', 'No such document.')
+
+    // ---- 2. THE SLOW PART, WITH NOTHING HELD OPEN.
+    //
+    // The bytes and the model call both live out here. This is the fix for the
+    // bare 500 the owner hit pasting a Relay booking into production: the model
+    // was slow enough to outlive a 60-second interactive transaction, and the
+    // Prisma error that produced is not a `ClaudeError`, so it escaped every
+    // handler as an empty 500. A third party's latency has no business inside
+    // a database lock — see the note on `beginExtraction`.
+    const bytes = await objectBytes(r2ConfigFromEnv(), claimed.r2Key)
+    if (!bytes) {
+      await withCurrentOrg('create', 'document', (tx) =>
+        recordExtraction(tx, claimed.target, claimed.id, {
+          ok: false,
+          reason: 'no_document',
+          detail: 'The document has no stored object.',
+        }),
+      )
+      return apiError(404, 'not_found', 'The document has no stored object.')
+    }
+
+    const asked = await askForExtraction({
+      base64: base64Of(bytes),
+      mimeType: claimed.mimeType,
+      ...(requested ? { model: requested } : {}),
+      ...(cache ? { cache: true } : {}),
+    })
+
+    // ---- 3. WRITE WHAT CAME BACK, and read the memory that decorates it.
+    const result = await withCurrentOrg(
+      'create',
+      'document',
+      async (tx, session) => {
+        const outcome = await recordExtraction(
+          tx,
+          claimed.target,
+          claimed.id,
+          asked,
+        )
 
         // §1.4 — APPLIED ON THE NEXT UPLOAD. If somebody has already typed
         // over this printed name, the customer they chose is what the form
@@ -139,15 +191,7 @@ export async function POST(
 
         return { outcome, session, broker, facilities }
       },
-      // The model takes seconds, not milliseconds, and the transaction is open
-      // across it. Generous on purpose and still finite.
-      { timeoutMs: 60_000, maxWaitMs: 20_000 },
     )
-
-    if (!result) return apiError(404, 'not_found', 'No such document.')
-    if ('missing' in result) {
-      return apiError(404, 'not_found', 'The document has no stored object.')
-    }
 
     const { outcome, session, broker, facilities } = result
 
@@ -192,7 +236,39 @@ export async function POST(
   } catch (error) {
     const authFailure = authFailureResponse(error)
     if (authFailure) return authFailure
-    throw error
+
+    // NOTHING LEAVES THIS ROUTE WITHOUT A SENTENCE.
+    //
+    // It used to rethrow, which Next turns into a 500 with an EMPTY body — and
+    // the client's `messageOf` has nothing to read, so a dispatcher saw
+    // "Request failed (500)". That is the second defect the owner reported,
+    // and it is the one that made the first one hard to name: the worker knew
+    // exactly what had happened and said none of it.
+    //
+    // Logged with the id, because the sentence a dispatcher reads is
+    // deliberately not the sentence an engineer needs, and `wrangler tail` is
+    // where the second one belongs.
+    console.error(
+      `[zebra.extract] ${id}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
+    )
+
+    // A TRANSACTION THAT RAN OUT OF TIME IS ITS OWN SENTENCE. It means the
+    // model was slow, not that the file is bad, and "try again" is genuinely
+    // the right advice — which is the opposite of what `not_readable` says.
+    const message = error instanceof Error ? error.message : String(error)
+    if (/expired transaction|Transaction API error/i.test(message)) {
+      return apiError(
+        503,
+        'too_slow',
+        'That took longer than the reader allows. Try again, or type it in.',
+      )
+    }
+
+    return apiError(
+      500,
+      'extract_failed',
+      'Something went wrong reading that document. Try again, or type it in.',
+    )
   }
 }
 

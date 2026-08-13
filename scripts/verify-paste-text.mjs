@@ -180,11 +180,118 @@ record(
   `${stored?.ocrStatus}, ${(stored?.ocrText ?? '').length} chars`,
 )
 
+// --- A RELAY BOOKING EMAIL, WHICH IS WHAT BROKE IN PRODUCTION ---------------
+//
+// The owner pasted one of these and got a bare 500. The cause was the model
+// call sitting inside a 60-second interactive transaction: Gemini was slow,
+// the transaction expired, and the Prisma error escaped every handler into an
+// empty response. So this case is not about the words — it is about the SHAPE
+// of a booking email surviving a slow read.
+//
+// SYNTHETIC, AND THE SAME SHAPE. The real one names the owner's own company, a
+// live trip and a contract UUID, and `corpus-amazon/` is gitignored for that
+// reason. Everything below is invented and every QUIRK is real: no year on the
+// dates, two different timezone abbreviations, a U+2010 HYPHEN rather than a
+// hyphen-minus, `>` as the lane separator, money in three shapes on two lines,
+// and a paragraph of legal boilerplate longer than the booking itself.
+const RELAY = [
+  `Load Board - Trip ${TAG}X9 booked`,
+  'Dear EXAMPLE HAULAGE LLC,',
+  'You have successfully booked the following trip. Visit the Upcoming tab to view trip details.',
+  `${TAG}X9 Starts in 20h 37m`,
+  'CONTRACT \u2010 00000000-1111-2222-3333-444444444444',
+  'AAA1 SPRINGFIELD, OH >  BBB2 FRANKLIN, IL',
+  'Fri 14 Aug 03:45 EDT > Fri 14 Aug 09:08 CDT',
+  "53' Trailer |  Trailer provided  |  Solo Driver",
+  'Estimated Payout  -  $551.81 ( $2.10/mi)  | 262.56mi',
+  'Base Rate -  $268.07 ( $1.02/mi)  ( $41.89/hr)',
+  '',
+  'Note: This estimated payout is subject to change. If Amazon adds or',
+  'removes one or more Routes to a booked Pre-Routed Trip, then Amazon',
+  'will pay your company the per hour base rate for the new planned',
+  'transit time of the modified trip, plus any applicable Accessorial',
+  'charges; provided, that such modification was solely for reasons',
+  "related to changes in Amazon's planning or network needs.",
+  'This trip is power only.  Trip Requirements.',
+].join('\n')
+
+await page.goto(`${BASE}/loads/new`, { waitUntil: 'domcontentloaded' })
+for (let attempt = 0; attempt < 30; attempt++) {
+  await page.fill('input[name="miles"]', '262')
+  await page.waitForTimeout(200)
+  if ((await page.locator('input[name="miles"]').inputValue()) === '262') break
+  await page.waitForTimeout(500)
+}
+
+await page.locator('[role="tab"]', { hasText: 'Paste text' }).click()
+await page.fill('textarea', RELAY)
+await page.locator('button', { hasText: 'Read this text' }).click()
+
+// GENEROUS ON PURPOSE. A real Relay read has been measured at 38–53 seconds
+// against a busy model, and the whole point of the fix is that slow is no
+// longer the same as broken.
+let relay = await snapshot()
+let relayStable = 0
+for (let attempt = 0; attempt < 150; attempt++) {
+  await page.waitForTimeout(1_000)
+  const next = await snapshot()
+  const same = JSON.stringify(next) === JSON.stringify(relay)
+  relay = next
+  if (!relay.places.some(Boolean)) {
+    relayStable = 0
+    continue
+  }
+  if (same && ++relayStable >= 2) break
+  if (!same) relayStable = 0
+}
+
+const caption =
+  (await page.locator('[role="status"]').first().textContent())?.trim() ?? ''
+
+// THE DEFECT ITSELF. A bare 500 reaches the dispatcher as "Request failed
+// (500)" — no sentence, nothing to do. Whatever else happens, that string must
+// never be on this screen again, and neither must a vendor's raw JSON.
+record(
+  'a Relay booking never answers with a bare status code',
+  !/Request failed \(\d+\)/.test(caption),
+  caption || '(no caption)',
+)
+record(
+  'nor with the upstream API’s own words',
+  !/Gemini returned|Claude returned|"status":|UNAVAILABLE/i.test(caption),
+  'no vendor JSON on a dispatcher’s screen',
+)
+
+record(
+  'the Relay lane fills both stops',
+  relay.places.length >= 2 &&
+    relay.places[0]?.toUpperCase().includes('SPRINGFIELD') &&
+    relay.places[relay.places.length - 1]?.toUpperCase().includes('FRANKLIN'),
+  relay.places.join(' · ') || '(none)',
+)
+
+// The trip id is the broker's reference, and it is the duplicate key a second
+// paste of the same email would warn on.
+const relayStored = relay.pendingUploadId
+  ? (
+      await pool.query(
+        `select "ocrStatus", "ocrError" from "PendingUpload" where id = $1`,
+        [relay.pendingUploadId],
+      )
+    ).rows[0]
+  : null
+
+record(
+  'and the mint lands COMPLETED rather than FAILED',
+  relayStored?.ocrStatus === 'COMPLETED',
+  `${relayStored?.ocrStatus ?? '(no mint)'}${
+    relayStored?.ocrError ? ` — ${relayStored.ocrError.slice(0, 90)}` : ''
+  }`,
+)
+
 await browser.close()
-if (form.pendingUploadId) {
-  await pool.query('delete from "PendingUpload" where id = $1', [
-    form.pendingUploadId,
-  ])
+for (const id of [form.pendingUploadId, relay.pendingUploadId]) {
+  if (id) await pool.query('delete from "PendingUpload" where id = $1', [id])
 }
 await pool.end()
 

@@ -92,6 +92,9 @@ interface Props {
     done: string
     failed: string
     typeInstead: string
+    failedUnreadable: string
+    failedTryAgain: string
+    failedMissing: string
     methodAmazonSoon: string
     methodPasteRead: string
     methodPastePlaceholder: string
@@ -104,6 +107,9 @@ interface Props {
     methodManual: string
   }
 }
+
+/** The offer's own words, named so `messageOf` can take them. */
+type Labels = Props['labels']
 
 export function RateConOffer({ companyId, onExtracted, labels }: Props) {
   const [phase, setPhase] = useState<Phase>('idle')
@@ -163,7 +169,7 @@ export function RateConOffer({ companyId, onExtracted, labels }: Props) {
           documentType: 'RATE_CONFIRMATION',
         }),
       })
-      if (!minted.ok) throw new Error(await messageOf(minted))
+      if (!minted.ok) throw new Error(await messageOf(minted, labels))
       const { pendingUploadId, url, headers } = (await minted.json()) as {
         pendingUploadId: string
         url: string
@@ -178,7 +184,7 @@ export function RateConOffer({ companyId, onExtracted, labels }: Props) {
       const read = await fetch(`/api/documents/${pendingUploadId}/extract`, {
         method: 'POST',
       })
-      if (!read.ok) throw new Error(await messageOf(read))
+      if (!read.ok) throw new Error(await messageOf(read, labels))
 
       const answer = (await read.json()) as {
         extracted: Extracted
@@ -370,12 +376,50 @@ export function RateConOffer({ companyId, onExtracted, labels }: Props) {
   )
 }
 
-async function messageOf(response: Response): Promise<string> {
+/**
+ * What the dispatcher is told when a read fails.
+ *
+ * THE UPSTREAM'S WORDS ARE NOT A SENTENCE. `body.message` was shown verbatim,
+ * so a dispatcher pasting a booking during a Gemini outage read
+ *
+ *   Gemini returned 503: {"error":{"code":503,"message":"This model is
+ *   currently experiencing high demand…","status":"UNAVAILABLE"}}
+ *
+ * off the screen. That is a stack trace with a nicer font: it names a vendor
+ * we do not want them thinking about, it is untranslated in a three-language
+ * product, and §10 asks an error to say what happened AND what to do.
+ *
+ * So the REASON CODE picks the sentence — the codes are ours and finite — and
+ * the upstream detail goes to the console, where somebody debugging can still
+ * reach it. Anything unrecognised falls back to the caller's own wording
+ * rather than inventing a new one.
+ */
+async function messageOf(response: Response, labels: Labels): Promise<string> {
+  let body: { message?: string; error?: string } = {}
   try {
-    const body = (await response.json()) as { message?: string; error?: string }
-    return body.message ?? body.error ?? `Request failed (${response.status}).`
+    body = (await response.json()) as typeof body
   } catch {
-    return `Request failed (${response.status}).`
+    // An empty or non-JSON body used to be the WHOLE story — see the route's
+    // catch, which no longer lets that happen. Kept because a proxy or an
+    // edge failure can still produce one.
+    return labels.failed
+  }
+
+  if (body.message)
+    console.warn(`[zebra.extract] ${body.error}: ${body.message}`)
+
+  switch (body.error) {
+    case 'not_readable':
+      return labels.failedUnreadable
+    case 'unparsable':
+    case 'call_failed':
+    case 'too_slow':
+    case 'extract_failed':
+      return labels.failedTryAgain
+    case 'not_found':
+      return labels.failedMissing
+    default:
+      return labels.failed
   }
 }
 

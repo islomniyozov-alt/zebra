@@ -2,7 +2,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
 import { withOrg } from '@/lib/tenancy'
 import {
-  extractRateConfirmation,
+  askForExtraction,
+  beginExtraction,
+  recordExtraction,
   storedExtraction,
 } from '@/lib/rate-confirmation'
 import type { PrismaClient } from '@/generated/prisma/client'
@@ -77,13 +79,29 @@ const answer = (over: Record<string, unknown> = {}) =>
   })
 
 /** A fetch that returns one canned Claude response. */
+/**
+ * A stubbed answer in the SHIPPED ENGINE'S SHAPE.
+ *
+ * It used to be Anthropic's — `content[].text`, `usage.input_tokens` — and it
+ * stayed that way when `EXTRACTION_MODEL` became `gemini-3.6-flash`. Since
+ * `askModel` routes on the resolved model, every one of these tests was really
+ * asking Gemini to read an Anthropic response, getting "returned no text", and
+ * failing. Four of them had been red since the engine switch and nobody saw it,
+ * because the integration project runs under `npm test` and not under
+ * `npm run check`.
+ *
+ * Which is the lesson worth keeping: a suite that is not in the gate is a
+ * suite that reports on nothing.
+ */
 const replying = (text: string, usage = { input: 4_210, output: 880 }) =>
   (async () =>
     new Response(
       JSON.stringify({
-        content: [{ type: 'text', text }],
-        usage: { input_tokens: usage.input, output_tokens: usage.output },
-        model: 'claude-sonnet-5',
+        candidates: [{ content: { parts: [{ text }] }, finishReason: 'STOP' }],
+        usageMetadata: {
+          promptTokenCount: usage.input,
+          candidatesTokenCount: usage.output,
+        },
       }),
       { status: 200, headers: { 'content-type': 'application/json' } },
     )) as unknown as typeof fetch
@@ -142,21 +160,41 @@ afterAll(async () => {
   await owner.$disconnect()
 })
 
+/**
+ * The three phases the route walks, in one call, for the tests.
+ *
+ * NOT a production shortcut and deliberately not exported from the library:
+ * the whole point of the split is that `askForExtraction` runs with NO
+ * transaction open, and a wrapper that re-joined them would be a trap for the
+ * next caller. Here the fetch is a stub with no latency, so holding `tx` across
+ * it costs nothing and keeps each test one statement.
+ */
+async function extractInOneGo(
+  input: Parameters<typeof askForExtraction>[0] & { documentId: string },
+) {
+  const begun = await inOrg((tx) =>
+    beginExtraction(tx, 'document', input.documentId),
+  )
+  if (!begun.ok) return begun
+  const asked = await askForExtraction(input)
+  return inOrg((tx) =>
+    recordExtraction(tx, 'document', input.documentId, asked),
+  )
+}
+
 describe('a document that reads', () => {
   let documentId = ''
 
   it('lands COMPLETED with the model’s own words and the parsed shape', async () => {
     documentId = await makeDocument('good')
 
-    const outcome = await inOrg((tx) =>
-      extractRateConfirmation(tx, {
-        documentId,
-        base64: 'JVBERi0xLjQK',
-        mimeType: 'application/pdf',
-        fetchImpl: replying(answer()),
-        apiKey: 'test-key',
-      }),
-    )
+    const outcome = await extractInOneGo({
+      documentId,
+      base64: 'JVBERi0xLjQK',
+      mimeType: 'application/pdf',
+      fetchImpl: replying(answer()),
+      apiKey: 'test-key',
+    })
 
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) return
@@ -168,8 +206,10 @@ describe('a document that reads', () => {
     expect(outcome.money.fuelSurchargeCents).toBe(41_250)
     expect(outcome.money.totalCents).toBe(226_250)
     expect(outcome.money.totalAgrees).toBe(true)
-    // 4210 x 300 + 880 x 1500 = 2,583,000 millionths -> 2,583 thousandths.
-    expect(outcome.costMilliCents).toBe(2_583)
+    // Gemini 3.6 Flash at 150/750 per Mtok. Each side is rounded before they
+    // are summed — 4210 x 150 = 631,500 -> 632 and 880 x 750 = 660,000 -> 660
+    // — which is 1,292 rather than the 1,291 a single division would give.
+    expect(outcome.costMilliCents).toBe(1_292)
 
     const stored = await owner.document.findUniqueOrThrow({
       where: { id: documentId },
@@ -186,8 +226,8 @@ describe('a document that reads', () => {
     // settled by what it said, not by what we stored after reshaping it.
     expect(stored.ocrText).toContain('Midwest Logistics')
     const json = stored.extractedJson as Record<string, unknown>
-    expect(json['model']).toBe('claude-sonnet-5')
-    expect(json['costMilliCents']).toBe(2_583)
+    expect(json['model']).toBe('gemini-3.6-flash')
+    expect(json['costMilliCents']).toBe(1_292)
   }, 300_000)
 
   it('and reads back without calling anything', async () => {
@@ -208,15 +248,13 @@ describe('a document that does not read', () => {
     // offers the button again forever.
     const documentId = await makeDocument('prose')
 
-    const outcome = await inOrg((tx) =>
-      extractRateConfirmation(tx, {
-        documentId,
-        base64: 'JVBERi0xLjQK',
-        mimeType: 'application/pdf',
-        fetchImpl: replying('I could not read this document.'),
-        apiKey: 'test-key',
-      }),
-    )
+    const outcome = await extractInOneGo({
+      documentId,
+      base64: 'JVBERi0xLjQK',
+      mimeType: 'application/pdf',
+      fetchImpl: replying('I could not read this document.'),
+      apiKey: 'test-key',
+    })
 
     expect(outcome).toMatchObject({ ok: false, reason: 'unparsable' })
 
@@ -240,37 +278,35 @@ describe('a document that does not read', () => {
   it('names WHERE the answer went wrong, for a half-good response', async () => {
     const documentId = await makeDocument('halfgood')
 
-    const outcome = await inOrg((tx) =>
-      extractRateConfirmation(tx, {
-        documentId,
-        base64: 'JVBERi0xLjQK',
-        mimeType: 'application/pdf',
-        // Everything right except one confidence, deep in a stop.
-        fetchImpl: replying(
-          answer({
-            stops: [
-              {
-                type: { value: 'PICKUP', confidence: 'high' },
-                name: null,
-                addressLine1: null,
-                addressLine2: null,
-                city: { value: 'Chicago', confidence: 0.9 },
-                state: null,
-                postalCode: null,
-                scheduledAt: null,
-                windowStart: null,
-                windowEnd: null,
-                referenceNumber: null,
-                contactName: null,
-                contactPhone: null,
-                instructions: null,
-              },
-            ],
-          }),
-        ),
-        apiKey: 'test-key',
-      }),
-    )
+    const outcome = await extractInOneGo({
+      documentId,
+      base64: 'JVBERi0xLjQK',
+      mimeType: 'application/pdf',
+      // Everything right except one confidence, deep in a stop.
+      fetchImpl: replying(
+        answer({
+          stops: [
+            {
+              type: { value: 'PICKUP', confidence: 'high' },
+              name: null,
+              addressLine1: null,
+              addressLine2: null,
+              city: { value: 'Chicago', confidence: 0.9 },
+              state: null,
+              postalCode: null,
+              scheduledAt: null,
+              windowStart: null,
+              windowEnd: null,
+              referenceNumber: null,
+              contactName: null,
+              contactPhone: null,
+              instructions: null,
+            },
+          ],
+        }),
+      ),
+      apiKey: 'test-key',
+    })
 
     expect(outcome).toMatchObject({ ok: false, reason: 'unparsable' })
     if (outcome.ok) return
@@ -292,15 +328,13 @@ describe('a document that does not read', () => {
     // versus "try again".
     const documentId = await makeDocument('huge')
 
-    const outcome = await inOrg((tx) =>
-      extractRateConfirmation(tx, {
-        documentId,
-        base64: 'A'.repeat(11 * 1024 * 1024),
-        mimeType: 'application/pdf',
-        fetchImpl: replying(answer()),
-        apiKey: 'test-key',
-      }),
-    )
+    const outcome = await extractInOneGo({
+      documentId,
+      base64: 'A'.repeat(11 * 1024 * 1024),
+      mimeType: 'application/pdf',
+      fetchImpl: replying(answer()),
+      apiKey: 'test-key',
+    })
 
     expect(outcome).toMatchObject({ ok: false, reason: 'not_readable' })
 
@@ -315,18 +349,16 @@ describe('a document that does not read', () => {
   it('and an HTTP failure is "try again", not "unreadable"', async () => {
     const documentId = await makeDocument('http')
 
-    const outcome = await inOrg((tx) =>
-      extractRateConfirmation(tx, {
-        documentId,
-        base64: 'JVBERi0xLjQK',
-        mimeType: 'application/pdf',
-        fetchImpl: (async () =>
-          new Response('overloaded', {
-            status: 529,
-          })) as unknown as typeof fetch,
-        apiKey: 'test-key',
-      }),
-    )
+    const outcome = await extractInOneGo({
+      documentId,
+      base64: 'JVBERi0xLjQK',
+      mimeType: 'application/pdf',
+      fetchImpl: (async () =>
+        new Response('overloaded', {
+          status: 529,
+        })) as unknown as typeof fetch,
+      apiKey: 'test-key',
+    })
 
     expect(outcome).toMatchObject({ ok: false, reason: 'call_failed' })
     const stored = await owner.document.findUniqueOrThrow({
@@ -343,15 +375,13 @@ describe('a document in another tenant', () => {
     // RLS removed it; the service reports the same thing it reports for an id
     // that never existed, because the caller is not entitled to tell them
     // apart.
-    const outcome = await inOrg((tx) =>
-      extractRateConfirmation(tx, {
-        documentId: 'ckdoesnotexist000000000',
-        base64: 'JVBERi0xLjQK',
-        mimeType: 'application/pdf',
-        fetchImpl: replying(answer()),
-        apiKey: 'test-key',
-      }),
-    )
+    const outcome = await extractInOneGo({
+      documentId: 'ckdoesnotexist000000000',
+      base64: 'JVBERi0xLjQK',
+      mimeType: 'application/pdf',
+      fetchImpl: replying(answer()),
+      apiKey: 'test-key',
+    })
     expect(outcome).toMatchObject({ ok: false, reason: 'no_document' })
   }, 300_000)
 })
