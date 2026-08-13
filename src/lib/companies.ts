@@ -23,12 +23,13 @@ import { optionalText, stateCode } from './reference'
 export type AddCompanyFailure =
   | 'no_name'
   | 'duplicate_name'
+  | 'duplicate_dot'
   | 'limit_reached'
   | 'bad_state'
 
 export type AddCompanyResult =
   | { ok: true; id: string }
-  | { ok: false; reason: AddCompanyFailure; limit?: number }
+  | { ok: false; reason: AddCompanyFailure; limit?: number; dot?: string }
 
 export interface AddCompanyInput {
   name: string
@@ -99,13 +100,36 @@ export async function addCompany(
   })
   if (clash) return { ok: false, reason: 'duplicate_name' }
 
+  // THE SCHEMA HAS ALWAYS HAD `@@unique([organizationId, dotNumber])` AND
+  // NOTHING HAS EVER HANDLED IT.
+  //
+  // Harmless while a DOT number was something somebody occasionally typed;
+  // not harmless now that the FMCSA lookup fills it in, because looking up the
+  // same carrier twice is exactly what somebody does when they are not sure
+  // whether they already added it. Unhandled, Prisma's unique violation
+  // escapes `addCompanyAction` and the browser gets a 500 with no sentence in
+  // it — on the one screen where the answer is a single friendly line.
+  //
+  // Checked here rather than caught below because the message names the
+  // number, and a caught constraint error does not carry it.
+  const dotNumber = optionalText(input.dotNumber)
+  if (dotNumber !== null) {
+    const sameDot = await tx.company.findFirst({
+      where: { dotNumber },
+      select: { id: true },
+    })
+    if (sameDot) {
+      return { ok: false, reason: 'duplicate_dot', dot: dotNumber }
+    }
+  }
+
   const created = await tx.company.create({
     data: {
       organizationId,
       name,
       legalName: optionalText(input.legalName),
       mcNumber: optionalText(input.mcNumber),
-      dotNumber: optionalText(input.dotNumber),
+      dotNumber,
       addressLine1: optionalText(input.addressLine1),
       addressLine2: optionalText(input.addressLine2),
       city: optionalText(input.city),

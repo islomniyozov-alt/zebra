@@ -30,6 +30,16 @@ export default async function NewCompanyPage() {
           save: t('companies.save'),
           cancel: t('companies.cancel'),
           hint: t('companies.hint'),
+          lookup: t('companies.lookup'),
+          lookupHint: t('companies.lookupHint'),
+          lookupPending: t('companies.lookupPending'),
+          lookupFilled: t('companies.lookupFilled'),
+          fromFmcsa: t('companies.fromFmcsa'),
+          fmcsaTitle: t('companies.fmcsaTitle'),
+          fmcsaEntity: t('companies.fmcsaEntity'),
+          fmcsaOperation: t('companies.fmcsaOperation'),
+          fmcsaStatus: t('companies.fmcsaStatus'),
+          fmcsaRating: t('companies.fmcsaRating'),
         }}
       />
     </div>

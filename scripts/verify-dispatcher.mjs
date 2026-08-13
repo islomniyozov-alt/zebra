@@ -735,6 +735,26 @@ record(
   `HTTP ${dispatcherAdd.status}`,
 )
 
+// --- THE FMCSA LOOKUP IS SERVER-SIDE, AND THAT IS THE POINT ---------------
+//
+// QCMobile takes its key as a QUERY PARAMETER, so a browser fetch would put
+// `FMCSA_WEBKEY` in the network tab of anybody who opened this form, in their
+// history, and in every proxy log between here and Washington. The lookup is a
+// server function for that reason alone, and this is the assertion that keeps
+// it one: nothing resembling the key or the endpoint may appear in the payload.
+record(
+  'the Add authority page offers the FMCSA lookup',
+  /Look up/.test(ownerAdd.body),
+  'the button is on the form',
+)
+
+record(
+  'and neither the FMCSA key nor its endpoint is in the payload',
+  !/webKey/i.test(ownerAdd.body) &&
+    !/mobile\.fmcsa\.dot\.gov/i.test(ownerAdd.body),
+  'the lookup runs on the server, so the browser never sees either',
+)
+
 // --- THE RELAY IMPORT IS A BOOKING ACT (Phase 6 §3a) ----------------------
 //
 // Gated on `load:create` and nothing new, so a dispatcher — who books all day

@@ -84,6 +84,26 @@ describe('adding an authority', () => {
     expect(result).toMatchObject({ ok: false, reason: 'duplicate_name' })
   }, 300_000)
 
+  // THE SCHEMA HAS ALWAYS HAD `@@unique([organizationId, dotNumber])` AND
+  // NOTHING EVER HANDLED IT — a duplicate escaped as a Prisma unique violation
+  // and reached the browser as a 500 with no sentence in it. Harmless while a
+  // DOT number was typed occasionally; not harmless now the FMCSA lookup fills
+  // it in, because looking the same carrier up twice is exactly what somebody
+  // does when they are not sure whether they already added it.
+  it('refuses a second authority with the same USDOT, naming the number', async () => {
+    const result = await inOrg((tx) =>
+      addCompany(tx, organizationId, {
+        name: `RAM Haulage again ${nonce}`,
+        dotNumber: '3162967',
+      }),
+    )
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'duplicate_dot',
+      dot: '3162967',
+    })
+  }, 300_000)
+
   it('refuses a state that is not a two-letter code', async () => {
     const result = await inOrg((tx) =>
       addCompany(tx, organizationId, {

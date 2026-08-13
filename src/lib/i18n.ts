@@ -80,6 +80,41 @@ const en = {
     'Your plan covers {limit} authorities and you are using all of them. Ask for more before adding another.',
   'companies.error.duplicateName':
     'An authority with that name already exists.',
+  'companies.lookup': 'Look up',
+  'companies.lookupHint':
+    'Type a USDOT or MC number, then look it up in the FMCSA register. Everything it fills stays editable, and nothing is saved until you press Add authority.',
+  'companies.lookupPending': 'Asking FMCSA…',
+  'companies.lookupFilled':
+    'Filled from the FMCSA register — check every line before saving.',
+  'companies.fromFmcsa': 'From FMCSA.',
+  'companies.fmcsaTitle': 'FMCSA register',
+  'companies.fmcsaEntity': 'Entity type',
+  'companies.fmcsaOperation': 'Operation',
+  'companies.fmcsaStatus': 'Operating status',
+  'companies.fmcsaRating': 'Safety rating',
+  'companies.fmcsaActive': 'Active',
+  'companies.fmcsaInactive': 'Inactive',
+  'companies.warn.notAllowedToOperate':
+    'FMCSA says this authority is NOT allowed to operate.',
+  'companies.warn.outOfService':
+    'FMCSA shows an out-of-service order dated {date}.',
+  'companies.warn.inactive': 'FMCSA shows this authority as inactive.',
+  'companies.warn.noActiveAuthority':
+    'FMCSA shows no active operating authority — common, contract and broker are all inactive or absent.',
+  'companies.warn.unsatisfactoryRating':
+    'The FMCSA safety rating is Unsatisfactory.',
+  'companies.error.lookupNeedNumber':
+    'Type a USDOT or MC number first — digits only.',
+  'companies.error.lookupNotFound':
+    'No carrier with that number in the FMCSA register. Type the details instead.',
+  'companies.error.lookupUnavailable':
+    'The FMCSA register did not answer. Type the details instead — nothing on this form depends on it.',
+  'companies.error.lookupNoKey':
+    'FMCSA lookup is not configured on this server. Type the details instead.',
+  'companies.error.lookupRefused':
+    'You do not have permission to look up carriers.',
+  'companies.error.duplicateDot':
+    'USDOT {dot} already belongs to another authority here.',
   'companies.error.badState': 'Use a two-letter state code.',
   'nav.companies': 'Authorities',
   'nav.settings': 'Settings',
@@ -1523,6 +1558,40 @@ const ru: Dictionary = {
     'Ваш тариф включает {limit} перевозчиков, и все они используются. Запросите увеличение лимита.',
   'companies.error.duplicateName':
     'Перевозчик с таким названием уже существует.',
+  'companies.lookup': 'Найти',
+  'companies.lookupHint':
+    'Введите номер USDOT или MC и найдите его в реестре FMCSA. Всё, что подставится, можно править, и ничего не сохраняется, пока вы не нажмёте «Добавить перевозчика».',
+  'companies.lookupPending': 'Запрос в FMCSA…',
+  'companies.lookupFilled':
+    'Заполнено из реестра FMCSA — проверьте каждую строку перед сохранением.',
+  'companies.fromFmcsa': 'Из FMCSA.',
+  'companies.fmcsaTitle': 'Реестр FMCSA',
+  'companies.fmcsaEntity': 'Тип лица',
+  'companies.fmcsaOperation': 'Вид перевозок',
+  'companies.fmcsaStatus': 'Статус деятельности',
+  'companies.fmcsaRating': 'Рейтинг безопасности',
+  'companies.fmcsaActive': 'Действует',
+  'companies.fmcsaInactive': 'Не действует',
+  'companies.warn.notAllowedToOperate':
+    'По данным FMCSA этому перевозчику НЕ разрешено работать.',
+  'companies.warn.outOfService':
+    'FMCSA показывает запрет на эксплуатацию от {date}.',
+  'companies.warn.inactive': 'FMCSA показывает этого перевозчика неактивным.',
+  'companies.warn.noActiveAuthority':
+    'FMCSA не показывает действующих разрешений — common, contract и broker все неактивны или отсутствуют.',
+  'companies.warn.unsatisfactoryRating':
+    'Рейтинг безопасности FMCSA — Unsatisfactory.',
+  'companies.error.lookupNeedNumber':
+    'Сначала введите номер USDOT или MC — только цифры.',
+  'companies.error.lookupNotFound':
+    'В реестре FMCSA нет перевозчика с таким номером. Введите данные вручную.',
+  'companies.error.lookupUnavailable':
+    'Реестр FMCSA не ответил. Введите данные вручную — ничего на этой форме от него не зависит.',
+  'companies.error.lookupNoKey':
+    'Поиск в FMCSA не настроен на этом сервере. Введите данные вручную.',
+  'companies.error.lookupRefused': 'У вас нет прав на поиск перевозчиков.',
+  'companies.error.duplicateDot':
+    'USDOT {dot} уже принадлежит другому перевозчику здесь.',
   'companies.error.badState': 'Используйте двухбуквенный код штата.',
   'nav.companies': 'Перевозчики',
   'nav.settings': 'Настройки',
@@ -2965,6 +3034,40 @@ const fa: Dictionary = {
   'companies.error.limitReached':
     'طرح شما {limit} شرکت را پوشش می‌دهد و همه در حال استفاده‌اند. برای افزودن بیشتر، افزایش سقف بخواهید.',
   'companies.error.duplicateName': 'شرکتی با این نام از پیش وجود دارد.',
+  'companies.lookup': 'جست‌وجو',
+  'companies.lookupHint':
+    'شمارهٔ USDOT یا MC را بنویسید و در سامانهٔ FMCSA جست‌وجو کنید. هرچه پر شود قابل ویرایش است و تا زمانی که «افزودن شرکت» را نزنید چیزی ذخیره نمی‌شود.',
+  'companies.lookupPending': 'در حال پرسیدن از FMCSA…',
+  'companies.lookupFilled':
+    'از سامانهٔ FMCSA پر شد — پیش از ذخیره هر سطر را بررسی کنید.',
+  'companies.fromFmcsa': 'از FMCSA.',
+  'companies.fmcsaTitle': 'سامانهٔ FMCSA',
+  'companies.fmcsaEntity': 'نوع شخصیت',
+  'companies.fmcsaOperation': 'نوع فعالیت',
+  'companies.fmcsaStatus': 'وضعیت فعالیت',
+  'companies.fmcsaRating': 'رتبهٔ ایمنی',
+  'companies.fmcsaActive': 'فعال',
+  'companies.fmcsaInactive': 'غیرفعال',
+  'companies.warn.notAllowedToOperate':
+    'به گفتهٔ FMCSA این شرکت اجازهٔ فعالیت ندارد.',
+  'companies.warn.outOfService':
+    'FMCSA دستور توقف فعالیت به تاریخ {date} را نشان می‌دهد.',
+  'companies.warn.inactive': 'FMCSA این شرکت را غیرفعال نشان می‌دهد.',
+  'companies.warn.noActiveAuthority':
+    'FMCSA هیچ مجوز فعالی نشان نمی‌دهد — common، contract و broker همه غیرفعال یا نبوده‌اند.',
+  'companies.warn.unsatisfactoryRating':
+    'رتبهٔ ایمنی FMCSA برابر Unsatisfactory است.',
+  'companies.error.lookupNeedNumber':
+    'اول شمارهٔ USDOT یا MC را بنویسید — فقط رقم.',
+  'companies.error.lookupNotFound':
+    'در سامانهٔ FMCSA شرکتی با این شماره نیست. اطلاعات را دستی وارد کنید.',
+  'companies.error.lookupUnavailable':
+    'سامانهٔ FMCSA پاسخ نداد. اطلاعات را دستی وارد کنید — هیچ‌چیز این فرم به آن وابسته نیست.',
+  'companies.error.lookupNoKey':
+    'جست‌وجوی FMCSA روی این سرور پیکربندی نشده است. اطلاعات را دستی وارد کنید.',
+  'companies.error.lookupRefused': 'اجازهٔ جست‌وجوی شرکت‌ها را ندارید.',
+  'companies.error.duplicateDot':
+    'USDOT {dot} از پیش متعلق به شرکت دیگری در اینجاست.',
   'companies.error.badState': 'از کد دو حرفی ایالت استفاده کنید.',
   'nav.companies': 'شرکت‌های حمل',
   'nav.settings': 'تنظیمات',

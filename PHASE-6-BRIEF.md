@@ -527,3 +527,65 @@ Recorded rather than resolved, per Phase 1's discipline.
 
     Subject to the same money wall as everything else: a DISPATCHER's preview
     has no rate column IN THE PAYLOAD, and their import books at zero.
+
+24. **The FMCSA lookup was built outside §4's order, and it is UNVERIFIED
+    AGAINST THE LIVE REGISTER.** An owner request rather than a step: a
+    DOT-or-MC lookup on the Add authority form, prefilling legal name, DBA,
+    address, phone and entity type, warning in words on an authority that is
+    inactive or out of service.
+
+    `FMCSA_WEBKEY` is set on the workers by the owner and deliberately absent
+    from this machine, so **no call has been made against the real API**. The
+    request and response shapes in `src/lib/fmcsa.ts` are the DOCUMENTED ones
+    and `tests/fmcsa.test.ts` proves the reader is right about that
+    documentation — which is not the same as proving the documentation is right
+    about the API. The first real lookup is the second half of the evidence and
+    it is owed.
+
+    That is why `parseCarrier` is written the way it is: every field is
+    null-on-anything-unexpected, and a test feeds it an object where a legal
+    name, a city and two nested blocks have the wrong types. A register that
+    changes a field must produce a blank on a form somebody is about to check,
+    never `[object Object]` in a legal name on an invoice.
+
+    THREE THINGS THE REGISTER RETURNS AND ZEBRA CANNOT STORE: entity type,
+    operation and safety rating. `Company` has no column for any of them, so
+    they are SHOWN in the lookup panel and not saved. Three columns to hold
+    what the register can be asked again is a migration this screen has not
+    earned; if fleet-wide safety history becomes a feature, that is when it
+    earns one.
+
+    THE LOOKUP NEVER WRITES AND NEVER AUTO-SAVES. It fills the form's fields,
+    marks each filled field "From FMCSA" until somebody types in it, and the
+    only write on the screen is still the button at the bottom — the extraction
+    contract's posture applied to a different source of the same kind of claim.
+    Every failure (no key, not found, 5xx, unreachable, unreadable) is its own
+    sentence ending in "type the details instead", and nothing on the form is
+    disabled while it runs except the lookup button itself.
+
+    THE KEY IS THE REASON IT IS A SERVER FUNCTION. QCMobile takes the web key
+    as a QUERY PARAMETER, so a browser fetch would put it in the network tab of
+    anybody who opened the form, in their history and in every proxy log on the
+    way. `verify-dispatcher` asserts that neither `webKey` nor the FMCSA
+    endpoint appears anywhere in the page payload.
+
+    NOT RATE-LIMITED. The action is gated on `company:create`, which only OWNER
+    and ADMIN hold, so the exposure is a trusted user pressing a button in a
+    loop; FMCSA publishes rate limits and Zebra respects them only by being
+    small. Named rather than solved, and it becomes real the day this same
+    service is pointed at broker verification, where a DISPATCHER might hold
+    the permission and a load list might look them up in bulk.
+
+25. **`@@unique([organizationId, dotNumber])` has been in the schema since the
+    init migration and nothing ever handled it.** A second authority with the
+    same USDOT escaped `addCompany` as a Prisma unique violation, went
+    uncaught through `addCompanyAction`, and reached the browser as a 500 with
+    no sentence in it.
+
+    Harmless while a DOT number was something somebody typed occasionally.
+    Not harmless the moment a lookup fills it in, because looking the same
+    carrier up twice is exactly what a person does when they are not sure
+    whether they already added it. Now a named refusal that prints the number,
+    checked before the insert rather than caught after it — a caught constraint
+    error does not carry the value, and "USDOT 3162967 already belongs to
+    another authority here" is the whole usefulness of the message.
