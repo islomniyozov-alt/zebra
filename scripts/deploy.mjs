@@ -18,8 +18,20 @@ import { check as checkMigrationGap } from './check-migration-gap.mjs'
 // deploy from a dirty tree is stamped as such, because "which commit is live"
 // has to be answerable including when the answer is "not one".
 //
+// THE THIRD is that `npm run check` does not run the integration suite, and
+// cannot: it needs a database, and check is the thing you run twenty times an
+// afternoon without thinking about what it will touch. That gap was silent
+// until it wasn't — four extraction tests had been red since the engine switch
+// (flag 41) while every gate anybody ran stayed green.
+//
+// So the integration suite gates the DEPLOY instead, which is the moment it is
+// worth waiting minutes to be sure. `tests/setup.ts` refuses to run against
+// the production branch, so this is the dev database either way — deploying to
+// production does not test against production.
+//
 //   npm run deploy:dev
 //   npm run deploy:prod
+//   npm run deploy:prod -- --skip-integration   (see below; say why out loud)
 // ---------------------------------------------------------------------------
 
 const production = process.argv.includes('--production')
@@ -59,6 +71,45 @@ if (production) {
 const run = (args) => {
   const result = spawnSync('npx', args, { stdio: 'inherit', shell: true })
   if (result.status !== 0) process.exit(result.status ?? 1)
+}
+
+// THE INTEGRATION GATE (owner's ruling). Before the build, because a refusal
+// after a thirty-second bundle is a refusal that trains people to skip it.
+if (process.argv.includes('--skip-integration')) {
+  // AN ESCAPE HATCH THAT COSTS A SENTENCE. Neon can be down, or the machine
+  // can have no credentials, and a gate with no way past it is a gate somebody
+  // edits out of the script. It is loud, it is never the default, and it is
+  // not stamped on the version — `check-deploy-drift` reports commits, and
+  // what was verified before a deploy belongs in the report you are reading
+  // now rather than encoded in a version message.
+  console.log('')
+  console.log('!! SKIPPING THE INTEGRATION SUITE.')
+  console.log(
+    '   Nothing has proved this build against a database. Say so in the report,',
+  )
+  console.log('   and run `npm run test:integration` when you can.')
+  console.log('')
+} else {
+  console.log('')
+  console.log('Running the integration suite before anything is built.')
+  console.log(
+    'It writes to the DEV branch — tests/setup.ts refuses production.',
+  )
+  const integration = spawnSync(
+    'npx',
+    ['vitest', 'run', '--project', 'integration'],
+    { stdio: 'inherit', shell: true },
+  )
+  if (integration.status !== 0) {
+    console.error('')
+    console.error(
+      `Refusing to deploy to ${target}: the integration suite is red.`,
+    )
+    console.error(
+      'Fix it, or deploy with --skip-integration and say why in the report.',
+    )
+    process.exit(1)
+  }
 }
 
 run(['opennextjs-cloudflare', 'build'])

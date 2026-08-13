@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { ESLint } from 'eslint'
 
 // ---------------------------------------------------------------------------
@@ -160,5 +161,45 @@ describe("an asset's companyId cannot be written directly", () => {
     const code = `export const rename = async (tx: { truck: { update: (a: unknown) => unknown } }) =>
       tx.truck.update({ where: { id: 'x' }, data: { unitNumber: '102' } })`
     expect(syntax(await lint('src/lib/fleet.ts', code))).toEqual([])
+  })
+})
+
+describe('the two gates, and which suite belongs in which', () => {
+  const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as {
+    scripts: Record<string, string>
+  }
+  const deployScript = readFileSync('scripts/deploy.mjs', 'utf8')
+
+  // THE OWNER'S RULING, MADE UNFORGETTABLE. `npm run check` is what somebody
+  // runs twenty times an afternoon; the moment it needs a database it stops
+  // being that, and people stop running it.
+  it('keeps `check` fast and database-free', () => {
+    const check = packageJson.scripts['check'] ?? ''
+    expect(check).toContain('test:check')
+    expect(check).not.toContain('test:integration')
+
+    const fast = packageJson.scripts['test:check'] ?? ''
+    expect(fast).toContain('--project node')
+    expect(fast).toContain('--project workers')
+    expect(fast).not.toContain('integration')
+  })
+
+  // The other half. Flag 41 is why: four extraction tests were red for weeks
+  // because the suite that exercises the shipped engine was in no gate at all,
+  // and every gate anybody ran was green.
+  it('makes the deploy refuse on a red integration suite', () => {
+    expect(deployScript).toMatch(/--project['"\s,]+integration/)
+    expect(deployScript).toContain('the integration suite is red')
+    // Before the build: a refusal that arrives after a thirty-second bundle is
+    // one people learn to skip.
+    expect(deployScript.indexOf('the integration suite is red')).toBeLessThan(
+      deployScript.indexOf("run(['opennextjs-cloudflare', 'build'])"),
+    )
+  })
+
+  // An escape hatch is fine; a silent one is not.
+  it('and only lets it be skipped out loud', () => {
+    expect(deployScript).toContain('--skip-integration')
+    expect(deployScript).toContain('SKIPPING THE INTEGRATION SUITE')
   })
 })
