@@ -718,11 +718,20 @@ Recorded rather than resolved, per Phase 1's discipline.
     rule's other half: without it the stretched link covers the number and
     tapping a broker's phone on a tablet opens their detail page.
 
-    ADOPTED ON THE TWO SCREENS THE OWNER REPORTED. Six other lists have detail
-    routes and could take one line each — drivers, invoices, loads, payments,
-    settlements, trailers, trucks. Not done here because the session was scoped
-    to Companies and Brokers, and named so it is a decision rather than an
-    oversight.
+    ~~ADOPTED ON THE TWO SCREENS THE OWNER REPORTED.~~ **CLOSED — adopted
+    everywhere.** The owner ruled the debt paid across the board, so loads,
+    trucks, trailers, drivers, invoices, payments and settlements all took
+    `rowHref`. SEVEN, not the six this flag said while listing seven — the
+    miscount was in the flag, not in the ruling.
+
+    Each cost one line plus removing the anchor the first column already had,
+    and the mono face moved from that anchor onto the value it belongs to, so
+    a load number and an invoice number still read character by character.
+    `drivers` needed the dead zone as well: it has a `tel:` link in the row,
+    and without `relative z-10` the stretched link covers the number and
+    tapping a driver's phone on a tablet opens their record instead of
+    dialling. The walkthrough checks the set in a loop, so a list added later
+    and forgotten is named rather than merely absent.
 
 32. **Flag 11's "minimal" left an authority uneditable and permanent.** Both
     were reachable only with SQL, which is the state that whole screen exists
@@ -781,15 +790,21 @@ Recorded rather than resolved, per Phase 1's discipline.
     with the same name the next time a dispatcher types it — splitting the
     payment history the duplicate-MC refusal (flag 30) exists to protect.
 
-    So the refusal names the counts and points at the states the schema already
-    has: ON_HOLD stops new bookings while the office argues, BLOCKED is the
-    first-class "do not haul for these people" BIG M II bought. Both keep the
-    record findable; retiring hides it.
+        So the refusal names the counts and points at the states the schema already
+        has: ON_HOLD stops new bookings while the office argues, BLOCKED is the
+        first-class "do not haul for these people" BIG M II bought. Both keep the
+        record findable; retiring hides it.
 
-    THE CONTROL IS ABSENT RATHER THAN FAILING. `retireBrokerAction` returns
-    `void` and has no error channel, so a thrown refusal would be a 500. The
-    detail page reads the usage alongside the broker and renders the sentence
-    in place of the button. The throw in `retireBroker` remains as the wall
-    behind it, for the race where freight is booked between the page rendering
-    and the button being pressed — in which case the action does still 500.
-    Named rather than left to be discovered.
+        THE CONTROL IS ABSENT RATHER THAN FAILING, and ~~the race still 500s~~ —
+        **CLOSED.** `retireBrokerAction` now returns a `RetireState` instead of
+        `void` and catches `BrokerInUseError`, so freight booked between the page
+        rendering and the button being pressed prints the same sentence the screen
+        would have shown — naming the broker and the counts — instead of a stack
+        trace. The state type lives in its own plain module, because a `"use
+
+    server"` file may only export async functions and the lint rule has caught
+    that twice now.
+
+        The throw in `retireBroker` is unchanged and is still the wall: the action
+        translates it rather than replacing it, so a caller that is not this screen
+        still cannot retire a broker with freight by accident.

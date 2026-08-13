@@ -90,14 +90,7 @@ export default async function TrailersPage({
     {
       key: 'unitNumber',
       header: t('fleet.unitNumber'),
-      render: (row) => (
-        <Link
-          href={`/trailers/${row.id}`}
-          className="font-mono font-medium text-ink hover:text-accent"
-        >
-          {row.unitNumber}
-        </Link>
-      ),
+      render: (row) => <span className="font-mono">{row.unitNumber}</span>,
     },
     ...(showCompany
       ? [
@@ -170,6 +163,7 @@ export default async function TrailersPage({
         columns={columns}
         rows={rows}
         rowKey={(row) => row.id}
+        rowHref={(row) => `/trailers/${row.id}`}
         stripeTone={(row) => TRAILER_TONE[row.status]}
         isCancelled={(row) => row.isRetired}
         empty={

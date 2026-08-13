@@ -111,14 +111,7 @@ export default async function TrucksPage({
       key: 'unitNumber',
       header: t('fleet.unitNumber'),
       // Never truncated — it is the field people copy and read aloud (§7.1).
-      render: (row) => (
-        <Link
-          href={`/trucks/${row.id}`}
-          className="font-mono font-medium text-ink hover:text-accent"
-        >
-          {row.unitNumber}
-        </Link>
-      ),
+      render: (row) => <span className="font-mono">{row.unitNumber}</span>,
     },
     ...(showCompany
       ? [
@@ -204,6 +197,7 @@ export default async function TrucksPage({
         columns={columns}
         rows={rows}
         rowKey={(row) => row.id}
+        rowHref={(row) => `/trucks/${row.id}`}
         stripeTone={(row) => TRUCK_TONE[row.status]}
         isCancelled={(row) => row.isRetired}
         empty={

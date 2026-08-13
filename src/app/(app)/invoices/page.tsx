@@ -99,14 +99,8 @@ export default async function InvoicesPage() {
     {
       key: 'invoiceNumber',
       header: t('invoices.number'),
-      render: (row) => (
-        <Link
-          href={`/invoices/${row.id}`}
-          className="font-mono font-medium text-ink hover:text-accent"
-        >
-          {row.invoiceNumber}
-        </Link>
-      ),
+      // The mono face stays on the value; the anchor around it is `Table`'s.
+      render: (row) => <span className="font-mono">{row.invoiceNumber}</span>,
     },
     {
       key: 'customer',
@@ -221,6 +215,7 @@ export default async function InvoicesPage() {
         columns={columns}
         rows={rows}
         rowKey={(row) => row.id}
+        rowHref={(row) => `/invoices/${row.id}`}
         stripeTone={(row) => INVOICE_TONE[row.status]}
         empty={
           <EmptyState

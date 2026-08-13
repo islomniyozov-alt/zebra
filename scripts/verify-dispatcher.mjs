@@ -793,6 +793,41 @@ record(
   'reachable by a dispatcher, who books against them',
 )
 
+// §7.1'S DEBT, PAID EVERYWHERE (flag 31 ruled). Seven more lists took the
+// row link. Checked as a SET rather than one assertion each: the failure this
+// guards against is a list that was missed, and a loop names which one.
+for (const [path, prefix] of [
+  ['/loads', 'loads'],
+  ['/trucks', 'trucks'],
+  ['/trailers', 'trailers'],
+  ['/drivers', 'drivers'],
+]) {
+  const list = await bodyOf(dispatcher.page, path)
+  record(
+    `${path} rows open their detail`,
+    list.status === 200 &&
+      new RegExp(`href="/${prefix}/[a-z0-9]+"`).test(list.body) &&
+      /after:absolute/.test(list.body),
+    `HTTP ${list.status} — a real anchor, stretched across the row`,
+  )
+}
+
+// The money lists, which a dispatcher cannot see at all — so an owner checks
+// them, and the dispatcher's 404 is the pair.
+for (const [path, prefix] of [
+  ['/invoices', 'invoices'],
+  ['/payments', 'payments'],
+  ['/settlements', 'settlements'],
+]) {
+  const list = await bodyOf(owner.page, path)
+  record(
+    `${path} rows open their detail for an owner`,
+    list.status === 200 &&
+      new RegExp(`href="/${prefix}/[a-z0-9]+"`).test(list.body),
+    `HTTP ${list.status}`,
+  )
+}
+
 // --- THE AUTHORITY EDIT SCREEN, WHICH FLAG 11 SKIPPED ---------------------
 const ownerEdit = await bodyOf(owner.page, `/companies/${companyId}`)
 record(

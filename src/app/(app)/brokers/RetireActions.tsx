@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useActionState, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
+import { RETIRE_INITIAL, type RetireState } from './retire-state'
 
 // A broker has no authority to be transferred between, so this is the retire
 // half of AssetActions and nothing else. Kept separate rather than adding an
@@ -20,7 +21,10 @@ interface Props {
    * invoices are filed under them" answers the question instead.
    */
   inUse?: string | undefined
-  retireAction: () => Promise<void>
+  retireAction: (
+    previous: RetireState,
+    formData: FormData,
+  ) => Promise<RetireState>
   restoreAction: () => Promise<void>
   labels: {
     retire: string
@@ -39,6 +43,7 @@ export function RetireActions({
   labels,
 }: Props) {
   const [open, setOpen] = useState(false)
+  const [state, retire] = useActionState(retireAction, RETIRE_INITIAL)
 
   if (isRetired) {
     return (
@@ -61,11 +66,22 @@ export function RetireActions({
   }
 
   return (
-    <section className="mt-z6 max-w-[520px] border-t border-border pt-z4">
-      {/* Standing rule 11: destructive actions are never accent-coloured. */}
-      <Button type="button" variant="danger" onClick={() => setOpen(true)}>
-        {labels.retire}
-      </Button>
+    <section className="mt-z6 flex max-w-[520px] flex-col gap-z2 border-t border-border pt-z4">
+      <div>
+        {/* Standing rule 11: destructive actions are never accent-coloured. */}
+        <Button type="button" variant="danger" onClick={() => setOpen(true)}>
+          {labels.retire}
+        </Button>
+      </div>
+
+      {/* FLAG 35's RACE, IN WORDS. Freight booked between this page rendering
+       * and the button being pressed used to be a 500; it is now the same
+       * sentence the screen would have shown had it known. */}
+      {state.error ? (
+        <p role="alert" className="text-sm text-danger">
+          {state.error}
+        </p>
+      ) : null}
 
       <Modal
         open={open}
@@ -77,7 +93,7 @@ export function RetireActions({
           <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
             {labels.cancel}
           </Button>
-          <form action={retireAction} onSubmit={() => setOpen(false)}>
+          <form action={retire} onSubmit={() => setOpen(false)}>
             <Button type="submit" variant="danger">
               {labels.retire}
             </Button>

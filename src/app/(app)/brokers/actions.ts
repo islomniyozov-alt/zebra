@@ -9,6 +9,7 @@ import {
 } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import {
+  BrokerInUseError,
   DuplicateBrokerError,
   createBroker,
   restoreBroker,
@@ -22,6 +23,7 @@ import {
 } from '@/lib/fmcsa-lookup'
 import type { LookupAudience } from '@/lib/fmcsa'
 import type { FmcsaAnswer } from '@/components/forms/fmcsa-labels'
+import type { RetireState } from './retire-state'
 import { toFormState } from '../_reference/shared'
 import type { RecordFormState } from '@/components/forms/RecordForm'
 import type { CustomerStatus, CustomerType } from '@/generated/prisma/client'
@@ -94,10 +96,40 @@ export async function updateBrokerAction(
   redirect('/brokers')
 }
 
-export async function retireBrokerAction(id: string): Promise<void> {
-  await withCurrentOrg('delete', 'customer', (tx) => retireBroker(tx, id))
+/**
+ * Retire a broker, or come back with the reason it cannot be.
+ *
+ * RETURNS A STATE RATHER THAN `void` (flag 35). `retireBroker` throws when
+ * freight is filed under the broker, and the screen hides the control in that
+ * case — so the throw was only reachable in the race where a load is booked
+ * between the page rendering and the button being pressed. That race used to
+ * be a 500 with nothing in the browser; now it is the same sentence the screen
+ * would have shown, naming the broker and the counts.
+ */
+export async function retireBrokerAction(
+  id: string,
+  _previous: RetireState,
+  _formData: FormData,
+): Promise<RetireState> {
+  const { t } = await getLocaleContext()
+
+  try {
+    await withCurrentOrg('delete', 'customer', (tx) => retireBroker(tx, id))
+  } catch (error) {
+    if (error instanceof BrokerInUseError) {
+      return {
+        error: t('brokers.error.inUse')
+          .replace('{name}', error.brokerName)
+          .replace('{loads}', String(error.loads))
+          .replace('{invoices}', String(error.invoices)),
+      }
+    }
+    throw error
+  }
+
   revalidatePath('/brokers')
   revalidatePath(`/brokers/${id}`)
+  return { error: null }
 }
 
 export async function restoreBrokerAction(id: string): Promise<void> {

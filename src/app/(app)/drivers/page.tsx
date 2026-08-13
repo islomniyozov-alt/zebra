@@ -96,14 +96,10 @@ export default async function DriversPage({
     {
       key: 'name',
       header: t('drivers.name'),
-      render: (row) => (
-        <Link
-          href={`/drivers/${row.id}`}
-          className="font-medium text-ink hover:text-accent"
-        >
-          {row.name}
-        </Link>
-      ),
+      // No anchor: `Table` wraps the first cell in the row's stretched link,
+      // and an anchor inside an anchor is invalid HTML that browsers resolve by
+      // closing the outer one — which would kill the rest of the row.
+      render: (row) => row.name,
     },
     ...(showCompany
       ? [
@@ -121,7 +117,10 @@ export default async function DriversPage({
       render: (row) =>
         row.phone ? (
           // §8 — tap-to-call on every surface, desktop included.
-          <a href={`tel:${row.phone}`} className="font-mono hover:text-accent">
+          <a
+            href={`tel:${row.phone}`}
+            className="relative z-10 font-mono hover:text-accent"
+          >
             {row.phone}
           </a>
         ) : (
@@ -191,6 +190,7 @@ export default async function DriversPage({
         columns={columns}
         rows={rows}
         rowKey={(row) => row.id}
+        rowHref={(row) => `/drivers/${row.id}`}
         stripeTone={(row) => DRIVER_TONE[row.status]}
         isCancelled={(row) => row.isRetired}
         empty={

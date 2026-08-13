@@ -121,6 +121,7 @@ export default async function EditBrokerPage({
                 ? retireBrokerAction.bind(null, id)
                 : async () => {
                     'use server'
+                    return { error: null }
                   }
             }
             restoreAction={restoreBrokerAction.bind(null, id)}

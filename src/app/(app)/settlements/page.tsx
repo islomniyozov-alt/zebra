@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
@@ -86,12 +85,7 @@ export default async function SettlementsPage() {
       key: 'number',
       header: t('settlements.number'),
       render: (row) => (
-        <Link
-          href={`/settlements/${row.id}`}
-          className="font-mono font-medium text-ink hover:text-accent"
-        >
-          {row.settlementNumber}
-        </Link>
+        <span className="font-mono">{row.settlementNumber}</span>
       ),
     },
     {
@@ -191,6 +185,7 @@ export default async function SettlementsPage() {
         columns={columns}
         rows={data.settlements}
         rowKey={(row) => row.id}
+        rowHref={(row) => `/settlements/${row.id}`}
         stripeTone={(row) => TONE[row.status]}
         empty={
           <EmptyState

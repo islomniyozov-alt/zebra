@@ -1,6 +1,5 @@
 'use client'
 
-import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { Table, type Column } from '@/components/ui/Table'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -74,14 +73,7 @@ export function LoadsTable({
       key: 'loadNumber',
       header: labels.load,
       // Never truncated. This is the field people copy and read down a phone.
-      render: (row) => (
-        <Link
-          href={`/loads/${row.id}`}
-          className="z-identifier font-medium text-ink hover:text-accent"
-        >
-          {row.loadNumber}
-        </Link>
-      ),
+      render: (row) => <span className="z-identifier">{row.loadNumber}</span>,
     },
     ...(showCompanyColumn
       ? [
@@ -158,6 +150,7 @@ export function LoadsTable({
       columns={columns}
       rows={rows}
       rowKey={(row) => row.id}
+      rowHref={(row) => `/loads/${row.id}`}
       stripeTone={stripeTone}
       isCancelled={(row) => row.isCancelled}
       caption={labels.caption}

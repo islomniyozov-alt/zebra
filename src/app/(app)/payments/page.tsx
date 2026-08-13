@@ -43,14 +43,7 @@ export default async function PaymentsPage() {
     {
       key: 'received',
       header: t('payments.received'),
-      render: (row) => (
-        <Link
-          href={`/payments/${row.id}`}
-          className="font-mono font-medium text-ink hover:text-accent"
-        >
-          {day(row.receivedAt)}
-        </Link>
-      ),
+      render: (row) => <span className="font-mono">{day(row.receivedAt)}</span>,
     },
     {
       key: 'method',
@@ -138,6 +131,7 @@ export default async function PaymentsPage() {
         columns={columns}
         rows={payments}
         rowKey={(row) => row.id}
+        rowHref={(row) => `/payments/${row.id}`}
         // One meaning per screen (§2): the stripe is "this one still needs
         // somebody", not the payment method or the age.
         stripeTone={(row) => (row.unappliedCents > 0 ? 'warning' : 'success')}
