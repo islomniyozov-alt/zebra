@@ -215,6 +215,34 @@ export async function objectBytes(
   return new Uint8Array(await response.arrayBuffer())
 }
 
+/**
+ * Write an object from the worker itself.
+ *
+ * EVERY OTHER UPLOAD IN THIS APPLICATION IS A PRESIGNED PUT from a browser,
+ * deliberately: bytes that never pass through the worker cost no CPU and no
+ * request body limit. Inbound mail is the exception that has no browser —
+ * the message arrives inside a Worker and there is nobody to hand a URL to.
+ *
+ * Kept small on purpose. This is for a `.eml` and its attachments, both of
+ * which the mail path already caps; it is not a general upload path and
+ * anything that could be a presigned PUT should still be one.
+ */
+export async function putObject(
+  config: R2Config,
+  key: string,
+  body: Uint8Array,
+  contentType: string,
+): Promise<void> {
+  const response = await client(config).fetch(objectUrl(config, key), {
+    method: 'PUT',
+    body: body as unknown as BodyInit,
+    headers: { 'content-type': contentType },
+  })
+  if (!response.ok) {
+    throw new Error(`R2 PUT ${key} failed: ${response.status}`)
+  }
+}
+
 /** Used by reconciliation to clear orphans. Absent is success. */
 export async function deleteObject(
   config: R2Config,

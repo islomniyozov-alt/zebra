@@ -1000,7 +1000,8 @@ Recorded rather than resolved, per Phase 1's discipline.
     (BOL, PO, broker reference, probable-duplicate) is the CONFLICT family,
     because each one means this booking may already BE a load.
 
-47. **WHAT STEP 4 DOES NOT YET DO, and the list is the honest part.** The
+47. ~~**WHAT STEP 4 DOES NOT YET DO**~~ — **MOSTLY CLOSED; see flag 48 for
+    what is left.** The
     pipeline runs end to end in code — mail in, parsed, read, checked, queued —
     and none of the following is built:
     - **Opening a row does not prefill.** The Incoming list links to
@@ -1019,3 +1020,54 @@ Recorded rather than resolved, per Phase 1's discipline.
       have not been run. Every test here is against constructed input.
     - **Thread matching and update detection (§13, §14) are Step 5** and are
       untouched.
+
+48. **The queue is a queue of unfinished forms now, and it was proved end to
+    end.** Flag 47's list is closed except for the one item that needs an
+    account setting:
+    - **`?from=` prefills** through the same `Prefill` shape an upload
+      produces — the form cannot tell a draft from a PDF, which is how §1.1's
+      "no second editing surface" is enforced rather than merely intended. The
+      money strip happens on the SERVER, by role, exactly as
+      `/api/documents/[id]/extract` does it for uploads.
+    - **Confirm is the ordinary Save.** There is no confirm button, because
+      §1.1 forbids the surface one would live on: booking the load IS
+      confirming the email, and the draft closes in its own transaction after
+      the load exists. A queue that failed to update must not roll back
+      freight somebody just booked.
+    - **Dismiss** writes DISMISSED with the person and the moment, and keeps
+      the message, the extraction and the original. Gated on `load:update`
+      rather than `delete`, because nothing is destroyed.
+    - **The original is real.** The `.eml` lands in R2 under
+      `{org}/inbound/{id}/message.eml` and a route serves it back behind the
+      session — deliberately NOT a presigned URL, which is a bearer capability
+      that outlives the click. Attachments land beside it.
+
+    STILL OPEN: **attachments are not `Document` rows.** `Document.companyId`
+    is required and an inbound email has no authority — which one it belongs to
+    is decided on the create form, where authority is field 1. The bytes are in
+    R2 waiting to be claimed at confirm; wiring that claim is a separate piece.
+
+49. **The proof, and precisely what it does not cover.** Email Routing is not
+    enabled on `zebratms.com` — `nslookup -type=mx` returns nothing — so the
+    delivery hop cannot be exercised by anyone but the owner. Everything either
+    side of it now is:
+    - `tests/workers/email-parse.test.ts` parses a REAL forwarded booking
+      inside workerd, two MIME boundaries deep, with quoted-printable and a
+      nested `message/rfc822`. That is the hard case and the one that will
+      arrive first, since spec §15 says manual forwarding must work
+      identically. A parser that only read the top-level text part would hand
+      the reader "Booking below, please book it." and produce a draft with no
+      lane, no times and no money — looking exactly like a message the model
+      failed on.
+    - `scripts/verify-inbound-email.mjs` posts the payload the worker sends,
+      field for field, and follows it through: read, stated, queued, original
+      downloadable, form prefilled, Save books load **#1174** and closes the
+      draft with attribution. 15/15 on dev.
+
+    THE GATE FIRED ON THE WAY THROUGH AND THAT IS THE FINDING. The draft
+    reached Save and was warned — "No pickup date, so this load will not appear
+    on any screen that sorts by one" — because a Relay booking carries times
+    with no year. A dispatcher confirms past it, which is what routing drafts
+    through the ordinary form is FOR: the checks are not skipped because the
+    freight arrived by machine. The first version of the script clicked Save
+    once and reported failure; the script was naive, not the product.

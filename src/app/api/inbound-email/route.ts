@@ -5,8 +5,10 @@ import {
   emailByMessageId,
   organizationClaims,
   recordEmail,
+  recordOriginal,
   recordReading,
 } from '@/lib/inbound-email'
+import { putObject, r2ConfigFromEnv } from '@/lib/r2'
 import { apiError } from '../_lib/respond'
 
 // POST /api/inbound-email — a booking email, delivered (Phase 6 §4 step 4).
@@ -43,6 +45,10 @@ export interface InboundEmailPayload {
     mimeType: string
     base64: string
   }[]
+  /** The whole `.eml`, base64. Null when it was too large to carry. */
+  raw?: string | null
+  /** How big it was, whether or not `raw` came with it. */
+  rawBytes?: number | null
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -130,6 +136,17 @@ export async function POST(request: Request): Promise<Response> {
     text: payload.text ?? null,
   })
 
+  // --- 1b. KEEP THE ORIGINAL (spec §12) ------------------------------------
+  //
+  // Stored before the reading, because the reading is the part that can fail
+  // and the original is the part that cannot be reconstructed. A message whose
+  // extraction died is still a message somebody can open.
+  //
+  // FAILURE HERE DOES NOT LOSE THE MAIL. R2 being unreachable must not turn a
+  // booking into a 500 that Cloudflare retries forever; the row keeps
+  // `rawR2Key` null, which is exactly what "no original stored" looks like.
+  await storeOriginal(organizationId, created.id, payload)
+
   // --- 2. READ IT, WITH NOTHING HELD OPEN -----------------------------------
   //
   // The rule flag 38 bought: a model call does not belong inside a database
@@ -170,6 +187,81 @@ export async function POST(request: Request): Promise<Response> {
     state: result.state,
     concerns: result.concerns,
   })
+}
+
+/**
+ * The `.eml` and its attachments, in R2 under the email's own prefix.
+ *
+ * ATTACHMENTS ARE NOT `Document` ROWS YET, and cannot be: `Document.companyId`
+ * is required and an inbound email has no authority — which one it belongs to
+ * is decided on the create form, where authority is field 1. So the bytes are
+ * kept where the load can claim them at confirm, and until then the original
+ * is openable as the message it arrived as.
+ */
+async function storeOriginal(
+  organizationId: string,
+  emailId: string,
+  payload: InboundEmailPayload,
+): Promise<void> {
+  const prefix = `${organizationId}/inbound/${emailId}`
+
+  try {
+    const config = r2ConfigFromEnv()
+    let rawKey: string | null = null
+
+    if (payload.raw) {
+      rawKey = `${prefix}/message.eml`
+      await putObject(
+        config,
+        rawKey,
+        bytesOfBase64(payload.raw),
+        'message/rfc822',
+      )
+    }
+
+    for (const [index, attachment] of (payload.attachments ?? []).entries()) {
+      await putObject(
+        config,
+        `${prefix}/attachments/${index}-${safeName(attachment.filename)}`,
+        bytesOfBase64(attachment.base64),
+        attachment.mimeType,
+      )
+    }
+
+    await recordOriginal(organizationId, emailId, {
+      rawR2Key: rawKey,
+      rawBytes: payload.rawBytes ?? null,
+    })
+  } catch (error) {
+    // Named, not swallowed silently. The mail is already on the board; what is
+    // missing is its original, and that is worth a line in `wrangler tail`
+    // rather than a failed delivery.
+    console.error(
+      `[zebra.inbound] could not keep the original for ${emailId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    )
+  }
+}
+
+/** Base64 to bytes, without Buffer. */
+function bytesOfBase64(base64: string): Uint8Array {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index++) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return bytes
+}
+
+/** A filename that cannot climb out of its prefix or carry a query string. */
+function safeName(filename: string): string {
+  return (
+    filename
+      .replace(/[^A-Za-z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 120) || 'attachment'
+  )
 }
 
 /** UTF-8 text as base64, without Buffer — this runs on workerd. */

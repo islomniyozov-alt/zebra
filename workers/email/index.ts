@@ -48,9 +48,24 @@ const READABLE = /^(application\/pdf|image\/(png|jpeg|webp|gif))$/
  */
 const MAX_ATTACHMENT_BYTES = 7 * 1024 * 1024
 
+/**
+ * The biggest message worth carrying whole.
+ *
+ * A Worker's request body is capped and base64 costs a third on top, so a
+ * message past this is recorded WITHOUT its original rather than not recorded
+ * at all — `rawBytes` still says how big it was, so the gap is visible instead
+ * of looking like a message that never had attachments.
+ */
+const MAX_RAW_BYTES = 15 * 1024 * 1024
+
 const handler = {
   async email(message: ForwardableEmailMessage, env: Env): Promise<void> {
-    const parsed = await PostalMime.parse(message.raw)
+    // THE WHOLE MESSAGE, READ ONCE. `message.raw` is a stream and a stream is
+    // consumed by whoever gets there first — parsing it and then trying to
+    // keep it would hand the endpoint an empty body. So the bytes are taken
+    // first and the parser is given those.
+    const raw = new Uint8Array(await new Response(message.raw).arrayBuffer())
+    const parsed = await PostalMime.parse(raw)
 
     // The Message-ID is the mail system's own idempotency key and the endpoint
     // treats it as unique. A message without one is rare and still real, so it
@@ -94,6 +109,13 @@ const handler = {
       // three tables of layout in it.
       text: parsed.text ?? textFromHtml(parsed.html ?? ''),
       attachments,
+      // SPEC §12: the dispatcher opens the original. The `.eml` is the
+      // original — headers, body and every attachment inside it — and it is
+      // the one artefact that cannot be reconstructed from anything else we
+      // keep. Sent even when it is large, because a booking whose provenance
+      // is missing is the thing a dispute turns on.
+      raw: raw.byteLength <= MAX_RAW_BYTES ? base64Of(raw) : null,
+      rawBytes: raw.byteLength,
     }
 
     const response = await fetch(`${env.ZEBRA_ORIGIN}/api/inbound-email`, {

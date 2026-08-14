@@ -6,6 +6,8 @@ import { Table, type Column } from '@/components/ui/Table'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { renderDateOnly } from '@/lib/stop-time'
+import { Button } from '@/components/ui/Button'
+import { dismissEmailAction } from './actions'
 import type { LoadWarning } from '@/lib/load-warnings'
 import type { MessageKey } from '@/lib/i18n'
 
@@ -33,6 +35,8 @@ interface Row {
   subject: string
   received: string
   reasons: string[]
+  /** Spec §12 — present when the message itself was kept. */
+  hasOriginal: boolean
 }
 
 const TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = {
@@ -64,6 +68,7 @@ export default async function IncomingPage() {
         receivedAt: true,
         concerns: true,
         ocrError: true,
+        rawR2Key: true,
       },
     }),
   )
@@ -95,6 +100,7 @@ export default async function IncomingPage() {
       subject: email.subject ?? '—',
       received: renderDateOnly(email.receivedAt) ?? '—',
       reasons,
+      hasOriginal: email.rawR2Key !== null,
     }
   })
 
@@ -142,6 +148,30 @@ export default async function IncomingPage() {
             {row.reasons.length > 1 ? ` (+${row.reasons.length - 1})` : ''}
           </span>
         ),
+    },
+    {
+      key: 'actions',
+      header: t('incoming.actions'),
+      // §7.1: interactive controls inside a clickable row raise z-index as
+      // dead zones, or the stretched link swallows them and Dismiss opens the
+      // form instead.
+      render: (row) => (
+        <div className="relative z-10 flex items-center gap-z2">
+          {row.hasOriginal ? (
+            <a
+              href={`/api/inbound-email/${row.id}/original`}
+              className="text-xs font-medium text-ink-2 hover:text-accent"
+            >
+              {t('incoming.original')}
+            </a>
+          ) : null}
+          <form action={dismissEmailAction.bind(null, row.id)}>
+            <Button type="submit" variant="ghost" size="compact">
+              {t('incoming.dismiss')}
+            </Button>
+          </form>
+        </div>
+      ),
     },
   ]
 

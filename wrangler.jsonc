@@ -56,6 +56,9 @@
   // Non-secret configuration only. Connection strings, R2 keys and
   // AUTH_SECRET are set with `wrangler secret put` and never live here.
   "vars": {
+    // Dev's tenant for inbound mail. Production's lives in the production
+    // block and is the owner's to set — see the README's Email-in runbook.
+    "INBOUND_EMAIL_ORG_ID": "cms5d2etl0000ncvsjz5bgdh9",
     "NEON_BRANCH": "dev",
     "R2_BUCKET": "zebra-docs-dev",
 

@@ -67,6 +67,8 @@ interface Props {
     driverPayPercentBps: number
   } | null
   labels: CreateLoadLabels
+  /** The queued email this form was opened from (§4 step 4), when it was. */
+  fromEmail?: FromEmail
 }
 
 /**
@@ -175,7 +177,16 @@ const money = (cents: number) =>
     maximumFractionDigits: 2,
   })
 
+/** The queued email this form was opened from, when it was (§4 step 4). */
+export interface FromEmail {
+  id: string
+  extracted: Prefill['extracted']
+  subject: string | null
+  from: string
+}
+
 export function CreateLoadForm({
+  fromEmail,
   authorities,
   defaultAuthority,
   brokers,
@@ -303,7 +314,20 @@ export function CreateLoadForm({
   // PHASE 5 §3 STEP 2. What the extraction gave us, and which fields it was
   // unsure about. `null` means nobody uploaded anything, which is the normal
   // case and must stay the fast one.
-  const [prefill, setPrefill] = useState<Prefill | null>(null)
+  // OPENED FROM THE QUEUE, so the prefill is there before anything renders.
+  // The same `Prefill` an upload produces — `pendingUploadId` is empty because
+  // there is no mint, and everything downstream that keys off it correctly
+  // does nothing: there is no document to attach and no facility offer to make.
+  const [prefill, setPrefill] = useState<Prefill | null>(
+    fromEmail
+      ? {
+          pendingUploadId: '',
+          extracted: fromEmail.extracted,
+          lowConfidence: [],
+          cost: '',
+        }
+      : null,
+  )
 
   /**
    * MANUALLY-MODIFIED INDICATORS (Phase 6 §4 step 1).
@@ -487,6 +511,13 @@ export function CreateLoadForm({
           methodAmazonSoon: labels.methodAmazonSoon,
         }}
       />
+      {/* WHICH DRAFT THIS CAME FROM. The save action closes it — links the
+       * load, marks it CONFIRMED, takes it out of the queue — which is what
+       * "Confirm" means when there is no second surface to confirm on. */}
+      {fromEmail ? (
+        <input type="hidden" name="fromEmail" value={fromEmail.id} />
+      ) : null}
+
       {prefill ? (
         <input
           type="hidden"

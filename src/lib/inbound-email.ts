@@ -3,6 +3,7 @@ import { withOrg } from './tenancy'
 import { unattributed } from './audit'
 import type { AskedExtraction } from './rate-confirmation'
 import type { Extracted } from './extraction-shape'
+import { withoutMoney, type ExtractedWithoutMoney } from './extraction'
 import { loadWarnings, type LoadWarning } from './load-warnings'
 import { resolveBroker } from './correction-memory'
 
@@ -309,4 +310,126 @@ export async function recordReading(
     },
     FROM_A_MAIL_SERVER,
   )
+}
+
+/** Where the original ended up, once it is safely in the bucket. */
+export async function recordOriginal(
+  organizationId: string,
+  emailId: string,
+  keys: { rawR2Key: string | null; rawBytes: number | null },
+): Promise<void> {
+  await withOrg(
+    organizationId,
+    (tx) =>
+      tx.inboundEmail.update({
+        where: { id: emailId },
+        data: { rawR2Key: keys.rawR2Key, rawBytes: keys.rawBytes },
+      }),
+    FROM_A_MAIL_SERVER,
+  )
+}
+
+/**
+ * One queued email's extraction, for the create form to prefill from.
+ *
+ * THE SAME SHAPE AN UPLOAD PRODUCES, deliberately: §1.1 says opening a draft
+ * lands on the ordinary form, and the cheapest way to guarantee that is for
+ * the form to be unable to tell the two apart. It receives `extracted`,
+ * `lowConfidence` and nothing else it would not have had from a PDF.
+ *
+ * MONEY IS STRIPPED HERE, BY ROLE. The stored extraction carries the rate —
+ * it was read out of the email and it belongs in the row. §1.3 keeps it off a
+ * DISPATCHER's wire, and the endpoint that does this for uploads is
+ * `/api/documents/[id]/extract`; this is the same rule on the other path, and
+ * it is the SERVER doing it, so a dispatcher's page never holds the number.
+ */
+export async function queuedExtraction(
+  tx: TxClient,
+  emailId: string,
+  options: { maySeeMoney: boolean },
+): Promise<{
+  id: string
+  extracted: Extracted | ExtractedWithoutMoney
+  subject: string | null
+  from: string
+} | null> {
+  const email = await tx.inboundEmail.findFirst({
+    where: {
+      id: emailId,
+      // A handled email is not a draft any more. Opening the form from one
+      // would offer to book freight that is already booked.
+      state: { in: ['READY', 'REVIEW', 'CONFLICT'] },
+    },
+    select: {
+      id: true,
+      subject: true,
+      fromAddress: true,
+      extractedJson: true,
+    },
+  })
+  if (!email) return null
+
+  const stored = (email.extractedJson ?? null) as {
+    extracted?: Extracted
+  } | null
+  if (!stored?.extracted) return null
+
+  return {
+    id: email.id,
+    subject: email.subject,
+    from: email.fromAddress,
+    extracted: options.maySeeMoney
+      ? stored.extracted
+      : withoutMoney(stored.extracted),
+  }
+}
+
+/**
+ * The email becomes freight: link the load and leave the queue.
+ *
+ * CALLED FROM THE ORDINARY SAVE, which is the whole of §1.1. There is no
+ * confirm button on a second surface — a dispatcher opens the draft, reads the
+ * form, and presses the same Save a typed load uses. This is what that press
+ * means for the email it came from.
+ *
+ * ATTRIBUTED TO THE PERSON, unlike everything else this module writes. The
+ * mail arrived unattributed because a mail server delivered it; a human is
+ * booking it, and the row should say which one.
+ */
+export async function confirmEmail(
+  tx: TxClient,
+  emailId: string,
+  loadId: string,
+  userId: string,
+): Promise<void> {
+  await tx.inboundEmail.updateMany({
+    // `updateMany` rather than `update`: RLS already scopes this, and a
+    // dispatcher pasting somebody else's id should get zero rows changed
+    // rather than a thrown not-found that reveals the row exists.
+    where: { id: emailId, state: { in: ['READY', 'REVIEW', 'CONFLICT'] } },
+    data: {
+      state: 'CONFIRMED',
+      loadId,
+      confirmedAt: new Date(),
+      handledByUserId: userId,
+    },
+  })
+}
+
+/** Not freight. Leaves the queue, keeps the record, names who said so. */
+export async function dismissEmail(
+  tx: TxClient,
+  emailId: string,
+  userId: string,
+  reason: string | null,
+): Promise<void> {
+  await tx.inboundEmail.updateMany({
+    where: { id: emailId, state: { in: ['READY', 'REVIEW', 'CONFLICT'] } },
+    data: {
+      state: 'DISMISSED',
+      dismissedAt: new Date(),
+      dismissedReason: reason?.slice(0, 500) ?? null,
+      handledByUserId: userId,
+    },
+  })
 }

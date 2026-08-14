@@ -53,6 +53,11 @@ const en = {
   'incoming.state.CONFLICT': 'Conflict',
   'incoming.state.CONFIRMED': 'Booked',
   'incoming.state.DISMISSED': 'Dismissed',
+  'incoming.actions': '',
+  'incoming.original': 'Original',
+  'incoming.dismiss': 'Dismiss',
+  'incoming.fromEmail':
+    'Prefilled from a booking email. Check every line — saving books the load and clears it from Incoming.',
   'incoming.empty.title': 'Nothing waiting.',
   'incoming.empty.body':
     'Booking emails sent to the load inbox appear here, read and checked against the freight you already have.',
@@ -1581,6 +1586,11 @@ const ru: Dictionary = {
   'incoming.state.CONFLICT': 'Конфликт',
   'incoming.state.CONFIRMED': 'Оформлен',
   'incoming.state.DISMISSED': 'Отклонено',
+  'incoming.actions': '',
+  'incoming.original': 'Оригинал',
+  'incoming.dismiss': 'Отклонить',
+  'incoming.fromEmail':
+    'Заполнено из письма о бронировании. Проверьте каждую строку — сохранение оформит груз и уберёт письмо из «Входящих».',
   'incoming.empty.title': 'Ничего не ждёт.',
   'incoming.empty.body':
     'Письма о бронировании, отправленные на почтовый ящик грузов, появятся здесь — прочитанные и сверенные с уже имеющимися грузами.',
@@ -3110,6 +3120,11 @@ const fa: Dictionary = {
   'incoming.state.CONFLICT': 'تعارض',
   'incoming.state.CONFIRMED': 'ثبت‌شده',
   'incoming.state.DISMISSED': 'رد شده',
+  'incoming.actions': '',
+  'incoming.original': 'اصل نامه',
+  'incoming.dismiss': 'رد کردن',
+  'incoming.fromEmail':
+    'از نامهٔ رزرو پر شده است. هر سطر را بررسی کنید — ذخیره، بار را ثبت می‌کند و نامه را از «ورودی» برمی‌دارد.',
   'incoming.empty.title': 'چیزی در انتظار نیست.',
   'incoming.empty.body':
     'نامه‌های رزرو که به صندوق بار فرستاده شوند اینجا می‌آیند، خوانده‌شده و سنجیده‌شده با بارهایی که از پیش دارید.',

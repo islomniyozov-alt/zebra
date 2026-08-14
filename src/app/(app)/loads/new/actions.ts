@@ -26,6 +26,7 @@ import {
 import { normalizeTypedDate, normalizeTypedTime } from '@/lib/typed-date'
 import { resolveZone, zoneMidnight } from '@/lib/stop-time'
 import { rememberAuthority } from '../../_reference/shared'
+import { confirmEmail } from '@/lib/inbound-email'
 
 export interface CreateLoadState {
   /** Pre-translated sentence, or null. */
@@ -303,6 +304,27 @@ export async function createLoadAction(
       // 5s default is not enough when the round trip is long.
       { timeoutMs: LOAD_WRITE_TIMEOUT_MS },
     )
+
+    // THE DRAFT CLOSES WHEN THE LOAD OPENS (§4 step 4). "Confirm" is this
+    // save — §1.1 forbids a second editing surface, so booking the freight IS
+    // confirming the email it came from. Linked and attributed to the person
+    // who pressed the button, unlike the arrival, which nobody did.
+    //
+    // Its own transaction, after the load exists: a queue that failed to
+    // update must not roll back freight somebody just booked. A draft left in
+    // the queue is a visible, fixable annoyance; a load that vanished is not.
+    const fromEmail = optionalText(formData.get('fromEmail'))
+    if (fromEmail) {
+      try {
+        await withCurrentOrg('update', 'load', (tx, session) =>
+          confirmEmail(tx, fromEmail, load.id, session.userId),
+        )
+        revalidatePath('/loads/incoming')
+      } catch {
+        // Swallowed for the reason above, and visible: the row stays in the
+        // queue with no load on it, which is what "not closed" looks like.
+      }
+    }
 
     await rememberAuthority(companyId)
     revalidatePath('/loads')

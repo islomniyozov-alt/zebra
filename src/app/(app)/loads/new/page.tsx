@@ -4,6 +4,7 @@ import { getLocaleContext } from '@/lib/locale'
 import { companyIdScopeFilter, companyScopeFilter } from '@/lib/tenancy'
 import { CreateLoadForm } from './CreateLoadForm'
 import { lastUsedAuthority } from '../../_reference/shared'
+import { queuedExtraction } from '@/lib/inbound-email'
 
 // §7.6 / brief §9 — the most-used form in the product.
 //
@@ -12,8 +13,17 @@ import { lastUsedAuthority } from '../../_reference/shared'
 // dispatcher, and the lists are small: brokers and places are per-organization,
 // trucks and drivers per authority.
 
-export default async function NewLoadPage() {
+export default async function NewLoadPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
   if (!(await currentUserCan('create', 'load'))) notFound()
+
+  // `?from=<inbound email id>` — the Incoming queue's row link (§4 step 4).
+  // §1.1: "the inbox is a queue of unfinished forms", and this is the form.
+  const params = await searchParams
+  const fromEmail = typeof params['from'] === 'string' ? params['from'] : null
 
   const { t } = await getLocaleContext()
   const mayeeFinancials = await currentUserCan('read', 'load.financials')
@@ -72,6 +82,13 @@ export default async function NewLoadPage() {
         }),
       ])
 
+    // THE QUEUED EMAIL, IF THE LINK CAME FROM ONE. Read inside the same
+    // transaction as everything else the form needs — one round trip, and the
+    // §1.3 money strip happens on the server where the rule lives.
+    const queued = fromEmail
+      ? await queuedExtraction(tx, fromEmail, { maySeeMoney: mayEnterRate })
+      : null
+
     // §7 — a field a role cannot see is ABSENT from the payload, never hidden
     // in CSS. A dispatcher's page never carries the fuel cost or the pay
     // percentage, so the computed line has nothing to render even if somebody
@@ -91,7 +108,16 @@ export default async function NewLoadPage() {
           }))
       : null
 
-    return { companies, brokers, trucks, drivers, places, recent, economics }
+    return {
+      companies,
+      brokers,
+      trucks,
+      drivers,
+      places,
+      recent,
+      economics,
+      queued,
+    }
   })
 
   // Distinct, in the order they were last booked. Deduped here rather than in
@@ -120,6 +146,20 @@ export default async function NewLoadPage() {
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-surface-2 px-gutter py-z5">
         <CreateLoadForm
+          // The draft this form was opened from, when it was opened from one.
+          // Shaped exactly like an upload's prefill so the form cannot tell
+          // the two apart — §1.1's "no second editing surface", enforced by
+          // there being nothing else for it to render.
+          {...(data.queued
+            ? {
+                fromEmail: {
+                  id: data.queued.id,
+                  extracted: data.queued.extracted,
+                  subject: data.queued.subject,
+                  from: data.queued.from,
+                },
+              }
+            : {})}
           authorities={authorities}
           defaultAuthority={defaultAuthority}
           brokers={data.brokers.map((broker) => broker.name)}
