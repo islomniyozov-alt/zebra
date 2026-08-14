@@ -182,13 +182,22 @@ describe('the two gates, and which suite belongs in which', () => {
     expect(fast).toContain('--project node')
     expect(fast).toContain('--project workers')
     expect(fast).not.toContain('integration')
+
+    // And the integration project has exactly one launcher, which is what
+    // makes a receipt describe the same run a deploy would have made.
+    expect(packageJson.scripts['test:integration']).toContain(
+      'scripts/integration-gate.mjs',
+    )
   })
 
   // The other half. Flag 41 is why: four extraction tests were red for weeks
   // because the suite that exercises the shipped engine was in no gate at all,
   // and every gate anybody ran was green.
   it('makes the deploy refuse on a red integration suite', () => {
-    expect(deployScript).toMatch(/--project['"\s,]+integration/)
+    // The launcher moved to scripts/integration-gate.mjs so that a run which
+    // earns a receipt and a run which gates a deploy are the same run. The
+    // RULING is unchanged and still asserted: deploy refuses on red.
+    expect(deployScript).toContain('runIntegrationSuite()')
     expect(deployScript).toContain('the integration suite is red')
     // Before the build: a refusal that arrives after a thirty-second bundle is
     // one people learn to skip.

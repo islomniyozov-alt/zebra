@@ -126,32 +126,33 @@ describe('what it still allows and still refuses', () => {
 })
 
 describe('the deploy gate refuses to inherit a terminal', () => {
+  // The launcher moved to scripts/integration-gate.mjs when the receipt
+  // landed, so that a run which EARNS a receipt and a run which GATES a deploy
+  // are the same run, launched the same way. The scrub moved with it; the
+  // ruling did not change.
+  const gate = readFileSync('scripts/integration-gate.mjs', 'utf8')
   const deployScript = readFileSync('scripts/deploy.mjs', 'utf8')
 
   // SCRUBBED, NOT WARNED ABOUT. The three variables that decide where the
   // suite writes are deleted from the child's environment, so `.env` is the
   // only possible source and a terminal's leftovers cannot aim the gate.
   it('deletes the three variables from the child environment', () => {
-    expect(deployScript).toMatch(
+    expect(gate).toMatch(
       /SCRUBBED\s*=\s*\[\s*'DATABASE_URL',\s*'DIRECT_DATABASE_URL',\s*'NEON_BRANCH'/,
     )
-    expect(deployScript).toContain('delete child[name]')
+    expect(gate).toContain('delete child[name]')
     // And the scrubbed environment is what the suite actually gets.
-    expect(deployScript).toContain('env: integrationEnv()')
+    expect(gate).toContain('env: child')
   })
 
   it('and checks .env itself, since scrubbing says nothing about that', () => {
-    expect(deployScript).toContain(
-      'Refusing: .env names two different database endpoints.',
-    )
-    expect(deployScript).toContain(
-      'Refusing: .env says NEON_BRANCH=production.',
-    )
+    expect(gate).toContain('.env names two different database endpoints')
+    expect(gate).toContain('.env says NEON_BRANCH=production.')
   })
 
   // The gate must know before it runs, not after it has written.
   it('decides before the suite starts', () => {
-    expect(deployScript.indexOf('integrationEnv()')).toBeLessThan(
+    expect(deployScript.indexOf('runIntegrationSuite()')).toBeLessThan(
       deployScript.indexOf("run(['opennextjs-cloudflare', 'build'])"),
     )
   })

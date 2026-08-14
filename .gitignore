@@ -94,3 +94,10 @@ next-env.d.ts
 # pasted from a run on the owner's machine rather than re-derived from a clean
 # checkout.
 /corpus-amazon/
+
+# Proof that this working copy passed the integration suite, recently, here.
+# NOT committed, and that is the point: a receipt cannot travel between
+# machines, cannot be committed by accident, and cannot be reviewed into
+# existence. It is evidence about one working copy at one moment, and
+# `deploy:prod` checks it against HEAD, the tree, the endpoint and the clock.
+/.integration-receipt.json

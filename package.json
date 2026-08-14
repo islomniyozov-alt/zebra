@@ -28,7 +28,7 @@
     "db:seed": "prisma db seed",
     "check:hex": "node scripts/check-hex.mjs",
     "check:drift": "node scripts/check-deploy-drift.mjs",
-    "test:integration": "vitest run --project integration --reporter=verbose --reporter=json --outputFile.json=.vitest-integration.json"
+    "test:integration": "node scripts/integration-gate.mjs"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "5.2.6",

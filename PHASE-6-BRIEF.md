@@ -1134,3 +1134,54 @@ Recorded rather than resolved, per Phase 1's discipline.
     the suites' `afterAll` cleanup does run, and it uses the same owner client,
     so most of what the incident created on production was probably removed on
     the way out. Probably is not a report; the owner's run is.
+
+53. **The invoices failure was collision, and the aborted run proved it by
+    leaving evidence.** Two full runs at HEAD passed that file — 6/6 alone and
+    405/405 in a complete suite — while my own runs were hitting the same dev
+    database as the owner's gate. `fileParallelism: false` exists because the
+    files "mutate shared tables"; two RUNS at once breaks that harder, and the
+    first invoices assertion is `numbers it from the counter`, which is exactly
+    what fails when something else is allocating numbers underneath it. Logged
+    as collision, not a regression from the inbound-email work — that work
+    touches no table `invoices.test.ts` reads.
+
+    AND THE ABORT LEFT ITS OWN TRAIL. Killing vitest mid-file means `afterAll`
+    never runs, so the stopped gate left `iso-A-tfrnkvpd` and `iso-B-tfrnkvpd`
+    in dev with half-built fixtures. Those orphans then failed FOUR whole-
+    database integrity checks in `npm run check` — trailers whose `companyId`
+    disagreed with a missing open period, and payment, billing and settlement
+    drift. `check` had been green all day; the orphans arrived with the abort.
+    `scripts/sweep-test-rows.mjs` found them by name and cleared them, and
+    `check` returned to green at 873.
+
+    THE LESSON IS ABOUT THE INTEGRITY TESTS, NOT THE ORPHANS. They read the
+    whole database on the owner connection with RLS bypassed, so they see every
+    tenant — including wreckage from an interrupted run. That is a feature: an
+    aborted suite now announces itself the next time anybody runs `check`.
+
+54. **The suite costs 54 minutes, measured, and a receipt is what makes that
+    affordable.** 405 tests, 3254 seconds, on the owner's machine. Every
+    earlier claim in these reports that the gate ran "in minutes" was
+    impression rather than measurement, and is corrected here.
+
+    Where it goes: 26 files strictly serial, audited writes costing four round
+    trips each (`SAVEPOINT / write / audit insert / RELEASE`), and fixtures
+    dominating — `fleet.test.ts` does 67 creates in `beforeAll` alone, roughly
+    268 round trips before a single assertion.
+
+    So a green run may now stand in for a re-run, under four conditions that
+    each close a specific hole: same commit, tree clean both when it ran and
+    now, same endpoint, under an hour old. **The stamp is the FINISH of the
+    run** — the owner's constraint, and obvious once said: timestamping the
+    start of a 54-minute suite against a 60-minute window leaves six usable
+    minutes.
+
+    NOT COMMITTED, so a receipt cannot travel between machines or be reviewed
+    into existence. `--skip-integration` earns none — there is deliberately no
+    path from "I did not run it" to "it was run". One launcher
+    (`scripts/integration-gate.mjs`) serves both `npm run test:integration` and
+    the deploy, because two launchers would be two answers to "where does this
+    write", which is the question the whole incident was about.
+
+    PARKED BY THE OWNER: raw-SQL fixtures are the next session's lever, and
+    file parallelism stays parked until production has the email pipeline.
