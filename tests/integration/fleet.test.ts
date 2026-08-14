@@ -20,7 +20,7 @@ import {
   retireBroker,
   updateBroker,
 } from '@/lib/brokers'
-import { createLoad } from '@/lib/loads'
+import { createLoad, LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import { ReferenceError } from '@/lib/reference'
 import type { PrismaClient } from '@/generated/prisma/client'
 
@@ -53,6 +53,9 @@ const inOrg = <T>(fn: Parameters<typeof withOrg<T>>[1]): Promise<T> =>
     // See the note in loads.test.ts: 2s of pool wait is enough when this file
     // runs alone and not when it runs eighth.
     maxWaitMs: 15_000,
+    // Prisma's 5s default cannot be met from here — see the note in
+    // tests/transaction-budget.test.ts. One dial for all nineteen suites.
+    timeoutMs: LOAD_WRITE_TIMEOUT_MS,
   })
 
 beforeAll(async () => {

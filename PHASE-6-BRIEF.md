@@ -1185,3 +1185,40 @@ Recorded rather than resolved, per Phase 1's discipline.
 
     PARKED BY THE OWNER: raw-SQL fixtures are the next session's lever, and
     file parallelism stays parked until production has the email pipeline.
+
+55. **Twelve suites were running on Prisma's 5-second default, and one of them
+    killed a gate run.** `claims.test.ts` set `maxWaitMs` and no `timeoutMs`:
+
+    > Transaction API error: A commit cannot be executed on an expired
+    > transaction. The timeout for this transaction was 5000 ms, however
+    > 17923 ms passed since the start of the transaction.
+
+    Not a regression and not collision — that run was alone. One audited write
+    costs four round trips (SAVEPOINT, write, audit insert, RELEASE) and at
+    ~200ms to us-east-2 a handful is past five seconds with nothing wrong.
+    `LOAD_WRITE_TIMEOUT_MS` has carried that arithmetic since Phase 5: 5s is
+    about 24 statements from here.
+
+    SEVEN SUITES ALREADY HAD IT, which is the tell. Each had hit this and been
+    fixed alone, so the rule lived in nobody's head and every new file started
+    exposed again. All nineteen now point at the constant — including
+    `relay-import.test.ts`, which was the one holdout hardcoding `30_000`, so
+    its budget TIGHTENED from 30s to 20s as a side effect. Worth watching.
+
+    `tests/transaction-budget.test.ts` is the rule written down: every suite
+    with an `inOrg` helper must set `timeoutMs`, and must set it to the
+    CONSTANT rather than to a number, because nineteen files holding `20_000`
+    would be nineteen places to change when the link moves. Watched failing —
+    removing one file's line fails two tests by that file's name.
+
+56. **DEBT, for the raw-SQL fixtures session: nineteen copies of `inOrg`.**
+    Every integration suite defines its own three-line helper wrapping
+    `withOrg` with its own attribution string and its own `maxWaitMs` — which
+    still varies (15s in loads, 20s everywhere else) for no recorded reason.
+    That duplication is exactly why the timeout rule could be true in seven
+    files and false in twelve.
+
+    NOT CONSOLIDATED NOW, by the owner's instruction, and the instinct is
+    right: a shared helper touching nineteen files belongs in the session that
+    is already rewriting how fixtures talk to the database, not in a session
+    whose job is to earn one green run.

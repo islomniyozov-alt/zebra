@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
 import { withOrg } from '@/lib/tenancy'
+import { LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import {
   askForExtraction,
   beginExtraction,
@@ -32,6 +33,9 @@ const inOrg = <T>(fn: Parameters<typeof withOrg<T>>[1]): Promise<T> =>
   withOrg(organizationId, fn, {
     attribution: { userId, ip: null, userAgent: 'extraction.test' },
     maxWaitMs: 20_000,
+    // Prisma's 5s default cannot be met from here — see the note in
+    // tests/transaction-budget.test.ts. One dial for all nineteen suites.
+    timeoutMs: LOAD_WRITE_TIMEOUT_MS,
   })
 
 /** A well-formed model answer, as text. */

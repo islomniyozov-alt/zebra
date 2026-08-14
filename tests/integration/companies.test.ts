@@ -8,7 +8,7 @@ import {
   setCompanyActive,
   updateCompany,
 } from '@/lib/companies'
-import { createLoad } from '@/lib/loads'
+import { createLoad, LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import type { PrismaClient } from '@/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -29,6 +29,9 @@ const inOrg = <T>(fn: Parameters<typeof withOrg<T>>[1]): Promise<T> =>
   withOrg(organizationId, fn, {
     attribution: { userId, ip: null, userAgent: 'companies.test' },
     maxWaitMs: 20_000,
+    // Prisma's 5s default cannot be met from here — see the note in
+    // tests/transaction-budget.test.ts. One dial for all nineteen suites.
+    timeoutMs: LOAD_WRITE_TIMEOUT_MS,
   })
 
 beforeAll(async () => {

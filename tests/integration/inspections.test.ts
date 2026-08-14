@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
 import { withOrg } from '@/lib/tenancy'
+import { LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import {
   addViolation,
   documentsForInspections,
@@ -46,6 +47,9 @@ const inOrg = <T>(fn: Parameters<typeof withOrg<T>>[1]): Promise<T> =>
   withOrg(organizationId, fn, {
     attribution: { userId, ip: null, userAgent: 'inspections.test' },
     maxWaitMs: 20_000,
+    // Prisma's 5s default cannot be met from here — see the note in
+    // tests/transaction-budget.test.ts. One dial for all nineteen suites.
+    timeoutMs: LOAD_WRITE_TIMEOUT_MS,
   })
 
 const DAY = (iso: string) => new Date(`${iso}T00:00:00Z`)

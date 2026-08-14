@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
 import { withOrg } from '@/lib/tenancy'
+import { LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import { parseRelayCsv } from '@/lib/relay-csv'
 import {
   RELAY_CUSTOMER_NAME,
@@ -33,7 +34,7 @@ const inOrg = <T>(fn: Parameters<typeof withOrg<T>>[1]): Promise<T> =>
   withOrg(organizationId, fn, {
     attribution: { userId, ip: null, userAgent: 'relay-import.test' },
     maxWaitMs: 20_000,
-    timeoutMs: 30_000,
+    timeoutMs: LOAD_WRITE_TIMEOUT_MS,
   })
 
 const file = (...rows: string[]) => `﻿${RELAY_HEADER}\n${rows.join('\n')}\n`
