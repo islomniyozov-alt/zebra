@@ -1071,3 +1071,66 @@ Recorded rather than resolved, per Phase 1's discipline.
     through the ordinary form is FOR: the checks are not skipped because the
     freight arrived by machine. The first version of the script clicked Save
     once and reported failure; the script was naive, not the product.
+
+50. **THE PRODUCTION-BRANCH GUARD WAS CHECKING A STICKER ON THE BOX.**
+    `deploy:prod` was run in a ritual terminal carrying a production
+    `DIRECT_DATABASE_URL`. The gate's integration suite ran, wrote fixtures to
+    production, failed 237 of 405, and refused the deploy — nothing shipped.
+    `tests/setup.ts` said nothing the whole time.
+
+    IT SAID NOTHING BECAUSE IT WAS ASKING THE WRONG QUESTION. The guard was
+    `if (process.env.NEON_BRANCH === 'production') throw`. `NEON_BRANCH` is a
+    LABEL: nothing derives it from a connection, nothing enforces it, and it is
+    not what decides where a write lands. The two connection strings are.
+
+    THE SPLIT-BRAIN SHAPE IS THE PROOF, and it names the mechanism exactly:
+
+    | path     | client                                | went to    |
+    | -------- | ------------------------------------- | ---------- |
+    | fixtures | `retryingClient(DIRECT_DATABASE_URL)` | production |
+    | the app  | `prisma` → `DATABASE_URL` (from .env) | dev        |
+
+    Only ONE of the pair was overridden, so organizations were created on one
+    database and looked for on the other — "missing their own rows" —
+    child inserts on dev referenced `organizationId`s that existed only on
+    production, which is the foreign-key violations, and reset tokens written
+    one side came back null from the other. Every reported symptom follows from
+    that single table.
+
+    THE REPLACEMENT DOES NOT ASK ABOUT LABELS. `tests/db-target.ts`: the two
+    URLs must name the same Neon endpoint, with the `-pooler` suffix folded
+    away because the pooled and direct doors of one endpoint are legitimate.
+    That is true of every correct configuration and false of every way this
+    goes wrong, including ways nobody has thought of. The old label check is
+    KEPT as well — worthless alone, still worth honouring when set honestly.
+
+    Proven by running the suite with the incident's own environment: it now
+    aborts with **no tests run**, where the incident ran 237.
+
+51. **The gate no longer inherits the terminal at all.** Scrubbing beats
+    checking: `deploy.mjs` DELETES `DATABASE_URL`, `DIRECT_DATABASE_URL` and
+    `NEON_BRANCH` from the child's environment, so `.env` — read through
+    dotenv, which does not override — is the only possible source. A
+    terminal's leftovers cannot aim the gate at anything, and it says out loud
+    which variables it ignored and which endpoint it will write to.
+
+    And it checks `.env` itself afterwards, because scrubbing says nothing
+    about whether the file is pointing somewhere dangerous.
+
+52. **What could not be swept from here, and why.** No production connection
+    string exists on this machine — `.env`, `.next/standalone/.env` and the
+    OpenNext copy all name the dev endpoint, and the production string lives
+    only in the owner's ritual terminal and in Cloudflare secrets. So the
+    production sweep is `scripts/sweep-test-rows.mjs` and the OWNER runs it.
+
+    Read-only by default, `--delete` needs `--yes`, and it prints the host it
+    is talking to before anything else — because not knowing that is the entire
+    incident. The signature is exact rather than heuristic: `.test` is reserved
+    by RFC 6761, so no real person has an `@example.test` address, and the slug
+    prefixes are harvested from the suites and anchored with their separator so
+    `loads-` cannot match a tenant called `loads`.
+
+    RUN AGAINST DEV AS A REHEARSAL, it found **zero fixture organizations** —
+    the suites' `afterAll` cleanup does run, and it uses the same owner client,
+    so most of what the incident created on production was probably removed on
+    the way out. Probably is not a report; the owner's run is.

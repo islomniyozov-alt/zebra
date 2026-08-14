@@ -288,6 +288,51 @@ Each step assumes the ones above it.
     `companyScopes` only for someone who genuinely works one authority; an empty
     scope means every authority in the organization.
 
+### If a test run ever points at production
+
+It happened once: `deploy:prod` was run in a terminal whose
+`DIRECT_DATABASE_URL` was still production. The gate's integration suite wrote
+its fixtures there, failed 237 of 405 with foreign-key violations, and refused
+the deploy. **Nothing shipped**, and the fix below means it cannot recur — but
+this is how you check and clean up if you ever suspect it.
+
+**Why it happened, in one line:** the old guard checked `NEON_BRANCH`, which is
+a label, while the thing that decides where writes go is the pair of connection
+strings — and only one of them had been overridden.
+
+1. **Look, from the terminal that has the production string.** Read-only; it
+   prints the host it is talking to before anything else, because not knowing
+   that is the whole failure mode.
+
+   ```bash
+   node -r dotenv/config scripts/sweep-test-rows.mjs
+   ```
+
+   It names every organization whose slug carries a fixture prefix, every user
+   at `@example.test` (RFC 6761 reserves `.test`, so no real person has one),
+   their reset tokens, login attempts, and inbound emails from reserved test
+   domains.
+
+2. **Then, if it found anything, remove it.** Two flags, deliberately:
+
+   ```bash
+   node -r dotenv/config scripts/sweep-test-rows.mjs --delete --yes
+   ```
+
+   Deleting an organization cascades to its companies, loads and documents,
+   which is why the script never deletes anything its signature did not name.
+
+3. **Rotate anything a token could reach.** Unused reset tokens for
+   `@example.test` accounts are harmless once the users are gone, but if the
+   sweep found any belonging to a REAL address, treat it as a leak and reset
+   that password.
+
+The guard that replaced the label check lives in `tests/db-target.ts`: the two
+connection strings must name the same Neon endpoint, which is true of every
+legitimate configuration and false of every way this goes wrong. `deploy.mjs`
+additionally **scrubs** `DATABASE_URL`, `DIRECT_DATABASE_URL` and `NEON_BRANCH`
+out of the gate's environment, so `.env` is the only thing that can aim it.
+
 ### Email-in: loads@zebratms.com (Phase 6 §4 step 4)
 
 Mail arrives at a domain, gets parsed by a small worker, and lands in

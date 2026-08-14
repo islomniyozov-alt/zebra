@@ -110,6 +110,19 @@ export async function check({ confirmed = false } = {}) {
   )
   console.log('      npx prisma migrate deploy')
   console.log('')
+  // THE INSTRUCTION ABOVE IS HOW THE INCIDENT HAPPENED. As a one-shot prefix
+  // it is safe; `export`ed — or run in a shell that keeps it — the NEXT
+  // command inherits a production `DIRECT_DATABASE_URL`, and the next command
+  // is `deploy:prod`, whose gate then wrote its fixtures to production.
+  //
+  // `deploy.mjs` now scrubs those three variables before the gate runs, so
+  // this warning is belt and braces. It stays, because a ritual that leaves a
+  // loaded gun on the table should say so out loud.
+  console.log('  A ONE-SHOT PREFIX, NEVER `export`. Those variables must not')
+  console.log('  outlive that single command — then deploy from a fresh')
+  console.log('  terminal. See the README: "If a test run ever points at')
+  console.log('  production".')
+  console.log('')
   console.log(
     '  Then record it:  node scripts/check-migration-gap.mjs --record',
   )

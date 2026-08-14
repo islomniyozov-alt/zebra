@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { check as checkMigrationGap } from './check-migration-gap.mjs'
 
 // ---------------------------------------------------------------------------
@@ -73,6 +74,109 @@ const run = (args) => {
   if (result.status !== 0) process.exit(result.status ?? 1)
 }
 
+// ---------------------------------------------------------------------------
+// THE GATE RUNS AGAINST `.env`, AND NOTHING THE TERMINAL IS CARRYING.
+//
+// `deploy:prod` was once run in a ritual terminal whose `DIRECT_DATABASE_URL`
+// pointed at production. The child process inherited it, `DATABASE_URL` still
+// came from `.env`, and the suite ran SPLIT-BRAINED — fixtures written to
+// production, the application reading dev. 237 of 405 failed with foreign-key
+// violations and organizations that could not see their own rows. The gate
+// refused and nothing shipped, which is the system working; that the suite got
+// as far as writing to production is the part that must never repeat.
+//
+// SCRUBBED, NOT WARNED ABOUT. The three variables that decide where the suite
+// writes are DELETED from the child's environment, so `.env` — read by
+// `tests/setup.ts` through dotenv, which does not override — is the only
+// possible source. A terminal's leftovers cannot aim this at anything.
+//
+// AND THEN CHECKED ANYWAY, because scrubbing only fixes the environment; it
+// says nothing about whether `.env` ITSELF is pointing somewhere dangerous.
+// ---------------------------------------------------------------------------
+
+/** `.env`, parsed just enough. Not loaded into this process — deploy needs the
+ *  ambient environment for wrangler, and importing dotenv here would merge the
+ *  two things this function exists to keep apart. */
+function envFileValues() {
+  let text = ''
+  try {
+    text = readFileSync('.env', 'utf8')
+  } catch {
+    return {}
+  }
+  const values = {}
+  for (const line of text.split(/[\r\n]+/)) {
+    const match = /^\s*([A-Z0-9_]+)\s*=\s*(.*)$/.exec(line)
+    if (!match) continue
+    values[match[1]] = match[2].trim().replace(/^["']|["']$/g, '')
+  }
+  return values
+}
+
+/** The pooled and direct doors of one Neon endpoint fold to the same name. */
+function endpointOf(url) {
+  const { hostname } = new URL(url)
+  const [first, ...rest] = hostname.split('.')
+  return [first.replace(/-pooler$/, ''), ...rest].join('.')
+}
+
+const SCRUBBED = ['DATABASE_URL', 'DIRECT_DATABASE_URL', 'NEON_BRANCH']
+
+function integrationEnv() {
+  const child = { ...process.env }
+  const carried = SCRUBBED.filter((name) => child[name] !== undefined)
+  for (const name of SCRUBBED) delete child[name]
+
+  if (carried.length > 0) {
+    console.log('')
+    console.log(
+      `Ignoring ${carried.join(', ')} from this terminal — the gate reads .env.`,
+    )
+  }
+
+  // What the child WILL see, which is `.env` and only `.env`.
+  const file = envFileValues()
+  const pooled = file.DATABASE_URL
+  const direct = file.DIRECT_DATABASE_URL
+
+  if (!pooled || !direct) {
+    console.error('')
+    console.error('.env is missing DATABASE_URL or DIRECT_DATABASE_URL.')
+    process.exit(1)
+  }
+
+  let a
+  let b
+  try {
+    a = endpointOf(pooled)
+    b = endpointOf(direct)
+  } catch {
+    console.error('')
+    console.error('.env has a DATABASE_URL that is not a URL.')
+    process.exit(1)
+  }
+
+  // THE CHECK THAT WOULD HAVE CAUGHT THE INCIDENT even without the scrub: two
+  // different endpoints means the fixtures and the application are looking at
+  // two different databases, whatever any label says.
+  if (a !== b) {
+    console.error('')
+    console.error('Refusing: .env names two different database endpoints.')
+    console.error(`  DATABASE_URL        -> ${a}`)
+    console.error(`  DIRECT_DATABASE_URL -> ${b}`)
+    process.exit(1)
+  }
+
+  if ((file.NEON_BRANCH ?? '').trim().toLowerCase() === 'production') {
+    console.error('')
+    console.error('Refusing: .env says NEON_BRANCH=production.')
+    process.exit(1)
+  }
+
+  console.log(`The gate will write to ${a} (from .env).`)
+  return child
+}
+
 // THE INTEGRATION GATE (owner's ruling). Before the build, because a refusal
 // after a thirty-second bundle is a refusal that trains people to skip it.
 if (process.argv.includes('--skip-integration')) {
@@ -98,7 +202,7 @@ if (process.argv.includes('--skip-integration')) {
   const integration = spawnSync(
     'npx',
     ['vitest', 'run', '--project', 'integration'],
-    { stdio: 'inherit', shell: true },
+    { stdio: 'inherit', shell: true, env: integrationEnv() },
   )
   if (integration.status !== 0) {
     console.error('')
