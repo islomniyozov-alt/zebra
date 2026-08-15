@@ -23,10 +23,24 @@ import { LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 // each hit it and been fixed one at a time — which is the shape of a rule that
 // lives in nobody's head. This is the rule, written down and watched.
 //
-// IT CHECKS FOR THE CONSTANT, NOT FOR A NUMBER. Nineteen files holding
-// `20_000` would be nineteen places to change when the link or the audit cost
-// moves; the point is one dial. A file that hardcodes even the right value
-// fails here.
+// IT CHECKS FOR A NAME, NOT FOR A NUMBER. Nineteen files holding `20_000`
+// would be nineteen places to change when the link or the audit cost moves;
+// the point is one dial. A file that hardcodes even the right value fails
+// here.
+//
+// BUT IT NO LONGER DEMANDS ONE PARTICULAR NAME. The first version required
+// exactly `LOAD_WRITE_TIMEOUT_MS`, which forbade a justified override — and a
+// guard with no room in it gets cut open under deadline by whoever needs the
+// exception at 2am, with whatever reasoning fits in the moment.
+// `relay-import.test.ts` had a 30s budget before this rule was written, and a
+// suite that genuinely needs a longer one will exist again.
+//
+// THE HATCH IS "AN IMPORTED IDENTIFIER", AND THE IMPORT IS THE POINT. A local
+// `const RELAY_TIMEOUT = 30_000` satisfies "use a named constant" while being
+// a bare literal wearing a name — it moves nothing out of the file and puts
+// the number back in nineteen possible places. Requiring the name to be
+// IMPORTED forces an override to live in a shared module, where its reason is
+// written down once and can be grepped, reviewed and changed in one edit.
 // ---------------------------------------------------------------------------
 
 const DIR = join(process.cwd(), 'tests', 'integration')
@@ -70,17 +84,47 @@ describe('every integration suite states its transaction budget', () => {
   )
 
   it.each(suitesWithHelper().map((file) => file.name))(
-    '%s points at the shared constant rather than a number',
+    '%s names its budget rather than spelling it as a number',
     (name) => {
       const source = suites.find((file) => file.name === name)!.source
       const helper = source.slice(
         source.indexOf('const inOrg'),
         source.indexOf('const inOrg') + 900,
       )
+
+      const written = /timeoutMs:\s*([^,\n]+)/.exec(helper)?.[1]?.trim()
+      expect(written, `${name} sets no timeoutMs`).toBeDefined()
+
+      // A bare literal — `20_000`, `30000`, `60 * 1000` — is the thing this
+      // forbids, whatever arithmetic it is dressed in.
       expect(
-        helper,
-        `${name} hardcodes its budget; use LOAD_WRITE_TIMEOUT_MS`,
-      ).toContain('timeoutMs: LOAD_WRITE_TIMEOUT_MS')
+        /^[\d_]+$/.test(written!) || /^[\d_\s*+/-]+$/.test(written!),
+        `${name} hardcodes ${written}; point it at an imported constant`,
+      ).toBe(false)
+
+      // ...and the name has to come from somewhere else. A file-local const
+      // is a literal with a hat on: it moves the number nowhere.
+      const identifier = /^[A-Za-z_$][\w$]*$/.test(written!) ? written! : null
+      expect(
+        identifier,
+        `${name} sets timeoutMs to an expression (${written}); use a plain imported identifier`,
+      ).not.toBeNull()
+
+      const imported = new RegExp(
+        `import\\s*\\{[^}]*\\b${identifier}\\b[^}]*\\}\\s*from`,
+      ).test(source)
+      const declaredLocally = new RegExp(
+        `^\\s*(const|let|var)\\s+${identifier}\\b`,
+        'm',
+      ).test(source)
+
+      expect(
+        declaredLocally,
+        `${name} declares ${identifier} in the file; a budget lives in a shared module or it is nineteen budgets`,
+      ).toBe(false)
+      expect(imported, `${name} uses ${identifier} without importing it`).toBe(
+        true,
+      )
     },
   )
 
