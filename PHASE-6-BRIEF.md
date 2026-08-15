@@ -1251,6 +1251,33 @@ Recorded rather than resolved, per Phase 1's discipline.
     and earns no proof. The receipt left on disk was the morning's, and it
     refuses itself — `wrong_commit: that run was f46e048; HEAD is b740bc5`.
 
+    THE RULE HAD A BUG AND HAS BEEN RESTATED. As first written it required the
+    diff against the last deployed commit to show `wrangler.jsonc` and nothing
+    else — which collided with the requirement, one clause earlier, that the
+    exception be logged in this file. Logging it put `PHASE-6-BRIEF.md` in the
+    range and made the next skip unrunnable by its own terms. THE STANDING
+    FORM:
+
+    > The diff against the last deployed commit must contain no DEPLOYABLE
+    > change beyond the stated config. Documentation and this brief are
+    > excluded by name, because markdown does not ship.
+
+    A SECOND EXCEPTION WAS TAKEN THE SAME DAY under that form, version
+    `e80e2e9f`, moving `R2_ENDPOINT` and `R2_ACCOUNT_ID` from secrets to vars
+    (flag 61):
+
+    ```
+    PHASE-6-BRIEF.md | 138 +++++++++++++++
+    wrangler.jsonc   |  14 ++++
+    2 files changed, 152 insertions(+)
+
+    excluding markdown:
+    wrangler.jsonc   |  14 ++++
+    ```
+
+    Twelve of those fourteen lines are comment; two are values. Still vars
+    only, still no code, and STILL DOES NOT GENERALISE.
+
 58. **THE BYTES CHANGE BETWEEN RETRIES. THE MESSAGE-ID DOES NOT.** Measured,
     not reasoned: one message, three deliveries, `wrangler tail` on both
     workers.
@@ -1360,3 +1387,15 @@ Recorded rather than resolved, per Phase 1's discipline.
     presigned GET. A system whose job includes storing BOLs and PODs had no
     working object storage in production, and nothing said so until a mail
     worker started shouting into a log somebody was watching.
+
+62. **DEBT, small and sharp: prettier is not idempotent on unfenced tabular
+    data inside a list item.** A run-on line that wraps to column 0 terminates
+    its list item; what follows is then read as an indented code block, and
+    every `--write` pass indents it four spaces further. `npm run check` goes
+    red and stays red, and the diff looks like the formatter is fighting
+    itself rather than like a broken line above it.
+
+    THE RULE: tabular data in this repository's markdown gets FENCED, not
+    indented. It cost a commit that went in without `check` behind it —
+    `663dbe8` — which is also the reminder that a docs-only commit is still a
+    commit and still runs the gate.
