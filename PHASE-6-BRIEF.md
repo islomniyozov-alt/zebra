@@ -1222,3 +1222,98 @@ Recorded rather than resolved, per Phase 1's discipline.
     right: a shared helper touching nineteen files belongs in the session that
     is already rewriting how fixtures talk to the database, not in a session
     whose job is to earn one green run.
+
+57. **THE INTEGRATION GATE WAS SKIPPED ONCE, ON 2026-08-15, DELIBERATELY.**
+    `npm run deploy:prod -- --skip-integration`, version `fd08dcc3`.
+
+    REASON: the deployed code was byte-identical to `f46e048`, which had a
+    405/405 integration run behind it that morning. The entire delta was one
+    environment variable:
+
+    ```
+     wrangler.jsonc | 2 +-
+     1 file changed, 1 insertion(+), 1 deletion(-)
+    ```
+
+    `"INBOUND_EMAIL_ORG_ID": ""` → `"cmsbsc82y0000nsvsa6yffuyh"`. The suite
+    does not read that variable, so a 55-minute run would have re-proven the
+    same code against the same database to authorise a value it never touches.
+
+    THE OWNER RULED IT AND BOUNDED IT: the diff had to be shown before the
+    deploy and had to touch `wrangler.jsonc` and nothing else, the exception
+    had to be written here, and IT DOES NOT GENERALISE — the next change with
+    code in it goes through the gate or a valid receipt. Recorded so that the
+    next person to want a skip has to argue against a precedent that says
+    "vars only, diff shown first", rather than against nothing.
+
+    NO RECEIPT WAS WRITTEN, as designed: `--skip-integration` runs no suite and
+    earns no proof. The receipt left on disk was the morning's, and it now
+    refuses itself — `wrong_commit: that run was f46e048; HEAD is b740bc5`.
+
+58. **THE BYTES CHANGE BETWEEN RETRIES. THE MESSAGE-ID DOES NOT.** Measured,
+    not reasoned: one message, three deliveries, `wrangler tail` on both
+    workers.
+
+    | attempt | time     | gap     | size  |
+    | ------- | -------- | ------- | ----- |
+    | 1       | 10:32:50 | —       | 59591 |
+    | 2       | 10:39:18 | 6m 28s  | 59591 |
+    | 3       | 11:00:06 | 20m 48s | 59592 |
+
+    ONE BYTE LARGER ON THE THIRD — the sender rewriting a trace header on its
+    way back out. `<CAHryuVcfHUuG9ZyA2wYK2P0JL0iH8pMbPGGUZSLvAnmOpVF_TQ@
+mail.gmail.com>` was identical every time.
+
+    SO A CONTENT HASH WOULD BE A BROKEN IDEMPOTENCY KEY. Hashing the raw
+    `.eml` is the obvious alternative to trusting a header anyone can forge,
+    and it would have booked this message twice — once for the 59591-byte
+    copies and once for the 59592-byte one. The bug would surface only on
+    retry, which is to say only on the day the mail path is already
+    struggling. `emailByMessageId` keys on the Message-ID and holds. Anything
+    added later — including the persist-before-202 fix — keys on the same
+    thing.
+
+    THE RETRY IS THE SENDER'S, NOT OURS. A thrown `email()` handler hands the
+    decision back up: Cloudflare returns a temporary failure and the sending
+    MTA decides what happens next. The 6.5-then-21-minute curve is Gmail's.
+    A broker on another provider gets a different one, and a badly configured
+    one might give minutes. **Our retry budget is somebody else's policy** —
+    which is the strongest argument for persisting before the 202 rather than
+    relying on redelivery.
+
+59. **DEBT: the runbook prints production commands that a dev terminal can
+    satisfy.** Step 4's psql is `psql "$DIRECT_DATABASE_URL" -c 'update
+"Organization" set "inboundAddress" ...'`. Run in this repository's own
+    working terminal that variable resolves to DEV, and the command succeeds,
+    prints `UPDATE 1`, and leaves production untouched while dev quietly
+    claims `loads@zebratms.com`.
+
+    THIS IS THE SAME SHAPE AS FLAG 50. There it was the migrate command; the
+    root cause was found in our own runbook. A production step must never name
+    a variable a dev terminal already has — it should name something that can
+    only be filled deliberately (`$PROD_DIRECT_URL`), or print the endpoint it
+    is about to write to and stop for confirmation.
+
+60. **DEBT, AND IT IS NOT COSMETIC: the receipt records no proof that anything
+    ran.** `writeReceipt` accepts `{ tests, files }` and
+    `integration-gate.mjs` calls it with neither, so every receipt carries
+    `"tests": null, "files": null` — fields designed for exactly this and
+    never wired.
+
+    WHICH MEANS THE ONLY CONDITION FOR EARNING ONE IS `result.status === 0`.
+    A vitest invocation that matches ZERO test files also exits 0, in seconds,
+    and would earn a full hour of deploy authority having proven nothing. That
+    is the same failure the isolation-coverage test exists to prevent one
+    level down: "no failures" and "no tests" are indistinguishable from the
+    outside, and the comfortable reading is the wrong one.
+
+    NOTICED BECAUSE A RECEIPT'S TIMESTAMP MOVED. The morning's run finished
+    `00:40:53Z`; the file later read `00:49:47Z` — same commit, same endpoint,
+    nine minutes later, with no 55-minute suite between. `deploy.mjs` never
+    calls `writeReceipt`, so something ran the gate and earned a stamp in nine
+    minutes. WHAT, EXACTLY, IS NOT ESTABLISHED — it is moot now (the receipt
+    refuses itself on `wrong_commit`) but it is unexplained, and an
+    unexplained receipt is the thing the mechanism exists to make impossible.
+
+    The fix is to record counts and refuse a receipt below a floor. Not built
+    in this session.
