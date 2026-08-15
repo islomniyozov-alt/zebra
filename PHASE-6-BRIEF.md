@@ -1536,3 +1536,48 @@ Recorded rather than resolved, per Phase 1's discipline.
     change was type-only. The next contract edit will not be, and "deploy
     both" removes the need for anyone to make that judgment correctly under
     time pressure.
+
+71. **A COMMIT NEVER CHAINS AFTER `check` WITH `;` — ONLY `&&`. IT BIT TWICE
+    IN ONE NIGHT.** `663dbe8` went in without `check` behind it at all;
+    `07f0501` went in while `check` was RED, because the command chained the
+    commit after the gate with a semicolon. That runs the commit whatever the
+    exit status, and the failure scrolls past above a successful-looking
+    commit line.
+
+    BOTH TIMES THE CONTENT WAS FINE, WHICH IS THE TRAP. `663dbe8`'s red was a
+    markdown formatting break; `07f0501`'s was contention from a concurrent
+    suite, and it certified green the moment dev was quiet. A rule that only
+    bit when the code was also wrong would have been learned the first time;
+    this one has to be followed while it is costing nothing.
+
+    THE RULE: `&&`, always, between a gate and a commit. `;` is for commands
+    whose failure genuinely does not matter, and a gate is never one of them.
+    It proved itself on its first outing minutes later, when a prettier
+    instability stopped the very commit that recorded it.
+
+72. **AN INTEGRATION SUITE RAN ON DEV THAT NOBODY STARTED, AND THE CAUSE IS
+    OPEN.** 2026-08-15, roughly 21:30 local: a bare `vitest` integration run
+    appeared against `ep-little-lake` while the tree was being edited. It
+    created and cleaned up its own fixtures — `iso-counter-6awlaz`, then
+    `warnings-x8bedk` — and finished on its own.
+
+    WHAT IT WAS NOT, established rather than assumed. It was not a deploy:
+    `deploy.mjs --production` reaches production only through
+    `runIntegrationSuite()`, which writes the receipt on success, and the
+    receipt was untouched at `d09f001` / `21:25:19Z` throughout. It shipped
+    nothing: the production deployment list shows `11c75a52` (`d09f001`,
+    21:28Z) still live with nothing after it, so `07f0501` never reached
+    production. And it was not the VS Code Vitest extension on auto-run,
+    which is not installed — no `vitest`, `autoRun` or `watch` keys in user
+    settings, and no `.vscode` in the repository.
+
+    WHAT COULD NOT BE ESTABLISHED: its ancestry. The process exited before it
+    could be walked to a parent, so the launcher is unknown. The absence of a
+    deploy parent is INFERRED from two independent records that agree, not
+    proven from the chain.
+
+    WHY IT MATTERS BEYOND THE MYSTERY: it cost a red `check` that looked like
+    drift, and it nearly cost a sweep of a running suite's live fixtures —
+    the read-only default is the only thing that stopped it. Anything that can
+    start a suite unattended can also collide with the gate, which is flag
+    66's 526 seconds.
