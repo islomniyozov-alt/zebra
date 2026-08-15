@@ -1228,45 +1228,46 @@ Recorded rather than resolved, per Phase 1's discipline.
 
     REASON: the deployed code was byte-identical to `f46e048`, which had a
     405/405 integration run behind it that morning. The entire delta was one
-    environment variable:
+    environment variable — `"INBOUND_EMAIL_ORG_ID": ""` becoming
+    `"cmsbsc82y0000nsvsa6yffuyh"`:
 
     ```
-     wrangler.jsonc | 2 +-
-     1 file changed, 1 insertion(+), 1 deletion(-)
+    wrangler.jsonc | 2 +-
+    1 file changed, 1 insertion(+), 1 deletion(-)
     ```
 
-    `"INBOUND_EMAIL_ORG_ID": ""` → `"cmsbsc82y0000nsvsa6yffuyh"`. The suite
-    does not read that variable, so a 55-minute run would have re-proven the
-    same code against the same database to authorise a value it never touches.
+    The suite does not read that variable, so a 55-minute run would have
+    re-proven the same code against the same database to authorise a value it
+    never touches.
 
     THE OWNER RULED IT AND BOUNDED IT: the diff had to be shown before the
     deploy and had to touch `wrangler.jsonc` and nothing else, the exception
     had to be written here, and IT DOES NOT GENERALISE — the next change with
     code in it goes through the gate or a valid receipt. Recorded so that the
-    next person to want a skip has to argue against a precedent that says
-    "vars only, diff shown first", rather than against nothing.
+    next person to want a skip argues against a precedent that says "vars
+    only, diff shown first" rather than against nothing.
 
-    NO RECEIPT WAS WRITTEN, as designed: `--skip-integration` runs no suite and
-    earns no proof. The receipt left on disk was the morning's, and it now
+    NO RECEIPT WAS WRITTEN, as designed: `--skip-integration` runs no suite
+    and earns no proof. The receipt left on disk was the morning's, and it
     refuses itself — `wrong_commit: that run was f46e048; HEAD is b740bc5`.
 
 58. **THE BYTES CHANGE BETWEEN RETRIES. THE MESSAGE-ID DOES NOT.** Measured,
     not reasoned: one message, three deliveries, `wrangler tail` on both
     workers.
 
-    | attempt | time     | gap     | size  |
-    | ------- | -------- | ------- | ----- |
-    | 1       | 10:32:50 | —       | 59591 |
-    | 2       | 10:39:18 | 6m 28s  | 59591 |
-    | 3       | 11:00:06 | 20m 48s | 59592 |
+    ```
+    attempt   time       gap        size
+    1         10:32:50   —          59591
+    2         10:39:18   6m 28s     59591
+    3         11:00:06   20m 48s    59592
+    ```
 
     ONE BYTE LARGER ON THE THIRD — the sender rewriting a trace header on its
-    way back out. `<CAHryuVcfHUuG9ZyA2wYK2P0JL0iH8pMbPGGUZSLvAnmOpVF_TQ@
-mail.gmail.com>` was identical every time.
+    way back out. The Message-ID was identical every time.
 
     SO A CONTENT HASH WOULD BE A BROKEN IDEMPOTENCY KEY. Hashing the raw
     `.eml` is the obvious alternative to trusting a header anyone can forge,
-    and it would have booked this message twice — once for the 59591-byte
+    and it would have booked this message twice: once for the 59591-byte
     copies and once for the 59592-byte one. The bug would surface only on
     retry, which is to say only on the day the mail path is already
     struggling. `emailByMessageId` keys on the Message-ID and holds. Anything
@@ -1275,45 +1276,87 @@ mail.gmail.com>` was identical every time.
 
     THE RETRY IS THE SENDER'S, NOT OURS. A thrown `email()` handler hands the
     decision back up: Cloudflare returns a temporary failure and the sending
-    MTA decides what happens next. The 6.5-then-21-minute curve is Gmail's.
-    A broker on another provider gets a different one, and a badly configured
-    one might give minutes. **Our retry budget is somebody else's policy** —
-    which is the strongest argument for persisting before the 202 rather than
+    MTA decides what happens next. The 6.5-then-21-then-27-minute curve is
+    Gmail's; the message was accepted on attempt 4 after 54 minutes. A broker
+    on another provider gets a different curve, and a badly configured one
+    might give minutes. **Our retry budget is somebody else's policy** — which
+    is the strongest argument for persisting before the 202 rather than
     relying on redelivery.
 
-59. **DEBT: the runbook prints production commands that a dev terminal can
-    satisfy.** Step 4's psql is `psql "$DIRECT_DATABASE_URL" -c 'update
-"Organization" set "inboundAddress" ...'`. Run in this repository's own
-    working terminal that variable resolves to DEV, and the command succeeds,
-    prints `UPDATE 1`, and leaves production untouched while dev quietly
-    claims `loads@zebratms.com`.
+59. **THE DAY'S ONE FINDING, IN THREE COSTUMES: A PRODUCTION COMMAND THAT
+    DEFAULTS TO DEV AND READS AS SUCCESS.** Three separate near-misses on
+    2026-08-15, and they are the same bug:
+    - `psql "$DIRECT_DATABASE_URL"` in the step 4 runbook. Run from this
+      repository's own terminal it resolves to DEV, prints `UPDATE 1`, and
+      leaves production untouched while dev quietly claims
+      `loads@zebratms.com`.
+    - Flag 50's migrate command, which is where the production-pointed test
+      run came from. Same variable, same silence.
+    - `npx wrangler secret put R2_ENDPOINT` without `--env production`, which
+      writes to `zebra-dev` and prints success either way.
 
-    THIS IS THE SAME SHAPE AS FLAG 50. There it was the migrate command; the
-    root cause was found in our own runbook. A production step must never name
-    a variable a dev terminal already has — it should name something that can
-    only be filled deliberately (`$PROD_DIRECT_URL`), or print the endpoint it
-    is about to write to and stop for confirmation.
+    EACH ONE SUCCEEDS LOUDLY WHILE DOING NOTHING. That is what makes this a
+    class rather than three mistakes: the failure is indistinguishable from
+    the fix, so the only way to learn the truth is to exercise production and
+    read a log.
 
-60. **DEBT, AND IT IS NOT COSMETIC: the receipt records no proof that anything
+    THE RULE: a production-touching command must name its target explicitly,
+    or be impossible to run against the wrong one. A variable a dev terminal
+    already has is not a target — it is a coin flip that reports heads.
+
+60. **DEBT, AND NOT COSMETIC: the receipt records no proof that anything
     ran.** `writeReceipt` accepts `{ tests, files }` and
     `integration-gate.mjs` calls it with neither, so every receipt carries
     `"tests": null, "files": null` — fields designed for exactly this and
     never wired.
 
     WHICH MEANS THE ONLY CONDITION FOR EARNING ONE IS `result.status === 0`.
-    A vitest invocation that matches ZERO test files also exits 0, in seconds,
-    and would earn a full hour of deploy authority having proven nothing. That
-    is the same failure the isolation-coverage test exists to prevent one
-    level down: "no failures" and "no tests" are indistinguishable from the
+    A vitest invocation matching ZERO test files also exits 0, in seconds,
+    and would earn a full hour of deploy authority having proven nothing.
+    That is the failure `tests/isolation-coverage.test.ts` exists to prevent
+    one level down: "no failures" and "no tests" are indistinguishable from
     outside, and the comfortable reading is the wrong one.
 
-    NOTICED BECAUSE A RECEIPT'S TIMESTAMP MOVED. The morning's run finished
-    `00:40:53Z`; the file later read `00:49:47Z` — same commit, same endpoint,
-    nine minutes later, with no 55-minute suite between. `deploy.mjs` never
-    calls `writeReceipt`, so something ran the gate and earned a stamp in nine
-    minutes. WHAT, EXACTLY, IS NOT ESTABLISHED — it is moot now (the receipt
-    refuses itself on `wrong_commit`) but it is unexplained, and an
-    unexplained receipt is the thing the mechanism exists to make impossible.
+    NOTICED BECAUSE A RECEIPT'S TIMESTAMP MOVED. The run finished `00:40:53Z`;
+    the file later read `00:49:47Z` — same commit, same endpoint, nine minutes
+    later, with no 55-minute suite between. `deploy.mjs` never calls
+    `writeReceipt`. What earned that stamp is NOT ESTABLISHED. It is moot now
+    (the receipt refuses itself on `wrong_commit`) but it is unexplained, and
+    an unexplained receipt is the thing the mechanism exists to make
+    impossible.
 
     The fix is to record counts and refuse a receipt below a floor. Not built
     in this session.
+
+61. **R2 HAS NEVER WORKED ON PRODUCTION, AND A SECRET IS WHY IT TOOK THIS
+    LONG TO SEE.** Both inbound messages recorded their rows and their
+    readings and then failed identically:
+
+    ```
+    [zebra.inbound] could not keep the original for
+      cmsuj4nt40000psp77ig13iwz: Invalid URL string.
+    ```
+
+    `new URL()` on the composed `${endpoint}/${bucket}/${key}`.
+    `r2ConfigFromEnv()` did not throw its own "missing" error, so every value
+    was present — one of them simply was not a URL.
+
+    THE ROUTE DEGRADED EXACTLY AS WRITTEN: the mail was not lost, the row was
+    kept, `rawR2Key` stayed null, and a named line went to `wrangler tail`
+    instead of a 500 that Cloudflare would retry forever. That design held.
+
+    BUT A SECRET'S VALUE CANNOT BE READ BACK, so a re-put could not be
+    verified — the only way to tell a fixed value from an unfixed one was to
+    send another email and read the log, which is what happened, and it was
+    still broken. `R2_ENDPOINT` and `R2_ACCOUNT_ID` are therefore now VARS:
+    the account id is printed by `wrangler whoami` and the endpoint is derived
+    from it, so neither protects anything, while living in `wrangler.jsonc`
+    makes both diffable, reviewable, deployed with the code, and immune to
+    flag 59's missing `--env`. `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`
+    stay secrets; they are the actual credentials.
+
+    THE BLAST RADIUS IS EVERY R2 CALL, not just the email original.
+    `r2ConfigFromEnv()` is the single door for document upload, download and
+    presigned GET. A system whose job includes storing BOLs and PODs had no
+    working object storage in production, and nothing said so until a mail
+    worker started shouting into a log somebody was watching.
