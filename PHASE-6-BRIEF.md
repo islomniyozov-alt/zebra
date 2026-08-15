@@ -1455,3 +1455,12 @@ Recorded rather than resolved, per Phase 1's discipline.
     literal wearing a name, and puts the number back in nineteen possible
     places. Requiring it to come from a shared module gives an override one
     home, one written reason, and one edit to change it.
+
+66. **A SUSPECTED ENDPOINT COLLISION HALTED A RUNNING SUITE, AND THE HALT WAS
+    RIGHT EVEN THOUGH THE SUSPICION WAS WRONG.** 2026-08-15: the owner saw
+    `ep-little-lake` copies where production was expected and called a stop
+    mid-run. It resolved to a Connect dialog left on the wrong branch —
+    production is `ep-proud-union-ayxlcytw`, dev is `ep-little-lake-aydu7faj`,
+    and the gate's own first line had said `ep-little-lake` all along. Sixty
+    minutes of runtime and a swept fixture org is what the caution cost;
+    flag 50 is what not calling it costs.
