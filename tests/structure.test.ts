@@ -91,10 +91,29 @@ describe('row-level security', () => {
     // issued and redeemed before anyone has proved who they are, and it cannot
     // carry a tenant because the request arrives with an email address and
     // nothing else.
+    //
+    // UnroutedEmail is the fifth, and it is the only one that is not about
+    // authentication. A row is in it BECAUSE the question "which organization
+    // claims this address?" was asked and answered NO — so there is no tenant
+    // to scope to, and `org_isolation` on it could never be satisfied by the
+    // connection that has to write it.
+    //
+    // IT IS HERE SO THAT "DELIVERED" AND "EXISTS NOWHERE" CANNOT BOTH BE TRUE.
+    // `/api/inbound-email` answers 202 to mail nobody claims, deliberately: a
+    // 4xx makes Cloudflare retry a message that can never route, and a bounce
+    // tells a stranger which addresses exist. But 202 means the sending server
+    // marks it delivered and stops trying, and until this table that
+    // acknowledgement was a lie — the message went in a `console.warn`.
+    //
+    // WHAT IT COSTS, STATED: mail from strangers sits in a table with no wall.
+    // It is write-only from one endpoint, no route reads it, and it holds a
+    // message somebody sent to a public address. When the routing table of
+    // flag 44 arrives, this becomes tenant-scoped and leaves this list.
     expect(rows.map((r) => r.relname)).toEqual([
       'LoginAttempt',
       'PasswordResetToken',
       'Session',
+      'UnroutedEmail',
       'User',
       '_prisma_migrations',
     ])

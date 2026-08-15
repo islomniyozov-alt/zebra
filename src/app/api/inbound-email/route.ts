@@ -8,6 +8,8 @@ import {
   recordOriginal,
   recordReading,
 } from '@/lib/inbound-email'
+import { keepUnrouted } from '@/lib/unrouted-email'
+import { liveUnroutedStore } from '@/lib/unrouted-email-store'
 import { putObject, r2ConfigFromEnv } from '@/lib/r2'
 import { apiError } from '../_lib/respond'
 
@@ -107,9 +109,30 @@ export async function POST(request: Request): Promise<Response> {
     // 202, NOT 4xx. The mail WAS delivered; there is simply nobody here it
     // belongs to. A 4xx makes Cloudflare retry a message that will never
     // route, and a bounce would tell a stranger which addresses exist.
-    console.warn(`[zebra.inbound] no tenant claims ${recipient}`)
+    //
+    // BUT THE 202 IS EARNED, NOT ASSUMED. It tells the sending server to stop
+    // trying, so it may only be said once the message is somewhere. This
+    // block used to be a `console.warn` and a 202, which made "delivered" and
+    // "exists nowhere" true at the same time.
+    let kept
+    try {
+      kept = await keepUnrouted(payload, liveUnroutedStore())
+    } catch (error) {
+      // 503, so the worker throws and the sender keeps the message. Losing it
+      // here would be the exact bug this path was rewritten to close.
+      console.error(
+        `[zebra.inbound] could not keep unrouted mail for ${recipient}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+      return apiError(503, 'not_kept', 'Could not record the message.')
+    }
+
+    console.warn(
+      `[zebra.inbound] no tenant claims ${recipient}; kept as ${kept.id}`,
+    )
     return NextResponse.json(
-      { accepted: false, reason: 'no_tenant' },
+      { accepted: false, reason: 'no_tenant', id: kept.id },
       { status: 202 },
     )
   }

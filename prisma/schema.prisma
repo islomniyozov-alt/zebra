@@ -2780,6 +2780,53 @@ model InboundEmail {
   @@index([organizationId, receivedAt])
 }
 
+/// Mail that arrived at an address NO ORGANIZATION CLAIMS.
+///
+/// THIS TABLE EXISTS SO THAT "DELIVERED" AND "EXISTS NOWHERE" CANNOT BOTH BE
+/// TRUE. `/api/inbound-email` answers 202 when no tenant claims the recipient
+/// — deliberately, because a 4xx makes Cloudflare retry mail that can never
+/// route and a bounce tells a stranger which addresses exist. But a 202 is an
+/// acknowledgement: the sending server marks the message delivered and stops.
+/// Until this table, that acknowledgement was a lie — the message was
+/// discarded with a `console.warn` and nothing else.
+///
+/// IT CANNOT CARRY A TENANT, which is the whole point of it. The message is
+/// here precisely because the question "whose is this?" was asked and answered
+/// NO. A policy on `organizationId` could never be satisfied, the same
+/// argument `Session` and `LoginAttempt` make in tests/structure.test.ts. It
+/// therefore sits outside row-level security, and the exact list in that test
+/// is where that decision is defended.
+///
+/// KEYED ON THE MESSAGE-ID, NOT A CONTENT HASH. Measured, not assumed: one
+/// message redelivered three times grew by a byte between attempts as the
+/// sender rewrote a trace header (PHASE-6-BRIEF flag 58). A hash of the raw
+/// `.eml` would have recorded the same message twice.
+model UnroutedEmail {
+  id String @id @default(cuid())
+
+  /// The mail system's own idempotency key. Redelivery finds this row.
+  messageId String @unique
+
+  fromAddress String
+  toAddress   String
+  subject     String?
+
+  /// Kept even though the `.eml` usually holds it: R2 can fail, and a message
+  /// with no readable trace is the thing this table exists to prevent.
+  bodyText String?
+
+  /// The whole message, when it could be stored. Null means the object write
+  /// failed or the message was too large to carry — `rawBytes` still says how
+  /// big it was, so the gap is visible rather than invisible.
+  rawR2Key String?
+  rawBytes Int?
+
+  receivedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([receivedAt])
+}
+
 enum InboundEmailState {
   /// Read cleanly, nothing worth stopping for.
   READY
