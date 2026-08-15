@@ -1,4 +1,8 @@
 import PostalMime from 'postal-mime'
+// TYPE-ONLY, so it is erased at build time: the worker gains a compile-time
+// contract with the endpoint and carries no application code. The two used to
+// agree by memory — see the header of the file it points at.
+import type { InboundEmailPayload } from '../../src/lib/inbound-email-payload'
 
 // ---------------------------------------------------------------------------
 // THE MAIL RECEIVER (Phase 6 §4 step 4).
@@ -96,7 +100,7 @@ const handler = {
         base64: base64Of(new Uint8Array(attachment.content as ArrayBuffer)),
       }))
 
-    const body = {
+    const body: InboundEmailPayload = {
       messageId,
       // `message.from` is the envelope sender, which is what actually
       // delivered this; `parsed.from` is the header, which anybody can write.

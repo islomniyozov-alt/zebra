@@ -11,6 +11,7 @@ import {
 import { keepUnrouted } from '@/lib/unrouted-email'
 import { liveUnroutedStore } from '@/lib/unrouted-email-store'
 import { putObject, r2ConfigFromEnv } from '@/lib/r2'
+import type { InboundEmailPayload } from '@/lib/inbound-email-payload'
 import { apiError } from '../_lib/respond'
 
 // POST /api/inbound-email — a booking email, delivered (Phase 6 §4 step 4).
@@ -32,26 +33,6 @@ import { apiError } from '../_lib/respond'
 // NOTHING HERE CREATES A LOAD. §1.1: the inbox is a queue of unfinished forms.
 // The mail becomes an `InboundEmail`, gets read, gets a state computed from
 // the create form's own validations, and waits for a dispatcher.
-
-export interface InboundEmailPayload {
-  /** RFC 5322 Message-ID. The idempotency key. */
-  messageId: string
-  from: string
-  to: string
-  subject?: string | null
-  /** The best text body the parser found — plain preferred, else HTML text. */
-  text?: string | null
-  /** Base64 attachments worth reading. The worker drops signatures and images. */
-  attachments?: {
-    filename: string
-    mimeType: string
-    base64: string
-  }[]
-  /** The whole `.eml`, base64. Null when it was too large to carry. */
-  raw?: string | null
-  /** How big it was, whether or not `raw` came with it. */
-  rawBytes?: number | null
-}
 
 export async function POST(request: Request): Promise<Response> {
   const secret = process.env.INBOUND_EMAIL_SECRET
