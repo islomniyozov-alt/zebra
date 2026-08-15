@@ -1624,3 +1624,40 @@ Recorded rather than resolved, per Phase 1's discipline.
     exists, which is precisely when nobody is expecting to wait. Either watch
     it to its last line, or earn a receipt first and deploy on that, which is
     the whole reason the receipt exists.
+
+74. **DEDUPE IS PROVEN LIVE, AND SO IS EVERY OTHER BRANCH OF THE ROUTE.**
+    2026-08-15, on production: a re-POST of test 3's Message-ID returned
+    `200 {"accepted":true,"duplicate":true,"id":"cmsulfhoc0000psp7mhh24ddu"}`
+    and both tails recorded ONE request line and ZERO `audit.gap` lines. No
+    create, no update, nothing written. `emailByMessageId` returned before any
+    write, on the key flag 58 measured to be the stable one.
+
+    THE ABSENCE IS THE PROOF, not the 200. A second row would have announced
+    itself as a `create` audit gap; silence is the only observation that
+    distinguishes "deduplicated" from "wrote it again".
+
+    AND THE FAILED ATTEMPTS WERE WORTH MORE THAN THE SUCCESS. Getting there
+    walked the refusal ladder on production in order — `503 not_configured`,
+    `401 unauthenticated`, `400 invalid_body`, then the `200`. Every branch of
+    this route has now been observed on a real request against the real
+    worker, which is a thing no test suite had established: the integration
+    tests exercise the handler, not the deployed edge.
+
+75. **TWO TOOLING TRAPS, BOTH OF WHICH CORRUPT SILENTLY.**
+
+    `wrangler secret put` PROMPTS BLIND AND EATS THE NEXT LINE OF A MULTI-LINE
+    PASTE. The value it stores cannot be read back, so a secret mangled this
+    way is invisible until something authenticates with it and fails — and
+    the failure surfaces as `503 not_configured` or `401`, neither of which
+    points at the paste. SECRETS GO IN THROUGH THE DASHBOARD from now on.
+    This is the same class as flag 61: a value that cannot be read back is a
+    value that cannot be verified, only re-guessed.
+
+    POWERSHELL STRIPS EMBEDDED QUOTES when passing inline JSON to a native
+    executable, so `curl.exe -d '{"a":"b"}'` arrives as something the endpoint
+    reports as `400 invalid_body` — a message about the payload, for a fault
+    in the shell. Write the body to a FILE and use `--data-binary "@body.json"`.
+
+    BOTH FAIL AS SOMETHING ELSE. A mangled secret reports as configuration, a
+    mangled quote reports as a bad payload. Neither names the tool that did
+    it, which is why they are written down here rather than remembered.
