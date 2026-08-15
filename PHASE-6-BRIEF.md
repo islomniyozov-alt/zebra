@@ -1465,22 +1465,37 @@ Recorded rather than resolved, per Phase 1's discipline.
     minutes of runtime and a swept fixture org is what the caution cost;
     flag 50 is what not calling it costs.
 
-    AND THE RUN TIMES ARE A CONTENTION SIGNAL, which is what the scare was
-    actually worth. Four full runs of the same 405 tests:
+    THE RUN TIMES ARE NOT A CONTENTION SIGNAL, AND AN EARLIER VERSION OF THIS
+    FLAG SAID THEY WERE. Corrected here rather than quietly deleted, because
+    the wrong version was written with the same confidence as the right one.
+    Four full runs of the same 405 tests, with what was actually alongside
+    each — the last column known only after flag 72 was closed:
 
     ```
-    3288.63s   green, uncontended
-    3313.85s   green, uncontended
-    3839.86s   RED, a concurrent connection to the same branch
+    3288.63s   green   nothing alongside it
+    3313.85s   green   A FULL PARALLEL SUITE, for ~45 of its 55 minutes
+    3839.86s   RED     one brief migrate-status connection
+     (owner's) RED     the 3313.85s run, alongside it the whole time
     ```
 
-    The red run was 526s slower than the green one that followed it on the
-    same commit. A run materially past ~55 minutes should have its failures
-    SUSPECTED rather than believed — and the two failures in that run, a
-    dropped WebSocket and a 38-second stall on a trivial statement, were both
-    read as a sick network by this assistant, twice, before the timeline
-    ruled that out. The mechanism by which a short `migrate status` check
-    produces a 38-second stall is still not established; the correlation is.
+    THE 3313.85s RUN WAS CONTENDED BY AN ENTIRE SECOND SUITE and finished 25
+    seconds off the uncontended baseline, green. The 3839.86s run was
+    contended by a single short connection and lost 551 seconds and two
+    tests. Duration does not track contention, so "a run past ~55 minutes
+    should have its failures suspected" — which this flag previously asserted
+    — is unsupported and withdrawn.
+
+    WHAT THE PAIR DOES SHOW is that damage from two parallel suites is
+    ASYMMETRIC: of the two running together, one was green and on time while
+    the other lost `companies.test.ts` to a dropped pooler socket. Whoever
+    loses the connection loses the run, and neither is slowed predictably.
+    The mechanism behind the 38-second stall remains unestablished, and now
+    so does the slowdown itself.
+
+    A GREEN RUN UNDER CONTENTION IS STILL GREEN. Contention manifests as
+    dropped sockets, which fail tests; it does not invent passes. The receipt
+    that authorised `d09f001` was earned during that parallel window and is
+    not weakened by it.
 
 67. **VISIBILITY BEFORE RETENTION — AN ORDERING, NOT A PREFERENCE.** The
     drift-script line — `N unrouted, oldest <date>`, silent at zero — ships
@@ -1571,13 +1586,41 @@ Recorded rather than resolved, per Phase 1's discipline.
     which is not installed — no `vitest`, `autoRun` or `watch` keys in user
     settings, and no `.vscode` in the repository.
 
-    WHAT COULD NOT BE ESTABLISHED: its ancestry. The process exited before it
-    could be walked to a parent, so the launcher is unknown. The absence of a
-    deploy parent is INFERRED from two independent records that agree, not
-    proven from the chain.
+    CLOSED, BY THE OWNER, AND IT WAS A DEPLOY AFTER ALL. A production deploy
+    carrying the migrations-applied flag was run at 16:40:46, before any
+    receipt existed. The flag satisfied the migration check, the missing
+    receipt meant the gate started the suite itself, and the window was left
+    unwatched. It ran ~45 minutes alongside the 16:30 run, finished RED at
+    404/405 around 17:36 on `companies.test.ts` with a dropped socket to the
+    pooler, refused to deploy, and wrote no receipt. Production was untouched
+    throughout, exactly as the receipt and the deployment list said.
+
+    THE INFERENCE WAS RIGHT AND THE REASONING WAS WRONG. "No deploy parent"
+    was concluded from an untouched receipt and an unchanged deployment list.
+    Both facts were true; the conclusion did not follow. A deploy whose gate
+    goes red writes no receipt and ships nothing — which is
+    indistinguishable, from those two records alone, from no deploy at all.
+    The guard held; the diagnosis was luck.
+
+    ITS PARALLEL PRESENCE ALSO EXPLAINS THE FIXTURES that a `npm run check`
+    tripped on at 01:34Z: `iso-counter-6awlaz` and `warnings-x8bedk` were that
+    suite's live working set, which is why they moved between two sweeps and
+    why they were gone soon after without anyone deleting them.
 
     WHY IT MATTERS BEYOND THE MYSTERY: it cost a red `check` that looked like
     drift, and it nearly cost a sweep of a running suite's live fixtures —
     the read-only default is the only thing that stopped it. Anything that can
     start a suite unattended can also collide with the gate, which is flag
     66's 526 seconds.
+
+73. **ONE DEPLOY COMMAND, ONE WINDOW, WATCHED TO ITS LAST LINE.** A deploy
+    that starts its own 55-minute gate and is then left alone is a second
+    runner nobody remembers starting. It cost a red `check` read as drift, a
+    near-sweep of live fixtures, an hour spent diagnosing a failure that had
+    an author, and a false conclusion recorded in flag 66.
+
+    THE COMMAND IS NOT THE COMMITMENT — THE WINDOW IS. `deploy:prod` looks
+    like it takes a second, and takes an hour whenever no valid receipt
+    exists, which is precisely when nobody is expecting to wait. Either watch
+    it to its last line, or earn a receipt first and deploy on that, which is
+    the whole reason the receipt exists.
