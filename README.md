@@ -71,6 +71,31 @@ Each step assumes the ones above it.
 
 3. **Migrate production, from empty.**
 
+   **REQUIRED FIRST — read the target back before running anything.** Copy the
+   production connection string, then in PowerShell:
+
+   ```powershell
+   $env:DIRECT_DATABASE_URL = (Get-Clipboard -Raw).Trim()
+   $env:DIRECT_DATABASE_URL -match '^postgresql://.*proud-union'
+   ```
+
+   **Nothing proceeds past `False`.** Not "check it again" — stop, fix the
+   clipboard, and start this step over.
+
+   THIS IS NOT BELT AND BRACES. On 2026-08-15 a production migration took five
+   attempts. The first two never reached a database at all — an unfilled
+   instruction placeholder went in literally, then Prisma reported `P1001` for
+   a host that was the placeholder text. **The next two connected to DEV while
+   reporting success.** Four false successes in one night, and the only reason
+   the fifth was known to be right is that something printed the target and a
+   human read it. Flag 59 is the general form: a production command that names
+   a variable a dev terminal can satisfy is a coin flip that reports heads.
+
+   THE ANCHOR IS LOAD-BEARING. `-match 'proud-union'` unanchored matched a
+   COMMENT in an instruction block during that same session. `^postgresql://`
+   forces the match to start at a connection string, so prose containing the
+   branch name cannot pass the gate.
+
    ```bash
    NEON_BRANCH=production NODE_ENV=production ALLOW_PROD_MIGRATION=1 \
      DIRECT_DATABASE_URL='<production DIRECT url>' npx prisma migrate deploy
@@ -938,3 +963,34 @@ a presigned URL already in flight is signed with it.
 > **`.env` is gitignored and no credential in it has ever been committed** —
 > `git log -S` over the full history finds none of them, and there is no remote.
 > The exposure is transcript-only. That is still exposure.
+
+### Parked: make the migration check VERIFY instead of accept
+
+`prisma/production-migrations.json` is a marker a human writes, and it says so
+— every report prints `UNVERIFIED`. It records what somebody believed, which
+on a night when four commands reported success against the wrong database is
+worth exactly what it sounds like.
+
+`check-migration-gap.mjs` already prefers the truth when it can get it: set
+`PROD_DIRECT_DATABASE_URL` and it queries `_prisma_migrations` on production
+instead of reading the marker.
+
+```powershell
+$env:PROD_DIRECT_DATABASE_URL = (Get-Clipboard -Raw).Trim()
+$env:PROD_DIRECT_DATABASE_URL -match '^postgresql://.*proud-union'
+npm run deploy:prod
+```
+
+**That name is deliberately not one of the three the gate scrubs.**
+`DATABASE_URL`, `DIRECT_DATABASE_URL` and `NEON_BRANCH` are deleted from the
+integration suite's environment precisely so a ritual terminal cannot aim it at
+production; `PROD_DIRECT_DATABASE_URL` is read only by the migration check and
+never by `tests/setup.ts`, so it carries the production URL without arming the
+gun flag 50 went off with.
+
+WHY IT IS PARKED RATHER THAN REQUIRED: `--migrations-applied` is still needed
+when a receipt is in play. Recording the marker is a commit, a commit moves
+`HEAD`, and a receipt binds to `HEAD` and a clean tree — so on a receipt deploy
+the marker cannot be brought up to date first without destroying the thing
+authorising the deploy. Verifying against production has no such problem and
+should become the default the day deploys stop being receipt-gated.

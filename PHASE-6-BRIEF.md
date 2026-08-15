@@ -1464,3 +1464,75 @@ Recorded rather than resolved, per Phase 1's discipline.
     and the gate's own first line had said `ep-little-lake` all along. Sixty
     minutes of runtime and a swept fixture org is what the caution cost;
     flag 50 is what not calling it costs.
+
+    AND THE RUN TIMES ARE A CONTENTION SIGNAL, which is what the scare was
+    actually worth. Four full runs of the same 405 tests:
+
+    ```
+    3288.63s   green, uncontended
+    3313.85s   green, uncontended
+    3839.86s   RED, a concurrent connection to the same branch
+    ```
+
+    The red run was 526s slower than the green one that followed it on the
+    same commit. A run materially past ~55 minutes should have its failures
+    SUSPECTED rather than believed — and the two failures in that run, a
+    dropped WebSocket and a 38-second stall on a trivial statement, were both
+    read as a sick network by this assistant, twice, before the timeline
+    ruled that out. The mechanism by which a short `migrate status` check
+    produces a 38-second stall is still not established; the correlation is.
+
+67. **VISIBILITY BEFORE RETENTION — AN ORDERING, NOT A PREFERENCE.** The
+    drift-script line — `N unrouted, oldest <date>`, silent at zero — ships
+    BEFORE any purge is enabled. A purge running while the table has no reader
+    shreds the only copy of something no human ever saw. **The invisible pile
+    is recoverable; the invisible shredder is not.**
+
+    IT INVERTS THE NATURAL BUILD ORDER, which is why it needs writing down.
+    Retention is the tidier, more satisfying piece of work and the one anybody
+    would reach for first. Only this sentence explains why it waits.
+
+    THE SCRIPT, NOT THE DASHBOARD, FIRST. `UnroutedEmail` sits outside
+    row-level security, so a dashboard count means deciding WHICH TENANT sees
+    mail belonging to no tenant — a permission decision, which by standing
+    rule can only be made in `src/lib/permissions.ts`, on a resource that does
+    not exist. A drift-script line has no route, no permission surface and no
+    RLS question. The dashboard count arrives with flag 44's screen, when
+    there is a tenant to attribute it to.
+
+68. **RETENTION: 90 DAYS, revisited when flag 44's screen makes unrouted mail
+    visible and actionable.** The reasoning travels with the number, because a
+    bare 90 gets "tuned" by whoever finds it: this is a safety net for
+    misdirected bookings, and a booking nobody has missed in a quarter is
+    dead.
+
+    PURGE ORDER: object first, then row — or record what was deleted.
+    `rawR2Key` exists ONLY on the row, so deleting rows first orphans bytes in
+    R2 that nothing can ever name again. DELETION IS LOUD IN AGGREGATE
+    (`purged 12 unrouted messages older than 90 days`) rather than a silent
+    cron, or an invisible pile has merely been replaced by an invisible
+    shredder.
+
+69. **RATE LIMITING IS ABUSE CONTROL, NOT HOUSEKEEPING, and gets its own
+    flag.** `UnroutedEmail` is the only table in this system whose write rate
+    is set by the outside world: anyone who emails a routed address causes a
+    row and an R2 object. `fmcsa-gate.ts`'s sliding window is the pattern when
+    it is built.
+
+    IT MATTERS MORE THE DAY THE ADDRESS IS PUBLISHED, because that is the day
+    the write rate stops being ours. Today `loads@zebratms.com` is known to
+    one carrier group and four test messages.
+
+70. **A COMMIT TOUCHING THE SHARED PAYLOAD CONTRACT DEPLOYS BOTH WORKERS.**
+    `zebra` and `zebra-email` ship from two different commands, so the source
+    can agree with itself while production runs two halves from different
+    commits — the one thing flag 64's contract cannot catch.
+
+    TONIGHT QUALIFIED AND WAS ALSO THE EASY CASE: `c07e9e0` touched
+    `workers/email/index.ts`, but only with an `import type` and an
+    annotation, both erased at build, so the emitted bundle was unchanged and
+    the deploy only aligned versions. THAT IS THE ARGUMENT FOR THE RULE RATHER
+    THAN AGAINST IT — knowing the deploy was a no-op required knowing the
+    change was type-only. The next contract edit will not be, and "deploy
+    both" removes the need for anyone to make that judgment correctly under
+    time pressure.
