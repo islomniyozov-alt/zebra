@@ -112,6 +112,20 @@
       "vars": {
         "NEON_BRANCH": "production",
         "R2_BUCKET": "zebra-docs",
+        // NOT CREDENTIALS, AND THEREFORE NOT SECRETS. The account id is
+        // printed by `wrangler whoami` and the endpoint is derived from it;
+        // neither protects anything. Only R2_ACCESS_KEY_ID and
+        // R2_SECRET_ACCESS_KEY are, and those stay secrets.
+        //
+        // THEY MOVED HERE BECAUSE A SECRET'S VALUE CANNOT BE READ BACK. One
+        // of them was malformed on this worker — `new URL()` threw "Invalid
+        // URL string" on every R2 call — and there was no way to see which,
+        // or to tell a fixed value from an unfixed one, except by sending
+        // another email and reading the log. A value that lives here is
+        // diffable, reviewable, deploys with the code, and cannot be written
+        // to the wrong environment by a command that forgot `--env`.
+        "R2_ACCOUNT_ID": "0253064d6b8ffd36abf9c263372a3c7a",
+        "R2_ENDPOINT": "https://0253064d6b8ffd36abf9c263372a3c7a.r2.cloudflarestorage.com",
         // The workers.dev origin, deliberately, until the custom domain
         // exists. Reset links point wherever this says and tms.tajikcargollc.com
         // does not resolve — the apex does not either — so pointing at it
