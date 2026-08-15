@@ -1661,3 +1661,48 @@ Recorded rather than resolved, per Phase 1's discipline.
     BOTH FAIL AS SOMETHING ELSE. A mangled secret reports as configuration, a
     mangled quote reports as a bad payload. Neither names the tool that did
     it, which is why they are written down here rather than remembered.
+
+76. **STEP 3b's FIRST REAL DATA POINT: THE READER ABSTAINED ON A DOCUMENT
+    THAT HAD EVERYTHING.** 2026-08-15, a real Relay booking forwarded to
+    `loads@zebratms.com`. Transport was perfect and the reading was not.
+
+    WHAT ARRIVED: delivery on attempt 1, 72,723 bytes, the nested parse
+    intact, the row created, the original in R2, ocrStatus `COMPLETED`, state
+    `REVIEW`, no error. WHAT THE MODEL RETURNED: every field null, no stops at
+    all, and a single high-confidence brokerName of "RAM HAULAGE" — which is
+    the CARRIER, taken from either the greeting or the signature block Gmail
+    appended to the forward. Carrier-identity-as-artifact is the case the
+    extraction contract forbids by name. The draft was not saved.
+
+    THE FEED HYPOTHESIS WAS WRONG AND IS RECORDED AS WRONG. This assistant
+    diagnosed the cause as the mail worker preferring the plain-text part over
+    the HTML, reasoning that a Relay booking's lane and times live in table
+    cells that a mail client's plain-text alternative would flatten past
+    recognition. The owner's query falsified it outright: bodyText, which IS
+    the extraction input verbatim, contained the entire booking, readable,
+    with the lane, both zoned clocks and both money lines adjacent. That line
+    is EXONERATED for this message.
+
+    SO IT IS READER-VERSUS-WRAPPER, and which one is open. The reader may be
+    failing on a document it can read; or Gmail's forward furniture — the
+    banner, the quoted header block, the signature — may reframe the
+    document's genre from rate confirmation to email thread, and an
+    abstention plus one confidently-named party is exactly what that would
+    look like.
+
+    A THIRD VARIABLE NOBODY HAS CONTROLLED FOR: the two paths cannot even
+    choose the same model. The document extract route accepts a model
+    parameter and the corpus experiments use it; the inbound-email route
+    passes none and silently takes EXTRACTION_MODEL, today
+    `gemini-3.6-flash`. "The same email reads well via paste" is therefore not
+    established as a controlled comparison until the paste is re-run on the
+    default model.
+
+    THE EXPERIMENT THAT SEPARATES THEM, one model held fixed, three inputs:
+    bodyText verbatim; bodyText with the forward furniture and signature
+    removed; and the original booking body alone. Rich on the second and third
+    but empty on the first is the wrapper. Empty on all three is the reader.
+
+    WHAT THIS COSTS TO KNOW IS ONE PASTE, and it is worth doing before any
+    code moves — the feed hypothesis was plausible, specific, wrong, and would
+    have produced a confident fix to a line that was never at fault.
