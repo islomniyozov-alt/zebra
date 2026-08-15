@@ -1690,13 +1690,28 @@ Recorded rather than resolved, per Phase 1's discipline.
     abstention plus one confidently-named party is exactly what that would
     look like.
 
-    A THIRD VARIABLE NOBODY HAS CONTROLLED FOR: the two paths cannot even
-    choose the same model. The document extract route accepts a model
-    parameter and the corpus experiments use it; the inbound-email route
-    passes none and silently takes EXTRACTION_MODEL, today
-    `gemini-3.6-flash`. "The same email reads well via paste" is therefore not
-    established as a controlled comparison until the paste is re-run on the
-    default model.
+    THE MODEL IS CONTROLLED, AND AN EARLIER VERSION OF THIS FLAG SAID IT WAS
+    NOT. Corrected rather than deleted. The claim was that the extract route
+    accepts a model parameter while the inbound-email route silently takes
+    EXTRACTION_MODEL, so the two observations might have asked different
+    models. Reading the source settles it: `verify-paste-text.mjs` is not an
+    API script, it drives the real UI through Playwright — it opens the Paste
+    text tab and fills the textarea — and the tab's own extract call sends no
+    body at all, so no model and no cache flag reach the endpoint. Both paths
+    fall through to the same default, today `gemini-3.6-flash`. THE 15/15
+    STANDS as evidence about production's reader.
+
+    THE HONEST CAVEAT IS THE OTHER ONE: the comparison was
+    DOCUMENT-uncontrolled. The 15/15 ran on different texts from tonight's
+    booking, so "paste reads well, email does not" has always carried two
+    variables — the path and the words — and only one of them was ever in
+    question.
+
+    APART FROM THE BYTES, THE TWO PATHS ARE THE SAME PATH. Same endpoint, same
+    `text/plain` type — the Paste tab mints a `.txt` file exactly as the mail
+    route base64s its body — same model, same cache setting. That is what
+    makes the experiment below a single-variable one, and it is why it needs
+    no scripting: three pastes through the tab a dispatcher uses.
 
     THE EXPERIMENT THAT SEPARATES THEM, one model held fixed, three inputs:
     bodyText verbatim; bodyText with the forward furniture and signature
