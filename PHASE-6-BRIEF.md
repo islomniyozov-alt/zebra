@@ -1399,3 +1399,59 @@ Recorded rather than resolved, per Phase 1's discipline.
     indented. It cost a commit that went in without `check` behind it —
     `663dbe8` — which is also the reminder that a docs-only commit is still a
     commit and still runs the gate.
+
+63. **THE 202 IS NOW EARNED, AND IT COST A FIFTH TABLE WITHOUT A WALL.** The
+    `no_tenant` path answered 202 and threw the message away with a
+    `console.warn`. The 202 itself was right and stays — a 4xx makes Cloudflare
+    retry mail that can never route, a bounce tells a stranger which addresses
+    exist — but it is an ACKNOWLEDGEMENT: the sending server marks the message
+    delivered and stops. "Delivered" and "exists nowhere" were true at once.
+    Harmless while nothing could reach the endpoint; a way to lose freight from
+    the moment Email Routing went live on 2026-08-15.
+
+    `UnroutedEmail` holds it, keyed on the Message-ID because flag 58 measured
+    the bytes moving. The row is required — a failure answers 503 so the worker
+    throws and the sender keeps the message — while a failure to store the
+    `.eml` is logged and survivable, because by then the row exists and asking
+    a stranger's mail server to redeliver what we have kept would be worse.
+    Redelivery creates nothing and retries an original an outage lost.
+
+    THE PRICE, WRITTEN DOWN RATHER THAN BURIED: it is the fifth table outside
+    row-level security, and the first that is not about authentication. It
+    cannot carry a tenant — a row is there BECAUSE "whose is this?" was
+    answered no, so `org_isolation` could never be satisfied by the connection
+    that has to write it. Mail from strangers therefore sits in a table with no
+    wall. It is write-only from one endpoint and no route reads it. WHEN FLAG
+    44'S ROUTING TABLE ARRIVES this becomes tenant-scoped and leaves the exact
+    list in `tests/structure.test.ts`.
+
+64. **THE THREE-WAY PAYLOAD CORRESPONDENCE IS A CONTRACT NOW, NOT A MEMORY.**
+    The mail worker built a bare object literal, the route declared its own
+    interface, and `verify-inbound-email.mjs` — the only thing that ever proved
+    the pipeline end to end — hand-copied "the payload the worker sends, field
+    for field". Renaming a field passed `tsc`, passed the verify script, and
+    failed only on real mail.
+
+    One declaration in `src/lib/inbound-email-payload.ts`; the worker imports
+    it type-only, so it is erased at build and the worker carries a contract
+    and no runtime weight. The `.mjs` copy cannot be typed, so a field list
+    covers it — and the list is PROVED against the interface by two conditional
+    types rather than maintained beside it, because a list maintained beside a
+    type is a fourth copy.
+
+    WHAT IT STILL CANNOT CATCH: `zebra-email` and `zebra` are separate
+    deployments. The source can be consistent while production runs two halves
+    from different commits. Only deploying both catches that, which is why the
+    runbook says to.
+
+65. **A GUARD WITH NO ROOM IN IT GETS CUT OPEN UNDER DEADLINE.**
+    `transaction-budget.test.ts` demanded exactly `LOAD_WRITE_TIMEOUT_MS`,
+    which forbade a justified override — and the person who needs one at 2am
+    will not add a hatch, they will delete the assertion. The rule is now "an
+    imported identifier".
+
+    THE IMPORT IS THE LOAD-BEARING HALF. `const SETTINGS_TIMEOUT_MS = 30_000`
+    at the top of a suite satisfies "use a named constant" while being a bare
+    literal wearing a name, and puts the number back in nineteen possible
+    places. Requiring it to come from a shared module gives an override one
+    home, one written reason, and one edit to change it.
