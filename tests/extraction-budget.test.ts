@@ -172,3 +172,47 @@ describe('where the route takes the slot, which is the whole safety property', (
     expect(deferred).not.toContain('FAILED')
   })
 })
+
+// ---------------------------------------------------------------------------
+// THE TAIL SAYS WHAT THE ROW KNOWS.
+//
+// `askForExtraction` returns `{ok:false}` rather than throwing, so a failed
+// read wrote FAILED and a reason into the database and printed NOTHING. Every
+// other failure on this path announces itself; that one did not, and a failed
+// read was indistinguishable from a good one to anyone watching.
+//
+// The success line is the other half, and it is the one that would have caught
+// the logo: a real booking read as all-nulls four times, and the only visible
+// symptom anywhere was that a 2052-character document and a 211-character one
+// cost the SAME 4294 input tokens.
+// ---------------------------------------------------------------------------
+
+describe('an inbound reading says what happened', () => {
+  const route = readFileSync('src/app/api/inbound-email/route.ts', 'utf8')
+  const block = route.slice(
+    route.indexOf('--- 2b. SAY WHAT HAPPENED'),
+    route.indexOf('--- 3. WRITE WHAT CAME BACK'),
+  )
+
+  it('names a failed read, with its reason and detail', () => {
+    expect(block).toContain('could not read')
+    expect(block).toMatch(/asked\.reason/)
+    expect(block).toMatch(/asked\.detail/)
+  })
+
+  it('uses error for a failure, not a silent success line', () => {
+    expect(block).toMatch(/console\.error\(/)
+  })
+
+  it('reports the token cost and the model on a successful read', () => {
+    expect(block).toMatch(/usage\.inputTokens/)
+    expect(block).toMatch(/usage\.outputTokens/)
+    expect(block).toMatch(/answer\.model/)
+  })
+
+  it('says it BEFORE the row is written, so a throw downstream cannot eat it', () => {
+    expect(route.indexOf('--- 2b. SAY WHAT HAPPENED')).toBeLessThan(
+      route.indexOf('recordReading(organizationId'),
+    )
+  })
+})

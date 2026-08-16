@@ -214,6 +214,32 @@ export async function POST(request: Request): Promise<Response> {
             'The message had no readable body and no readable attachment.',
         } as const)
 
+  // --- 2b. SAY WHAT HAPPENED, WHETHER OR NOT IT WORKED ---------------------
+  //
+  // A FAILED READ AND A GOOD READ USED TO LOOK IDENTICAL ON THE TAIL.
+  // `askForExtraction` returns `{ok:false}` rather than throwing, and
+  // `recordReading` writes FAILED and the reason into the ROW — so the
+  // database knew and nobody watching did. Every other failure on this path
+  // announces itself; this one did not.
+  if (!asked.ok) {
+    console.error(
+      `[zebra.inbound] could not read ${created.id}: ${asked.reason} — ${asked.detail}`,
+    )
+  } else {
+    // AND THE TOKENS ON SUCCESS, WHICH IS NOT BOOKKEEPING. A real Relay
+    // booking was read four times across two days and returned every field
+    // null; the cause was that a 37KB signature logo was being sent to the
+    // model INSTEAD OF the body, and the only place it was visible was here:
+    // 4294 input tokens on a 2052-character booking and 4294 on a
+    // 211-character "Hello Test 2". Identical cost for wildly different
+    // documents is a fact no reading of the extraction can show you, and a
+    // week of tails would have made it obvious.
+    console.log(
+      `[zebra.inbound] read ${created.id} with ${asked.answer.model}: ` +
+        `${asked.answer.usage.inputTokens} in / ${asked.answer.usage.outputTokens} out`,
+    )
+  }
+
   // --- 3. WRITE WHAT CAME BACK, AND WHAT THE OFFICE SHOULD BE TOLD ---------
   const result = await recordReading(organizationId, created.id, asked)
 
