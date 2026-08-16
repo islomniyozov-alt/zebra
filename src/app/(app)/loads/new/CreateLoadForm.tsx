@@ -268,11 +268,42 @@ export function CreateLoadForm({
    * not its index, so reordering does not make React reuse the wrong row's
    * uncontrolled input.
    */
-  const [stops, setStops] = useState<StopRow[]>(() => [
-    { key: 'stop-0', type: 'PICKUP', date: '', from: '', to: '' },
-    { key: 'stop-1', type: 'DELIVERY', date: '', from: '', to: '' },
-  ])
-  const nextKey = useRef(2)
+  /**
+   * OPENED FROM THE QUEUE, as a `Prefill`, before anything renders.
+   *
+   * Built here rather than inside the `prefill` state below because the STATE
+   * initialisers underneath need it too — and that is the whole bug this
+   * shape fixes. An upload arrives through a callback that runs
+   * `stopRowsFrom` and `extractedRate` and pushes the answers into state; a
+   * queued draft only ever set `prefill`, so the uncontrolled inputs
+   * (broker, the places) filled from it and the STATE-backed ones (dates,
+   * windows, rate) stayed blank. The form's own comment said the two paths
+   * were indistinguishable, and it was true of the object and false of the
+   * path that consumed it. A load could be booked from a READY draft with no
+   * pickup date and no rate, and one was: #1174.
+   */
+  const queued: Prefill | null = fromEmail
+    ? {
+        pendingUploadId: '',
+        extracted: fromEmail.extracted,
+        lowConfidence: [],
+        cost: '',
+      }
+    : null
+
+  // ONE MAPPING, TWO CALLERS. `stopRowsFrom` is the same function the upload
+  // handler calls; this is not a second copy of the rules, which is what let
+  // them drift in the first place.
+  const [stops, setStops] = useState<StopRow[]>(() => {
+    const blank: StopRow[] = [
+      { key: 'stop-0', type: 'PICKUP', date: '', from: '', to: '' },
+      { key: 'stop-1', type: 'DELIVERY', date: '', from: '', to: '' },
+    ]
+    if (!queued) return blank
+    let minted = blank.length
+    return stopRowsFrom(queued, blank, () => `stop-${minted++}`) ?? blank
+  })
+  const nextKey = useRef(stops.length)
 
   const setStop = (index: number, patch: Partial<StopRow>) =>
     setStops((current) =>
@@ -309,7 +340,15 @@ export function CreateLoadForm({
     })
 
   const [miles, setMiles] = useState('')
-  const [rate, setRate] = useState('')
+
+  // THE SAME §1.3 GATE THE UPLOAD PATH APPLIES, applied at initialisation for
+  // the same reason. `queuedExtraction` already stripped money for a role that
+  // may not enter one, so `extractedRate` returns null for them and this does
+  // nothing; the check is here as well because a form that WOULD have filled
+  // the field had the payload carried it is one API change away from doing so.
+  const [rate, setRate] = useState(() =>
+    queued && mayEnterRate ? (extractedRate(queued) ?? '') : '',
+  )
 
   // PHASE 5 §3 STEP 2. What the extraction gave us, and which fields it was
   // unsure about. `null` means nobody uploaded anything, which is the normal
@@ -318,16 +357,7 @@ export function CreateLoadForm({
   // The same `Prefill` an upload produces — `pendingUploadId` is empty because
   // there is no mint, and everything downstream that keys off it correctly
   // does nothing: there is no document to attach and no facility offer to make.
-  const [prefill, setPrefill] = useState<Prefill | null>(
-    fromEmail
-      ? {
-          pendingUploadId: '',
-          extracted: fromEmail.extracted,
-          lowConfidence: [],
-          cost: '',
-        }
-      : null,
-  )
+  const [prefill, setPrefill] = useState<Prefill | null>(queued)
 
   /**
    * MANUALLY-MODIFIED INDICATORS (Phase 6 §4 step 1).

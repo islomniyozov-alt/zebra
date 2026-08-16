@@ -204,6 +204,16 @@ const snapshot = () =>
       places: [...document.querySelectorAll('input[name$=".place"]')].map((n) =>
         n.value.trim(),
       ),
+      // THE STATE-BACKED FIELDS, which is where the bug lived. The three
+      // above are uncontrolled inputs reading the prefill directly; these
+      // are React state, and `?from=` never applied the prefill to them.
+      // Asserting only the first three is how 15/15 was reported for a form
+      // that had filled half of itself.
+      dates: [...document.querySelectorAll('input[name$=".scheduledAt"]')].map(
+        (n) => n.value.trim(),
+      ),
+      rate: value('rate'),
+      miles: value('miles'),
     }
   })
 
@@ -229,7 +239,23 @@ record(
   `${form.fromEmail ?? '(none)'}`,
 )
 
+record(
+  'and the times the reading carried, rendered to the minute',
+  form.dates.filter(Boolean).length >= 2,
+  form.dates.join(' · ') || '(none)',
+)
+record(
+  'and the rate, so nobody books freight for an unknown number',
+  (form.rate ?? '').length > 0,
+  form.rate || '(empty)',
+)
+
 // --- 6. Save books the load AND closes the draft ----------------------------
+//
+// `miles` IS NOT FILLED BEFORE IT IS ASSERTED ANY MORE. The earlier version
+// typed 262 in here, which is how the one state-backed field this script
+// touched stopped being a witness: it was blank because of the prefill bug,
+// and the script supplied the value and moved on.
 await page.fill('input[name="miles"]', '262')
 await page.click('button[type="submit"]')
 
