@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { classify } from './deploy-drift-rules.mjs'
+import { classify, looksLikeCommit } from './deploy-drift-rules.mjs'
 
 // ---------------------------------------------------------------------------
 // WHERE EACH WORKER STANDS AGAINST THIS COMMIT.
@@ -51,19 +51,52 @@ let productionTrailsSource = false
 for (const environment of ENVIRONMENTS) {
   let deployedMessage = null
   let versionId = null
+  /** Set when the serving version is a config edit rather than a deploy. */
+  let configAtop = null
 
   try {
     // The DEPLOYED version, not merely the most recently uploaded one — an
     // upload that was never promoted is not what anybody is serving.
     const deployments = wrangler(['deployments', 'list', ...environment.args])
-    const newest = [...deployments].sort((a, b) =>
+
+    // ORDER COMES FROM `deployments`, AND ONLY FROM THERE. `versions list`
+    // returns no `created_on` at all, so sorting it compares "undefined" with
+    // itself and leaves whatever order wrangler happened to return — which is
+    // NOT newest-first: d09f001 (21:28) comes back after a230e61 (16:28).
+    // Deployments do carry the timestamp, and carry the message too.
+    const ordered = [...deployments].sort((a, b) =>
       String(b.created_on).localeCompare(String(a.created_on)),
-    )[0]
+    )
+    const newest = ordered[0]
     versionId = newest?.versions?.[0]?.version_id ?? null
 
-    const versions = wrangler(['versions', 'list', ...environment.args])
-    const version = versions.find((candidate) => candidate.id === versionId)
-    deployedMessage = version?.annotations?.['workers/message'] ?? null
+    const messageOf = (d) => d?.annotations?.['workers/message'] ?? null
+    deployedMessage = messageOf(newest)
+
+    if (!deployedMessage) {
+      // Older deploys stamped the version rather than the deployment.
+      const versions = wrangler(['versions', 'list', ...environment.args])
+      deployedMessage =
+        versions.find((candidate) => candidate.id === versionId)?.annotations?.[
+          'workers/message'
+        ] ?? null
+    }
+
+    // A SECRET EDITED IN THE DASHBOARD CREATES A DEPLOYMENT, and it serves.
+    // Observed on production 2026-08-16: its message is absent entirely — not
+    // merely a non-commit string. Either way nobody deployed it from a commit,
+    // and the CODE running is the code of the last one somebody did.
+    //
+    // WITHOUT THIS THE CHECK GOES QUIET. An unresolvable message returns
+    // `unstamped` or `unknown-commit`, both of which are silent, so a config
+    // edit would hide a production that is behind on src/ — for as long as
+    // nobody deploys again, which is exactly the window after somebody has
+    // been fixing secrets by hand.
+    if (!looksLikeCommit(deployedMessage)) {
+      const realDeploy = ordered.find((d) => looksLikeCommit(messageOf(d)))
+      configAtop = realDeploy ? messageOf(realDeploy) : null
+      deployedMessage = configAtop
+    }
   } catch {
     console.log(`  ${environment.label.padEnd(11)} could not be read`)
     continue
@@ -73,12 +106,21 @@ for (const environment of ENVIRONMENTS) {
 
   if (!deployedMessage) {
     // Deployed before this stamping existed, or by something other than
-    // scripts/deploy.mjs. Not a fault, just unanswerable.
+    // scripts/deploy.mjs, or a config version with no deploy under it at all.
+    // Not a fault, just unanswerable.
     console.log(
       `  ${environment.label.padEnd(11)} ${shortVersion}  commit unknown (deployed without a message)`,
     )
     continue
   }
+
+  // Said before the verdict, because it changes what the verdict is ABOUT.
+  // Said instead of the bare SHA, because it changes what the line is ABOUT:
+  // this version was not deployed from a commit, and the commit named is the
+  // code it is serving.
+  const stamp = configAtop
+    ? `config version atop the last real deploy ${configAtop}`
+    : deployedMessage
 
   const commit = deployedMessage.replace('+dirty', '')
   const isKnownCommit = (() => {
@@ -103,7 +145,7 @@ for (const environment of ENVIRONMENTS) {
     isKnownCommit,
     changedSourceFiles,
   })
-  const prefix = `  ${environment.label.padEnd(11)} ${shortVersion}  ${deployedMessage}`
+  const prefix = `  ${environment.label.padEnd(11)} ${shortVersion}  ${stamp}`
 
   if (verdict.state === 'current') {
     console.log(`${prefix} — matches HEAD`)

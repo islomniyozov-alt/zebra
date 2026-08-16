@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 // Plain .mjs tooling, deliberately outside the app's build. Typed at the call
 // sites below rather than with a .d.ts nobody would keep in step.
-import { classify } from '../scripts/deploy-drift-rules.mjs'
+import { classify, looksLikeCommit } from '../scripts/deploy-drift-rules.mjs'
 import { credentialsFor, isProduction } from '../scripts/check-credentials.mjs'
 
 // ---------------------------------------------------------------------------
@@ -46,7 +46,7 @@ describe('deploy drift', () => {
     // The one that matters, and the one nobody wants to stage by hand.
     expect(
       drift({
-        deployedMessage: 'old1234',
+        deployedMessage: '01d1234',
         changedSourceFiles: ['src/lib/users.ts'],
       }),
     ).toEqual({ state: 'behind-source', loud: true })
@@ -56,7 +56,7 @@ describe('deploy drift', () => {
     // The pair. Without it, "loud" could simply mean "behind", and the signal
     // would fire on every README commit until people stopped reading it.
     expect(
-      drift({ deployedMessage: 'old1234', changedSourceFiles: [] }),
+      drift({ deployedMessage: '01d1234', changedSourceFiles: [] }),
     ).toEqual({ state: 'behind-only', loud: false })
   })
 
@@ -64,7 +64,7 @@ describe('deploy drift', () => {
     expect(
       drift({
         label: 'dev',
-        deployedMessage: 'old1234',
+        deployedMessage: '01d1234',
         changedSourceFiles: ['src/lib/users.ts'],
       }),
     ).toEqual({ state: 'behind-source', loud: false })
@@ -142,5 +142,62 @@ describe('which credentials a verification run uses', () => {
       expect(resolved.ok).toBe(true)
       expect(resolved.source).toBe('SEED_OWNER_*')
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// A CONFIG VERSION IS NOT A DEPLOY, AND IT MUST NOT SILENCE THIS CHECK.
+//
+// Editing a secret in the Cloudflare dashboard creates a deployment that
+// serves. Nobody deployed it from a commit, so it carries no commit message —
+// observed on production 2026-08-16 with no message AT ALL, not merely a
+// non-commit string. Left alone it resolved to `unstamped`, which is quiet,
+// and the one loud signal in this file — production behind a change to src/ —
+// would have gone missing for as long as that version kept serving.
+// ---------------------------------------------------------------------------
+
+describe('telling a deploy from a config version', () => {
+  it.each([
+    ['d09f001', true],
+    ['6a97827+dirty', true],
+    ['0123456789abcdef0123456789abcdef01234567', true],
+  ])('%s is a commit', (message, expected) => {
+    expect(looksLikeCommit(message)).toBe(expected)
+  })
+
+  it.each<[string | null, string]>([
+    ['', 'empty'],
+    [null, 'absent — the shape production actually had'],
+    ['Updated secrets via dashboard', 'a sentence'],
+    ['abc', 'too short to be a short SHA'],
+  ])('%s is not a commit (%s)', (message: string | null) => {
+    expect(looksLikeCommit(message)).toBe(false)
+  })
+
+  it('refuses to guess when the message is not a commit', () => {
+    // The caller resolves the real deploy underneath and calls again with it.
+    expect(
+      classify({
+        label: 'production',
+        deployedMessage: 'Updated secrets via dashboard',
+        head: 'abc1234',
+        isKnownCommit: false,
+        changedSourceFiles: [],
+      }),
+    ).toMatchObject({ state: 'config-version-unresolved', loud: false })
+  })
+
+  // THE POINT OF THE WHOLE THING. Once the real deploy is resolved, drift is
+  // measured against the code actually running, and the alarm still fires.
+  it('is still LOUD about src/ drift underneath a config version', () => {
+    expect(
+      classify({
+        label: 'production',
+        deployedMessage: 'd09f001',
+        head: '6a97827',
+        isKnownCommit: true,
+        changedSourceFiles: ['src/lib/inbound-email.ts'],
+      }),
+    ).toMatchObject({ state: 'behind-source', loud: true })
   })
 })
