@@ -1713,11 +1713,60 @@ Recorded rather than resolved, per Phase 1's discipline.
     makes the experiment below a single-variable one, and it is why it needs
     no scripting: three pastes through the tab a dispatcher uses.
 
-    THE EXPERIMENT THAT SEPARATES THEM, one model held fixed, three inputs:
-    bodyText verbatim; bodyText with the forward furniture and signature
-    removed; and the original booking body alone. Rich on the second and third
-    but empty on the first is the wrapper. Empty on all three is the reader.
+    THE EXPERIMENT RAN, AND IT WAS NOT THE WRAPPER. Three inputs on the
+    default model, through the Paste tab a dispatcher uses: bodyText verbatim,
+    bodyText with the forward furniture and signature removed, and the booking
+    body alone. ALL THREE EXTRACTED, the full-furniture one included. The
+    reader reads this genre, and Gmail's banner and signature do not stop it.
+    (The per-field results were not captured into this flag; the ruling
+    recorded here is that all three read, not what each field held.)
 
-    WHAT THIS COSTS TO KNOW IS ONE PASTE, and it is worth doing before any
-    code moves — the feed hypothesis was plausible, specific, wrong, and would
-    have produced a confident fix to a line that was never at fault.
+    IT TOOK TWO ATTEMPTS TO LEARN THAT, and the first attempt taught something
+    else. Three pastes made earlier the same evening ALL returned "Could not
+    read that one", which looked like the reader refusing three different
+    documents identically — engine state rather than content. The tail said
+    otherwise: zero calls reached the extract endpoint at all. Every one died
+    at `upload-url`, one step earlier, on the database guard of flag 77. THOSE
+    THREE REFUSALS ARE NOT EVIDENCE ABOUT THE READER and must not be read as
+    such; they are an infrastructure outage wearing an extraction error's
+    clothing.
+
+    SO 3b's QUESTION IS NOT GENRE. It is REPRODUCIBILITY: the same reader, the
+    same default model and the same bytes produced a full extraction by paste
+    and every field null by mail, and engine-moment variance is the prime
+    suspect. The email run's all-nulls is now the SOLE anomaly rather than a
+    pattern, and one anomaly is a thing to reproduce, not to fix.
+
+    AND THE SECOND HALF OF THE QUESTION IS WHAT THE PIPELINE SHOULD DO WITH AN
+    EMPTY READ. Tonight's produced ocrStatus `COMPLETED`, state `REVIEW`, no
+    error, and a draft carrying one confident field that was the carrier's own
+    name. Nothing in that says "the reader returned nothing" — it looks like a
+    document that had nothing in it. An abstention and a blank rate
+    confirmation are indistinguishable on the queue, and they should not be.
+
+77. **THE GUARD THAT REFUSED, WHICH IS FLAG 50 INVERTED.** During the same
+    evening's secret work a `neondb_owner` connection string was pasted into
+    production's `DATABASE_URL`. The owner role carries BYPASSRLS. Had the app
+    accepted it, every tenant boundary in the system would have quietly
+    stopped existing while every page kept rendering and every query kept
+    returning rows — the failure that leaves no trace because nothing looks
+    wrong.
+
+    `src/lib/db.ts` refuses any connection string without `zebra_app` in it,
+    by name, on every client construction. So instead of a silent bypass there
+    was a loud outage: five `upload-url` requests in twelve minutes, each
+    logging the sentence, and a paste flow that could not mint a document.
+
+    THAT IS THE SHAPE FLAG 50 DID NOT HAVE. There, the production-branch
+    check asked about a LABEL that nothing enforced, said nothing for an
+    entire run, and let fixtures reach production. Here the check asks about
+    THE THING THAT ACTS — the credential in the string that opens the
+    connection — and it cannot be true while the danger is present. A guard
+    that inspects what performs the action fails loudly by construction; a
+    guard that inspects a description of it fails silently by construction.
+
+    THE COST WAS TWELVE MINUTES AND A MISDIAGNOSIS, and it was worth it. The
+    outage also made three paste results look like a reader failure, which is
+    the one genuinely expensive part: a loud failure in the wrong vocabulary
+    still misleads. "Could not read that one" was true of a request that never
+    reached a reader.
