@@ -31,6 +31,12 @@ import type { MessageKey } from '@/lib/i18n'
 interface Row {
   id: string
   state: string
+  /**
+   * Only for UNREAD: which kind of nothing. `ocrStatus` is the WHY behind the
+   * state, and without it "Not read" is a dead end — a dispatcher cannot tell
+   * a deferred reading from one that came back empty.
+   */
+  unreadBecause: string | null
   from: string
   subject: string
   received: string
@@ -43,6 +49,9 @@ const TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = {
   READY: 'success',
   REVIEW: 'warning',
   CONFLICT: 'danger',
+  // Not a failure and not a warning about the freight: nothing was read, and
+  // the row is waiting on somebody rather than telling them something.
+  UNREAD: 'neutral',
   CONFIRMED: 'neutral',
   DISMISSED: 'neutral',
 }
@@ -57,12 +66,13 @@ export default async function IncomingPage() {
       // The handled ones leave the queue. They are still rows — the audit
       // trail of what arrived does not shrink — but a queue that keeps what
       // has been dealt with is a queue nobody reaches the bottom of.
-      where: { state: { in: ['READY', 'REVIEW', 'CONFLICT'] } },
+      where: { state: { in: ['READY', 'REVIEW', 'CONFLICT', 'UNREAD'] } },
       orderBy: { receivedAt: 'desc' },
       take: 200,
       select: {
         id: true,
         state: true,
+        ocrStatus: true,
         fromAddress: true,
         subject: true,
         receivedAt: true,
@@ -96,6 +106,7 @@ export default async function IncomingPage() {
     return {
       id: email.id,
       state: email.state,
+      unreadBecause: email.state === 'UNREAD' ? email.ocrStatus : null,
       from: email.fromAddress,
       subject: email.subject ?? '—',
       received: renderDateOnly(email.receivedAt) ?? '—',
@@ -126,10 +137,21 @@ export default async function IncomingPage() {
       key: 'state',
       header: t('ref.status'),
       render: (row) => (
-        <StatusBadge
-          tone={TONE[row.state] ?? 'neutral'}
-          label={t(`incoming.state.${row.state}` as MessageKey)}
-        />
+        <>
+          <StatusBadge
+            tone={TONE[row.state] ?? 'neutral'}
+            label={t(`incoming.state.${row.state}` as MessageKey)}
+          />
+          {/* THE WHY, BESIDE THE STATE. "Not read" on its own tells a
+              dispatcher to do nothing in particular; "Not read · Nothing
+              found in it" tells them to open the original. One state, one
+              label, no second column to sort by. */}
+          {row.unreadBecause ? (
+            <span className="unread-because">
+              {t(`incoming.unread.${row.unreadBecause}` as MessageKey)}
+            </span>
+          ) : null}
+        </>
       ),
     },
     {

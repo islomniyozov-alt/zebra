@@ -2834,6 +2834,22 @@ enum InboundEmailState {
   REVIEW
   /// Could not be read at all, or contradicts freight already booked.
   CONFLICT
+  /// NO USABLE READING EXISTS, and `ocrStatus` says which kind of nothing.
+  ///
+  /// Three different absences used to be indistinguishable on the queue: a
+  /// reading nobody ever asked for, a reading that failed, and a reading that
+  /// came back with every field null. All three produced a row that looked
+  /// like a document which simply had nothing in it — which is how a real
+  /// Relay booking, read as all-nulls, sat in REVIEW looking ordinary
+  /// (PHASE-6-BRIEF flag 76).
+  ///
+  ///   ocrStatus NOT_QUEUED — deferred; the model was never called
+  ///   ocrStatus FAILED     — the reader was asked and could not answer
+  ///   ocrStatus COMPLETED  — the reader answered and said nothing
+  ///
+  /// ONE STATE, NOT A TAXONOMY. The queue needs to show that nothing was
+  /// read; WHY is a label beside it, not another column to sort by.
+  UNREAD
   /// A dispatcher turned it into a load.
   CONFIRMED
   /// A dispatcher said it was not freight.

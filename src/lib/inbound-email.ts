@@ -3,7 +3,11 @@ import { withOrg } from './tenancy'
 import { unattributed } from './audit'
 import type { AskedExtraction } from './rate-confirmation'
 import type { Extracted } from './extraction-shape'
-import { withoutMoney, type ExtractedWithoutMoney } from './extraction'
+import {
+  isEmptyReading,
+  withoutMoney,
+  type ExtractedWithoutMoney,
+} from './extraction'
 import { loadWarnings, type LoadWarning } from './load-warnings'
 import { resolveBroker } from './correction-memory'
 
@@ -27,19 +31,37 @@ export type InboundState =
   | 'READY'
   | 'REVIEW'
   | 'CONFLICT'
+  | 'UNREAD'
   | 'CONFIRMED'
   | 'DISMISSED'
 
 /**
- * Which of the three an email lands in.
+ * Which of the four an email lands in.
  *
- *   CONFLICT — the reader could not read it, or what it says contradicts
- *              freight already booked. A duplicate BOL, PO or broker reference
- *              means this booking may already BE a load, and creating a second
- *              is the mistake §11 of the spec exists to prevent.
+ *   UNREAD   — NO USABLE READING EXISTS. `ocrStatus` says which kind of
+ *              nothing: NOT_QUEUED for a reading nobody asked for, FAILED for
+ *              one that could not be produced, COMPLETED for one that came
+ *              back with every field null.
+ *   CONFLICT — what it says contradicts freight already booked. A duplicate
+ *              BOL, PO or broker reference means this booking may already BE a
+ *              load, and creating a second is the mistake §11 exists to
+ *              prevent.
  *   REVIEW   — read, but something wants a person: no pickup date, no rate,
  *              anything a dispatcher would have been warned about on the form.
  *   READY    — read cleanly and nothing to say.
+ *
+ * WHY UNREAD EXISTS, AND WHY IT IS ONE STATE. Three different absences used to
+ * be indistinguishable here: nobody asked, the asking failed, and the answer
+ * was empty. All three produced a row that looked like a document which simply
+ * had nothing in it — which is exactly how a real Relay booking read as
+ * all-nulls sat in REVIEW looking ordinary (brief flag 76), and it is what a
+ * message deferred by the rate limiter would otherwise look like too. Deferred
+ * work with no visible state is the invisible pile inside the routed path.
+ *
+ * A FAILED READ MOVED OUT OF CONFLICT TO GET HERE. CONFLICT means "this may
+ * already be a load" — a claim about freight. "We could not read it" is a
+ * claim about us, and putting the two under one word is what made an
+ * unreadable document and a duplicate booking sort the same.
  *
  * NOT A CONFIDENCE SCORE. Spec §10 shows percentages beside each row; those
  * come from the extraction's per-field confidence and are a separate display
@@ -48,9 +70,11 @@ export type InboundState =
  */
 export function stateFor(input: {
   read: boolean
+  /** The reader answered and had nothing to say. An abstention. */
+  empty?: boolean
   warnings: readonly LoadWarning[]
 }): InboundState {
-  if (!input.read) return 'CONFLICT'
+  if (!input.read || input.empty === true) return 'UNREAD'
 
   // The duplicate family is the conflict family: each one means "this may
   // already be a load". Everything else is worth reading before you book.
@@ -277,7 +301,9 @@ export async function recordReading(
     async (tx) => {
       const extracted = asked.ok ? asked.extracted : null
       const warnings = await concernsForEmail(tx, extracted)
-      const state = stateFor({ read: asked.ok, warnings })
+      // An answer with nothing in it is not a document with nothing in it.
+      const empty = extracted !== null && isEmptyReading(extracted)
+      const state = stateFor({ read: asked.ok, empty, warnings })
 
       await tx.inboundEmail.update({
         where: { id: emailId },

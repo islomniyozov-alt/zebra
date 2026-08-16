@@ -411,3 +411,42 @@ export function lowConfidenceFields(extracted: Extracted): string[] {
 export function field<T>(value: T, confidence: Confidence = 'high'): Field<T> {
   return { value, confidence }
 }
+
+/**
+ * Did the reader answer and say nothing?
+ *
+ * AN ABSTENTION IS NOT AN EMPTY DOCUMENT, and until this predicate the two
+ * were the same row. A real Relay booking came back with every field null,
+ * no stops, and one high-confidence `brokerName` that was the CARRIER's own
+ * name lifted from a greeting — and it sat in the queue looking like a
+ * message that simply had no freight in it (brief flag 76).
+ *
+ * NO STOPS IS THE SPINE OF IT. A rate confirmation without a single stop is
+ * not a rate confirmation that was read; the lane is the one thing every
+ * booking has. But stops alone would call a genuinely partial read empty, so
+ * this also requires that nothing else load-defining came back.
+ *
+ * `brokerName` IS DELIBERATELY NOT LOAD-DEFINING HERE. It is the field most
+ * likely to be filled from prose — a greeting, a signature block, a footer —
+ * which is precisely how the flag-76 abstention disguised itself as a partial
+ * success. Counting it would let one name rescue an otherwise empty answer,
+ * which is the failure this predicate exists to name.
+ */
+export function isEmptyReading(extracted: Extracted): boolean {
+  if (extracted.stops.length > 0) return false
+
+  const loadDefining = [
+    extracted.bolNumber,
+    extracted.poNumber,
+    extracted.brokerReference,
+    extracted.commodity,
+    extracted.weightLbs,
+    extracted.equipmentType,
+    extracted.money.linehaul,
+    extracted.money.total,
+  ]
+
+  if (loadDefining.some((field) => field !== null)) return false
+
+  return extracted.money.accessorials.length === 0
+}

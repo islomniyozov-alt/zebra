@@ -46,9 +46,14 @@ describe('which state an email lands in', () => {
     expect(stateFor({ read: true, warnings: [] })).toBe('READY')
   })
 
-  // Unread is CONFLICT rather than REVIEW: there is nothing to review.
-  it('is CONFLICT when the reader could not read it', () => {
-    expect(stateFor({ read: false, warnings: [] })).toBe('CONFLICT')
+  // WAS CONFLICT, IS NOW UNREAD, AND THE OLD COMMENT HERE EXPLAINED THE
+  // CONFLATION RATHER THAN A DECISION: "unread is CONFLICT rather than REVIEW:
+  // there is nothing to review." True, and it put "we could not read it" —
+  // a claim about US — under a word that means "this may already be a load",
+  // a claim about FREIGHT. So an unreadable message sorted beside a duplicate
+  // booking, and a deferred one would have too. See tests/unread-state.test.ts.
+  it('is UNREAD when the reader could not read it', () => {
+    expect(stateFor({ read: false, warnings: [] })).toBe('UNREAD')
   })
 
   it('is REVIEW when something wants a person but nothing contradicts', () => {

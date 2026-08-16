@@ -195,3 +195,21 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* WHY A ROW WAS NOT READ, beside its badge.
+   One state, three causes: "Not read" alone tells a dispatcher nothing to do,
+   "Not read · Nothing found in it" tells them to open the original. Muted and
+   small because it qualifies the badge rather than competing with it — no new
+   tone, no second badge, no colour that would read as a status of its own.
+   Logical properties only. */
+.unread-because {
+  display: inline-block;
+  margin-inline-start: var(--space-2);
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+  color: var(--color-muted);
+}
+
+.unread-because::before {
+  content: '· ';
+}
