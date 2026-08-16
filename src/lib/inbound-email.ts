@@ -291,6 +291,34 @@ export async function recordEmail(
  * duplicate that appears between the check and the write is a duplicate the
  * inbox would never mention.
  */
+/**
+ * The message was kept and deliberately not read.
+ *
+ * DEFERRED IS NOT FAILED, and the row must not claim it was. `ocrStatus`
+ * stays NOT_QUEUED — nothing was ever asked — and `ocrError` stays null,
+ * because there is no error to report: a budget was spent, which is a fact
+ * about us and not about the document.
+ *
+ * THE STATE IS UNREAD, WHICH IS THE WHOLE POINT. Deferred work with no
+ * visible state is the invisible pile inside the routed path, and this is the
+ * consumer that state was built for first.
+ */
+export async function recordDeferred(
+  organizationId: string,
+  emailId: string,
+): Promise<{ state: InboundState; concerns: number }> {
+  await withOrg(
+    organizationId,
+    (tx) =>
+      tx.inboundEmail.update({
+        where: { id: emailId },
+        data: { state: 'UNREAD', ocrStatus: 'NOT_QUEUED', concerns: [] },
+      }),
+    FROM_A_MAIL_SERVER,
+  )
+  return { state: 'UNREAD', concerns: 0 }
+}
+
 export async function recordReading(
   organizationId: string,
   emailId: string,

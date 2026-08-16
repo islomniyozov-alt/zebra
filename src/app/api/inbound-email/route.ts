@@ -4,10 +4,12 @@ import {
   baseAddress,
   emailByMessageId,
   organizationClaims,
+  recordDeferred,
   recordEmail,
   recordOriginal,
   recordReading,
 } from '@/lib/inbound-email'
+import { takeExtractionSlot } from '@/lib/extraction-budget'
 import { keepUnrouted } from '@/lib/unrouted-email'
 import { liveUnroutedStore } from '@/lib/unrouted-email-store'
 import { putObject, r2ConfigFromEnv } from '@/lib/r2'
@@ -150,6 +152,36 @@ export async function POST(request: Request): Promise<Response> {
   // booking into a 500 that Cloudflare retries forever; the row keeps
   // `rawR2Key` null, which is exactly what "no original stored" looks like.
   await storeOriginal(organizationId, created.id, payload)
+
+  // --- 1c. IS THERE BUDGET TO READ IT? -------------------------------------
+  //
+  // AFTER THE DEDUPE LOOKUP, so a redelivery never takes a slot: a second copy
+  // left at the duplicate branch above, before reaching here. Gmail knocked
+  // four times with one message on 2026-08-15 and a limiter placed any earlier
+  // would have read our own first real booking as abuse.
+  //
+  // AFTER THE PERSIST, TOO. The message is already a row with its original in
+  // R2 — refusing the SPEND must never refuse the MESSAGE, which is the same
+  // rule the 202 above follows for a different reason.
+  const slot = takeExtractionSlot(organizationId)
+
+  if (!slot.allowed) {
+    // 200 AND `accepted`, because it WAS accepted: kept, openable, and on the
+    // queue. What it did not get is a reading, and the row says so in the one
+    // place a dispatcher will look — its state.
+    const deferred = await recordDeferred(organizationId, created.id)
+    console.warn(
+      `[zebra.inbound] extraction budget spent for ${organizationId}; ` +
+        `${created.id} kept and deferred, retry in ${slot.retryAfterSeconds}s`,
+    )
+    return NextResponse.json({
+      accepted: true,
+      id: created.id,
+      state: deferred.state,
+      concerns: deferred.concerns,
+      deferred: true,
+    })
+  }
 
   // --- 2. READ IT, WITH NOTHING HELD OPEN -----------------------------------
   //
