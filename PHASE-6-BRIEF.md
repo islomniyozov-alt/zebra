@@ -1770,3 +1770,51 @@ Recorded rather than resolved, per Phase 1's discipline.
     the one genuinely expensive part: a loud failure in the wrong vocabulary
     still misleads. "Could not read that one" was true of a request that never
     reached a reader.
+
+78. **A CONFIG VERSION WAS SILENCING THE DRIFT CHECK, AND THE QUIET WINDOW WAS
+    THE WORST POSSIBLE ONE.** Editing a secret in the Cloudflare dashboard
+    creates a deployment that serves. Nobody deployed it from a commit, so it
+    carries no commit message — production's carried NONE AT ALL, not merely a
+    non-commit string, which resolved to `unstamped`. Unstamped is quiet.
+
+    SO THE ONE LOUD SIGNAL IN THAT FILE WENT MISSING — production trailing a
+    change to `src/` — for as long as the config version kept serving. That is
+    the window right after somebody has been fixing secrets by hand, which is
+    exactly when a half-finished deploy is most likely. Live, the fix turned
+    `commit unknown` into `9 commit(s) behind HEAD, 5 file(s) under src/`.
+
+    THE SCRIPT NOW RESOLVES THE LAST REAL DEPLOY UNDERNEATH and measures drift
+    against it, saying `config version atop the last real deploy d09f001` so
+    the line states what it is about rather than what it is.
+
+79. **`versions list` RETURNS NO `created_on`, SO A SORT ON IT WAS A NO-OP.**
+    Found while fixing flag 78. `check-deploy-drift.mjs` sorted versions by
+    `created_on` to find the newest; the field is absent from that command's
+    JSON, so the comparator compared `"undefined"` with itself and left
+    whatever order wrangler returned — WHICH IS NOT NEWEST-FIRST. `d09f001`
+    (21:28) comes back after `a230e61` (16:28).
+
+    `deployments list` does carry `created_on`, and carries the message too,
+    so ordering and stamping both come from there now. The lesson is smaller
+    than the flag above and older than it: a sort that silently does nothing
+    looks exactly like a sort that works, and the only reason this surfaced is
+    that a bug elsewhere made the ordering matter.
+
+80. **THE DEPLOY COULD NOT SEE THE VARIABLE THAT EXISTED TO INFORM IT.**
+    `PROD_DIRECT_DATABASE_URL` was parked so the migration gate would VERIFY
+    against `_prisma_migrations` instead of trusting a marker a human wrote.
+    `check:unrouted` and `check:drift` run under `node -r dotenv/config`;
+    `deploy:prod` does not. So the 2026-08-16 deploy read the marker while a
+    live answer sat one line away in `.env`, and this assistant announced it
+    as the first deploy that verifies rather than asserts. It was not.
+
+    WORSE THAN A MISSED OPPORTUNITY: the marker had just been set to
+    `verified: true`, so the deploy's output looked like a verification. A
+    stale marker with that flag set would have looked identical.
+
+    `deploy.mjs` now parses the single key out of `.env` when the environment
+    does not already carry it — not `dotenv/config`, which would put the dev
+    connection strings into the very process the integration gate is spawned
+    from. Adding it as a reader failed `tests/prod-url-guard.test.ts` by name,
+    which is the fence working: a third reader is a decision, and this is the
+    record of making it.

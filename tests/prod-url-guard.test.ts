@@ -49,6 +49,19 @@ const VARIABLE = 'PROD_DIRECT_DATABASE_URL'
  */
 const CHECK_READERS = ['check-migration-gap.mjs', 'check-unrouted.mjs']
 
+/**
+ * The deploy reads it to PASS IT ON, and queries nothing itself.
+ *
+ * It was added on 2026-08-16 because it was the one command whose decision
+ * the variable existed to inform and the only one that could not see it: the
+ * `check:` scripts run under `node -r dotenv/config` and `deploy:prod` does
+ * not, so a deploy accepted a human-written marker while a live answer sat in
+ * `.env`. It parses the single key rather than loading dotenv, because
+ * loading it would put the dev connection strings into the process the
+ * integration gate is spawned from.
+ */
+const DEPLOY_READERS = ['deploy.mjs']
+
 const WALKTHROUGH_READERS = [
   'verify-factoring.mjs',
   'verify-money-roles.mjs',
@@ -57,7 +70,7 @@ const WALKTHROUGH_READERS = [
   'verify-users.mjs',
 ]
 
-const ALLOWED = [...CHECK_READERS, ...WALKTHROUGH_READERS]
+const ALLOWED = [...CHECK_READERS, ...DEPLOY_READERS, ...WALKTHROUGH_READERS]
 
 /** Every script, since scripts are where a production URL would be used. */
 function sources(): { name: string; text: string }[] {
@@ -97,8 +110,8 @@ describe('the production URL has exactly the readers it was given', () => {
 
   // The stricter half of the rule. A walkthrough writes fixtures by design;
   // a script that runs unattended in `check` must never be able to.
-  it('is only ever read by the scripts that run unattended', () => {
-    for (const name of CHECK_READERS) {
+  it('is only ever read by the scripts that run unattended or pass it on', () => {
+    for (const name of [...CHECK_READERS, ...DEPLOY_READERS]) {
       const text = readFileSync(join(process.cwd(), 'scripts', name), 'utf8')
       // Anything that mutates. A count and a migration list need none of it.
       expect(

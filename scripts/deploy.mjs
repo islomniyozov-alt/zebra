@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { check as checkMigrationGap } from './check-migration-gap.mjs'
 import { runIntegrationSuite, resolveEndpoint } from './integration-gate.mjs'
 import {
@@ -64,6 +65,36 @@ if (dirty) {
 // because no request reached that path. Dev is exempt — `migrate dev` runs
 // against it constantly and a gap there is the normal state of an afternoon.
 if (production) {
+  // VERIFY, DON'T ASSERT — IF THE MACHINE CAN. `check-migration-gap` queries
+  // `_prisma_migrations` when `PROD_DIRECT_DATABASE_URL` is in the
+  // environment, and falls back to a marker file a human wrote when it is not.
+  //
+  // THIS SCRIPT COULD NOT SEE IT. `check:unrouted` and `check:drift` run under
+  // `node -r dotenv/config`; `deploy:prod` does not, so the variable sat in
+  // `.env` being read by everything except the one command whose decision it
+  // was supposed to inform. The 2026-08-16 deploy accepted a marker while a
+  // live answer was one line away — and the marker said `verified: true`,
+  // which made the output look like a verification it was not.
+  //
+  // ONE KEY, PARSED, NOT `dotenv/config`. Loading the whole file here would
+  // put `DATABASE_URL` and `DIRECT_DATABASE_URL` into this process, which is
+  // the environment the integration gate is spawned from — the gate scrubs
+  // them, but arranging for them to be there so something else can remove them
+  // is a bad trade for a variable this script does not use. Same reasoning as
+  // `integration-gate.mjs`, which parses `.env` without loading it.
+  if (!process.env.PROD_DIRECT_DATABASE_URL) {
+    try {
+      const key = 'PROD_DIRECT_DATABASE_URL='
+      const line = readFileSync('.env', 'utf8')
+        .split(/\r?\n/)
+        .find((candidate) => candidate.trim().startsWith(key))
+      const value = line?.trim().slice(key.length).trim()
+      if (value) process.env.PROD_DIRECT_DATABASE_URL = value
+    } catch {
+      // No .env, or unreadable. The marker is the fallback and says so.
+    }
+  }
+
   const gap = await checkMigrationGap({
     confirmed: process.argv.includes('--migrations-applied'),
   })

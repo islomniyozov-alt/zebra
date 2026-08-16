@@ -91,6 +91,24 @@ Each step assumes the ones above it.
    human read it. Flag 59 is the general form: a production command that names
    a variable a dev terminal can satisfy is a coin flip that reports heads.
 
+   APPENDS TO `.env` GO THROUGH AN EDITOR, OR CARRY A LEADING NEWLINE.
+   `Add-Content` does not add one, and a file whose last line has no trailing
+   newline SWALLOWS THE APPEND: the new key is glued to the end of the
+   previous line, dotenv sees one malformed entry, and the variable is simply
+   absent. Nothing reports an error.
+
+   THAT PASSED THE GATE ABOVE. The `-match` was run on the clipboard string,
+   which was correct, so it returned `True` while the value the file actually
+   yielded was unusable — flag 50's shape again, a check on a description
+   rather than on the thing that acts. The check that inspects the file is:
+
+   ```powershell
+   (Get-Content .env | Select-String 'PROD_DIRECT_DATABASE_URL').Count
+   ```
+
+   One is right. Zero means the append was swallowed; two means it went in
+   twice and dotenv will take the first.
+
    THE ANCHOR IS LOAD-BEARING. `-match 'proud-union'` unanchored matched a
    COMMENT in an instruction block during that same session. `^postgresql://`
    forces the match to start at a connection string, so prose containing the
