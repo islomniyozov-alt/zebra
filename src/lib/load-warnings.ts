@@ -21,6 +21,15 @@ import { renderDateOnly } from './stop-time'
 // ---------------------------------------------------------------------------
 
 export type WarningKind =
+  // PHASE 6. THE READER NAMED ONE OF OUR OWN AUTHORITIES AS THE BROKER.
+  //
+  // A real Relay booking came back with brokerName "RAM HAULAGE" at high
+  // confidence, every other field null: the reader had been handed our own
+  // signature logo instead of the booking and read the name off it. The
+  // extraction contract forbids carrier-identity-as-artifact, and this is
+  // the check that catches it WHATEVER the cause — a greeting, a signature,
+  // a logo, or a model having a bad day. We know our own names.
+  | 'broker_is_own_authority'
   | 'duplicate_bol'
   | 'duplicate_po'
   // PHASE 6 §3a. The broker's own load number, which for a Relay import is

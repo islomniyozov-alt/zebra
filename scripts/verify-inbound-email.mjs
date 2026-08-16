@@ -95,6 +95,7 @@ const delivered = await fetch(`${BASE}/api/inbound-email`, {
     subject: `Load Board - Trip ${TAG} booked`,
     text: BODY,
     attachments: [],
+    attachmentsDropped: 0,
     raw: rawBase64,
     rawBytes: Buffer.byteLength(RAW, 'utf8'),
   }),

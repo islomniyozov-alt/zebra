@@ -121,7 +121,27 @@ export async function concernsForEmail(
   const first = stops[0]
   const last = stops[stops.length - 1]
 
-  return loadWarnings(tx, {
+  // THE READER NAMED ONE OF OUR OWN AUTHORITIES AS THE BROKER.
+  //
+  // A real Relay booking came back with brokerName "RAM HAULAGE" at high
+  // confidence and every other field null. The reader had been handed our
+  // signature logo instead of the booking and read our name off it. The
+  // logo is fixed; this is the check that catches the CLASS — a greeting, a
+  // footer, a signature block, or a model having a bad day all produce the
+  // same wrong answer, and we are the one party whose names we know for
+  // certain.
+  //
+  // COMPARED AGAINST Company, WHICH IS THE AUTHORITY TABLE. Matching is on
+  // the normalised name rather than the id: the reader returns printed
+  // words, not a foreign key, and "RAM HAULAGE LLC" and "Ram Haulage" are
+  // the same carrier to everyone except a string comparison.
+  const ourNames = printed
+    ? await tx.company.findMany({ select: { name: true } })
+    : []
+  const collides = ourNames.some(
+    (company) => squash(company.name) === squash(printed ?? ''),
+  )
+  const warnings = await loadWarnings(tx, {
     // No customer resolved means no customer-scoped check can fire, which is
     // correct rather than convenient: the probable-duplicate check is about
     // one broker's freight and an unknown broker has none.
@@ -144,6 +164,17 @@ export async function concernsForEmail(
     },
     linehaulCents: null,
   })
+
+  return collides
+    ? [
+        ...warnings,
+        {
+          kind: 'broker_is_own_authority' as const,
+          messageKey: 'loads.warn.brokerIsOwnAuthority' as const,
+          values: { broker: printed ?? '' },
+        },
+      ]
+    : warnings
 }
 
 /** An extracted `YYYY-MM-DD` or ISO instant, as a Date, or null. */
@@ -206,6 +237,21 @@ export function baseAddress(address: string): string {
 // Every write below is `unattributed('…')` — typed out, reason carried into
 // the audit log, greppable. Nobody did this, and that is the truth about it.
 // ---------------------------------------------------------------------------
+
+/**
+ * A company name with the noise taken out, for comparison only.
+ *
+ * Case, punctuation and the trailing entity word are all things two humans
+ * write differently for the same carrier. "RAM HAULAGE LLC" off a logo and
+ * "Ram Haulage" in the authority table are the same party.
+ */
+function squash(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/(llc|inc|corp|co|ltd|limited|incorporated)/g, ' ')
+    .replace(/[^a-z0-9]+/g, '')
+    .trim()
+}
 
 /** Nobody did this: a mail server delivered it. */
 const FROM_A_MAIL_SERVER = {

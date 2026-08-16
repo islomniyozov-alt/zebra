@@ -13,7 +13,10 @@ import { takeExtractionSlot } from '@/lib/extraction-budget'
 import { keepUnrouted } from '@/lib/unrouted-email'
 import { liveUnroutedStore } from '@/lib/unrouted-email-store'
 import { putObject, r2ConfigFromEnv } from '@/lib/r2'
-import type { InboundEmailPayload } from '@/lib/inbound-email-payload'
+import {
+  documentToRead,
+  type InboundEmailPayload,
+} from '@/lib/inbound-email-payload'
 import { apiError } from '../_lib/respond'
 
 // POST /api/inbound-email — a booking email, delivered (Phase 6 §4 step 4).
@@ -193,9 +196,23 @@ export async function POST(request: Request): Promise<Response> {
   // AN ATTACHMENT WINS OVER THE BODY when there is one worth reading. A Relay
   // booking says the essentials in its body; a broker's rate confirmation says
   // "see attached" and means it.
-  const readable = (payload.attachments ?? []).find((attachment) =>
-    /^(application\/pdf|image\/)/.test(attachment.mimeType),
-  )
+  // THE DISCRIMINATOR, from the module the worker imports too.
+  //
+  // This used to be "the first attachment whose type looks readable", which is
+  // how a 37KB Gmail signature logo was handed to the reader instead of a
+  // Relay booking — four times, returning our own carrier name read off our
+  // own logo with every other field null. An inline part the HTML points at is
+  // presentation; a PDF is a document; an image that is neither is a
+  // photographed rate confirmation.
+  const readable = documentToRead(payload.attachments ?? [])
+
+  if ((payload.attachmentsDropped ?? 0) > 0) {
+    // The caps had to choose. Said out loud, because a non-zero count on real
+    // freight means they are wrong.
+    console.warn(
+      `[zebra.inbound] ${created.id}: ${payload.attachmentsDropped} attachment(s) left behind by the forwarding caps`,
+    )
+  }
 
   const asked = readable
     ? await askForExtraction({

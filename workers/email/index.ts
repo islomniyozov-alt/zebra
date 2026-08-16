@@ -2,7 +2,13 @@ import PostalMime from 'postal-mime'
 // TYPE-ONLY, so it is erased at build time: the worker gains a compile-time
 // contract with the endpoint and carries no application code. The two used to
 // agree by memory — see the header of the file it points at.
-import type { InboundEmailPayload } from '../../src/lib/inbound-email-payload'
+import {
+  byDocumentLikelihood,
+  MAX_FORWARDED_ATTACHMENTS,
+  MAX_FORWARDED_TOTAL_BYTES,
+  type InboundAttachment,
+  type InboundEmailPayload,
+} from '../../src/lib/inbound-email-payload'
 
 // ---------------------------------------------------------------------------
 // THE MAIL RECEIVER (Phase 6 §4 step 4).
@@ -81,7 +87,25 @@ const handler = {
         Date.now() / 60_000,
       )}@zebra.local>`
 
-    const attachments = (parsed.attachments ?? [])
+    // --- CANDIDATES, NOT A CHOICE -----------------------------------------
+    //
+    // THIS WORKER USED TO PICK, AND PICKED WRONG. It filtered to readable
+    // types and took `.slice(0, 1)` — the first match in MIME order — so a
+    // Gmail signature logo could be forwarded while the rate confirmation
+    // behind it was discarded here, in a process with no database, no log
+    // anybody reads, and no way to ask afterwards what was thrown away.
+    //
+    // It now carries every readable candidate within the caps and the FACTS
+    // about each: what the message declared as its disposition, its
+    // Content-ID, and whether the HTML points at it. The judgment lives in
+    // `inbound-email-payload.ts`, which both sides import, so the selection
+    // here and the preference there cannot disagree.
+    const html = parsed.html ?? ''
+    const referenced = new Set(
+      [...html.matchAll(/cid:([^"'\s>)]+)/g)].map((match) => match[1]),
+    )
+
+    const candidates = (parsed.attachments ?? [])
       .filter(
         (attachment) =>
           READABLE.test(attachment.mimeType ?? '') &&
@@ -89,16 +113,43 @@ const handler = {
           attachment.content.byteLength > 0 &&
           attachment.content.byteLength <= MAX_ATTACHMENT_BYTES,
       )
-      // ONE. The endpoint reads a single document, and sending four means
-      // paying for four model calls to fill one form. A rate confirmation
-      // email has one rate confirmation on it; the rest is a logo and a
-      // signature block.
-      .slice(0, 1)
-      .map((attachment) => ({
-        filename: attachment.filename ?? 'attachment',
-        mimeType: attachment.mimeType ?? 'application/octet-stream',
-        base64: base64Of(new Uint8Array(attachment.content as ArrayBuffer)),
-      }))
+      .map((attachment) => {
+        const contentId = (attachment.contentId ?? '').replace(/^<|>$/g, '')
+        return {
+          bytes: new Uint8Array(attachment.content as ArrayBuffer),
+          filename: attachment.filename ?? 'attachment',
+          mimeType: attachment.mimeType ?? 'application/octet-stream',
+          disposition: attachment.disposition ?? null,
+          contentId: contentId || null,
+          inlineReferenced: contentId !== '' && referenced.has(contentId),
+        }
+      })
+
+    // DOCUMENT-MOST-LIKELY FIRST, so the caps drop decoration rather than the
+    // rate confirmation. Ordering is the shared rule's job too.
+    candidates.sort(byDocumentLikelihood)
+
+    const carried: InboundAttachment[] = []
+    let carriedBytes = 0
+    for (const candidate of candidates) {
+      if (carried.length >= MAX_FORWARDED_ATTACHMENTS) break
+      if (carriedBytes + candidate.bytes.byteLength > MAX_FORWARDED_TOTAL_BYTES)
+        continue
+      carriedBytes += candidate.bytes.byteLength
+      carried.push({
+        filename: candidate.filename,
+        mimeType: candidate.mimeType,
+        base64: base64Of(candidate.bytes),
+        disposition: candidate.disposition,
+        contentId: candidate.contentId,
+        inlineReferenced: candidate.inlineReferenced,
+      })
+    }
+
+    // SAID OUT LOUD. Silent truncation is how "we forwarded everything" stays
+    // true-sounding and false; a non-zero count on a real booking means the
+    // caps are wrong and should be visible rather than inferred.
+    const attachmentsDropped = candidates.length - carried.length
 
     const body: InboundEmailPayload = {
       messageId,
@@ -112,7 +163,8 @@ const handler = {
       // booking email is usually both, and the plain part is the one without
       // three tables of layout in it.
       text: parsed.text ?? textFromHtml(parsed.html ?? ''),
-      attachments,
+      attachments: carried,
+      attachmentsDropped,
       // SPEC §12: the dispatcher opens the original. The `.eml` is the
       // original — headers, body and every attachment inside it — and it is
       // the one artefact that cannot be reconstructed from anything else we

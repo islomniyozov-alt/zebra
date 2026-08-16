@@ -69,8 +69,29 @@ describe('every field of the payload appears in every copy of it', () => {
 
 describe('the worker is held to the type rather than to a memory of it', () => {
   it('imports the payload type instead of redeclaring the shape', () => {
-    expect(worker).toMatch(
-      /import\s+type\s*\{[^}]*InboundEmailPayload[^}]*\}\s*from/,
+    // `import type { … }` or an inline `type` modifier — the worker now also
+    // imports RUNTIME rules from the same module, so the whole import is no
+    // longer type-only.
+    expect(worker).toContain('type InboundEmailPayload')
+    expect(worker).toContain("from '../../src/lib/inbound-email-payload'")
+  })
+
+  // THE RULE IS SHARED, NOT COPIED. The worker orders candidates and the route
+  // picks among them; if either reimplemented the judgment they would drift,
+  // which is exactly how a signature logo came to be preferred over a booking.
+  it('orders candidates with the shared rule rather than its own', () => {
+    expect(worker).toContain('byDocumentLikelihood')
+    expect(
+      worker,
+      'the worker must not decide what counts as decoration',
+    ).not.toContain('function isDecoration')
+  })
+
+  it('and the route chooses with the same module', () => {
+    const route = readFileSync('src/app/api/inbound-email/route.ts', 'utf8')
+    expect(route).toContain('documentToRead(')
+    expect(route, 'no second mime-type guess in the route').not.toContain(
+      'image/)',
     )
   })
 

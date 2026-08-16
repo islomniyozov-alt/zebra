@@ -473,6 +473,8 @@ const en = {
   'loads.placeHint': 'City, ST — or a facility name.',
   'loads.bol': 'BOL',
   'loads.po': 'PO',
+  'loads.warn.brokerIsOwnAuthority':
+    'The reader named {broker} as the broker, but that is one of your own authorities. Check the document before booking.',
   'loads.warn.title': 'Worth checking before you book this:',
   'loads.warn.saveAnyway': 'Book it anyway',
   'loads.warn.duplicateBol':
@@ -2012,6 +2014,8 @@ const ru: Dictionary = {
   'loads.placeHint': 'Город, штат — или название площадки.',
   'loads.bol': 'Коносамент',
   'loads.po': 'Заказ',
+  'loads.warn.brokerIsOwnAuthority':
+    'Прочитано, что брокер — {broker}, но это ваш собственный перевозчик. Проверьте документ перед оформлением.',
   'loads.warn.title': 'Проверьте перед бронированием:',
   'loads.warn.saveAnyway': 'Всё равно забронировать',
   'loads.warn.duplicateBol':
@@ -3542,6 +3546,8 @@ const fa: Dictionary = {
   'loads.placeHint': 'شهر، ایالت — یا نام محل.',
   'loads.bol': 'بارنامه',
   'loads.po': 'سفارش خرید',
+  'loads.warn.brokerIsOwnAuthority':
+    'خواننده {broker} را کارگزار خواند، اما این یکی از شرکت‌های خودتان است. پیش از ثبت، سند را بررسی کنید.',
   'loads.warn.title': 'پیش از ثبت، این‌ها را بررسی کنید:',
   'loads.warn.saveAnyway': 'با این حال ثبت کن',
   'loads.warn.duplicateBol':
