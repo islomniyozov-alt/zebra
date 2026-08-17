@@ -47,6 +47,7 @@ const answer = (over: Record<string, unknown> = {}) =>
     poNumber: null,
     commodity: { value: 'Frozen peas', confidence: 'high' },
     weightLbs: { value: 42_000, confidence: 'high' },
+    miles: null,
     pieces: null,
     pallets: { value: 24, confidence: 'medium' },
     equipmentType: { value: 'REEFER', confidence: 'high' },

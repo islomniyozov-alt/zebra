@@ -217,6 +217,7 @@ export function parseExtraction(text: string): Extracted {
     poNumber: readField(root, 'poNumber', '$', asString),
     commodity: readField(root, 'commodity', '$', asString),
     weightLbs: readField(root, 'weightLbs', '$', asNumber),
+    miles: readField(root, 'miles', '$', asNumber),
     pieces: readField(root, 'pieces', '$', asNumber),
     pallets: readField(root, 'pallets', '$', asNumber),
     equipmentType: readField(root, 'equipmentType', '$', asEnum(EQUIPMENT)),

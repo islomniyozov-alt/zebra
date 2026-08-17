@@ -339,7 +339,11 @@ export function CreateLoadForm({
       return next
     })
 
-  const [miles, setMiles] = useState('')
+  // MILES, WHEN THE DOCUMENT STATED THEM. A Relay booking prints the trip
+  // distance on its face; that is read, not computed, so it may be carried.
+  // Nothing infers a distance from two city names — that would be inventing
+  // a number about freight, which the contract forbids.
+  const [miles, setMiles] = useState(() => extractedMiles(queued) ?? '')
 
   // THE SAME §1.3 GATE THE UPLOAD PATH APPLIES, applied at initialisation for
   // the same reason. `queuedExtraction` already stripped money for a role that
@@ -421,6 +425,9 @@ export function CreateLoadForm({
     // them and this does nothing; the check is here as well because a form
     // that would have filled the field if the payload had carried it is a form
     // one API change away from filling it.
+    const statedMiles = extractedMiles(next)
+    if (statedMiles) setMiles((current) => current || statedMiles)
+
     if (mayEnterRate) {
       const linehaul = extractedRate(next)
       if (linehaul) setRate((current) => current || linehaul)
@@ -1031,10 +1038,33 @@ export function CreateLoadForm({
   )
 }
 
-/** The linehaul as the rate field expects it: a plain decimal, no symbol. */
+/**
+ * What the load pays, as the rate field expects it: a plain decimal, no symbol.
+ *
+ * ESTIMATED PAYOUT, NOT BASE RATE. Ruled 2026-08-17 on booking #2. The Relay
+ * app headlines the payout and frames Base Rate as a modification-only
+ * fallback, so the total is the number a dispatcher is agreeing to. Linehaul
+ * is still extracted and still on the row; it is simply not what the rate
+ * field offers.
+ */
+/**
+ * The trip distance the document stated, as the miles field expects it.
+ *
+ * READ, NEVER COMPUTED — the same rule the rate follows. Relay prints
+ * "320.1mi" and the form takes it whole; a distance nobody printed stays
+ * empty and a dispatcher types it.
+ */
+function extractedMiles(prefill: Prefill | null): string | null {
+  if (!prefill) return null
+  const stated = fieldAt(prefill, 'miles')
+  if (!stated || typeof stated.value !== 'number') return null
+  if (!Number.isFinite(stated.value) || stated.value <= 0) return null
+  return String(Math.round(stated.value))
+}
+
 function extractedRate(prefill: Prefill): string | null {
-  const linehaul = fieldAt(prefill, 'money.linehaul')
-  if (!linehaul || typeof linehaul.value !== 'string') return null
+  const payout = fieldAt(prefill, 'money.total')
+  if (!payout || typeof payout.value !== 'string') return null
 
   // Parsed and re-rendered through money.ts rather than passed along as the
   // model printed it. "$2,450.00" in a decimal input is a value the form would
@@ -1042,7 +1072,7 @@ function extractedRate(prefill: Prefill): string | null {
   // round-trips through the same parser the action will use, so what the user
   // sees is what will be saved or nothing is.
   try {
-    return centsToInput(parseMoneyToCents(linehaul.value))
+    return centsToInput(parseMoneyToCents(payout.value))
   } catch {
     return null
   }

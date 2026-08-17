@@ -75,6 +75,18 @@ export interface Extracted {
   poNumber: Maybe<string>
   commodity: Maybe<string>
   weightLbs: Maybe<number>
+  /**
+   * Total trip mileage, WHEN THE DOCUMENT STATES IT.
+   *
+   * READ, NEVER COMPUTED. A Relay booking prints the trip distance on its
+   * face — "320.1mi" — and a number a document states is a number this
+   * contract may carry. Distance between two cities is a number this
+   * contract may NOT invent: rule 1 of EXTRACTION-CONTRACT.md, and the
+   * difference between reading a document and guessing about freight.
+   *
+   * Null on almost everything else, which is correct rather than a gap.
+   */
+  miles: Maybe<number>
   pieces: Maybe<number>
   pallets: Maybe<number>
   equipmentType: Maybe<EquipmentType>
@@ -106,6 +118,7 @@ export const EXTRACTION_SCHEMA = {
     'poNumber',
     'commodity',
     'weightLbs',
+    'miles',
     'pieces',
     'pallets',
     'equipmentType',
@@ -124,6 +137,7 @@ export const EXTRACTION_SCHEMA = {
     poNumber: field('string'),
     commodity: field('string'),
     weightLbs: field('number'),
+    miles: field('number'),
     pieces: field('number'),
     pallets: field('number'),
     equipmentType: field('string', [

@@ -33,6 +33,7 @@ function emptyExtraction(over: Partial<Extracted> = {}): Extracted {
     poNumber: null,
     commodity: null,
     weightLbs: null,
+    miles: null,
     pieces: null,
     pallets: null,
     equipmentType: null,

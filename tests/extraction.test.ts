@@ -38,6 +38,7 @@ const bare = (over: Record<string, unknown> = {}) =>
     poNumber: null,
     commodity: null,
     weightLbs: null,
+    miles: null,
     pieces: null,
     pallets: null,
     equipmentType: null,
@@ -438,6 +439,7 @@ describe('which fields the form must mark', () => {
       bare({
         commodity: { value: 'Peas', confidence: 'low' },
         weightLbs: { value: 42_000, confidence: 'high' },
+        miles: null,
         stops: [
           {
             type: { value: 'PICKUP', confidence: 'high' },
