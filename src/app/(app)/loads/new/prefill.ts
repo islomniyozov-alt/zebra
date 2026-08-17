@@ -155,9 +155,18 @@ export function stopRowsFrom(
     // Empty is the ordinary answer: most stops carry an appointment, and rule
     // 1 of EXTRACTION-CONTRACT.md says a window needs two DIFFERENT ends — so
     // the reader does not invent one and neither does this.
+    // THE APPOINTMENT FILLS THE FROM CLOCK when no window was printed.
+    //
+    // A Relay booking states a single time — "08/14 03:45" — and until
+    // 2026-08-17 both clock boxes read only windowStart/windowEnd, so an
+    // appointment reached neither and the time vanished between a reading
+    // that had it and a form that showed a bare date. windowStart still wins
+    // when the document printed a real window; this is the fallback, not a
+    // second source of truth.
     from:
       current[index]?.from ||
       timeFrom(prefill, `stops[${index}].windowStart`) ||
+      timeFrom(prefill, `stops[${index}].scheduledAt`) ||
       '',
     to:
       current[index]?.to ||

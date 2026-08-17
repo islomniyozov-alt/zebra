@@ -190,10 +190,18 @@ describe('the window, which the columns have waited for since Phase 1', () => {
     ])
   })
 
-  it('and leaves it EMPTY for an appointment, which is most stops', () => {
-    // Rule 1 of EXTRACTION-CONTRACT.md: one printed time is an appointment,
-    // and the reader returns no window at all. The form must not invent one
-    // from the appointment either — a window 08:00-08:00 is not a window.
+  // WAS "leaves it EMPTY for an appointment", AND THAT WAS THE BUG WRITTEN
+  // DOWN AS A RULE. Rule 1 of EXTRACTION-CONTRACT.md says one printed time is
+  // an appointment and the reader returns no window — true, and this test drew
+  // the wrong conclusion from it: that the APPOINTMENT should also go nowhere.
+  //
+  // So "08/14 03:45" reached a date box and two blank clocks, and because
+  // `stopDate` returned midnight regardless, the load saved with a 00:00 stop.
+  // The dispatch board sorted a 03:45 pickup before every load booked that day.
+  //
+  // The To box stays empty, which is what the rule actually protects: one time
+  // is not a window, and 03:45-03:45 is not one either.
+  it('puts an appointment in From and still refuses to invent a window', () => {
     const rows = stopRowsFrom(
       prefill([
         { scheduledAt: { value: '2026-08-20T11:00' } },
@@ -203,8 +211,8 @@ describe('the window, which the columns have waited for since Phase 1', () => {
       mint,
     )
     expect(rows?.map((row) => [row.date, row.from, row.to])).toEqual([
-      ['2026-08-20', '', ''],
-      ['2026-08-22', '', ''],
+      ['2026-08-20', '11:00', ''],
+      ['2026-08-22', '23:59', ''],
     ])
   })
 

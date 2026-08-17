@@ -49,21 +49,39 @@ export interface CreateLoadState {
 }
 
 /**
- * A typed date, at midnight **in the stop's own zone**.
+ * When a stop is due, as an instant **in the stop's own zone**.
  *
- * NOT UTC midnight, and the difference is a whole day. A pickup typed as
- * September 15th, stored at UTC midnight and then rendered in the stop's zone
- * per design rule 3, displays as "Sep 14, 19:00 CDT" — the rule's own failure
- * mode, committed by the code meant to honour it. Caught in a screenshot of
- * the Step 5 detail screen.
+ * NOT UTC. A pickup typed as September 15th, stored at UTC midnight and then
+ * rendered in the stop's zone per design rule 3, displays as "Sep 14, 19:00
+ * CDT" — the rule's own failure mode, committed by the code meant to honour
+ * it. Caught in a screenshot of the Step 5 detail screen.
  *
  * Parsed here as well as in the browser, and not because the browser is
  * untrusted about dates — because the form works without JavaScript, and the
  * blur handler that normalises "810" into "2026-08-10" is JavaScript.
+ *
+ * THE CLOCK BELONGS TO THE APPOINTMENT, and until 2026-08-17 it had nowhere to
+ * go. This returned midnight and nothing else, so a document printing "Pickup
+ * 08/14 03:45" produced a load whose stop time was 00:00 — the appointment
+ * discarded on the way through a form that had no field for it. It survived
+ * being flagged once because the visible symptom was two empty clock boxes,
+ * and a fix that filled them in would have entrenched the real fault.
+ *
+ * ONE TIME MEANS AN APPOINTMENT; TWO MEAN A WINDOW. A dispatcher typing a
+ * single clock is saying when the stop is due, and that is `scheduledAt`. When
+ * they type both ends, `windowStart`/`windowEnd` carry the window and this
+ * still records the start as the moment the stop is due — the same instant a
+ * board sorts by, rather than a midnight that sorts before every load booked
+ * that day.
+ *
+ * MIDNIGHT REMAINS THE ANSWER FOR A DATE WITH NO CLOCK, which is the ordinary
+ * typed load: a date alone is a date alone, and inventing 09:00 for it would
+ * be a number about freight that nobody wrote down.
  */
 function stopDate(
   value: unknown,
   place: { state: string | null; timezone: string | null },
+  clock?: unknown,
 ): Date | null {
   const text = optionalText(value)
   if (text === null) return null
@@ -76,6 +94,13 @@ function stopDate(
     place.state,
     COMPANY_FALLBACK_ZONE,
   )
+
+  const typed = optionalText(clock)
+  if (typed !== null) {
+    const moment = stopMoment(iso, typed, place)
+    if (moment !== null) return moment
+  }
+
   return zoneMidnight(iso, zone)
 }
 
@@ -295,7 +320,7 @@ export async function createLoadAction(
               name: facilities[index]?.name ?? stop.place,
               city: places[index]!.city,
               state: places[index]!.state,
-              scheduledAt: stopDate(stop.date, places[index]!),
+              scheduledAt: stopDate(stop.date, places[index]!, stop.from),
               // THE WINDOW REACHES ITS COLUMNS. `windowStart`/`windowEnd` have
               // been on LoadStop since Phase 1 and nothing has ever written
               // them from this form.
