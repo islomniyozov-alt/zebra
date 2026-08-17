@@ -1,6 +1,6 @@
 import { chromium } from 'playwright'
 import { neonConfig, Pool } from '@neondatabase/serverless'
-import { readFileSync, readdirSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   accuracyTable,
@@ -49,6 +49,9 @@ const CACHE = argv.includes('--cache')
 const VARIANT = `${MODEL ?? 'default model'}${CACHE ? ' + caching' : ', no caching'}`
 const CORPUS = 'corpus'
 const SHEETS = join(CORPUS, 'truth')
+/** Every extraction this run produced, kept for the questions scoring cannot answer. */
+const EXTRACTIONS = join(CORPUS, '.extractions')
+mkdirSync(EXTRACTIONS, { recursive: true })
 
 neonConfig.webSocketConstructor ??= WebSocket
 neonConfig.poolQueryViaFetch = false
@@ -236,6 +239,22 @@ for (const { name, sheet } of sheets) {
   }
   inTokens += answer.body.cost?.inputTokens ?? 0
   outTokens += answer.body.cost?.outputTokens ?? 0
+
+  // WHAT THE MODEL ACTUALLY SAID, KEPT.
+  //
+  // Scoring is a comparison against the sheet, so it can only ever report on
+  // fields the sheet already knows about — and it deletes the PendingUpload on
+  // the way past, which leaves NOTHING to interrogate afterwards. That is how
+  // a run costing 29.4¢ answered the regression question and could not answer
+  // "does any of these documents state a mileage", which was the other half of
+  // why it was run.
+  //
+  // Under ./corpus, which is gitignored whole, so this cannot become a second
+  // stray file in the repository root.
+  writeFileSync(
+    join(EXTRACTIONS, `${name}.json`),
+    `${JSON.stringify({ document: name, extracted: answer.body.extracted, money: answer.body.money }, null, 2)}\n`,
+  )
 
   const scored = scoreDocument(
     sheet.fields,
