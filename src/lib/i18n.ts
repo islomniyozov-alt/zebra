@@ -471,6 +471,7 @@ const en = {
   'loads.extractedChanged': 'You changed this — the document said “{was}”.',
   'loads.createOnMiss': 'Type a new name to create it.',
   'loads.placeHint': 'City, ST — or a facility name.',
+  'loads.reference': 'Reference #',
   'loads.bol': 'BOL',
   'loads.po': 'PO',
   'loads.warn.brokerIsOwnAuthority':
@@ -2012,6 +2013,7 @@ const ru: Dictionary = {
   'loads.extractedChanged': 'Вы изменили это — в документе было «{was}».',
   'loads.createOnMiss': 'Введите новое название, чтобы создать его.',
   'loads.placeHint': 'Город, штат — или название площадки.',
+  'loads.reference': 'Номер брокера',
   'loads.bol': 'Коносамент',
   'loads.po': 'Заказ',
   'loads.warn.brokerIsOwnAuthority':
@@ -3544,6 +3546,7 @@ const fa: Dictionary = {
   'loads.extractedChanged': 'شما این را تغییر دادید — سند می‌گفت «{was}».',
   'loads.createOnMiss': 'برای ساختن مورد تازه، نام آن را بنویسید.',
   'loads.placeHint': 'شهر، ایالت — یا نام محل.',
+  'loads.reference': 'شمارهٔ مرجع',
   'loads.bol': 'بارنامه',
   'loads.po': 'سفارش خرید',
   'loads.warn.brokerIsOwnAuthority':

@@ -158,6 +158,7 @@ export interface CreateLoadLabels {
   stopFrom: string
   bol: string
   po: string
+  reference: string
   warnTitle: string
   warnSaveAnyway: string
   save: string
@@ -874,7 +875,10 @@ export function CreateLoadForm({
        * BOL yet anyway — it is known at pickup, not at booking — so the fields
        * appear because an extraction filled them, and the duplicate warnings
        * they feed are about numbers a document actually carried. */}
-      {prefill && (valueOf('bolNumber') || valueOf('poNumber')) ? (
+      {prefill &&
+      (valueOf('bolNumber') ||
+        valueOf('poNumber') ||
+        valueOf('brokerReference')) ? (
         <div className="flex gap-z3">
           <div className="flex-1">
             <Input
@@ -895,6 +899,22 @@ export function CreateLoadForm({
               hint={hintFor('poNumber', undefined)}
               key={`po-${prefill.pendingUploadId}`}
               defaultValue={valueOf('poNumber')}
+              className="font-mono"
+            />
+          </div>
+          <div className="flex-1">
+            {/* THE BROKER OWN NUMBER, and for Relay freight the ONLY exact
+                duplicate key: those bookings carry no BOL, no PO and no
+                addresses, so duplicate_reference could never fire without
+                it. Same conditional block as the two beside it, so the
+                typing path gains no tab stop. */}
+            <Input
+              name="reference"
+              label={labels.reference}
+              identifier
+              hint={hintFor('brokerReference', undefined)}
+              key={`reference-${prefill.pendingUploadId}`}
+              defaultValue={valueOf('brokerReference')}
               className="font-mono"
             />
           </div>

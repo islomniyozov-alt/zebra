@@ -251,6 +251,7 @@ export default async function NewLoadPage({
             timePlaceholder: t('loads.timePlaceholder'),
             bol: t('loads.bol'),
             po: t('loads.po'),
+            reference: t('loads.reference'),
             warnTitle: t('loads.warn.title'),
             warnSaveAnyway: t('loads.warn.saveAnyway'),
             save: t('loads.save'),

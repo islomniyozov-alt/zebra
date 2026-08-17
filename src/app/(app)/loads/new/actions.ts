@@ -147,6 +147,10 @@ export async function createLoadAction(
   // them, and a warning about a number nothing stores cannot be written.
   const bolNumber = optionalText(formData.get('bol'))
   const poNumber = optionalText(formData.get('po'))
+  // The BROKER's own load number. For a Relay booking it is the only exact
+  // duplicate key there is: no BOL, no PO, no addresses — so without it the
+  // duplicate_reference warning can never fire on Amazon freight.
+  const referenceNumber = optionalText(formData.get('reference'))
   // What the dispatcher was shown last time, if they were shown anything.
   const acknowledged = String(formData.get('acknowledge') ?? '')
 
@@ -239,6 +243,7 @@ export async function createLoadAction(
           customerName: broker,
           bolNumber,
           poNumber,
+          referenceNumber,
           pickupAt,
           deliveryAt,
           pickup: { city: from.city, state: from.state },
@@ -263,6 +268,7 @@ export async function createLoadAction(
             customerId,
             bolNumber,
             poNumber,
+            referenceNumber,
             truckId: optionalText(formData.get('truckId')),
             driverId: optionalText(formData.get('driverId')),
             dispatchedMiles: formData.get('miles'),

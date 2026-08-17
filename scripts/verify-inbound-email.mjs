@@ -214,6 +214,7 @@ const snapshot = () =>
         (n) => n.value.trim(),
       ),
       rate: value('rate'),
+      reference: value('reference'),
       miles: value('miles'),
     }
   })
@@ -249,6 +250,12 @@ record(
   'and the rate, so nobody books freight for an unknown number',
   (form.rate ?? '').length > 0,
   form.rate || '(empty)',
+)
+
+record(
+  'and the broker reference, the only exact duplicate key Relay freight has',
+  (form.reference ?? '').length > 0,
+  form.reference || '(empty)',
 )
 
 // --- 6. Save books the load AND closes the draft ----------------------------
