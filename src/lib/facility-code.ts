@@ -187,7 +187,12 @@ export function parseSeedAddress(address: unknown): ParsedAddress {
   // postcode, and it would have done so for 451 of 3,383 rows. Anchoring
   // on the two-letter state is what makes it the postcode rather than a
   // number that happens to be five digits long.
-  const zip = /\b[A-Za-z]{2}\s+(\d{5})(?:-\d{4})?\b/.exec(address)
+  // THE COMMA IS OPTIONAL because the two exports disagree about it. The
+  // Datatruck file writes "Hammond, LA 70401"; the Amazon delta writes
+  // "Seattle, WA, 98121". Requiring whitespace alone lost the postcode on 11
+  // measured rows of the second file while correctly refusing 57 others whose
+  // only five-digit run was a street number.
+  const zip = /\b[A-Za-z]{2},?\s+(\d{5})(?:-\d{4})?\b/.exec(address)
 
   return {
     addressLine1: street === '' ? null : street,

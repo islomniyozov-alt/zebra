@@ -207,7 +207,10 @@ describe('what the trailer was doing', () => {
 
 const files = existsSync(CORPUS)
   ? readdirSync(CORPUS).filter(
-      (name) => name.endsWith('.csv') && name !== 'facilities-seed.csv',
+      // A trip export is named Trips*. Excluding one facilities file BY NAME
+      // meant a second one — facilities-amazon-delta.csv — was fed to the trip
+      // parser the day it arrived.
+      (name) => name.startsWith('Trips') && name.endsWith('.csv'),
     )
   : []
 

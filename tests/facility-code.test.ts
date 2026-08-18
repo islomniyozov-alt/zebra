@@ -119,7 +119,7 @@ describe('the seed script carries the same rules it was written beside', () => {
 
   it('anchors its postcode on the state, exactly as the library does', () => {
     const library = readFileSync('src/lib/facility-code.ts', 'utf8')
-    const pattern = /\[A-Za-z\]\{2\}\\s\+\(\\d\{5\}\)/
+    const pattern = /[A-Za-z]{2},?\s+(\d{5})/
     expect(library).toMatch(pattern)
     expect(script, 'the script would give 451 rows a street number').toMatch(
       pattern,

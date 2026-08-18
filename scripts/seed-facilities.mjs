@@ -227,7 +227,12 @@ function parseSeedAddress(address) {
   // postcode, and it would have done so for 451 of 3,383 rows. Anchoring
   // on the two-letter state is what makes it the postcode rather than a
   // number that happens to be five digits long.
-  const zip = /\b[A-Za-z]{2}\s+(\d{5})(?:-\d{4})?\b/.exec(text)
+  //
+  // THE COMMA IS OPTIONAL because the two exports disagree about it. Datatruck
+  // writes "Hammond, LA 70401"; the Amazon delta writes "Seattle, WA, 98121".
+  // Whitespace alone lost 11 measured rows of the second file while correctly
+  // refusing 57 whose only five-digit run was a street number.
+  const zip = /\b[A-Za-z]{2},?\s+(\d{5})(?:-\d{4})?\b/.exec(text)
   return {
     addressLine1: street === '' ? null : street,
     postalCode: zip?.[1] ?? null,
@@ -236,10 +241,39 @@ function parseSeedAddress(address) {
 
 // --- what would change ----------------------------------------------------
 
+/**
+ * The state written inside the address string itself, or null.
+ *
+ * ONLY EVER USED TO DISAGREE. The state column is what gets imported; this
+ * reads the address's own tail so the two can be compared.
+ *
+ * WHAT A DISAGREEMENT MEANS DEPENDS ON THE FILE. In the Datatruck export the
+ * column is independent of the address, so a mismatch is a source error — a
+ * dock filed in the wrong state, which design rule 3 turns into the wrong time
+ * zone. In the Amazon delta the column was PARSED from this same tail when the
+ * file was built, so a mismatch there means the tail-regex grabbed the wrong
+ * thing on that row: the parse disagreeing with itself, which is worth knowing
+ * for a different reason.
+ *
+ * Either way this reports and imports nothing differently. As ruled: as-is.
+ */
+function stateInAddress(address) {
+  const text = String(address ?? '')
+  const match = /\b([A-Za-z]{2}),?\s+\d{5}(?:-\d{4})?\b/.exec(text)
+  if (match) return stateCode(match[1])
+  const tail = /,\s*([A-Za-z][A-Za-z .]+?)\s*(?:,\s*USA)?\s*$/.exec(text)
+  return tail ? stateCode(tail[1]) : null
+}
+
 const unknownStates = new Set()
+const disagreements = []
 const prepared = rows.map((row) => {
   const state = stateCode(row.state)
   if (state === null && row.state !== '') unknownStates.add(row.state)
+  const fromAddress = stateInAddress(row.address)
+  if (state !== null && fromAddress !== null && state !== fromAddress) {
+    disagreements.push({ code: row.code, column: state, address: fromAddress })
+  }
   const { addressLine1, postalCode } = parseSeedAddress(row.address)
   return {
     facilityCode: row.code,
@@ -270,6 +304,21 @@ if (unknownStates.size > 0) {
   for (const name of [...unknownStates].slice(0, 8)) console.log(`    ${name}`)
   console.log('  Those rows import with a null state, which is a fact rather')
   console.log('  than a guess — a wrong state moves a dock into another zone.')
+}
+if (disagreements.length > 0) {
+  console.log(``)
+  console.log(
+    `  ${disagreements.length} row(s) whose state column and address disagree:`,
+  )
+  for (const row of disagreements.slice(0, 10)) {
+    console.log(
+      `    ${row.code}: column says ${row.column}, address says ${row.address}`,
+    )
+  }
+  console.log(`  Imported AS-IS from the column, as ruled. What this means`)
+  console.log(`  depends on the file: an independent column disagreeing is a`)
+  console.log(`  source error; a column parsed FROM the address disagreeing`)
+  console.log(`  means the tail-regex grabbed the wrong thing on that row.`)
 }
 console.log('')
 console.log('  First three, as they would be written:')
