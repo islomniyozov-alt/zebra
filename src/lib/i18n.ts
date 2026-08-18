@@ -461,7 +461,7 @@ const en = {
   'loads.methodDropHint': 'or drop a file anywhere in this box',
   'loads.methodPastePlaceholder': 'Paste the booking email or message here.',
   'loads.methodPasteRead': 'Read this text',
-  'loads.methodAmazonImport': 'Import a Relay Trips export',
+  'loads.methodAmazonImport': 'Import a Relay load-board export (rates)',
   'loads.methodAmazonSoon':
     'Amazon booking sheets arrive in a later step. Upload the Excel under Upload document, or paste the email.',
   'loads.extracted': 'From the document.',
@@ -490,9 +490,9 @@ const en = {
   'loads.warn.missingRate': 'No rate, so this load cannot be invoiced yet.',
   'loads.warn.duplicateReference':
     'Load reference {reference} is already on load {load} for {customer}, booked {date}.',
-  'relay.title': 'Import from Amazon Relay',
+  'relay.title': 'Import a Relay load-board export (rates)',
   'relay.subtitle':
-    'The Trips export, as loads. Columns are read directly — nothing is guessed and no document is sent anywhere.',
+    'One row per trip, with rates. Columns are read directly — nothing is guessed and no document is sent anywhere.',
   'relay.authority': 'Authority',
   'relay.mode': 'What is in this file',
   'relay.modeBooked': 'Upcoming trips — book them',
@@ -548,9 +548,9 @@ const en = {
   'relay.error.no_rows': 'That file has a header and no trips in it.',
   'relay.error.too_many_rows':
     'That file has more rows than one import covers.',
-  'trips.title': 'Import Amazon Relay trips',
+  'trips.title': 'Import a Relay Trips export (legs & miles)',
   'trips.subtitle':
-    'One file per trip, one row per leg. Nothing is booked until you confirm.',
+    'One row per leg, with mileage and no rate. Nothing is booked until you confirm.',
   'trips.error.noTrips': 'That file has no trips in it.',
   'trips.action.create': 'books a new load',
   'trips.action.unchanged': 'already has its stops and mileage',
@@ -2037,7 +2037,8 @@ const ru: Dictionary = {
   'loads.methodPastePlaceholder':
     'Вставьте письмо о бронировании или сообщение.',
   'loads.methodPasteRead': 'Прочитать текст',
-  'loads.methodAmazonImport': 'Импортировать выгрузку Relay Trips',
+  'loads.methodAmazonImport':
+    'Импортировать выгрузку Relay load-board (со ставками)',
   'loads.methodAmazonSoon':
     'Листы Amazon появятся позже. Загрузите Excel во вкладке «Загрузить документ» или вставьте письмо.',
   'loads.extracted': 'Из документа.',
@@ -2067,9 +2068,9 @@ const ru: Dictionary = {
     'Нет ставки — счёт по этому рейсу выставить нельзя.',
   'loads.warn.duplicateReference':
     'Номер {reference} уже стоит на грузе {load} для {customer}, оформлен {date}.',
-  'relay.title': 'Импорт из Amazon Relay',
+  'relay.title': 'Импорт выгрузки Relay load-board (со ставками)',
   'relay.subtitle':
-    'Выгрузка Trips как грузы. Столбцы читаются напрямую — ничего не угадывается и никуда не отправляется.',
+    'Одна строка на рейс, со ставками. Столбцы читаются напрямую — ничего не угадывается и никуда не отправляется.',
   'relay.authority': 'Перевозчик',
   'relay.mode': 'Что в этом файле',
   'relay.modeBooked': 'Предстоящие рейсы — оформить их',
@@ -2125,9 +2126,9 @@ const ru: Dictionary = {
   'relay.error.no_rows': 'В файле только заголовок, рейсов нет.',
   'relay.error.too_many_rows':
     'В файле больше строк, чем помещается в один импорт.',
-  'trips.title': 'Импорт рейсов Amazon Relay',
+  'trips.title': 'Импорт выгрузки Relay Trips (плечи и мили)',
   'trips.subtitle':
-    'Один файл на рейс, одна строка на плечо. Ничего не оформляется до подтверждения.',
+    'Одна строка на плечо, с пробегом и без ставки. Ничего не оформляется до подтверждения.',
   'trips.error.noTrips': 'В файле нет рейсов.',
   'trips.action.create': 'создаст груз',
   'trips.action.unchanged': 'остановки и пробег уже есть',
@@ -3604,7 +3605,7 @@ const fa: Dictionary = {
   'loads.methodDropHint': 'یا فایل را در هر جای این کادر رها کنید',
   'loads.methodPastePlaceholder': 'ایمیل یا پیام رزرو را اینجا بچسبانید.',
   'loads.methodPasteRead': 'خواندن این متن',
-  'loads.methodAmazonImport': 'وارد کردن خروجی Relay Trips',
+  'loads.methodAmazonImport': 'وارد کردن خروجی Relay load-board (نرخ‌ها)',
   'loads.methodAmazonSoon':
     'برگه‌های آمازون در مرحله‌ای بعد می‌آیند. اکسل را در «بارگذاری سند» بگذارید یا ایمیل را بچسبانید.',
   'loads.extracted': 'از روی سند.',
@@ -3634,9 +3635,9 @@ const fa: Dictionary = {
     'نرخ ندارد، پس هنوز نمی‌توان برایش صورتحساب صادر کرد.',
   'loads.warn.duplicateReference':
     'شمارهٔ مرجع {reference} از پیش روی بار {load} برای {customer} است، ثبت‌شده در {date}.',
-  'relay.title': 'وارد کردن از Amazon Relay',
+  'relay.title': 'وارد کردن خروجی Relay load-board (نرخ‌ها)',
   'relay.subtitle':
-    'خروجی Trips به‌صورت بار. ستون‌ها مستقیم خوانده می‌شوند — چیزی حدس زده نمی‌شود و سندی جایی فرستاده نمی‌شود.',
+    'هر ردیف یک سفر، همراه با نرخ. ستون‌ها مستقیم خوانده می‌شوند — چیزی حدس زده نمی‌شود و سندی جایی فرستاده نمی‌شود.',
   'relay.authority': 'شرکت',
   'relay.mode': 'محتوای این فایل',
   'relay.modeBooked': 'سفرهای پیش‌رو — ثبتشان کن',
@@ -3690,9 +3691,9 @@ const fa: Dictionary = {
     'این خروجی Relay Trips نیست — ستون Load ID یا Stop 1 ندارد.',
   'relay.error.no_rows': 'آن فایل فقط سرستون دارد و هیچ سفری در آن نیست.',
   'relay.error.too_many_rows': 'آن فایل بیش از حد یک بار وارد کردن سطر دارد.',
-  'trips.title': 'وارد کردن سفرهای Amazon Relay',
+  'trips.title': 'وارد کردن خروجی Relay Trips (پاها و مایل‌ها)',
   'trips.subtitle':
-    'هر فایل یک سفر، هر ردیف یک پا. تا تأیید نکنید چیزی ثبت نمی‌شود.',
+    'هر ردیف یک پا، با مسافت و بدون نرخ. تا تأیید نکنید چیزی ثبت نمی‌شود.',
   'trips.error.noTrips': 'این فایل هیچ سفری ندارد.',
   'trips.action.create': 'بار تازه ثبت می‌کند',
   'trips.action.unchanged': 'توقف‌ها و مسافت را دارد',
