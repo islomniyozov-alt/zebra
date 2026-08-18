@@ -173,11 +173,18 @@ describe('what the trailer was doing', () => {
     expect(legPurpose('BobtailMovementAnnotation')).toBe('EMPTY')
     expect(legPurpose('FleetManagementEquipmentRepositioning')).toBe('EMPTY')
     expect(legPurpose('TransfersEmptyCarts')).toBe('EMPTY')
+    // THE SINGLE /Empty/ RULE, replacing an EmptyCarts anchor and an
+    // EmptyContainer pattern that matched nothing in 2,987 rows.
+    expect(legPurpose('CustomerFacingEmptyTrailer')).toBe('EMPTY')
+    expect(legPurpose('TransfersEmptyPod')).toBe('EMPTY')
   })
 
   it('calls freight loaded', () => {
     expect(legPurpose('OutboundAmazonManaged')).toBe('LOADED')
     expect(legPurpose('TransfersInitialPlacement')).toBe('LOADED')
+    // A domain question with the owner, not a pattern question. Unmatched
+    // overstates loaded miles visibly rather than understating them quietly.
+    expect(legPurpose('TrailerPoolAdjustmentDrop')).toBe('LOADED')
   })
 
   // UNMATCHED IS LOADED, and that is the safe direction: a loaded leg wrongly

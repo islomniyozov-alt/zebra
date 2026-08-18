@@ -52,15 +52,21 @@ export const LEG_PURPOSE_RULES: readonly LegPurposeRule[] = [
     note: 'Moving equipment to where it is needed. 721 legs — the largest empty category.',
   },
   {
-    pattern: /EmptyContainer/i,
+    pattern: /Empty/i,
     purpose: 'EMPTY',
-    note: 'Ruled as part of the default mapping. NOT OBSERVED in the sweep — zero legs.',
+    note:
+      'Amazon writes "Empty" when the move carries no freight, so this matches ' +
+      'the word rather than an enumeration of its neighbours. 156 legs: ' +
+      'TransfersEmptyCarts 82, CustomerFacingEmptyTrailer 71, ' +
+      'TransfersEmptyPod 3. It replaced two narrower rules — an EmptyCarts$ ' +
+      'anchor and an EmptyContainer pattern that matched NOTHING in 2,987 ' +
+      'rows, while CustomerFacingEmptyTrailer sat unclassified between them.',
   },
-  {
-    pattern: /EmptyCarts$/i,
-    purpose: 'EMPTY',
-    note: 'Returning empty carts. 82 legs.',
-  },
+  // TrailerPoolAdjustment (112 legs across three variants) is deliberately
+  // NOT here. Whether repositioning a pool trailer is an empty move is a
+  // question about this business rather than about this string, and it is
+  // with the owner. Unmatched means LOADED, which overstates loaded miles
+  // visibly rather than understating them quietly.
 ]
 
 /**
