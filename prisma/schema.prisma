@@ -1030,6 +1030,21 @@ model Location {
   // no street address means no key, and no key means no match, which is the
   // correct answer rather than a weak one. See src/lib/facility-memory.ts for
   // what the fold does and, more importantly, what it refuses to do.
+  /// THE CARRIER-OWN CODE FOR THIS FACILITY: "MEM1", "DXH5",
+  /// "KCDC_WAR_740370001_656". What Datatruck calls Company and what Relay
+  /// paperwork prints, so it is the string a dispatcher and a CSV both have
+  /// in hand when nothing else matches.
+  ///
+  /// EXACT LOOKUP, NEVER FUZZY. The address matcher in facility-memory.ts
+  /// exists because addresses are written six ways; a code is written one
+  /// way or it is a different facility.
+  ///
+  /// The unique index is also the seed idempotency key: re-importing the
+  /// locations export upserts on (organizationId, facilityCode) and cannot
+  /// duplicate. Nullable because most locations are typed by a dispatcher
+  /// and have no code, and Postgres does not collide NULLs.
+  facilityCode String?
+
   normalizedAddress String?
 
   deletedAt DateTime?
@@ -1041,6 +1056,7 @@ model Location {
   @@index([organizationId, name])
   @@index([organizationId, state, city])
   @@index([organizationId, normalizedAddress])
+  @@unique([organizationId, facilityCode])
 }
 
 model FactoringCompany {
