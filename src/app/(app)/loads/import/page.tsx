@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
@@ -33,6 +34,19 @@ export default async function RelayImportPage() {
       <div className="flex flex-col gap-z1">
         <h1 className="text-xl font-semibold text-ink">{t('relay.title')}</h1>
         <p className="text-sm text-ink-2">{t('relay.subtitle')}</p>
+        {/* THE OTHER RELAY EXPORT. Two files, two shapes, one carrier: this
+         * screen reads the board — a row per trip, with rates — and the trips
+         * export is a row per LEG, with mileage and no rate worth having.
+         * Nobody arriving with the wrong file should have to guess, so each
+         * screen names the other. */}
+        <p className="text-sm text-ink-2">
+          <Link
+            href="/loads/import/trips"
+            className="text-accent underline underline-offset-2"
+          >
+            {t('trips.title')}
+          </Link>
+        </p>
       </div>
 
       <RelayImportForm

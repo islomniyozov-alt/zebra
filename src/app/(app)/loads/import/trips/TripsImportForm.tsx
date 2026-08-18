@@ -1,0 +1,349 @@
+'use client'
+
+import { useActionState, useRef, useState } from 'react'
+import Link from 'next/link'
+import { Button } from '@/components/ui/Button'
+import { Select } from '@/components/ui/Select'
+import { Table, type Column } from '@/components/ui/Table'
+import { tripsImportAction } from './actions'
+import { EMPTY_TRIPS_IMPORT, type TripRowView } from './state'
+
+// ---------------------------------------------------------------------------
+// THE TRIPS IMPORT SCREEN — the load-board import's sibling, deliberately.
+//
+// It is the same two beats for the same reason: this writes freight in bulk,
+// and forty trips booked by one click cannot be reviewed field by field
+// afterwards. Where the shapes match the screen beside it, they match on
+// purpose — a dispatcher who has used one has used both.
+//
+// THE FILE IS READ IN THE BROWSER and posted as text. A trips export is a
+// table; nothing about it needs to be STORED. No upload, no R2 object, no
+// pending row to clean up when somebody changes their mind at the preview.
+//
+// TWO COUNTS, NOT ONE. Relay's booking email and Relay's trips export describe
+// the same freight from different ends, so a trip in this file may be a load
+// that already exists. The preview says which are new and which are being
+// FILLED IN before it says anything else, because those are two different
+// promises and confirming is one button.
+//
+// NOTHING IS AUTO-ASSIGNED. Driver and equipment are columns here because a
+// dispatcher recognises a trip by them — not because this screen will attach
+// them to a Driver or a Truck record. That is its own feature and it has not
+// been built.
+// ---------------------------------------------------------------------------
+
+export interface TripsImportLabels {
+  authority: string
+  choose: string
+  file: string
+  preview: string
+  previewTitle: string
+  previewOne: string
+  previewNone: string
+  trip: string
+  lane: string
+  stops: string
+  miles: string
+  what: string
+  driver: string
+  equipment: string
+  willCreate: string
+  willEnrich: string
+  unchanged: string
+  skippedLegs: string
+  unresolvedTitle: string
+  warningsTitle: string
+  notAssigned: string
+  confirm: string
+  back: string
+  stale: string
+  done: string
+  toLoads: string
+}
+
+export function TripsImportForm({
+  companies,
+  defaultCompanyId,
+  labels,
+}: {
+  companies: readonly { id: string; name: string }[]
+  defaultCompanyId: string
+  labels: TripsImportLabels
+}) {
+  const [state, submit, pending] = useActionState(
+    tripsImportAction,
+    EMPTY_TRIPS_IMPORT,
+  )
+  const [csv, setCsv] = useState('')
+  const [fileName, setFileName] = useState('')
+  const [companyId, setCompanyId] = useState(defaultCompanyId)
+  const fileInput = useRef<HTMLInputElement>(null)
+  // THE PREVIEW IS SERVER STATE AND DOES NOT CLEAR ITSELF — the same bug the
+  // screen beside it hit. `useActionState` holds the last result until the
+  // next submit, so "choose a different file" would leave the old plan on
+  // screen above a confirm button with no file behind either.
+  const [dismissed, setDismissed] = useState(false)
+
+  const plan = dismissed ? null : state.plan
+  const done = state.created !== null
+
+  return (
+    <form
+      action={submit}
+      onSubmit={() => setDismissed(false)}
+      className="flex flex-col gap-z4"
+    >
+      {/* Posted on every submit, so the confirm re-parses the SAME text the
+       * preview was built from rather than trusting a plan that came back
+       * from the browser. */}
+      <input type="hidden" name="csv" value={csv} />
+      <input type="hidden" name="companyId" value={companyId} />
+
+      {done ? (
+        <section className="flex flex-col items-start gap-z3 rounded-card border border-border bg-surface-2 p-z4">
+          <p className="text-sm text-ink">
+            {labels.done
+              .replace('{created}', String(state.created))
+              .replace('{enriched}', String(state.enriched ?? 0))}
+          </p>
+          <Link href="/loads">
+            <Button type="button" variant="secondary">
+              {labels.toLoads}
+            </Button>
+          </Link>
+        </section>
+      ) : null}
+
+      {!done && plan === null ? (
+        <section className="flex flex-col gap-z4 rounded-card border border-border bg-surface-2 p-z4">
+          {/* AUTHORITY IS FIELD 1 — Zebra's standing rule, and it decides
+           * which carrier's load-number series these trips take. */}
+          <Select
+            label={labels.authority}
+            value={companyId}
+            onChange={(event) => setCompanyId(event.target.value)}
+            options={companies.map((company) => ({
+              value: company.id,
+              label: company.name,
+            }))}
+          />
+
+          <div className="flex flex-wrap items-center gap-z3">
+            {/* A label wrapping the input, styled as the secondary button —
+             * a file input has no accessible way to be a <button>. */}
+            <label className="inline-flex h-control-compact cursor-pointer items-center rounded-control border border-border-strong bg-surface px-z3 text-xs font-medium text-ink hover:bg-surface-3">
+              {labels.choose}
+              <input
+                ref={fileInput}
+                type="file"
+                accept=".csv,text/csv"
+                className="sr-only"
+                onChange={async (event) => {
+                  const file = event.target.files?.[0]
+                  if (!file) return
+                  setFileName(file.name)
+                  setCsv(await file.text())
+                }}
+              />
+            </label>
+            {fileName ? (
+              <p className="text-xs text-ink-3">
+                {labels.file}: {fileName}
+              </p>
+            ) : null}
+          </div>
+
+          <div>
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={csv.trim() === '' || pending || companyId === ''}
+            >
+              {labels.preview}
+            </Button>
+          </div>
+
+          {state.error ? (
+            <p role="alert" className="text-sm text-danger">
+              {state.error}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
+      {!done && plan !== null ? (
+        <section className="flex flex-col gap-z4">
+          {state.stale ? (
+            <p role="alert" className="text-sm text-warning">
+              {labels.stale}
+            </p>
+          ) : null}
+
+          <h2 className="text-base font-medium text-ink">
+            {plan.rows.length === 0
+              ? labels.previewNone
+              : plan.rows.length === 1
+                ? labels.previewOne
+                : labels.previewTitle.replace(
+                    '{count}',
+                    String(plan.rows.length),
+                  )}
+          </h2>
+
+          {/* THE COUNTS BEFORE THE ROWS. Someone deciding whether to confirm
+           * needs the shape of the thing before its detail, and "12 to book,
+           * 3 to add to" is the whole decision for most files. */}
+          <ul className="flex flex-wrap gap-z3 text-sm text-ink-2">
+            <li>
+              {plan.createCount} {labels.willCreate}
+            </li>
+            <li>
+              {plan.enrichCount} {labels.willEnrich}
+            </li>
+            <li>
+              {plan.unchangedCount} {labels.unchanged}
+            </li>
+            {plan.skippedLegTotal > 0 ? (
+              <li>
+                {plan.skippedLegTotal} {labels.skippedLegs}
+              </li>
+            ) : null}
+          </ul>
+
+          {plan.rows.length > 0 ? (
+            <Table
+              rows={plan.rows}
+              columns={tripColumns(labels)}
+              rowKey={(row) => row.tripId}
+              caption={labels.previewTitle.replace(
+                '{count}',
+                String(plan.rows.length),
+              )}
+              // Never reached — the table only renders when there are rows —
+              // but the prop is required, and a table that could render
+              // nothing with nothing to say is the bug it guards against.
+              empty={<p className="text-sm text-ink-2">{labels.previewNone}</p>}
+            />
+          ) : null}
+
+          <p className="text-xs text-ink-3">{labels.notAssigned}</p>
+
+          {/* EVERY WARNING, IN WORDS, BEFORE THE BUTTON. The near-miss prefix
+           * ones are why this box exists: T-118R and 118R are one trip written
+           * two ways somewhere in the wild, and this screen refuses to guess
+           * which — it says so and lets a person decide. */}
+          {plan.warnings.length > 0 ? (
+            <div className="flex flex-col gap-z1 rounded-card border border-warning bg-surface-2 p-z3">
+              <p className="text-sm font-medium text-ink">
+                {labels.warningsTitle}
+              </p>
+              <ul className="flex flex-col gap-z1">
+                {plan.warnings.map((warning) => (
+                  <li key={warning} className="text-sm text-ink-2">
+                    {warning}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {/* UNRESOLVED CODES ARE NOT AN ERROR. The stop is still written,
+           * with the code as its name — a dock nobody has recorded yet is a
+           * fact about the location book, not a reason to refuse the trip. */}
+          {plan.unresolvedCodes.length > 0 ? (
+            <p className="text-sm text-ink-2">
+              {labels.unresolvedTitle.replace(
+                '{codes}',
+                plan.unresolvedCodes.join(', '),
+              )}
+            </p>
+          ) : null}
+
+          {state.error ? (
+            <p role="alert" className="text-sm text-danger">
+              {state.error}
+            </p>
+          ) : null}
+
+          <div className="flex flex-wrap gap-z3">
+            {plan.createCount + plan.enrichCount > 0 ? (
+              <>
+                {/* The signature of exactly this plan. Its presence is what
+                 * turns the next submit from a preview into a write. */}
+                <input
+                  type="hidden"
+                  name="signature"
+                  value={state.signature ?? ''}
+                />
+                <Button type="submit" variant="primary" disabled={pending}>
+                  {labels.confirm}
+                </Button>
+              </>
+            ) : null}
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setCsv('')
+                setFileName('')
+                setDismissed(true)
+                if (fileInput.current) fileInput.current.value = ''
+              }}
+            >
+              {labels.back}
+            </Button>
+          </div>
+        </section>
+      ) : null}
+    </form>
+  )
+}
+
+function tripColumns(labels: TripsImportLabels): Column<TripRowView>[] {
+  return [
+    {
+      key: 'tripId',
+      header: labels.trip,
+      render: (row) => (
+        <span className="font-mono" dir="ltr">
+          {row.tripId}
+        </span>
+      ),
+    },
+    {
+      key: 'lane',
+      header: labels.lane,
+      truncate: true,
+      render: (row) => row.lane,
+    },
+    {
+      key: 'stops',
+      header: labels.stops,
+      align: 'end',
+      render: (row) => String(row.stops),
+    },
+    {
+      key: 'miles',
+      header: labels.miles,
+      align: 'end',
+      render: (row) => (
+        <span className="tabular-nums" dir="ltr">
+          {row.miles}
+        </span>
+      ),
+    },
+    { key: 'what', header: labels.what, render: (row) => row.actionDetail },
+    {
+      key: 'driver',
+      header: labels.driver,
+      truncate: true,
+      render: (row) => row.driver,
+    },
+    {
+      key: 'equipment',
+      header: labels.equipment,
+      truncate: true,
+      render: (row) => row.equipment,
+    },
+  ]
+}

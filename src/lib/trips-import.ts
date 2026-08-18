@@ -239,3 +239,38 @@ export function nearMissWarnings(
 function unique(values: readonly string[]): string[] {
   return [...new Set(values.filter((value) => value.trim() !== ''))]
 }
+
+/**
+ * A fingerprint of what a preview showed, posted back with the confirm.
+ *
+ * WHY IT EXISTS: the preview and the confirm are two round trips over the same
+ * text, and between them a dispatcher can pick a different file. Without this,
+ * the second submit would write whatever the browser last held while the
+ * screen still displayed the plan for something else — the worst shape a bulk
+ * write can take, because it looks like it was reviewed.
+ *
+ * IT IS NOT A CHECKSUM OF THE FILE. Two exports of one trip differing only in
+ * whitespace or column order describe the same freight and should not force a
+ * re-read; what must not change is what the import WOULD DO. So the fingerprint
+ * is taken over the planned shape — which trips, how many stops each, the
+ * mileage, how many legs were dropped — and it is deliberately blind to
+ * everything the write does not use.
+ *
+ * SORTED, because row order in the export is not meaningful and reordering it
+ * is not a change worth refusing.
+ */
+export function planSignature(plan: TripsPlan): string {
+  const shape = plan.trips
+    .map(
+      (trip) =>
+        `${trip.tripId}:${trip.stops.length}:${trip.totalMiles ?? '-'}:${trip.cancelledLegs}`,
+    )
+    .sort()
+    .join('|')
+
+  let hash = 0
+  for (let index = 0; index < shape.length; index++) {
+    hash = (hash * 31 + shape.charCodeAt(index)) | 0
+  }
+  return `${plan.trips.length}-${hash}`
+}

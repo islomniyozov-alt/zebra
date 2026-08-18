@@ -150,9 +150,23 @@ export function stateCode(value: unknown): string | null {
   const trimmed = value.trim()
   if (trimmed === '') return null
 
-  if (/^[A-Za-z]{2}$/.test(trimmed)) return trimmed.toUpperCase()
+  // TWO LETTERS IS NOT ENOUGH TO BE A STATE. The first version returned any
+  // two-character string upper-cased, so "US" from a mis-split address became
+  // a state and one row went into the location book carrying it. "RD" off a
+  // street name would have done the same.
+  //
+  // This is flag 11's lesson one step over: that one said do not INVENT a
+  // state by slicing "Texas" to "TE"; this one says do not ACCEPT a non-state
+  // because it happens to be the right length.
+  if (/^[A-Za-z]{2}$/.test(trimmed)) {
+    const upper = trimmed.toUpperCase()
+    return KNOWN_CODES.has(upper) ? upper : null
+  }
   return STATE_CODES[trimmed.toLowerCase()] ?? null
 }
+
+/** Every code the table above can produce — the set a two-letter input must be in. */
+const KNOWN_CODES = new Set(Object.values(STATE_CODES))
 
 export interface ParsedAddress {
   addressLine1: string | null

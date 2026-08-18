@@ -210,10 +210,19 @@ const STATE_CODES = {
   'puerto rico': 'PR',
 }
 
+const KNOWN_CODES = new Set(Object.values(STATE_CODES))
+
 function stateCode(value) {
   const trimmed = String(value ?? '').trim()
   if (trimmed === '') return null
-  if (/^[A-Za-z]{2}$/.test(trimmed)) return trimmed.toUpperCase()
+  // Two letters is not enough to be a state: "US" from a mis-split address and
+  // "RD" off a street name are both the right length and neither is a place.
+  // Flag 11 said do not INVENT a state by slicing "Texas" to "TE"; this says
+  // do not ACCEPT a non-state for being two characters long.
+  if (/^[A-Za-z]{2}$/.test(trimmed)) {
+    const upper = trimmed.toUpperCase()
+    return KNOWN_CODES.has(upper) ? upper : null
+  }
   return STATE_CODES[trimmed.toLowerCase()] ?? null
 }
 
@@ -259,21 +268,39 @@ function parseSeedAddress(address) {
  */
 function stateInAddress(address) {
   const text = String(address ?? '')
+  // ONLY THE ST-ZIP FORM. The tail fallback that used to sit here matched the
+  // last comma-separated word — "USA" on most rows, a street suffix on others
+  // — and reported 37 disagreements in the Datatruck file, every one of them
+  // this comparator over-reaching rather than a source error. A postcode after
+  // two letters is what actually identifies a state.
   const match = /\b([A-Za-z]{2}),?\s+\d{5}(?:-\d{4})?\b/.exec(text)
-  if (match) return stateCode(match[1])
-  const tail = /,\s*([A-Za-z][A-Za-z .]+?)\s*(?:,\s*USA)?\s*$/.exec(text)
-  return tail ? stateCode(tail[1]) : null
+  return match ? stateCode(match[1]) : null
 }
 
 const unknownStates = new Set()
 const disagreements = []
 const prepared = rows.map((row) => {
-  const state = stateCode(row.state)
-  if (state === null && row.state !== '') unknownStates.add(row.state)
+  const fromColumn = stateCode(row.state)
   const fromAddress = stateInAddress(row.address)
-  if (state !== null && fromAddress !== null && state !== fromAddress) {
-    disagreements.push({ code: row.code, column: state, address: fromAddress })
+  if (fromColumn === null && row.state !== '') unknownStates.add(row.state)
+  if (
+    fromColumn !== null &&
+    fromAddress !== null &&
+    fromColumn !== fromAddress
+  ) {
+    disagreements.push({
+      code: row.code,
+      column: fromColumn,
+      address: fromAddress,
+    })
   }
+  // THE COLUMN FIRST, THE ADDRESS WHEN THE COLUMN IS UNUSABLE. XUSU's column
+  // holds "US" — its own build-time parse split "Rock Hill, SC 29730,US" at
+  // the wrong comma — and the address it came from still says SC plainly.
+  // Falling back recovers the state from the same string the column was
+  // derived from, rather than importing a dock with no state because one
+  // parse upstream slipped.
+  const state = fromColumn ?? fromAddress
   const { addressLine1, postalCode } = parseSeedAddress(row.address)
   return {
     facilityCode: row.code,
@@ -302,8 +329,12 @@ if (unknownStates.size > 0) {
   console.log('')
   console.log(`  ${unknownStates.size} state name(s) this could not read:`)
   for (const name of [...unknownStates].slice(0, 8)) console.log(`    ${name}`)
-  console.log('  Those rows import with a null state, which is a fact rather')
-  console.log('  than a guess — a wrong state moves a dock into another zone.')
+  console.log('  Those rows fall back to the state inside their own address,')
+  console.log('  and import with a null state only when that fails too — which')
+  console.log(
+    '  is a fact rather than a guess. A wrong state moves a dock into',
+  )
+  console.log('  another time zone, which design rule 3 then renders as truth.')
 }
 if (disagreements.length > 0) {
   console.log(``)

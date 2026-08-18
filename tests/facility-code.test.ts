@@ -58,6 +58,19 @@ describe('the state, as the two letters the column holds', () => {
 
   // FLAG 11'S LESSON. Slicing "Texas" to "TE" produced a state that does not
   // exist and nothing noticed. Unknown is null, not a prefix.
+  // TWO LETTERS IS NOT ENOUGH TO BE A STATE. The first version returned any
+  // two-character string upper-cased, so "US" from a mis-split address became
+  // a state and a dock went into the location book carrying it. "RD" off a
+  // street name would have done the same. Flag 11 said do not INVENT a state
+  // by slicing; this says do not ACCEPT a non-state for being the right
+  // length.
+  it('refuses two letters that are not a state', () => {
+    expect(stateCode('US')).toBeNull()
+    expect(stateCode('RD')).toBeNull()
+    expect(stateCode('CE')).toBeNull()
+    expect(stateCode('ZZ')).toBeNull()
+  })
+
   it('returns null for anything it does not know, never a slice', () => {
     expect(stateCode('Tex')).toBeNull()
     expect(stateCode('Ontario')).toBeNull()
