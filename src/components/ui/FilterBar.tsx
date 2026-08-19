@@ -36,13 +36,34 @@ export interface FilterGroup {
   choices: readonly FilterChoice[]
 }
 
+/**
+ * A free-text box whose value lands in the URL like every chip does.
+ *
+ * OPTIONAL, and absent by default: most boards here are answered by chips, and
+ * a search box on a screen with nothing worth typing is furniture. The loads
+ * list has one because "is trip T-115HXB4HH in the system?" is a question with
+ * a typed answer and no chip can hold it.
+ */
+export interface FilterSearch {
+  /** The query-string key, same contract as a group's `param`. */
+  param: string
+  label: string
+  placeholder: string
+}
+
 interface FilterBarProps {
   groups: readonly FilterGroup[]
+  search?: FilterSearch
   clearLabel: string
   moreLabel: string
 }
 
-export function FilterBar({ groups, clearLabel, moreLabel }: FilterBarProps) {
+export function FilterBar({
+  groups,
+  search,
+  clearLabel,
+  moreLabel,
+}: FilterBarProps) {
   const router = useRouter()
   const pathname = usePathname()
   const params = useSearchParams()
@@ -62,7 +83,28 @@ export function FilterBar({ groups, clearLabel, moreLabel }: FilterBarProps) {
     [params, pathname, router],
   )
 
-  const active = groups.some((group) => params.get(group.param) !== null)
+  // SUBMIT, NOT KEYSTROKE. A debounce would put a database query behind every
+  // letter of a nine-character trip id and re-render the table under the
+  // typing hand. Enter is the gesture, and it is also what makes the resulting
+  // URL a thing somebody chose to create rather than a trail of nine of them
+  // in the history.
+  const submitSearch = useCallback(
+    (value: string) => {
+      if (!search) return
+      const next = new URLSearchParams(params.toString())
+      const trimmed = value.trim()
+      if (trimmed === '') next.delete(search.param)
+      else next.set(search.param, trimmed)
+      router.replace(next.size > 0 ? `${pathname}?${next}` : pathname, {
+        scroll: false,
+      })
+    },
+    [params, pathname, router, search],
+  )
+
+  const active =
+    groups.some((group) => params.get(group.param) !== null) ||
+    (search !== undefined && params.get(search.param) !== null)
 
   return (
     <div className="flex flex-wrap items-center gap-z2 border-b border-border bg-surface px-gutter py-z2">
@@ -106,6 +148,37 @@ export function FilterBar({ groups, clearLabel, moreLabel }: FilterBarProps) {
           })}
         </div>
       ))}
+
+      {search ? (
+        <form
+          className="flex items-center gap-z1"
+          onSubmit={(event) => {
+            event.preventDefault()
+            const field = new FormData(event.currentTarget).get(search.param)
+            submitSearch(typeof field === 'string' ? field : '')
+          }}
+        >
+          <label
+            htmlFor={`filter-${search.param}`}
+            className="text-xs font-medium uppercase tracking-[0.04em] text-ink-3"
+          >
+            {search.label}
+          </label>
+          <input
+            id={`filter-${search.param}`}
+            name={search.param}
+            type="search"
+            dir="ltr"
+            // `key` on the URL value so a cleared filter empties the box.
+            // Without it the input keeps what was typed while the table shows
+            // everything, which reads as a filter that stopped working.
+            key={params.get(search.param) ?? ''}
+            defaultValue={params.get(search.param) ?? ''}
+            placeholder={search.placeholder}
+            className="h-control-compact rounded-control border border-border-strong bg-surface px-z2 font-mono text-xs text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none"
+          />
+        </form>
+      ) : null}
 
       <Button variant="ghost" size="compact" disabled>
         {moreLabel}

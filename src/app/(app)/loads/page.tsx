@@ -6,6 +6,7 @@ import { companyScopeFilter } from '@/lib/tenancy'
 import { FilterBar } from '@/components/ui/FilterBar'
 import { LoadsTable, type LoadRow } from './LoadsTable'
 import { billingLabelKey, operationalLabelKey } from '@/lib/status'
+import { loadSearchWhere } from '@/lib/loads'
 import { readyToInvoiceWhere } from '@/lib/invoices'
 import { DENSITIES, readDensity, readSavedViews } from '@/lib/preferences'
 import { SavedViews } from './SavedViews'
@@ -50,6 +51,10 @@ export default async function LoadsPage({
   // chip ran none.
   const billingParam =
     typeof params['billing'] === 'string' ? params['billing'] : undefined
+  // "IS TRIP X IN THE SYSTEM?" — the reference is the number dispatch quotes
+  // to Amazon, and until now the only way to answer was to read the list.
+  const referenceParam =
+    typeof params['ref'] === 'string' ? params['ref'].trim() : ''
 
   const {
     rows,
@@ -71,10 +76,16 @@ export default async function LoadsPage({
     // OTHER active filter and ignores its own group — a Booked count that
     // ignored the company filter would send somebody to a screen with a
     // different number on it.
+    // Contains rather than equals, and why, in `loadSearchWhere`. It lives in
+    // loads.ts so a test can call it — the searching semantics are the kind of
+    // thing that silently does not work.
+    const searchWhere = loadSearchWhere(referenceParam)
+
     const base: Prisma.LoadWhereInput = {
       deletedAt: null,
       ...scope,
       ...(companyParam ? { companyId: companyParam } : {}),
+      ...searchWhere,
     }
     const statusWhere = statusParam
       ? { operationalStatus: statusParam as LoadOperationalStatus }
@@ -100,6 +111,9 @@ export default async function LoadsPage({
       select: {
         id: true,
         loadNumber: true,
+        // The number dispatch quotes to Amazon. Shown under the load number
+        // rather than in a column of its own — see LoadsTable.
+        referenceNumber: true,
         isCancelled: true,
         operationalStatus: true,
         billingStatus: true,
@@ -157,6 +171,7 @@ export default async function LoadsPage({
     const rows: LoadRow[] = loads.map((load) => ({
       id: load.id,
       loadNumber: load.loadNumber,
+      reference: load.referenceNumber,
       companyName: load.company.name,
       customerName: load.customer.name,
       pickup: place(load.stops.find((stop) => stop.type === 'PICKUP')),
@@ -325,6 +340,11 @@ export default async function LoadsPage({
             })),
           },
         ]}
+        search={{
+          param: 'ref',
+          label: t('loads.filter.reference'),
+          placeholder: t('loads.filter.referencePlaceholder'),
+        }}
       />
 
       <LoadsTable
@@ -344,6 +364,7 @@ export default async function LoadsPage({
         labels={{
           caption: t('loads.title'),
           load: t('loads.column.load'),
+          reference: t('loads.column.reference'),
           company: t('loads.column.company'),
           customer: t('loads.column.customer'),
           pickup: t('loads.column.pickup'),

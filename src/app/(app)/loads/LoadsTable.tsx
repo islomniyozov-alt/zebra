@@ -19,6 +19,8 @@ import type {
 export interface LoadRow {
   id: string
   loadNumber: string
+  /** Amazon's Trip ID, or whatever the broker calls this freight. */
+  reference: string | null
   companyName: string
   customerName: string
   pickup: string
@@ -37,6 +39,7 @@ interface LoadsTableProps {
   labels: {
     caption: string
     load: string
+    reference: string
     company: string
     customer: string
     pickup: string
@@ -72,8 +75,27 @@ export function LoadsTable({
     {
       key: 'loadNumber',
       header: labels.load,
-      // Never truncated. This is the field people copy and read down a phone.
-      render: (row) => <span className="z-identifier">{row.loadNumber}</span>,
+      // THE REFERENCE RIDES WITH THE LOAD NUMBER RATHER THAN IN A COLUMN OF
+      // ITS OWN, and the reason is §7.1: nine visible columns maximum, with
+      // anything past that behind a column chooser this application does not
+      // have. The list already runs nine when an organization has more than
+      // one authority — which this one does — so a tenth column would break a
+      // checked-in rule to show a field that belongs beside the load number
+      // anyway. Both are identity; a dispatcher scans one place for "which
+      // load is this".
+      //
+      // Never truncated. These are the fields people copy and read down a
+      // phone.
+      render: (row) => (
+        <span className="flex flex-col">
+          <span className="z-identifier">{row.loadNumber}</span>
+          {row.reference === null ? null : (
+            <span className="font-mono text-xs text-ink-3" dir="ltr">
+              {labels.reference} {row.reference}
+            </span>
+          )}
+        </span>
+      ),
     },
     ...(showCompanyColumn
       ? [

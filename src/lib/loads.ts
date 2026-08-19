@@ -2,6 +2,7 @@ import type { TxClient } from './tenancy'
 import type {
   EquipmentType,
   LoadOperationalStatus,
+  Prisma,
 } from '@/generated/prisma/client'
 import { allocateNumber } from './counters'
 import { assertAssignable, loadWindow } from './dispatch'
@@ -682,3 +683,35 @@ export const UI_OPERATIONAL_STATUSES: LoadOperationalStatus[] = [
 // Re-exported so callers keep one loads import. It lives in ./load-status
 // because documents.ts needs it and has no business importing this module.
 export { podConfirmed }
+
+/**
+ * The predicate behind the loads list's search box.
+ *
+ * CONTAINS, NOT EQUALS, AND THE DISTINCTION IS DELIBERATE. Exact matching is
+ * the rule for JOINING a trip to a load — `planTripWrite` refuses to guess
+ * that "T-115HXB4HH" and "115HXB4HH" are one reference, because guessing there
+ * attaches freight to the wrong load and nobody sees it happen.
+ *
+ * SEARCHING IS THE OPPOSITE PROBLEM. A dispatcher holding a Relay screen types
+ * what is printed in front of them, and both the prefixed and the bare form
+ * exist in the wild. A substring match finds the load under either shape and a
+ * human reads the answer — which is the whole question being asked: is this
+ * trip in the system?
+ *
+ * THE LOAD NUMBER IS SEARCHED TOO. A box on a loads list that refused the
+ * number printed down every other row of the same table would be a trap.
+ *
+ * An empty term is no filter at all, rather than a filter matching everything
+ * — the caller spreads this into a `where` and `{}` is what "not filtering"
+ * has to look like there.
+ */
+export function loadSearchWhere(term: string): Prisma.LoadWhereInput {
+  const trimmed = term.trim()
+  if (trimmed === '') return {}
+  return {
+    OR: [
+      { referenceNumber: { contains: trimmed, mode: 'insensitive' } },
+      { loadNumber: { contains: trimmed, mode: 'insensitive' } },
+    ],
+  }
+}

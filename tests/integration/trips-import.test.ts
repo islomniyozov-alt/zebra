@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
 import { withOrg } from '@/lib/tenancy'
-import { LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
+import { LOAD_WRITE_TIMEOUT_MS, loadSearchWhere } from '@/lib/loads'
 import { resolveBroker } from '@/lib/locations'
 import { planTrips } from '@/lib/trips-import'
 import {
@@ -233,5 +233,68 @@ describe('a trip whose load already exists is enriched, not doubled', () => {
     // asserted anyway, so the two paths are held to one standard.
     expect(loads[0]!.stops.map((row) => row.name)).toEqual(['DEN7', 'MKC6'])
     expect(loads[0]!.stops[1]!.legMiles).toBe(583)
+  })
+})
+
+describe('finding a trip by the number dispatch quotes', () => {
+  // "IS TRIP X IN THE SYSTEM?" — the question the loads-list search exists to
+  // answer, asked against real Postgres because `contains` and `insensitive`
+  // are translated into SQL rather than evaluated in JavaScript. A predicate
+  // that compiles is not a predicate that matches.
+  const find = (term: string) =>
+    inOrg((tx) =>
+      tx.load.findMany({
+        where: { deletedAt: null, ...loadSearchWhere(term) },
+        select: { referenceNumber: true },
+      }),
+    )
+
+  it('finds a prefixed trip when the bare id is typed, and the reverse', async () => {
+    const bare = `SEARCH${nonce}`
+    await importTrip([leg({ tripId: `T-${bare}`, loadId: `L-S1-${nonce}` })])
+
+    // BOTH SHAPES EXIST IN THE WILD and a dispatcher types what is printed in
+    // front of them. Exact matching is the JOIN rule, deliberately not this.
+    expect((await find(bare)).map((row) => row.referenceNumber)).toContain(
+      `T-${bare}`,
+    )
+    expect(
+      (await find(`T-${bare}`)).map((row) => row.referenceNumber),
+    ).toContain(`T-${bare}`)
+  })
+
+  it('ignores case', async () => {
+    const bare = `MiXeD${nonce}`
+    await importTrip([leg({ tripId: `T-${bare}`, loadId: `L-S2-${nonce}` })])
+    expect(
+      (await find(bare.toLowerCase())).map((row) => row.referenceNumber),
+    ).toContain(`T-${bare}`)
+  })
+
+  // The number printed down every other row of the same table. A search box
+  // that refused it would be a trap.
+  it('finds a load by its own load number too', async () => {
+    const { load } = await importTrip([
+      leg({ tripId: `T-BYNUM${nonce}`, loadId: `L-S3-${nonce}` }),
+    ])
+    const found = await inOrg((tx) =>
+      tx.load.findMany({
+        where: { deletedAt: null, ...loadSearchWhere(load.loadNumber) },
+        select: { id: true },
+      }),
+    )
+    expect(found.map((row) => row.id)).toContain(load.id)
+  })
+
+  // An empty term must not become a filter that matches nothing — the caller
+  // spreads this into a `where`, and `{}` is what "not filtering" looks like.
+  it('does not filter on an empty or whitespace term', async () => {
+    await importTrip([
+      leg({ tripId: `T-ALL${nonce}`, loadId: `L-S4-${nonce}` }),
+    ])
+    const all = await find('')
+    const spaces = await find('   ')
+    expect(all.length).toBeGreaterThan(0)
+    expect(spaces.length).toBe(all.length)
   })
 })

@@ -280,6 +280,16 @@ export default async function LoadDetailPage({
           />
           <h1 className="text-lg font-medium text-ink">
             <span className="font-mono">{load.loadNumber}</span>
+            {/* THE NUMBER DISPATCH QUOTES TO AMAZON, in the header where it is
+             * read from rather than buried in the summary list. Our load
+             * number is what this office calls the freight; the reference is
+             * what the broker calls it, and a phone call about a trip starts
+             * with theirs. Dimmer, because it identifies the same load. */}
+            {load.referenceNumber === null ? null : (
+              <span className="ms-z2 font-mono text-sm text-ink-2" dir="ltr">
+                · {t('loads.column.reference')} {load.referenceNumber}
+              </span>
+            )}
           </h1>
           {/* §7.2 — operational FILLED, billing OUTLINED, side by side. */}
           <StatusBadge
