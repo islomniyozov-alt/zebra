@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { createLoad, LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
+import { LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import { resolveBroker } from '@/lib/locations'
 import { parseTripsCsv } from '@/lib/trips-csv'
 import {
@@ -13,10 +13,10 @@ import {
   type PlannedTrip,
 } from '@/lib/trips-import'
 import {
+  createTripLoad,
   enrichLoad,
   planTripWrite,
   resolveFacilities,
-  stopRowsForTrip,
   tripFacilityCodes,
 } from '@/lib/trips-writer'
 import { EMPTY_TRIPS_IMPORT, type TripsImportState } from './state'
@@ -204,23 +204,17 @@ export async function tripsImportAction(
           continue
         }
 
-        const rows = stopRowsForTrip(trip, facilities)
-        await createLoad(tx, session.organizationId, {
-          companyId,
-          customerId,
-          referenceNumber: trip.tripId,
-          // RULE 6: no money reaches this call. The rate comes from the
-          // booking email or the load carries none.
-          ...(trip.totalMiles === null
-            ? {}
-            : { dispatchedMiles: trip.totalMiles }),
-          stops: rows.map((row) => ({
-            type: row.type,
-            place: row.name,
-            locationId: row.locationId,
-            referenceNumber: row.referenceNumber,
-          })),
-        })
+        // THE WRITE LIVES IN `trips-writer.ts`, NOT HERE. It used to be inline
+        // and mapped the stop rows by hand, with `place` where `createLoad`
+        // wanted `name` — a key nothing typechecked and nothing could test,
+        // because this file is 'use server' and a test cannot call it. Every
+        // stop would have landed nameless.
+        await createTripLoad(
+          tx,
+          session.organizationId,
+          { trip, companyId, customerId },
+          facilities,
+        )
         created++
       }
     },

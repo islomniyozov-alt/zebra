@@ -82,6 +82,18 @@ export interface StopInput {
   contactName?: unknown
   contactPhone?: unknown
   instructions?: unknown
+  /**
+   * The leg that ARRIVED at this stop: its distance, and whether it ran empty.
+   *
+   * TYPED, NOT `unknown`, UNLIKE ITS NEIGHBOURS ABOVE. Those are `unknown`
+   * because they come from form data and are laundered through `optionalText`.
+   * These come from a parser that has already made them numbers, and typing
+   * them is what makes a caller passing the wrong shape a compile error rather
+   * than a silent null — which is exactly how these two came to be missing
+   * from the trips importer's create path for a day.
+   */
+  legMiles?: number | null
+  legEmpty?: boolean | null
 }
 
 export interface LoadInput {
@@ -218,6 +230,8 @@ async function writeStops(
       contactName: optionalText(stop.contactName),
       contactPhone: optionalText(stop.contactPhone),
       instructions: optionalText(stop.instructions),
+      legMiles: stop.legMiles ?? null,
+      legEmpty: stop.legEmpty ?? null,
     })),
   })
 }

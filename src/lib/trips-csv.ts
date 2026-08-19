@@ -13,6 +13,20 @@ import { parseCsv } from './relay-csv'
 //   * It does not read `Estimated Cost`. Amazon's internal allocation summed
 //     to ~$310 on a trip that paid $1,776, and a column nothing parses cannot
 //     leak into a rate field later. Rule 6, enforced by absence.
+//
+//     AND `relay-csv.ts` READS A COLUMN OF THAT NAME ON PURPOSE. Not an
+//     inconsistency and not a leak: the board export is a row per TRIP, where
+//     `Estimated Cost` is one figure for the whole move and the only rate the
+//     file carries. Phase 6 flag 23 ruled it imported — a load with no rate
+//     cannot be reconciled against the weekly statement — and the settlement
+//     corrects it. Here the column is a row per LEG and means a share, not a
+//     price.
+//
+//     THE TWO RULINGS LOOK CONTRADICTORY AND ARE BOTH TRUE. On 2026-08-19 the
+//     first real board import produced rates of $15.18 and $297.69 and was
+//     reported as rule 6 leaking, by the person who wrote both rulings; the
+//     assertion protecting this file had held perfectly the whole time. Before
+//     citing either rule, establish which export is in hand.
 //   * It does not decide anything about loads. Legs come out; what becomes a
 //     stop chain is `trips-import.ts`'s judgment, made where it can be tested
 //     without a file.
@@ -254,6 +268,10 @@ export function parseTripsCsv(text: string): ParsedTripsFile {
       return
     }
 
+    // MILES, AND DELIBERATELY NOT THE COST BESIDE IT. `Estimated Cost` sits a
+    // few columns over in this same export and is never read — see rule 6 at
+    // the top of this file, and `relay-csv.ts` for why the board export treats
+    // its own column of that name the opposite way.
     const distanceText = cell(cells, 'Estimate Distance')
     const distance = distanceText === '' ? null : Number(distanceText)
 

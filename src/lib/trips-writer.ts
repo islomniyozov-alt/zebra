@@ -1,3 +1,4 @@
+import { createLoad, type StopInput } from './loads'
 import type { TxClient } from './tenancy'
 import type { PlannedTrip } from './trips-import'
 
@@ -110,6 +111,74 @@ export function stopRowsForTrip(
     legMiles: stop.legMiles,
     legEmpty: stop.legEmpty,
   }))
+}
+
+/**
+ * Book a trip that no load carries yet.
+ *
+ * IT LIVES HERE RATHER THAN IN THE SERVER ACTION, and that is the whole
+ * lesson of the bug that produced it. The create half used to be inline in
+ * `actions.ts` — a 'use server' file no test can call — where it mapped
+ * `stopRowsForTrip`'s output by hand into `createLoad`'s stop shape and got
+ * the key wrong: `place` instead of `name`. TypeScript does not flag an
+ * excess property on a literal returned from a `.map()` callback, so it
+ * typechecked, linted, passed 1,112 unit tests and 405 integration tests, and
+ * would have written every stop with no name at all. The same hand-mapping
+ * dropped `legMiles` and `legEmpty`, which is the entire point of the
+ * migration that added them.
+ *
+ * `enrichLoad` beside it never had the bug, because it spreads the row whole.
+ * The difference was not care; it was that one path had a function to test and
+ * the other had a screen.
+ *
+ * NO MONEY IS PASSED. Rule 6, and there is nothing to pass: the parser never
+ * read a cost.
+ */
+export async function createTripLoad(
+  tx: TxClient,
+  organizationId: string,
+  input: TripWriteInput,
+  facilities: ReadonlyMap<string, { id: string }>,
+): Promise<TripWriteOutcome> {
+  const rows = stopRowsForTrip(input.trip, facilities)
+
+  // THE `: StopInput` ON THE CALLBACK IS THE GUARD, AND ITS POSITION IS THE
+  // WHOLE TRICK. Annotating the VARIABLE — `const stops: StopInput[] = ...` —
+  // does nothing: excess-property checking does not reach a literal returned
+  // from a `.map()` callback, which is precisely why `place` survived review,
+  // typecheck, lint, 1,112 unit tests and 405 integration tests. Measured, not
+  // assumed: with the variable annotation alone, reintroducing `place`
+  // still compiled clean; with the RETURN annotation it fails as TS2353.
+  //
+  // Both annotations are kept. The variable one documents the intent, the
+  // callback one enforces it.
+  const stops: StopInput[] = rows.map(
+    (row): StopInput => ({
+      type: row.type,
+      locationId: row.locationId,
+      name: row.name,
+      referenceNumber: row.referenceNumber,
+      legMiles: row.legMiles,
+      legEmpty: row.legEmpty,
+    }),
+  )
+
+  const load = await createLoad(tx, organizationId, {
+    companyId: input.companyId,
+    customerId: input.customerId,
+    referenceNumber: input.trip.tripId,
+    ...(input.trip.totalMiles === null
+      ? {}
+      : { dispatchedMiles: String(input.trip.totalMiles) }),
+    stops,
+  })
+
+  return {
+    kind: 'created',
+    loadId: load.id,
+    tripId: input.trip.tripId,
+    stops: stops.length,
+  }
 }
 
 /**

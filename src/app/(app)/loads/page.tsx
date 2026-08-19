@@ -112,7 +112,9 @@ export default async function LoadsPage({
         truck: { select: { unitNumber: true } },
         stops: {
           orderBy: { sequence: 'asc' },
-          select: { city: true, state: true, type: true },
+          // `name` IS SELECTED BECAUSE SOME STOPS HAVE NOTHING ELSE. See
+          // `place` below.
+          select: { name: true, city: true, state: true, type: true },
         },
       },
     })
@@ -124,9 +126,33 @@ export default async function LoadsPage({
       maximumFractionDigits: 2,
     })
 
+    // CITY AND STATE FIRST, THE STOP'S OWN NAME WHEN IT HAS NEITHER.
+    //
+    // The Relay board export carries no addresses at all — it names facilities
+    // and clocks — so its stops land with `name` set to the facility code and
+    // `city`/`state` null. This column read only the two null fields, joined
+    // them to the empty string, and rendered BLANK on every imported load. The
+    // first real production import was reported as "did the stops write?", and
+    // they had: the load detail screen has always fallen back to `stop.name`
+    // and showed the codes the whole time.
+    //
+    // TWO SCREENS DISAGREEING ABOUT ONE ROW is the actual defect, so this is
+    // now the same expression the detail uses. Read-side on purpose: the
+    // `Location` a stop links to already owns city and state, and copying them
+    // onto the stop at write time would be a duplicate free to drift.
+    //
+    // AN ABSENT STOP IS STILL AN EM-DASH, and that distinction is what
+    // diagnosed this: blank meant a stop existed with nothing to print, while
+    // a missing pickup would have printed '—'.
     const place = (
-      stop: { city: string | null; state: string | null } | undefined,
-    ) => (stop ? [stop.city, stop.state].filter(Boolean).join(', ') : '—')
+      stop:
+        | { name: string | null; city: string | null; state: string | null }
+        | undefined,
+    ) => {
+      if (!stop) return '—'
+      const address = [stop.city, stop.state].filter(Boolean).join(', ')
+      return address || stop.name || '—'
+    }
 
     const rows: LoadRow[] = loads.map((load) => ({
       id: load.id,

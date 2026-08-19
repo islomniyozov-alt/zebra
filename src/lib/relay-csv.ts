@@ -117,7 +117,26 @@ export interface RelayTrip {
   tractorId: string | null
   /** Whole miles, floored. `wholeNumber` refuses a decimal and every row has one. */
   distanceMiles: number | null
-  /** `Estimated Cost`, in integer cents. Amazon's estimate, not a booked rate. */
+  /**
+   * `Estimated Cost`, in integer cents. Amazon's estimate, not a booked rate.
+   *
+   * THE OTHER RELAY EXPORT HAS A COLUMN OF THIS NAME AND IT IS READ BY
+   * NOBODY. See `trips-csv.ts`, which parses the Trips export — a row per
+   * LEG — where `Estimated Cost` is an internal allocation across the legs of
+   * one trip and sums to about $310 on a trip that paid $1,776. Writing that
+   * near a rate would be a fiction, so rule 6 of the trips build forbids
+   * reading it at all and a test asserts the parser never names it.
+   *
+   * HERE IT IS THE ONLY RATE THERE IS. This file parses the load-board
+   * export — a row per TRIP — where the column is one figure for the whole
+   * move. Phase 6 flag 23 ruled it imported anyway: a load with no rate
+   * cannot be reconciled against the weekly statement at all, and the
+   * settlement is what corrects it.
+   *
+   * TWO TRUE RULINGS THAT LOOK CONTRADICTORY, so they point at each other.
+   * The trap is proven: it alarmed the people who wrote both. Before citing
+   * either, check which export is in hand — a row per trip, or a row per leg.
+   */
   costCents: number | null
   currency: string | null
   shipperAccount: string | null
@@ -371,6 +390,10 @@ export function parseRelayCsv(text: string): RelayTrip[] {
       trailerId: text('Trailer ID'),
       tractorId: text('Tractor Vehicle ID'),
       distanceMiles: wholeMiles(at('Estimate Distance'), at('Unit')),
+      // THE BOARD EXPORT'S COST, AND ONLY THIS FILE MAY READ IT. `trips-csv.ts`
+      // refuses the same column name in the Trips export, where it means a
+      // per-leg allocation rather than the trip's price. See `costCents` on
+      // `RelayTrip` above for both rulings.
       costCents: money(at('Estimated Cost')),
       currency: text('Currency'),
       shipperAccount: text('Shipper Account'),

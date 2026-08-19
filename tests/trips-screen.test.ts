@@ -108,11 +108,19 @@ describe('the confirm writes only what the preview showed', () => {
     expect(code).toContain('acknowledged !== signature')
     expect(code).toContain('stale: true')
 
-    // The write happens after both gates, never before.
+    // BOTH WRITE PATHS, BY NAME, AND EACH MUST EXIST. This assertion broke
+    // when the create half moved into `trips-writer.ts` and the old name
+    // stopped appearing — `indexOf` returned -1 and the test failed loudly,
+    // which is the correct behaviour for a guard whose subject was renamed. A
+    // guard that shrugged at a name it could no longer find would have gone on
+    // reporting success about code it was no longer reading.
     const stale = code.indexOf('stale: true')
-    const write = code.indexOf('createLoad(')
     expect(stale).toBeGreaterThan(-1)
-    expect(write).toBeGreaterThan(stale)
+    for (const write of ['createTripLoad(', 'enrichLoad(']) {
+      const at = code.indexOf(write)
+      expect(at, `the action never calls ${write}`).toBeGreaterThan(-1)
+      expect(at, `${write} runs before the stale gate`).toBeGreaterThan(stale)
+    }
   })
 })
 
