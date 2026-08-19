@@ -114,3 +114,53 @@ export async function resolveBroker(
 }
 
 export { stateCode }
+
+// ---------------------------------------------------------------------------
+// AN ADDRESS, AS ONE LINE, FOR A HUMAN WHO HAS TO SAY IT OUT LOUD.
+//
+// A facility code is an exact key and it is meaningless to the person driving
+// to it. "MEM1" is a row in the location book; "3639 E Holmes Rd, Memphis, TN
+// 38118" is a thing you can hand to a driver, read down a phone, or paste into
+// a map. The seed put 4,367 of these in the database and no screen showed one.
+//
+// SHARED RATHER THAN INLINE because more than one surface needs it and two
+// implementations of "which parts of an address, in what order" is how two
+// screens come to disagree about one dock.
+// ---------------------------------------------------------------------------
+
+export interface AddressParts {
+  addressLine1?: string | null
+  city?: string | null
+  state?: string | null
+  postalCode?: string | null
+}
+
+/**
+ * The address on one line, or null when there is nothing to show.
+ *
+ * WHATEVER IS MISSING IS SIMPLY ABSENT. Most imported facilities have a street
+ * and a city; some have only a city and a state; the ones the seed could not
+ * read have a street and nothing else. Each of those is a useful sentence and
+ * none of them should render a stray comma or the word "null".
+ *
+ * NULL, NOT THE EMPTY STRING. The caller decides what an absent address looks
+ * like — the load detail falls back to the facility code, which is better than
+ * a blank line where an address should be.
+ */
+export function formatAddress(parts: AddressParts | null): string | null {
+  if (!parts) return null
+
+  const street = optionalText(parts.addressLine1)
+  const city = optionalText(parts.city)
+  const state = optionalText(parts.state)
+  const postal = optionalText(parts.postalCode)
+
+  // "Hammond, LA 70401" — the postcode belongs to the state, without a comma
+  // between them, which is how a US address is written and read aloud.
+  const region = [city, [state, postal].filter(Boolean).join(' ') || null]
+    .filter(Boolean)
+    .join(', ')
+
+  const line = [street, region || null].filter(Boolean).join(', ')
+  return line === '' ? null : line
+}

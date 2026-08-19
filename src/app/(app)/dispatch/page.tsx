@@ -88,6 +88,9 @@ export default async function DispatchPage({
             orderBy: { sequence: 'asc' },
             select: {
               scheduledAt: true,
+              // `name` for the same reason the loads list selects it: a Relay
+              // import writes the facility code and no city at all.
+              name: true,
               city: true,
               state: true,
               type: true,
@@ -105,9 +108,22 @@ export default async function DispatchPage({
 
   const canAssign = await currentUserCan('update', 'dispatch')
 
-  const routeOf = (stops: { city: string | null; state: string | null }[]) => {
-    const place = (stop?: { city: string | null; state: string | null }) =>
-      stop ? [stop.city, stop.state].filter(Boolean).join(', ') : '—'
+  // THE SAME FALLBACK THE LOADS LIST AND THE LOAD DETAIL USE. City and state
+  // alone rendered "— → —" for every imported load, because the board export
+  // carries no addresses and its stops hold the facility code in `name`. Three
+  // screens showing one row differently is the defect; one expression is the
+  // fix.
+  type StopPlace = {
+    name: string | null
+    city: string | null
+    state: string | null
+  }
+  const routeOf = (stops: StopPlace[]) => {
+    const place = (stop?: StopPlace) => {
+      if (!stop) return '—'
+      const address = [stop.city, stop.state].filter(Boolean).join(', ')
+      return address || stop.name || '—'
+    }
     return `${place(stops[0])} → ${place(stops[stops.length - 1])}`
   }
 

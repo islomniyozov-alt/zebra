@@ -9,6 +9,7 @@ import {
   operationalTone,
   TONE_STRIPE,
 } from '@/lib/status'
+import { formatAddress } from '@/lib/locations'
 import { renderStopTime, ZONE_CHOICES } from '@/lib/stop-time'
 import { isMessageKey, type MessageKey } from '@/lib/i18n'
 import { Button } from '@/components/ui/Button'
@@ -101,7 +102,21 @@ export default async function LoadDetailPage({
         trailer: { select: { unitNumber: true } },
         stops: {
           orderBy: { sequence: 'asc' },
-          include: { location: { select: { timezone: true } } },
+          include: {
+            // THE ADDRESS COMES FROM THE FACILITY BOOK when the stop has none
+            // of its own. A Relay import writes the facility code and nothing
+            // else — the seed's 4,367 rows are where the street lives — and a
+            // code is not something a driver can be sent to.
+            location: {
+              select: {
+                timezone: true,
+                addressLine1: true,
+                city: true,
+                state: true,
+                postalCode: true,
+              },
+            },
+          },
         },
         accessorials: {
           orderBy: { createdAt: 'asc' },
@@ -367,6 +382,11 @@ export default async function LoadDetailPage({
                   locale,
                   zone: stop.location?.timezone ?? null,
                 })
+                // The stop's own address wins; the facility book fills the
+                // silence. `formatAddress` returns null rather than '' so
+                // "has none" is distinguishable from "has an empty one".
+                const address =
+                  formatAddress(stop) ?? formatAddress(stop.location)
                 return (
                   <li
                     key={stop.id}
@@ -387,6 +407,19 @@ export default async function LoadDetailPage({
                       {stop.name ??
                         [stop.city, stop.state].filter(Boolean).join(', ')}
                     </p>
+                    {/* THE ADDRESS, UNDER THE NAME A DISPATCHER RECOGNISES.
+                     * The stop's own address first — somebody typed or
+                     * corrected it — and the linked facility's only when the
+                     * stop has none, which is every Relay-imported stop.
+                     *
+                     * Suppressed when it would only repeat the line above: a
+                     * stop typed as "Chicago, IL" has that as its name AND as
+                     * its whole address, and printing it twice is noise. */}
+                    {address !== null && address !== stop.name ? (
+                      <p className="mt-z1 text-sm text-ink-2" dir="ltr">
+                        {address}
+                      </p>
+                    ) : null}
                     {when?.approximate ? (
                       <p className="mt-z1 text-xs text-ink-3">
                         {t('loads.zoneApprox').replace('{zone}', when.zone)}
