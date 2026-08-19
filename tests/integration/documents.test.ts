@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
-import { runInOrg } from '@/lib/tenancy'
+import { runInOrg, type TxClient } from '@/lib/tenancy'
 import { unattributed, type Attribution } from '@/lib/audit'
 import { deleteObject, headObject, r2ConfigFromEnv } from '@/lib/r2'
 import {
@@ -395,6 +395,16 @@ describe('phantom rows', () => {
 })
 
 describe('reconciliation', () => {
+  // THE SWEEP OPENS ITS OWN TRANSACTIONS, ONE PER DATABASE STEP, because the
+  // R2 calls between them must not be inside either. Passing a runner rather
+  // than a `tx` is what makes that the sweep's choice instead of its caller's
+  // — and the caller cannot accidentally wrap the network work in a
+  // transaction again, because there is no longer a `tx` to wrap it with.
+  const sweepRunner = <T>(fn: (tx: TxClient) => Promise<T>): Promise<T> =>
+    runInOrg(app, orgA, fn, {
+      attribution: unattributed('scheduled reconciliation sweep'),
+    })
+
   it('clears expired mints and the orphans behind them', async () => {
     const uploaded = await mint()
     await put(uploaded.url, uploaded.headers, PDF)
@@ -407,14 +417,7 @@ describe('reconciliation', () => {
       })
     }
 
-    const result = await runInOrg(
-      app,
-      orgA,
-      (tx) => reconcileExpiredUploads(tx),
-      {
-        attribution: unattributed('scheduled reconciliation sweep'),
-      },
-    )
+    const result = await reconcileExpiredUploads(sweepRunner)
 
     expect(result.expiredMints).toBeGreaterThanOrEqual(2)
     expect(result.orphansDeleted).toBeGreaterThanOrEqual(1)
@@ -446,9 +449,7 @@ describe('reconciliation', () => {
       },
     })
 
-    await runInOrg(app, orgA, (tx) => reconcileExpiredUploads(tx), {
-      attribution: unattributed('scheduled reconciliation sweep'),
-    })
+    await reconcileExpiredUploads(sweepRunner)
 
     expect(
       await owner.pendingUpload.count({
@@ -462,16 +463,59 @@ describe('reconciliation', () => {
     ).toBe(0)
   })
 
+  // THE CEILING, ASSERTED. The original sweep held one interactive
+  // transaction across every R2 call it made, and Postgres gives it five
+  // seconds. At a measured ~350ms per `headObject` that is roughly fourteen
+  // expired mints before the sweep can no longer finish — against a `take`
+  // that defaults to TWO HUNDRED.
+  //
+  // TWENTY-FOUR IS A MEASURED NUMBER, NOT A ROUND ONE. Ten was tried first and
+  // PASSED on the old shape — about 4s of R2 against a 5s ceiling, close
+  // enough to look like a proof and worth nothing as one. At 24 the old shape
+  // fails every time, and says so exactly: "The timeout for this transaction
+  // was 5000 ms, however 11423 ms passed since the start of the transaction."
+  //
+  // That is what makes this a regression test rather than a slow way of
+  // asserting `deleteMany` works. It costs the suite ~8s of real R2 round
+  // trips, which is the price of a guard that can actually fail.
+  it('sweeps more mints than a transaction ceiling would allow', async () => {
+    const many = 24
+    const ids: string[] = []
+    for (let index = 0; index < many; index++) {
+      // Rows written directly: this test is about the sweep's transaction
+      // shape, and minting ten real URLs would measure presign instead. The
+      // keys name nothing in the bucket, so each `headObject` is a real round
+      // trip that finds nothing — which is the expensive part being moved.
+      const row = await owner.pendingUpload.create({
+        data: {
+          organizationId: orgA,
+          companyId: companyA,
+          r2Key: `ceiling/${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`,
+          filename: `ceiling-${index}.pdf`,
+          mimeType: 'application/pdf',
+          sizeBytes: 1,
+          sha256: 'x'.repeat(64),
+          type: 'RATE_CONFIRMATION',
+          expiresAt: new Date(Date.now() - 60_000),
+        },
+        select: { id: true },
+      })
+      ids.push(row.id)
+    }
+
+    const result = await reconcileExpiredUploads(sweepRunner)
+
+    expect(result.expiredMints).toBeGreaterThanOrEqual(many)
+    // Nothing was in the bucket, so nothing was an orphan — and every row is
+    // still cleared, which is the semantic that must survive the reshaping.
+    expect(
+      await owner.pendingUpload.count({ where: { id: { in: ids } } }),
+    ).toBe(0)
+  })
+
   it('leaves a live mint alone', async () => {
     const live = await mint()
-    const result = await runInOrg(
-      app,
-      orgA,
-      (tx) => reconcileExpiredUploads(tx),
-      {
-        attribution: unattributed('scheduled reconciliation sweep'),
-      },
-    )
+    const result = await reconcileExpiredUploads(sweepRunner)
     expect(result.expiredMints).toBe(0)
     expect(
       await owner.pendingUpload.count({ where: { id: live.pendingUploadId } }),

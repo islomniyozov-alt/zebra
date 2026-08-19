@@ -515,6 +515,9 @@ export interface ReconciliationResult {
   orphansLeft: number
 }
 
+/** Runs one function inside one org-scoped transaction. See `runInOrg`. */
+export type OrgRunner = <T>(fn: (tx: TxClient) => Promise<T>) => Promise<T>
+
 /**
  * Sweep mints that expired without being confirmed.
  *
@@ -523,19 +526,59 @@ export interface ReconciliationResult {
  * confirmed (an orphan object — delete it too, since no Document will ever
  * reference it).
  *
- * This is an indexed query on `(organizationId, expiresAt)`, not a bucket
+ * The scan is an indexed query on `(organizationId, expiresAt)`, not a bucket
  * listing, which is the reason PendingUpload exists as a table.
+ *
+ * ---------------------------------------------------------------------------
+ * IT TAKES A RUNNER, NOT A TRANSACTION, AND THAT IS THE WHOLE FIX.
+ *
+ * This function talks to R2 — a HEAD and sometimes a DELETE per expired mint,
+ * over the public internet. It used to do that while HOLDING an interactive
+ * Postgres transaction, one it was handed by its caller, and it deleted each
+ * row individually inside the same transaction as it went.
+ *
+ * MEASURED FROM THE OWNER'S MACHINE, 2026-08-19: an R2 `headObject` is
+ * 330–420ms and a Neon round trip is ~200ms. So an expired orphan costs
+ * ~350ms + ~350ms + ~200ms ≈ 900ms of transaction time, almost all of it
+ * waiting on Cloudflare rather than on the database.
+ *
+ * `take` DEFAULTS TO 200. At ~900ms each that is roughly THREE MINUTES inside
+ * a transaction whose ceiling is five seconds. This function could not
+ * complete a full sweep — not under load, not on a good day, not ever. The
+ * integration test failing at TWO rows (10,260ms) was the mildest possible
+ * symptom of it, and it failed intermittently because it sat right on the
+ * boundary: the same test passes alone and dies under a loaded suite.
+ *
+ * BATCHING THE DELETES ALONE WOULD NOT HAVE FIXED IT. That was the first
+ * theory and the numbers refute it: the per-row deletes are ~200ms of a
+ * ~900ms row, so collapsing N deletes into one `deleteMany` removes under a
+ * quarter of the cost and leaves the R2 calls — the other three quarters —
+ * exactly where they were, inside the transaction.
+ *
+ * SO THE R2 WORK HAPPENS BETWEEN TRANSACTIONS, NOT INSIDE ONE. Read the
+ * candidates in a short transaction; do the network work holding nothing; then
+ * clear the rows that succeeded in a second short transaction, batched. Two
+ * round trips of database time regardless of how many mints expired.
+ *
+ * THE SEMANTICS ARE UNCHANGED, deliberately. A mint whose R2 call throws is
+ * still counted in `orphansLeft` and its row is still LEFT ALONE, so the next
+ * sweep finds it again — R2 being unreachable must not lose the only record
+ * that an object needs collecting.
+ * ---------------------------------------------------------------------------
  */
 export async function reconcileExpiredUploads(
-  tx: TxClient,
+  run: OrgRunner,
   options: { config?: R2Config; now?: Date; limit?: number } = {},
 ): Promise<ReconciliationResult> {
   const now = options.now ?? new Date()
-  const expired = await tx.pendingUpload.findMany({
-    where: { expiresAt: { lt: now } },
-    select: { id: true, r2Key: true },
-    take: options.limit ?? 200,
-  })
+
+  const expired = await run((tx) =>
+    tx.pendingUpload.findMany({
+      where: { expiresAt: { lt: now } },
+      select: { id: true, r2Key: true },
+      take: options.limit ?? 200,
+    }),
+  )
 
   if (expired.length === 0) {
     return { expiredMints: 0, orphansDeleted: 0, orphansLeft: 0 }
@@ -544,7 +587,10 @@ export async function reconcileExpiredUploads(
   const config = options.config ?? r2ConfigFromEnv()
   let orphansDeleted = 0
   let orphansLeft = 0
+  const clearable: string[] = []
 
+  // NOTHING IS HELD OPEN HERE. Slow R2, unreachable R2, two hundred mints —
+  // none of it is a transaction's problem any more.
   for (const mint of expired) {
     try {
       if (await headObject(config, mint.r2Key)) {
@@ -558,7 +604,13 @@ export async function reconcileExpiredUploads(
       orphansLeft += 1
       continue
     }
-    await tx.pendingUpload.delete({ where: { id: mint.id } })
+    clearable.push(mint.id)
+  }
+
+  if (clearable.length > 0) {
+    await run((tx) =>
+      tx.pendingUpload.deleteMany({ where: { id: { in: clearable } } }),
+    )
   }
 
   return { expiredMints: expired.length, orphansDeleted, orphansLeft }
