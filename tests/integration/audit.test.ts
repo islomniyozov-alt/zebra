@@ -436,7 +436,16 @@ describe('a narrowed select narrows the response, not the audit', () => {
     expect(outcome).toBeTruthy()
     // The create itself is audited either way — thin beats absent.
     expect((await auditRows()).length).toBeGreaterThanOrEqual(1)
-    await owner.customer.deleteMany({ where: { name: 'Vanishes' } })
+    // SCOPED TO THIS RUN'S ORGANIZATION. Matching by name alone, as the
+    // RLS-bypassing owner, deleted every 'Vanishes' customer on the database
+    // — including a concurrently running suite's — and `Load.customer`
+    // cascades, so it took their loads with it. See the one-runner lock in
+    // integration-gate.mjs; this is the hazard that lock exists to make
+    // unreachable, fixed here as well because a cleanup should not depend on
+    // a lock to be correct.
+    await owner.customer.deleteMany({
+      where: { organizationId, name: 'Vanishes' },
+    })
   })
 })
 
@@ -693,7 +702,7 @@ describe('gaps are counted separately from failures', () => {
     } finally {
       unsubscribe()
       await owner.customer.deleteMany({
-        where: { name: { startsWith: 'Bulk ' } },
+        where: { organizationId, name: { startsWith: 'Bulk ' } },
       })
     }
   })
@@ -722,7 +731,7 @@ describe('gaps are counted separately from failures', () => {
       expect(getAuditHealth().gaps.unfollowableOperation).toBe(0)
     } finally {
       await owner.customer.deleteMany({
-        where: { name: { startsWith: 'Traceable ' } },
+        where: { organizationId, name: { startsWith: 'Traceable ' } },
       })
     }
   })

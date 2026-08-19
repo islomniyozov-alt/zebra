@@ -162,7 +162,7 @@ if (process.argv.includes('--skip-integration')) {
     console.log('')
     console.log(`Running the integration suite: ${verdict.message}`)
 
-    const outcome = runIntegrationSuite()
+    const outcome = await runIntegrationSuite()
     if (!outcome.ok) {
       console.error('')
       console.error(
