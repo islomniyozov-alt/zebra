@@ -1,5 +1,11 @@
 import { afterAll, describe, expect, it } from 'vitest'
 import { Pool } from '@neondatabase/serverless'
+import {
+  GRANT_AUDIT_SQL,
+  describeGrantDifferences,
+  findGrantDifferences,
+  type GrantRow,
+} from '@/lib/grant-rule'
 
 // ---------------------------------------------------------------------------
 // The guarantees the rls_and_isolation migration is supposed to leave behind,
@@ -409,6 +415,41 @@ describe('the application role', () => {
   //
   // `public.` is spelled out here for the same reason: an unqualified name in
   // an assertion about a search_path bug is the bug in the assertion.
+  // ------------------------------------------------------------------------
+  // FLAG 81, AS AN ASSERTION RATHER THAN A NOTE.
+  //
+  // The check below this one names ONE table. This names every table there is,
+  // and derives what each should carry from the migration rather than from a
+  // list somebody keeps — because a maintained list rots exactly the way the
+  // grants did, and a blind spot that is written down is still a blind spot.
+  //
+  // The same rule runs against PRODUCTION from `scripts/check-grants.mjs`,
+  // which is where `PROD_DIRECT_DATABASE_URL` may be read. One rule, two
+  // callers, two databases: that is what closes "dev and production disagree"
+  // without putting a production connection string inside the test suite.
+  // ------------------------------------------------------------------------
+  it('grants zebra_app exactly what the migration established, on every table', async () => {
+    const rows = await query<GrantRow>(GRANT_AUDIT_SQL)
+
+    // THE CONTROL. An empty result would satisfy "no differences" perfectly,
+    // which is the shape of failure this session has hit twice.
+    expect(
+      rows.length,
+      'no tables found — this is not the right database',
+    ).toBeGreaterThan(40)
+
+    const differences = findGrantDifferences(rows)
+    expect(
+      differences,
+      differences.length > 0
+        ? `grants differ from the migration — a change made outside a ` +
+            `migration is invisible to every other check here:
+` +
+            describeGrantDifferences(differences)
+        : '',
+    ).toEqual([])
+  })
+
   it('has no reach into migration bookkeeping', async () => {
     const [priv] = await query<Record<string, boolean>>(`
       SELECT has_table_privilege('zebra_app', 'public."_prisma_migrations"', 'SELECT')     AS m_select,

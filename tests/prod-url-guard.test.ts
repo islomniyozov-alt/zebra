@@ -47,7 +47,22 @@ const VARIABLE = 'PROD_DIRECT_DATABASE_URL'
  * `check:` scripts run unattended inside `npm run check`. The walkthroughs are
  * run deliberately by a human, at a named target, and predate this fence.
  */
-const CHECK_READERS = ['check-migration-gap.mjs', 'check-unrouted.mjs']
+const CHECK_READERS = [
+  'check-migration-gap.mjs',
+  'check-unrouted.mjs',
+  // ADDED 2026-08-20, deliberately, which is what this fence is for.
+  //
+  // Flag 81: the schema is version-controlled and the GRANTS ARE NOT, so two
+  // databases could disagree about who may read what and nothing would say so.
+  // `src/lib/grant-rule.ts` derives the expected grants from the migration and
+  // `tests/structure.test.ts` asserts them against dev — but the test suite
+  // may not read this variable, so production needs its own caller. One rule,
+  // two callers, and the second one is this.
+  //
+  // Held to the stricter half of the rule below: it runs unattended in
+  // `npm run check` and only ever SELECTs.
+  'check-grants.mjs',
+]
 
 /**
  * The deploy reads it to PASS IT ON, and queries nothing itself.
