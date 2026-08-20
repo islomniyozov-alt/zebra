@@ -9,7 +9,10 @@ export default defineConfig({
   test: {
     name: 'integration',
     include: ['tests/integration/**/*.test.ts'],
-    setupFiles: ['tests/setup.ts'],
+    // ORDER MATTERS. The routing file rewrites the connection strings; the
+    // shared file then validates whatever it finds. Reversed, the shared file
+    // would refuse the un-rewritten database or bless the wrong one.
+    setupFiles: ['tests/setup-integration.ts', 'tests/setup.ts'],
     // ONE RUNNER PER DATABASE. `globalSetup` runs exactly once per run, in the
     // main process, before any worker — so a bare `vitest` pays it too, which
     // `setupFiles` (once per FILE, own process) could never enforce.
