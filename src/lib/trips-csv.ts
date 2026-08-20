@@ -1,4 +1,5 @@
 import { parseCsv } from './relay-csv'
+import { MoneyFormatError, parseMoneyToCents } from './money'
 
 // ---------------------------------------------------------------------------
 // THE RELAY **TRIPS** EXPORT, PARSED. NO MODEL, NO GUESSES.
@@ -10,23 +11,34 @@ import { parseCsv } from './relay-csv'
 //
 // WHAT THIS FILE WILL NOT DO:
 //
-//   * It does not read `Estimated Cost`. Amazon's internal allocation summed
-//     to ~$310 on a trip that paid $1,776, and a column nothing parses cannot
-//     leak into a rate field later. Rule 6, enforced by absence.
+//   * It reads `Estimated Cost` and REFUSES TO INTERPRET IT. Rule 6 used to be
+//     enforced here by absence — the column was never parsed at all — and that
+//     changed on 2026-08-20 when the owner verified trip 1165YNVHN against the
+//     Relay portal: $5,089.07, matching this column exactly, on a trip whose
+//     Load ID equals its Trip ID.
 //
-//     AND `relay-csv.ts` READS A COLUMN OF THAT NAME ON PURPOSE. Not an
-//     inconsistency and not a leak: the board export is a row per TRIP, where
-//     `Estimated Cost` is one figure for the whole move and the only rate the
-//     file carries. Phase 6 flag 23 ruled it imported — a load with no rate
-//     cannot be reconciled against the weekly statement — and the settlement
-//     corrects it. Here the column is a row per LEG and means a share, not a
-//     price.
+//     SO THE VALUE IS CARRIED AND THE JUDGEMENT MOVED, to `planTrips`. On a
+//     multi-leg trip the column is an allocation ACROSS the legs — it summed
+//     to ~$310 on a trip that paid $1,776 — and the planner drops it. On a
+//     trip with exactly one leg whose Load ID is the Trip ID, it is that
+//     load's price, and the planner keeps it as `rateCents`.
 //
-//     THE TWO RULINGS LOOK CONTRADICTORY AND ARE BOTH TRUE. On 2026-08-19 the
-//     first real board import produced rates of $15.18 and $297.69 and was
-//     reported as rule 6 leaking, by the person who wrote both rulings; the
-//     assertion protecting this file had held perfectly the whole time. Before
-//     citing either rule, establish which export is in hand.
+//     PARSING IS NOT PERMISSION. This file makes a number out of a string; it
+//     never decides whether that number is a rate. The old guard asserted this
+//     file did not contain the word; the new one asserts the partition, which
+//     is the thing that actually protects the money.
+//
+//     AND `relay-csv.ts` READS A COLUMN OF THAT NAME UNCONDITIONALLY. Not an
+//     inconsistency: the board export is a row per TRIP, where `Estimated
+//     Cost` is one figure for the whole move and the only rate the file
+//     carries. Phase 6 flag 23 ruled it imported — a load with no rate cannot
+//     be reconciled against the weekly statement — and the settlement corrects
+//     it.
+//
+//     ON 2026-08-19 the first real board import produced rates of $15.18 and
+//     $297.69 and was reported as rule 6 leaking, by the person who wrote both
+//     rulings. Before citing either rule, establish which export is in hand:
+//     a row per trip, or a row per leg.
 //   * It does not decide anything about loads. Legs come out; what becomes a
 //     stop chain is `trips-import.ts`'s judgment, made where it can be tested
 //     without a file.
@@ -85,6 +97,14 @@ export interface TripLeg {
   status: string
   /** `Estimate Distance`, in the unit the file names. Null when absent. */
   distance: number | null
+  /**
+   * `Estimated Cost` in integer cents, CARRIED BUT NOT ENDORSED.
+   *
+   * On a multi-leg trip this is a share of the trip's money and means nothing
+   * on its own. `planTrips` is the only thing allowed to decide otherwise, and
+   * it drops this value for every trip that has more than one leg.
+   */
+  costCents: number | null
   /** `Unit` — "mi" everywhere in the sweep, kept rather than assumed. */
   distanceUnit: string | null
   /** `Shipper Account`. The only evidence of loaded-versus-empty. */
@@ -174,6 +194,26 @@ function clockAt(
  * produces zero legs and a list of reasons, which is a thing a preview can
  * show and a thing an empty result cannot.
  */
+/**
+ * `Estimated Cost` as integer cents, or null.
+ *
+ * A blank is absence. A value this cannot read is ALSO null rather than a
+ * throw: a malformed cost must not cost somebody the other forty trips in the
+ * file, and a rate that never arrives is visible on the load while a refused
+ * import is just a file that would not open.
+ */
+function money(text: string): number | null {
+  const trimmed = text.trim()
+  if (trimmed === '') return null
+  try {
+    const cents = parseMoneyToCents(trimmed)
+    return cents >= 0 ? cents : null
+  } catch (error) {
+    if (error instanceof MoneyFormatError) return null
+    throw error
+  }
+}
+
 export function parseTripsCsv(text: string): ParsedTripsFile {
   const rows = parseCsv(text)
   if (rows.length < 2) return { legs: [], problems: [] }
@@ -268,10 +308,6 @@ export function parseTripsCsv(text: string): ParsedTripsFile {
       return
     }
 
-    // MILES, AND DELIBERATELY NOT THE COST BESIDE IT. `Estimated Cost` sits a
-    // few columns over in this same export and is never read — see rule 6 at
-    // the top of this file, and `relay-csv.ts` for why the board export treats
-    // its own column of that name the opposite way.
     const distanceText = cell(cells, 'Estimate Distance')
     const distance = distanceText === '' ? null : Number(distanceText)
 
@@ -281,6 +317,7 @@ export function parseTripsCsv(text: string): ParsedTripsFile {
       facilitySequence: cell(cells, 'Facility Sequence'),
       status: cell(cells, 'Load Execution Status'),
       distance: Number.isFinite(distance) ? distance : null,
+      costCents: money(cell(cells, 'Estimated Cost')),
       distanceUnit: cell(cells, 'Unit') || null,
       shipperAccount: cell(cells, 'Shipper Account'),
       driverName: cell(cells, 'Driver Name'),

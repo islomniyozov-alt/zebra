@@ -47,6 +47,7 @@ const trip = (over: Partial<PlannedTrip> = {}): PlannedTrip => ({
   trailerIds: ['HV2504452'],
   tractorIds: ['ZP33494'],
   cancelledLegs: 0,
+  rateCents: null,
   ...over,
 })
 
@@ -105,6 +106,10 @@ describe('the stops a trip writes', () => {
   })
 })
 
+/** Money arithmetic, in the two shapes it would realistically take. */
+const SUMS_MONEY = /Cents\s*\+/
+const REDUCES_MONEY = /reduce\([\s\S]{0,160}?Cents/
+
 describe('what the writer is forbidden to do', () => {
   const source = readFileSync('src/lib/trips-writer.ts', 'utf8')
 
@@ -121,18 +126,52 @@ describe('what the writer is forbidden to do', () => {
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/^\s*\/\/.*$/gm, '')
 
-  // RULE 6. Estimated Cost was never parsed, and nothing downstream may
-  // reintroduce it — a rate on this path comes from the email or is absent.
-  it('never touches money', () => {
+  // RULE 6 AS IT NOW STANDS. This file DOES write `linehaulCents` — that is
+  // the 2026-08-20 ruling, verified against trip 1165YNVHN at $5,089.07 — so
+  // the old "never touches money" assertion would now be asserting a bug.
+  //
+  // WHAT REPLACED IT IS NARROWER AND STRICTER: the writer may only write the
+  // figure it was HANDED, and must be unable to reach a per-leg cost. It never
+  // names `costCents`, never names the export's column, and never derives a
+  // number by adding legs up. Everything a rate could wrongly come from is
+  // absent; the one thing it may come from arrives as an argument.
+  it('writes only the rate it was handed, and can reach no other money', () => {
     for (const field of [
-      'linehaulCents',
+      'costCents',
+      'Estimated Cost',
+      'Cost',
       'totalRevenueCents',
       'fuelSurchargeCents',
       'accessorialsCents',
-      'Cost',
     ]) {
-      expect(code, `the writer uses ${field}`).not.toContain(field)
+      expect(code, `the writer reaches ${field}`).not.toContain(field)
     }
+    // The only money it writes, and it comes straight off its own input.
+    expect(code).toContain('linehaulCents: rateCents')
+    expect(code).toContain('linehaulCents: input.rateCents')
+  })
+
+  // The sum of the legs is what `Estimated Cost` means on a multi-leg trip.
+  // No arithmetic on money may exist here at all.
+  it('does not add money up', () => {
+    // BOTH PATTERNS PROVEN TO FIRE, below. The first version of the reduce
+    // pattern was /reduce\([^)]*Cents/, which cannot match
+    // `legs.reduce((n, l) => n + l.costCents, 0)` at all — the character class
+    // stops dead at the `)` of the parameter list. It would have sat here
+    // passing forever on exactly the code it was written to catch.
+    expect(code).not.toMatch(SUMS_MONEY)
+    expect(code).not.toMatch(REDUCES_MONEY)
+  })
+
+  it('has money-arithmetic patterns that can actually fail', () => {
+    expect(SUMS_MONEY.test('load.linehaulCents + fuelSurchargeCents')).toBe(
+      true,
+    )
+    expect(
+      REDUCES_MONEY.test('legs.reduce((n, l) => n + l.costCents, 0)'),
+    ).toBe(true)
+    expect(SUMS_MONEY.test('linehaulCents: rateCents')).toBe(false)
+    expect(REDUCES_MONEY.test('linehaulCents: rateCents')).toBe(false)
   })
 
   // RULE 7. Name-matching a CSV string to a Driver record is a separate ruled

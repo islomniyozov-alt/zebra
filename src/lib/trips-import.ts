@@ -55,6 +55,18 @@ export interface PlannedTrip {
   tractorIds: string[]
   /** Rule 3: how many legs were dropped, so the preview can say so. */
   cancelledLegs: number
+  /**
+   * The trip's price in integer cents, or null — and null is the common case.
+   *
+   * SET ONLY FOR A SINGLE-LOAD TRIP: exactly one row in the export, and that
+   * row's Load ID equal to the Trip ID. See `singleLoadRateCents`.
+   *
+   * The per-leg costs do NOT survive onto this object. A `PlannedTrip` is what
+   * the writer sees, and the writer must not be able to reach an allocation
+   * even by mistake — the value either qualified as a price here or it no
+   * longer exists.
+   */
+  rateCents: number | null
 }
 
 export type TripWarningKind =
@@ -197,10 +209,55 @@ export function planTrips(legs: readonly TripLeg[]): TripsPlan {
       trailerIds: unique(usable.map((leg) => leg.trailerId)),
       tractorIds: unique(usable.map((leg) => leg.tractorId)),
       cancelledLegs,
+      rateCents: singleLoadRateCents(tripId, all),
     })
   }
 
   return { trips, warnings }
+}
+
+/**
+ * `Estimated Cost` promoted to a price, or null.
+ *
+ * ---------------------------------------------------------------------------
+ * THE PARTITION, AND WHY IT IS TWO CONDITIONS RATHER THAN ONE.
+ *
+ * The ruling on 2026-08-20 was "fill the rate when Trip ID === Load ID", after
+ * the owner verified trip 1165YNVHN against the Relay portal at $5,089.07 and
+ * found this column matching exactly.
+ *
+ * MEASURED ACROSS THE 1,600-FILE CORPUS, per file, which is the only unit
+ * `planTrips` is ever called in: 1,816 trip instances, of which 1,001 have a
+ * single leg. 973 of those 1,001 have Load ID === Trip ID and every one of the
+ * 973 carries a cost. Of the 815 multi-leg trips, ZERO contain a leg whose
+ * Load ID equals the Trip ID. The partition is clean, exactly as ruled.
+ *
+ * THE LEG COUNT IS CHECKED ANYWAY, and not because the corpus needs it. It is
+ * the ruling's second sentence — multi-leg trips stay never-read — written as
+ * code rather than left as a property of today's data. On a multi-leg trip
+ * this column is a share of the trip's money; if such a trip ever does carry a
+ * matching Load ID, the equality alone would price it from an allocation, and
+ * the trap would be silent.
+ *
+ * A CAUTION FROM BUILDING THIS. The first measurement said 87 multi-leg trips
+ * contained a matching leg, and it was WRONG: it grouped trips across every
+ * file at once, so the corpus's duplicate exports of one trip — the same trip
+ * downloaded four times — counted as four legs. Grouping by Trip ID is right;
+ * grouping by Trip ID across files invents legs that never shared a trip.
+ *
+ * CANCELLED LEGS COUNT TOWARDS THE TOTAL. A trip that ran one leg and
+ * cancelled another was still planned as a multi-leg trip, and its cost column
+ * was still divided up as one. "Exactly one row" means exactly one row.
+ * ---------------------------------------------------------------------------
+ */
+function singleLoadRateCents(
+  tripId: string,
+  legs: readonly TripLeg[],
+): number | null {
+  if (legs.length !== 1) return null
+  const only = legs[0]!
+  if (only.loadId.trim() !== tripId.trim()) return null
+  return only.costCents
 }
 
 /**

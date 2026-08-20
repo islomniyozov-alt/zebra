@@ -30,6 +30,7 @@ function leg(over: Partial<TripLeg> = {}): TripLeg {
     facilitySequence: 'A->B',
     status: 'Completed',
     distance: 100,
+    costCents: null,
     distanceUnit: 'mi',
     shipperAccount: 'OutboundAmazonManaged',
     driverName: 'Belal Sultani',
@@ -237,6 +238,65 @@ describe('the two trip-id shapes', () => {
 // AGAINST THE SWEEP.
 // ---------------------------------------------------------------------------
 
+describe('the rate, and the two conditions it needs', () => {
+  const priced = (over: Partial<TripLeg>[]) =>
+    planTrips(over.map((o) => leg(o))).trips[0]!.rateCents
+
+  // THE VERIFIED CASE. Trip 1165YNVHN read $5,089.07 in the Relay portal and
+  // the column matched exactly, on a trip whose Load ID is its Trip ID.
+  it('prices a single-load trip from Estimated Cost', () => {
+    expect(priced([{ tripId: 'T-1', loadId: 'T-1', costCents: 508907 }])).toBe(
+      508907,
+    )
+  })
+
+  // THE TRAP, AND THE REASON THE LEG COUNT DECIDES FIRST. Trip 116W21ST2 in
+  // the real corpus has four legs whose Load ID all equal the Trip ID; on a
+  // multi-leg trip the column is a share, and 87 corpus trips look like this.
+  it('refuses a multi-leg trip even when every leg matches', () => {
+    expect(
+      priced([
+        { tripId: 'T-1', loadId: 'T-1', costCents: 180000 },
+        { tripId: 'T-1', loadId: 'T-1', costCents: 45000 },
+      ]),
+    ).toBeNull()
+  })
+
+  it('refuses a single leg whose Load ID is a different id', () => {
+    expect(priced([{ tripId: 'T-1', loadId: 'OTHER', costCents: 90000 }])).toBe(
+      null,
+    )
+  })
+
+  // A CANCELLED SIBLING STILL MAKES IT A MULTI-LEG TRIP. The cost column was
+  // divided across the legs Amazon planned, not the ones that survived.
+  it('counts cancelled legs towards the leg count', () => {
+    expect(
+      priced([
+        { tripId: 'T-1', loadId: 'T-1', costCents: 180000 },
+        { tripId: 'T-1', loadId: 'T-1', status: 'Cancelled' },
+      ]),
+    ).toBeNull()
+  })
+
+  it('is null when a single-load trip carries no cost at all', () => {
+    expect(
+      priced([{ tripId: 'T-1', loadId: 'T-1', costCents: null }]),
+    ).toBeNull()
+  })
+
+  // The per-leg figures must not survive onto the object the writer sees.
+  it('leaves no per-leg cost anywhere on the planned trip', () => {
+    const plan = planTrips([
+      leg({ tripId: 'T-9', loadId: 'A', costCents: 111 }),
+      leg({ tripId: 'T-9', loadId: 'B', costCents: 222 }),
+    ])
+    const json = JSON.stringify(plan.trips[0])
+    expect(json).not.toContain('111')
+    expect(json).not.toContain('222')
+  })
+})
+
 const CORPUS = join(process.cwd(), 'corpus', 'relay-trips')
 const files = existsSync(CORPUS)
   ? readdirSync(CORPUS).filter(
@@ -251,6 +311,58 @@ describe.skipIf(files.length === 0)('every real trip in the sweep', () => {
   const plans = files.map((name) => {
     const { legs } = parseTripsCsv(readFileSync(join(CORPUS, name), 'utf8'))
     return { name, ...planTrips(legs) }
+  })
+
+  // ------------------------------------------------------------------------
+  // THE RATE PARTITION, BOTH DIRECTIONS, ACROSS THE WHOLE SWEEP.
+  //
+  // Per file — the unit planTrips runs in — the corpus holds 1,816 trip
+  // instances: 1,001 single-leg, 973 of those with Load ID === Trip ID and all
+  // 973 carrying a cost; 815 multi-leg, NONE with a matching leg.
+  //
+  // SO THE FIRST TEST BELOW CANNOT FAIL ON TODAY'S CORPUS — there is no
+  // multi-leg trip here for it to catch. It is a tripwire for a shape not yet
+  // seen, the same posture as the prefix near-miss warning. What actually
+  // proves the rule is the unit tests above, which construct the shape
+  // deliberately and watch it refused.
+  // ------------------------------------------------------------------------
+  it('never prices a trip that has more than one leg', () => {
+    const priced = plans.flatMap((plan) =>
+      plan.trips
+        .filter((trip) => trip.rateCents !== null)
+        .map((trip) => ({ name: plan.name, tripId: trip.tripId, trip })),
+    )
+
+    // Every priced trip came from a file whose rows for that trip numbered
+    // one. Re-derived from the source rather than trusted from the plan.
+    for (const { name, tripId } of priced) {
+      const { legs } = parseTripsCsv(readFileSync(join(CORPUS, name), 'utf8'))
+      const rows = legs.filter((leg) => leg.tripId === tripId)
+      expect(
+        rows,
+        `${name}:${tripId} was priced with ${rows.length} legs`,
+      ).toHaveLength(1)
+      expect(rows[0]!.loadId).toBe(tripId)
+    }
+  })
+
+  it('prices every single-load trip the export gives a cost for', () => {
+    const missed = plans.flatMap((plan) =>
+      plan.trips
+        .filter((trip) => trip.rateCents === null && trip.cancelledLegs === 0)
+        .flatMap((trip) => {
+          const { legs } = parseTripsCsv(
+            readFileSync(join(CORPUS, plan.name), 'utf8'),
+          )
+          const rows = legs.filter((leg) => leg.tripId === trip.tripId)
+          const single =
+            rows.length === 1 &&
+            rows[0]!.loadId === trip.tripId &&
+            rows[0]!.costCents !== null
+          return single ? [`${plan.name}:${trip.tripId}`] : []
+        }),
+    )
+    expect(missed).toEqual([])
   })
 
   it('plans a trip from every file that has a usable leg', () => {

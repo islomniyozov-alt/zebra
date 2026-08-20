@@ -55,6 +55,7 @@ const leg = (over: Partial<TripLeg> = {}): TripLeg => ({
   facilitySequence: 'DEN7->MKC6',
   status: 'Completed',
   distance: 583,
+  costCents: null,
   distanceUnit: 'mi',
   shipperAccount: 'OutboundAmazonManaged',
   driverName: 'A DRIVER',

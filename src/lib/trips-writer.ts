@@ -1,4 +1,4 @@
-import { createLoad, type StopInput } from './loads'
+import { createLoad, recomputeTotals, type StopInput } from './loads'
 import type { TxClient } from './tenancy'
 import type { PlannedTrip } from './trips-import'
 
@@ -35,6 +35,16 @@ export interface TripWriteInput {
   trip: PlannedTrip
   companyId: string
   customerId: string
+  /**
+   * The rate to write, already decided by the caller.
+   *
+   * NOT READ OFF THE TRIP DIRECTLY, and the indirection is the money wall:
+   * §1.3 says a role that may not see money does not write it either, so the
+   * action passes `trip.rateCents` only when the importer holds
+   * `load.financials`, and null otherwise. The board importer takes the same
+   * posture — a DISPATCHER's import books at zero.
+   */
+  rateCents: number | null
 }
 
 export type TripWriteOutcome =
@@ -170,6 +180,11 @@ export async function createTripLoad(
     ...(input.trip.totalMiles === null
       ? {}
       : { dispatchedMiles: String(input.trip.totalMiles) }),
+    // THE RATE, ONLY IF THE PLANNER CALLED IT ONE. `rateCents` is null for
+    // every multi-leg trip by construction, so there is no allocation reachable
+    // from here — and null is OMITTED rather than sent as zero, because a
+    // dispatcher must not be able to read an import as a rate of nothing.
+    ...(input.rateCents === null ? {} : { linehaulCents: input.rateCents }),
     stops,
   })
 
@@ -192,7 +207,13 @@ export async function planTripWrite(
   trip: PlannedTrip,
 ): Promise<
   | { action: 'create' }
-  | { action: 'enrich'; loadId: string; hasStops: boolean; hasMiles: boolean }
+  | {
+      action: 'enrich'
+      loadId: string
+      hasStops: boolean
+      hasMiles: boolean
+      hasRate: boolean
+    }
 > {
   const existing = await tx.load.findFirst({
     // EXACT. No prefix stripping, no case folding, no trimming beyond what the
@@ -201,6 +222,7 @@ export async function planTripWrite(
     select: {
       id: true,
       dispatchedMiles: true,
+      linehaulCents: true,
       _count: { select: { stops: true } },
     },
   })
@@ -212,6 +234,13 @@ export async function planTripWrite(
     loadId: existing.id,
     hasStops: existing._count.stops > 0,
     hasMiles: existing.dispatchedMiles !== null,
+    // ZERO IS "NO RATE YET" HERE, and it has to be: `linehaulCents` is
+    // `@default(0)`, so a load booked from an email that carried no money is
+    // indistinguishable from one deliberately booked at nothing. Treating 0 as
+    // absent is what lets the import ADD a rate; treating it as a real figure
+    // would mean no enrich ever fills one. A load with an actual rate is
+    // untouched either way, which is the half that matters.
+    hasRate: existing.linehaulCents !== 0,
   }
 }
 
@@ -229,7 +258,8 @@ export async function enrichLoad(
   loadId: string,
   trip: PlannedTrip,
   facilities: ReadonlyMap<string, { id: string }>,
-  existing: { hasStops: boolean; hasMiles: boolean },
+  existing: { hasStops: boolean; hasMiles: boolean; hasRate: boolean },
+  rateCents: number | null = null,
 ): Promise<TripWriteOutcome> {
   const added: string[] = []
 
@@ -252,6 +282,22 @@ export async function enrichLoad(
       },
     })
     added.push(`${trip.totalMiles} miles`)
+  }
+
+  // THE RATE, ADDED AND NEVER REPLACED. A load that already carries money keeps
+  // it: the booking email is the contract and this file is a courier. `null`
+  // covers both "the trip is multi-leg" and "the importer may not see money",
+  // and neither is a reason to write zero over anything.
+  if (!existing.hasRate && rateCents !== null) {
+    await tx.load.update({
+      where: { id: loadId },
+      data: { linehaulCents: rateCents },
+    })
+    // The cached total is owned by this function, not written by hand — a
+    // linehaul changed without it leaves `totalRevenueCents` stale, which is
+    // the figure invoices read.
+    await recomputeTotals(tx, loadId)
+    added.push('rate')
   }
 
   if (added.length === 0) {

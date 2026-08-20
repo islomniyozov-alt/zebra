@@ -87,6 +87,7 @@ const leg = (over: Partial<TripLeg> = {}): TripLeg => ({
   facilitySequence: 'DEN7->MKC6',
   status: 'Completed',
   distance: 583,
+  costCents: null,
   distanceUnit: 'mi',
   shipperAccount: 'OutboundAmazonManaged',
   driverName: 'A DRIVER',
@@ -97,7 +98,7 @@ const leg = (over: Partial<TripLeg> = {}): TripLeg => ({
 })
 
 /** Book one trip the way the action does, and hand back the row it wrote. */
-async function importTrip(legs: TripLeg[]) {
+async function importTrip(legs: TripLeg[], maySeeMoney = true) {
   const plan = planTrips(legs)
   const trip = plan.trips[0]!
 
@@ -107,7 +108,14 @@ async function importTrip(legs: TripLeg[]) {
     return createTripLoad(
       tx,
       organizationId,
-      { trip, companyId, customerId },
+      {
+        trip,
+        companyId,
+        customerId,
+        // The action passes null for a role without `load.financials`; the
+        // tests drive both sides of that here.
+        rateCents: maySeeMoney ? trip.rateCents : null,
+      },
       facilities,
     )
   })
@@ -164,15 +172,60 @@ describe('a booked trip lands with what it was given', () => {
     expect(load.dispatchedMiles).toBe(583)
   })
 
-  // RULE 6, READ BACK FROM THE COLUMN. The parser never reads a cost, so the
-  // load must book with no rate — asserted against the row rather than against
-  // the absence of a word in the source.
-  it('books no money at all', async () => {
+  // ------------------------------------------------------------------------
+  // RULE 6 AS RULED ON 2026-08-20, READ BACK FROM THE COLUMN — both
+  // directions, because one of them without the other is not a partition.
+  // ------------------------------------------------------------------------
+
+  // A SINGLE-LOAD TRIP LANDS WITH ITS RATE. Trip 1165YNVHN read $5,089.07 in
+  // the Relay portal and this column matched it exactly.
+  it('books a single-load trip with its rate', async () => {
+    const id = `SINGLE-${nonce}`
     const { load } = await importTrip([
-      leg({ tripId: `T-MONEY-${nonce}`, loadId: `L-MONEY-${nonce}` }),
+      leg({ tripId: id, loadId: id, costCents: 508907 }),
+    ])
+    expect(load.linehaulCents).toBe(508907)
+    // The cached total is what an invoice reads; a linehaul written without it
+    // would be right on the load and wrong on the bill.
+    expect(load.totalRevenueCents).toBe(508907)
+  })
+
+  // A MULTI-LEG TRIP LANDS WITH NONE, whatever its Load IDs say. No trip in
+  // today's corpus has this shape — 815 multi-leg trips, none with a leg whose
+  // Load ID equals the Trip ID — so it is constructed here on purpose. That is
+  // the point: the rule must hold for the shape the data has not shown yet,
+  // because the equality alone would price it out of an allocation.
+  it('books a multi-leg trip with no rate even when every leg matches', async () => {
+    const id = `MULTI-${nonce}`
+    const { load } = await importTrip([
+      leg({
+        tripId: id,
+        loadId: id,
+        costCents: 180000,
+        facilitySequence: 'DEN7->MKC6',
+        stops: [stop('DEN7'), stop('MKC6')],
+      }),
+      leg({
+        tripId: id,
+        loadId: id,
+        costCents: 45000,
+        facilitySequence: 'MKC6->ORD5',
+        stops: [stop('MKC6'), stop('ORD5')],
+      }),
     ])
     expect(load.linehaulCents).toBe(0)
     expect(load.totalRevenueCents).toBe(0)
+  })
+
+  // §1.3'S MONEY WALL. A role that may not see money does not write it, so the
+  // freight books and the rate waits for somebody who may enter one.
+  it('books no rate for an importer who may not see money', async () => {
+    const id = `NOMONEY-${nonce}`
+    const { load } = await importTrip(
+      [leg({ tripId: id, loadId: id, costCents: 508907 })],
+      false,
+    )
+    expect(load.linehaulCents).toBe(0)
   })
 
   // RULE 7, likewise. The CSV names a driver and two units; none of them may
@@ -184,6 +237,71 @@ describe('a booked trip lands with what it was given', () => {
     expect(load.driverId).toBeNull()
     expect(load.truckId).toBeNull()
     expect(load.trailerId).toBeNull()
+  })
+})
+
+describe('enrichment adds a missing rate and replaces nothing', () => {
+  const bookEmailLoad = async (tripId: string, linehaulCents: number) => {
+    const customerId = await inOrg((tx) =>
+      resolveBroker(tx, organizationId, 'Amazon Relay'),
+    )
+    return owner.load.create({
+      data: {
+        organizationId,
+        companyId,
+        customerId,
+        loadNumber: `R-${tripId}`,
+        referenceNumber: tripId,
+        linehaulCents,
+      },
+      select: { id: true },
+    })
+  }
+
+  const enrich = async (tripId: string, costCents: number) => {
+    const trip = planTrips([leg({ tripId, loadId: tripId, costCents })])
+      .trips[0]!
+    return inOrg(async (tx) => {
+      const write = await planTripWrite(tx, trip)
+      if (write.action !== 'enrich') throw new Error('expected enrich')
+      const facilities = await resolveFacilities(tx, tripFacilityCodes(trip))
+      await enrichLoad(
+        tx,
+        organizationId,
+        write.loadId,
+        trip,
+        facilities,
+        {
+          hasStops: write.hasStops,
+          hasMiles: write.hasMiles,
+          hasRate: write.hasRate,
+        },
+        trip.rateCents,
+      )
+      return tx.load.findFirstOrThrow({
+        where: { id: write.loadId },
+        select: { linehaulCents: true, totalRevenueCents: true },
+      })
+    })
+  }
+
+  // The booking email made the load and carried no money — zero is the schema
+  // default, which is why `hasRate` treats it as absence.
+  it('fills a rate the email never carried', async () => {
+    const id = `ENRICH-NONE-${nonce}`
+    await bookEmailLoad(id, 0)
+    const after = await enrich(id, 508907)
+    expect(after.linehaulCents).toBe(508907)
+    expect(after.totalRevenueCents).toBe(508907)
+  })
+
+  // THE HALF THAT MATTERS. The email is the contract; this import is a
+  // courier, and a courier does not rewrite the price.
+  it('leaves a rate the email already carried', async () => {
+    const id = `ENRICH-KEEP-${nonce}`
+    await bookEmailLoad(id, 177600)
+    const after = await enrich(id, 508907)
+    expect(after.linehaulCents).toBe(177600)
   })
 })
 
@@ -210,12 +328,19 @@ describe('a trip whose load already exists is enriched, not doubled', () => {
 
     const outcome = await inOrg(async (tx) => {
       const write = await planTripWrite(tx, trip)
-      expect(write.action).toBe('enrich')
+      // Narrowed rather than asserted-then-indexed: `hasRate` only exists on
+      // the enrich arm, and TypeScript is right to insist.
+      if (write.action !== 'enrich') throw new Error('expected enrich')
       const facilities = await resolveFacilities(tx, tripFacilityCodes(trip))
-      return enrichLoad(tx, organizationId, existing.id, trip, facilities, {
-        hasStops: false,
-        hasMiles: false,
-      })
+      return enrichLoad(
+        tx,
+        organizationId,
+        existing.id,
+        trip,
+        facilities,
+        { hasStops: false, hasMiles: false, hasRate: write.hasRate },
+        trip.rateCents,
+      )
     })
 
     expect(outcome.kind).toBe('enriched')

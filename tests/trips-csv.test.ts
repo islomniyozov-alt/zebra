@@ -47,6 +47,9 @@ const HEADER = [
   'Stop 2  Planned Arrival Time',
 ]
 
+/** Where 'Estimated Cost' sits in HEADER/ROW, by name rather than by count. */
+const COST_COLUMN = HEADER.indexOf('Estimated Cost')
+
 const ROW = [
   'T-115HXB4HH',
   '115HXB4HH',
@@ -140,14 +143,33 @@ describe('a leg', () => {
     expect(legs[0]?.stops[1]?.plannedArrival?.utcOffsetHours).toBe(-6)
   })
 
-  // RULE 6, ENFORCED BY ABSENCE. Amazon's internal allocation summed to ~$310
-  // on a trip that paid $1,776. A column nothing parses cannot leak into a
-  // rate field later, so the type has no home for it at all.
-  it('does not carry Estimated Cost anywhere', () => {
-    expect(JSON.stringify(legs[0])).not.toContain('1657.64')
-    expect(Object.keys(legs[0] ?? {})).not.toContain('estimatedCost')
-    const source = readFileSync('src/lib/trips-csv.ts', 'utf8')
-    expect(source.toLowerCase()).not.toContain("'estimated cost'")
+  // RULE 6 NO LONGER MEANS "NEVER PARSED", AND THIS TEST CHANGED WITH IT.
+  //
+  // The old assertion was that this file did not contain the string 'estimated
+  // cost' at all — absence as the guarantee. On 2026-08-20 the owner verified
+  // trip 1165YNVHN against the Relay portal at $5,089.07 and found the column
+  // exact on a single-load trip, so the value is now carried and the judgement
+  // moved to `planTrips`.
+  //
+  // THE GUARD MOVED RATHER THAN DISAPPEARED. Parsing is not permission: this
+  // asserts only that the number arrives intact and in CENTS. What may be
+  // called a rate is asserted in trips-import.test.ts, against the partition,
+  // which is the thing that actually protects the money.
+  it('carries Estimated Cost as integer cents, deciding nothing', () => {
+    expect(legs[0]?.costCents).toBe(165764)
+  })
+
+  it('treats a blank or unreadable cost as absence rather than zero', () => {
+    const blank = [...ROW]
+    blank[COST_COLUMN] = ''
+    expect(parseTripsCsv(file([HEADER, blank])).legs[0]?.costCents).toBeNull()
+
+    // A malformed figure must not cost the other forty trips in the file.
+    const junk = [...ROW]
+    junk[COST_COLUMN] = 'see contract'
+    const parsed = parseTripsCsv(file([HEADER, junk]))
+    expect(parsed.legs).toHaveLength(1)
+    expect(parsed.legs[0]?.costCents).toBeNull()
   })
 
   it('says which row it could not read, rather than dropping it', () => {

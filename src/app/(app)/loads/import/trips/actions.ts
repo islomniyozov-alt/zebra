@@ -50,6 +50,12 @@ export async function tripsImportAction(
     return { ...EMPTY_TRIPS_IMPORT, error: t('ref.error.required') }
   }
 
+  // §1.3'S MONEY WALL, ON THE WRITE SIDE. A role that may not see money does
+  // not get to write it either, so a DISPATCHER's import books the freight and
+  // leaves the rate for somebody who may enter one. Same posture as the board
+  // importer beside it, decided by the same permission.
+  const maySeeMoney = await currentUserCan('update', 'load.financials')
+
   const csv = String(formData.get('csv') ?? '')
   const companyId = String(formData.get('companyId') ?? '')
   const acknowledged = String(formData.get('signature') ?? '')
@@ -198,7 +204,12 @@ export async function tripsImportAction(
             write.loadId,
             trip,
             facilities,
-            { hasStops: write.hasStops, hasMiles: write.hasMiles },
+            {
+              hasStops: write.hasStops,
+              hasMiles: write.hasMiles,
+              hasRate: write.hasRate,
+            },
+            maySeeMoney ? trip.rateCents : null,
           )
           if (outcome.kind === 'enriched') enriched++
           continue
@@ -212,7 +223,12 @@ export async function tripsImportAction(
         await createTripLoad(
           tx,
           session.organizationId,
-          { trip, companyId, customerId },
+          {
+            trip,
+            companyId,
+            customerId,
+            rateCents: maySeeMoney ? trip.rateCents : null,
+          },
           facilities,
         )
         created++

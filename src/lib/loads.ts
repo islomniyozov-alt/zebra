@@ -140,7 +140,10 @@ function wholeNumber(
  * trusted — the schema says denormalized-for-reporting, which means it is a
  * cache and a cache that is written by hand goes stale.
  */
-async function recomputeTotals(tx: TxClient, loadId: string): Promise<void> {
+export async function recomputeTotals(
+  tx: TxClient,
+  loadId: string,
+): Promise<void> {
   const load = await tx.load.findUnique({
     where: { id: loadId },
     select: { linehaulCents: true, fuelSurchargeCents: true },
