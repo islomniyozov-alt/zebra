@@ -60,3 +60,25 @@ Rules that are cheap to state and expensive to rediscover:
 - No hex colour outside the token block. Grep before deleting a token.
 - Amend `TMS-DESIGN-SYSTEM.md` in its own commit, with the reason, _before_
   changing code to match it.
+
+Rules about instruments, which are the ones that cost whole sessions:
+
+- **Never supply the baseline you are testing.** Asking
+  `git rev-list --count 6fc6f60..HEAD` how far production is behind, when
+  `6fc6f60` is your own belief about production, gets you your belief back with
+  a number attached. Read the baseline from the thing being measured —
+  `check:drift` queries Cloudflare — and only then compute against it. On
+  2026-08-20 production had moved three deploys past a reading carried forward
+  from two days earlier, and every report in between repeated it.
+- **Read the exit code before anything touches the output.** `cmd | tail` gives
+  you `tail`'s exit code — a cheerful `0` over a failed command — and a filter
+  that trims to the last lines will trim away the banner explaining what went
+  wrong. Capture the status first, then filter for reading. The same session
+  produced three false readings this way: a proof that "passed" because `$?`
+  was `tail`'s, a `sed` that silently matched nothing after prettier reindented
+  its target, and a `grep` that turned a refused run into a four-second
+  mystery.
+- **A guard that has never been watched failing is not known to work.** Break
+  the thing on purpose, see the guard fire, put it back. Flag 47's lesson, and
+  the reason `singleLoadRateCents`, the money-arithmetic patterns and the
+  template freshness check each have both branches observed.
