@@ -113,7 +113,22 @@ async function ensureTemplate(adminUrl: string): Promise<void> {
     `[integration] template ${TEMPLATE_DB} is STALE: missing ${missing.length} of ${wanted.length}` +
       ` (${missing.slice(0, 3).join(', ')}${missing.length > 3 ? ', …' : ''})`,
   )
-  console.log('[integration] migrating the template — this costs ~155s, once')
+  // TWO VERY DIFFERENT COSTS, AND SAYING THE WRONG ONE IS NOT A ROUNDING
+  // ERROR. `migrate deploy` applies only what is PENDING, so catching a
+  // template up to a newly-landed migration takes seconds — measured, one
+  // migration, and the run was indistinguishable from a normal one. The 155
+  // seconds is the price of building a template from EMPTY, which happens on a
+  // fresh machine and after somebody drops it.
+  //
+  // The message used to quote 155s for both. Wrong in the reassuring
+  // direction: it would tell a reader that a routine schema change costs three
+  // minutes of every run, which is the sort of thing that gets a cache
+  // "optimised" into a correctness hole by somebody trying to help.
+  console.log(
+    missing.length === wanted.length
+      ? `[integration] building it from empty — this costs ~155s, and only when the template is missing or dropped`
+      : `[integration] applying ${missing.length} pending migration(s) — seconds, not the full chain`,
+  )
 
   const result = spawnSync('npx', ['prisma', 'migrate', 'deploy'], {
     stdio: 'inherit',
