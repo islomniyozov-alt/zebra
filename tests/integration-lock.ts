@@ -1,6 +1,15 @@
 import 'dotenv/config'
 import { hostname } from 'node:os'
+import { readdirSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { neonConfig, Pool } from '@neondatabase/serverless'
+import {
+  TEMPLATE_DB,
+  WORKER_DB_PREFIX,
+  withDatabase,
+  workerCount,
+  workerDatabase,
+} from './worker-db'
 
 // ---------------------------------------------------------------------------
 // ONE RUNNER PER DATABASE — NOW OWNED BY THE SUITE, NOT BY A LAUNCHER.
@@ -41,6 +50,171 @@ const RUNNER_LOCK_KEY = 8127346501
 const KEEPALIVE_MS = 60_000
 
 let release: (() => Promise<void>) | null = null
+
+/** Migration directory names, which is what `_prisma_migrations` records. */
+function migrationsOnDisk(): string[] {
+  return readdirSync('prisma/migrations', { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort()
+}
+
+/**
+ * Bring the template up to date, or confirm it already is.
+ *
+ * SAYS WHICH BRANCH IT TOOK, always. A template is a cache of a schema, and a
+ * cache nobody can see the freshness of is how a suite comes to prove last
+ * week's migrations. The comparison is against the migrations FOLDER rather
+ * than against a timestamp: a name present on disk and absent from the
+ * template is the only thing that actually matters.
+ */
+async function ensureTemplate(adminUrl: string): Promise<void> {
+  const admin = new Pool({ connectionString: adminUrl, max: 1 })
+  const exists = await admin.query(
+    'select 1 from pg_database where datname = $1',
+    [TEMPLATE_DB],
+  )
+  if (exists.rowCount === 0) {
+    await admin.query(`create database "${TEMPLATE_DB}"`)
+    console.log(`[integration] template ${TEMPLATE_DB} created`)
+  }
+  await admin.end()
+
+  const wanted = migrationsOnDisk()
+
+  // A SEPARATE, SHORT-LIVED CONNECTION TO THE TEMPLATE, closed before anything
+  // copies from it. `CREATE DATABASE ... TEMPLATE` refuses while any session is
+  // connected to the source, so every read of the template is opened and shut
+  // rather than held.
+  const templateUrl = withDatabase(adminUrl, TEMPLATE_DB)
+  let applied: string[] = []
+  const probe = new Pool({ connectionString: templateUrl, max: 1 })
+  try {
+    const rows = await probe.query(
+      'select migration_name from _prisma_migrations where finished_at is not null',
+    )
+    applied = rows.rows.map((row) => row.migration_name as string).sort()
+  } catch {
+    // No `_prisma_migrations` at all — a fresh or half-built template.
+    applied = []
+  } finally {
+    await probe.end()
+  }
+
+  const missing = wanted.filter((name) => !applied.includes(name))
+  if (missing.length === 0) {
+    console.log(
+      `[integration] template ${TEMPLATE_DB} is current (${applied.length} migrations) — reused`,
+    )
+    return
+  }
+
+  console.log(
+    `[integration] template ${TEMPLATE_DB} is STALE: missing ${missing.length} of ${wanted.length}` +
+      ` (${missing.slice(0, 3).join(', ')}${missing.length > 3 ? ', …' : ''})`,
+  )
+  console.log('[integration] migrating the template — this costs ~155s, once')
+
+  const result = spawnSync('npx', ['prisma', 'migrate', 'deploy'], {
+    stdio: 'inherit',
+    shell: true,
+    env: {
+      ...process.env,
+      DATABASE_URL: templateUrl,
+      DIRECT_DATABASE_URL: templateUrl,
+    },
+  })
+  if (result.status !== 0) {
+    throw new Error('migrating the integration template failed')
+  }
+  console.log('[integration] template migrated')
+}
+
+/**
+ * Drop every worker database, then build one per worker from the template.
+ *
+ * THE SWEEP IS UNCONDITIONAL AND IT IS SAFE BECAUSE OF THE LOCK. A crashed run
+ * leaves its databases behind; the run lock is already held by the time this
+ * executes, so nothing else on this branch can be using them. `WITH (FORCE)`
+ * because a leaked connection from a killed run would otherwise make its own
+ * corpse undroppable.
+ */
+async function buildWorkerDatabases(adminUrl: string): Promise<void> {
+  const admin = new Pool({ connectionString: adminUrl, max: 12 })
+  try {
+    const orphans = await admin.query(
+      `select datname from pg_database where datname like $1`,
+      [`${WORKER_DB_PREFIX}%`],
+    )
+    for (const row of orphans.rows) {
+      await admin.query(`drop database "${row.datname}" with (force)`)
+    }
+    if (orphans.rowCount) {
+      console.log(
+        `[integration] swept ${orphans.rowCount} worker database(s) from a previous run`,
+      )
+    }
+
+    // NOTHING MAY BE CONNECTED TO THE SOURCE, and something always is.
+    //
+    // `CREATE DATABASE ... TEMPLATE` fails with 55006 — "There is 1 other
+    // session using the database" — if a single connection remains. The
+    // migrate step above runs as a child process and its connection outlives
+    // the exit of the CLI by a moment, so the very first copy raced it and
+    // lost. This is not a hypothetical: it is what happened on the first run.
+    //
+    // Terminating is safe here for the same reason the sweep is: the run lock
+    // is held, so any session on the template is a leftover of ours.
+    await admin.query(
+      `select pg_terminate_backend(pid) from pg_stat_activity
+        where datname = $1 and pid <> pg_backend_pid()`,
+      [TEMPLATE_DB],
+    )
+
+    const count = workerCount()
+    const startedAt = Date.now()
+
+    // COPIED CONCURRENTLY, ON SEPARATE CONNECTIONS. A populated copy costs
+    // ~20 seconds — measured, 55 tables — so eight of them in series would be
+    // 160s of setup and would give back most of what parallelism won. They are
+    // independent: each reads the same template and writes a different
+    // database, and Postgres serialises only the parts that must be.
+    const copy = async (slot: number) => {
+      // AND A BOUNDED RETRY, because termination is asynchronous: the backend
+      // is asked to go away, and `pg_stat_activity` stops listing it slightly
+      // before the database stops counting it.
+      let lastError: unknown = null
+      for (let attempt = 0; attempt < 10; attempt++) {
+        try {
+          await admin.query(
+            `create database "${workerDatabase(slot)}" template "${TEMPLATE_DB}"`,
+          )
+          lastError = null
+          break
+        } catch (error) {
+          lastError = error
+          if ((error as { code?: string }).code !== '55006') throw error
+          await admin.query(
+            `select pg_terminate_backend(pid) from pg_stat_activity
+              where datname = $1 and pid <> pg_backend_pid()`,
+            [TEMPLATE_DB],
+          )
+          await new Promise((resolve) => setTimeout(resolve, 300))
+        }
+      }
+      if (lastError) throw lastError
+    }
+
+    await Promise.all(
+      Array.from({ length: count }, (_, index) => copy(index + 1)),
+    )
+    console.log(
+      `[integration] ${count} worker database(s) copied from ${TEMPLATE_DB} in ${Date.now() - startedAt}ms`,
+    )
+  } finally {
+    await admin.end()
+  }
+}
 
 export async function setup(): Promise<void> {
   const url = process.env.DIRECT_DATABASE_URL
@@ -115,6 +289,11 @@ export async function setup(): Promise<void> {
     client.query('select 1').catch(() => {})
   }, KEEPALIVE_MS)
   keepalive.unref?.()
+
+  // ONLY NOW, WITH THE LOCK HELD. The sweep drops databases; doing that before
+  // knowing this is the only run would be dropping somebody else's.
+  await ensureTemplate(url)
+  await buildWorkerDatabases(url)
 
   release = async () => {
     clearInterval(keepalive)

@@ -14,10 +14,17 @@ export default defineConfig({
     // main process, before any worker — so a bare `vitest` pays it too, which
     // `setupFiles` (once per FILE, own process) could never enforce.
     globalSetup: ['tests/integration-lock.ts'],
-    // Each file holds one WebSocket to Neon and mutates shared tables.
-    // Running them concurrently multiplies connections and invites the kind
-    // of interference that gets blamed on the code under test.
-    fileParallelism: false,
+    // PARALLEL, BECAUSE EACH WORKER OWNS A DATABASE. The old note here said
+    // running these concurrently "invites the kind of interference that gets
+    // blamed on the code under test", and it was right about the shared
+    // database it was written for — one worker's unscoped cleanup deleting
+    // another's rows is precisely the failure that voided the a8e0c9f gate.
+    // Workers no longer share tables, so there is nothing left to interfere
+    // with. See tests/worker-db.ts.
+    fileParallelism: true,
+    // ONE SOURCE OF TRUTH with the database count in tests/worker-db.ts; a
+    // worker without its own database would silently share slot 1's.
+    maxWorkers: Number(process.env.ZEBRA_TEST_WORKERS ?? '8'),
     testTimeout: 120_000,
     hookTimeout: 180_000,
   },
