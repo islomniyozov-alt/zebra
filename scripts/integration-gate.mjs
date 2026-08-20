@@ -1,7 +1,5 @@
 import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { hostname } from 'node:os'
-import { neonConfig, Pool } from '@neondatabase/serverless'
 import { writeReceipt } from './integration-receipt.mjs'
 
 // ---------------------------------------------------------------------------
@@ -24,33 +22,12 @@ import { writeReceipt } from './integration-receipt.mjs'
 
 const SCRUBBED = ['DATABASE_URL', 'DIRECT_DATABASE_URL', 'NEON_BRANCH']
 
-// ---------------------------------------------------------------------------
-// ONE RUNNER PER DATABASE, ENFORCED BY POSTGRES RATHER THAN BY REMEMBERING.
-//
-// On 2026-08-19 a gate and a `deploy:prod` started FIFTEEN SECONDS APART
-// against the same dev database. One reported 417 passed and the other failed
-// in the audit suite; both results were void, because two suites mutating one
-// database are not two experiments, they are one experiment with no control.
-//
-// THE GREEN ONE IS THE DANGEROUS HALF. A red run tells you something is wrong.
-// A green run earned while another process was writing to the same tables
-// tells you nothing at all and looks exactly like proof — it even wrote a
-// receipt, which `deploy:prod` would have accepted.
-//
-// SO THE SUITE NOW TAKES A LOCK. `pg_try_advisory_lock` is session-scoped:
-// held for as long as the connection lives, released the instant it dies, and
-// therefore impossible to leave behind by killing the run with ^C — which is
-// exactly what a lock row in a table would have got wrong the first time
-// somebody interrupted a gate.
-//
-// The key is an arbitrary constant. It only has to be the same number in every
-// copy of this file.
-// ---------------------------------------------------------------------------
-
-const RUNNER_LOCK_KEY = 8127346501
-
-/** Keeps the lock's connection from being reaped during a ~55 minute run. */
-const KEEPALIVE_MS = 60_000
+// ONE RUNNER PER DATABASE IS NO LONGER THIS FILE'S JOB. The lock moved into
+// the suite itself — `tests/integration-lock.ts`, run by Vitest's globalSetup —
+// because guarding only the two commands that go through here left a bare
+// `vitest` invocation free to run beside a gate. It MUST NOT also be taken
+// here: this process spawns the suite as a child, and a lock held by the
+// parent is a lock the child cannot get.
 
 /** `.env`, parsed just enough — never loaded into this process. */
 function envFileValues() {
@@ -121,87 +98,6 @@ export function resolveEndpoint() {
 }
 
 /**
- * Take the one-runner lock, or report who has it.
- *
- * Uses the DIRECT url from `.env` — the same file the suite itself reads, so
- * the lock is held on the database the suite will actually write to rather
- * than on whatever a terminal happened to export.
- */
-async function acquireRunnerLock(directUrl) {
-  neonConfig.poolQueryViaFetch = false
-  const pool = new Pool({ connectionString: directUrl, max: 1 })
-
-  // ONE CLIENT, CHECKED OUT AND HELD. An advisory lock belongs to a SESSION,
-  // so it must be the same connection for the whole run; handing the query to
-  // a pool that might rotate connections would take a lock and immediately
-  // lose it.
-  const client = await pool.connect()
-
-  try {
-    const held = await client.query('select pg_try_advisory_lock($1) as got', [
-      RUNNER_LOCK_KEY,
-    ])
-    if (held.rows[0]?.got !== true) {
-      // Who else is on it. Best-effort and purely for the message: the answer
-      // can be stale by the time it is printed, and a wrong name is still more
-      // useful than "locked".
-      let who = ''
-      try {
-        const other = await client.query(
-          `select application_name, client_addr, backend_start
-             from pg_stat_activity
-            where pid <> pg_backend_pid()
-              and application_name like 'zebra-integration%'
-            order by backend_start asc
-            limit 1`,
-        )
-        const row = other.rows[0]
-        if (row) {
-          who =
-            `
-  The other runner: ${row.application_name}` +
-            `${row.client_addr ? ` from ${row.client_addr}` : ''}` +
-            `, started ${new Date(row.backend_start).toLocaleString()}.`
-        }
-      } catch {
-        // pg_stat_activity is a nicety, not the mechanism.
-      }
-      client.release()
-      await pool.end()
-      return { ok: false, who }
-    }
-
-    // The name the OTHER runner will read out of pg_stat_activity.
-    await client.query(
-      `set application_name = 'zebra-integration ${hostname()} pid ${process.pid}'`,
-    )
-
-    const keepalive = setInterval(() => {
-      client.query('select 1').catch(() => {})
-    }, KEEPALIVE_MS)
-    keepalive.unref?.()
-
-    return {
-      ok: true,
-      async release() {
-        clearInterval(keepalive)
-        try {
-          await client.query('select pg_advisory_unlock($1)', [RUNNER_LOCK_KEY])
-        } catch {
-          // Releasing on a dead connection is already released.
-        }
-        client.release()
-        await pool.end().catch(() => {})
-      },
-    }
-  } catch (error) {
-    client.release()
-    await pool.end().catch(() => {})
-    throw error
-  }
-}
-
-/**
  * Run the suite. Returns `{ ok, endpoint, receipt }`.
  *
  * A RECEIPT IS WRITTEN ONLY ON A GREEN RUN, and only after the runner has
@@ -226,28 +122,6 @@ export async function runIntegrationSuite() {
     )
   }
   console.log(`The suite will write to ${target.endpoint} (from .env).`)
-
-  // THE LOCK BEFORE THE FIFTY-FIVE MINUTES, not after them.
-  const lock = await acquireRunnerLock(envFileValues().DIRECT_DATABASE_URL)
-  if (!lock.ok) {
-    console.error('')
-    console.error('='.repeat(70))
-    console.error('ANOTHER INTEGRATION RUN IS ALREADY USING THIS DATABASE.')
-    console.error('')
-    console.error(
-      'Two suites mutating one database do not produce two results. They',
-    )
-    console.error(
-      'produce one void result that can still come back GREEN — which is how',
-    )
-    console.error('a receipt got written for an uncontrolled run on')
-    console.error('2026-08-19.')
-    if (lock.who) console.error(lock.who)
-    console.error('')
-    console.error('Wait for it to finish, then run this again.')
-    console.error('='.repeat(70))
-    return { ok: false, endpoint: target.endpoint, receipt: null }
-  }
 
   console.log('')
 
@@ -285,10 +159,13 @@ export async function runIntegrationSuite() {
     }
 
     return { ok: true, endpoint: target.endpoint, receipt }
-  } finally {
-    // RELEASED WHATEVER HAPPENED. A red suite that kept the lock would make
-    // the next attempt look like a concurrency problem instead of a failure.
-    await lock.release()
+  } catch (error) {
+    // The suite refusing because another runner holds the lock arrives here as
+    // a non-zero child exit, not as a throw; this catches anything else and
+    // keeps the gate's contract of returning rather than exploding.
+    console.error('')
+    console.error(String(error))
+    return { ok: false, endpoint: target.endpoint, receipt: null }
   }
 }
 
