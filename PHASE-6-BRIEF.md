@@ -1818,3 +1818,43 @@ Recorded rather than resolved, per Phase 1's discipline.
     from. Adding it as a reader failed `tests/prod-url-guard.test.ts` by name,
     which is the fence working: a third reader is a decision, and this is the
     record of making it.
+
+81. **A HAND-WRITTEN CHANGE TO A SHARED DATABASE IS INVISIBLE TO EVERY
+    INSTRUMENT WE HAVE.** On 2026-08-20 this assistant ran
+    `REVOKE ALL ON TABLE public."_prisma_migrations" FROM zebra_app` against the
+    dev branch by hand, to undo damage its own probing had caused. The revoke
+    was correct and `structure.test.ts` went green again. That is not the
+    point.
+
+    THE POINT IS THAT NOTHING COULD HAVE TOLD ANYONE. `check:drift` compares
+    commits, and a manual `REVOKE` leaves no commit. The migration checker
+    compares `_prisma_migrations` against the migrations folder, and a grant is
+    not a migration. `npm run check` asserts a handful of privileges it thought
+    to name — it caught this one only because `structure.test.ts` happened to
+    assert on the exact table that changed, and only on `SELECT`, which the
+    blanket grant happened to include. A revoke on any table nobody asserts
+    about would have been permanent and silent.
+
+    SO THE BLIND SPOT IS: the schema is version-controlled and the GRANTS ARE
+    NOT. Two databases can pass every check in this repository while disagreeing
+    about who may read what. Dev and production are not compared to each other
+    on privileges by anything, ever.
+
+    Recorded as a standing blind spot rather than as an incident, because the
+    incident is closed and the gap is not. The obvious closure is a check that
+    reads the ACLs of every table on both databases and compares them to each
+    other — not to a list somebody maintains, which would rot the same way.
+
+82. **`zebratms.com` IS THE MAIL DOMAIN. THE APP IS
+    `zebra.tajikcargollc.workers.dev`.** Cloudflare Email Routing serves
+    `loads@zebratms.com`; no application is served there at all.
+
+    This cost four dead probes on 2026-08-20 — `zebratms.com`, `www.`, `app.`
+    and `zebra.` all returned `000`, which reads as "production is down" rather
+    than "wrong host" — and it stalled an artifact-level check of what was
+    actually deployed at the one moment that check mattered, during a dispute
+    about which commit production was running.
+
+    The app origin is now written into `scripts/check-deploy-drift.mjs` beside
+    the probe that uses it, so the next person reads it from the code rather
+    than guessing from the email address.

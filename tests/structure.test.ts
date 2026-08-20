@@ -395,13 +395,42 @@ describe('the application role', () => {
     expect(rows.map((r) => r.granted)).toEqual([])
   })
 
+  // EVERY PRIVILEGE TYPE, NOT JUST SELECT, AND SCHEMA-QUALIFIED.
+  //
+  // This asserted `SELECT` alone, which would have watched a `GRANT INSERT` or
+  // a `GRANT ALL` land without a word. It is now the whole set, because the
+  // way this actually broke was a blanket grant: 20260728224900 says
+  // `GRANT ... ON ALL TABLES IN SCHEMA public TO zebra_app` and then revokes on
+  // `"_prisma_migrations"` UNQUALIFIED, resolving through search_path. Running
+  // migrations with a non-public search_path — which happened on 2026-08-20
+  // while measuring schema-per-worker — grants on public's copy and revokes on
+  // somebody else's. The test caught it; it caught it by luck of asking about
+  // SELECT, which is the one the blanket grant happened to include.
+  //
+  // `public.` is spelled out here for the same reason: an unqualified name in
+  // an assertion about a search_path bug is the bug in the assertion.
   it('has no reach into migration bookkeeping', async () => {
-    const [priv] = await query<{ migrations: boolean; loads: boolean }>(`
-      SELECT has_table_privilege('zebra_app', '"_prisma_migrations"', 'SELECT') AS migrations,
-             has_table_privilege('zebra_app', '"Load"', 'SELECT')               AS loads
+    const [priv] = await query<Record<string, boolean>>(`
+      SELECT has_table_privilege('zebra_app', 'public."_prisma_migrations"', 'SELECT')     AS m_select,
+             has_table_privilege('zebra_app', 'public."_prisma_migrations"', 'INSERT')     AS m_insert,
+             has_table_privilege('zebra_app', 'public."_prisma_migrations"', 'UPDATE')     AS m_update,
+             has_table_privilege('zebra_app', 'public."_prisma_migrations"', 'DELETE')     AS m_delete,
+             has_table_privilege('zebra_app', 'public."_prisma_migrations"', 'TRUNCATE')   AS m_truncate,
+             has_table_privilege('zebra_app', 'public."_prisma_migrations"', 'REFERENCES') AS m_references,
+             has_table_privilege('zebra_app', 'public."_prisma_migrations"', 'TRIGGER')    AS m_trigger,
+             has_table_privilege('zebra_app', 'public."Load"', 'SELECT')                   AS loads
     `)
 
-    expect(priv).toMatchObject({ migrations: false, loads: true })
+    const held = Object.entries(priv!)
+      .filter(([key, value]) => key.startsWith('m_') && value)
+      .map(([key]) => key.slice(2))
+
+    expect(held, 'zebra_app holds privileges on migration bookkeeping').toEqual(
+      [],
+    )
+    // THE CONTROL. Without it, a connection that could see nothing at all
+    // would pass this test by having no privileges anywhere.
+    expect(priv!.loads).toBe(true)
   })
 
   it('is the role the application actually connects as', async () => {

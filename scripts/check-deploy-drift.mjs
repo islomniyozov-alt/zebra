@@ -28,8 +28,62 @@ import { classify, looksLikeCommit } from './deploy-drift-rules.mjs'
 
 const ENVIRONMENTS = [
   { label: 'dev', worker: 'zebra-dev', args: [] },
-  { label: 'production', worker: 'zebra', args: ['--env', 'production'] },
+  {
+    label: 'production',
+    worker: 'zebra',
+    args: ['--env', 'production'],
+    // ---------------------------------------------------------------------
+    // THE HOST IS THE APP. `zebratms.com` is the MAIL domain — Cloudflare
+    // Email Routing for loads@zebratms.com — and serves no application. Four
+    // probes died against it on 2026-08-20 before anybody checked, so it is
+    // written down here rather than remembered.
+    // ---------------------------------------------------------------------
+    origin: 'https://zebra.tajikcargollc.workers.dev',
+    // A route the running build must have, and one it must not. The control
+    // is not decoration: without it a host that answers 200 to everything —
+    // a parked page, a captive portal, a misrouted proxy — would read as a
+    // healthy deploy.
+    probePath: '/loads/import/trips',
+    controlPath: '/loads/import/this-route-does-not-exist',
+  },
 ]
+
+/**
+ * Ask the RUNNING deployment whether it is the build we think it is.
+ *
+ * WHY THIS EXISTS: everything above reads a LABEL. `deploy.mjs` stamps the
+ * short commit with `--message`, and this file has said since it was written
+ * that "a version id tells you a deploy happened; it does not tell you what is
+ * in it". That caveat stood because nobody had the host. Now it is here, so
+ * the check can look at the artifact instead of the sticker.
+ *
+ * NON-FATAL AND LOUD, deliberately. An unreachable host is a network fact, not
+ * a wrong deploy, and a check that treats them the same becomes untrustworthy
+ * in the other direction — people stop believing its alarms. So: silence when
+ * it agrees, a shout when the artifact contradicts the label, and a quieter
+ * note when it simply could not ask.
+ */
+async function probeArtifact(environment) {
+  if (!environment.origin) return null
+
+  const ask = async (path) => {
+    const response = await fetch(`${environment.origin}${path}`, {
+      redirect: 'follow',
+      signal: AbortSignal.timeout(20_000),
+    })
+    return response.status
+  }
+
+  try {
+    const [live, control] = await Promise.all([
+      ask(environment.probePath),
+      ask(environment.controlPath),
+    ])
+    return { live, control }
+  } catch (error) {
+    return { unreachable: String(error?.message ?? error) }
+  }
+}
 
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim()
 
@@ -47,6 +101,7 @@ const head = git('rev-parse', '--short', 'HEAD')
 console.log(`HEAD is ${head}`)
 
 let productionTrailsSource = false
+let artifactDisagrees = false
 
 for (const environment of ENVIRONMENTS) {
   let deployedMessage = null
@@ -173,6 +228,62 @@ for (const environment of ENVIRONMENTS) {
         `                  ... and ${changedSourceFiles.length - 8} more`,
       )
   }
+}
+
+// ---------------------------------------------------------------------------
+// AND NOW ASK THE RUNNING BUILD, not the label on it.
+//
+// After the loop rather than inside it: that loop exits through four different
+// `continue`s, and a probe placed among them would run for some verdicts and
+// not others — which is the sort of coverage gap that reads as "the probe
+// agreed" when the probe never ran.
+// ---------------------------------------------------------------------------
+for (const environment of ENVIRONMENTS) {
+  if (!environment.origin) continue
+  const probe = await probeArtifact(environment)
+  if (!probe) continue
+
+  const where = `  ${environment.label.padEnd(11)} artifact`
+
+  if (probe.unreachable) {
+    // NOT A FAILURE. A laptop on a plane, a DNS hiccup and a wrong deploy are
+    // three different things, and only one of them is this check's business.
+    console.log(`${where}   not reached (${probe.unreachable})`)
+    continue
+  }
+
+  const { live, control } = probe
+  const routeServed = live >= 200 && live < 400
+  const controlRefused = control === 404
+
+  if (routeServed && controlRefused) {
+    console.log(
+      `${where}   serving ${environment.probePath} (${live}), control 404 — the build has this route`,
+    )
+    continue
+  }
+
+  artifactDisagrees = true
+  console.log(`${where}   DISAGREES WITH THE LABEL ABOVE`)
+  console.log(
+    `                  ${environment.probePath} -> ${live}, control -> ${control}`,
+  )
+  console.log(
+    controlRefused
+      ? '                  the deployed commit claims this route and the host does not serve it'
+      : '                  the control did not 404, so the 200 above proves nothing',
+  )
+}
+
+if (artifactDisagrees) {
+  console.log('')
+  console.log('  ' + '='.repeat(70))
+  console.log('  THE RUNNING BUILD DOES NOT MATCH WHAT THE DEPLOYMENT CLAIMS.')
+  console.log(
+    '  A version message is a sticker somebody wrote. The lines above',
+  )
+  console.log('  asked the host itself and got a different answer.')
+  console.log('  ' + '='.repeat(70))
 }
 
 if (productionTrailsSource) {

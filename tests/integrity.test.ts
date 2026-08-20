@@ -64,6 +64,50 @@ afterAll(async () => {
   await owner?.$disconnect()
 })
 
+// ---------------------------------------------------------------------------
+// AN EMPTY DATABASE IS NOT A CLEAN ONE.
+//
+// Every assertion in this file has the shape "find the inconsistencies, expect
+// none". That is trivially satisfied by a database with nothing in it, and on
+// 2026-08-20 that is exactly what happened: a routing change pointed this
+// project at a per-worker database — a fresh copy of the migration template —
+// and all five checks passed against zero loads, zero invoices and zero
+// payments. The suite reported a clean bill of health for a database it had
+// never seen the contents of.
+//
+// SO THE FILE PROVES IT CAN SEE ROWS BEFORE IT PROVES ANYTHING ABOUT THEM.
+// This is a precondition, not a check of the data: it asserts the connection
+// reaches a populated database, and it fails LOUDLY rather than passing
+// quietly, which is the difference between the two outcomes that matter.
+//
+// The tables are the ones the checks below actually read. A database holding
+// organizations and no loads would still satisfy a bare "is anything here",
+// while telling the factoring and payment checks nothing.
+// ---------------------------------------------------------------------------
+describe('the backstop can see the database it is judging', () => {
+  it('reaches rows in the tables these checks read', async () => {
+    owner ??= createPrismaClient(process.env.DIRECT_DATABASE_URL!)
+
+    const counts = {
+      organizations: await owner.organization.count(),
+      companies: await owner.company.count(),
+      loads: await owner.load.count(),
+    }
+
+    const empty = Object.entries(counts)
+      .filter(([, n]) => n === 0)
+      .map(([table]) => table)
+
+    expect(
+      empty,
+      `these checks report "no inconsistencies" by finding nothing, so an ` +
+        `empty table makes them meaningless. Counts: ${JSON.stringify(counts)}. ` +
+        `If this is a fresh database, this file is pointed at the wrong one — ` +
+        `see tests/setup.ts.`,
+    ).toEqual([])
+  })
+})
+
 describe('an asset agrees with its own history', () => {
   it('no live asset has a companyId its open period disagrees with', async () => {
     const drift = await acrossEveryOrg((tx) => findAuthorityDrift(tx))
