@@ -6,12 +6,8 @@ import { getLocaleContext } from '@/lib/locale'
 import { LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import { resolveBroker } from '@/lib/locations'
 import { parseTripsCsv } from '@/lib/trips-csv'
-import {
-  nearMissWarnings,
-  planSignature,
-  planTrips,
-  type PlannedTrip,
-} from '@/lib/trips-import'
+import { tripRowView } from '@/lib/trips-preview'
+import { nearMissWarnings, planSignature, planTrips } from '@/lib/trips-import'
 import {
   createTripLoad,
   enrichLoad,
@@ -37,14 +33,11 @@ import { EMPTY_TRIPS_IMPORT, type TripsImportState } from './state'
 /** The customer every Relay trip belongs to. */
 const RELAY_CUSTOMER_NAME = 'Amazon Relay'
 
-const lane = (trip: PlannedTrip) =>
-  trip.stops.map((stop) => stop.facilityCode).join(' → ')
-
 export async function tripsImportAction(
   _previous: TripsImportState,
   formData: FormData,
 ): Promise<TripsImportState> {
-  const { t } = await getLocaleContext()
+  const { t, locale } = await getLocaleContext()
 
   if (!(await currentUserCan('create', 'load'))) {
     return { ...EMPTY_TRIPS_IMPORT, error: t('ref.error.required') }
@@ -106,33 +99,24 @@ export async function tripsImportAction(
   })
 
   const view = {
-    rows: decided.rows.map(({ trip, write, unresolved }) => ({
-      tripId: trip.tripId,
-      lane: lane(trip),
-      stops: trip.stops.length,
-      miles: trip.totalMiles === null ? '—' : String(trip.totalMiles),
-      action:
-        write.action === 'create'
-          ? ('create' as const)
-          : write.hasStops && write.hasMiles
-            ? ('unchanged' as const)
-            : ('enrich' as const),
-      actionDetail:
-        write.action === 'create'
-          ? t('trips.action.create')
-          : write.hasStops && write.hasMiles
-            ? t('trips.action.unchanged')
-            : [
-                write.hasStops ? null : t('trips.action.addsStops'),
-                write.hasMiles ? null : t('trips.action.addsMiles'),
-              ]
-                .filter(Boolean)
-                .join(', '),
-      skippedLegs: trip.cancelledLegs,
-      unresolved,
-      driver: trip.driverNames.join(', ') || '—',
-      equipment: [...trip.trailerIds, ...trip.tractorIds].join(' / ') || '—',
-    })),
+    // ONE BUILDER FOR THE ROW, in src/lib/trips-preview.ts, where a test can
+    // reach it. The money key is added there or not at all — §1.3 wants the
+    // field ABSENT from the payload for a role that may not see it, and an
+    // action nothing can call is where that promise would go unchecked.
+    rows: decided.rows.map(({ trip, write, unresolved }) =>
+      tripRowView(
+        trip,
+        write,
+        unresolved,
+        {
+          create: t('trips.action.create'),
+          unchanged: t('trips.action.unchanged'),
+          addsStops: t('trips.action.addsStops'),
+          addsMiles: t('trips.action.addsMiles'),
+        },
+        { maySeeMoney, locale },
+      ),
+    ),
     warnings: [
       ...plan.warnings.map((warning) => `${warning.tripId}: ${warning.detail}`),
       ...decided.near.map((warning) => `${warning.tripId}: ${warning.detail}`),
@@ -150,6 +134,7 @@ export async function tripsImportAction(
     unresolvedCodes: [
       ...new Set(decided.rows.flatMap((row) => row.unresolved)),
     ],
+    showsMoney: maySeeMoney,
   }
 
   view.createCount = view.rows.filter((row) => row.action === 'create').length

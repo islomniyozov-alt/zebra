@@ -5,24 +5,12 @@
 // runtime as a 500 with nothing in the browser to explain it. The repository
 // has a lint rule for exactly this and it has caught it before.
 
-export interface TripRowView {
-  tripId: string
-  /** "DEN7 → MKC6 → ORD5", for a dispatcher to recognise at a glance. */
-  lane: string
-  stops: number
-  miles: string
-  /** ENRICH means a load already carries this reference — the email made it. */
-  action: 'create' | 'enrich' | 'unchanged'
-  /** What enrichment would add, or why nothing changes. */
-  actionDetail: string
-  /** Cancelled legs dropped from this trip. Rule 3, said out loud. */
-  skippedLegs: number
-  /** Facility codes with no location in the book. Written as names, not guesses. */
-  unresolved: string[]
-  /** Driver and equipment, shown only. Rule 7: nothing is auto-assigned. */
-  driver: string
-  equipment: string
-}
+// THE ROW SHAPE LIVES IN `src/lib/trips-preview.ts`, with the function that
+// builds it — including the conditional `rate` key that §1.3 requires be
+// ABSENT rather than empty for a role without `load.financials`. Re-exported
+// here so the form imports one name.
+export type { TripRowView } from '@/lib/trips-preview'
+import type { TripRowView } from '@/lib/trips-preview'
 
 export interface TripsPlanView {
   rows: TripRowView[]
@@ -34,6 +22,14 @@ export interface TripsPlanView {
   skippedLegTotal: number
   /** Distinct facility codes the book could not resolve. */
   unresolvedCodes: string[]
+  /**
+   * Whether the rows carry a `rate` key at all.
+   *
+   * The table renders the column only when this is true — and it is true only
+   * when the server put the key there, so the column cannot exist without the
+   * data and the data cannot arrive without the permission.
+   */
+  showsMoney: boolean
 }
 
 export interface TripsImportState {

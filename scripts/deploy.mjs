@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { readFileSync } from 'node:fs'
 import { check as checkMigrationGap } from './check-migration-gap.mjs'
 import { runIntegrationSuite, resolveEndpoint } from './integration-gate.mjs'
@@ -105,8 +106,26 @@ if (production) {
   }
 }
 
-const run = (args) => {
-  const result = spawnSync('npx', args, { stdio: 'inherit', shell: true })
+// NODE ON EACH TOOL'S OWN ENTRY. A shell was involved only to find `npx` on
+// Windows, and it printed DEP0190 on every deploy — a real warning worn out by
+// repetition, in the exact band of output where refusals appear. Naming
+// `npx.cmd` is not the fix either: Node refuses to spawn `.cmd` without a
+// shell since the 2024 argument-injection change, which turns the call into a
+// silent failure rather than a loud one.
+const require_ = createRequire(import.meta.url)
+const ENTRIES = {
+  wrangler: require_.resolve('../node_modules/wrangler/bin/wrangler.js'),
+  'opennextjs-cloudflare': require_.resolve(
+    '../node_modules/@opennextjs/cloudflare/dist/cli/index.js',
+  ),
+}
+
+const run = ([tool, ...rest]) => {
+  const entry = ENTRIES[tool]
+  if (!entry) throw new Error(`no resolved entry for ${tool}`)
+  const result = spawnSync(process.execPath, [entry, ...rest], {
+    stdio: 'inherit',
+  })
   if (result.status !== 0) process.exit(result.status ?? 1)
 }
 

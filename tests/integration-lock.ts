@@ -2,6 +2,7 @@ import 'dotenv/config'
 import { hostname } from 'node:os'
 import { readdirSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { neonConfig, Pool } from '@neondatabase/serverless'
 import {
   TEMPLATE_DB,
@@ -130,9 +131,11 @@ async function ensureTemplate(adminUrl: string): Promise<void> {
       : `[integration] applying ${missing.length} pending migration(s) — seconds, not the full chain`,
   )
 
-  const result = spawnSync('npx', ['prisma', 'migrate', 'deploy'], {
+  // Node on Prisma's own entry rather than `npx` through a shell — see the
+  // note in scripts/integration-gate.mjs. Same DEP0190, same fix.
+  const prisma = createRequire(import.meta.url).resolve('prisma/build/index.js')
+  const result = spawnSync(process.execPath, [prisma, 'migrate', 'deploy'], {
     stdio: 'inherit',
-    shell: true,
     env: {
       ...process.env,
       DATABASE_URL: templateUrl,

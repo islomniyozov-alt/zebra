@@ -1,5 +1,11 @@
 import { execFileSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { classify, looksLikeCommit } from './deploy-drift-rules.mjs'
+
+/** Wrangler's own entry, so nothing has to find a `.cmd`. */
+const WRANGLER_ENTRY = createRequire(import.meta.url).resolve(
+  '../node_modules/wrangler/bin/wrangler.js',
+)
 
 // ---------------------------------------------------------------------------
 // WHERE EACH WORKER STANDS AGAINST THIS COMMIT.
@@ -88,11 +94,17 @@ async function probeArtifact(environment) {
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim()
 
 const wrangler = (args) => {
+  // NODE ON WRANGLER'S OWN ENTRY. `shell: true` existed only to find `npx` on
+  // Windows and it printed DEP0190 on every run; naming `npx.cmd` instead does
+  // not work either, because Node refuses to spawn `.cmd` without a shell
+  // (the 2024 argument-injection fix). Both dead ends were tried — the second
+  // one silently turned this check into "could not be read" until the output
+  // was actually looked at.
   const out = execFileSync(
-    'npx',
-    ['wrangler', ...args, '--json'],
+    process.execPath,
+    [WRANGLER_ENTRY, ...args, '--json'],
     // Wrangler writes its banner to stderr; only stdout is parsed.
-    { encoding: 'utf8', shell: true, stdio: ['ignore', 'pipe', 'ignore'] },
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
   )
   return JSON.parse(out)
 }

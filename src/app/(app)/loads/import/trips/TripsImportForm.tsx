@@ -47,6 +47,7 @@ export interface TripsImportLabels {
   what: string
   driver: string
   equipment: string
+  rate: string
   willCreate: string
   willEnrich: string
   unchanged: string
@@ -213,7 +214,7 @@ export function TripsImportForm({
           {plan.rows.length > 0 ? (
             <Table
               rows={plan.rows}
-              columns={tripColumns(labels)}
+              columns={tripColumns(labels, plan.showsMoney)}
               rowKey={(row) => row.tripId}
               caption={labels.previewTitle.replace(
                 '{count}',
@@ -299,8 +300,11 @@ export function TripsImportForm({
   )
 }
 
-function tripColumns(labels: TripsImportLabels): Column<TripRowView>[] {
-  return [
+function tripColumns(
+  labels: TripsImportLabels,
+  showsMoney: boolean,
+): Column<TripRowView>[] {
+  const columns: Column<TripRowView>[] = [
     {
       key: 'tripId',
       header: labels.trip,
@@ -346,4 +350,28 @@ function tripColumns(labels: TripsImportLabels): Column<TripRowView>[] {
       render: (row) => row.equipment,
     },
   ]
+
+  // THE COLUMN EXISTS ONLY IF THE ROLE DOES — the render half of §1.3, and the
+  // same shape the board importer beside it uses. `showsMoney` comes from the
+  // server's own permission check, and the rows carry no `rate` key at all
+  // when it is false, so this cannot render a value that was never sent.
+  //
+  // WHAT IT SHOWS IS WHAT WILL LAND. A trip whose load already carries money
+  // reads '—', because enrichment adds and never replaces; a multi-leg trip
+  // reads '—', because its per-leg cost was never a price. See
+  // `rateThatWouldLand`.
+  if (showsMoney) {
+    columns.push({
+      key: 'rate',
+      header: labels.rate,
+      align: 'end',
+      render: (row) => (
+        <span className="tabular-nums" dir="ltr">
+          {row.rate ?? '—'}
+        </span>
+      ),
+    })
+  }
+
+  return columns
 }

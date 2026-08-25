@@ -67,6 +67,7 @@ export default async function TripsImportPage() {
           what: t('trips.what'),
           driver: t('trips.driver'),
           equipment: t('trips.equipment'),
+          rate: t('relay.rate'),
           willCreate: t('trips.willCreate'),
           willEnrich: t('trips.willEnrich'),
           unchanged: t('trips.unchanged'),

@@ -1858,3 +1858,47 @@ Recorded rather than resolved, per Phase 1's discipline.
     The app origin is now written into `scripts/check-deploy-drift.mjs` beside
     the probe that uses it, so the next person reads it from the code rather
     than guessing from the email address.
+
+83. **THE INTEGRATION SUITE'S TRANSACTION MARGINS ARE THINNER THAN THE
+    DATABASE'S VARIANCE.** Two runs died on transaction ceilings in two days,
+    at different limits, and both passed in isolation immediately afterwards:
+    - `documents.test.ts` — 10,260ms against a 5,000ms ceiling, on TWO expired
+      mints. Diagnosed and fixed: the sweep held a transaction open across
+      R2 calls (~350ms each), which no row count could survive.
+    - `payments.test.ts` — 21,879ms against a 20,000ms ceiling, in
+      `transitionOperational`, which makes FOUR queries. At the measured 202ms
+      round trip that is ~800ms of work against a 25× margin. Nothing in the
+      diff touched that path; the file passed 21/21 alone minutes later.
+
+    THE FIRST WAS A DESIGN FAULT AND THE SECOND WAS WEATHER, and telling them
+    apart took a measurement each time. What is recorded here is the pair: this
+    database's latency varies enough that a 25× margin is not always enough,
+    so a ceiling failure is not by itself evidence of a bug in the change under
+    test. It is also not by itself evidence of weather — the first one was
+    real, and calling it weather would have shipped a sweep that could never
+    complete.
+
+    `LOAD_WRITE_TIMEOUT_MS` WAS NOT RAISED, and should not be to quiet this.
+    It is a production write budget; widening it so a test passes changes what
+    the application promises in order to make an instrument agreeable.
+
+    The parallel suite has not removed this — it removed the COST of finding
+    out, from 56 minutes to 11.
+
+84. **~~A GUARD ON ONE DOOR OF A ROOM WITH THREE.~~** — **CLOSED 2026-08-20.**
+    The one-runner lock lived in `scripts/integration-gate.mjs`, so it guarded
+    `npm run test:integration` and `deploy:prod` and nothing else. A bare
+    `npx vitest --project integration` walked straight past it — and that is
+    not hypothetical: it is the command typed to reproduce the payments
+    failure, run beside a lock that was free only by luck.
+
+    Moved into `tests/integration-lock.ts`, run by Vitest's `globalSetup`,
+    which fires exactly once per run in the main process whatever invoked it.
+    NOT into `tests/setup.ts` as first proposed: that is a `setupFiles` entry
+    and executes once per test FILE in its own process — measured, three files
+    gave three executions under three pids — so a session-scoped lock there
+    would be taken and dropped twenty-seven times a run.
+
+    Recorded rather than deleted because the SHAPE recurs: a guard attached to
+    one entry point protects that entry point, and the entry point somebody
+    uses while debugging is rarely the guarded one.

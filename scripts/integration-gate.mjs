@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { readFileSync } from 'node:fs'
 import { writeReceipt } from './integration-receipt.mjs'
 
@@ -21,6 +22,9 @@ import { writeReceipt } from './integration-receipt.mjs'
 // ---------------------------------------------------------------------------
 
 const SCRUBBED = ['DATABASE_URL', 'DIRECT_DATABASE_URL', 'NEON_BRANCH']
+
+/** Vitest's own entry, resolved from this repository's install. */
+const VITEST_ENTRY = createRequire(import.meta.url).resolve('vitest/vitest.mjs')
 
 // ONE RUNNER PER DATABASE IS NO LONGER THIS FILE'S JOB. The lock moved into
 // the suite itself — `tests/integration-lock.ts`, run by Vitest's globalSetup —
@@ -127,11 +131,23 @@ export async function runIntegrationSuite() {
 
   try {
     const status = await new Promise((resolve) => {
-      const proc = spawn('npx', ['vitest', 'run', '--project', 'integration'], {
-        stdio: 'inherit',
-        shell: true,
-        env: child,
-      })
+      // NODE ON VITEST'S OWN ENTRY, NOT `npx` THROUGH A SHELL.
+      //
+      // `shell: true` made Node print DEP0190 on every single gate — "passing
+      // args to a child process with shell option true can lead to security
+      // vulnerabilities, as the arguments are not escaped, only concatenated"
+      // — which is a real warning wearing out its welcome: fifty runs of noise
+      // teaches the eye to skip the banner area, which is where the refusals
+      // and the receipt line also live.
+      //
+      // The shell was only ever there to find `npx` on Windows, where it is
+      // `npx.cmd`. Resolving the module entry removes both the shell and the
+      // guessing: this is the exact vitest this repository installed.
+      const proc = spawn(
+        process.execPath,
+        [VITEST_ENTRY, 'run', '--project', 'integration'],
+        { stdio: 'inherit', env: child },
+      )
       proc.on('close', (code) => resolve(code))
       proc.on('error', () => resolve(1))
     })

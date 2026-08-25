@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config'
 import tsconfigPaths from 'vite-tsconfig-paths'
+import { workerCount } from './tests/worker-db'
 
 // These write to a real Neon branch and clean up after themselves. Separated
 // so `npm run check` stays something you can run without thinking about what
@@ -25,9 +26,12 @@ export default defineConfig({
     // Workers no longer share tables, so there is nothing left to interfere
     // with. See tests/worker-db.ts.
     fileParallelism: true,
-    // ONE SOURCE OF TRUTH with the database count in tests/worker-db.ts; a
-    // worker without its own database would silently share slot 1's.
-    maxWorkers: Number(process.env.ZEBRA_TEST_WORKERS ?? '8'),
+    // ONE SOURCE OF TRUTH, IMPORTED RATHER THAN RESTATED. This used to read
+    // `Number(process.env.ZEBRA_TEST_WORKERS ?? '8')` under a comment claiming
+    // it agreed with tests/worker-db.ts — two literals, one claim. They agreed
+    // only because nobody had changed one; a worker without its own database
+    // silently shares slot 1's, and slot 1's cleanup then deletes its rows.
+    maxWorkers: workerCount(),
     testTimeout: 120_000,
     hookTimeout: 180_000,
   },
