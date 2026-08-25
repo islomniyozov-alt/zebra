@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
 import { check as checkMigrationGap } from './check-migration-gap.mjs'
 import { runIntegrationSuite, resolveEndpoint } from './integration-gate.mjs'
@@ -59,13 +59,34 @@ if (dirty) {
   )
 }
 
-// SCHEMA BEFORE CODE, for production only.
+/** One key out of `.env`, parsed rather than loaded. See the note below. */
+const envKey = (key) => {
+  try {
+    const prefix = `${key}=`
+    const line = readFileSync('.env', 'utf8')
+      .split(/\r?\n/)
+      .find((candidate) => candidate.trim().startsWith(prefix))
+    return line?.trim().slice(prefix.length).trim() || null
+  } catch {
+    return null
+  }
+}
+
+// SCHEMA BEFORE CODE, FOR BOTH WORKERS.
 //
 // Step 2 shipped a column reference to production before the column existed.
 // Nothing broke, which is the problem: the window was silent and closed only
-// because no request reached that path. Dev is exempt — `migrate dev` runs
-// against it constantly and a gap there is the normal state of an afternoon.
-if (production) {
+// because no request reached that path.
+//
+// DEV USED TO BE EXEMPT on the grounds that "a gap there is the normal state
+// of an afternoon" — true while dev was where migrations got written, and
+// false the moment dev became a deployed worker serving a real build. On
+// 2026-08-20 a `deploy:dev` shipped twenty commits onto a schema nobody had
+// checked. It was current, verified by a `migrate status` somebody thought to
+// run BY HAND. A habit is not a check.
+//
+// So both targets verify, against their own database, through the same code.
+{
   // VERIFY, DON'T ASSERT — IF THE MACHINE CAN. `check-migration-gap` queries
   // `_prisma_migrations` when `PROD_DIRECT_DATABASE_URL` is in the
   // environment, and falls back to a marker file a human wrote when it is not.
@@ -83,25 +104,32 @@ if (production) {
   // them, but arranging for them to be there so something else can remove them
   // is a bad trade for a variable this script does not use. Same reasoning as
   // `integration-gate.mjs`, which parses `.env` without loading it.
-  if (!process.env.PROD_DIRECT_DATABASE_URL) {
-    try {
-      const key = 'PROD_DIRECT_DATABASE_URL='
-      const line = readFileSync('.env', 'utf8')
-        .split(/\r?\n/)
-        .find((candidate) => candidate.trim().startsWith(key))
-      const value = line?.trim().slice(key.length).trim()
-      if (value) process.env.PROD_DIRECT_DATABASE_URL = value
-    } catch {
-      // No .env, or unreadable. The marker is the fallback and says so.
-    }
+  if (production && !process.env.PROD_DIRECT_DATABASE_URL) {
+    const value = envKey('PROD_DIRECT_DATABASE_URL')
+    if (value) process.env.PROD_DIRECT_DATABASE_URL = value
   }
+
+  // THE DEV URL GOES IN A LOCAL CONST AND NOWHERE ELSE.
+  //
+  // `integration-gate.mjs` deletes DATABASE_URL and DIRECT_DATABASE_URL from
+  // the child it spawns, so `.env` is the suite's only source of truth about
+  // where to write. Putting the dev URL into THIS process's environment would
+  // mean relying on that scrub to undo a leak this script had created — belt
+  // and braces backwards. A local const has nothing to scrub.
+  const schemaUrl = production
+    ? process.env.PROD_DIRECT_DATABASE_URL
+    : envKey('DIRECT_DATABASE_URL')
 
   const gap = await checkMigrationGap({
     confirmed: process.argv.includes('--migrations-applied'),
+    url: schemaUrl,
+    label: deployTarget,
   })
   if (!gap.ok) {
     console.error('')
-    console.error('Refusing to deploy code that is ahead of the schema.')
+    console.error(
+      `Refusing to deploy code that is ahead of the ${deployTarget} schema.`,
+    )
     process.exit(1)
   }
 }
@@ -112,12 +140,12 @@ if (production) {
 // `npx.cmd` is not the fix either: Node refuses to spawn `.cmd` without a
 // shell since the 2024 argument-injection change, which turns the call into a
 // silent failure rather than a loud one.
-const require_ = createRequire(import.meta.url)
+const entry = (relative) =>
+  fileURLToPath(new URL(`../node_modules/${relative}`, import.meta.url))
+
 const ENTRIES = {
-  wrangler: require_.resolve('../node_modules/wrangler/bin/wrangler.js'),
-  'opennextjs-cloudflare': require_.resolve(
-    '../node_modules/@opennextjs/cloudflare/dist/cli/index.js',
-  ),
+  wrangler: entry('wrangler/bin/wrangler.js'),
+  'opennextjs-cloudflare': entry('@opennextjs/cloudflare/dist/cli/index.js'),
 }
 
 const run = ([tool, ...rest]) => {

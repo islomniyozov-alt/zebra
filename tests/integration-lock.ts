@@ -2,7 +2,7 @@ import 'dotenv/config'
 import { hostname } from 'node:os'
 import { readdirSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import { neonConfig, Pool } from '@neondatabase/serverless'
 import {
   TEMPLATE_DB,
@@ -133,7 +133,10 @@ async function ensureTemplate(adminUrl: string): Promise<void> {
 
   // Node on Prisma's own entry rather than `npx` through a shell — see the
   // note in scripts/integration-gate.mjs. Same DEP0190, same fix.
-  const prisma = createRequire(import.meta.url).resolve('prisma/build/index.js')
+  // A file path, not a package specifier — see scripts/integration-gate.mjs.
+  const prisma = fileURLToPath(
+    new URL('../node_modules/prisma/build/index.js', import.meta.url),
+  )
   const result = spawnSync(process.execPath, [prisma, 'migrate', 'deploy'], {
     stdio: 'inherit',
     env: {

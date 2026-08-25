@@ -28,6 +28,9 @@ import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 
 const MARKER = 'prisma/production-migrations.json'
 
+/** A lone backslash, built rather than escaped — see AGENTS.md on instruments. */
+const BACKSLASH = String.fromCharCode(92)
+
 export function localMigrations() {
   return readdirSync('prisma/migrations')
     .filter((entry) => /^\d{14}_/.test(entry))
@@ -54,7 +57,7 @@ export function migrationGap(local, applied) {
   return local.filter((name) => !seen.has(name))
 }
 
-async function appliedFromProduction(url) {
+async function appliedFromDatabase(url) {
   const { neonConfig, Pool } = await import('@neondatabase/serverless')
   neonConfig.webSocketConstructor ??= WebSocket
   neonConfig.poolQueryViaFetch = false
@@ -69,14 +72,44 @@ async function appliedFromProduction(url) {
   }
 }
 
-export async function check({ confirmed = false } = {}) {
+/**
+ * Compare the migrations on disk against those applied to a database.
+ *
+ * ---------------------------------------------------------------------------
+ * IT TAKES THE URL RATHER THAN FINDING ONE, and that is the fix.
+ *
+ * This used to reach for `process.env.PROD_DIRECT_DATABASE_URL` itself, which
+ * meant only ONE database could ever be verified. Production got a live check
+ * against `_prisma_migrations`; dev got nothing at all, so `deploy:dev` shipped
+ * code onto whatever schema happened to be there. On 2026-08-20 that was
+ * current — verified by a `migrate status` run BY HAND because somebody
+ * thought to ask, which is not a check, it is a habit.
+ *
+ * `label` is what the refusal calls the target. A message that says PRODUCTION
+ * while refusing a dev deploy sends somebody to migrate the wrong database.
+ * ---------------------------------------------------------------------------
+ */
+export async function check({
+  confirmed = false,
+  url = process.env.PROD_DIRECT_DATABASE_URL,
+  label = 'production',
+} = {}) {
   const local = localMigrations()
 
   let applied
   let source
-  if (process.env.PROD_DIRECT_DATABASE_URL) {
-    applied = await appliedFromProduction(process.env.PROD_DIRECT_DATABASE_URL)
-    source = 'production database'
+  if (url) {
+    applied = await appliedFromDatabase(url)
+    source = `${label} database`
+  } else if (label !== 'production') {
+    // NO MARKER FOR DEV, DELIBERATELY. The marker exists because the
+    // production connection string is not meant to live on this machine; the
+    // dev one is right there in `.env`. A dev check with no URL is a
+    // misconfiguration, not a fallback, and inventing a second marker file
+    // would give it somewhere comfortable to hide.
+    console.log(`migrations: ${local.length} local, ${label} not checked`)
+    console.log(`            no ${label} URL available — nothing verified`)
+    return { ok: true, gap: [], checked: false }
   } else {
     const marker = readMarker()
     applied = marker?.applied ?? []
@@ -97,37 +130,56 @@ export async function check({ confirmed = false } = {}) {
 
   console.log('')
   console.log('  ' + '='.repeat(68))
-  console.log('  NOT APPLIED TO PRODUCTION:')
+  console.log(`  NOT APPLIED TO ${label.toUpperCase()}:`)
   for (const name of gap) console.log(`    ${name}`)
   console.log('')
   console.log('  Code that reads a column the database does not have fails on')
   console.log('  the first request that touches it, not at deploy. Migrate')
   console.log('  first:')
   console.log('')
-  console.log('    NEON_BRANCH=production NODE_ENV=production \\')
-  console.log(
-    '      ALLOW_PROD_MIGRATION=1 DIRECT_DATABASE_URL=<direct url> \\',
-  )
-  console.log('      npx prisma migrate deploy')
-  console.log('')
-  // THE INSTRUCTION ABOVE IS HOW THE INCIDENT HAPPENED. As a one-shot prefix
-  // it is safe; `export`ed — or run in a shell that keeps it — the NEXT
-  // command inherits a production `DIRECT_DATABASE_URL`, and the next command
-  // is `deploy:prod`, whose gate then wrote its fixtures to production.
-  //
-  // `deploy.mjs` now scrubs those three variables before the gate runs, so
-  // this warning is belt and braces. It stays, because a ritual that leaves a
-  // loaded gun on the table should say so out loud.
-  console.log('  A ONE-SHOT PREFIX, NEVER `export`. Those variables must not')
-  console.log('  outlive that single command — then deploy from a fresh')
-  console.log('  terminal. See the README: "If a test run ever points at')
-  console.log('  production".')
-  console.log('')
-  console.log(
-    '  Then record it:  node scripts/check-migration-gap.mjs --record',
-  )
-  console.log('  Or, if this deploy genuinely needs no schema:')
-  console.log('    npm run deploy:prod -- --migrations-applied')
+
+  // THE REMEDIATION DEPENDS ON THE TARGET, and printing the wrong one is worse
+  // than printing none. The production ritual sets ALLOW_PROD_MIGRATION=1 and
+  // a production DIRECT_DATABASE_URL; showing that to somebody whose DEV
+  // schema is behind hands them a loaded gun to fix a paper cut — and the
+  // first version of the dev check did exactly that, because the text was
+  // written when only production could ever reach it.
+  if (label === 'production') {
+    console.log('    NEON_BRANCH=production NODE_ENV=production ' + BACKSLASH)
+    console.log(
+      '      ALLOW_PROD_MIGRATION=1 DIRECT_DATABASE_URL=<direct url> ' +
+        BACKSLASH,
+    )
+    console.log('      npx prisma migrate deploy')
+    console.log('')
+    // THE INSTRUCTION ABOVE IS HOW THE INCIDENT HAPPENED. As a one-shot prefix
+    // it is safe; `export`ed — or run in a shell that keeps it — the NEXT
+    // command inherits a production `DIRECT_DATABASE_URL`, and the next command
+    // is `deploy:prod`, whose gate then wrote its fixtures to production.
+    //
+    // `deploy.mjs` scrubs those three variables before the gate runs, so this
+    // warning is belt and braces. It stays, because a ritual that leaves a
+    // loaded gun on the table should say so out loud.
+    console.log('  A ONE-SHOT PREFIX, NEVER `export`. Those variables must not')
+    console.log('  outlive that single command — then deploy from a fresh')
+    console.log('  terminal. See the README: "If a test run ever points at')
+    console.log('  production".')
+    console.log('')
+    console.log(
+      '  Then record it:  node scripts/check-migration-gap.mjs --record',
+    )
+    console.log('  Or, if this deploy genuinely needs no schema:')
+    console.log('    npm run deploy:prod -- --migrations-applied')
+  } else {
+    // Dev's connection string is already in `.env`; there is no ritual, no
+    // marker to record, and nothing to be careful about.
+    console.log('    npx prisma migrate deploy')
+    console.log('')
+    console.log('  Dev reads its URL from `.env`, so no prefix is needed —')
+    console.log('  and there is no marker to record afterwards.')
+    console.log('  Or, if this deploy genuinely needs no schema:')
+    console.log('    npm run deploy:dev -- --migrations-applied')
+  }
   console.log('  ' + '='.repeat(68))
 
   return { ok: confirmed, gap }

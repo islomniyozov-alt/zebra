@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
 import { writeReceipt } from './integration-receipt.mjs'
 
@@ -23,8 +23,14 @@ import { writeReceipt } from './integration-receipt.mjs'
 
 const SCRUBBED = ['DATABASE_URL', 'DIRECT_DATABASE_URL', 'NEON_BRANCH']
 
-/** Vitest's own entry, resolved from this repository's install. */
-const VITEST_ENTRY = createRequire(import.meta.url).resolve('vitest/vitest.mjs')
+// A FILE PATH, NOT A PACKAGE SPECIFIER. `require.resolve('vitest/vitest.mjs')`
+// throws ERR_PACKAGE_PATH_NOT_EXPORTED — the file is right there on disk and
+// the package's `exports` map simply does not list it. Resolving relative to
+// this file avoids asking the package's opinion about its own contents, and
+// avoids `npx` and its shell along with it.
+const VITEST_ENTRY = fileURLToPath(
+  new URL('../node_modules/vitest/vitest.mjs', import.meta.url),
+)
 
 // ONE RUNNER PER DATABASE IS NO LONGER THIS FILE'S JOB. The lock moved into
 // the suite itself — `tests/integration-lock.ts`, run by Vitest's globalSetup —

@@ -1,10 +1,11 @@
 import { execFileSync } from 'node:child_process'
-import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import { classify, looksLikeCommit } from './deploy-drift-rules.mjs'
 
-/** Wrangler's own entry, so nothing has to find a `.cmd`. */
-const WRANGLER_ENTRY = createRequire(import.meta.url).resolve(
-  '../node_modules/wrangler/bin/wrangler.js',
+/** Wrangler's own entry, so nothing has to find a `.cmd`. A file path rather
+ * than a package specifier — see the note in scripts/integration-gate.mjs. */
+const WRANGLER_ENTRY = fileURLToPath(
+  new URL('../node_modules/wrangler/bin/wrangler.js', import.meta.url),
 )
 
 // ---------------------------------------------------------------------------
