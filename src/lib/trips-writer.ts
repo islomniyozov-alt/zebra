@@ -111,7 +111,17 @@ export async function resolveFacilities(
 }
 
 /** The stop rows a trip writes, resolved against the facility book. */
+/**
+ * A stop row: a `StopInput` and the sequence it sits at.
+ *
+ * TYPED AS `StopInput &` DELIBERATELY, so the create path can SPREAD it rather
+ * than restate it. Three separate fields have been lost in that restatement —
+ * `place` for `name`, `legMiles`/`legEmpty`, and all four clocks — every one of
+ * them in the same handful of lines, every one found only by a test that read
+ * the column back. The durable fix is the shape, not more care.
+ */
 export interface TripStopRow {
+  /** Position in the chain. `createLoad` recomputes it from array order. */
   sequence: number
   type: 'PICKUP' | 'DELIVERY'
   locationId: string | null
@@ -125,6 +135,17 @@ export interface TripStopRow {
   arrivedAt: Date | null
   departedAt: Date | null
 }
+
+// PRECISE TYPES HERE, NOT `StopInput &`. That was tried: `StopInput` types its
+// text fields `unknown` because they arrive from form data and are laundered
+// through `optionalText`, and inheriting that widened this row enough to break
+// `enrichLoad`'s direct `createMany`. The row keeps real types and stays
+// STRUCTURALLY assignable to `StopInput`, which is all the spread below needs.
+type RowFitsStopInput =
+  Omit<TripStopRow, 'sequence'> extends StopInput ? true : never
+/** Fails to compile if a row field ever stops fitting the load contract. */
+const _rowFitsStopInput: RowFitsStopInput = true
+void _rowFitsStopInput
 
 /**
  * A printed clock face becomes an instant, in the stop's own zone.
@@ -231,24 +252,18 @@ export async function createTripLoad(
   //
   // Both annotations are kept. The variable one documents the intent, the
   // callback one enforces it.
-  const stops: StopInput[] = rows.map(
-    (row): StopInput => ({
-      type: row.type,
-      locationId: row.locationId,
-      name: row.name,
-      referenceNumber: row.referenceNumber,
-      legMiles: row.legMiles,
-      legEmpty: row.legEmpty,
-      // ALL THREE, AND THE CREATE PATH IS THE ONLY ONE THAT HAS TO SAY SO.
-      // `enrichLoad` spreads the row whole and got these for free; this
-      // branch maps field by field and is therefore the branch that can drop
-      // one — which is exactly how `place` instead of `name` happened here,
-      // in these same lines.
-      scheduledAt: row.scheduledAt,
-      arrivedAt: row.arrivedAt,
-      departedAt: row.departedAt,
-    }),
-  )
+  // SPREAD, NOT RESTATED — and the return annotation stays.
+  //
+  // Measured, because both halves of that sentence are load-bearing: a SPREAD
+  // property is not excess-property-checked, so `sequence` passes through
+  // harmlessly and no field can be forgotten; an explicitly written unknown key
+  // still fails TS2353 under `(row): StopInput`. Verified both ways before this
+  // was written.
+  //
+  // The read-back tests in tests/integration/trips-import.test.ts are the other
+  // half: types cannot notice a field that stops being PRODUCED, only one that
+  // is misspelled on arrival.
+  const stops: StopInput[] = rows.map((row): StopInput => ({ ...row }))
 
   const load = await createLoad(tx, organizationId, {
     companyId: input.companyId,

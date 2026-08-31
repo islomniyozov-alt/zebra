@@ -78,6 +78,13 @@ Rules about instruments, which are the ones that cost whole sessions:
   was `tail`'s, a `sed` that silently matched nothing after prettier reindented
   its target, and a `grep` that turned a refused run into a four-second
   mystery.
+- **Assert the anchor before replacing on it.** `str.replace` returns the
+  original string when it matches nothing, `sed` exits 0, and a filter that
+  matches nothing prints nothing — so a silent no-op is indistinguishable from
+  a successful edit. Three in one session: a `sed` prettier had reindented past,
+  a stop mapping whose anchor prettier had reformatted, and a `grep` that ate a
+  refusal banner. Where an assertion is awkward, print the lines and splice by
+  number. See `PHASE-6-BRIEF.md` flag 86.
 - **A guard that has never been watched failing is not known to work.** Break
   the thing on purpose, see the guard fire, put it back. Flag 47's lesson, and
   the reason `singleLoadRateCents`, the money-arithmetic patterns and the

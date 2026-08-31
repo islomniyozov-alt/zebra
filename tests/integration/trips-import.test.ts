@@ -375,6 +375,61 @@ describe('a trip whose load already exists is enriched, not doubled', () => {
   })
 })
 
+describe('every field family survives the write', () => {
+  // ------------------------------------------------------------------------
+  // THE CREATE PATH SPREADS THE ROW NOW, so no field can be forgotten by
+  // restatement — that shape lost `place`/`name`, then `legMiles`/`legEmpty`,
+  // then all four clocks, in the same handful of lines.
+  //
+  // TYPES CANNOT REPLACE THIS TEST. A spread that stops PRODUCING a field is
+  // invisible to the compiler: the row simply has one fewer key and everything
+  // still fits. Only reading the column back can see it. One assertion per
+  // family, so a future narrowing shows up as a null somewhere specific rather
+  // than as a vague failure.
+  // ------------------------------------------------------------------------
+  it('lands identity, location, leg and clock fields together', async () => {
+    const id = `FAMILY-${nonce}`
+    const { load } = await importTrip([
+      leg({
+        tripId: id,
+        loadId: 'LEG-LOAD-1',
+        distance: 583,
+        stops: [
+          stop('DEN7', { plannedArrival: clock('2026-08-24', '04:41') }),
+          stop('MKC6', {
+            plannedArrival: clock('2026-08-24', '06:32'),
+            actualArrival: clock('2026-08-24', '08:08'),
+            actualDeparture: clock('2026-08-24', '08:41'),
+          }),
+        ],
+      }),
+    ])
+
+    const [first, second] = load.stops
+
+    // IDENTITY — the family `place` instead of `name` emptied.
+    expect(first!.name).toBe('DEN7')
+    expect(second!.name).toBe('MKC6')
+
+    // TYPE — position is the only evidence this export offers.
+    expect(first!.type).toBe('PICKUP')
+    expect(second!.type).toBe('DELIVERY')
+
+    // REFERENCE — the arriving leg's own Load ID, on the stop it arrived at.
+    expect(second!.referenceNumber).toBe('LEG-LOAD-1')
+
+    // LEG — the family the hand-mapping dropped second.
+    expect(second!.legMiles).toBe(583)
+    expect(second!.legEmpty).toBe(false)
+
+    // CLOCKS — the family it dropped third.
+    expect(first!.scheduledAt).not.toBeNull()
+    expect(second!.scheduledAt).not.toBeNull()
+    expect(second!.arrivedAt).not.toBeNull()
+    expect(second!.departedAt).not.toBeNull()
+  })
+})
+
 describe('the clocks a trip lands with', () => {
   // ------------------------------------------------------------------------
   // THE TRIPS WRITER USED TO DISCARD EVERY TIME IT PARSED. Planned and actual,

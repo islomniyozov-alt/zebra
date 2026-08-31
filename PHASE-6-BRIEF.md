@@ -1902,3 +1902,55 @@ Recorded rather than resolved, per Phase 1's discipline.
     Recorded rather than deleted because the SHAPE recurs: a guard attached to
     one entry point protects that entry point, and the entry point somebody
     uses while debugging is rarely the guarded one.
+
+85. **THE FIELD-BY-FIELD MAPPING LOST THREE FIELD FAMILIES IN THE SAME TEN
+    LINES, AND VIGILANCE WAS NEVER GOING TO FIX IT.** `createTripLoad` built
+    its `StopInput` by restating each field; `enrichLoad`, ten lines below,
+    spread the row whole. The restating branch lost:
+    - `place` where the contract says `name` — every stop nameless, caught by
+      an integration test written after the fact;
+    - `legMiles` and `legEmpty` — the entire reason
+      `20260817225524_load_stop_leg_miles` exists, dropped because `StopInput`
+      had nowhere to put them and nobody noticed the silence;
+    - all four clocks — planned and actual, arrival and departure — parsed,
+      planned, and then not written.
+
+    THE SPREADING BRANCH LOST NOTHING, EVER. Not because it was written more
+    carefully but because it cannot: `{ ...row }` has no place for an omission
+    to hide.
+
+    So the create path spreads now, with the callback return annotation kept.
+    Measured, because both halves matter: a SPREAD property is not
+    excess-property-checked, so nothing can be forgotten — and an explicitly
+    written unknown key still fails TS2353, so `place` could not come back.
+    Both watched failing before the change was committed.
+
+    TYPES STILL CANNOT SEE THE OTHER HALF. A spread that stops PRODUCING a
+    field is invisible to the compiler — the row has one fewer key and
+    everything fits. Only reading the column back catches that, which is why
+    one read-back assertion per field family sits in
+    `tests/integration/trips-import.test.ts`.
+
+86. **THREE SILENT `str.replace` NO-OPS IN ONE SESSION, and the durable fix is
+    the shape of the edit rather than more care.** Every one looked like a
+    successful change and produced nothing:
+    - a `sed` whose target prettier had reindented, so the "proof" that a guard
+      caught a bug was a run against unmodified code;
+    - a `python` replace of the stop mapping whose anchor prettier had
+      reformatted — the clocks were never carried, found only when four
+      integration tests read back null;
+    - a `grep` filter over a background run that discarded the refusal banner
+      AND reported `tail`'s exit code, turning a real 607-second failure into a
+      four-second mystery.
+
+    WHAT THEY SHARE is that the tool reports success for "matched nothing".
+    `str.replace` returns the original string; `sed` exits 0; a filter that
+    matches nothing prints nothing. Each was caught by something downstream
+    reading a value back — never by the edit itself.
+
+    THE RULE, alongside "never supply the baseline you are testing" and "read
+    the exit code before anything touches the output": **assert the anchor
+    before replacing on it.** A replace without an assertion is a wish. Where
+    an assertion is awkward, splice by line number after printing the lines —
+    which is what finally landed the deploy.mjs edit after two failed attempts
+    at matching its text.
