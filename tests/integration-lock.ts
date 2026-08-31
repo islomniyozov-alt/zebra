@@ -205,7 +205,7 @@ async function buildWorkerDatabases(adminUrl: string): Promise<void> {
       // is asked to go away, and `pg_stat_activity` stops listing it slightly
       // before the database stops counting it.
       let lastError: unknown = null
-      for (let attempt = 0; attempt < 10; attempt++) {
+      for (let attempt = 0; attempt < 12; attempt++) {
         try {
           await admin.query(
             `create database "${workerDatabase(slot)}" template "${TEMPLATE_DB}"`,
@@ -220,7 +220,14 @@ async function buildWorkerDatabases(adminUrl: string): Promise<void> {
               where datname = $1 and pid <> pg_backend_pid()`,
             [TEMPLATE_DB],
           )
-          await new Promise((resolve) => setTimeout(resolve, 300))
+          // BACKING OFF, NOT DRUMMING. Ten tries at a flat 300ms is three
+          // seconds, and Neon does not always release a just-closed session
+          // inside that — measured, twice, as a run that died on 55006 with
+          // `pg_stat_activity` showing nothing by the time anyone looked.
+          // Rising delays reach ~16s while staying instant in the common case.
+          await new Promise((resolve) =>
+            setTimeout(resolve, 250 * (attempt + 1)),
+          )
         }
       }
       if (lastError) throw lastError

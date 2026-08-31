@@ -7,6 +7,7 @@ import type {
 import type { TxClient } from './tenancy'
 import { lastFullWeekEnding } from './settings'
 import { allocateNumber } from './counters'
+import { sheetDates, type SheetDates, type SheetStop } from './stop-actuals'
 import {
   amountFromSnapshot,
   payFor,
@@ -108,6 +109,8 @@ export function settleableWhere(
 export interface SettleableLoad extends PayableLoad {
   /** When the POD landed. From the status event, not a column. */
   podReceivedAt: Date | null
+  /** The stops the sheet's PU and DEL dates are taken from. */
+  stops: SheetStop[]
 }
 
 export async function settleableLoads(
@@ -128,6 +131,18 @@ export async function settleableLoads(
       totalRevenueCents: true,
       actualMiles: true,
       dispatchedMiles: true,
+      // THE SHEET DATES' SOURCE. Sequence and type decide which stop is the
+      // pickup and which the delivery; the three time columns decide whether
+      // each date is a record or a plan.
+      stops: {
+        select: {
+          sequence: true,
+          type: true,
+          scheduledAt: true,
+          arrivedAt: true,
+          departedAt: true,
+        },
+      },
       statusEvents: {
         where: {
           axis: 'OPERATIONAL',
@@ -142,6 +157,7 @@ export async function settleableLoads(
   })
 
   return loads.map((load) => ({
+    stops: load.stops,
     id: load.id,
     loadNumber: load.loadNumber,
     linehaulCents: load.linehaulCents,
@@ -245,12 +261,12 @@ export async function generateSettlement(
   })
 
   // --- compute, in memory ---------------------------------------------------
-  const lines: {
+  const lines: ({
     loadId: string
     description: string
     amountCents: number
     snapshot: PaySnapshot
-  }[] = []
+  } & SheetDates)[] = []
   const refused: { reason: PayFailure; loadNumber: string }[] = []
 
   for (const load of loads) {
@@ -270,6 +286,10 @@ export async function generateSettlement(
       description: input.labels.loadPay(load.loadNumber),
       amountCents: result.amountCents,
       snapshot: result.snapshot,
+      // FROZEN HERE, beside the pay rule and for the same reason: a later
+      // import that enriches this load with actuals must not rewrite a cheque
+      // already handed over.
+      ...sheetDates(load.stops),
     })
   }
 
@@ -318,6 +338,10 @@ export async function generateSettlement(
           amountCents: line.amountCents,
           payRuleSnapshot: line.snapshot as unknown as Prisma.InputJsonValue,
           sortOrder: index,
+          puAt: line.puAt,
+          puActual: line.puActual,
+          delAt: line.delAt,
+          delActual: line.delActual,
         })),
       },
     },

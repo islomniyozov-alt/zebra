@@ -102,3 +102,51 @@ export function latenessLabel(
   const span = hours > 0 ? `${hours}hr ${rest}m` : `${rest}m`
   return `${span} ${minutes > 0 ? labels.late : labels.early}`
 }
+
+// ---------------------------------------------------------------------------
+// THE DRIVER'S SHEET DATES.
+//
+// PU is the check-in at the first PICKUP; DEL the check-in at the last
+// DELIVERY. Both come through `shownStopTime`, so the settlement document and
+// the load screen cannot reach different conclusions about the same stop —
+// which is the entire reason that function exists rather than each caller
+// deciding for itself.
+//
+// `isActual` TRAVELS WITH EACH DATE, separately. A load can easily have a real
+// check-in at the shipper and none at the consignee, and a money document that
+// marked the line rather than the figure would be telling the driver that one
+// of these two numbers is a guess without saying which.
+// ---------------------------------------------------------------------------
+
+export interface SheetStop extends StopTimes {
+  type: 'PICKUP' | 'DELIVERY' | 'INTERMEDIATE'
+  sequence: number
+}
+
+export interface SheetDates {
+  puAt: Date | null
+  puActual: boolean
+  delAt: Date | null
+  delActual: boolean
+}
+
+export function sheetDates(stops: readonly SheetStop[]): SheetDates {
+  const ordered = [...stops].sort((a, b) => a.sequence - b.sequence)
+  const pickup = ordered.find((stop) => stop.type === 'PICKUP')
+  const delivery = [...ordered]
+    .reverse()
+    .find((stop) => stop.type === 'DELIVERY')
+
+  // `delivered: true` because a settled load has run: this is asking what
+  // HAPPENED, and the fallback to the plan is `shownStopTime`'s own rule with
+  // `isActual` false to mark it.
+  const pu = pickup ? shownStopTime(pickup, { delivered: true }) : null
+  const del = delivery ? shownStopTime(delivery, { delivered: true }) : null
+
+  return {
+    puAt: pu?.at ?? null,
+    puActual: pu?.isActual ?? false,
+    delAt: del?.at ?? null,
+    delActual: del?.isActual ?? false,
+  }
+}

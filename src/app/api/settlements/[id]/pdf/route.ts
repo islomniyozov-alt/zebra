@@ -49,6 +49,12 @@ export async function GET(
               description: true,
               amountCents: true,
               payRuleSnapshot: true,
+              // The sheet dates, frozen at generation. Selected here or the
+              // columns print blank and the footnote never appears.
+              puAt: true,
+              delAt: true,
+              puActual: true,
+              delActual: true,
               load: { select: { loadNumber: true } },
             },
           },

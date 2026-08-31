@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { latenessLabel, shownStopTime } from '@/lib/stop-actuals'
+import { latenessLabel, sheetDates, shownStopTime } from '@/lib/stop-actuals'
 
 // ---------------------------------------------------------------------------
 // WHOSE CLOCK IS OPERATIVE.
@@ -124,5 +124,74 @@ describe("the lateness label, in Relay's own phrasing", () => {
   it('says nothing at all for on-time or unknown', () => {
     expect(latenessLabel(0, labels)).toBeNull()
     expect(latenessLabel(null, labels)).toBeNull()
+  })
+})
+
+describe("the driver's sheet dates", () => {
+  const chain = (over: {
+    puArrived?: Date | null
+    delArrived?: Date | null
+  }) => [
+    {
+      sequence: 1,
+      type: 'PICKUP' as const,
+      scheduledAt: at('2026-08-24T09:41:00Z'),
+      arrivedAt:
+        'puArrived' in over ? over.puArrived! : at('2026-08-24T12:17:00Z'),
+      departedAt: null,
+    },
+    {
+      sequence: 2,
+      type: 'INTERMEDIATE' as const,
+      scheduledAt: at('2026-08-24T14:00:00Z'),
+      arrivedAt: at('2026-08-24T15:00:00Z'),
+      departedAt: null,
+    },
+    {
+      sequence: 3,
+      type: 'DELIVERY' as const,
+      scheduledAt: at('2026-08-25T11:32:00Z'),
+      arrivedAt:
+        'delArrived' in over ? over.delArrived! : at('2026-08-25T13:20:00Z'),
+      departedAt: null,
+    },
+  ]
+
+  it('takes PU from the first pickup and DEL from the last delivery', () => {
+    const dates = sheetDates(chain({}))
+    expect(dates.puAt?.toISOString()).toBe('2026-08-24T12:17:00.000Z')
+    expect(dates.delAt?.toISOString()).toBe('2026-08-25T13:20:00.000Z')
+    expect(dates.puActual).toBe(true)
+    expect(dates.delActual).toBe(true)
+  })
+
+  // THE INTERMEDIATE STOP IS NOT THE DELIVERY, even though it has a later
+  // check-in than the pickup and sits between them.
+  it('ignores an intermediate stop entirely', () => {
+    const dates = sheetDates(chain({}))
+    expect(dates.delAt?.toISOString()).not.toBe('2026-08-24T15:00:00.000Z')
+  })
+
+  // PER DATE, NOT PER LINE. A real check-in at the shipper and none at the
+  // consignee is an ordinary week.
+  it('marks only the date that fell back to a plan', () => {
+    const dates = sheetDates(chain({ delArrived: null }))
+    expect(dates.puActual).toBe(true)
+    expect(dates.delActual).toBe(false)
+    expect(dates.delAt?.toISOString()).toBe('2026-08-25T11:32:00.000Z')
+  })
+
+  it('marks both when neither stop was checked into', () => {
+    const dates = sheetDates(chain({ puArrived: null, delArrived: null }))
+    expect(dates.puActual).toBe(false)
+    expect(dates.delActual).toBe(false)
+  })
+
+  it('says nothing rather than guessing when a load has no stops', () => {
+    const dates = sheetDates([])
+    expect(dates.puAt).toBeNull()
+    expect(dates.delAt).toBeNull()
+    expect(dates.puActual).toBe(false)
+    expect(dates.delActual).toBe(false)
   })
 })

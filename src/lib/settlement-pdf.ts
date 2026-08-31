@@ -27,6 +27,18 @@ export interface SettlementPdfLine {
   /** "30% of $2,450.00" — how the figure was reached. Blank where obvious. */
   basis: string
   amountCents: number
+  /**
+   * The driver's sheet dates, already formatted, and whether each is a RECORD.
+   *
+   * A MONEY DOCUMENT NEVER PRESENTS A PLAN AS AN ACTUAL SILENTLY. When the
+   * load carried no check-in the plan is printed with a marker beside it and a
+   * footnote explaining the marker — the driver is entitled to know which of
+   * these dates is what happened and which is what was intended.
+   */
+  puDate: string
+  puActual: boolean
+  delDate: string
+  delActual: boolean
 }
 
 export interface SettlementPdfInput {
@@ -113,18 +125,43 @@ export function renderSettlementPdf(input: SettlementPdfInput): Uint8Array {
   rule()
   y -= 16
   text('LOAD', LEFT, 8, true)
-  text('DESCRIPTION', LEFT + 60, 8, true)
-  text('HOW IT WAS CALCULATED', 300, 8, true)
+  text('PU', LEFT + 60, 8, true)
+  text('DEL', LEFT + 118, 8, true)
+  text('DESCRIPTION', LEFT + 176, 8, true)
+  text('HOW IT WAS CALCULATED', 330, 8, true)
   text('AMOUNT', RIGHT - 40, 8, true)
   y -= 6
   rule()
   y -= 16
 
+  // THE MARKER, ONCE, so the footnote below can be written once. An asterisk
+  // rather than a word: the column is narrow and a driver reading a row of
+  // dates needs the exception to catch the eye, not to be explained twice.
+  const SCHEDULED_MARK = '*'
+  let anyScheduled = false
+
   for (const line of input.lines.slice(0, MAX_SETTLEMENT_LINES)) {
     text(line.loadNumber ?? '', LEFT, 9)
-    text(line.description, LEFT + 60, 9)
+
+    // A DATE WITH NO ACTUAL BEHIND IT IS MARKED WHERE IT IS PRINTED. Marking
+    // the line instead would tell the driver one of the two is a plan without
+    // saying which.
+    if (line.puDate && !line.puActual) anyScheduled = true
+    if (line.delDate && !line.delActual) anyScheduled = true
+    text(
+      line.puDate + (line.puDate && !line.puActual ? SCHEDULED_MARK : ''),
+      LEFT + 60,
+      9,
+    )
+    text(
+      line.delDate + (line.delDate && !line.delActual ? SCHEDULED_MARK : ''),
+      LEFT + 118,
+      9,
+    )
+
+    text(line.description, LEFT + 176, 9)
     // THE WORKING. This column is why the document is worth printing.
-    if (line.basis) text(line.basis, 300, 9)
+    if (line.basis) text(line.basis, 330, 9)
     money(line.amountCents, 9)
     y -= 14
   }
@@ -174,6 +211,21 @@ export function renderSettlementPdf(input: SettlementPdfInput): Uint8Array {
       `${input.lines.length - MAX_SETTLEMENT_LINES} further lines not shown - see the screen`,
       LEFT,
       9,
+    )
+  }
+
+  // THE FOOTNOTE, PRINTED ONLY WHEN A MARKER APPEARS. A legend explaining a
+  // symbol that is not on the page teaches the reader to ignore legends.
+  //
+  // Plain words and a hyphen: parentheses are PDF syntax and would be escaped
+  // in the byte stream, so anything grepping the file for this sentence would
+  // miss it. Same reasoning as the truncation notice above.
+  if (anyScheduled) {
+    y -= 10
+    text(
+      `${SCHEDULED_MARK} scheduled date - no arrival was recorded at this stop`,
+      LEFT,
+      8,
     )
   }
 

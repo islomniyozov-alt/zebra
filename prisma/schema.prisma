@@ -2341,6 +2341,15 @@ model SettlementLine {
   payRuleSnapshot Json?
   sortOrder       Int                @default(0)
 
+  /// The driver's sheet dates, FROZEN at generation like payRuleSnapshot.
+  /// PU = actual check-in at the first PICKUP; DEL = at the last DELIVERY.
+  /// When no actual exists the plan is used and the flag says so, because a
+  /// money document never presents a plan as an actual silently.
+  puAt      DateTime?
+  delAt     DateTime?
+  puActual  Boolean   @default(false)
+  delActual Boolean   @default(false)
+
   createdAt DateTime @default(now())
 
   @@index([settlementId])

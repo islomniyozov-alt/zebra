@@ -60,7 +60,15 @@ const WEEK_END = new Date(Date.UTC(2026, 7, 2, 23, 59, 59, 999))
  * The period is keyed on the POD status event (see settleableWhere), so the
  * fixture has to control that timestamp rather than the booking date.
  */
-async function deliveredLoad(linehaul: string, fuel: string, podOn: Date) {
+async function deliveredLoad(
+  linehaul: string,
+  fuel: string,
+  podOn: Date,
+  /** Actual check-ins, when the trip finished with them recorded. */
+  actuals: { pickup?: Date | null; delivery?: Date | null } = {},
+  /** Whose load. Defaults to the file's shared driver. */
+  forDriverId = driverId,
+) {
   const load = await inOrg((tx) =>
     createLoad(
       tx,
@@ -68,19 +76,21 @@ async function deliveredLoad(linehaul: string, fuel: string, podOn: Date) {
       {
         companyId,
         customerId: brokerId,
-        driverId,
+        driverId: forDriverId,
         stops: [
           {
             type: 'PICKUP',
             city: 'Chicago',
             state: 'IL',
             scheduledAt: new Date(podOn.getTime() - 86_400_000),
+            arrivedAt: actuals.pickup ?? null,
           },
           {
             type: 'DELIVERY',
             city: 'Dallas',
             state: 'TX',
             scheduledAt: podOn,
+            arrivedAt: actuals.delivery ?? null,
           },
         ],
       },
@@ -213,6 +223,129 @@ afterAll(async () => {
     .catch(() => {})
   await owner.user.delete({ where: { id: userId } }).catch(() => {})
   await owner.$disconnect()
+})
+
+describe("the driver's sheet dates, frozen on the line", () => {
+  // ------------------------------------------------------------------------
+  // THE RULING'S OWN GUARD: a line for a delivered load with actuals shows the
+  // actual dates; one built from plan-only stops carries the marker.
+  //
+  // Read back from the COLUMNS after generation, because these are frozen at
+  // generation like `payRuleSnapshot` — a later import that enriches the load
+  // with actuals must not rewrite a cheque already handed over, and the only
+  // way to see that promise kept is to look at what was stored.
+  // ------------------------------------------------------------------------
+  // A WEEK OF ITS OWN. These tests GENERATE settlements, and a settled load
+  // stops being settleable — run against the shared week they would consume
+  // the loads the other tests in this file are asserting about, and five of
+  // them turned red the first time. The period is later than WEEK_END and
+  // inside the same pay rule, so the arithmetic is unchanged.
+  const SHEET_START = new Date(Date.UTC(2026, 7, 24))
+  const SHEET_END = new Date(Date.UTC(2026, 7, 30, 23, 59, 59, 999))
+  const POD_ON = new Date(Date.UTC(2026, 7, 26, 18, 0, 0))
+
+  const PU_ACTUAL = new Date('2026-08-25T12:17:00Z')
+  const DEL_ACTUAL = new Date('2026-08-26T13:20:00Z')
+
+  // ITS OWN DRIVER, not merely its own week.
+  //
+  // Two cheaper isolations were tried and both broke this file. Sharing the
+  // driver but using a later period made these tests CONSUME loads the other
+  // tests assert about — five failures. Adding a pay rule for the shared
+  // driver then collided with the tests that assert on rule overlap and on
+  // `no_rule` — six failures. The tests in this file are deliberately coupled
+  // to one driver's state; a new fact about that driver is a new fact for all
+  // of them. A separate driver touches nothing.
+  let sheetDriverId = ''
+
+  beforeAll(async () => {
+    const driver = await owner.driver.create({
+      data: {
+        organizationId,
+        companyId,
+        firstName: 'Dilshod',
+        lastName: `Nazarov ${nonce}`,
+      },
+    })
+    sheetDriverId = driver.id
+    await inOrg((tx) =>
+      saveDriverPayRule(tx, sheetDriverId, {
+        type: 'PERCENT_GROSS',
+        percentBps: 3000,
+        effectiveFrom: SHEET_START,
+      }),
+    )
+  }, 300_000)
+
+  const lineFor = async (settlementId: string) => {
+    const rows = await inOrg((tx) =>
+      tx.settlementLine.findMany({
+        where: { settlementId, type: 'LOAD_PAY' },
+        select: {
+          puAt: true,
+          delAt: true,
+          puActual: true,
+          delActual: true,
+        },
+      }),
+    )
+    return rows[0]!
+  }
+
+  const settle = async () => {
+    const outcome = await inOrg((tx) =>
+      generateSettlement(tx, organizationId, {
+        driverId: sheetDriverId,
+        periodStart: SHEET_START,
+        periodEnd: SHEET_END,
+        labels,
+      }),
+    )
+    if (!outcome.ok) throw new Error(`settlement refused: ${outcome.reason}`)
+    return outcome.settlementId
+  }
+
+  it('freezes the actual check-ins when the trip recorded them', async () => {
+    await deliveredLoad(
+      '2000.00',
+      '0',
+      POD_ON,
+      { pickup: PU_ACTUAL, delivery: DEL_ACTUAL },
+      sheetDriverId,
+    )
+
+    const line = await lineFor(await settle())
+    expect(line.puActual).toBe(true)
+    expect(line.delActual).toBe(true)
+    expect(line.puAt?.toISOString()).toBe(PU_ACTUAL.toISOString())
+    expect(line.delAt?.toISOString()).toBe(DEL_ACTUAL.toISOString())
+  })
+
+  it('falls back to the plan and marks it when no arrival was recorded', async () => {
+    await deliveredLoad('2000.00', '0', POD_ON, {}, sheetDriverId)
+
+    const line = await lineFor(await settle())
+    expect(line.puActual).toBe(false)
+    expect(line.delActual).toBe(false)
+    // The plan is still carried — a blank date would be worse than a marked
+    // one, because the driver could not check it against anything.
+    expect(line.puAt).not.toBeNull()
+    expect(line.delAt?.toISOString()).toBe(POD_ON.toISOString())
+  })
+
+  it('marks only the stop that was missed', async () => {
+    await deliveredLoad(
+      '2000.00',
+      '0',
+      POD_ON,
+      { pickup: PU_ACTUAL },
+      sheetDriverId,
+    )
+
+    const line = await lineFor(await settle())
+    expect(line.puActual).toBe(true)
+    expect(line.delActual).toBe(false)
+  })
 })
 
 describe('the pay rule on file', () => {

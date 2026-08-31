@@ -100,6 +100,26 @@ interface StoredLine {
   amountCents: number
   payRuleSnapshot: Prisma.JsonValue | null
   load: { loadNumber: string } | null
+  /** Frozen at generation. See SettlementLine in the schema. */
+  puAt?: Date | null
+  delAt?: Date | null
+  puActual?: boolean
+  delActual?: boolean
+}
+
+/**
+ * A sheet date as the document prints it: `MM/DD`, or blank.
+ *
+ * UTC, DELIBERATELY, and the same choice the rest of this document makes about
+ * dates it was handed. Re-reading a frozen instant in a zone chosen at print
+ * time would let the same settlement print two different dates on two
+ * machines, which is the one thing a driver's sheet may not do.
+ */
+function sheetDate(at: Date | null | undefined): string {
+  if (!at) return ''
+  const month = String(at.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(at.getUTCDate()).padStart(2, '0')
+  return `${month}/${day}`
 }
 
 /** Settlement lines as the PDF wants them, working included, in English. */
@@ -111,5 +131,9 @@ export function settlementPdfLines(
     description: line.description,
     basis: basisSentence(readSnapshot(line.payRuleSnapshot), 'en-US'),
     amountCents: line.amountCents,
+    puDate: sheetDate(line.puAt),
+    puActual: line.puActual ?? false,
+    delDate: sheetDate(line.delAt),
+    delActual: line.delActual ?? false,
   }))
 }

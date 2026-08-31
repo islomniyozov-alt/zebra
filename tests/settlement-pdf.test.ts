@@ -25,24 +25,40 @@ const input: SettlementPdfInput = {
       loadNumber: 'L-1042',
       description: 'Load pay L-1042',
       basis: '30% of $2,990.00 gross',
+      puDate: '08/24',
+      puActual: true,
+      delDate: '08/25',
+      delActual: true,
       amountCents: 89700,
     },
     {
       loadNumber: 'L-1044',
       description: 'Load pay L-1044',
       basis: '30% of $1,900.00 gross',
+      puDate: '08/24',
+      puActual: true,
+      delDate: '08/25',
+      delActual: true,
       amountCents: 57000,
     },
     {
       loadNumber: null,
       description: 'Fuel advance 28 Jul',
       basis: '',
+      puDate: '08/24',
+      puActual: true,
+      delDate: '08/25',
+      delActual: true,
       amountCents: -25000,
     },
     {
       loadNumber: null,
       description: 'Lumper reimbursed',
       basis: '',
+      puDate: '08/24',
+      puActual: true,
+      delDate: '08/25',
+      delActual: true,
       amountCents: 12000,
     },
   ],
@@ -56,6 +72,91 @@ const input: SettlementPdfInput = {
 }
 
 const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes)
+
+describe('the sheet dates, and the marker a plan carries', () => {
+  // ------------------------------------------------------------------------
+  // A MONEY DOCUMENT NEVER PRESENTS A PLAN AS AN ACTUAL SILENTLY. The driver
+  // is entitled to know which of these two dates is what happened and which is
+  // what was intended — per DATE, not per line, because a load can easily have
+  // a real check-in at the shipper and none at the consignee.
+  // ------------------------------------------------------------------------
+  const withLines = (lines: SettlementPdfInput['lines']) =>
+    decode(renderSettlementPdf({ ...input, lines }))
+
+  it('prints both dates unmarked when both are records', () => {
+    const pdf = withLines([
+      {
+        loadNumber: '1005',
+        description: 'Load pay',
+        basis: '',
+        amountCents: 50000,
+        puDate: '08/24',
+        puActual: true,
+        delDate: '08/25',
+        delActual: true,
+      },
+    ])
+    expect(pdf).toContain('08/24')
+    expect(pdf).toContain('08/25')
+    expect(pdf).not.toContain('08/24*')
+    // No marker means no legend: a footnote explaining a symbol that is not on
+    // the page teaches the reader to ignore footnotes.
+    expect(pdf).not.toContain('scheduled date')
+  })
+
+  it('marks a plan-only date and explains the marker once', () => {
+    const pdf = withLines([
+      {
+        loadNumber: '1006',
+        description: 'Load pay',
+        basis: '',
+        amountCents: 50000,
+        puDate: '08/24',
+        puActual: false,
+        delDate: '08/25',
+        delActual: true,
+      },
+    ])
+    expect(pdf).toContain('08/24*')
+    // The date that IS a record carries no marker beside it.
+    expect(pdf).not.toContain('08/25*')
+    expect(pdf).toContain('scheduled date')
+  })
+
+  it('marks each date on its own, not the line', () => {
+    const pdf = withLines([
+      {
+        loadNumber: '1007',
+        description: 'Load pay',
+        basis: '',
+        amountCents: 50000,
+        puDate: '08/24',
+        puActual: true,
+        delDate: '08/25',
+        delActual: false,
+      },
+    ])
+    expect(pdf).toContain('08/25*')
+    expect(pdf).not.toContain('08/24*')
+  })
+
+  it('says nothing about dates a load never had', () => {
+    const pdf = withLines([
+      {
+        loadNumber: '1008',
+        description: 'Load pay',
+        basis: '',
+        amountCents: 50000,
+        puDate: '',
+        puActual: false,
+        delDate: '',
+        delActual: false,
+      },
+    ])
+    // An empty date is not an unmarked plan; there is nothing to qualify.
+    expect(pdf).not.toContain('scheduled date')
+  })
+})
 
 describe('the settlement PDF', () => {
   const bytes = renderSettlementPdf(input)
@@ -139,6 +240,10 @@ describe('the settlement PDF', () => {
         loadNumber: `L-${2000 + index}`,
         description: `Load pay ${index}`,
         basis: '30% of $1,000.00 gross',
+        puDate: '08/24',
+        puActual: true,
+        delDate: '08/25',
+        delActual: true,
         amountCents: 30000,
       })),
     }
