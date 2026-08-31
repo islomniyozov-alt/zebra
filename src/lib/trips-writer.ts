@@ -1,4 +1,6 @@
 import { createLoad, recomputeTotals, type StopInput } from './loads'
+import { zoneForRelayStop } from './relay-import'
+import { zoneWallClock } from './stop-time'
 import type { TxClient } from './tenancy'
 import type { PlannedTrip } from './trips-import'
 
@@ -65,29 +67,43 @@ export function tripFacilityCodes(trip: PlannedTrip): string[] {
  * never seen this dock" looks like. The alternative — inventing a location —
  * is how a facility book fills with half-known addresses.
  */
+export interface ResolvedFacility {
+  id: string
+  city: string | null
+  state: string | null
+  /** The zone its printed clocks are read in, when somebody has recorded one. */
+  timezone: string | null
+}
+
 export async function resolveFacilities(
   tx: TxClient,
   codes: readonly string[],
-): Promise<
-  Map<string, { id: string; city: string | null; state: string | null }>
-> {
+): Promise<Map<string, ResolvedFacility>> {
   if (codes.length === 0) return new Map()
 
   const found = await tx.location.findMany({
     where: { facilityCode: { in: [...codes] }, deletedAt: null },
-    select: { id: true, facilityCode: true, city: true, state: true },
+    select: {
+      id: true,
+      facilityCode: true,
+      city: true,
+      state: true,
+      // THE STOP'S OWN ZONE. Flag 14: a printed clock is a wall-clock face and
+      // becomes an instant only in a named zone. Reading it here means the
+      // trip's times are resolved where they happened rather than where the
+      // carrier is.
+      timezone: true,
+    },
   })
 
-  const map = new Map<
-    string,
-    { id: string; city: string | null; state: string | null }
-  >()
+  const map = new Map<string, ResolvedFacility>()
   for (const row of found) {
     if (row.facilityCode) {
       map.set(row.facilityCode, {
         id: row.id,
         city: row.city,
         state: row.state,
+        timezone: row.timezone,
       })
     }
   }
@@ -95,10 +111,7 @@ export async function resolveFacilities(
 }
 
 /** The stop rows a trip writes, resolved against the facility book. */
-export function stopRowsForTrip(
-  trip: PlannedTrip,
-  facilities: ReadonlyMap<string, { id: string }>,
-): {
+export interface TripStopRow {
   sequence: number
   type: 'PICKUP' | 'DELIVERY'
   locationId: string | null
@@ -106,7 +119,43 @@ export function stopRowsForTrip(
   referenceNumber: string | null
   legMiles: number | null
   legEmpty: boolean | null
-}[] {
+  /** The plan, as the export printed it. */
+  scheduledAt: Date | null
+  /** What happened, on a finished trip. Null on one still running. */
+  arrivedAt: Date | null
+  departedAt: Date | null
+}
+
+/**
+ * A printed clock face becomes an instant, in the stop's own zone.
+ *
+ * FLAG 14, APPLIED TO ACTUALS AS WELL AS TO THE PLAN. The export prints wall
+ * clocks and a standard-offset column beside them; the offset disagrees with
+ * the printed time for half the year, so it is cross-check metadata and never
+ * an instant. The zone comes from the facility when somebody has recorded one,
+ * from the offset table when they have not, and from the carrier last.
+ */
+function instantAt(
+  clock: { date: string; time: string; utcOffsetHours: number | null } | null,
+  facility: ResolvedFacility | undefined,
+  fallbackZone: string,
+): Date | null {
+  if (!clock) return null
+  const [hour, minute] = clock.time.split(':').map(Number)
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return null
+  const zone = zoneForRelayStop(
+    facility?.timezone ?? null,
+    clock.utcOffsetHours,
+    fallbackZone,
+  )
+  return zoneWallClock(clock.date, hour!, minute!, zone)
+}
+
+export function stopRowsForTrip(
+  trip: PlannedTrip,
+  facilities: ReadonlyMap<string, ResolvedFacility>,
+  fallbackZone = 'America/Chicago',
+): TripStopRow[] {
   return trip.stops.map((stop, index) => ({
     sequence: index + 1,
     // POSITION IS THE ONLY EVIDENCE THIS EXPORT OFFERS. It names facilities
@@ -120,6 +169,26 @@ export function stopRowsForTrip(
     referenceNumber: stop.referenceNumber,
     legMiles: stop.legMiles,
     legEmpty: stop.legEmpty,
+    // ALL FOUR CLOCKS, WHICH THIS USED TO DISCARD ENTIRELY. The parser reads
+    // planned and actual arrival and departure for every stop; the planner
+    // carries them; this function returned none of them, so a trips-imported
+    // load had no times of any kind — and the ruling that actuals are
+    // operative had nothing to be operative over.
+    scheduledAt: instantAt(
+      stop.plannedArrival,
+      facilities.get(stop.facilityCode),
+      fallbackZone,
+    ),
+    arrivedAt: instantAt(
+      stop.actualArrival,
+      facilities.get(stop.facilityCode),
+      fallbackZone,
+    ),
+    departedAt: instantAt(
+      stop.actualDeparture,
+      facilities.get(stop.facilityCode),
+      fallbackZone,
+    ),
   }))
 }
 
@@ -148,7 +217,7 @@ export async function createTripLoad(
   tx: TxClient,
   organizationId: string,
   input: TripWriteInput,
-  facilities: ReadonlyMap<string, { id: string }>,
+  facilities: ReadonlyMap<string, ResolvedFacility>,
 ): Promise<TripWriteOutcome> {
   const rows = stopRowsForTrip(input.trip, facilities)
 
@@ -170,6 +239,14 @@ export async function createTripLoad(
       referenceNumber: row.referenceNumber,
       legMiles: row.legMiles,
       legEmpty: row.legEmpty,
+      // ALL THREE, AND THE CREATE PATH IS THE ONLY ONE THAT HAS TO SAY SO.
+      // `enrichLoad` spreads the row whole and got these for free; this
+      // branch maps field by field and is therefore the branch that can drop
+      // one — which is exactly how `place` instead of `name` happened here,
+      // in these same lines.
+      scheduledAt: row.scheduledAt,
+      arrivedAt: row.arrivedAt,
+      departedAt: row.departedAt,
     }),
   )
 
@@ -257,7 +334,7 @@ export async function enrichLoad(
   organizationId: string,
   loadId: string,
   trip: PlannedTrip,
-  facilities: ReadonlyMap<string, { id: string }>,
+  facilities: ReadonlyMap<string, ResolvedFacility>,
   existing: { hasStops: boolean; hasMiles: boolean; hasRate: boolean },
   rateCents: number | null = null,
 ): Promise<TripWriteOutcome> {

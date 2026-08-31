@@ -1,0 +1,128 @@
+import { describe, expect, it } from 'vitest'
+import { latenessLabel, shownStopTime } from '@/lib/stop-actuals'
+
+// ---------------------------------------------------------------------------
+// WHOSE CLOCK IS OPERATIVE.
+//
+// The numbers below are real trip T-115GY4TBD, whose Relay view shows the plan
+// and the record hours apart: MEM4 scheduled 04:41, checked in 07:17; HME9
+// scheduled 06:32, checked in 08:08; WE_PAY_WMBAF scheduled 07:32, checked in
+// 09:20 — which Relay labels "1hr 18m late".
+//
+// THE THIRD RULE IS THE ONE WORTH TESTING HARDEST: a stop with no actual keeps
+// its plan and is labelled, INCLUDING on a delivered load where every stop
+// around it is a record. That is where a plan is likeliest to be read as one.
+// ---------------------------------------------------------------------------
+
+const at = (iso: string) => new Date(iso)
+
+const stop = (over: Partial<Parameters<typeof shownStopTime>[0]> = {}) => ({
+  scheduledAt: at('2026-08-24T09:41:00Z'), // 04:41 CDT
+  arrivedAt: at('2026-08-24T12:17:00Z'), // 07:17 CDT
+  departedAt: at('2026-08-24T12:52:00Z'),
+  ...over,
+})
+
+describe('a delivered load', () => {
+  const shown = shownStopTime(stop(), { delivered: true })
+
+  it('shows the actual check-in', () => {
+    expect(shown.at?.toISOString()).toBe('2026-08-24T12:17:00.000Z')
+    expect(shown.isActual).toBe(true)
+  })
+
+  it('keeps the plan for reference beneath it', () => {
+    expect(shown.scheduledAt?.toISOString()).toBe('2026-08-24T09:41:00.000Z')
+  })
+
+  it('carries the actual departure', () => {
+    expect(shown.departedAt?.toISOString()).toBe('2026-08-24T12:52:00.000Z')
+  })
+
+  // Relay's own figure for this stop: 04:41 planned, 07:17 actual.
+  it('derives the lateness rather than storing it', () => {
+    expect(shown.latenessMinutes).toBe(156)
+  })
+})
+
+describe('a booked load', () => {
+  const shown = shownStopTime(stop(), { delivered: false })
+
+  it('shows the plan', () => {
+    expect(shown.at?.toISOString()).toBe('2026-08-24T09:41:00.000Z')
+    expect(shown.isActual).toBe(false)
+  })
+
+  // THE ACTUALS EXIST ON THE ROW HERE and are still not shown — a load that
+  // has not been marked delivered is one whose record is not yet final, and
+  // the plan is what the office is working to.
+  it('does not show an actual it has not accepted yet', () => {
+    expect(shown.departedAt).toBeNull()
+    expect(shown.latenessMinutes).toBeNull()
+  })
+})
+
+describe('a stop with no actual, on a delivered load', () => {
+  const shown = shownStopTime(stop({ arrivedAt: null, departedAt: null }), {
+    delivered: true,
+  })
+
+  it('falls back to the plan', () => {
+    expect(shown.at?.toISOString()).toBe('2026-08-24T09:41:00.000Z')
+  })
+
+  // THE WHOLE POINT. Its neighbours are actuals; if this said `isActual` the
+  // screen would present an intention as a record with nothing to distinguish
+  // it.
+  it('is not presented as an actual', () => {
+    expect(shown.isActual).toBe(false)
+  })
+
+  it('offers no lateness, because it was late for nothing', () => {
+    expect(shown.latenessMinutes).toBeNull()
+  })
+})
+
+describe('a stop with nothing at all', () => {
+  it('shows nothing rather than inventing a time', () => {
+    const shown = shownStopTime(
+      { scheduledAt: null, arrivedAt: null, departedAt: null },
+      { delivered: true },
+    )
+    expect(shown.at).toBeNull()
+    expect(shown.isActual).toBe(false)
+  })
+})
+
+describe('the plan is not repeated when it agrees with the record', () => {
+  it('drops a scheduled time identical to the actual', () => {
+    const same = at('2026-08-24T12:17:00Z')
+    const shown = shownStopTime(
+      { scheduledAt: same, arrivedAt: same, departedAt: null },
+      { delivered: true },
+    )
+    expect(shown.scheduledAt).toBeNull()
+    expect(shown.latenessMinutes).toBe(0)
+  })
+})
+
+describe("the lateness label, in Relay's own phrasing", () => {
+  const labels = { late: 'late', early: 'early' }
+
+  it('reads like the portal does', () => {
+    expect(latenessLabel(78, labels)).toBe('1hr 18m late')
+  })
+
+  it('drops the hour when there is none', () => {
+    expect(latenessLabel(12, labels)).toBe('12m late')
+  })
+
+  it('says early for a negative', () => {
+    expect(latenessLabel(-25, labels)).toBe('25m early')
+  })
+
+  it('says nothing at all for on-time or unknown', () => {
+    expect(latenessLabel(0, labels)).toBeNull()
+    expect(latenessLabel(null, labels)).toBeNull()
+  })
+})

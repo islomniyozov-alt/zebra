@@ -84,6 +84,18 @@ export interface StopInput {
   contactPhone?: unknown
   instructions?: unknown
   /**
+   * What actually happened here, when it is known.
+   *
+   * SEPARATE FROM `scheduledAt`, NEVER OVERWRITING IT. The plan is what was
+   * agreed and stays on the row as the reference; these two are the record.
+   * `src/lib/stop-actuals.ts` decides which one a screen shows.
+   *
+   * `relay-import.ts` used to write these in a second pass because this
+   * contract had nowhere to put them — a load could not be created complete.
+   */
+  arrivedAt?: Date | null
+  departedAt?: Date | null
+  /**
    * The leg that ARRIVED at this stop: its distance, and whether it ran empty.
    *
    * TYPED, NOT `unknown`, UNLIKE ITS NEIGHBOURS ABOVE. Those are `unknown`
@@ -234,6 +246,8 @@ async function writeStops(
       contactName: optionalText(stop.contactName),
       contactPhone: optionalText(stop.contactPhone),
       instructions: optionalText(stop.instructions),
+      arrivedAt: stop.arrivedAt ?? null,
+      departedAt: stop.departedAt ?? null,
       legMiles: stop.legMiles ?? null,
       legEmpty: stop.legEmpty ?? null,
     })),

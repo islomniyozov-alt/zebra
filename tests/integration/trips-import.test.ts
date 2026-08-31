@@ -73,12 +73,26 @@ afterAll(async () => {
   await owner.$disconnect()
 })
 
-const stop = (facilityCode: string) => ({
+const clock = (date: string, time: string) => ({
+  date,
+  time,
+  utcOffsetHours: -6,
+})
+
+const stop = (
+  facilityCode: string,
+  times: {
+    plannedArrival?: ReturnType<typeof clock> | null
+    plannedDeparture?: ReturnType<typeof clock> | null
+    actualArrival?: ReturnType<typeof clock> | null
+    actualDeparture?: ReturnType<typeof clock> | null
+  } = {},
+) => ({
   facilityCode,
-  plannedArrival: null,
-  plannedDeparture: null,
-  actualArrival: null,
-  actualDeparture: null,
+  plannedArrival: times.plannedArrival ?? null,
+  plannedDeparture: times.plannedDeparture ?? null,
+  actualArrival: times.actualArrival ?? null,
+  actualDeparture: times.actualDeparture ?? null,
 })
 
 const leg = (over: Partial<TripLeg> = {}): TripLeg => ({
@@ -358,6 +372,109 @@ describe('a trip whose load already exists is enriched, not doubled', () => {
     // asserted anyway, so the two paths are held to one standard.
     expect(loads[0]!.stops.map((row) => row.name)).toEqual(['DEN7', 'MKC6'])
     expect(loads[0]!.stops[1]!.legMiles).toBe(583)
+  })
+})
+
+describe('the clocks a trip lands with', () => {
+  // ------------------------------------------------------------------------
+  // THE TRIPS WRITER USED TO DISCARD EVERY TIME IT PARSED. Planned and actual,
+  // arrival and departure — all four read by the parser, carried by the
+  // planner, and dropped on the floor by the writer, so an imported load had
+  // no times of any kind. These read the columns back.
+  // ------------------------------------------------------------------------
+
+  it('lands a FINISHED trip with its actual check-in and departure', async () => {
+    const id = `ACT-${nonce}`
+    const { load } = await importTrip([
+      leg({
+        tripId: id,
+        loadId: id,
+        stops: [
+          stop('DEN7', {
+            plannedArrival: clock('2026-08-24', '04:41'),
+            actualArrival: clock('2026-08-24', '07:17'),
+            actualDeparture: clock('2026-08-24', '07:52'),
+          }),
+          stop('MKC6', {
+            plannedArrival: clock('2026-08-24', '06:32'),
+            actualArrival: clock('2026-08-24', '08:08'),
+          }),
+        ],
+      }),
+    ])
+
+    expect(load.stops[0]!.arrivedAt).not.toBeNull()
+    expect(load.stops[0]!.departedAt).not.toBeNull()
+    // THE PLAN IS KEPT, NOT REPLACED. It is the reference the screen shows
+    // beneath the record, and the settlement marks when it has to fall back.
+    expect(load.stops[0]!.scheduledAt).not.toBeNull()
+    expect(load.stops[0]!.arrivedAt!.getTime()).toBeGreaterThan(
+      load.stops[0]!.scheduledAt!.getTime(),
+    )
+    expect(load.stops[1]!.arrivedAt).not.toBeNull()
+  })
+
+  // A trip still running: Relay prints the plan and no check-in.
+  it('lands a BOOKED trip with the plan and no actuals', async () => {
+    const id = `PLAN-${nonce}`
+    const { load } = await importTrip([
+      leg({
+        tripId: id,
+        loadId: id,
+        stops: [
+          stop('DEN7', { plannedArrival: clock('2026-08-24', '04:41') }),
+          stop('MKC6', { plannedArrival: clock('2026-08-24', '06:32') }),
+        ],
+      }),
+    ])
+
+    expect(load.stops[0]!.scheduledAt).not.toBeNull()
+    expect(load.stops[0]!.arrivedAt).toBeNull()
+    expect(load.stops[0]!.departedAt).toBeNull()
+  })
+
+  // A REAL SHAPE: the driver checked into the first dock and not the second.
+  // The second stop must keep its plan and stay distinguishable from a record.
+  it('lands a half-finished trip without inventing the missing actual', async () => {
+    const id = `HALF-${nonce}`
+    const { load } = await importTrip([
+      leg({
+        tripId: id,
+        loadId: id,
+        stops: [
+          stop('DEN7', {
+            plannedArrival: clock('2026-08-24', '04:41'),
+            actualArrival: clock('2026-08-24', '07:17'),
+          }),
+          stop('MKC6', { plannedArrival: clock('2026-08-24', '06:32') }),
+        ],
+      }),
+    ])
+
+    expect(load.stops[0]!.arrivedAt).not.toBeNull()
+    expect(load.stops[1]!.arrivedAt).toBeNull()
+    expect(load.stops[1]!.scheduledAt).not.toBeNull()
+  })
+
+  // FLAG 14. The printed face is read in the stop's zone, so 04:41 at a
+  // Central dock is 09:41Z — not 04:41Z, and not shifted by the standard
+  // offset column, which disagrees with the clock for half the year.
+  it('reads a printed clock in the zone, not as UTC', async () => {
+    const id = `ZONE-${nonce}`
+    const { load } = await importTrip([
+      leg({
+        tripId: id,
+        loadId: id,
+        stops: [
+          stop('DEN7', { plannedArrival: clock('2026-08-24', '04:41') }),
+          stop('MKC6', { plannedArrival: clock('2026-08-24', '06:32') }),
+        ],
+      }),
+    ])
+
+    const iso = load.stops[0]!.scheduledAt!.toISOString()
+    expect(iso).not.toContain('T04:41')
+    expect(iso).toContain('2026-08-24')
   })
 })
 

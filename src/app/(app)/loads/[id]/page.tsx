@@ -11,6 +11,7 @@ import {
 } from '@/lib/status'
 import { formatAddress } from '@/lib/locations'
 import { renderStopTime, ZONE_CHOICES } from '@/lib/stop-time'
+import { latenessLabel, shownStopTime } from '@/lib/stop-actuals'
 import { isMessageKey, type MessageKey } from '@/lib/i18n'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
@@ -239,6 +240,11 @@ export default async function LoadDetailPage({
     load.operationalStatus === 'DELIVERED' ||
     load.operationalStatus === 'POD_RECEIVED'
 
+  // FINISHED, for the purpose of whose clock is operative. The same two
+  // statuses `podRequired` uses: a load with a POD expected is a load whose
+  // stops have been driven.
+  const delivered = podRequired
+
   const slotFor = (
     type: string,
     label: string,
@@ -387,10 +393,30 @@ export default async function LoadDetailPage({
             <ol className="mt-z3 flex flex-col gap-z3">
               {load.stops.map((stop) => {
                 // Rule 3. In the STOP's zone, with the abbreviation shown.
-                const when = renderStopTime(stop.scheduledAt, stop.state, {
+                // ACTUALS ARE OPERATIVE ON A FINISHED TRIP. The rule lives in
+                // stop-actuals.ts so this screen and the settlement document
+                // cannot come to different conclusions about the same stop.
+                const shown = shownStopTime(stop, { delivered })
+                const when = renderStopTime(shown.at, stop.state, {
                   fallbackZone: zone,
                   locale,
                   zone: stop.location?.timezone ?? null,
+                })
+                // The plan, rendered only when it says something the actual
+                // does not — and always labelled, never bare.
+                const planned = renderStopTime(shown.scheduledAt, stop.state, {
+                  fallbackZone: zone,
+                  locale,
+                  zone: stop.location?.timezone ?? null,
+                })
+                const departed = renderStopTime(shown.departedAt, stop.state, {
+                  fallbackZone: zone,
+                  locale,
+                  zone: stop.location?.timezone ?? null,
+                })
+                const lateness = latenessLabel(shown.latenessMinutes, {
+                  late: t('stop.late'),
+                  early: t('stop.early'),
                 })
                 // The stop's own address wins; the facility book fills the
                 // silence. `formatAddress` returns null rather than '' so
@@ -406,11 +432,21 @@ export default async function LoadDetailPage({
                       <span className="text-xs uppercase tracking-[0.04em] text-ink-2">
                         {t(`stop.${stop.type}` as never)}
                       </span>
-                      <span
-                        className="font-mono text-sm text-ink"
-                        title={when?.zone ?? zone}
-                      >
-                        {when?.text ?? '—'}
+                      <span className="flex items-baseline gap-z2">
+                        {/* A PLAN IS NEVER SHOWN AS A RECORD. On a delivered
+                         * load its neighbours are actuals, which is exactly
+                         * when an unlabelled plan reads as one. */}
+                        {shown.at && !shown.isActual ? (
+                          <span className="text-xs text-ink-3">
+                            {t('stop.scheduled')}
+                          </span>
+                        ) : null}
+                        <span
+                          className="font-mono text-sm text-ink"
+                          title={when?.zone ?? zone}
+                        >
+                          {when?.text ?? '—'}
+                        </span>
                       </span>
                     </div>
                     <p className="mt-z1 text-base text-ink">
@@ -428,6 +464,20 @@ export default async function LoadDetailPage({
                     {address !== null && address !== stop.name ? (
                       <p className="mt-z1 text-sm text-ink-2" dir="ltr">
                         {address}
+                      </p>
+                    ) : null}
+                    {/* THE PLAN BENEATH THE RECORD, small, for reference —
+                     * and the lateness Relay itself shows, derived here from
+                     * the two columns rather than stored as a third. */}
+                    {planned ? (
+                      <p className="mt-z1 text-xs text-ink-3">
+                        {t('stop.scheduled')} {planned.text}
+                        {lateness ? ` · ${lateness}` : ''}
+                      </p>
+                    ) : null}
+                    {departed ? (
+                      <p className="mt-z1 text-xs text-ink-3">
+                        {t('stop.departed')} {departed.text}
                       </p>
                     ) : null}
                     {when?.approximate ? (

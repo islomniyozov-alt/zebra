@@ -51,10 +51,19 @@ const trip = (over: Partial<PlannedTrip> = {}): PlannedTrip => ({
   ...over,
 })
 
-const book = new Map([
-  ['DEN7', { id: 'loc-den7' }],
-  ['MKC6', { id: 'loc-mkc6' }],
-])
+/** Facilities as `resolveFacilities` returns them, zone included. */
+const facilityMap = (
+  byCode: Record<string, string>,
+  timezone: string | null = 'America/Chicago',
+) =>
+  new Map(
+    Object.entries(byCode).map(([code, id]) => [
+      code,
+      { id, city: null, state: null, timezone },
+    ]),
+  )
+
+const book = facilityMap({ DEN7: 'loc-den7', MKC6: 'loc-mkc6' })
 
 describe('the stops a trip writes', () => {
   it('resolves each facility code to the seeded location', () => {
@@ -66,10 +75,7 @@ describe('the stops a trip writes', () => {
   // with the code as its name and no address, rather than minting a location
   // out of a string — which is how a facility book fills with half-known docks.
   it('writes an unknown code as a name with no location', () => {
-    const rows = stopRowsForTrip(
-      trip(),
-      new Map([['DEN7', { id: 'loc-den7' }]]),
-    )
+    const rows = stopRowsForTrip(trip(), facilityMap({ DEN7: 'loc-den7' }))
     expect(rows[1]?.locationId).toBeNull()
     expect(rows[1]?.name).toBe('MKC6')
   })
