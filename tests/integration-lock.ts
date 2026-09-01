@@ -160,6 +160,56 @@ async function ensureTemplate(adminUrl: string): Promise<void> {
  * because a leaked connection from a killed run would otherwise make its own
  * corpse undroppable.
  */
+/**
+ * Wait until nothing is connected to the template, terminating what is.
+ *
+ * ASKING RATHER THAN HOPING. This was a fire-and-forget `pg_terminate_backend`
+ * followed by copies that retried on 55006, and it was not enough: termination
+ * is a REQUEST, and the run that has just migrated the template is the one
+ * whose `prisma migrate deploy` child has a backend still winding down. Twelve
+ * retries over ~20 seconds went red on exactly that run — the first gate after
+ * a new migration landed.
+ *
+ * So this loops until `pg_stat_activity` agrees the template is idle, and says
+ * so if it never does. Safe for the same reason the sweep is: the run lock is
+ * held, so any session on the template is a leftover of ours.
+ */
+async function awaitTemplateIdle(admin: Pool): Promise<void> {
+  const deadline = Date.now() + 60_000
+  let waited = false
+
+  for (;;) {
+    await admin.query(
+      `select pg_terminate_backend(pid) from pg_stat_activity
+        where datname = $1 and pid <> pg_backend_pid()`,
+      [TEMPLATE_DB],
+    )
+    const { rows } = await admin.query(
+      `select count(*)::int as n from pg_stat_activity
+        where datname = $1 and pid <> pg_backend_pid()`,
+      [TEMPLATE_DB],
+    )
+    const busy = rows[0]?.n ?? 0
+    if (busy === 0) {
+      if (waited) console.log(`[integration] template ${TEMPLATE_DB} is idle`)
+      return
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `${busy} session(s) still connected to ${TEMPLATE_DB} after 60s; ` +
+          'CREATE DATABASE ... TEMPLATE cannot copy a database in use.',
+      )
+    }
+    if (!waited) {
+      console.log(
+        `[integration] waiting for ${busy} session(s) to leave ${TEMPLATE_DB}`,
+      )
+      waited = true
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
+}
+
 async function buildWorkerDatabases(adminUrl: string): Promise<void> {
   const admin = new Pool({ connectionString: adminUrl, max: 12 })
   try {
@@ -186,11 +236,7 @@ async function buildWorkerDatabases(adminUrl: string): Promise<void> {
     //
     // Terminating is safe here for the same reason the sweep is: the run lock
     // is held, so any session on the template is a leftover of ours.
-    await admin.query(
-      `select pg_terminate_backend(pid) from pg_stat_activity
-        where datname = $1 and pid <> pg_backend_pid()`,
-      [TEMPLATE_DB],
-    )
+    await awaitTemplateIdle(admin)
 
     const count = workerCount()
     const startedAt = Date.now()
@@ -215,19 +261,10 @@ async function buildWorkerDatabases(adminUrl: string): Promise<void> {
         } catch (error) {
           lastError = error
           if ((error as { code?: string }).code !== '55006') throw error
-          await admin.query(
-            `select pg_terminate_backend(pid) from pg_stat_activity
-              where datname = $1 and pid <> pg_backend_pid()`,
-            [TEMPLATE_DB],
-          )
-          // BACKING OFF, NOT DRUMMING. Ten tries at a flat 300ms is three
-          // seconds, and Neon does not always release a just-closed session
-          // inside that — measured, twice, as a run that died on 55006 with
-          // `pg_stat_activity` showing nothing by the time anyone looked.
-          // Rising delays reach ~16s while staying instant in the common case.
-          await new Promise((resolve) =>
-            setTimeout(resolve, 250 * (attempt + 1)),
-          )
+          // THE SAME WAIT, not another blind sleep. A copy that loses this
+          // race loses it to a session, and the way to stop losing it is to
+          // watch that session leave.
+          await awaitTemplateIdle(admin)
         }
       }
       if (lastError) throw lastError
