@@ -2094,3 +2094,20 @@ Recorded rather than resolved, per Phase 1's discipline.
     "any stop with an `arrivedAt`", so re-importing the same export after this
     deploys fills all four. Any trips-imported load booked between 2026-08-17
     and this fix has the same hole and the same repair.
+
+    THE ONE SENTENCE THAT COVERS ALL THREE: **every instrument failed by
+    inheriting the belief it was meant to test.** The aggregate inherited the
+    archive's date and counted a population that could not contain the defect.
+    The corpus inherited the sweep's end date — a corpus that stops where the
+    archive stops records what USED to arrive. The test inherited the parser's
+    column name, and so agreed with the bug in the bug's own words. None of the
+    three was careless; each was built from the same assumption as the thing it
+    was checking, which makes disagreement impossible rather than unlikely.
+
+    THIS IS THE DATA-SIDE TWIN OF "CHECK THE THING THAT ACTS". That rule says
+    to measure the running system rather than a stand-in for it. This one says
+    the measurement must not be constructed from the same assumption as the
+    code: derive the instrument from the artefact — read the header, read the
+    row, read the baseline off the thing being measured — and never from what
+    the source believes about it. Where the instrument must name something the
+    code also names, that name is the first thing to doubt when both agree.

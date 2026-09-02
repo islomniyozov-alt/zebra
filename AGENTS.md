@@ -92,6 +92,10 @@ Rules about instruments, which are the ones that cost whole sessions:
   where the survivors carry the count. The row settled it in one query. Twin of
   "check the thing that acts", and it applies to fixtures too: a corpus that
   stops where the archive stops records what USED to arrive. Flag 88.
+  All three instruments that missed it had inherited the belief they were meant
+  to test — the aggregate the archive's date, the corpus the sweep's end, the
+  test the parser's column name. Build the instrument from the artefact, not
+  from what the code believes about it.
 - **A guard that has never been watched failing is not known to work.** Break
   the thing on purpose, see the guard fire, put it back. Flag 47's lesson, and
   the reason `singleLoadRateCents`, the money-arithmetic patterns and the
