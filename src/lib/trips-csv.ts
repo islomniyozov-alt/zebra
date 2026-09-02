@@ -171,19 +171,40 @@ export function tripOffset(value: string): number | null {
   return hours
 }
 
+/**
+ * The first of several column names that yields a whole clock.
+ *
+ * MORE THAN ONE NAME, BECAUSE AMAZON RENAMES COLUMNS. The arrival pair was
+ * `Stop N Actual Arrival Date/Time` in all 1,600 swept exports and is
+ * `Stop N Actual Check-In Date/Time` in every export downloaded since; the
+ * departure pair beside it never changed. A reader that knew one name went on
+ * finding half of each stop, and load 1010 was written with four real
+ * departures and four null check-ins — the file said when the driver left
+ * every facility and nothing about when he arrived.
+ *
+ * SO THE NAMES ARE A LIST AND THE OLD ONE STAYS. Exports already on disk are
+ * re-imported, and the day the rename is "cleaned up" here is the day those
+ * files start losing their times instead.
+ */
 function clockAt(
   cells: readonly string[],
   index: Record<string, number>,
-  dateKey: string,
-  timeKey: string,
+  /** Column labels without the trailing " date"/" time", best name first. */
+  names: readonly string[],
   offset: number | null,
 ): TripClock | null {
-  const date = tripDate(cells[index[dateKey] ?? -1] ?? '')
-  const time = tripTime(cells[index[timeKey] ?? -1] ?? '')
-  // BOTH HALVES OR NEITHER. A date with no clock is not a moment, and half a
-  // clock printed into a window is worse than an absent one.
-  if (date === null || time === null) return null
-  return { date, time, utcOffsetHours: offset }
+  for (const name of names) {
+    const date = tripDate(cells[index[`${name} date`] ?? -1] ?? '')
+    const time = tripTime(cells[index[`${name} time`] ?? -1] ?? '')
+    // BOTH HALVES OR NEITHER. A date with no clock is not a moment, and half a
+    // clock printed into a window is worse than an absent one. A file carrying
+    // only one half under one name may still carry both under another, so this
+    // keeps looking rather than returning null here.
+    if (date !== null && time !== null) {
+      return { date, time, utcOffsetHours: offset }
+    }
+  }
+  return null
 }
 
 /**
@@ -262,29 +283,28 @@ export function parseTripsCsv(text: string): ParsedTripsFile {
         plannedArrival: clockAt(
           cells,
           index,
-          `stop ${n} planned arrival date`,
-          `stop ${n} planned arrival time`,
+          [`stop ${n} planned arrival`],
           utc,
         ),
         plannedDeparture: clockAt(
           cells,
           index,
-          `stop ${n} planned departure date`,
-          `stop ${n} planned departure time`,
+          [`stop ${n} planned departure`],
           utc,
         ),
+        // TWO NAMES FOR ONE COLUMN, CURRENT FIRST. See `clockAt`: the swept
+        // exports print "Actual Arrival", everything downloaded since prints
+        // "Actual Check-In", and both are read.
         actualArrival: clockAt(
           cells,
           index,
-          `stop ${n} actual arrival date`,
-          `stop ${n} actual arrival time`,
+          [`stop ${n} actual check-in`, `stop ${n} actual arrival`],
           utc,
         ),
         actualDeparture: clockAt(
           cells,
           index,
-          `stop ${n} actual departure date`,
-          `stop ${n} actual departure time`,
+          [`stop ${n} actual departure`],
           utc,
         ),
       })

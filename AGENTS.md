@@ -85,6 +85,13 @@ Rules about instruments, which are the ones that cost whole sessions:
   a stop mapping whose anchor prettier had reformatted, and a `grep` that ate a
   refusal banner. Where an assertion is awkward, print the lines and splice by
   number. See `PHASE-6-BRIEF.md` flag 86.
+- **Count the thing you are claiming, not a superset of it.** A corpus-wide
+  count of "stops carrying an arrival" returned 1,002 of 1,285 and was used to
+  retract a correct diagnosis. The claim was about one pair on one stop in one
+  file; the measurement was of a 1,600-file archive that predated the defect,
+  where the survivors carry the count. The row settled it in one query. Twin of
+  "check the thing that acts", and it applies to fixtures too: a corpus that
+  stops where the archive stops records what USED to arrive. Flag 88.
 - **A guard that has never been watched failing is not known to work.** Break
   the thing on purpose, see the guard fire, put it back. Flag 47's lesson, and
   the reason `singleLoadRateCents`, the money-arithmetic patterns and the

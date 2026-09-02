@@ -348,32 +348,34 @@ export function parseRelayCsv(text: string): RelayTrip[] {
       if (facility === '') continue
 
       const offset = offsetHours(at(`Stop ${number} UTC Offset`))
-      const moment = (date: string, time: string) =>
-        relayClock(at(date), at(time))
+      // THE FIRST NAME THAT YIELDS A WHOLE CLOCK, because Amazon renames
+      // columns. This reader knew `Actual Check-In` and `trips-csv.ts` knew
+      // `Actual Arrival`; both are right, for different halves of the archive,
+      // and each was blind where the other could see. The pair is now a list
+      // in both readers — one file, two readers, and never again two answers
+      // about what a column is called.
+      const moment = (...names: string[]) => {
+        for (const name of names) {
+          const clock = relayClock(at(`${name} Date`), at(`${name} Time`))
+          if (clock) return clock
+        }
+        return null
+      }
 
       stops.push({
         facility,
         utcOffsetHours: offset,
-        plannedArrival: moment(
-          `Stop ${number} Planned Arrival Date`,
-          `Stop ${number} Planned Arrival Time`,
-        ),
+        plannedArrival: moment(`Stop ${number} Planned Arrival`),
         // The departure has its OWN date column and it is not always the
         // arrival's: `FOE1` in the corpus is planned in at 23:30 on the 11th
         // and out at 00:01 on the 12th. Reusing the arrival date would make
         // that window end twenty-three hours before it starts.
-        plannedDeparture: moment(
-          `Stop ${number} Planned Departure Date`,
-          `Stop ${number} Planned Departure Time`,
-        ),
+        plannedDeparture: moment(`Stop ${number} Planned Departure`),
         actualArrival: moment(
-          `Stop ${number} Actual Check-In Date`,
-          `Stop ${number} Actual Check-In Time`,
+          `Stop ${number} Actual Check-In`,
+          `Stop ${number} Actual Arrival`,
         ),
-        actualDeparture: moment(
-          `Stop ${number} Actual Departure Date`,
-          `Stop ${number} Actual Departure Time`,
-        ),
+        actualDeparture: moment(`Stop ${number} Actual Departure`),
         containerId: text(`Stop ${number} Container ID`),
       })
     }

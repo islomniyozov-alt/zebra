@@ -2012,3 +2012,85 @@ Recorded rather than resolved, per Phase 1's discipline.
     So the gate's output is captured to a FILE and the file is read — the same
     move as `assertOutsideTransaction`: replace the recollection with a shape
     that cannot forget.
+
+88. **AMAZON RENAMED A COLUMN, TWO READERS OF THE SAME FILE DISAGREED ABOUT
+    ITS NAME FOR TWO PHASES, AND THREE INSTRUMENTS IN A ROW MISSED IT BECAUSE
+    EACH ONE MEASURED A SUPERSET OF THE THING BEING CLAIMED.** — 2026-09-02.
+
+    Load 1010 was imported from a Completed export. The preview promised
+    actual times, the confirm ran, and every stop still rendered `scheduled`.
+    One query against the row settled what four rounds of reading the source
+    had not: all four stops had been updated at `03:04:09`, each one carrying a
+    real `departedAt` and `legMiles` beside a null `arrivedAt`. The stops were
+    matched, the write happened, and the arrival half of every pair was null
+    before it ever reached the database.
+
+    THE CAUSE IS ONE COLUMN. Amazon renamed the arrival pair from
+    `Stop N Actual Arrival Date/Time` to `Stop N Actual Check-In Date/Time`.
+    Every export downloaded since 2026-08-17 carries the new name; the
+    departure pair beside it never changed. So the reader kept finding half of
+    each stop, and a delivered load recorded when the driver left every
+    facility and nothing about when he arrived.
+
+    AND THE OTHER READER HAD IT RIGHT ALL ALONG. `relay-csv.ts` — the board
+    importer, written first — reads `Actual Check-In`. `trips-csv.ts`, written
+    later against the swept archive, read `Actual Arrival`. One file, two
+    readers, two answers about what a column is called, each blind exactly
+    where the other could see, for two phases. Flag 23's correction said the
+    two screens differ in the UNIT of their output and not in the file they
+    take; nothing followed that through to the question of whether they agree
+    about the file's columns, and they did not.
+
+    THREE INSTRUMENTS MISSED IT, THE SAME WAY EVERY TIME — each one counted a
+    population that could not contain the defect:
+    - A corpus probe counted stops carrying an arrival across the whole sweep:
+      `stops=1285 withArrival=1002`. This was used to RETRACT a correct
+      diagnosis. It proves arrivals parse SOMEWHERE. The claim being made was
+      about one pair on one stop in one file; the measurement was of a
+      1,600-file archive in which the survivors carry the count.
+    - The corpus was the second. Twenty-one post-rename exports sat unswept in
+      a downloads folder while `corpus/relay-trips` held only files from before
+      the rename — the newest of them from a run that predates the change. A
+      corpus that stops where the archive stops is a record of what USED to
+      arrive, and every assertion over it inherits that date.
+    - The first version of the pairwise test then ran over the real renamed
+      export and PASSED, because it asked for `stop n actual arrival date` —
+      the name the parser believes in. Built independently of the parser, from
+      the same belief. A test that names the column cannot see the column being
+      renamed; it agrees with the bug in the parser's own words.
+
+    THE REVERSALS ARE THE POINT. "Found it" was announced on the column names,
+    retracted on the corpus aggregate, and then reinstated by the row. Both
+    moves were made by reasoning ABOUT the data — an aggregate, then the source
+    — and the row settled it in one query, as it would have at any point in the
+    preceding hour. This is the twin of "check the thing that acts": **count
+    the thing you are claiming, not a superset of it.** A superset answers a
+    different question and answers it confidently.
+
+    THE FIX IS A LIST, IN BOTH READERS. `clockAt` and `moment` take column
+    names in order and return the first that yields a whole clock, so both
+    spellings are read and the old one stays — files already on disk are
+    re-imported, and the day the rename is "cleaned up" is the day those files
+    start losing their times instead.
+
+    THE GUARD IS THE HEADER, NOT A NAME. `tests/trips-csv.test.ts` discovers
+    every `Stop N <label> Date` that has a `Time` beside it, classifies it by
+    whether its own name says departure, and asserts the PAIR on the stop:
+    where a file prints both halves, both readers must return both. It runs
+    over the sweep — now 1,623 files, including all 21 post-rename exports —
+    and a census assertion lists which actual-time labels the sweep contains,
+    so a THIRD name fails by name rather than by a load quietly losing its
+    check-ins. Three hand-written fixtures carry the same claim without the
+    corpus, because the corpus is gitignored and every assertion over it skips
+    on CI.
+
+    BOTH GUARDS WERE WATCHED FAILING. Reverting `trips-csv.ts` to the old name
+    alone fails the sweep and the fixture, naming load 1010's own times
+    (`MEM4 07:17`, `HME9 08:08`); reverting `relay-csv.ts` to the new name
+    alone fails the board half on 1,602 pre-rename files. Both restored, both
+    green after.
+
+    WHAT THIS COSTS TO REDISCOVER: load 1010 is repairable — `hasActuals` is
+    "any stop with an `arrivedAt`", so re-importing the same export after this
+    deploys fills all four. Any trips-imported load booked between 2026-08-17
+    and this fix has the same hole and the same repair.
