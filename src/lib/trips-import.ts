@@ -28,6 +28,12 @@ import { isEmptyLeg } from './leg-purpose'
 /** Legs Amazon replanned. Rule 3: skipped whole, counted out loud. */
 export const CANCELLED_STATUS = 'Cancelled'
 
+/**
+ * A leg that ran to the end. The export's other states are `Not Started` and
+ * `In Progress`; measured across the corpus, those four are all it uses.
+ */
+export const COMPLETED_STATUS = 'Completed'
+
 export interface PlannedTripStop {
   sequence: number
   facilityCode: string
@@ -55,6 +61,20 @@ export interface PlannedTrip {
   tractorIds: string[]
   /** Rule 3: how many legs were dropped, so the preview can say so. */
   cancelledLegs: number
+  /**
+   * Every usable leg reported `Completed`, so the trip has RUN.
+   *
+   * The lifecycle this exists for: dispatch imports the trip from an Upcoming
+   * export to get it on the board, and the same trip is exported again after
+   * it runs. The second file is the only place the actual check-ins live, and
+   * without this flag nothing could tell the two apart — both produce the same
+   * stops and the same mileage, so the import called the second one
+   * "already complete" and wrote nothing.
+   *
+   * `Not Started` and `In Progress` are the other two states the export uses;
+   * neither is a finished trip and neither moves a load.
+   */
+  completed: boolean
   /**
    * The trip's price in integer cents, or null — and null is the common case.
    *
@@ -209,6 +229,10 @@ export function planTrips(legs: readonly TripLeg[]): TripsPlan {
       trailerIds: unique(usable.map((leg) => leg.trailerId)),
       tractorIds: unique(usable.map((leg) => leg.tractorId)),
       cancelledLegs,
+      // EVERY usable leg, not any. A trip half-run is not a trip that
+      // happened, and calling it delivered would put a load on the invoice
+      // queue while the driver is still on it.
+      completed: usable.every((leg) => leg.status === COMPLETED_STATUS),
       rateCents: singleLoadRateCents(tripId, all),
     })
   }

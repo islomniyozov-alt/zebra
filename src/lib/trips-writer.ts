@@ -1,4 +1,5 @@
 import { createLoad, recomputeTotals, type StopInput } from './loads'
+import { transitionOperational } from './load-status'
 import { zoneForRelayStop } from './relay-import'
 import { zoneWallClock } from './stop-time'
 import type { TxClient } from './tenancy'
@@ -305,6 +306,10 @@ export async function planTripWrite(
       hasStops: boolean
       hasMiles: boolean
       hasRate: boolean
+      /** Any stop already carries a check-in. */
+      hasActuals: boolean
+      /** Already at or past DELIVERED, so nothing here may move it. */
+      isDelivered: boolean
     }
 > {
   const existing = await tx.load.findFirst({
@@ -315,7 +320,19 @@ export async function planTripWrite(
       id: true,
       dispatchedMiles: true,
       linehaulCents: true,
+      operationalStatus: true,
       _count: { select: { stops: true } },
+      // THE LIFECYCLE THIS EXISTS FOR. A trip imported from an Upcoming export
+      // has stops and mileage and no check-ins; the same trip exported after it
+      // runs is the ONLY place the check-ins live. Counting stops alone made
+      // the second file read as "already complete", so the actual times could
+      // never reach a load that had been booked first — which is the normal
+      // order of events, not an edge case.
+      stops: {
+        where: { arrivedAt: { not: null } },
+        select: { id: true },
+        take: 1,
+      },
     },
   })
 
@@ -333,6 +350,10 @@ export async function planTripWrite(
     // would mean no enrich ever fills one. A load with an actual rate is
     // untouched either way, which is the half that matters.
     hasRate: existing.linehaulCents !== 0,
+    hasActuals: existing.stops.length > 0,
+    isDelivered:
+      existing.operationalStatus === 'DELIVERED' ||
+      existing.operationalStatus === 'POD_RECEIVED',
   }
 }
 
@@ -350,8 +371,15 @@ export async function enrichLoad(
   loadId: string,
   trip: PlannedTrip,
   facilities: ReadonlyMap<string, ResolvedFacility>,
-  existing: { hasStops: boolean; hasMiles: boolean; hasRate: boolean },
+  existing: {
+    hasStops: boolean
+    hasMiles: boolean
+    hasRate: boolean
+    hasActuals: boolean
+    isDelivered: boolean
+  },
   rateCents: number | null = null,
+  byUserId: string | null = null,
 ): Promise<TripWriteOutcome> {
   const added: string[] = []
 
@@ -392,12 +420,84 @@ export async function enrichLoad(
     added.push('rate')
   }
 
+  // ---------------------------------------------------------------------------
+  // THE ACTUALS, ONTO STOPS THAT ALREADY EXIST.
+  //
+  // THE LIFECYCLE: dispatch imports the trip from an Upcoming export to get it
+  // on the board, then the trip runs, then the same trip is exported again as
+  // Completed. Only the second file has the check-ins. Because the first
+  // import had already written stops and mileage, the second read as "already
+  // complete" and wrote nothing — so a load booked first, which is the normal
+  // order, could never receive the times it actually ran to.
+  //
+  // FILLED, NEVER OVERWRITTEN. Only a stop whose `arrivedAt` is null is
+  // touched, which keeps this the same promise the rest of the function makes:
+  // it adds what is missing. A stop somebody corrected by hand stays corrected.
+  //
+  // MATCHED ON SEQUENCE AND FACILITY, BOTH. Sequence alone would write MEM4's
+  // check-in onto HME9 if the chain ever changed between the two exports, and
+  // that is a wrong time presented as a record — the exact thing this whole
+  // area exists to prevent. A stop that does not match on both is left alone.
+  // Resolved once: the clocks are already instants on these rows, in the
+  // stop's own zone. Nothing below re-derives a time.
+  const actualRows = stopRowsForTrip(trip, facilities)
+
+  if (!existing.hasActuals) {
+    const current = await tx.loadStop.findMany({
+      where: { loadId },
+      select: { id: true, sequence: true, name: true, arrivedAt: true },
+      orderBy: { sequence: 'asc' },
+    })
+
+    let filled = 0
+    for (const row of actualRows) {
+      if (row.arrivedAt === null && row.departedAt === null) continue
+      const match = current.find(
+        (stop) =>
+          stop.sequence === row.sequence &&
+          stop.name === row.name &&
+          stop.arrivedAt === null,
+      )
+      if (!match) continue
+      await tx.loadStop.update({
+        where: { id: match.id },
+        data: { arrivedAt: row.arrivedAt, departedAt: row.departedAt },
+      })
+      filled += 1
+    }
+
+    if (filled > 0) added.push(`${filled} actual time(s)`)
+  }
+
+  // AND THE STATUS THE EXPORT REPORTS. A finished trip is a delivered load, and
+  // leaving it BOOKED means it never reaches the invoice queue or a settlement.
+  //
+  // `transitionOperational` rather than a column write, so the move is on the
+  // event log with a source that says a human did not click it. It refuses a
+  // backwards move on its own, so a load already at POD_RECEIVED is safe; the
+  // `isDelivered` check is there to keep the preview honest rather than to
+  // protect the write.
+  if (trip.completed && !existing.isDelivered) {
+    const last = actualRows[actualRows.length - 1]
+    // WHEN IT FINISHED, not when the file was uploaded — the same choice the
+    // board importer makes. Departure first, arrival second, nothing third:
+    // a load with no recorded time still moves, it just carries no instant.
+    const finishedAt = last?.departedAt ?? last?.arrivedAt ?? null
+    const outcome = await transitionOperational(tx, loadId, 'DELIVERED', {
+      source: 'INTEGRATION',
+      userId: byUserId,
+      ...(finishedAt ? { occurredAt: finishedAt } : {}),
+      note: `Relay trips export reports ${trip.tripId} completed`,
+    })
+    if (outcome.result === 'moved') added.push('delivered')
+  }
+
   if (added.length === 0) {
     return {
       kind: 'unchanged',
       loadId,
       tripId: trip.tripId,
-      reason: 'the load already has its stops and mileage',
+      reason: 'the load already has its stops, mileage and times',
     }
   }
 

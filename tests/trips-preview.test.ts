@@ -19,6 +19,8 @@ const LABELS = {
   unchanged: 'already has its stops and mileage',
   addsStops: 'adds stops',
   addsMiles: 'adds mileage',
+  addsActuals: 'adds actual times',
+  marksDelivered: 'marks delivered',
 }
 
 const trip = (over: Partial<PlannedTrip> = {}): PlannedTrip => ({
@@ -53,6 +55,7 @@ const trip = (over: Partial<PlannedTrip> = {}): PlannedTrip => ({
   trailerIds: ['HV1'],
   tractorIds: ['ZP1'],
   cancelledLegs: 0,
+  completed: true,
   rateCents: 508907,
   ...over,
 })
@@ -84,6 +87,8 @@ describe('a confirmer who may see money', () => {
         hasStops: false,
         hasMiles: false,
         hasRate: true,
+        hasActuals: true,
+        isDelivered: false,
       } as never).rate,
     ).toBe('—')
   })
@@ -95,6 +100,8 @@ describe('a confirmer who may see money', () => {
         hasStops: false,
         hasMiles: false,
         hasRate: false,
+        hasActuals: true,
+        isDelivered: false,
       } as never).rate,
     ).toBe('$5,089.07')
   })
@@ -137,7 +144,98 @@ describe('what would land, decided once', () => {
         hasStops: true,
         hasMiles: true,
         hasRate: true,
+        hasActuals: true,
+        isDelivered: false,
       }),
     ).toBeNull()
+  })
+})
+
+describe('the preview says what a Finished re-import will do', () => {
+  // A trip that RAN: check-ins on its stops and every leg Completed.
+  const ran = () =>
+    trip({
+      completed: true,
+      stops: [
+        {
+          sequence: 1,
+          facilityCode: 'DEN7',
+          legMiles: null,
+          legEmpty: null,
+          referenceNumber: null,
+          plannedArrival: {
+            date: '2026-08-24',
+            time: '04:41',
+            utcOffsetHours: -6,
+          },
+          plannedDeparture: null,
+          actualArrival: {
+            date: '2026-08-24',
+            time: '07:17',
+            utcOffsetHours: -6,
+          },
+          actualDeparture: null,
+        },
+      ],
+    })
+
+  const enrich = (over: { hasActuals?: boolean; isDelivered?: boolean }) =>
+    tripRowView(
+      ran(),
+      {
+        action: 'enrich',
+        hasStops: true,
+        hasMiles: true,
+        hasRate: true,
+        hasActuals: over.hasActuals ?? false,
+        isDelivered: over.isDelivered ?? false,
+      },
+      [],
+      LABELS,
+      { maySeeMoney: false, locale: 'en-US' },
+    )
+
+  // THE LIVE SYMPTOM. A load booked from an Upcoming export has stops and
+  // mileage, so this used to read "already has its stops and mileage" — and a
+  // dispatcher who believed it would never have imported the file again.
+  it('does not call a load with unread check-ins complete', () => {
+    const row = enrich({})
+    expect(row.action).toBe('enrich')
+    expect(row.actionDetail).toContain('adds actual times')
+    expect(row.actionDetail).toContain('marks delivered')
+    expect(row.actionDetail).not.toContain('already has')
+  })
+
+  // AND A DISPATCHER IS TOLD BEFORE CONFIRMING, not after. Moving a load to
+  // Delivered puts it in front of the invoice queue; an import that did that
+  // silently would be changing money-adjacent state unannounced.
+  it('announces the status change as part of the sentence', () => {
+    expect(enrich({}).actionDetail).toContain('marks delivered')
+  })
+
+  it('offers nothing once the times and the status are both there', () => {
+    const row = enrich({ hasActuals: true, isDelivered: true })
+    expect(row.action).toBe('unchanged')
+    expect(row.actionDetail).toBe(LABELS.unchanged)
+  })
+
+  // A trip with no check-ins in the file has nothing to add, whatever its
+  // legs say — the preview must not promise times that are not there.
+  it('promises no actuals when the export carries none', () => {
+    const row = tripRowView(
+      trip({ completed: true }),
+      {
+        action: 'enrich',
+        hasStops: true,
+        hasMiles: true,
+        hasRate: true,
+        hasActuals: false,
+        isDelivered: true,
+      },
+      [],
+      LABELS,
+      { maySeeMoney: false, locale: 'en-US' },
+    )
+    expect(row.actionDetail).not.toContain('adds actual times')
   })
 })

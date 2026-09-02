@@ -289,6 +289,8 @@ describe('enrichment adds a missing rate and replaces nothing', () => {
           hasStops: write.hasStops,
           hasMiles: write.hasMiles,
           hasRate: write.hasRate,
+          hasActuals: write.hasActuals,
+          isDelivered: write.isDelivered,
         },
         trip.rateCents,
       )
@@ -352,7 +354,13 @@ describe('a trip whose load already exists is enriched, not doubled', () => {
         existing.id,
         trip,
         facilities,
-        { hasStops: false, hasMiles: false, hasRate: write.hasRate },
+        {
+          hasStops: false,
+          hasMiles: false,
+          hasRate: write.hasRate,
+          hasActuals: write.hasActuals,
+          isDelivered: write.isDelivered,
+        },
         trip.rateCents,
       )
     })
@@ -530,6 +538,203 @@ describe('the clocks a trip lands with', () => {
     const iso = load.stops[0]!.scheduledAt!.toISOString()
     expect(iso).not.toContain('T04:41')
     expect(iso).toContain('2026-08-24')
+  })
+})
+
+describe('booked first, then it runs — the normal lifecycle', () => {
+  // ------------------------------------------------------------------------
+  // FOUND IN LIVE USE, load 1010 / T-115GY4TBD. Dispatch imported the trip
+  // from an UPCOMING export to get it on the board: four stops, plan times,
+  // Booked. The trip then ran, and re-importing the SAME trip from a COMPLETED
+  // export counted it "1 already complete" and wrote nothing — because the
+  // load already had stops and mileage, which was the whole of the question
+  // being asked. The actual check-ins could never reach a load that had been
+  // booked first, which is the ordinary order of events.
+  // ------------------------------------------------------------------------
+  const upcoming = (id: string) =>
+    leg({
+      tripId: id,
+      loadId: id,
+      status: 'Not Started',
+      stops: [
+        stop('DEN7', { plannedArrival: clock('2026-08-24', '04:41') }),
+        stop('MKC6', { plannedArrival: clock('2026-08-24', '06:32') }),
+      ],
+    })
+
+  const finished = (id: string) =>
+    leg({
+      tripId: id,
+      loadId: id,
+      status: 'Completed',
+      stops: [
+        stop('DEN7', {
+          plannedArrival: clock('2026-08-24', '04:41'),
+          actualArrival: clock('2026-08-24', '07:17'),
+          actualDeparture: clock('2026-08-24', '07:52'),
+        }),
+        stop('MKC6', {
+          plannedArrival: clock('2026-08-24', '06:32'),
+          actualArrival: clock('2026-08-24', '08:08'),
+        }),
+      ],
+    })
+
+  /** Re-import a trip onto the load that already carries its reference. */
+  const reimport = async (legs: TripLeg[]) => {
+    const trip = planTrips(legs).trips[0]!
+    return inOrg(async (tx) => {
+      const write = await planTripWrite(tx, trip)
+      if (write.action !== 'enrich') throw new Error('expected enrich')
+      const facilities = await resolveFacilities(tx, tripFacilityCodes(trip))
+      const outcome = await enrichLoad(
+        tx,
+        organizationId,
+        write.loadId,
+        trip,
+        facilities,
+        {
+          hasStops: write.hasStops,
+          hasMiles: write.hasMiles,
+          hasRate: write.hasRate,
+          hasActuals: write.hasActuals,
+          isDelivered: write.isDelivered,
+        },
+        null,
+        userId,
+      )
+      const load = await tx.load.findFirstOrThrow({
+        where: { id: write.loadId },
+        include: { stops: { orderBy: { sequence: 'asc' } } },
+      })
+      return { outcome, load }
+    })
+  }
+
+  it('books from an Upcoming export with the plan and no actuals', async () => {
+    const id = `LIFE-A-${nonce}`
+    const { load } = await importTrip([upcoming(id)])
+
+    expect(load.operationalStatus).toBe('BOOKED')
+    expect(load.stops[0]!.scheduledAt).not.toBeNull()
+    expect(load.stops.every((row) => row.arrivedAt === null)).toBe(true)
+  })
+
+  // THE BUG, ASSERTED. This is the re-import that used to write nothing.
+  it('takes the actuals on a Finished re-import and delivers the load', async () => {
+    const id = `LIFE-B-${nonce}`
+    await importTrip([upcoming(id)])
+
+    const { outcome, load } = await reimport([finished(id)])
+
+    expect(outcome.kind).toBe('enriched')
+    expect(load.stops[0]!.arrivedAt).not.toBeNull()
+    expect(load.stops[0]!.departedAt).not.toBeNull()
+    expect(load.stops[1]!.arrivedAt).not.toBeNull()
+    expect(load.operationalStatus).toBe('DELIVERED')
+  })
+
+  it('keeps the plan alongside the actual it just gained', async () => {
+    const id = `LIFE-C-${nonce}`
+    await importTrip([upcoming(id)])
+    const { load } = await reimport([finished(id)])
+
+    const first = load.stops[0]!
+    expect(first.scheduledAt).not.toBeNull()
+    expect(first.arrivedAt!.getTime()).toBeGreaterThan(
+      first.scheduledAt!.getTime(),
+    )
+  })
+
+  // ADDS WHAT IS MISSING, REPLACES NOTHING — the promise the rest of this
+  // function makes, extended to times. A stop somebody corrected by hand, or
+  // one a previous Finished import already filled, is left exactly as it is.
+  it('never overwrites a check-in that is already there', async () => {
+    const id = `LIFE-D-${nonce}`
+    await importTrip([upcoming(id)])
+    const { load: firstPass } = await reimport([finished(id)])
+    const original = firstPass.stops[0]!.arrivedAt!
+
+    // A different Completed export for the same trip, an hour later.
+    const later = leg({
+      tripId: id,
+      loadId: id,
+      status: 'Completed',
+      stops: [
+        stop('DEN7', {
+          plannedArrival: clock('2026-08-24', '04:41'),
+          actualArrival: clock('2026-08-24', '09:17'),
+        }),
+        stop('MKC6', { plannedArrival: clock('2026-08-24', '06:32') }),
+      ],
+    })
+    const trip = planTrips([later]).trips[0]!
+    const after = await inOrg(async (tx) => {
+      const write = await planTripWrite(tx, trip)
+      if (write.action !== 'enrich') throw new Error('expected enrich')
+      const facilities = await resolveFacilities(tx, tripFacilityCodes(trip))
+      await enrichLoad(
+        tx,
+        organizationId,
+        write.loadId,
+        trip,
+        facilities,
+        {
+          hasStops: write.hasStops,
+          hasMiles: write.hasMiles,
+          hasRate: write.hasRate,
+          hasActuals: write.hasActuals,
+          isDelivered: write.isDelivered,
+        },
+        null,
+        userId,
+      )
+      return tx.load.findFirstOrThrow({
+        where: { id: write.loadId },
+        include: { stops: { orderBy: { sequence: 'asc' } } },
+      })
+    })
+
+    expect(after.stops[0]!.arrivedAt!.toISOString()).toBe(
+      original.toISOString(),
+    )
+  })
+
+  // A TRIP STILL RUNNING IS NOT A DELIVERED LOAD. `In Progress` carries
+  // check-ins for the stops already made and must not move the load.
+  it('does not deliver a load whose trip is still in progress', async () => {
+    const id = `LIFE-E-${nonce}`
+    await importTrip([upcoming(id)])
+
+    const running = leg({
+      tripId: id,
+      loadId: id,
+      status: 'In Progress',
+      stops: [
+        stop('DEN7', {
+          plannedArrival: clock('2026-08-24', '04:41'),
+          actualArrival: clock('2026-08-24', '07:17'),
+        }),
+        stop('MKC6', { plannedArrival: clock('2026-08-24', '06:32') }),
+      ],
+    })
+    const { outcome, load } = await reimport([running])
+
+    // The actuals it does have are still worth taking.
+    expect(outcome.kind).toBe('enriched')
+    expect(load.stops[0]!.arrivedAt).not.toBeNull()
+    expect(load.operationalStatus).toBe('BOOKED')
+  })
+
+  // AND THE THIRD IMPORT REALLY IS NOTHING. Idempotence is what makes
+  // re-importing a downloads folder safe.
+  it('reports unchanged when the same Finished file is imported twice', async () => {
+    const id = `LIFE-F-${nonce}`
+    await importTrip([upcoming(id)])
+    await reimport([finished(id)])
+    const { outcome } = await reimport([finished(id)])
+
+    expect(outcome.kind).toBe('unchanged')
   })
 })
 

@@ -113,6 +113,8 @@ export async function tripsImportAction(
           unchanged: t('trips.action.unchanged'),
           addsStops: t('trips.action.addsStops'),
           addsMiles: t('trips.action.addsMiles'),
+          addsActuals: t('trips.action.addsActuals'),
+          marksDelivered: t('trips.action.marksDelivered'),
         },
         { maySeeMoney, locale },
       ),
@@ -193,8 +195,11 @@ export async function tripsImportAction(
               hasStops: write.hasStops,
               hasMiles: write.hasMiles,
               hasRate: write.hasRate,
+              hasActuals: write.hasActuals,
+              isDelivered: write.isDelivered,
             },
             maySeeMoney ? trip.rateCents : null,
+            session.userId ?? null,
           )
           if (outcome.kind === 'enriched') enriched++
           continue

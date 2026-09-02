@@ -47,6 +47,7 @@ const trip = (over: Partial<PlannedTrip> = {}): PlannedTrip => ({
   trailerIds: ['HV2504452'],
   tractorIds: ['ZP33494'],
   cancelledLegs: 0,
+  completed: false,
   rateCents: null,
   ...over,
 })

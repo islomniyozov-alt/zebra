@@ -27,11 +27,20 @@ export interface TripRowLabels {
   unchanged: string
   addsStops: string
   addsMiles: string
+  addsActuals: string
+  marksDelivered: string
 }
 
 export type TripWriteView =
   | { action: 'create' }
-  | { action: 'enrich'; hasStops: boolean; hasMiles: boolean; hasRate: boolean }
+  | {
+      action: 'enrich'
+      hasStops: boolean
+      hasMiles: boolean
+      hasRate: boolean
+      hasActuals: boolean
+      isDelivered: boolean
+    }
 
 export interface TripRowMoney {
   /** `load.financials`. False means the key below is never emitted. */
@@ -54,6 +63,13 @@ export interface TripRowView {
   rate?: string
 }
 
+/** Does the export carry a check-in for any stop on this trip? */
+export function tripHasActuals(trip: PlannedTrip): boolean {
+  return trip.stops.some(
+    (stop) => stop.actualArrival !== null || stop.actualDeparture !== null,
+  )
+}
+
 /** The cents this import would actually write, or null if it would write none. */
 export function rateThatWouldLand(
   trip: PlannedTrip,
@@ -72,8 +88,25 @@ export function tripRowView(
   labels: TripRowLabels,
   money: TripRowMoney,
 ): TripRowView {
+  // WHAT THIS ENRICH WOULD ACTUALLY DO, listed before it is summarised.
+  //
+  // "already complete" used to mean stops-and-mileage alone, which is how a
+  // trip booked from an Upcoming export and re-imported after it ran came back
+  // as "1 already complete" while its check-in times sat unread in the file.
+  const enriching = write.action === 'enrich' ? write : null
+  const willAddActuals = Boolean(
+    enriching && !enriching.hasActuals && tripHasActuals(trip),
+  )
+  const willDeliver = Boolean(
+    enriching && trip.completed && !enriching.isDelivered,
+  )
+
   const unchanged =
-    write.action === 'enrich' && write.hasStops && write.hasMiles
+    enriching !== null &&
+    enriching.hasStops &&
+    enriching.hasMiles &&
+    !willAddActuals &&
+    !willDeliver
 
   const row: TripRowView = {
     tripId: trip.tripId,
@@ -88,8 +121,10 @@ export function tripRowView(
         : unchanged
           ? labels.unchanged
           : [
-              write.hasStops ? null : labels.addsStops,
-              write.hasMiles ? null : labels.addsMiles,
+              enriching!.hasStops ? null : labels.addsStops,
+              enriching!.hasMiles ? null : labels.addsMiles,
+              willAddActuals ? labels.addsActuals : null,
+              willDeliver ? labels.marksDelivered : null,
             ]
               .filter(Boolean)
               .join(', '),
