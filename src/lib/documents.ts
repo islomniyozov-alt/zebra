@@ -364,7 +364,7 @@ export class ConfirmError extends Error {
  * whoever clicks the POD during a dispute.
  */
 export async function confirmUpload(
-  tx: TxClient,
+  run: OrgRunner,
   organizationId: string,
   pendingUploadId: string,
   options: {
@@ -381,9 +381,9 @@ export async function confirmUpload(
   } = {},
 ): Promise<{ documentId: string; r2Key: string }> {
   // Tenant-scoped: another organization's mint is not found.
-  const pending = await tx.pendingUpload.findUnique({
-    where: { id: pendingUploadId },
-  })
+  const pending = await run((tx) =>
+    tx.pendingUpload.findUnique({ where: { id: pendingUploadId } }),
+  )
 
   if (!pending) {
     throw new ConfirmError('unknown_mint', 'No such pending upload.')
@@ -395,6 +395,12 @@ export async function confirmUpload(
     )
   }
 
+  // NOTHING IS HELD OPEN ACROSS THIS. `headObject` is an HTTPS round trip —
+  // ~350ms measured — and it used to run inside the caller's transaction,
+  // which is the same defect `reconcileExpiredUploads` was fixed for and the
+  // reason this function now takes a runner rather than a `tx`. On a slow day
+  // it blew the ceiling and took a gate with it; on every other day it spent a
+  // third of a second of transaction budget for nothing.
   const config = options.config ?? r2ConfigFromEnv()
   const facts = await headObject(config, pending.r2Key)
 
@@ -436,46 +442,51 @@ export async function confirmUpload(
     )
   }
 
-  const document = await tx.document.create({
-    data: {
-      organizationId,
-      companyId: pending.companyId,
-      r2Key: pending.r2Key,
-      filename: pending.filename,
-      mimeType: pending.mimeType,
-      sizeBytes: pending.sizeBytes,
-      sha256: facts.checksumSha256 ?? pending.sha256,
-      type: pending.type,
-      [TARGETS[targetEntity].column]: targetId,
-      uploadedByUserId: options.uploadedByUserId ?? null,
-      // EXTRACTION CARRIED ACROSS. It was read before the record existed, so
-      // it lived on the mint; the Document is where it belongs now, and the
-      // columns are named the same on both so nothing has to be translated.
-      ocrStatus: pending.ocrStatus,
-      ocrText: pending.ocrText,
-      extractedJson: pending.extractedJson ?? undefined,
-      ocrError: pending.ocrError,
-    },
-    select: { id: true, r2Key: true },
+  // ONE SHORT TRANSACTION FOR THE WRITE, opened after the network is done.
+  // The document row, the mint's deletion and the POD transition belong
+  // together — a Document with no mint deleted would be swept as an orphan.
+  return run(async (tx) => {
+    const document = await tx.document.create({
+      data: {
+        organizationId,
+        companyId: pending.companyId,
+        r2Key: pending.r2Key,
+        filename: pending.filename,
+        mimeType: pending.mimeType,
+        sizeBytes: pending.sizeBytes,
+        sha256: facts.checksumSha256 ?? pending.sha256,
+        type: pending.type,
+        [TARGETS[targetEntity].column]: targetId,
+        uploadedByUserId: options.uploadedByUserId ?? null,
+        // EXTRACTION CARRIED ACROSS. It was read before the record existed, so
+        // it lived on the mint; the Document is where it belongs now, and the
+        // columns are named the same on both so nothing has to be translated.
+        ocrStatus: pending.ocrStatus,
+        ocrText: pending.ocrText,
+        extractedJson: pending.extractedJson ?? undefined,
+        ocrError: pending.ocrError,
+      },
+      select: { id: true, r2Key: true },
+    })
+
+    // The mint has served its purpose. Deleting it is what keeps the
+    // reconciliation query meaningful: what remains is what never landed.
+    await tx.pendingUpload.delete({ where: { id: pending.id } })
+
+    // §7: POD received is set automatically when a confirmed Document of type
+    // POD attaches, and NEVER by hand. This is that moment — the confirm is
+    // what makes the document real, so it is what moves the load.
+    //
+    // The transition is idempotent and refuses to rewind, which matters here
+    // more than anywhere: a confirm retried after a timeout arrives twice, and
+    // a POD can be confirmed before the manual Delivered click ever happens.
+    // Both are handled by the engine rather than by a condition here.
+    if (pending.type === 'POD' && targetEntity === 'load') {
+      await podConfirmed(tx, targetId, options.uploadedByUserId ?? null)
+    }
+
+    return { documentId: document.id, r2Key: document.r2Key }
   })
-
-  // The mint has served its purpose. Deleting it is what keeps the
-  // reconciliation query meaningful: what remains is what never landed.
-  await tx.pendingUpload.delete({ where: { id: pending.id } })
-
-  // §7: POD received is set automatically when a confirmed Document of type
-  // POD attaches, and NEVER by hand. This is that moment — the confirm is
-  // what makes the document real, so it is what moves the load.
-  //
-  // The transition is idempotent and refuses to rewind, which matters here
-  // more than anywhere: a confirm retried after a timeout arrives twice, and
-  // a POD can be confirmed before the manual Delivered click ever happens.
-  // Both are handled by the engine rather than by a condition here.
-  if (pending.type === 'POD' && targetEntity === 'load') {
-    await podConfirmed(tx, targetId, options.uploadedByUserId ?? null)
-  }
-
-  return { documentId: document.id, r2Key: document.r2Key }
 }
 
 /**

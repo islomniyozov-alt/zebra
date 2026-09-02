@@ -171,6 +171,47 @@ interface BufferedEntry extends PendingEntry {
  */
 export const auditScope = new AsyncLocalStorage<AuditScope>()
 
+// ---------------------------------------------------------------------------
+// NO THIRD-PARTY CALL INSIDE A POSTGRES TRANSACTION, ENFORCED.
+//
+// The rule was already written down, in prose, in this repository: the extract
+// route says "a third party's latency has no business inside a database lock"
+// and explains the bare 500 it caused. `reconcileExpiredUploads` was rebuilt
+// around it. And `confirmUpload` shipped with an R2 `headObject` inside the
+// caller's transaction anyway, until a slow night blew a ceiling and took a
+// gate with it.
+//
+// A rule that depends on the next person remembering it is not a rule, so this
+// is the mechanism. `auditScope` is entered by `withOrg` around the
+// transaction callback and by nothing else, which makes "is a store present"
+// exactly the question "am I inside a tenant transaction".
+//
+// IT THROWS RATHER THAN WARNS. The alternative is a transaction that works on
+// a quiet afternoon and times out under load, which is the failure this
+// codebase has now had three times — and each time the symptom appeared
+// somewhere other than the cause.
+// ---------------------------------------------------------------------------
+
+export class TransactionBoundaryError extends Error {
+  constructor(what: string) {
+    super(
+      `${what} was called inside a database transaction. A third party's ` +
+        'latency has no business inside a database lock: the transaction is ' +
+        'held for the whole round trip and times out under load. Do the call ' +
+        'first, then open a short transaction for the write — see ' +
+        'confirmUpload and reconcileExpiredUploads for the shape.',
+    )
+    this.name = 'TransactionBoundaryError'
+  }
+}
+
+/** Refuse to make a network call while a tenant transaction is open. */
+export function assertOutsideTransaction(what: string): void {
+  if (auditScope.getStore() !== undefined) {
+    throw new TransactionBoundaryError(what)
+  }
+}
+
 // --- health -----------------------------------------------------------------
 
 export interface AuditFailure {

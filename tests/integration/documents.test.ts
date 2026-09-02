@@ -148,6 +148,19 @@ const mint = (
 const put = (url: string, headers: Record<string, string>, body: Uint8Array) =>
   fetch(url, { method: 'PUT', headers, body: body as BodyInit })
 
+/**
+ * `confirmUpload` takes a RUNNER, not a transaction.
+ *
+ * It asks R2 whether the object landed, and that HTTPS round trip must not be
+ * held inside a Postgres transaction — `assertOutsideTransaction` in r2.ts now
+ * refuses it outright. So the suite hands it the same thing production does:
+ * something that opens a short transaction when the write is ready.
+ */
+const confirmIn =
+  (orgId: string) =>
+  <T>(fn: (tx: TxClient) => Promise<T>): Promise<T> =>
+    runInOrg(app, orgId, fn, { attribution })
+
 describe('the round trip', () => {
   it('uploads direct to R2 and reads back through a signed GET', async () => {
     const minted = await mint()
@@ -157,14 +170,11 @@ describe('the round trip', () => {
     const uploaded = await put(minted.url, minted.headers, PDF)
     expect(uploaded.status).toBe(200)
 
-    const confirmed = await runInOrg(
-      app,
+    const confirmed = await confirmUpload(
+      confirmIn(orgA),
       orgA,
-      (tx) =>
-        confirmUpload(tx, orgA, minted.pendingUploadId, {
-          uploadedByUserId: userA,
-        }),
-      { attribution },
+      minted.pendingUploadId,
+      { uploadedByUserId: userA },
     )
 
     const document = await owner.document.findUniqueOrThrow({
@@ -309,14 +319,7 @@ describe('phantom rows', () => {
     const minted = await mint()
 
     await expect(
-      runInOrg(
-        app,
-        orgA,
-        (tx) => confirmUpload(tx, orgA, minted.pendingUploadId),
-        {
-          attribution,
-        },
-      ),
+      confirmUpload(confirmIn(orgA), orgA, minted.pendingUploadId),
     ).rejects.toThrow(ConfirmError)
 
     expect(await owner.document.count({ where: { r2Key: minted.key } })).toBe(0)
@@ -331,13 +334,13 @@ describe('phantom rows', () => {
     await put(minted.url, minted.headers, PDF)
 
     await expect(
-      runInOrg(
-        app,
+      confirmUpload(
+        (fn) =>
+          runInOrg(app, orgB, fn, {
+            attribution: unattributed('cross-tenant confirm attempt'),
+          }),
         orgB,
-        (tx) => confirmUpload(tx, orgB, minted.pendingUploadId),
-        {
-          attribution: unattributed('cross-tenant confirm attempt'),
-        },
+        minted.pendingUploadId,
       ),
     ).rejects.toThrow(/No such pending upload/)
 
@@ -353,14 +356,7 @@ describe('phantom rows', () => {
     })
 
     await expect(
-      runInOrg(
-        app,
-        orgA,
-        (tx) => confirmUpload(tx, orgA, minted.pendingUploadId),
-        {
-          attribution,
-        },
-      ),
+      confirmUpload(confirmIn(orgA), orgA, minted.pendingUploadId),
     ).rejects.toThrow(/expired/)
   })
 
@@ -368,26 +364,12 @@ describe('phantom rows', () => {
     const minted = await mint()
     await put(minted.url, minted.headers, PDF)
 
-    await runInOrg(
-      app,
-      orgA,
-      (tx) => confirmUpload(tx, orgA, minted.pendingUploadId),
-      {
-        attribution,
-      },
-    )
+    await confirmUpload(confirmIn(orgA), orgA, minted.pendingUploadId)
 
     // The mint is gone, so a replayed confirm cannot produce a second row for
     // the same object.
     await expect(
-      runInOrg(
-        app,
-        orgA,
-        (tx) => confirmUpload(tx, orgA, minted.pendingUploadId),
-        {
-          attribution,
-        },
-      ),
+      confirmUpload(confirmIn(orgA), orgA, minted.pendingUploadId),
     ).rejects.toThrow(/No such pending upload/)
 
     expect(await owner.document.count({ where: { r2Key: minted.key } })).toBe(1)
@@ -527,11 +509,10 @@ describe('documents obey the tenant wall', () => {
   it('will not mint a download URL for another organization’s document', async () => {
     const minted = await mint()
     await put(minted.url, minted.headers, PDF)
-    const confirmed = await runInOrg(
-      app,
+    const confirmed = await confirmUpload(
+      confirmIn(orgA),
       orgA,
-      (tx) => confirmUpload(tx, orgA, minted.pendingUploadId),
-      { attribution },
+      minted.pendingUploadId,
     )
 
     const asOther = await runInOrg(

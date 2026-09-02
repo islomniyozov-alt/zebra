@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { withCurrentOrg } from '@/lib/auth-context'
+import { requireSession, withCurrentOrg } from '@/lib/auth-context'
 import { ConfirmError, confirmUpload } from '@/lib/documents'
 import { apiError, authFailureResponse, readJson } from '../../_lib/respond'
 
@@ -23,10 +23,15 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
-    const document = await withCurrentOrg('create', 'document', (tx, session) =>
-      confirmUpload(tx, session.organizationId, pendingUploadId, {
-        uploadedByUserId: session.userId,
-      }),
+    // A RUNNER, NOT A TRANSACTION. `confirmUpload` asks R2 whether the object
+    // really landed, and that HTTPS round trip must not sit inside a Postgres
+    // transaction — see the note on the function.
+    const session = await requireSession()
+    const document = await confirmUpload(
+      (fn) => withCurrentOrg('create', 'document', fn),
+      session.organizationId,
+      pendingUploadId,
+      { uploadedByUserId: session.userId },
     )
 
     return NextResponse.json(document, { status: 201 })

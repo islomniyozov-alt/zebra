@@ -1,7 +1,11 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
+import {
+  currentUserCan,
+  requireSession,
+  withCurrentOrg,
+} from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { confirmUpload } from '@/lib/documents'
 import {
@@ -431,11 +435,17 @@ export async function createLoadAction(
       }
 
       try {
-        await withCurrentOrg('create', 'document', (tx, session) =>
-          confirmUpload(tx, session.organizationId, pendingUploadId, {
-            uploadedByUserId: session.userId,
+        // A RUNNER, NOT A TRANSACTION — `confirmUpload` asks R2 whether the
+        // object landed, and that round trip must not be held inside one.
+        const documentSession = await requireSession()
+        await confirmUpload(
+          (fn) => withCurrentOrg('create', 'document', fn),
+          documentSession.organizationId,
+          pendingUploadId,
+          {
+            uploadedByUserId: documentSession.userId,
             target: { entity: 'load', id: load.id },
-          }),
+          },
         )
       } catch {
         // Swallowed on purpose and visible in the pending row, which

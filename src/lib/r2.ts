@@ -1,4 +1,5 @@
 import { AwsClient } from 'aws4fetch'
+import { assertOutsideTransaction } from './audit'
 
 // ---------------------------------------------------------------------------
 // R2, over the S3 API
@@ -172,6 +173,7 @@ export async function headObject(
   config: R2Config,
   key: string,
 ): Promise<ObjectFacts | null> {
+  assertOutsideTransaction('R2 headObject')
   const response = await client(config).fetch(objectUrl(config, key), {
     method: 'HEAD',
   })
@@ -203,6 +205,7 @@ export async function objectBytes(
   config: R2Config,
   key: string,
 ): Promise<Uint8Array | null> {
+  assertOutsideTransaction('R2 objectBytes')
   const response = await client(config).fetch(objectUrl(config, key), {
     method: 'GET',
   })
@@ -233,6 +236,7 @@ export async function putObject(
   body: Uint8Array,
   contentType: string,
 ): Promise<void> {
+  assertOutsideTransaction('R2 putObject')
   const response = await client(config).fetch(objectUrl(config, key), {
     method: 'PUT',
     body: body as unknown as BodyInit,
@@ -248,6 +252,7 @@ export async function deleteObject(
   config: R2Config,
   key: string,
 ): Promise<void> {
+  assertOutsideTransaction('R2 deleteObject')
   const response = await client(config).fetch(objectUrl(config, key), {
     method: 'DELETE',
   })
