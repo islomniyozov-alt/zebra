@@ -310,6 +310,16 @@ export async function planTripWrite(
       hasActuals: boolean
       /** Already at or past DELIVERED, so nothing here may move it. */
       isDelivered: boolean
+      /**
+       * Somebody said this freight is not happening.
+       *
+       * An import must not touch it AT ALL. Before this, only the status move
+       * was refused — by `transitionOperational`, which protects itself — while
+       * the stop times, the mileage and the rate wrote straight through. So a
+       * cancelled load quietly gained figures from a file while the preview
+       * promised the one change that was going to be refused.
+       */
+      isCancelled: boolean
     }
 > {
   const existing = await tx.load.findFirst({
@@ -321,6 +331,7 @@ export async function planTripWrite(
       dispatchedMiles: true,
       linehaulCents: true,
       operationalStatus: true,
+      isCancelled: true,
       _count: { select: { stops: true } },
       // THE LIFECYCLE THIS EXISTS FOR. A trip imported from an Upcoming export
       // has stops and mileage and no check-ins; the same trip exported after it
@@ -351,6 +362,7 @@ export async function planTripWrite(
     // untouched either way, which is the half that matters.
     hasRate: existing.linehaulCents !== 0,
     hasActuals: existing.stops.length > 0,
+    isCancelled: existing.isCancelled,
     isDelivered:
       existing.operationalStatus === 'DELIVERED' ||
       existing.operationalStatus === 'POD_RECEIVED',
@@ -377,10 +389,29 @@ export async function enrichLoad(
     hasRate: boolean
     hasActuals: boolean
     isDelivered: boolean
+    isCancelled: boolean
   },
   rateCents: number | null = null,
   byUserId: string | null = null,
 ): Promise<TripWriteOutcome> {
+  // A CANCELLED LOAD IS NOT ENRICHED, AT ALL.
+  //
+  // Somebody looked at this freight and said it is not happening. An import
+  // arriving afterwards has nothing to add to that — and the half-write it
+  // used to perform was the worst available outcome: mileage and rate went in,
+  // the status move was refused by `transitionOperational`, and the preview
+  // had promised exactly the part that got refused.
+  //
+  // FIRST, BEFORE ANY WRITE, so this cannot become "refuses some of it".
+  if (existing.isCancelled) {
+    return {
+      kind: 'unchanged',
+      loadId,
+      tripId: trip.tripId,
+      reason: 'the load is cancelled',
+    }
+  }
+
   const added: string[] = []
 
   if (!existing.hasStops && trip.stops.length > 0) {

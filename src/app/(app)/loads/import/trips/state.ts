@@ -19,6 +19,8 @@ export interface TripsPlanView {
   createCount: number
   enrichCount: number
   unchangedCount: number
+  /** Loads somebody cancelled. Skipped whole, and said so. */
+  cancelledCount: number
   skippedLegTotal: number
   /** Distinct facility codes the book could not resolve. */
   unresolvedCodes: string[]

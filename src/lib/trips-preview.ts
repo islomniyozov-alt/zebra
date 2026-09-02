@@ -25,6 +25,7 @@ import type { PlannedTrip } from './trips-import'
 export interface TripRowLabels {
   create: string
   unchanged: string
+  cancelled: string
   addsStops: string
   addsMiles: string
   addsActuals: string
@@ -40,6 +41,7 @@ export type TripWriteView =
       hasRate: boolean
       hasActuals: boolean
       isDelivered: boolean
+      isCancelled: boolean
     }
 
 export interface TripRowMoney {
@@ -53,7 +55,7 @@ export interface TripRowView {
   lane: string
   stops: number
   miles: string
-  action: 'create' | 'enrich' | 'unchanged'
+  action: 'create' | 'enrich' | 'unchanged' | 'cancelled'
   actionDetail: string
   skippedLegs: number
   unresolved: string[]
@@ -101,6 +103,12 @@ export function tripRowView(
     enriching && trip.stage === 'finished' && !enriching.isDelivered,
   )
 
+  // A CANCELLED LOAD IS ITS OWN VERDICT, and it is counted separately rather
+  // than folded into "already complete". Somebody said this freight is not
+  // happening; the import skips it, and the preview says which loads it
+  // skipped for that reason instead of announcing a write that cannot occur.
+  const cancelled = enriching?.isCancelled === true
+
   const unchanged =
     enriching !== null &&
     enriching.hasStops &&
@@ -114,20 +122,28 @@ export function tripRowView(
     stops: trip.stops.length,
     miles: trip.totalMiles === null ? '—' : String(trip.totalMiles),
     action:
-      write.action === 'create' ? 'create' : unchanged ? 'unchanged' : 'enrich',
+      write.action === 'create'
+        ? 'create'
+        : cancelled
+          ? 'cancelled'
+          : unchanged
+            ? 'unchanged'
+            : 'enrich',
     actionDetail:
       write.action === 'create'
         ? labels.create
-        : unchanged
-          ? labels.unchanged
-          : [
-              enriching!.hasStops ? null : labels.addsStops,
-              enriching!.hasMiles ? null : labels.addsMiles,
-              willAddActuals ? labels.addsActuals : null,
-              willDeliver ? labels.marksDelivered : null,
-            ]
-              .filter(Boolean)
-              .join(', '),
+        : cancelled
+          ? labels.cancelled
+          : unchanged
+            ? labels.unchanged
+            : [
+                enriching!.hasStops ? null : labels.addsStops,
+                enriching!.hasMiles ? null : labels.addsMiles,
+                willAddActuals ? labels.addsActuals : null,
+                willDeliver ? labels.marksDelivered : null,
+              ]
+                .filter(Boolean)
+                .join(', '),
     skippedLegs: trip.cancelledLegs,
     unresolved,
     driver: trip.driverNames.join(', ') || '—',

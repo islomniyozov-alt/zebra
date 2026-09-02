@@ -111,6 +111,7 @@ export async function tripsImportAction(
         {
           create: t('trips.action.create'),
           unchanged: t('trips.action.unchanged'),
+          cancelled: t('trips.action.cancelled'),
           addsStops: t('trips.action.addsStops'),
           addsMiles: t('trips.action.addsMiles'),
           addsActuals: t('trips.action.addsActuals'),
@@ -129,6 +130,7 @@ export async function tripsImportAction(
     createCount: 0,
     enrichCount: 0,
     unchangedCount: 0,
+    cancelledCount: 0,
     skippedLegTotal: plan.trips.reduce(
       (sum, trip) => sum + trip.cancelledLegs,
       0,
@@ -154,6 +156,11 @@ export async function tripsImportAction(
   view.enrichCount = view.rows.filter((row) => row.action === 'enrich').length
   view.unchangedCount = view.rows.filter(
     (row) => row.action === 'unchanged',
+  ).length
+  // COUNTED SEPARATELY. A cancelled load folded into "already complete" would
+  // read as freight that needs nothing, when it is freight somebody stopped.
+  view.cancelledCount = view.rows.filter(
+    (row) => row.action === 'cancelled',
   ).length
 
   // --- preview ---------------------------------------------------------------
@@ -208,6 +215,7 @@ export async function tripsImportAction(
               hasRate: write.hasRate,
               hasActuals: write.hasActuals,
               isDelivered: write.isDelivered,
+              isCancelled: write.isCancelled,
             },
             maySeeMoney ? trip.rateCents : null,
             session.userId ?? null,

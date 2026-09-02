@@ -292,6 +292,7 @@ describe('enrichment adds a missing rate and replaces nothing', () => {
           hasRate: write.hasRate,
           hasActuals: write.hasActuals,
           isDelivered: write.isDelivered,
+          isCancelled: write.isCancelled,
         },
         trip.rateCents,
       )
@@ -361,6 +362,7 @@ describe('a trip whose load already exists is enriched, not doubled', () => {
           hasRate: write.hasRate,
           hasActuals: write.hasActuals,
           isDelivered: write.isDelivered,
+          isCancelled: write.isCancelled,
         },
         trip.rateCents,
       )
@@ -600,6 +602,7 @@ describe('booked first, then it runs — the normal lifecycle', () => {
           hasRate: write.hasRate,
           hasActuals: write.hasActuals,
           isDelivered: write.isDelivered,
+          isCancelled: write.isCancelled,
         },
         null,
         userId,
@@ -686,6 +689,7 @@ describe('booked first, then it runs — the normal lifecycle', () => {
           hasRate: write.hasRate,
           hasActuals: write.hasActuals,
           isDelivered: write.isDelivered,
+          isCancelled: write.isCancelled,
         },
         null,
         userId,
@@ -884,6 +888,303 @@ describe('the email–trip join, in both orders', () => {
       money: { linehaul: { value: '$1466.53', confidence: 'high' } },
     })
     expect(verdict.kind).toBe('no_payout')
+  })
+})
+
+describe('T-115GY4TBD, the real four-leg trip', () => {
+  // ------------------------------------------------------------------------
+  // LOAD 1010's OWN EXPORT, transcribed. Four legs, one of them CANCELLED and
+  // dropped by rule 3, flattening to the four stops the load actually carries:
+  //
+  //   111JPJ8YR  Completed  MEM4 07:17 → HME9 08:08
+  //   111YNGZP5  Completed  HME9 08:10 → WE_PAY_WMBAF_38113_NEX 09:20
+  //   113R4R6KT  CANCELLED  MEM4 06:27 → WE_PAY_WMBAF_38113_NEX (none)
+  //   1133KXTMH  Completed  WE_PAY_WMBAF_38113_NEX 09:20 → MDW2 18:59
+  //
+  // HME9 IS THE SHARED STOP, and the interesting one: it is the ARRIVING leg's
+  // stop 2 at 08:08 and the DEPARTING leg's stop 1 at 08:10. One visit, two
+  // rows. The arrival belongs to the leg that arrived.
+  // ------------------------------------------------------------------------
+  const WE_PAY = 'WE_PAY_WMBAF_38113_NEX'
+
+  const fourLegs = (id: string) => [
+    leg({
+      tripId: id,
+      loadId: '111JPJ8YR',
+      status: 'Completed',
+      facilitySequence: `MEM4->HME9`,
+      stops: [
+        stop('MEM4', {
+          plannedArrival: clock('2026-08-31', '04:41'),
+          actualArrival: clock('2026-08-31', '07:17'),
+        }),
+        stop('HME9', {
+          plannedArrival: clock('2026-08-31', '06:32'),
+          actualArrival: clock('2026-08-31', '08:08'),
+        }),
+      ],
+    }),
+    leg({
+      tripId: id,
+      loadId: '111YNGZP5',
+      status: 'Completed',
+      facilitySequence: `HME9->${WE_PAY}`,
+      stops: [
+        stop('HME9', { actualArrival: clock('2026-08-31', '08:10') }),
+        stop(WE_PAY, {
+          plannedArrival: clock('2026-08-31', '08:02'),
+          actualArrival: clock('2026-08-31', '09:20'),
+        }),
+      ],
+    }),
+    // RULE 3: replanned, dropped whole, and its 06:27 must not reach anything.
+    leg({
+      tripId: id,
+      loadId: '113R4R6KT',
+      status: 'Cancelled',
+      facilitySequence: `MEM4->${WE_PAY}`,
+      stops: [
+        stop('MEM4', { actualArrival: clock('2026-08-31', '06:27') }),
+        stop(WE_PAY, {}),
+      ],
+    }),
+    leg({
+      tripId: id,
+      loadId: '1133KXTMH',
+      status: 'Completed',
+      facilitySequence: `${WE_PAY}->MDW2`,
+      stops: [
+        stop(WE_PAY, { actualArrival: clock('2026-08-31', '09:20') }),
+        stop('MDW2', {
+          plannedArrival: clock('2026-09-01', '20:00'),
+          actualArrival: clock('2026-08-31', '18:59'),
+        }),
+      ],
+    }),
+  ]
+
+  const upcoming = (id: string) =>
+    fourLegs(id).map((one) => ({
+      ...one,
+      status: one.status === 'Cancelled' ? 'Cancelled' : 'Not Started',
+      stops: one.stops.map((s) => ({ ...s, actualArrival: null })),
+    }))
+
+  it('flattens four legs into the four stops the load carries', async () => {
+    const id = `T-4LEG-${nonce}`
+    const { load } = await importTrip(upcoming(id))
+    expect(load.stops.map((row) => row.name)).toEqual([
+      'MEM4',
+      'HME9',
+      WE_PAY,
+      'MDW2',
+    ])
+  })
+
+  // THE REPRODUCTION. Booked from an Upcoming export, then the Completed
+  // export re-imported — the exact sequence load 1010 went through, minus the
+  // cancellation. If the check-ins do not land here, cancellation was never
+  // the cause.
+  it('lands a check-in on every stop when the finished export arrives', async () => {
+    const id = `T-4LEGACT-${nonce}`
+    await importTrip(upcoming(id))
+
+    const trip = planTrips(fourLegs(id)).trips[0]!
+    const load = await inOrg(async (tx) => {
+      const write = await planTripWrite(tx, trip)
+      if (write.action !== 'enrich') throw new Error('expected enrich')
+      const facilities = await resolveFacilities(tx, tripFacilityCodes(trip))
+      await enrichLoad(
+        tx,
+        organizationId,
+        write.loadId,
+        trip,
+        facilities,
+        {
+          hasStops: write.hasStops,
+          hasMiles: write.hasMiles,
+          hasRate: write.hasRate,
+          hasActuals: write.hasActuals,
+          isDelivered: write.isDelivered,
+          isCancelled: write.isCancelled,
+        },
+        null,
+        userId,
+      )
+      return tx.load.findFirstOrThrow({
+        where: { id: write.loadId },
+        include: { stops: { orderBy: { sequence: 'asc' } } },
+      })
+    })
+
+    const arrived = load.stops.map((row) => row.arrivedAt)
+    expect(
+      arrived.filter((at) => at !== null),
+      `stops with a check-in: ${load.stops
+        .map((r) => `${r.name}=${r.arrivedAt ? 'set' : 'null'}`)
+        .join(', ')}`,
+    ).toHaveLength(4)
+  })
+
+  // THE SHARED STOP. HME9 is arrived at on one leg and departed on the next;
+  // its arrival is the ARRIVING leg's 08:08, not the departing leg's 08:10.
+  it('gives the shared stop the arriving leg check-in', async () => {
+    const id = `T-SHARED-${nonce}`
+    await importTrip(upcoming(id))
+
+    const trip = planTrips(fourLegs(id)).trips[0]!
+    const hme9 = trip.stops.find((s) => s.facilityCode === 'HME9')!
+    expect(hme9.actualArrival?.time).toBe('08:08')
+  })
+
+  // RULE 3, ON TIMES. The cancelled leg's 06:27 belongs to a leg Amazon
+  // replanned and must not become MEM4's check-in.
+  it('never takes a time from the cancelled leg', async () => {
+    const id = `T-CANCLEG-${nonce}`
+    const trip = planTrips(fourLegs(id)).trips[0]!
+    const mem4 = trip.stops.find((s) => s.facilityCode === 'MEM4')!
+    expect(mem4.actualArrival?.time).toBe('07:17')
+    expect(mem4.actualArrival?.time).not.toBe('06:27')
+  })
+})
+
+describe('a cancelled load is left alone', () => {
+  // LOAD 1010's SHAPE. Booked, delivered by hand, cancelled by hand, then the
+  // Completed export re-imported. Before this guard the import wrote mileage
+  // and rate straight through while `transitionOperational` refused the status
+  // move — so a cancelled load gained figures from a file, and the preview had
+  // promised the one change that could not happen.
+  const cancelledLoadFor = async (id: string) => {
+    const { load } = await importTrip([
+      leg({
+        tripId: id,
+        loadId: id,
+        status: 'Not Started',
+        stops: [
+          stop('DEN7', { plannedArrival: clock('2026-08-24', '04:41') }),
+          stop('MKC6', { plannedArrival: clock('2026-08-24', '06:32') }),
+        ],
+      }),
+    ])
+    await owner.load.update({
+      where: { id: load.id },
+      data: { isCancelled: true, cancelReason: 'not happening' },
+    })
+    return load
+  }
+
+  const finished = (id: string) =>
+    leg({
+      tripId: id,
+      loadId: id,
+      status: 'Completed',
+      distance: 900,
+      costCents: 500000,
+      stops: [
+        stop('DEN7', {
+          plannedArrival: clock('2026-08-24', '04:41'),
+          actualArrival: clock('2026-08-24', '07:17'),
+        }),
+        stop('MKC6', {
+          plannedArrival: clock('2026-08-24', '06:32'),
+          actualArrival: clock('2026-08-24', '08:08'),
+        }),
+      ],
+    })
+
+  it('writes nothing at all — not times, not mileage, not rate', async () => {
+    const id = `T-CANC-${nonce}`
+    const before = await cancelledLoadFor(id)
+
+    const trip = planTrips([finished(id)]).trips[0]!
+    const outcome = await inOrg(async (tx) => {
+      const write = await planTripWrite(tx, trip)
+      if (write.action !== 'enrich') throw new Error('expected enrich')
+      expect(write.isCancelled).toBe(true)
+      const facilities = await resolveFacilities(tx, tripFacilityCodes(trip))
+      return enrichLoad(
+        tx,
+        organizationId,
+        write.loadId,
+        trip,
+        facilities,
+        {
+          hasStops: write.hasStops,
+          hasMiles: write.hasMiles,
+          hasRate: write.hasRate,
+          hasActuals: write.hasActuals,
+          isDelivered: write.isDelivered,
+          isCancelled: write.isCancelled,
+        },
+        trip.rateCents,
+        userId,
+      )
+    })
+
+    expect(outcome.kind).toBe('unchanged')
+
+    const after = await inOrg((tx) =>
+      tx.load.findFirstOrThrow({
+        where: { id: before.id },
+        include: { stops: { orderBy: { sequence: 'asc' } } },
+      }),
+    )
+
+    // THE HALF-WRITE THIS REPLACED: mileage and rate went in while the status
+    // move was refused. Each of these is a field that used to change.
+    expect(after.stops.every((row) => row.arrivedAt === null)).toBe(true)
+    expect(after.dispatchedMiles).toBe(before.dispatchedMiles)
+    expect(after.linehaulCents).toBe(before.linehaulCents)
+    expect(after.operationalStatus).toBe(before.operationalStatus)
+  })
+
+  it('still enriches an identical load that nobody cancelled', async () => {
+    const id = `T-NOTCANC-${nonce}`
+    await importTrip([
+      leg({
+        tripId: id,
+        loadId: id,
+        status: 'Not Started',
+        stops: [
+          stop('DEN7', { plannedArrival: clock('2026-08-24', '04:41') }),
+          stop('MKC6', { plannedArrival: clock('2026-08-24', '06:32') }),
+        ],
+      }),
+    ])
+
+    const trip = planTrips([finished(id)]).trips[0]!
+    const load = await inOrg(async (tx) => {
+      const write = await planTripWrite(tx, trip)
+      if (write.action !== 'enrich') throw new Error('expected enrich')
+      expect(write.isCancelled).toBe(false)
+      const facilities = await resolveFacilities(tx, tripFacilityCodes(trip))
+      await enrichLoad(
+        tx,
+        organizationId,
+        write.loadId,
+        trip,
+        facilities,
+        {
+          hasStops: write.hasStops,
+          hasMiles: write.hasMiles,
+          hasRate: write.hasRate,
+          hasActuals: write.hasActuals,
+          isDelivered: write.isDelivered,
+          isCancelled: write.isCancelled,
+        },
+        trip.rateCents,
+        userId,
+      )
+      return tx.load.findFirstOrThrow({
+        where: { id: write.loadId },
+        include: { stops: { orderBy: { sequence: 'asc' } } },
+      })
+    })
+
+    // The control: without it, a guard that refused EVERYTHING would pass the
+    // test above and nobody would notice until an import stopped working.
+    expect(load.stops[0]!.arrivedAt).not.toBeNull()
+    expect(load.operationalStatus).toBe('DELIVERED')
   })
 })
 

@@ -19,6 +19,7 @@ const LABELS = {
   unchanged: 'already has its stops and mileage',
   addsStops: 'adds stops',
   addsMiles: 'adds mileage',
+  cancelled: 'load is cancelled — skipped',
   addsActuals: 'adds actual times',
   marksDelivered: 'marks delivered',
 }
@@ -89,6 +90,7 @@ describe('a confirmer who may see money', () => {
         hasRate: true,
         hasActuals: true,
         isDelivered: false,
+        isCancelled: false,
       } as never).rate,
     ).toBe('—')
   })
@@ -102,6 +104,7 @@ describe('a confirmer who may see money', () => {
         hasRate: false,
         hasActuals: true,
         isDelivered: false,
+        isCancelled: false,
       } as never).rate,
     ).toBe('$5,089.07')
   })
@@ -146,6 +149,7 @@ describe('what would land, decided once', () => {
         hasRate: true,
         hasActuals: true,
         isDelivered: false,
+        isCancelled: false,
       }),
     ).toBeNull()
   })
@@ -179,7 +183,11 @@ describe('the preview says what a Finished re-import will do', () => {
       ],
     })
 
-  const enrich = (over: { hasActuals?: boolean; isDelivered?: boolean }) =>
+  const enrich = (over: {
+    hasActuals?: boolean
+    isDelivered?: boolean
+    isCancelled?: boolean
+  }) =>
     tripRowView(
       ran(),
       {
@@ -189,6 +197,7 @@ describe('the preview says what a Finished re-import will do', () => {
         hasRate: true,
         hasActuals: over.hasActuals ?? false,
         isDelivered: over.isDelivered ?? false,
+        isCancelled: over.isCancelled ?? false,
       },
       [],
       LABELS,
@@ -231,11 +240,39 @@ describe('the preview says what a Finished re-import will do', () => {
         hasRate: true,
         hasActuals: false,
         isDelivered: true,
+        isCancelled: false,
       },
       [],
       LABELS,
       { maySeeMoney: false, locale: 'en-US' },
     )
     expect(row.actionDetail).not.toContain('adds actual times')
+  })
+
+  describe('a cancelled load is skipped and said so', () => {
+    // Load 1010 / T-115GY4TBD: booked, delivered by hand, then CANCELLED by
+    // hand, then the Completed export re-imported. The preview promised "adds
+    // actual times" while the only change it could still make — the status move
+    // — was the one `transitionOperational` refuses on a cancelled load.
+    it('reads as cancelled rather than as an enrich', () => {
+      const row = enrich({ isCancelled: true })
+      expect(row.action).toBe('cancelled')
+      expect(row.actionDetail).toBe(LABELS.cancelled)
+    })
+
+    it('promises nothing at all — not actuals, not delivery', () => {
+      const row = enrich({ isCancelled: true })
+      expect(row.actionDetail).not.toContain('adds actual times')
+      expect(row.actionDetail).not.toContain('marks delivered')
+    })
+
+    // NOT FOLDED INTO "already complete". A cancelled load counted as unchanged
+    // would read as freight that needs nothing, when it is freight somebody
+    // stopped — a different sentence and a different decision.
+    it('is not the same verdict as an untouched complete load', () => {
+      expect(enrich({ isCancelled: true }).action).not.toBe(
+        enrich({ hasActuals: true, isDelivered: true }).action,
+      )
+    })
   })
 })
