@@ -55,7 +55,7 @@ const trip = (over: Partial<PlannedTrip> = {}): PlannedTrip => ({
   trailerIds: ['HV1'],
   tractorIds: ['ZP1'],
   cancelledLegs: 0,
-  completed: true,
+  stage: 'finished' as const,
   rateCents: 508907,
   ...over,
 })
@@ -155,7 +155,7 @@ describe('the preview says what a Finished re-import will do', () => {
   // A trip that RAN: check-ins on its stops and every leg Completed.
   const ran = () =>
     trip({
-      completed: true,
+      stage: 'finished',
       stops: [
         {
           sequence: 1,
@@ -223,7 +223,7 @@ describe('the preview says what a Finished re-import will do', () => {
   // legs say — the preview must not promise times that are not there.
   it('promises no actuals when the export carries none', () => {
     const row = tripRowView(
-      trip({ completed: true }),
+      trip({ stage: 'finished' }),
       {
         action: 'enrich',
         hasStops: true,

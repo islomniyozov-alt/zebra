@@ -34,6 +34,28 @@ export const CANCELLED_STATUS = 'Cancelled'
  */
 export const COMPLETED_STATUS = 'Completed'
 
+/** A leg Amazon has planned and nobody has driven yet. */
+export const NOT_STARTED_STATUS = 'Not Started'
+
+/**
+ * Where a trip is in its life.
+ *
+ * THE LIFECYCLE THIS EXISTS FOR: dispatch imports the trip from an Upcoming
+ * export to get it on the board, and the same trip is exported again after it
+ * runs. The second file is the only place the actual check-ins live — and
+ * because both files produce the same stops and the same mileage, the import
+ * called the second one "already complete" and wrote nothing until this told
+ * them apart.
+ */
+export type TripStage = 'upcoming' | 'running' | 'finished'
+
+function stageOf(usable: readonly TripLeg[]): TripStage {
+  if (usable.every((leg) => leg.status === COMPLETED_STATUS)) return 'finished'
+  if (usable.every((leg) => leg.status === NOT_STARTED_STATUS))
+    return 'upcoming'
+  return 'running'
+}
+
 export interface PlannedTripStop {
   sequence: number
   facilityCode: string
@@ -62,19 +84,17 @@ export interface PlannedTrip {
   /** Rule 3: how many legs were dropped, so the preview can say so. */
   cancelledLegs: number
   /**
-   * Every usable leg reported `Completed`, so the trip has RUN.
+   * Where the trip is in its life, from the legs themselves.
    *
-   * The lifecycle this exists for: dispatch imports the trip from an Upcoming
-   * export to get it on the board, and the same trip is exported again after
-   * it runs. The second file is the only place the actual check-ins live, and
-   * without this flag nothing could tell the two apart — both produce the same
-   * stops and the same mileage, so the import called the second one
-   * "already complete" and wrote nothing.
+   * `finished` — every usable leg Completed.
+   * `upcoming` — every usable leg Not Started.
+   * `running`  — anything else, including a mix.
    *
-   * `Not Started` and `In Progress` are the other two states the export uses;
-   * neither is a finished trip and neither moves a load.
+   * ONE FIELD, NOT TWO. A separate `completed` boolean beside this would be a
+   * second number free to disagree with it, which is the shape this codebase
+   * keeps getting bitten by.
    */
-  completed: boolean
+  stage: TripStage
   /**
    * The trip's price in integer cents, or null — and null is the common case.
    *
@@ -232,7 +252,7 @@ export function planTrips(legs: readonly TripLeg[]): TripsPlan {
       // EVERY usable leg, not any. A trip half-run is not a trip that
       // happened, and calling it delivered would put a load on the invoice
       // queue while the driver is still on it.
-      completed: usable.every((leg) => leg.status === COMPLETED_STATUS),
+      stage: stageOf(usable),
       rateCents: singleLoadRateCents(tripId, all),
     })
   }

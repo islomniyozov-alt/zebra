@@ -30,6 +30,17 @@ export interface TripsPlanView {
    * data and the data cannot arrive without the permission.
    */
   showsMoney: boolean
+  /**
+   * The count that differs between the two import screens on the SAME file.
+   *
+   * The board importer makes one load per ROW; this one makes one per TRIP. A
+   * dispatcher who cannot remember which screen they are on can read it off
+   * these two numbers — "16 trips from 41 rows" is only ever true here.
+   */
+  tripCount: number
+  rowCount: number
+  /** Where the file's trips are in their life, from the legs themselves. */
+  stageCounts: { upcoming: number; running: number; finished: number }
 }
 
 export interface TripsImportState {

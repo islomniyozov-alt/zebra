@@ -477,7 +477,7 @@ export async function enrichLoad(
   // backwards move on its own, so a load already at POD_RECEIVED is safe; the
   // `isDelivered` check is there to keep the preview honest rather than to
   // protect the write.
-  if (trip.completed && !existing.isDelivered) {
+  if (trip.stage === 'finished' && !existing.isDelivered) {
     const last = actualRows[actualRows.length - 1]
     // WHEN IT FINISHED, not when the file was uploaded — the same choice the
     // board importer makes. Departure first, arrival second, nothing third:

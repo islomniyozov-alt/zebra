@@ -497,7 +497,8 @@ const en = {
   'loads.warn.missingRate': 'No rate, so this load cannot be invoiced yet.',
   'loads.warn.duplicateReference':
     'Load reference {reference} is already on load {load} for {customer}, booked {date}.',
-  'relay.title': 'Import a Relay load-board export (rates)',
+  'relay.title':
+    'One load per row — Relay rows imported separately (rate read from the file)',
   'relay.subtitle':
     'One row per trip, with rates. Columns are read directly — nothing is guessed and no document is sent anywhere.',
   'relay.authority': 'Authority',
@@ -555,7 +556,8 @@ const en = {
   'relay.error.no_rows': 'That file has a header and no trips in it.',
   'relay.error.too_many_rows':
     'That file has more rows than one import covers.',
-  'trips.title': 'Import a Relay Trips export (legs & miles)',
+  'trips.title':
+    'One load per trip — legs grouped into a stop chain (rate only on single-leg trips)',
   'trips.subtitle':
     'One row per leg, with mileage and no rate. Nothing is booked until you confirm.',
   'trips.error.noTrips': 'That file has no trips in it.',
@@ -591,6 +593,13 @@ const en = {
     'Driver and equipment are shown as the file wrote them. Nothing is assigned — do that on the load.',
   'trips.back': 'Choose a different file',
   'trips.toLoads': 'Go to loads',
+  'trips.otherScreen': 'Import each row as its own load instead',
+  'trips.fromRows': '{trips} trips from {rows} rows',
+  'trips.stageUpcoming': '{n} upcoming',
+  'trips.stageFinished': '{n} finished',
+  'trips.stageRunning': '{n} still running',
+  'relay.otherScreen': 'Group legs into one load per trip instead',
+
   'relay.error.noFile': 'Choose a CSV first.',
   'loads.warn.offsetDisagrees':
     'Stop {facility} is being read in {zone}, which was UTC{actual} that day, but the file says UTC{column}. If that facility is not in {zone}, record its timezone and import again.',
@@ -2084,7 +2093,8 @@ const ru: Dictionary = {
     'Нет ставки — счёт по этому рейсу выставить нельзя.',
   'loads.warn.duplicateReference':
     'Номер {reference} уже стоит на грузе {load} для {customer}, оформлен {date}.',
-  'relay.title': 'Импорт выгрузки Relay load-board (со ставками)',
+  'relay.title':
+    'Один груз на строку — строки Relay импортируются по отдельности (ставка читается из файла)',
   'relay.subtitle':
     'Одна строка на рейс, со ставками. Столбцы читаются напрямую — ничего не угадывается и никуда не отправляется.',
   'relay.authority': 'Перевозчик',
@@ -2142,7 +2152,8 @@ const ru: Dictionary = {
   'relay.error.no_rows': 'В файле только заголовок, рейсов нет.',
   'relay.error.too_many_rows':
     'В файле больше строк, чем помещается в один импорт.',
-  'trips.title': 'Импорт выгрузки Relay Trips (плечи и мили)',
+  'trips.title':
+    'Один груз на рейс — плечи собираются в цепочку точек (ставка только у односегментных рейсов)',
   'trips.subtitle':
     'Одна строка на плечо, с пробегом и без ставки. Ничего не оформляется до подтверждения.',
   'trips.error.noTrips': 'В файле нет рейсов.',
@@ -2178,6 +2189,13 @@ const ru: Dictionary = {
     'Водитель и техника показаны так, как их записал файл. Ничего не назначается — назначьте это в самом грузе.',
   'trips.back': 'Выбрать другой файл',
   'trips.toLoads': 'К грузам',
+  'trips.otherScreen': 'Импортировать каждую строку как отдельный груз',
+  'trips.fromRows': 'рейсов: {trips}, из строк: {rows}',
+  'trips.stageUpcoming': 'предстоящих: {n}',
+  'trips.stageFinished': 'завершённых: {n}',
+  'trips.stageRunning': 'в пути: {n}',
+  'relay.otherScreen': 'Собрать плечи в один груз на рейс',
+
   'relay.error.noFile': 'Сначала выберите CSV.',
   'loads.warn.offsetDisagrees':
     'Точка {facility} читается в зоне {zone} — в тот день это UTC{actual}, а в файле указано UTC{column}. Если площадка не в зоне {zone}, укажите её часовой пояс и повторите импорт.',
@@ -3660,7 +3678,8 @@ const fa: Dictionary = {
     'نرخ ندارد، پس هنوز نمی‌توان برایش صورتحساب صادر کرد.',
   'loads.warn.duplicateReference':
     'شمارهٔ مرجع {reference} از پیش روی بار {load} برای {customer} است، ثبت‌شده در {date}.',
-  'relay.title': 'وارد کردن خروجی Relay load-board (نرخ‌ها)',
+  'relay.title':
+    'یک بار به ازای هر ردیف — ردیف‌های Relay جداگانه وارد می‌شوند (نرخ از فایل خوانده می‌شود)',
   'relay.subtitle':
     'هر ردیف یک سفر، همراه با نرخ. ستون‌ها مستقیم خوانده می‌شوند — چیزی حدس زده نمی‌شود و سندی جایی فرستاده نمی‌شود.',
   'relay.authority': 'شرکت',
@@ -3716,7 +3735,8 @@ const fa: Dictionary = {
     'این خروجی Relay Trips نیست — ستون Load ID یا Stop 1 ندارد.',
   'relay.error.no_rows': 'آن فایل فقط سرستون دارد و هیچ سفری در آن نیست.',
   'relay.error.too_many_rows': 'آن فایل بیش از حد یک بار وارد کردن سطر دارد.',
-  'trips.title': 'وارد کردن خروجی Relay Trips (پاها و مایل‌ها)',
+  'trips.title':
+    'یک بار به ازای هر سفر — پاها در یک زنجیره توقف گروه می‌شوند (نرخ فقط در سفرهای تک‌پا)',
   'trips.subtitle':
     'هر ردیف یک پا، با مسافت و بدون نرخ. تا تأیید نکنید چیزی ثبت نمی‌شود.',
   'trips.error.noTrips': 'این فایل هیچ سفری ندارد.',
@@ -3751,6 +3771,13 @@ const fa: Dictionary = {
     'راننده و تجهیزات همان‌گونه که فایل نوشته نشان داده می‌شوند. چیزی تخصیص داده نمی‌شود — آن را روی خود بار انجام دهید.',
   'trips.back': 'فایل دیگری انتخاب کنید',
   'trips.toLoads': 'رفتن به بارها',
+  'trips.otherScreen': 'هر ردیف را به‌عنوان بار جداگانه وارد کن',
+  'trips.fromRows': '{trips} سفر از {rows} ردیف',
+  'trips.stageUpcoming': '{n} پیش‌رو',
+  'trips.stageFinished': '{n} پایان‌یافته',
+  'trips.stageRunning': '{n} در حال اجرا',
+  'relay.otherScreen': 'پاها را در یک بار به ازای هر سفر گروه کن',
+
   'relay.error.noFile': 'اول یک فایل CSV انتخاب کنید.',
   'loads.warn.offsetDisagrees':
     'توقف {facility} در منطقهٔ {zone} خوانده می‌شود که آن روز UTC{actual} بود، ولی فایل UTC{column} می‌گوید. اگر آن محل در {zone} نیست، منطقهٔ زمانی‌اش را ثبت کنید و دوباره وارد کنید.',

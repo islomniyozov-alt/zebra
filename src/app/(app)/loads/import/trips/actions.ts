@@ -137,6 +137,17 @@ export async function tripsImportAction(
       ...new Set(decided.rows.flatMap((row) => row.unresolved)),
     ],
     showsMoney: maySeeMoney,
+    // THE NUMBER THAT TELLS THE SCREENS APART. Both importers accept the same
+    // Relay export; the difference is the unit of the output. Saying it out
+    // loud is the body-level answer to "which screen am I on" that the titles
+    // alone could not give.
+    tripCount: plan.trips.length,
+    rowCount: legs.length,
+    stageCounts: {
+      upcoming: plan.trips.filter((trip) => trip.stage === 'upcoming').length,
+      running: plan.trips.filter((trip) => trip.stage === 'running').length,
+      finished: plan.trips.filter((trip) => trip.stage === 'finished').length,
+    },
   }
 
   view.createCount = view.rows.filter((row) => row.action === 'create').length

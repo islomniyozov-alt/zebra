@@ -52,6 +52,10 @@ export interface TripsImportLabels {
   willEnrich: string
   unchanged: string
   skippedLegs: string
+  fromRows: string
+  stageUpcoming: string
+  stageFinished: string
+  stageRunning: string
   unresolvedTitle: string
   warningsTitle: string
   notAssigned: string
@@ -190,6 +194,40 @@ export function TripsImportForm({
                     String(plan.rows.length),
                   )}
           </h2>
+
+          {/* WHICH SCREEN AM I ON, ANSWERED BY THE FILE ITSELF.
+           * Both importers read the same Relay export; the difference is the
+           * unit of the output. "16 trips from 41 rows" is only ever true on
+           * this screen, and it is the fastest way to notice you are on the
+           * wrong one — faster than reading a title. */}
+          <p className="text-sm text-ink-2">
+            {labels.fromRows
+              .replace('{trips}', String(plan.tripCount))
+              .replace('{rows}', String(plan.rowCount))}
+            {' · '}
+            {[
+              plan.stageCounts.upcoming > 0
+                ? labels.stageUpcoming.replace(
+                    '{n}',
+                    String(plan.stageCounts.upcoming),
+                  )
+                : null,
+              plan.stageCounts.finished > 0
+                ? labels.stageFinished.replace(
+                    '{n}',
+                    String(plan.stageCounts.finished),
+                  )
+                : null,
+              plan.stageCounts.running > 0
+                ? labels.stageRunning.replace(
+                    '{n}',
+                    String(plan.stageCounts.running),
+                  )
+                : null,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </p>
 
           {/* THE COUNTS BEFORE THE ROWS. Someone deciding whether to confirm
            * needs the shape of the thing before its detail, and "12 to book,

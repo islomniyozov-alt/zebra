@@ -514,6 +514,36 @@ Recorded rather than resolved, per Phase 1's discipline.
     will be honestly labelled INTERMEDIATE and honestly wrong half the time.
 
 23. **`Estimated Cost` is imported as the linehaul, and it is an ESTIMATE.**
+    — **PARTLY CORRECTED 2026-09-02.** What follows is right about the money
+    and wrong about the input, and the wrong half was repeated into a screen
+    title, a cross-link and a commit message before anybody checked it.
+
+    THERE IS ONE RELAY EXPORT, NOT TWO. Both importers read the same columns —
+    `Trip ID`, `Load ID`, `Facility Sequence`, `Load Execution Status`,
+    `Estimate Distance`, `Estimated Cost`, `Stop N …` — and the board parser's
+    own refusal message calls the file "a Relay Trips export". What differs is
+    the UNIT OF THE OUTPUT: `/loads/import` makes one load per ROW,
+    `/loads/import/trips` groups rows by Trip ID and makes one load per TRIP.
+
+    SO THE REAL RULE IS ROW CARDINALITY, not two file formats. On a trip whose
+    export is a single row, `Estimated Cost` is that load's price — verified
+    against the Relay portal at $5,089.07. On a trip spread across several
+    rows it is an allocation between them, summing to ~$310 on a trip that
+    paid $1,776. Everything below about the money still holds; only the
+    sentence "the other export" was wrong.
+
+    AND A RULE BUILT ON A WRONG MODEL OF THE INPUT IS WORTH RECORDING EVEN
+    AFTER THE RULE IS REPLACED. On 2026-08-19 the two screens were renamed to
+    "load-board export (rates)" and "Trips export (legs & miles)" — a naming
+    ruling made carefully, agreed explicitly, and built on the belief that a
+    dispatcher could tell the screens apart by which FILE they were holding.
+    That question has no answer, so the titles could not help, and the owner
+    lost real time on the confusion they were meant to end. The titles now name
+    what each screen DOES, and the preview prints "16 trips from 41 rows" —
+    the one number that differs between the screens on the same file.
+
+    The original entry follows.
+
     The column is Amazon's estimate of what the trip pays and it is the only
     rate figure in the export. Two of the five corpus loads are $17.18 and
     $1.47 — a bobtail move and a container-pool adjustment — which are real
@@ -1954,3 +1984,31 @@ Recorded rather than resolved, per Phase 1's discipline.
     an assertion is awkward, splice by line number after printing the lines —
     which is what finally landed the deploy.mjs edit after two failed attempts
     at matching its text.
+
+87. **THE RULE'S AUTHOR BROKE IT THE SAME DAY, ON THE SAME KIND OF COMMAND.**
+    `AGENTS.md` gained "read the exit code before anything touches the output"
+    on the morning of 2026-09-01, written up from three incidents where a
+    filter had eaten the evidence. That evening the gate was launched as
+    `npm run test:integration 2>&1 | tail -16`.
+
+    It went red. `tail` kept the last sixteen lines — a stack frame and the
+    summary — and discarded the error message naming which ceiling blew and
+    where. The captured log was twenty lines long. The pipeline reported exit
+    `0`, because that is `tail`'s exit code, so the only surviving signal that
+    anything had failed was the ABSENCE of a receipt.
+
+    The failure was then diagnosed by re-running the file alone, which passed,
+    and reading the source — a slower and less certain route to an answer the
+    original run had already produced and thrown away. The cause turned out to
+    be an R2 call inside a Postgres transaction, and the evidence for WHICH
+    ceiling it blew is simply gone.
+
+    WHAT THIS SAYS ABOUT WRITTEN RULES: knowing the rule, having just written
+    the rule, and having written the incident report attached to the rule were
+    together not enough to stop the habit. The pipeline was typed the way it
+    has been typed a hundred times. Rules that depend on recall at the moment
+    of typing fail at exactly that moment.
+
+    So the gate's output is captured to a FILE and the file is read — the same
+    move as `assertOutsideTransaction`: replace the recollection with a shape
+    that cannot forget.

@@ -34,13 +34,14 @@ export default async function TripsImportPage() {
       <div className="flex flex-col gap-z1">
         <h1 className="text-xl font-semibold text-ink">{t('trips.title')}</h1>
         <p className="text-sm text-ink-2">{t('trips.subtitle')}</p>
-        {/* Each screen names the other — see the note on the sibling. */}
+        {/* What the other screen DOES, not what file it wants — see the note
+         * on the sibling. One Relay export, two units of output. */}
         <p className="text-sm text-ink-2">
           <Link
             href="/loads/import"
             className="text-accent underline underline-offset-2"
           >
-            {t('relay.title')}
+            {t('trips.otherScreen')}
           </Link>
         </p>
       </div>
@@ -72,6 +73,10 @@ export default async function TripsImportPage() {
           willEnrich: t('trips.willEnrich'),
           unchanged: t('trips.unchanged'),
           skippedLegs: t('trips.skippedLegs'),
+          fromRows: t('trips.fromRows'),
+          stageUpcoming: t('trips.stageUpcoming'),
+          stageFinished: t('trips.stageFinished'),
+          stageRunning: t('trips.stageRunning'),
           unresolvedTitle: t('trips.unresolvedTitle'),
           warningsTitle: t('trips.warningsTitle'),
           notAssigned: t('trips.notAssigned'),

@@ -98,7 +98,7 @@ export function tripRowView(
     enriching && !enriching.hasActuals && tripHasActuals(trip),
   )
   const willDeliver = Boolean(
-    enriching && trip.completed && !enriching.isDelivered,
+    enriching && trip.stage === 'finished' && !enriching.isDelivered,
   )
 
   const unchanged =
