@@ -4,6 +4,7 @@ import { withOrg } from '@/lib/tenancy'
 import { LOAD_WRITE_TIMEOUT_MS, loadSearchWhere } from '@/lib/loads'
 import { resolveBroker } from '@/lib/locations'
 import { planTrips } from '@/lib/trips-import'
+import { tripRateJoin } from '@/lib/inbound-email'
 import {
   createTripLoad,
   enrichLoad,
@@ -735,6 +736,154 @@ describe('booked first, then it runs — the normal lifecycle', () => {
     const { outcome } = await reimport([finished(id)])
 
     expect(outcome.kind).toBe('unchanged')
+  })
+})
+
+describe('the email–trip join, in both orders', () => {
+  // ------------------------------------------------------------------------
+  // THE TWO AMAZON SOURCES ARE COMPLEMENTARY ON ONE KEY. The Trips CSV has the
+  // stop chain, the legs, the miles and the actuals and never the payout; the
+  // booking email has the payout and the same Trip ID.
+  //
+  // ORDER-INDEPENDENT, and that is the half worth testing hardest. Dispatch
+  // may forward the email before the trip is exported or after it, and both
+  // must end with ONE load carrying the full stop chain and the right rate.
+  // Real figures throughout: T-113X2YMG9 printed $1,776.25 as Estimated
+  // Payout beside a $1,466.53 Base Rate.
+  // ------------------------------------------------------------------------
+  const PAYOUT_CENTS = 177625
+
+  const bookingEmail = (reference: string, payout = '$1776.25') =>
+    ({
+      brokerName: { value: 'Amazon Relay', confidence: 'high' },
+      brokerReference: { value: reference, confidence: 'high' },
+      money: {
+        // BASE RATE IS PRESENT AND MUST NOT BE READ. It is 21% lower; taking
+        // it would under-invoice every Relay load in exactly the way nothing
+        // downstream would notice.
+        linehaul: { value: '$1466.53', confidence: 'high' },
+        total: { value: payout, confidence: 'high' },
+      },
+    }) as never
+
+  const tripCsv = (id: string) =>
+    leg({
+      tripId: id,
+      loadId: id,
+      status: 'Completed',
+      stops: [
+        stop('DEN7', { plannedArrival: clock('2026-08-24', '04:41') }),
+        stop('MKC6', { plannedArrival: clock('2026-08-24', '06:32') }),
+      ],
+    })
+
+  const verdictFor = (extracted: unknown) =>
+    inOrg((tx) => tripRateJoin(tx, extracted as never))
+
+  it('waits when the trip has not been imported yet, and says which', async () => {
+    const id = `T-WAIT-${nonce}`
+    const verdict = await verdictFor(bookingEmail(id))
+
+    expect(verdict.kind).toBe('waiting')
+    if (verdict.kind !== 'waiting') return
+    // The reference is named so the screen can say what it is waiting for.
+    expect(verdict.reference).toBe(id)
+  })
+
+  // CSV FIRST, THEN THE EMAIL — the ordinary order once dispatch is importing
+  // trips regularly.
+  it('fills the rate when the trip landed first', async () => {
+    const id = `T-CSVFIRST-${nonce}`
+    const { load } = await importTrip([tripCsv(id)])
+    expect(load.linehaulCents).toBe(0)
+
+    const verdict = await verdictFor(bookingEmail(id))
+    expect(verdict.kind).toBe('fillable')
+    if (verdict.kind !== 'fillable') return
+    expect(verdict.cents).toBe(PAYOUT_CENTS)
+    expect(verdict.loadId).toBe(load.id)
+  })
+
+  // EMAIL FIRST, THEN THE CSV — the email waits, the import books the load
+  // with its full chain, and the same email then fills the rate. One load.
+  it('ends the other order in the same place', async () => {
+    const id = `T-EMAILFIRST-${nonce}`
+
+    const before = await verdictFor(bookingEmail(id))
+    expect(before.kind).toBe('waiting')
+
+    const { load } = await importTrip([tripCsv(id)])
+    const after = await verdictFor(bookingEmail(id))
+
+    expect(after.kind).toBe('fillable')
+    if (after.kind !== 'fillable') return
+    expect(after.loadId).toBe(load.id)
+    expect(after.cents).toBe(PAYOUT_CENTS)
+
+    // ONE LOAD, WITH THE CHAIN THE CSV KNOWS. The email never created
+    // anything, which is the whole rule: a load booked from this email would
+    // carry the two stops it prints instead.
+    const all = await inOrg((tx) =>
+      tx.load.findMany({
+        where: { referenceNumber: id, deletedAt: null },
+        include: { stops: true },
+      }),
+    )
+    expect(all).toHaveLength(1)
+    expect(all[0]!.stops).toHaveLength(2)
+  })
+
+  // ESTIMATED PAYOUT, NEVER BASE RATE. Both are in the payload above.
+  it('takes the payout and not the base rate', async () => {
+    const id = `T-PAYOUT-${nonce}`
+    await importTrip([tripCsv(id)])
+    const verdict = await verdictFor(bookingEmail(id))
+
+    if (verdict.kind !== 'fillable') throw new Error('expected fillable')
+    expect(verdict.cents).toBe(177625)
+    expect(verdict.cents).not.toBe(146653)
+  })
+
+  // FILLS ONLY A NULL RATE. Whoever put a figure there — a typed correction,
+  // an earlier single-leg import — keeps it.
+  it('refuses a load that already carries money', async () => {
+    const id = `T-RATED-${nonce}`
+    const { load } = await importTrip([tripCsv(id)])
+    await inOrg((tx) =>
+      tx.load.update({
+        where: { id: load.id },
+        data: { linehaulCents: 999_00 },
+      }),
+    )
+
+    const verdict = await verdictFor(bookingEmail(id))
+    expect(verdict.kind).toBe('already_rated')
+  })
+
+  // EXACT MATCH — the JOIN rule, not the search rule. `loadSearchWhere`
+  // deliberately matches loosely so a human can find a load by typing; money
+  // is not attached on a resemblance.
+  it('does not join a bare id to a prefixed load, or the reverse', async () => {
+    const bare = `NOPREFIX-${nonce}`
+    await importTrip([tripCsv(`T-${bare}`)])
+
+    // A bare-ID email is not a trip email at all — it keeps the create flow.
+    expect((await verdictFor(bookingEmail(bare))).kind).toBe('not_a_trip')
+
+    // And a prefixed email finds nothing when only the bare load exists.
+    const other = `OTHER-${nonce}`
+    await importTrip([tripCsv(other)])
+    expect((await verdictFor(bookingEmail(`T-${other}`))).kind).toBe('waiting')
+  })
+
+  it('says so when the trip is here but the email printed no payout', async () => {
+    const id = `T-NOPAY-${nonce}`
+    await importTrip([tripCsv(id)])
+    const verdict = await verdictFor({
+      brokerReference: { value: id, confidence: 'high' },
+      money: { linehaul: { value: '$1466.53', confidence: 'high' } },
+    })
+    expect(verdict.kind).toBe('no_payout')
   })
 })
 

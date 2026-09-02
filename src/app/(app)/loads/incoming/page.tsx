@@ -7,9 +7,12 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { renderDateOnly } from '@/lib/stop-time'
 import { Button } from '@/components/ui/Button'
-import { dismissEmailAction } from './actions'
+import { applyTripRateAction, dismissEmailAction } from './actions'
+import { tripRateJoin, type TripRateJoin } from '@/lib/inbound-email'
+import type { Extracted } from '@/lib/extraction-shape'
 import type { LoadWarning } from '@/lib/load-warnings'
 import type { MessageKey } from '@/lib/i18n'
+import { formatCents } from '@/lib/money'
 
 // Loads → Incoming (Phase 6 §4 step 4, spec §10).
 //
@@ -41,6 +44,8 @@ interface Row {
   subject: string
   received: string
   reasons: string[]
+  /** What this email can do for the trip it names. See `tripRateJoin`. */
+  join: TripRateJoin
   /** Spec §12 — present when the message itself was kept. */
   hasOriginal: boolean
 }
@@ -59,7 +64,7 @@ const TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = {
 export default async function IncomingPage() {
   if (!(await currentUserCan('create', 'load'))) notFound()
 
-  const { t } = await getLocaleContext()
+  const { t, locale } = await getLocaleContext()
 
   const emails = await withCurrentOrg('read', 'load', (tx) =>
     tx.inboundEmail.findMany({
@@ -79,9 +84,25 @@ export default async function IncomingPage() {
         concerns: true,
         ocrError: true,
         rawR2Key: true,
+        // The join needs the reference and the payout the email printed.
+        extractedJson: true,
       },
     }),
   )
+
+  // THE JOIN VERDICT, PER ROW, DECIDED ON THE SERVER. `tripRateJoin` is the
+  // same function the action re-runs before it writes, so the sentence on the
+  // screen is produced by the code that later acts — the preview-then-confirm
+  // shape, applied to one button.
+  const joins = new Map<string, TripRateJoin>()
+  await withCurrentOrg('read', 'load', async (tx) => {
+    for (const email of emails) {
+      const stored = (email.extractedJson ?? null) as {
+        extracted?: Extracted
+      } | null
+      joins.set(email.id, await tripRateJoin(tx, stored?.extracted ?? null))
+    }
+  })
 
   const rows: Row[] = emails.map((email) => {
     // Stored as `LoadWarning[]` — kinds and values, never sentences — so the
@@ -112,6 +133,7 @@ export default async function IncomingPage() {
       received: renderDateOnly(email.receivedAt) ?? '—',
       reasons,
       hasOriginal: email.rawR2Key !== null,
+      join: joins.get(email.id) ?? { kind: 'not_a_trip' as const },
     }
   })
 
@@ -187,6 +209,41 @@ export default async function IncomingPage() {
               {t('incoming.original')}
             </a>
           ) : null}
+          {/* THE JOIN, SAID IN WORDS BEFORE IT IS OFFERED AS A BUTTON.
+           * A trip email cannot become a load here, so the row explains what
+           * it CAN do — and the waiting case is a real answer rather than a
+           * dead row: the trips import has not run yet, and the payout is
+           * kept until it does. */}
+          {row.join.kind === 'fillable' ? (
+            <form action={applyTripRateAction.bind(null, row.id)}>
+              <Button type="submit" variant="secondary" size="compact">
+                {t('incoming.fillRate')
+                  .replace('{load}', row.join.loadNumber)
+                  .replace('{amount}', formatCents(row.join.cents, locale))}
+              </Button>
+            </form>
+          ) : null}
+          {row.join.kind === 'waiting' ? (
+            <span className="text-xs text-ink-3">
+              {t('incoming.waitingForTrip').replace(
+                '{reference}',
+                row.join.reference,
+              )}
+            </span>
+          ) : null}
+          {row.join.kind === 'already_rated' ? (
+            <span className="text-xs text-ink-3">
+              {t('incoming.alreadyRated').replace(
+                '{load}',
+                row.join.loadNumber,
+              )}
+            </span>
+          ) : null}
+          {row.join.kind === 'no_payout' ? (
+            <span className="text-xs text-ink-3">
+              {t('incoming.noPayout').replace('{load}', row.join.loadNumber)}
+            </span>
+          ) : null}
           <form action={dismissEmailAction.bind(null, row.id)}>
             <Button type="submit" variant="ghost" size="compact">
               {t('incoming.dismiss')}
@@ -211,7 +268,13 @@ export default async function IncomingPage() {
         rowKey={(row) => row.id}
         // §7.1's whole-row link. It leads to the CREATE FORM, prefilled —
         // §1.1's "a queue of unfinished forms, not a second editing surface".
-        rowHref={(row) => `/loads/new?from=${row.id}`}
+        // A PREFIXED-TRIP EMAIL NEVER REACHES THE CREATE FORM. Booking from it
+        // would make a two-stop load out of freight whose real chain the trips
+        // import already knows, and the middle stops would then be typed in by
+        // hand. Its row offers the one thing the email can do instead.
+        rowHref={(row) =>
+          row.join.kind === 'not_a_trip' ? `/loads/new?from=${row.id}` : null
+        }
         stripeTone={(row) => TONE[row.state] ?? 'neutral'}
         empty={
           <EmptyState

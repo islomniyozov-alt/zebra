@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { withCurrentOrg } from '@/lib/auth-context'
-import { dismissEmail } from '@/lib/inbound-email'
+import { applyTripRate, dismissEmail } from '@/lib/inbound-email'
 
 // The one write this screen has (Phase 6 §4 step 4).
 //
@@ -29,4 +29,25 @@ export async function dismissEmailAction(
   )
 
   revalidatePath('/loads/incoming')
+}
+
+/**
+ * Give a trip's load the payout its booking email printed (§4, the join).
+ *
+ * THE QUEUE'S SECOND VERB, and it exists for the same reason the first one
+ * does: this is not booking a load. The load already exists — the trips
+ * import made it, with a stop chain an email could never describe — and all
+ * that is missing is the one number the CSV never carries.
+ *
+ * `update` ON `load.financials`, not `create` on `load`. The act is writing
+ * money onto freight somebody else booked, and the permission that governs
+ * money is the one that should be asked.
+ */
+export async function applyTripRateAction(id: string): Promise<void> {
+  await withCurrentOrg('update', 'load.financials', (tx, session) =>
+    applyTripRate(tx, id, session.userId),
+  )
+
+  revalidatePath('/loads/incoming')
+  revalidatePath('/loads')
 }

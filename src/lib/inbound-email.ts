@@ -10,6 +10,8 @@ import {
 } from './extraction'
 import { loadWarnings, type LoadWarning } from './load-warnings'
 import { resolveBroker } from './correction-memory'
+import { parseMoneyToCents } from './money'
+import { recomputeTotals } from './loads'
 
 // ---------------------------------------------------------------------------
 // A BOOKING EMAIL, AS A DRAFT (Phase 6 §4 step 4, spec §1 / §2 / §10).
@@ -532,4 +534,156 @@ export async function dismissEmail(
       handledByUserId: userId,
     },
   })
+}
+
+// ---------------------------------------------------------------------------
+// THE EMAIL–TRIP JOIN: the two Amazon sources are complementary on one key.
+//
+// The Trips CSV carries the stop chain, the legs, the mileage and the actual
+// check-ins, and NEVER the trip payout. The booking email carries the payout
+// and the same Trip ID. Neither is complete; together they are.
+//
+// AN EMAIL WHOSE REFERENCE IS A PREFIXED TRIP ID MAY ONLY FILL A RATE. It may
+// never create the load, and that is not caution — an email-created load has
+// the two stops the email prints, while the real trip has the chain the CSV
+// knows. Booking from the email would produce a load whose middle stops have
+// to be typed in by hand, on top of freight the import was about to describe
+// correctly.
+//
+// A BARE ID KEEPS TODAY'S BEHAVIOUR. Measured across 1,600 exports: every bare
+// Trip ID is its own row's Load ID, so a bare-ID email is a single-load
+// booking and the load it would create is the load the trip describes.
+//
+// EXACT MATCH, NO NORMALISING. This is the JOIN rule, not the search rule:
+// `loadSearchWhere` deliberately matches loosely so a dispatcher typing what
+// they can see finds the load, and a human reads the answer. Attaching money
+// is not a reading — "T-115M68R2H" and "115M68R2H" are different references
+// until somebody says otherwise.
+// ---------------------------------------------------------------------------
+
+export type TripRateJoin =
+  /** Not a prefixed trip reference — the ordinary create flow applies. */
+  | { kind: 'not_a_trip' }
+  /** No load carries this reference yet. The draft waits; it does not create. */
+  | { kind: 'waiting'; reference: string }
+  /** A load is here and carries no rate. This is the one case that writes. */
+  | { kind: 'fillable'; loadId: string; loadNumber: string; cents: number }
+  /** The load already has money. Adds nothing, replaces nothing. */
+  | { kind: 'already_rated'; loadId: string; loadNumber: string }
+  /** A trip load is here but the email printed no payout to give it. */
+  | { kind: 'no_payout'; loadId: string; loadNumber: string }
+
+/** Does this reference name a Relay TRIP rather than a single load? */
+export function isTripReference(reference: string | null): boolean {
+  return typeof reference === 'string' && /^T-/.test(reference.trim())
+}
+
+/**
+ * What this email can do for the trip it names.
+ *
+ * PURE OF WRITES, so the screen and the action reach the same verdict from the
+ * same function — the preview-then-confirm shape this codebase uses
+ * everywhere, applied to a single button.
+ *
+ * ESTIMATED PAYOUT ONLY. `money.total` is the payout; `money.linehaul` is the
+ * Base Rate beside it, and the two differ by 21% on a real booking
+ * (T-113X2YMG9: $1,776.25 against $1,466.53). The lower number is not the
+ * rate, and reading the wrong one would under-invoice every Relay load.
+ */
+export async function tripRateJoin(
+  tx: TxClient,
+  extracted: Extracted | null,
+): Promise<TripRateJoin> {
+  const reference =
+    typeof extracted?.brokerReference?.value === 'string'
+      ? extracted.brokerReference.value.trim()
+      : null
+
+  if (!isTripReference(reference)) return { kind: 'not_a_trip' }
+
+  const load = await tx.load.findFirst({
+    where: { referenceNumber: reference!, deletedAt: null },
+    select: { id: true, loadNumber: true, linehaulCents: true },
+  })
+
+  // THE WAITING CASE IS A REAL ANSWER, not a failure. The trip import may not
+  // have run yet; the email keeps its payout and says what it is waiting for.
+  if (!load) return { kind: 'waiting', reference: reference! }
+
+  if (load.linehaulCents !== 0) {
+    return {
+      kind: 'already_rated',
+      loadId: load.id,
+      loadNumber: load.loadNumber,
+    }
+  }
+
+  const payout =
+    typeof extracted?.money?.total?.value === 'string'
+      ? extracted.money.total.value
+      : null
+  if (!payout) {
+    return { kind: 'no_payout', loadId: load.id, loadNumber: load.loadNumber }
+  }
+
+  try {
+    const cents = parseMoneyToCents(payout)
+    if (cents <= 0) {
+      return { kind: 'no_payout', loadId: load.id, loadNumber: load.loadNumber }
+    }
+    return {
+      kind: 'fillable',
+      loadId: load.id,
+      loadNumber: load.loadNumber,
+      cents,
+    }
+  } catch {
+    return { kind: 'no_payout', loadId: load.id, loadNumber: load.loadNumber }
+  }
+}
+
+/**
+ * Give the trip's load the payout its booking email printed.
+ *
+ * THE VERDICT IS RE-TAKEN INSIDE THE WRITE. The screen showed one a moment
+ * ago; between the render and the click a trips import may have run, or
+ * somebody may have typed a rate. Trusting the rendered verdict would be
+ * trusting a fact the browser is holding — the same reason the trips import
+ * re-plans before it writes.
+ *
+ * FILLS ONLY A NULL RATE. `linehaulCents` is `@default(0)`, so zero is the
+ * only "nobody has said" this schema can express; a load with a figure on it
+ * keeps the figure, whoever put it there.
+ */
+export async function applyTripRate(
+  tx: TxClient,
+  emailId: string,
+  userId: string,
+): Promise<TripRateJoin> {
+  const email = await tx.inboundEmail.findFirst({
+    where: { id: emailId, state: { in: ['READY', 'REVIEW', 'CONFLICT'] } },
+    select: { id: true, extractedJson: true },
+  })
+  if (!email) return { kind: 'not_a_trip' }
+
+  const stored = (email.extractedJson ?? null) as {
+    extracted?: Extracted
+  } | null
+  const verdict = await tripRateJoin(tx, stored?.extracted ?? null)
+  if (verdict.kind !== 'fillable') return verdict
+
+  await tx.load.update({
+    where: { id: verdict.loadId },
+    data: { linehaulCents: verdict.cents },
+  })
+  // The cached total is what an invoice reads; a linehaul written without it
+  // leaves `totalRevenueCents` behind by exactly the rate just applied.
+  await recomputeTotals(tx, verdict.loadId)
+
+  // THE EMAIL HAS DONE ITS JOB. Linking it to the load it paid for is the same
+  // thing `confirmEmail` means on the create path: this draft is handled, and
+  // the record says which load it became part of.
+  await confirmEmail(tx, emailId, verdict.loadId, userId)
+
+  return verdict
 }

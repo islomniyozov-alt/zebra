@@ -61,6 +61,11 @@ const en = {
   'incoming.state.DISMISSED': 'Dismissed',
   'incoming.actions': '',
   'incoming.original': 'Original',
+  'incoming.fillRate': 'Give load {load} its rate {amount}',
+  'incoming.waitingForTrip':
+    'Waiting for trip {reference} to be imported — the payout is kept until it is.',
+  'incoming.alreadyRated': 'Load {load} already carries a rate.',
+  'incoming.noPayout': 'Load {load} is here; this email printed no payout.',
   'incoming.dismiss': 'Dismiss',
   'incoming.fromEmail':
     'Prefilled from a booking email. Check every line — saving books the load and clears it from Incoming.',
@@ -1653,6 +1658,11 @@ const ru: Dictionary = {
   'incoming.state.DISMISSED': 'Отклонено',
   'incoming.actions': '',
   'incoming.original': 'Оригинал',
+  'incoming.fillRate': 'Проставить грузу {load} ставку {amount}',
+  'incoming.waitingForTrip':
+    'Ждём импорта рейса {reference} — выплата сохранена до этого момента.',
+  'incoming.alreadyRated': 'У груза {load} уже есть ставка.',
+  'incoming.noPayout': 'Груз {load} есть; в письме не указана выплата.',
   'incoming.dismiss': 'Отклонить',
   'incoming.fromEmail':
     'Заполнено из письма о бронировании. Проверьте каждую строку — сохранение оформит груз и уберёт письмо из «Входящих».',
@@ -3247,6 +3257,11 @@ const fa: Dictionary = {
   'incoming.state.DISMISSED': 'رد شده',
   'incoming.actions': '',
   'incoming.original': 'اصل نامه',
+  'incoming.fillRate': 'ثبت نرخ {amount} برای بار {load}',
+  'incoming.waitingForTrip':
+    'در انتظار وارد شدن سفر {reference} — پرداخت تا آن زمان نگه داشته می‌شود.',
+  'incoming.alreadyRated': 'بار {load} از پیش نرخ دارد.',
+  'incoming.noPayout': 'بار {load} هست؛ این ایمیل پرداختی چاپ نکرده بود.',
   'incoming.dismiss': 'رد کردن',
   'incoming.fromEmail':
     'از نامهٔ رزرو پر شده است. هر سطر را بررسی کنید — ذخیره، بار را ثبت می‌کند و نامه را از «ورودی» برمی‌دارد.',
