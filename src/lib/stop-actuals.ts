@@ -150,3 +150,52 @@ export function sheetDates(stops: readonly SheetStop[]): SheetDates {
     delActual: del?.isActual ?? false,
   }
 }
+
+/**
+ * How long the truck sat at this stop.
+ *
+ * DWELL, NOT DETENTION, and the difference is money. This is the gap between
+ * the two ACTUAL clocks the Relay export gives us — descriptive, needing no
+ * appointment, and unable to disagree with anything. Detention measures against
+ * `scheduledAt` and is billable; `DETENTION` is already an accessorial type,
+ * and a column that quietly meant that would be a number somebody charges for
+ * sitting beside numbers nobody does.
+ *
+ * NULL WHEN EITHER CLOCK IS MISSING. Half a window is not a duration, and a
+ * stop that has arrived but not left has not finished waiting — showing the
+ * time so far would tick upward on a page that does not refresh.
+ *
+ * NEGATIVE IS ALSO NULL. A departure before its arrival is bad data, not a
+ * negative wait; printing "-2h" invites somebody to explain it rather than
+ * correct it.
+ */
+export function dwellMinutes(stop: {
+  arrivedAt: Date | null
+  departedAt: Date | null
+}): number | null {
+  if (stop.arrivedAt === null || stop.departedAt === null) return null
+  const minutes = Math.round(
+    (stop.departedAt.getTime() - stop.arrivedAt.getTime()) / 60_000,
+  )
+  return minutes < 0 ? null : minutes
+}
+
+/**
+ * A duration as a dispatcher says it: "3h 12m", "45m", "2d 4h".
+ *
+ * NOT LOCALISED, deliberately: these are units on a dense table, and `h`/`m`
+ * survive translation better than a sentence would. §12 reserves translation
+ * for prose, and this is closer to a unit symbol than to language.
+ */
+export function dwellLabel(minutes: number | null): string {
+  if (minutes === null) return '—'
+  if (minutes < 60) return `${minutes}m`
+
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  if (hours < 24) return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`
+
+  const days = Math.floor(hours / 24)
+  const spare = hours % 24
+  return spare === 0 ? `${days}d` : `${days}d ${spare}h`
+}

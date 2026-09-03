@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { latenessLabel, sheetDates, shownStopTime } from '@/lib/stop-actuals'
+import {
+  dwellLabel,
+  dwellMinutes,
+  latenessLabel,
+  sheetDates,
+  shownStopTime,
+} from '@/lib/stop-actuals'
 
 // ---------------------------------------------------------------------------
 // WHOSE CLOCK IS OPERATIVE.
@@ -193,5 +199,75 @@ describe("the driver's sheet dates", () => {
     expect(dates.delAt).toBeNull()
     expect(dates.puActual).toBe(false)
     expect(dates.delActual).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// DWELL: HOW LONG THE TRUCK SAT THERE.
+//
+// From the two ACTUAL clocks, and from nothing else. The column was specified
+// as "Waiting" and the alternative reading was detention — time past the
+// appointment, which is billable and already an accessorial type. This one
+// measures the gap between arriving and leaving, so it can be shown on freight
+// with no appointment at all and cannot be mistaken for a charge.
+// ---------------------------------------------------------------------------
+
+describe('how long the truck waited', () => {
+  it('measures arrival to departure', () => {
+    expect(
+      dwellMinutes({
+        arrivedAt: at('2026-08-31T13:17:00Z'),
+        departedAt: at('2026-08-31T16:18:00Z'),
+      }),
+    ).toBe(181)
+  })
+
+  // HALF A WINDOW IS NOT A DURATION. A stop that has arrived and not left has
+  // not finished waiting; a number here would be the time at render, on a page
+  // that does not refresh, ageing silently.
+  it('says nothing when the truck has not left yet', () => {
+    expect(
+      dwellMinutes({ arrivedAt: at('2026-08-31T13:17:00Z'), departedAt: null }),
+    ).toBeNull()
+  })
+
+  it('says nothing when there is no arrival', () => {
+    expect(
+      dwellMinutes({ arrivedAt: null, departedAt: at('2026-08-31T16:18:00Z') }),
+    ).toBeNull()
+  })
+
+  // BAD DATA IS ABSENT, NOT NEGATIVE. "-2h" on a screen invites somebody to
+  // explain the number rather than correct the row.
+  it('treats a departure before its arrival as unknown', () => {
+    expect(
+      dwellMinutes({
+        arrivedAt: at('2026-08-31T16:18:00Z'),
+        departedAt: at('2026-08-31T13:17:00Z'),
+      }),
+    ).toBeNull()
+  })
+})
+
+describe('a duration as a dispatcher says it', () => {
+  it('reads minutes under an hour', () => {
+    expect(dwellLabel(45)).toBe('45m')
+    expect(dwellLabel(0)).toBe('0m')
+  })
+
+  it('reads hours and minutes', () => {
+    expect(dwellLabel(181)).toBe('3h 1m')
+    expect(dwellLabel(120)).toBe('2h')
+  })
+
+  it('reads days once a truck has sat that long', () => {
+    // Real: a trailer left over a weekend. "52h" is arithmetic; "2d 4h" is
+    // the thing a dispatcher recognises.
+    expect(dwellLabel(52 * 60)).toBe('2d 4h')
+    expect(dwellLabel(48 * 60)).toBe('2d')
+  })
+
+  it('shows an em dash rather than a zero for unknown', () => {
+    expect(dwellLabel(null)).toBe('—')
   })
 })

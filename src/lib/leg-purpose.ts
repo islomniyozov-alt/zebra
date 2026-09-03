@@ -93,3 +93,34 @@ export function legPurpose(shipperAccount: unknown): LegPurpose {
 export function isEmptyLeg(shipperAccount: unknown): boolean {
   return legPurpose(shipperAccount) === 'EMPTY'
 }
+
+/**
+ * True when NO rule matched and the leg fell through to the default.
+ *
+ * THE SCHEMA ALREADY ASKED FOR THIS AND NOTHING SUPPLIED IT. `LoadStop.legEmpty`
+ * is documented as three-state — "null means nobody classified it; false means
+ * classified as loaded" — and the writer stored `false` for both, because
+ * `isEmptyLeg` collapses "matched a LOADED rule" and "matched nothing" into one
+ * boolean. A leg Amazon labelled `TrailerPoolAdjustment`, which is the 112-leg
+ * question still with the owner, was indistinguishable from freight somebody
+ * had actually classified.
+ *
+ * IT MATTERS NOW BECAUSE THE NUMBER IS ON A SCREEN. While nothing displayed
+ * empty miles, defaulting to LOADED "overstated loaded miles visibly rather
+ * than understating them quietly" — the trade-off written beside the rules.
+ * Visibly rested on something looking, and nothing was. A load whose split is
+ * partly a default now says so.
+ *
+ * DERIVED FROM THE RULES, NOT FROM A PATTERN. The day a rule for
+ * `TrailerPoolAdjustment` is added, legs carrying it classify and stop being
+ * provisional — no edit here, no edit at the call site. See flag 91.
+ */
+export function isUnclassifiedLeg(shipperAccount: unknown): boolean {
+  if (typeof shipperAccount !== 'string') return false
+  const text = shipperAccount.trim()
+  // An absent label is not an unclassified one: there is nothing to classify,
+  // and flagging every blank would make the note meaningless on the freight
+  // that carries no account at all.
+  if (text === '') return false
+  return !LEG_PURPOSE_RULES.some((rule) => rule.pattern.test(text))
+}

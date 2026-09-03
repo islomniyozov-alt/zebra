@@ -2220,3 +2220,63 @@ Recorded rather than resolved, per Phase 1's discipline.
       at DELIVERED can never gain its POD by being re-delivered, and
       re-importing is refused by the `isDelivered` guard. Every such load is
       unpayable until something backfills it. Loads 1010–1013 are in this set.
+
+91. **"AT LEAST THIS ERROR IS VISIBLE" IS A CLAIM ABOUT SOMEBODY LOOKING, AND
+    NOBODY WAS.** — 2026-09-03.
+
+    `leg-purpose.ts` classifies a Relay leg as loaded or empty from its
+    `Shipper Account`. `TrailerPoolAdjustment` — 112 legs across three variants
+    — is deliberately unclassified, because whether repositioning a pool
+    trailer is an empty move is a question about this business rather than
+    about that string, and it is with the owner. Unmatched falls through to
+    LOADED, and the comment beside it justifies the default:
+
+    > Unmatched means LOADED, which overstates loaded miles VISIBLY rather than
+    > understating them quietly.
+
+    THE REASONING WAS SOUND AND ITS PRECONDITION WENT UNSTATED. "Visibly"
+    is not a property of the default; it is a claim that something displays the
+    number and somebody reads it. Nothing did. `Load.emptyMiles` had been on
+    the schema since Phase 1 and nothing filled it; when the trips importer
+    began filling it, nothing showed it. So for the whole life of that comment
+    the error was not visible in any sense — it was as quiet as the
+    understatement the trade-off was chosen to avoid, and the sentence read as
+    if the choice had been safe all along.
+
+    IT BECAME TRUE AND FALSE ON THE SAME DAY. The Datatruck round-2 work put a
+    Loaded / Empty / Total panel on the load detail. At that moment 112 legs'
+    miles started appearing on screen as LOADED MILES — a figure a rate gets
+    judged against — and the trade-off's precondition was satisfied for the
+    first time, which is also the moment it stopped being harmless. A pending
+    classification in a source comment is a known unknown; the same thing
+    printed as a number is an assertion.
+
+    WHAT THE SHAPE IS, GENERALLY: a trade-off defended by the visibility of its
+    failure mode depends on an observer that the trade-off itself does not
+    provide. "Fails loudly", "obvious in the logs", "somebody would notice" are
+    the same sentence. None of them is a property of the code; each is a
+    prediction about attention, and attention is the thing least likely to be
+    there at the moment it is needed. Adjacent to flag 88's family — an
+    instrument that inherits the belief it is meant to test — with the
+    inversion that here the instrument was never built at all, and its absence
+    was what made the argument sound.
+
+    THE FIX IS NOT A CLASSIFICATION. Nobody answered the question; the screen
+    stopped pretending it had been answered. `isUnclassifiedLeg` reports that
+    no rule matched, `LoadStop.legEmpty` finally carries the three states the
+    schema documented and the writer had been collapsing — null for
+    unclassified, false for classified-as-loaded — and a load whose split rests
+    partly on a default says so where the number is shown.
+
+    IT IS DERIVED, SO IT REMOVES ITSELF. The note comes from "no rule matched
+    this account", not from a pattern for `TrailerPoolAdjustment`. The day a
+    rule is added, legs carrying that account classify and the note stops
+    appearing on freight imported afterwards — no edit at the call site, no
+    second commit.
+
+    AND IT DOES NOT REMOVE ITSELF RETROACTIVELY, which is correct rather than a
+    limitation. `Load.emptyMiles` is summed at import time from the same rules;
+    a note that vanished for already-imported loads while the stored number
+    still reflected the old table would be the screen going quiet about a
+    figure that was still provisional. Both update together, on re-import, or
+    not at all.

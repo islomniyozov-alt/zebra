@@ -417,3 +417,70 @@ describe.skipIf(files.length === 0)('every real trip in the sweep', () => {
     expect(cancelled).toBeGreaterThan(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// THE PER-STOP MILES AGREE WITH THE LOAD'S TOTAL.
+//
+// `Load.dispatchedMiles` accumulates per LEG, once, and is the authority. The
+// per-stop `legMiles` is the same money broken out, and the two disagreeing is
+// how a stops table comes to contradict the summary above it on the same
+// screen.
+//
+// IT DID DISAGREE, on 5 of 1,730 trips. `legMiles` was written as
+// `index === 0 ? null : miles`, which puts the WHOLE leg's mileage on every
+// stop after the first — identical to the intent on a two-stop leg and a
+// multiple of it on a longer one. The sweep held exactly 5 legs with three or
+// more stops. One-to-one, so the mechanism was named rather than guessed at,
+// and the authority question dissolved instead of needing a ruling.
+// ---------------------------------------------------------------------------
+
+describe.skipIf(files.length === 0)('miles, broken out and summed', () => {
+  it('sums the stop legs back to the trip total, on every trip in the sweep', () => {
+    const mismatched: string[] = []
+    let checked = 0
+
+    for (const name of files) {
+      const { legs } = parseTripsCsv(readFileSync(join(CORPUS, name), 'utf8'))
+      for (const trip of planTrips(legs).trips) {
+        if (trip.totalMiles === null) continue
+        checked++
+        const summed = trip.stops.reduce(
+          (total, stop) => total + (stop.legMiles ?? 0),
+          0,
+        )
+        if (summed !== trip.totalMiles && mismatched.length < 5) {
+          mismatched.push(
+            `${name} ${trip.tripId}: stops summed ${summed}, trip total ` +
+              `${trip.totalMiles}, ${trip.stops.length} stops`,
+          )
+        }
+      }
+    }
+
+    // The control. This assertion is worthless over an empty sweep, and the
+    // sweep is gitignored.
+    expect(checked).toBeGreaterThan(1_000)
+    expect(mismatched).toEqual([])
+  })
+
+  // THE CASE THAT BROKE IT, kept as itself so a future edit sees the shape
+  // rather than only the aggregate.
+  it('gives a three-stop leg its mileage once, at the arrival', () => {
+    const trip = planTrips([
+      leg({
+        tripId: 'T-3STOP',
+        distance: 470,
+        stops: ['MEM4', 'HME9', 'MDW2'].map((facilityCode) => ({
+          facilityCode,
+          plannedArrival: null,
+          plannedDeparture: null,
+          actualArrival: null,
+          actualDeparture: null,
+        })),
+      }),
+    ]).trips[0]!
+
+    expect(trip.totalMiles).toBe(470)
+    expect(trip.stops.map((s) => s.legMiles)).toEqual([null, null, 470])
+  })
+})

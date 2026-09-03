@@ -1,5 +1,5 @@
 import type { TripLeg, TripLegStop } from './trips-csv'
-import { isEmptyLeg } from './leg-purpose'
+import { isEmptyLeg, isUnclassifiedLeg } from './leg-purpose'
 
 // ---------------------------------------------------------------------------
 // LEGS BECOME A TRIP; A TRIP BECOMES ONE LOAD.
@@ -196,6 +196,7 @@ export function planTrips(legs: readonly TripLeg[]): TripsPlan {
     usable.forEach((leg) => {
       const chain = legStops(leg)
       const empty = isEmptyLeg(leg.shipperAccount)
+      const unclassified = isUnclassifiedLeg(leg.shipperAccount)
       const miles = leg.distance === null ? null : Math.round(leg.distance)
 
       if (miles !== null) {
@@ -216,14 +217,33 @@ export function planTrips(legs: readonly TripLeg[]): TripsPlan {
           return
         }
 
+        // THE LEG'S FIGURES BELONG TO THE STOP IT ARRIVES AT — one stop, the
+        // last one in the chain.
+        //
+        // This used to say `index === 0 ? null : miles`, which put the WHOLE
+        // leg's mileage on every stop after the first. On a two-stop leg those
+        // are the same sentence; on a longer one it counts the leg once per
+        // arrival. Measured across the sweep: 1,730 trips, 1,725 where the
+        // stop sums matched `totalMiles` and 5 where they did not — against
+        // exactly 5 legs with three or more stops. A one-to-one
+        // correspondence, so the mechanism is named rather than guessed at.
+        //
+        // `Load.dispatchedMiles` was never wrong: it accumulates per LEG,
+        // once, and stays the authority. This is the per-stop figure agreeing
+        // with it.
+        const arrival = index === chain.length - 1
+
         stops.push({
           sequence: stops.length + 1,
           facilityCode: stop.facilityCode,
-          // The leg belongs to the stop it ARRIVES at, so the first facility
-          // of a leg carries nothing and the rest carry this leg's figures.
-          legMiles: index === 0 ? null : miles,
-          legEmpty: index === 0 ? null : empty,
-          referenceNumber: index === 0 ? null : leg.loadId || null,
+          legMiles: arrival ? miles : null,
+          // THREE STATES, WHICH THE SCHEMA ASKED FOR AND THE WRITER COLLAPSED.
+          // Null means nobody classified this leg — it fell through the rules
+          // to the LOADED default — and false means a rule said loaded. The
+          // difference is what lets the load detail say its split is partly a
+          // default instead of asserting it. See flag 91.
+          legEmpty: arrival ? (unclassified ? null : empty) : null,
+          referenceNumber: arrival ? leg.loadId || null : null,
           plannedArrival: stop.plannedArrival,
           plannedDeparture: stop.plannedDeparture,
           actualArrival: stop.actualArrival,
