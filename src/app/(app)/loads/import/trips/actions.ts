@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
-import { resolveBroker } from '@/lib/locations'
+import { ensureRelayCustomer } from '@/lib/relay-import'
 import { parseTripsCsv } from '@/lib/trips-csv'
 import { tripRowView } from '@/lib/trips-preview'
 import { nearMissWarnings, planSignature, planTrips } from '@/lib/trips-import'
@@ -29,9 +29,6 @@ import { EMPTY_TRIPS_IMPORT, type TripsImportState } from './state'
 //
 // NO MODEL CALL ANYWHERE ON THIS PATH. The trips export is a table; reading it
 // is parsing, not extraction, and nothing here spends a cent.
-
-/** The customer every Relay trip belongs to. */
-const RELAY_CUSTOMER_NAME = 'Amazon Relay'
 
 export async function tripsImportAction(
   _previous: TripsImportState,
@@ -191,10 +188,22 @@ export async function tripsImportAction(
     'create',
     'load',
     async (tx, session) => {
-      const customerId = await resolveBroker(
+      // THE SAME CUSTOMER THE BOARD IMPORTER MAKES, from the same function.
+      //
+      // This used to call `resolveBroker`, which creates a customer with a
+      // name and nothing else — so `settlesDirectly` took its `false` default
+      // and every trips-imported load was booked `directSettled: false`. That
+      // is not cosmetic: `directSettled` decides the whole load-detail screen
+      // AND whether Delivered carries the POD, so those loads got the broker
+      // screen and never became payable.
+      //
+      // WORSE, IT WAS ORDER-DEPENDENT. Both paths look the customer up by name
+      // first, so whichever importer ran first in an organisation decided what
+      // Amazon Relay was for every load booked after it — and could decide it
+      // differently on dev than in production.
+      const { id: customerId } = await ensureRelayCustomer(
         tx,
         session.organizationId,
-        RELAY_CUSTOMER_NAME,
       )
       const codes = [...new Set(plan.trips.flatMap(tripFacilityCodes))]
       const facilities = await resolveFacilities(tx, codes)

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
 import { withOrg } from '@/lib/tenancy'
 import { LOAD_WRITE_TIMEOUT_MS, loadSearchWhere } from '@/lib/loads'
-import { resolveBroker } from '@/lib/locations'
+import { ensureRelayCustomer } from '@/lib/relay-import'
 import { planTrips } from '@/lib/trips-import'
 import { tripRateJoin } from '@/lib/inbound-email'
 import {
@@ -118,7 +118,7 @@ async function importTrip(legs: TripLeg[], maySeeMoney = true) {
   const trip = plan.trips[0]!
 
   const outcome = await inOrg(async (tx) => {
-    const customerId = await resolveBroker(tx, organizationId, 'Amazon Relay')
+    const customerId = (await ensureRelayCustomer(tx, organizationId)).id
     const facilities = await resolveFacilities(tx, tripFacilityCodes(trip))
     return createTripLoad(
       tx,
@@ -257,8 +257,8 @@ describe('a booked trip lands with what it was given', () => {
 
 describe('enrichment adds a missing rate and replaces nothing', () => {
   const bookEmailLoad = async (tripId: string, linehaulCents: number) => {
-    const customerId = await inOrg((tx) =>
-      resolveBroker(tx, organizationId, 'Amazon Relay'),
+    const customerId = await inOrg(
+      async (tx) => (await ensureRelayCustomer(tx, organizationId)).id,
     )
     return owner.load.create({
       data: {
@@ -330,8 +330,8 @@ describe('a trip whose load already exists is enriched, not doubled', () => {
     const trip = planTrips(legs).trips[0]!
 
     // The booking email's load: a reference and nothing else this import adds.
-    const customerId = await inOrg((tx) =>
-      resolveBroker(tx, organizationId, 'Amazon Relay'),
+    const customerId = await inOrg(
+      async (tx) => (await ensureRelayCustomer(tx, organizationId)).id,
     )
     const existing = await owner.load.create({
       data: {
@@ -635,7 +635,9 @@ describe('booked first, then it runs — the normal lifecycle', () => {
     expect(load.stops[0]!.arrivedAt).not.toBeNull()
     expect(load.stops[0]!.departedAt).not.toBeNull()
     expect(load.stops[1]!.arrivedAt).not.toBeNull()
-    expect(load.operationalStatus).toBe('DELIVERED')
+    // PAST DELIVERED. See the first-import test for why this is the payable
+    // state and not an overshoot.
+    expect(load.operationalStatus).toBe('POD_RECEIVED')
   })
 
   it('keeps the plan alongside the actual it just gained', async () => {
@@ -1068,11 +1070,43 @@ describe('T-115GY4TBD, the real four-leg trip', () => {
   // while the status is wrong — and "shows scheduled times" is therefore not
   // evidence about what was written. The row is.
   // ------------------------------------------------------------------------
-  it('lands a finished trip Delivered on the first import', async () => {
+  it('lands a finished trip payable on the first import', async () => {
     const id = `T-FRESH-${nonce}`
     const { load } = await importTrip(fourLegs(id))
 
-    expect(load.operationalStatus).toBe('DELIVERED')
+    // POD RECEIVED, NOT DELIVERED, and the difference is the point.
+    //
+    // Relay freight settles directly, so `transitionOperational` carries the
+    // POD with the delivery: drivers upload into Relay, Amazon holds the
+    // signed paperwork, and no POD document will ever reach this application
+    // for this load. Stopping at DELIVERED would leave it invisible to
+    // `settleableWhere`, which selects on POD_RECEIVED — no settlement line,
+    // in any period, for any driver.
+    //
+    // THIS TEST READ 'DELIVERED' AND PASSED, against freight that was not
+    // Amazon at all: the fixture resolved its customer with `resolveBroker`,
+    // which leaves `settlesDirectly` false, while the action used
+    // `ensureRelayCustomer`, which sets it true. The fixture inherited the
+    // defect from the code and agreed with it. Both call one function now.
+    expect(load.operationalStatus).toBe('POD_RECEIVED')
+
+    // The freight IS the kind the whole redesign is about — asserted here
+    // rather than assumed, because that assumption is exactly what failed.
+    expect(load.directSettled).toBe(true)
+
+    // AND DELIVERED IS STILL ON THE LOG. Reaching POD without a delivery
+    // behind it would be a load that was paid for a trip it never finished.
+    const events = await inOrg((tx) =>
+      tx.loadStatusEvent.findMany({
+        where: { loadId: load.id, axis: 'OPERATIONAL', outcome: 'APPLIED' },
+        orderBy: { occurredAt: 'asc' },
+        select: { toStatus: true, source: true },
+      }),
+    )
+    expect(events.map((event) => event.toStatus)).toContain('DELIVERED')
+    expect(
+      events.find((event) => event.toStatus === 'POD_RECEIVED')?.source,
+    ).toBe('AUTOMATIC')
   })
 
   it('and with every check-in the file printed, in one pass', async () => {
@@ -1270,7 +1304,9 @@ describe('a cancelled load is left alone', () => {
     // The control: without it, a guard that refused EVERYTHING would pass the
     // test above and nobody would notice until an import stopped working.
     expect(load.stops[0]!.arrivedAt).not.toBeNull()
-    expect(load.operationalStatus).toBe('DELIVERED')
+    // POD RECEIVED, NOT DELIVERED — Relay freight settles directly, so the
+    // delivery carries its POD. See the note at the first import test.
+    expect(load.operationalStatus).toBe('POD_RECEIVED')
   })
 })
 

@@ -203,7 +203,20 @@ describe('importing finished trips as delivered', () => {
       }),
     )
 
-    expect(load.operationalStatus).toBe('DELIVERED')
+    // PAST DELIVERED, TO POD RECEIVED — and that is the 2026-09-03 ruling
+    // reaching the board importer, not just the load-detail screen.
+    //
+    // The board importer creates its loads under Amazon Relay, which settles
+    // directly (see "the money wall and the settlement terms" below), and a
+    // direct-settled load carries its POD the moment it is delivered: drivers
+    // upload into Relay, Amazon holds the signed paperwork, and nothing in
+    // this application will ever receive a POD document for this freight.
+    //
+    // IT IS THE PAYABLE STATE, which is why this is the right answer rather
+    // than an accident. `settleableWhere` selects on POD_RECEIVED; a load that
+    // stopped at DELIVERED would be invisible to every settlement period, for
+    // every driver, forever.
+    expect(load.operationalStatus).toBe('POD_RECEIVED')
 
     // THROUGH THE ENGINE, which means the event log records it. A
     // `data: { operationalStatus }` write would leave a load that is
@@ -213,6 +226,15 @@ describe('importing finished trips as delivered', () => {
     )
     expect(delivered).toBeDefined()
     expect(delivered!.source).toBe('INTEGRATION')
+
+    // AND THE POD BEHIND IT, on the log as its own event. §7: POD_RECEIVED is
+    // never set by hand, and a status the log cannot explain is worse than one
+    // the load never reached.
+    const pod = load.statusEvents.find(
+      (event) => event.toStatus === 'POD_RECEIVED',
+    )
+    expect(pod).toBeDefined()
+    expect(pod!.source).toBe('AUTOMATIC')
 
     // The actuals are on the stops, and the PLAN is still there beside them —
     // a delivered load whose appointment was erased cannot be asked whether

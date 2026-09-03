@@ -2159,3 +2159,64 @@ Recorded rather than resolved, per Phase 1's discipline.
     because the screen conflates them and "shows scheduled times" is therefore
     not evidence about what was written. Plus a re-import that must find
     nothing left to add, and an In-Progress trip that must stay booked.
+
+90. **TWO IMPORTERS RESOLVED THE SAME CUSTOMER AND DISAGREED ABOUT WHETHER
+    AMAZON PAYS BY INVOICE — AND WHICHEVER RAN FIRST IN AN ORGANISATION
+    DECIDED IT FOR EVERY LOAD AFTERWARDS.** — 2026-09-03.
+
+    `Load.directSettled` is copied from `Customer.settlesDirectly` when a load
+    is booked. It decides the entire Amazon load-detail screen, it keeps the
+    load out of ready-to-invoice, and since the same day's ruling it decides
+    whether Delivered carries the POD — which is to say whether the driver is
+    ever paid for the freight.
+
+    THE BOARD IMPORTER creates `Amazon Relay` through `ensureRelayCustomer`,
+    with `settlesDirectly: true` and `isFactorable: false`, both reasoned about
+    in that function.
+
+    THE TRIPS IMPORTER called `resolveBroker`, a generic helper that creates a
+    customer with `{ organizationId, name }` and nothing else. `settlesDirectly`
+    took its `false` default. So every load booked through it was
+    `directSettled: false`: the broker screen, a Documents panel asking for
+    paperwork that lives in Relay, and no POD on delivery — invisible to
+    `settleableWhere`, in any period, for any driver.
+
+    AND IT WAS ORDER-DEPENDENT, which is the part that would have made this
+    hard to see. Both paths look the customer up by name before creating one,
+    so the flag was decided by whichever importer ran first in an organisation
+    and then silently inherited by everything after it. Dev and production could
+    disagree; two organisations could disagree; nothing on any screen says
+    which answer an office got.
+
+    THE FIXTURE INHERITED THE DEFECT FROM THE CODE. The trips integration tests
+    resolved their customer with `resolveBroker` too, so they booked
+    non-direct-settled freight and asserted the behaviour of freight the
+    importer does not actually create. Four tests passed on that basis,
+    including two written the same day specifically to prove the POD ruling
+    reached this path. Pointing the fixture at `ensureRelayCustomer` turned
+    three of them red immediately.
+
+    That is the flag-88 lesson arriving again by a different door: **an
+    instrument built the way the code is built agrees with the code.** There it
+    was a column name; here it is a factory function. The corpus rule says
+    build the instrument from the artefact; the equivalent for a fixture is to
+    book the load the way the ACTION books it, and the cheapest way to
+    guarantee that is for both to call the same function — which is now what
+    happens.
+
+    THE THIRD OCCURRENCE OF ONE SHAPE IN TWO DAYS. Flag 88: one file, two
+    readers, two answers about a column name. Flag 89: one behaviour, two write
+    paths, one of them missing a step. This: one customer, two resolvers, two
+    answers about a money flag. None of the three is a mistake in the code that
+    was written; all three are the absence of a single place where the fact
+    lives.
+
+    WHAT IS NOT FIXED BY THE CODE CHANGE, and needs the owner:
+    - **The existing customer row.** If `resolveBroker` created production's
+      `Amazon Relay`, its `settlesDirectly` is `false` and no deploy changes
+      that. One `SELECT` answers it; the fence means the owner runs it.
+    - **Loads already delivered.** `transitionOperational` returns `unchanged`
+      when `from === to`, before the POD follow-on — so an Amazon load already
+      at DELIVERED can never gain its POD by being re-delivered, and
+      re-importing is refused by the `isDelivered` guard. Every such load is
+      unpayable until something backfills it. Loads 1010–1013 are in this set.
