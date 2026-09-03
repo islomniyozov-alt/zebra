@@ -51,7 +51,14 @@ export interface TripWriteInput {
 }
 
 export type TripWriteOutcome =
-  | { kind: 'created'; loadId: string; tripId: string; stops: number }
+  | {
+      kind: 'created'
+      loadId: string
+      tripId: string
+      stops: number
+      /** The export said Completed and the load was moved on the way in. */
+      delivered: boolean
+    }
   | { kind: 'enriched'; loadId: string; tripId: string; added: string[] }
   | { kind: 'unchanged'; loadId: string; tripId: string; reason: string }
 
@@ -215,6 +222,49 @@ export function stopRowsForTrip(
 }
 
 /**
+ * A finished trip is a delivered load — on whichever path wrote it.
+ *
+ * SHARED, BECAUSE THE TWO PATHS DISAGREED FOR A PHASE. `enrichLoad` read
+ * `trip.stage` and moved the load; `createTripLoad` wrote the same four
+ * check-ins onto the same four stops and left it BOOKED. So a dispatcher
+ * importing yesterday's finished trips got loads that claimed to be booked
+ * and appeared to carry Amazon's appointment times — appeared, because the
+ * times were on the row all along and `stop-actuals.ts` shows the PLAN on a
+ * booked load. Importing the same file a second time moved the status and the
+ * check-ins became visible, which read as "the second import added them".
+ *
+ * That is the same shape as the column two readers named differently: one
+ * behaviour, two implementations, and nothing comparing them. It is one
+ * function now.
+ *
+ * `transitionOperational` rather than a column write, so the move is on the
+ * event log with a source that says a human did not click it. It refuses a
+ * backwards move on its own, so a load already at POD_RECEIVED is safe.
+ */
+async function deliverFinishedTrip(
+  tx: TxClient,
+  loadId: string,
+  trip: PlannedTrip,
+  rows: readonly TripStopRow[],
+  byUserId: string | null,
+): Promise<boolean> {
+  if (trip.stage !== 'finished') return false
+
+  const last = rows[rows.length - 1]
+  // WHEN IT FINISHED, not when the file was uploaded — the same choice the
+  // board importer makes. Departure first, arrival second, nothing third:
+  // a load with no recorded time still moves, it just carries no instant.
+  const finishedAt = last?.departedAt ?? last?.arrivedAt ?? null
+  const outcome = await transitionOperational(tx, loadId, 'DELIVERED', {
+    source: 'INTEGRATION',
+    userId: byUserId,
+    ...(finishedAt ? { occurredAt: finishedAt } : {}),
+    note: `Relay trips export reports ${trip.tripId} completed`,
+  })
+  return outcome.result === 'moved'
+}
+
+/**
  * Book a trip that no load carries yet.
  *
  * IT LIVES HERE RATHER THAN IN THE SERVER ACTION, and that is the whole
@@ -240,6 +290,7 @@ export async function createTripLoad(
   organizationId: string,
   input: TripWriteInput,
   facilities: ReadonlyMap<string, ResolvedFacility>,
+  byUserId: string | null = null,
 ): Promise<TripWriteOutcome> {
   const rows = stopRowsForTrip(input.trip, facilities)
 
@@ -281,11 +332,24 @@ export async function createTripLoad(
     stops,
   })
 
+  // AND THE STAGE THE PLANNER ALREADY READ. A Completed export imported with
+  // no earlier pass behind it is a delivered load on the FIRST import; needing
+  // a second one to reach the right state made the file a two-step ritual and
+  // put freight on the board claiming to be booked.
+  const delivered = await deliverFinishedTrip(
+    tx,
+    load.id,
+    input.trip,
+    rows,
+    byUserId,
+  )
+
   return {
     kind: 'created',
     loadId: load.id,
     tripId: input.trip.tripId,
     stops: stops.length,
+    delivered,
   }
 }
 
@@ -503,24 +567,21 @@ export async function enrichLoad(
   // AND THE STATUS THE EXPORT REPORTS. A finished trip is a delivered load, and
   // leaving it BOOKED means it never reaches the invoice queue or a settlement.
   //
-  // `transitionOperational` rather than a column write, so the move is on the
-  // event log with a source that says a human did not click it. It refuses a
-  // backwards move on its own, so a load already at POD_RECEIVED is safe; the
-  // `isDelivered` check is there to keep the preview honest rather than to
-  // protect the write.
-  if (trip.stage === 'finished' && !existing.isDelivered) {
-    const last = actualRows[actualRows.length - 1]
-    // WHEN IT FINISHED, not when the file was uploaded — the same choice the
-    // board importer makes. Departure first, arrival second, nothing third:
-    // a load with no recorded time still moves, it just carries no instant.
-    const finishedAt = last?.departedAt ?? last?.arrivedAt ?? null
-    const outcome = await transitionOperational(tx, loadId, 'DELIVERED', {
-      source: 'INTEGRATION',
-      userId: byUserId,
-      ...(finishedAt ? { occurredAt: finishedAt } : {}),
-      note: `Relay trips export reports ${trip.tripId} completed`,
-    })
-    if (outcome.result === 'moved') added.push('delivered')
+  // THE SAME FUNCTION THE CREATE PATH CALLS. `deliverFinishedTrip` used to be
+  // written out here and nowhere else, which is how the create path came to
+  // write identical stops and leave the load booked. The `isDelivered` check
+  // stays here rather than moving inside it: it keeps the PREVIEW honest about
+  // whether there is a move to make, and `transitionOperational` refuses a
+  // backwards move on its own regardless.
+  if (!existing.isDelivered) {
+    const moved = await deliverFinishedTrip(
+      tx,
+      loadId,
+      trip,
+      actualRows,
+      byUserId,
+    )
+    if (moved) added.push('delivered')
   }
 
   if (added.length === 0) {

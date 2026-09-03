@@ -276,3 +276,31 @@ describe('the preview says what a Finished re-import will do', () => {
     })
   })
 })
+
+// ---------------------------------------------------------------------------
+// THE CREATE ROW SAYS WHAT THE CREATE WILL DO.
+//
+// `createTripLoad` used to leave every load BOOKED, so "to book" was true of a
+// finished trip too. It reads `trip.stage` now and lands a Completed export
+// delivered on the first import — at which point the unchanged preview row was
+// describing the old write. A preview that understates is the same defect as
+// one that overstates: the sentence a dispatcher confirms has to be the
+// sentence the writer performs.
+// ---------------------------------------------------------------------------
+
+describe('a create row from a completed export', () => {
+  it('says it will book the load AND mark it delivered', () => {
+    expect(view(true, { stage: 'finished' }).actionDetail).toBe(
+      'books a new load, marks delivered',
+    )
+  })
+
+  it('says only "to book" for a trip that has not run', () => {
+    expect(view(true, { stage: 'upcoming' }).actionDetail).toBe(
+      'books a new load',
+    )
+    expect(view(true, { stage: 'running' }).actionDetail).toBe(
+      'books a new load',
+    )
+  })
+})

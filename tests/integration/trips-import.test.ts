@@ -1046,6 +1046,92 @@ describe('T-115GY4TBD, the real four-leg trip', () => {
     expect(mem4.actualArrival?.time).toBe('07:17')
     expect(mem4.actualArrival?.time).not.toBe('06:27')
   })
+
+  // ------------------------------------------------------------------------
+  // THE FIRST IMPORT, WITH NO EARLIER ONE BEHIND IT.
+  //
+  // Dispatch imports yesterday's finished trips. There was no Upcoming pass —
+  // the freight ran before anybody typed it in, which is the ordinary case for
+  // a carrier catching up on a week. The file says Completed and carries every
+  // check-in.
+  //
+  // ON PRODUCTION AT 790f475 loads 1011, 1012 and 1013 arrived from exactly
+  // this file and landed BOOKED, showing Amazon's appointment times as though
+  // they were the plan for freight still to come. Re-importing the same file
+  // then moved them to Delivered. Two passes to reach a state the first pass
+  // had all the facts for: `enrichLoad` reads `trip.stage` and `createTripLoad`
+  // did not.
+  //
+  // BOTH HALVES ARE ASSERTED SEPARATELY, because the screen cannot tell them
+  // apart. `stop-actuals.ts` shows the PLAN on a booked load, so a stop that
+  // carries a real check-in and a stop that carries none render identically
+  // while the status is wrong — and "shows scheduled times" is therefore not
+  // evidence about what was written. The row is.
+  // ------------------------------------------------------------------------
+  it('lands a finished trip Delivered on the first import', async () => {
+    const id = `T-FRESH-${nonce}`
+    const { load } = await importTrip(fourLegs(id))
+
+    expect(load.operationalStatus).toBe('DELIVERED')
+  })
+
+  it('and with every check-in the file printed, in one pass', async () => {
+    const id = `T-FRESHACT-${nonce}`
+    const { load } = await importTrip(fourLegs(id))
+
+    expect(
+      load.stops.filter((row) => row.arrivedAt !== null),
+      `stops with a check-in: ${load.stops
+        .map((row) => `${row.name}=${row.arrivedAt ? 'set' : 'null'}`)
+        .join(', ')}`,
+    ).toHaveLength(4)
+  })
+
+  // AND THE SECOND IMPORT CHANGES NOTHING. The point of doing it in one pass
+  // is that the file stops being a two-step ritual; if a re-import still found
+  // something to add, the first pass would still be incomplete.
+  it('has nothing left to add when the same file arrives again', async () => {
+    const id = `T-FRESHIDEM-${nonce}`
+    await importTrip(fourLegs(id))
+
+    const trip = planTrips(fourLegs(id)).trips[0]!
+    const outcome = await inOrg(async (tx) => {
+      const write = await planTripWrite(tx, trip)
+      if (write.action !== 'enrich') throw new Error('expected enrich')
+      const facilities = await resolveFacilities(tx, tripFacilityCodes(trip))
+      return enrichLoad(
+        tx,
+        organizationId,
+        write.loadId,
+        trip,
+        facilities,
+        {
+          hasStops: write.hasStops,
+          hasMiles: write.hasMiles,
+          hasRate: write.hasRate,
+          hasActuals: write.hasActuals,
+          isDelivered: write.isDelivered,
+          isCancelled: write.isCancelled,
+        },
+        null,
+        userId,
+      )
+    })
+
+    expect(outcome.kind).toBe('unchanged')
+  })
+
+  // A TRIP STILL RUNNING IS NOT DELIVERED, which is the other side of reading
+  // the stage: only `finished` moves the load, and the same import that lands
+  // one load delivered leaves the next one booked.
+  it('leaves an unfinished trip booked', async () => {
+    const id = `T-FRESHRUN-${nonce}`
+    const { load } = await importTrip(
+      fourLegs(id).map((one) => ({ ...one, status: 'In Progress' })),
+    )
+
+    expect(load.operationalStatus).toBe('BOOKED')
+  })
 })
 
 describe('a cancelled load is left alone', () => {

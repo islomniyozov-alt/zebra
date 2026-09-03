@@ -2111,3 +2111,49 @@ Recorded rather than resolved, per Phase 1's discipline.
     row, read the baseline off the thing being measured — and never from what
     the source believes about it. Where the instrument must name something the
     code also names, that name is the first thing to doubt when both agree.
+
+89. **ONE BEHAVIOUR, TWO WRITE PATHS, AND ONLY ONE OF THEM READ THE STAGE.** —
+    2026-09-02, found in live use within an hour of flag 88's deploy.
+
+    Loads 1011, 1012 and 1013 were imported from a Completed export with no
+    earlier pass behind them — the ordinary case for a carrier catching up on a
+    week of finished trips. All three landed **Booked**, showing what looked
+    like Amazon's appointment times for freight still to come. Re-importing the
+    same file moved them to Delivered and the check-ins appeared, which read as
+    "the second import added the times".
+
+    IT DID NOT. The row says the check-ins were written by the FIRST import:
+    the guard `and with every check-in the file printed, in one pass` passed
+    against unfixed code, while `lands a finished trip Delivered on the first
+import` failed with `BOOKED`. `createTripLoad` wrote all four clocks
+    correctly and never moved the status; `stop-actuals.ts` shows the PLAN on a
+    booked load, so four real check-ins and no check-ins render identically.
+    The screen could not distinguish the two, and neither could the report.
+
+    THIS IS FLAG 88'S SHAPE IN THE WRITE PATH. There, one file had two readers
+    that named a column differently and nothing compared them. Here, one
+    behaviour — "a finished trip is a delivered load" — was written out inside
+    `enrichLoad` and nowhere else, so the create path beside it could be
+    complete in every other respect and silently lack it. Neither defect is a
+    mistake in the code that was written; both are the absence of a single
+    place where the rule lives.
+
+    SO THE MOVE IS ONE FUNCTION. `deliverFinishedTrip` is called by both paths
+    and owns the `trip.stage === 'finished'` test and the `occurredAt` choice
+    (last departure, else last arrival, else nothing). `enrichLoad` keeps its
+    own `isDelivered` check, because that one exists to keep the PREVIEW honest
+    rather than to protect the write.
+
+    AND THE PREVIEW MOVED WITH IT. The create row read "to book" for a trip
+    that had already run — true of the old write, and false the moment the
+    writer learned to read the stage. It now reads "to book, marks delivered",
+    from the same `trip.stage` the writer uses. A preview that understates is
+    the same defect as one that overstates; flag 88's cancelled-load lesson was
+    that a preview must not announce a write that cannot happen, and this is
+    its other half.
+
+    WHAT THE GUARD LOOKS LIKE: four integration tests, and the split between
+    the first two is the point — status and check-ins are asserted SEPARATELY,
+    because the screen conflates them and "shows scheduled times" is therefore
+    not evidence about what was written. Plus a re-import that must find
+    nothing left to add, and an In-Progress trip that must stay booked.

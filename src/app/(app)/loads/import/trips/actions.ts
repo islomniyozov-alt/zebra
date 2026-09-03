@@ -239,6 +239,7 @@ export async function tripsImportAction(
             rateCents: maySeeMoney ? trip.rateCents : null,
           },
           facilities,
+          session.userId ?? null,
         )
         created++
       }

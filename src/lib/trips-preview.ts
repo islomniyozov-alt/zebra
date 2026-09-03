@@ -130,8 +130,15 @@ export function tripRowView(
             ? 'unchanged'
             : 'enrich',
     actionDetail:
+      // A CREATE FROM A COMPLETED EXPORT SAYS SO. The row used to read "to
+      // book" for a trip that had already run, which was true of the write at
+      // the time and stopped being true when `createTripLoad` learned to read
+      // the stage. The preview and the write agree by construction or they do
+      // not agree at all.
       write.action === 'create'
-        ? labels.create
+        ? trip.stage === 'finished'
+          ? [labels.create, labels.marksDelivered].join(', ')
+          : labels.create
         : cancelled
           ? labels.cancelled
           : unchanged
