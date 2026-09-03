@@ -85,7 +85,40 @@ const WALKTHROUGH_READERS = [
   'verify-users.mjs',
 ]
 
-const ALLOWED = [...CHECK_READERS, ...DEPLOY_READERS, ...WALKTHROUGH_READERS]
+/**
+ * Run by a human, deliberately, and permitted to SELECT and nothing else.
+ *
+ * A category between the two that existed. The `check:` scripts are unattended
+ * and read-only; the walkthroughs are human-run and write fixtures by design.
+ * An INSPECTION is human-run like a walkthrough and read-only like a check —
+ * somebody asking production a question whose answer governs a decision.
+ *
+ * Held to the STRICTER rule below, because the whole value of an inspection is
+ * that reading it cannot change the thing being read. A question that edits its
+ * subject is not a question.
+ */
+const INSPECTION_READERS = ['inspect-relay-customer.mjs']
+
+/**
+ * Run by a human, deliberately, and permitted to write.
+ *
+ * A one-off repair of rows the application cannot reach on its own. It is NOT
+ * held to the read-only rule — writing is the point — so the safety lives in
+ * the script instead: it is dry-run unless told otherwise, it names every row
+ * it would touch and why, and running it twice changes nothing the second time.
+ *
+ * A script in this list is a claim that somebody read its dry-run output before
+ * it ever wrote anything.
+ */
+const MAINTENANCE_READERS = ['backfill-direct-pod.mjs']
+
+const ALLOWED = [
+  ...CHECK_READERS,
+  ...DEPLOY_READERS,
+  ...INSPECTION_READERS,
+  ...MAINTENANCE_READERS,
+  ...WALKTHROUGH_READERS,
+]
 
 /** Every script, since scripts are where a production URL would be used. */
 function sources(): { name: string; text: string }[] {
@@ -126,7 +159,11 @@ describe('the production URL has exactly the readers it was given', () => {
   // The stricter half of the rule. A walkthrough writes fixtures by design;
   // a script that runs unattended in `check` must never be able to.
   it('is only ever read by the scripts that run unattended or pass it on', () => {
-    for (const name of [...CHECK_READERS, ...DEPLOY_READERS]) {
+    for (const name of [
+      ...CHECK_READERS,
+      ...DEPLOY_READERS,
+      ...INSPECTION_READERS,
+    ]) {
       const text = readFileSync(join(process.cwd(), 'scripts', name), 'utf8')
       // Anything that mutates. A count and a migration list need none of it.
       expect(
