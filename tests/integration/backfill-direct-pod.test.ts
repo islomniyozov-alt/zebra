@@ -140,7 +140,7 @@ const statusOf = async (loadId: string) =>
     })
   ).operationalStatus
 
-beforeAll(async () => {
+async function bootstrap() {
   owner = retryingClient(process.env.DIRECT_DATABASE_URL!)
 
   const organization = await owner.organization.create({
@@ -190,7 +190,7 @@ beforeAll(async () => {
       },
     })
   ).id
-})
+}
 
 afterAll(async () => {
   await owner.organization
@@ -200,81 +200,105 @@ afterAll(async () => {
   await owner.$disconnect()
 })
 
+// THE FIXTURES ARE BUILT ONCE AND THE SCRIPT RUNS THREE TIMES, which is a
+// deliberate change from a version that spawned it ten times.
+//
+// Each spawn is a Node process opening its own connection to a database branch
+// that is already carrying eight test workers. The ten-spawn version went into
+// the gate and four unrelated files blew their 20-second transaction ceiling by
+// one to eight seconds — flag 83's thin margin, pushed over by this file.
+//
+// It is also the better shape on its own terms: the script is a BATCH over
+// everything that qualifies, and running it once across a corpus of fixtures is
+// how the owner will actually use it. Ten runs of one load each tested a
+// program nobody executes.
+let dryRun = ''
+let stampedAt: Date
+let strandedId = ''
+let driverlessId = ''
+let noEventId = ''
+let brokerId = ''
+
+beforeAll(async () => {
+  await bootstrap()
+
+  stampedAt = day(11, 22)
+  strandedId = await strandedLoad({
+    tag: 'STAMP',
+    customerId: directCustomerId,
+    deliveredAt: stampedAt,
+  })
+  driverlessId = await strandedLoad({
+    tag: 'NODRV',
+    customerId: directCustomerId,
+    withDriver: false,
+  })
+  noEventId = await strandedLoad({
+    tag: 'NOEVT',
+    customerId: directCustomerId,
+    withDeliveredEvent: false,
+  })
+  brokerId = await strandedLoad({ tag: 'BROKER', customerId: brokerCustomerId })
+
+  dryRun = backfill()
+})
+
 describe('the dry run, which is what the owner reads first', () => {
-  it('names the load, and writes absolutely nothing', async () => {
-    const loadId = await strandedLoad({
-      tag: 'DRY',
-      customerId: directCustomerId,
-    })
-
-    const output = backfill()
-
-    expect(output).toContain('Dry run')
-    expect(output).toContain(`T-DRY-${nonce}`)
-    expect(output).toContain('Dry run — nothing was written')
-
-    // THE HALF THAT MATTERS. A dry run that moved a load would be the worst
-    // possible defect in a script whose entire safety story is "read it first".
-    expect(await statusOf(loadId)).toBe('DELIVERED')
-    expect(await podEvents(loadId)).toHaveLength(0)
+  it('names each load it would stamp', () => {
+    expect(dryRun).toContain('Dry run')
+    expect(dryRun).toContain(`T-STAMP-${nonce}`)
   })
 
-  it('says so when a load has no driver, because a POD alone will not pay it', async () => {
-    await strandedLoad({
-      tag: 'NODRV',
-      customerId: directCustomerId,
-      withDriver: false,
-    })
-
-    const output = backfill()
-    expect(output).toContain('NO DRIVER')
-    expect(output).toContain('will still not settle')
+  it('says which ones have no driver, because a POD alone will not pay them', () => {
+    expect(dryRun).toContain('NO DRIVER')
+    expect(dryRun).toContain('will still not settle')
   })
 
-  it('refuses a load it has no delivered time for, rather than guessing', async () => {
-    await strandedLoad({
-      tag: 'NOEVT',
-      customerId: directCustomerId,
-      withDeliveredEvent: false,
-    })
-
-    const output = backfill()
-    expect(output).toContain('NO DELIVERED EVENT')
-    expect(output).toContain('refused for want of a Delivered event')
+  it('refuses a load it has no delivered time for, rather than guessing', () => {
+    expect(dryRun).toContain('NO DELIVERED EVENT')
+    expect(dryRun).toContain('refused for want of a Delivered event')
   })
 
-  it('leaves broker freight out of it entirely', async () => {
-    await strandedLoad({ tag: 'BROKER', customerId: brokerCustomerId })
-
-    const output = backfill()
+  it('leaves broker freight out of it entirely', () => {
     // Broker freight reaches POD through a POD document, which is real
     // paperwork this carrier holds. Stamping one would be inventing a record.
-    expect(output).not.toContain(`T-BROKER-${nonce}`)
+    expect(dryRun).not.toContain(`T-BROKER-${nonce}`)
+  })
+
+  it('writes absolutely nothing', async () => {
+    // THE HALF THAT MATTERS. A dry run that moved a load would be the worst
+    // possible defect in a script whose entire safety story is "read it first".
+    for (const id of [strandedId, driverlessId, noEventId, brokerId]) {
+      expect(await statusOf(id)).toBe('DELIVERED')
+      expect(await podEvents(id)).toHaveLength(0)
+    }
   })
 })
 
 describe('--apply, on freight nobody could have been paid for', () => {
+  let applied = ''
+  let second = ''
+
+  beforeAll(() => {
+    applied = backfill('--apply')
+    // Immediately again. Idempotence is not a nicety here: a second stamp
+    // would put two POD events in one pay period, and a settlement counts
+    // events.
+    second = backfill('--apply')
+  })
+
   it('stamps the POD at the DELIVERED time, not at the clock', async () => {
-    const delivered = day(11, 22)
-    const loadId = await strandedLoad({
-      tag: 'APPLY',
-      customerId: directCustomerId,
-      deliveredAt: delivered,
-    })
+    expect(applied).toContain('APPLYING')
+    expect(await statusOf(strandedId)).toBe('POD_RECEIVED')
 
-    const output = backfill('--apply')
-    expect(output).toContain('APPLYING')
-
-    expect(await statusOf(loadId)).toBe('POD_RECEIVED')
-
-    const events = await podEvents(loadId)
+    const events = await podEvents(strandedId)
     expect(events).toHaveLength(1)
 
     // THE ASSERTION THE WHOLE SCRIPT TURNS ON. `settleableWhere` keys the pay
     // period on this timestamp. Stamping `now()` would sweep every stranded
     // load into whichever week the repair happened to be run, and pay a
     // summer of freight at once.
-    expect(events[0]!.occurredAt.toISOString()).toBe(delivered.toISOString())
+    expect(events[0]!.occurredAt.toISOString()).toBe(stampedAt.toISOString())
 
     // §7: never set by hand, and a message KEY rather than a sentence, so the
     // timeline renders it in the reader's language.
@@ -282,58 +306,43 @@ describe('--apply, on freight nobody could have been paid for', () => {
     expect(events[0]!.note).toBe('status.note.podConfirmed')
   })
 
-  it('changes nothing the second time it is run', async () => {
-    const loadId = await strandedLoad({
-      tag: 'TWICE',
-      customerId: directCustomerId,
-    })
-
-    backfill('--apply')
-    const first = await podEvents(loadId)
-    expect(first).toHaveLength(1)
-
-    // IDEMPOTENCE IS NOT A NICETY HERE. A second run that stamped again would
-    // put two POD events in one pay period, and a settlement counts events.
-    const second = backfill('--apply')
-    expect(await podEvents(loadId)).toHaveLength(1)
-    // ASSERTED AS BEHAVIOUR, NOT AS WORDING. An earlier version looked for
-    // "Nothing to do", which only prints when NOTHING matches the three
-    // conditions — and a sibling fixture with no Delivered event matches them
-    // forever, by design, because a permanent refusal is something the owner
-    // should keep seeing. The claim is that the second run STAMPS nothing.
-    expect(second).toContain('0 load(s) stamped')
+  it('stamps the driverless load too, and still says it will not settle', async () => {
+    // The POD is honest — the freight was delivered. What it does NOT do is
+    // make the load payable, and the dry run said so before anyone ran this.
+    expect(await statusOf(driverlessId)).toBe('POD_RECEIVED')
+    expect(dryRun).toContain('NO DRIVER')
   })
 
-  it('still refuses the load with no delivered time, even under --apply', async () => {
-    const loadId = await strandedLoad({
-      tag: 'STILL',
-      customerId: directCustomerId,
-      withDeliveredEvent: false,
-    })
+  it('still refuses the load with no delivered time', async () => {
+    // Not a dry-run courtesy: the script declines to invent a timestamp that
+    // decides which week somebody is paid in.
+    expect(await statusOf(noEventId)).toBe('DELIVERED')
+    expect(await podEvents(noEventId)).toHaveLength(0)
+  })
 
-    backfill('--apply')
-
-    // The refusal is not a dry-run courtesy; it is the script declining to
-    // invent a timestamp that decides which week somebody is paid in.
-    expect(await statusOf(loadId)).toBe('DELIVERED')
-    expect(await podEvents(loadId)).toHaveLength(0)
+  it('never touches broker freight', async () => {
+    expect(await statusOf(brokerId)).toBe('DELIVERED')
+    expect(await podEvents(brokerId)).toHaveLength(0)
   })
 
   it('moves the billing cache with it', async () => {
-    const loadId = await strandedLoad({
-      tag: 'BILL',
-      customerId: directCustomerId,
-    })
-
-    backfill('--apply')
-
     const load = await owner.load.findUniqueOrThrow({
-      where: { id: loadId },
+      where: { id: strandedId },
       select: { billingStatus: true },
     })
     // `billingStatusFor`: direct-settled, nothing applied, POD in, rate on it.
     // A stale cache here would leave the load out of the queue that matches it
     // against Amazon's weekly statement.
     expect(load.billingStatus).toBe('READY_TO_INVOICE')
+  })
+
+  it('changes nothing the second time it is run', async () => {
+    expect(await podEvents(strandedId)).toHaveLength(1)
+    // ASSERTED AS BEHAVIOUR, NOT AS WORDING. An earlier version looked for
+    // "Nothing to do", which only prints when NOTHING matches the three
+    // conditions — and the load with no Delivered event matches them forever,
+    // by design, because a permanent refusal is something the owner should
+    // keep seeing. The claim is that the second run STAMPS nothing.
+    expect(second).toContain('0 load(s) stamped')
   })
 })

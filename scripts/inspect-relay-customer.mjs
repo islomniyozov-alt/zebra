@@ -42,7 +42,10 @@ if (!connectionString) {
 
 neonConfig.webSocketConstructor ??= WebSocket
 neonConfig.poolQueryViaFetch = false
-const pool = new Pool({ connectionString })
+// ONE CONNECTION, SAID OUT LOUD. This script needs exactly one and runs
+// against a branch with a connection ceiling; a default pool holding idle
+// sockets is pressure on something else's transaction for no benefit here.
+const pool = new Pool({ connectionString, max: 1 })
 
 const rows = async (text, values = []) => (await pool.query(text, values)).rows
 
