@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { stopRowsForTrip, tripFacilityCodes } from '@/lib/trips-writer'
+import {
+  facilitiesMissingAddress,
+  stopRowsForTrip,
+  tripFacilityCodes,
+} from '@/lib/trips-writer'
 import type { PlannedTrip } from '@/lib/trips-import'
 
 // ---------------------------------------------------------------------------
@@ -60,7 +64,7 @@ const facilityMap = (
   new Map(
     Object.entries(byCode).map(([code, id]) => [
       code,
-      { id, city: null, state: null, timezone },
+      { id, city: null, state: null, timezone, addressLine1: null },
     ]),
   )
 
@@ -216,5 +220,52 @@ describe('what the writer is forbidden to do', () => {
     )
     expect(enrich).toContain('added.push(`${rows.length} stops`)')
     expect(enrich).toContain("kind: 'unchanged'")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE FACILITY THE BOOK HAS AND HAS NO STREET FOR.
+//
+// The quieter of two problems, and the one that was invisible. A code with no
+// row at all is already surfaced — the stop takes the code as its name and the
+// preview lists it as unresolved. A code the book HAS, with no address, resolves
+// cleanly: the stop links to a real facility, the load looks complete on every
+// screen, and a driver is sent to a code nobody has a street for. MEM4-DRAY on
+// load 1013 was exactly that.
+// ---------------------------------------------------------------------------
+
+describe('facilities the book cannot address', () => {
+  const withAddresses = (byCode: Record<string, string | null>) =>
+    new Map(
+      Object.entries(byCode).map(([code, addressLine1]) => [
+        code,
+        {
+          id: `loc-${code}`,
+          city: null,
+          state: null,
+          timezone: null,
+          addressLine1,
+        },
+      ]),
+    )
+
+  it('names a facility that resolved but carries no street', () => {
+    const book = withAddresses({ MEM4: '4000 Nucor Rd', 'MEM4-DRAY': null })
+    expect(facilitiesMissingAddress(['MEM4', 'MEM4-DRAY'], book)).toEqual([
+      'MEM4-DRAY',
+    ])
+  })
+
+  // THE LINE BETWEEN THE TWO CONDITIONS. A code with no row is the OTHER
+  // problem and is already reported as unresolved; listing it here as well
+  // would count one stop under two headings and imply two fixes.
+  it('says nothing about a code the book does not have at all', () => {
+    const book = withAddresses({ MEM4: '4000 Nucor Rd' })
+    expect(facilitiesMissingAddress(['MEM4', 'NOWHERE'], book)).toEqual([])
+  })
+
+  it('is quiet when every facility has a street', () => {
+    const book = withAddresses({ MEM4: '4000 Nucor Rd', HME9: '5155 Citation' })
+    expect(facilitiesMissingAddress(['MEM4', 'HME9'], book)).toEqual([])
   })
 })

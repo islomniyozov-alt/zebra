@@ -42,6 +42,24 @@ export interface LoadDetailView {
   editMiles: boolean
   /** Item 6 — Rate con / POD / BOL prompts. */
   showDocuments: boolean
+  /**
+   * Item 1 (round 2) — stops numbered, not just typed.
+   *
+   * A Relay trip runs six to eight stops and PICKUP/DELIVERY alone does not
+   * say which comes third. Broker freight is usually two stops, where the
+   * labels are the order.
+   */
+  numberedStops: boolean
+  /**
+   * Item 2 (round 2) — a stop with no address says so, loudly.
+   *
+   * MEM4-DRAY on load 1013 has a facility row and no street, and the screen
+   * showed blank space: a driver being sent to a code nobody has an address
+   * for, with nothing saying so. Relay freight is imported by CODE, so this is
+   * a condition it produces constantly and broker freight barely can — a
+   * typed-in load has an address because somebody typed one.
+   */
+  flagMissingAddress: boolean
   /** Item 8 — notes as timeline entries rather than a panel of their own. */
   notesInTimeline: boolean
 }
@@ -68,6 +86,8 @@ export function loadDetailView(load: {
     showFuelSurcharge: !direct,
     editMiles: direct,
     showDocuments: !direct,
+    numberedStops: direct,
+    flagMissingAddress: direct,
     notesInTimeline: direct,
   })
 }

@@ -13,6 +13,7 @@ import {
   enrichLoad,
   planTripWrite,
   resolveFacilities,
+  facilitiesMissingAddress,
   tripFacilityCodes,
 } from '@/lib/trips-writer'
 import { EMPTY_TRIPS_IMPORT, type TripsImportState } from './state'
@@ -77,10 +78,22 @@ export async function tripsImportAction(
     const rows = []
     for (const trip of plan.trips) {
       const write = await planTripWrite(tx, trip)
+      // TWO DIFFERENT PROBLEMS, COUNTED SEPARATELY (item 2, round 2).
+      //
+      // `unresolved` has always meant "the book has no row for this code" —
+      // the import writes the code as the stop name and nothing else. Widening
+      // it to cover a facility that HAS a row and no street would change what
+      // that number has meant since it was written, and the two need different
+      // fixes: one is a missing facility, the other is a facility missing a
+      // street. MEM4-DRAY on load 1013 is the second, and was invisible.
       const unresolved = tripFacilityCodes(trip).filter(
         (code) => !facilities.has(code),
       )
-      rows.push({ trip, write, unresolved })
+      const noAddress = facilitiesMissingAddress(
+        tripFacilityCodes(trip),
+        facilities,
+      )
+      rows.push({ trip, write, unresolved, noAddress })
     }
 
     return {
@@ -132,6 +145,7 @@ export async function tripsImportAction(
       (sum, trip) => sum + trip.cancelledLegs,
       0,
     ),
+    noAddressCodes: [...new Set(decided.rows.flatMap((row) => row.noAddress))],
     unresolvedCodes: [
       ...new Set(decided.rows.flatMap((row) => row.unresolved)),
     ],

@@ -78,6 +78,7 @@ export default async function TripsImportPage() {
           stageFinished: t('trips.stageFinished'),
           stageRunning: t('trips.stageRunning'),
           unresolvedTitle: t('trips.unresolvedTitle'),
+          noAddressTitle: t('trips.noAddressTitle'),
           warningsTitle: t('trips.warningsTitle'),
           notAssigned: t('trips.notAssigned'),
           confirm: t('trips.confirm'),

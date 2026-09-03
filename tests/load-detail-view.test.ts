@@ -31,6 +31,8 @@ describe('the screen a load gets', () => {
     showFuelSurcharge: false,
     editMiles: true,
     showDocuments: false,
+    numberedStops: true,
+    flagMissingAddress: true,
     notesInTimeline: true,
   }
 
@@ -42,6 +44,8 @@ describe('the screen a load gets', () => {
     showFuelSurcharge: true,
     editMiles: false,
     showDocuments: true,
+    numberedStops: false,
+    flagMissingAddress: false,
     notesInTimeline: false,
   }
 

@@ -20,7 +20,6 @@ import { renderStopTime, ZONE_CHOICES } from '@/lib/stop-time'
 import { latenessLabel, shownStopTime } from '@/lib/stop-actuals'
 import { isMessageKey, type MessageKey } from '@/lib/i18n'
 import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { RatePanel, type AccessorialRow } from './RatePanel'
@@ -31,6 +30,7 @@ import { LoadAssignment } from './LoadAssignment'
 import { NoteComposer } from './NoteComposer'
 import { Copyable } from './Copyable'
 import { MilesField } from './MilesField'
+import { StopAddress } from './StopAddress'
 import {
   addNoteAction,
   assignLoadAction,
@@ -420,7 +420,7 @@ export default async function LoadDetailPage({
               uncancel={uncancelLoadAction.bind(null, id)}
               labels={{
                 markDelivered: t('loads.markDelivered'),
-                cancel: t('loads.cancel'),
+                cancel: t('ref.cancel'),
                 cancelTitle: t('loads.cancelTitle'),
                 cancelBody: t('loads.cancelBody'),
                 reason: t('loads.cancelReason'),
@@ -481,7 +481,13 @@ export default async function LoadDetailPage({
                   <MilesField
                     dispatchedMiles={load.dispatchedMiles}
                     save={setMilesAction.bind(null, id)}
-                    labels={{ miles: t('loads.miles'), save: t('ref.save') }}
+                    locale={locale}
+                    labels={{
+                      miles: t('loads.miles'),
+                      edit: t('loads.editValue'),
+                      saving: t('loads.assignSaving'),
+                      failed: t('loads.saveFailed'),
+                    }}
                   />
                 ) : load.dispatchedMiles === null ? (
                   '—'
@@ -577,8 +583,18 @@ export default async function LoadDetailPage({
                     className="border-b border-border pb-z2 last:border-b-0"
                   >
                     <div className="flex items-baseline justify-between gap-z2">
+                      {/* ITEM 1 (round 2) — THE ORDER, NOT JUST THE KIND.
+                       * A Relay trip runs six to eight stops and
+                       * "PICKUP"/"DELIVERY" alone does not say which comes
+                       * third. Broker freight is two stops, where the labels
+                       * are the order. */}
                       <span className="text-xs uppercase tracking-[0.04em] text-ink-2">
-                        {t(`stop.${stop.type}` as never)}
+                        {view.numberedStops
+                          ? t('loads.stopN').replace(
+                              '{n}',
+                              String(stop.sequence),
+                            ) + ` · ${t(`stop.${stop.type}` as never)}`
+                          : t(`stop.${stop.type}` as never)}
                       </span>
                       <span className="flex items-baseline gap-z2">
                         {/* A PLAN IS NEVER SHOWN AS A RECORD. On a delivered
@@ -622,10 +638,51 @@ export default async function LoadDetailPage({
                      * corrected it — and the linked facility's only when the
                      * stop has none, which is every Relay-imported stop.
                      *
-                     * Suppressed when it would only repeat the line above: a
-                     * stop typed as "Chicago, IL" has that as its name AND as
-                     * its whole address, and printing it twice is noise. */}
-                    {address !== null && address !== stop.name ? (
+                     * TEXT, WITH AN EDIT BEHIND IT (item 4, round 2). An
+                     * address that resolved from the book is already correct;
+                     * eight stops of four input boxes made the screen look
+                     * like an abandoned form and buried the lane a dispatcher
+                     * came to read.
+                     *
+                     * AND ABSENCE LOOKS LIKE ABSENCE (item 2). A facility with
+                     * no street used to render as blank space, which is a
+                     * driver being sent to a code nobody has an address for
+                     * with the screen saying nothing. */}
+                    {view.flagMissingAddress ? (
+                      <StopAddress
+                        shown={address}
+                        missing={address === null}
+                        value={{
+                          addressLine1: stop.addressLine1 ?? '',
+                          city: stop.city ?? '',
+                          state: stop.state ?? '',
+                          postalCode: stop.postalCode ?? '',
+                        }}
+                        fallback={{
+                          addressLine1: stop.location?.addressLine1 ?? '',
+                          city: stop.location?.city ?? '',
+                          state: stop.location?.state ?? '',
+                          postalCode: stop.location?.postalCode ?? '',
+                        }}
+                        mayEdit={mayUpdate}
+                        save={setStopAddressAction.bind(null, id, stop.id)}
+                        labels={{
+                          street: t('loads.stopStreet'),
+                          city: t('loads.stopCity'),
+                          state: t('loads.stopState'),
+                          zip: t('loads.stopZip'),
+                          edit: t('loads.editAddress'),
+                          save: t('ref.save'),
+                          cancel: t('ref.cancel'),
+                          saving: t('loads.assignSaving'),
+                          missing: t('loads.noAddress'),
+                        }}
+                      />
+                    ) : address !== null && address !== stop.name ? (
+                      // Broker freight, unchanged: suppressed when it would
+                      // only repeat the line above — a stop typed as
+                      // "Chicago, IL" has that as its name AND its whole
+                      // address, and printing it twice is noise.
                       <p className="mt-z1 text-sm text-ink-2" dir="ltr">
                         {address}
                       </p>
@@ -672,54 +729,6 @@ export default async function LoadDetailPage({
                           labelHidden
                           defaultValue={stop.location?.timezone ?? ''}
                           options={zoneOptions}
-                        />
-                        <Button type="submit" variant="ghost" size="compact">
-                          {t('ref.save')}
-                        </Button>
-                      </form>
-                    ) : null}
-
-                    {/* AND THE ADDRESS IN ITS PLACE, editable on this load
-                     * only. A Relay import writes the facility code and the
-                     * street comes from the seed; a dock the seed has wrong,
-                     * or a drop with no book entry at all, is fixed here.
-                     *
-                     * BLANK RETURNS IT TO THE FACILITY BOOK rather than
-                     * blanking the stop — `formatAddress(stop) ??
-                     * formatAddress(stop.location)` is the read, so clearing
-                     * the override restores the inherited value. */}
-                    {mayUpdate && view.editStopAddress ? (
-                      <form
-                        action={setStopAddressAction.bind(null, id, stop.id)}
-                        className="mt-z2 flex flex-wrap items-end gap-z2"
-                      >
-                        <Input
-                          name="addressLine1"
-                          label={t('loads.stopStreet')}
-                          defaultValue={stop.addressLine1 ?? ''}
-                          placeholder={stop.location?.addressLine1 ?? ''}
-                          className="w-[220px]"
-                        />
-                        <Input
-                          name="city"
-                          label={t('loads.stopCity')}
-                          defaultValue={stop.city ?? ''}
-                          placeholder={stop.location?.city ?? ''}
-                          className="w-[140px]"
-                        />
-                        <Input
-                          name="state"
-                          label={t('loads.stopState')}
-                          defaultValue={stop.state ?? ''}
-                          placeholder={stop.location?.state ?? ''}
-                          className="w-[70px]"
-                        />
-                        <Input
-                          name="postalCode"
-                          label={t('loads.stopZip')}
-                          defaultValue={stop.postalCode ?? ''}
-                          placeholder={stop.location?.postalCode ?? ''}
-                          className="w-[100px] font-mono"
                         />
                         <Button type="submit" variant="ghost" size="compact">
                           {t('ref.save')}

@@ -78,6 +78,8 @@ export function tripFacilityCodes(trip: PlannedTrip): string[] {
 export interface ResolvedFacility {
   id: string
   city: string | null
+  /** Null when the book has a row for the code but no street for it. */
+  addressLine1: string | null
   state: string | null
   /** The zone its printed clocks are read in, when somebody has recorded one. */
   timezone: string | null
@@ -101,6 +103,11 @@ export async function resolveFacilities(
       // trip's times are resolved where they happened rather than where the
       // carrier is.
       timezone: true,
+      // WHETHER THE BOOK KNOWS WHERE THIS DOCK IS. A facility row can exist
+      // with no street — MEM4-DRAY does — and a stop written from it renders
+      // as a code with blank space under it. The preview counts these so a
+      // dispatcher learns it before a driver does.
+      addressLine1: true,
     },
   })
 
@@ -112,6 +119,7 @@ export async function resolveFacilities(
         city: row.city,
         state: row.state,
         timezone: row.timezone,
+        addressLine1: row.addressLine1,
       })
     }
   }
@@ -594,4 +602,30 @@ export async function enrichLoad(
   }
 
   return { kind: 'enriched', loadId, tripId: trip.tripId, added }
+}
+
+/**
+ * The codes the book knows but has no street for.
+ *
+ * TWO DIFFERENT PROBLEMS, AND THIS IS THE QUIETER ONE. A code with no row at
+ * all is already surfaced: the import writes the code as the stop's name and
+ * the preview lists it as unresolved. A code the book HAS, with no address on
+ * it, resolves cleanly — the stop links to a real facility, the load looks
+ * complete, and a driver is sent to a code nobody has a street for. MEM4-DRAY
+ * on load 1013 is exactly that, and nothing on any screen said so.
+ *
+ * IT LIVES HERE RATHER THAN IN THE SERVER ACTION so it can be tested; flag 85
+ * again. The action reads a map and shows a sentence, and neither of those is
+ * where the judgement is.
+ */
+export function facilitiesMissingAddress(
+  codes: readonly string[],
+  facilities: ReadonlyMap<string, ResolvedFacility>,
+): string[] {
+  return codes.filter((code) => {
+    const facility = facilities.get(code)
+    // Absent from the book is NOT this condition — it is the other one, and
+    // reporting a code under both headings would double-count the same stop.
+    return facility !== undefined && facility.addressLine1 === null
+  })
 }

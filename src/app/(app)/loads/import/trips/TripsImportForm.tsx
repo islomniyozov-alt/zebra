@@ -57,6 +57,8 @@ export interface TripsImportLabels {
   stageFinished: string
   stageRunning: string
   unresolvedTitle: string
+  /** Facilities the book has, with no street. Its own line, its own fix. */
+  noAddressTitle: string
   warningsTitle: string
   notAssigned: string
   confirm: string
@@ -294,6 +296,20 @@ export function TripsImportForm({
               {labels.unresolvedTitle.replace(
                 '{codes}',
                 plan.unresolvedCodes.join(', '),
+              )}
+            </p>
+          ) : null}
+
+          {/* AND THE OTHER CONDITION, ON ITS OWN LINE. A facility the book has
+           * with no street on it: the stop resolves, the load looks complete,
+           * and a driver is sent to a code nobody has an address for. Counted
+           * apart from unresolved because the fix is different — that one
+           * needs a facility, this one needs a street. */}
+          {plan.noAddressCodes.length > 0 ? (
+            <p className="text-sm text-danger">
+              {labels.noAddressTitle.replace(
+                '{codes}',
+                plan.noAddressCodes.join(', '),
               )}
             </p>
           ) : null}

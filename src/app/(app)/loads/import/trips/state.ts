@@ -24,6 +24,8 @@ export interface TripsPlanView {
   skippedLegTotal: number
   /** Distinct facility codes the book could not resolve. */
   unresolvedCodes: string[]
+  /** Facilities the book HAS, with no street on them. A different fix. */
+  noAddressCodes: string[]
   /**
    * Whether the rows carry a `rate` key at all.
    *
