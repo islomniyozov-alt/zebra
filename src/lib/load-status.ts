@@ -101,6 +101,7 @@ export async function transitionOperational(
     select: {
       operationalStatus: true,
       isCancelled: true,
+      directSettled: true,
       organizationId: true,
     },
   })
@@ -155,6 +156,43 @@ export async function transitionOperational(
       ...(options.occurredAt ? { occurredAt: options.occurredAt } : {}),
     },
   })
+
+  // AND ON A DIRECT-SETTLED LOAD, DELIVERED CARRIES THE POD WITH IT.
+  //
+  // THE RULING (2026-09-03), and it is a money rule rather than a display one.
+  // Amazon loads lose their Documents panel: drivers upload everything into
+  // Relay, so a Rate con / POD / BOL prompt on this screen is asking for
+  // paperwork that by agreement lives somewhere else. But `podConfirmed` fired
+  // from exactly one place — a POD document attaching — and TWO things select
+  // on `POD_RECEIVED`:
+  //
+  //   * `settleableWhere` — a driver is paid for freight that reached POD, in
+  //     the period the POD landed. No POD, no settlement line, and the driver
+  //     is never paid for that load by any period, ever.
+  //   * `directSettledAwaiting` — the queue that matches loads against Amazon's
+  //     weekly ACH statement. No POD, and the load never appears to reconcile.
+  //
+  // So removing the panel without this would have stopped driver pay for every
+  // Amazon load, silently, with the loads looking finished on every screen.
+  //
+  // THE RELAY EXPORT IS THE PROOF. Amazon holds the signed paperwork and pays
+  // against its own record; the Completed export is the carrier's copy of it.
+  // "Finished means the paperwork landed" still holds — the paperwork just
+  // lands in Relay, and `directSettled` is precisely the flag for freight that
+  // works that way.
+  //
+  // ONE PLACE, NOT TWO. The alternative was teaching `settleableWhere` and
+  // `directSettledAwaiting` to accept DELIVERED when the load is direct-settled
+  // — which splits the definition of "finished" across two modules that must
+  // then agree forever. Flags 88 and 89 are both that shape and neither was
+  // cheap.
+  //
+  // `AUTOMATIC`, not by hand: §7 says POD_RECEIVED is never set by a click, and
+  // this is not one. `podConfirmed` re-enters this function, where `from === to`
+  // and the rank guard make a second call harmless.
+  if (to === 'DELIVERED' && load.directSettled) {
+    await podConfirmed(tx, loadId, options.userId ?? null)
+  }
 
   // THE OTHER AXIS FOLLOWS. The two statuses move independently (schema
   // convention 4) but they are not unrelated: a POD landing is what makes a

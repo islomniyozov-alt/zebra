@@ -850,3 +850,93 @@ describe('dispatch conflict rules (§8)', () => {
     expect(kinds).toContain('out_of_service')
   })
 })
+
+// ---------------------------------------------------------------------------
+// DELIVERED CARRIES THE POD, ON DIRECT-SETTLED FREIGHT ONLY.
+//
+// THE RULING (2026-09-03). Amazon loads lose their Documents panel — drivers
+// upload into Relay — and `podConfirmed` fired from exactly one place: a POD
+// document attaching. Two things select on POD_RECEIVED, and one of them is
+// driver pay:
+//
+//   settleableWhere      — no POD, no settlement line, in any period, ever.
+//   directSettledAwaiting — no POD, and the load never reaches the queue that
+//                           matches it against Amazon's weekly ACH statement.
+//
+// Removing the panel without this would have stopped driver pay for every
+// Amazon load while the loads looked finished on every screen.
+//
+// BOTH SIDES ARE ASSERTED. A rule that fires everywhere is not this rule: a
+// broker load reaching Delivered must stay there and wait for its paperwork,
+// because for broker freight the paperwork is real and this carrier holds it.
+// ---------------------------------------------------------------------------
+
+describe('a delivered load that settles directly', () => {
+  const directCustomer = async () =>
+    inOrg((tx) =>
+      tx.customer.create({
+        data: {
+          organizationId,
+          name: `Relay ${Date.now()}${Math.random()}`,
+          type: 'BROKER',
+          settlesDirectly: true,
+        },
+        select: { id: true },
+      }),
+    )
+
+  const deliver = async (customerId: string) => {
+    const load = await inOrg((tx) =>
+      createLoad(tx, organizationId, {
+        companyId: alphaId,
+        customerId,
+        stops: stops(day(1), day(3)),
+      }),
+    )
+    await inOrg((tx) =>
+      transitionOperational(tx, load.id, 'DELIVERED', {
+        source: 'MANUAL',
+        userId: null,
+      }),
+    )
+    return inOrg((tx) =>
+      tx.load.findUniqueOrThrow({
+        where: { id: load.id },
+        select: { id: true, operationalStatus: true },
+      }),
+    )
+  }
+
+  it('reaches POD received without a document', async () => {
+    const customer = await directCustomer()
+    const load = await deliver(customer.id)
+    expect(load.operationalStatus).toBe('POD_RECEIVED')
+  })
+
+  // THE PAYABLE HALF, stated as itself. The status is the means; being visible
+  // to a settlement period is the thing that was at risk.
+  it('and carries an APPLIED POD event for the period to find', async () => {
+    const customer = await directCustomer()
+    const load = await deliver(customer.id)
+
+    const events = await inOrg((tx) =>
+      tx.loadStatusEvent.findMany({
+        where: {
+          loadId: load.id,
+          axis: 'OPERATIONAL',
+          toStatus: 'POD_RECEIVED',
+          outcome: 'APPLIED',
+        },
+        select: { source: true },
+      }),
+    )
+    expect(events).toHaveLength(1)
+    // §7: POD_RECEIVED is never set by hand, and an import is not a click.
+    expect(events[0]?.source).toBe('AUTOMATIC')
+  })
+
+  it('leaves broker freight at Delivered, waiting for its paperwork', async () => {
+    const load = await deliver(brokerId)
+    expect(load.operationalStatus).toBe('DELIVERED')
+  })
+})

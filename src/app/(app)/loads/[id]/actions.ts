@@ -6,10 +6,12 @@ import { getLocaleContext } from '@/lib/locale'
 import {
   cancelLoad,
   markDelivered,
+  updateLoad,
   uncancelLoad,
   LOAD_WRITE_TIMEOUT_MS,
 } from '@/lib/loads'
 import { optionalText } from '@/lib/reference'
+import { DispatchConflictError } from '@/lib/dispatch'
 import { ZONE_CHOICES } from '@/lib/stop-time'
 import type { MessageKey } from '@/lib/i18n'
 
@@ -166,4 +168,62 @@ export async function setStopZoneAction(
 export async function refreshLoadAction(loadId: string): Promise<void> {
   revalidatePath(`/loads/${loadId}`)
   revalidatePath('/loads')
+}
+
+/**
+/**
+ * Truck and driver, from the load detail.
+ *
+ * A MAPPER, NOT A DECISION. `updateLoad` in loads.ts does the work — it is
+ * the same function the edit path uses, it puts the pair to `assertAssignable`
+ * itself, and it moves the load to Dispatched once both are present. Writing
+ * the pair straight to the column — as an earlier draft of this did — is a
+ * second implementation of the same act, which is flag 89 exactly.
+ *
+ * A BLANK CLEARS — `optionalText` turning "" into null is what expresses
+ * taking a driver off a load. A cancelled load is refused by `updateLoad`.
+ */
+export async function assignLoadAction(
+  loadId: string,
+  _previous: DetailState,
+  formData: FormData,
+): Promise<DetailState> {
+  const { t } = await getLocaleContext()
+
+  try {
+    await withCurrentOrg(
+      'update',
+      'load',
+      (tx, session) =>
+        updateLoad(
+          tx,
+          loadId,
+          {
+            truckId: optionalText(formData.get('truckId')),
+            driverId: optionalText(formData.get('driverId')),
+          },
+          { byUserId: session.userId },
+        ),
+      { timeoutMs: LOAD_WRITE_TIMEOUT_MS },
+    )
+  } catch (error) {
+    if (error instanceof DispatchConflictError) {
+      // EVERY refusal at once, not the first — the same sentence-joining the
+      // create form does, and for the same reason: one error slot, and a
+      // dispatcher fixing one problem only to be told about the next is the
+      // interaction §10 exists to prevent.
+      const sentences = error.conflicts.map((conflict) =>
+        Object.entries(conflict.values).reduce(
+          (message, [key, value]) => message.replaceAll(`{${key}}`, value),
+          t(conflict.messageKey),
+        ),
+      )
+      return { error: sentences.join(' '), notice: null }
+    }
+    throw error
+  }
+
+  revalidatePath(`/loads/${loadId}`)
+  revalidatePath('/loads')
+  return { error: null, notice: null }
 }

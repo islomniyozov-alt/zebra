@@ -20,8 +20,10 @@ import { RatePanel, type AccessorialRow } from './RatePanel'
 import { StatusTimeline, type TimelineEvent } from './StatusTimeline'
 import { LoadDocuments, type DocumentSlot } from './LoadDocuments'
 import { LoadActions, LoadNotes } from './LoadActions'
+import { LoadAssignment } from './LoadAssignment'
 import {
   addNoteAction,
+  assignLoadAction,
   cancelLoadAction,
   markDeliveredAction,
   refreshLoadAction,
@@ -132,7 +134,14 @@ export default async function LoadDetailPage({
     })
     if (!load) return null
 
-    const [events, documents, notes] = await Promise.all([
+    // THE FLEET THIS LOAD COULD BE GIVEN TO, for the assignment panel.
+    //
+    // Scoped by the load's own company, not the session's whole scope: a load
+    // runs under one authority and a truck belongs to one, so offering the
+    // other company's fleet would offer an assignment that cannot legally be
+    // made. `assertAssignable` would not catch it either — it asks about
+    // double-booking, not about authority.
+    const [events, documents, notes, trucks, drivers] = await Promise.all([
       tx.loadStatusEvent.findMany({
         where: { loadId: id },
         orderBy: { occurredAt: 'desc' },
@@ -149,14 +158,41 @@ export default async function LoadDetailPage({
         take: 50,
         include: { user: { select: { name: true } } },
       }),
+      tx.truck.findMany({
+        where: { deletedAt: null, companyId: load.companyId },
+        orderBy: { unitNumber: 'asc' },
+        take: 500,
+        select: { id: true, unitNumber: true },
+      }),
+      tx.driver.findMany({
+        where: { deletedAt: null, companyId: load.companyId },
+        orderBy: { lastName: 'asc' },
+        take: 500,
+        select: { id: true, firstName: true, lastName: true },
+      }),
     ])
 
-    return { load, events, documents, notes }
+    return { load, events, documents, notes, trucks, drivers }
   })
 
   if (!data) notFound()
-  const { load, events, documents, notes } = data
+  const { load, events, documents, notes, trucks, drivers } = data
 
+  // THE DISCRIMINATOR FOR THE WHOLE REDESIGN, in one place and read from the
+  // LOAD rather than from its customer.
+  //
+  // `directSettled` is copied from `Customer.settlesDirectly` when the load is
+  // booked and never re-read, which is why it is the right thing to branch on:
+  // a broker that changes terms next year must not silently reshape the screen
+  // of freight that already ran. A live join to the customer would do exactly
+  // that.
+  //
+  // IT MEANS "SETTLES DIRECTLY", NOT "IS AMAZON". Today Relay is the only such
+  // customer, so the two sets are identical. A second direct-settling customer
+  // would get this screen too — which is correct, because everything the screen
+  // removes is removed BECAUSE nobody invoices it and the broker holds the
+  // paperwork, and that is what the flag means.
+  const isAmazon = load.directSettled
   const mayUpdate = await currentUserCan('update', 'load')
   const mayUpload = await currentUserCan('create', 'document')
 
@@ -382,6 +418,40 @@ export default async function LoadDetailPage({
               </p>
             ) : null}
           </section>
+
+          {/* ASSIGNMENT, ON AMAZON LOADS. `load.directSettled` is the whole
+           * discriminator for this redesign — copied from the customer when the
+           * load was booked and never re-read, so freight keeps the screen it
+           * was booked under even if the broker's terms change next year.
+           *
+           * BROKER FREIGHT HAS THE IDENTICAL GAP and does not get this panel,
+           * because the ruling scoped the redesign to direct-settled loads and
+           * "Werner and broker freight keep the full screen". Lifting the gate
+           * is deleting one condition; it is flagged rather than assumed. */}
+          {isAmazon && mayUpdate ? (
+            <LoadAssignment
+              trucks={trucks.map((truck) => ({
+                value: truck.id,
+                label: truck.unitNumber,
+              }))}
+              drivers={drivers.map((driver) => ({
+                value: driver.id,
+                label: `${driver.lastName}, ${driver.firstName}`,
+              }))}
+              truckId={load.truckId}
+              driverId={load.driverId}
+              disabled={load.isCancelled}
+              assign={assignLoadAction.bind(null, id)}
+              labels={{
+                title: t('loads.assignment'),
+                truck: t('loads.column.truck'),
+                driver: t('loads.column.driver'),
+                unassigned: t('loads.unassigned'),
+                save: t('loads.assignSave'),
+                saving: t('loads.assignSaving'),
+              }}
+            />
+          ) : null}
 
           <section className="rounded-card border border-border bg-surface p-z4">
             <h2 className="text-md font-medium text-ink">{t('loads.stops')}</h2>

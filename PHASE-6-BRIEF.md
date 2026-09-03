@@ -2125,8 +2125,10 @@ Recorded rather than resolved, per Phase 1's discipline.
     IT DID NOT. The row says the check-ins were written by the FIRST import:
     the guard `and with every check-in the file printed, in one pass` passed
     against unfixed code, while `lands a finished trip Delivered on the first
-import` failed with `BOOKED`. `createTripLoad` wrote all four clocks
-    correctly and never moved the status; `stop-actuals.ts` shows the PLAN on a
+
+        import`failed with`BOOKED`. `createTripLoad`wrote all four clocks
+
+    correctly and never moved the status;`stop-actuals.ts` shows the PLAN on a
     booked load, so four real check-ins and no check-ins render identically.
     The screen could not distinguish the two, and neither could the report.
 
