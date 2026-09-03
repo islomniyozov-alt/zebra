@@ -16,6 +16,7 @@ import {
   facilitiesMissingAddress,
   tripFacilityCodes,
 } from '@/lib/trips-writer'
+import { INTEGRATION_USER_AGENT } from '@/lib/load-activity'
 import { EMPTY_TRIPS_IMPORT, type TripsImportState } from './state'
 
 // Loads → Import → Amazon Relay TRIPS (Phase 6 §3a's sibling).
@@ -267,7 +268,10 @@ export async function tripsImportAction(
         created++
       }
     },
-    { timeoutMs: LOAD_WRITE_TIMEOUT_MS },
+    // STAMPED AS THE INTEGRATION. A dispatcher clicks confirm; a file does the
+    // work. The Activity panel reads this to say "via Integration" instead of
+    // naming a person who never typed a stop time. See load-activity.ts.
+    { timeoutMs: LOAD_WRITE_TIMEOUT_MS, userAgent: INTEGRATION_USER_AGENT },
   )
 
   revalidatePath('/loads')

@@ -94,7 +94,24 @@ export async function withCurrentOrg<T>(
   action: Action,
   resource: Resource,
   fn: (tx: TxClient, session: SessionContext) => Promise<T>,
-  options: TransactionTimeouts = {},
+  options: TransactionTimeouts & {
+    /**
+     * Overrides the browser's user agent on the audit rows this writes.
+     *
+     * FOR WRITES A PERSON AUTHORISED BUT DID NOT PERFORM. A trips import is
+     * clicked by a dispatcher and carried out by a file: the actor is real and
+     * the work was not typed. The audit log has no source column — that lives
+     * on `LoadStatusEvent` and covers status changes, not stop times — so the
+     * user agent is where the distinction can be recorded without a migration.
+     *
+     * FORWARD-ONLY, AND THE SCREEN MUST NOT PRETEND OTHERWISE. Rows written
+     * before this existed carry a browser string and are simply unknown; the
+     * Activity panel names the actor and says nothing about how. Rendering
+     * "manually" for an absent stamp would make thirteen already-imported
+     * loads claim a dispatcher checked in stops that an importer wrote.
+     */
+    userAgent?: string
+  } = {},
 ): Promise<T> {
   // One client for the whole request, regardless of whether a Route Handler
   // gives React's cache() a scope to memoize in. See src/lib/db.ts.
@@ -107,7 +124,7 @@ export async function withCurrentOrg<T>(
       attribution: {
         userId: session.userId,
         ip: metadata.ip ?? null,
-        userAgent: metadata.userAgent ?? null,
+        userAgent: options.userAgent ?? metadata.userAgent ?? null,
       },
     })
   })
