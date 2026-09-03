@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { cx } from '@/lib/cx'
 
@@ -14,8 +15,22 @@ import { cx } from '@/lib/cx'
 //   did not move, and the fact that they tried is exactly what a dispute turns
 //   on. A timeline that showed only what succeeded would be a timeline that
 //   quietly agrees with whoever is telling the story.
+//
+// AND SINCE ITEM 8, NOTES TOO — on the loads that ask for it.
+//
+// A note is a `Communication` row, which already carries `occurredAt` and an
+// author, so the two kinds interleave by time with nothing invented. The merge
+// is done on the server, where the times are still Dates; by the time an entry
+// arrives here its `at` is a rendered string and could only be sorted
+// alphabetically, which is not a chronology.
+//
+// A NOTE IS NOT A STATUS. It gets a hollow neutral rail and no badge, because
+// "somebody wrote this down" and "the load moved" are different kinds of fact
+// and a timeline that dressed them alike would be inviting a misreading in the
+// one place that exists to prevent one.
 
-export interface TimelineEvent {
+interface StatusEntry {
+  kind: 'status'
   id: string
   fromStatus: string | null
   toStatus: string
@@ -27,9 +42,25 @@ export interface TimelineEvent {
   note: string | null
 }
 
+interface NoteEntry {
+  kind: 'note'
+  id: string
+  at: string
+  by: string | null
+  /** Shown exactly as typed. §12: a person's sentence is evidence. */
+  body: string
+}
+
+export type TimelineEntry = StatusEntry | NoteEntry
+
+/** @deprecated The status half of `TimelineEntry`; kept for the broker screen. */
+export type TimelineEvent = StatusEntry
+
 interface Props {
-  events: readonly TimelineEvent[]
+  entries: readonly TimelineEntry[]
   statusLabels: Record<string, string>
+  /** The note box, when notes live in this section. Broker loads pass none. */
+  composer?: ReactNode
   labels: {
     title: string
     manual: string
@@ -43,7 +74,12 @@ interface Props {
   }
 }
 
-export function StatusTimeline({ events, statusLabels, labels }: Props) {
+export function StatusTimeline({
+  entries,
+  statusLabels,
+  composer,
+  labels,
+}: Props) {
   const sourceLabel = (source: string) =>
     source === 'MANUAL'
       ? labels.manual
@@ -57,11 +93,35 @@ export function StatusTimeline({ events, statusLabels, labels }: Props) {
     <section className="rounded-card border border-border bg-surface p-z4">
       <h2 className="text-md font-medium text-ink">{labels.title}</h2>
 
-      {events.length === 0 ? (
+      {composer}
+
+      {entries.length === 0 ? (
         <p className="mt-z2 text-sm text-ink-2">{labels.empty}</p>
       ) : (
         <ol className="mt-z3 flex flex-col gap-z3">
-          {events.map((event) => {
+          {entries.map((entry) => {
+            if (entry.kind === 'note') {
+              return (
+                <li key={entry.id} className="flex gap-z3">
+                  <div className="flex flex-col items-center pt-[5px]">
+                    <span
+                      aria-hidden
+                      className="h-z2 w-z2 rounded-full border border-border bg-surface"
+                    />
+                    <span aria-hidden className="mt-z1 w-px flex-1 bg-border" />
+                  </div>
+                  <div className="flex-1 pb-z2">
+                    <p className="text-base text-ink">{entry.body}</p>
+                    <p className="mt-z1 text-xs text-ink-3">
+                      <span className="font-mono">{entry.at}</span>
+                      {entry.by ? ` · ${entry.by}` : ''}
+                    </p>
+                  </div>
+                </li>
+              )
+            }
+
+            const event = entry
             const refused = event.outcome === 'REFUSED_STALE'
             return (
               <li key={event.id} className="flex gap-z3">

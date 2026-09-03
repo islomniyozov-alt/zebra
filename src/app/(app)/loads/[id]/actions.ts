@@ -10,7 +10,7 @@ import {
   uncancelLoad,
   LOAD_WRITE_TIMEOUT_MS,
 } from '@/lib/loads'
-import { optionalText } from '@/lib/reference'
+import { ReferenceError, optionalText } from '@/lib/reference'
 import { DispatchConflictError } from '@/lib/dispatch'
 import { ZONE_CHOICES } from '@/lib/stop-time'
 import type { MessageKey } from '@/lib/i18n'
@@ -226,4 +226,103 @@ export async function assignLoadAction(
   revalidatePath(`/loads/${loadId}`)
   revalidatePath('/loads')
   return { error: null, notice: null }
+}
+
+/**
+ * Dispatched miles, from the rate panel.
+ *
+ * `load:update`, NOT `load.financials`. Miles are an operational fact that
+ * happens to sit beside the money — a trip is 583 miles long whether or not
+ * the person looking may see what it paid — and permission follows the FIELD,
+ * never the panel it was drawn in. `setRateAction` beside this one keeps its
+ * own stricter gate.
+ *
+ * A BLANK CLEARS, because "we do not know yet" is a real state for a load
+ * booked from an email that printed no distance, and zero is not the same
+ * claim as unknown.
+ *
+ * `updateLoad` does the write: it validates the number against the same
+ * ceiling the create form uses and re-checks assignment conflicts against the
+ * window, neither of which this file should be deciding.
+ */
+export async function setMilesAction(
+  loadId: string,
+  _previous: DetailState,
+  formData: FormData,
+): Promise<DetailState> {
+  const { t } = await getLocaleContext()
+  const typed = optionalText(formData.get('miles'))
+
+  try {
+    await withCurrentOrg(
+      'update',
+      'load',
+      (tx, session) =>
+        updateLoad(
+          tx,
+          loadId,
+          { dispatchedMiles: typed },
+          { byUserId: session.userId },
+        ),
+      { timeoutMs: LOAD_WRITE_TIMEOUT_MS },
+    )
+  } catch (error) {
+    if (error instanceof ReferenceError) {
+      return { error: t('rate.error.badAmount'), notice: null }
+    }
+    throw error
+  }
+
+  revalidatePath(`/loads/${loadId}`)
+  revalidatePath('/loads')
+  return { error: null, notice: null }
+}
+
+/**
+ * Correct a stop's address, on THIS LOAD and nowhere else.
+ *
+ * THE RULING (2026-09-03): the edit lands on the stop, not on the facility.
+ * A Relay import writes the facility code and the seed's 4,367 rows are where
+ * the street comes from — so an edit that wrote back to the `Location` would
+ * fix every future load at that code from one 6am correction, and would spread
+ * a typo exactly as fast. The stop's own address already wins over the
+ * facility's when it has one (`formatAddress(stop) ?? formatAddress(location)`),
+ * so writing here is the shape the read already assumes.
+ *
+ * BLANK CLEARS AND FALLS BACK. Emptying the field does not blank the stop; it
+ * returns it to the facility book, which is the same "derive it again" escape
+ * the timezone control offers. That is why `optionalText` is right here and an
+ * empty string would not be.
+ *
+ * PERMISSION: `load:update` — the stop belongs to the load. Unlike
+ * `setStopZoneAction` beside it, nothing here reaches outside the load, so
+ * this one does not inherit that function's flagged gap.
+ */
+export async function setStopAddressAction(
+  loadId: string,
+  stopId: string,
+  formData: FormData,
+): Promise<void> {
+  await withCurrentOrg(
+    'update',
+    'load',
+    (tx) =>
+      tx.loadStop.updateMany({
+        // SCOPED BY LOAD AS WELL AS BY ID. `updateMany` rather than `update`
+        // so a stop id from another load cannot be posted into this form and
+        // edited through it; RLS already stops another organisation, and this
+        // stops another load inside the same one.
+        where: { id: stopId, loadId },
+        data: {
+          addressLine1: optionalText(formData.get('addressLine1')),
+          city: optionalText(formData.get('city')),
+          state: optionalText(formData.get('state')),
+          postalCode: optionalText(formData.get('postalCode')),
+        },
+      }),
+    { timeoutMs: LOAD_WRITE_TIMEOUT_MS },
+  )
+
+  revalidatePath(`/loads/${loadId}`)
+  revalidatePath('/loads')
 }
