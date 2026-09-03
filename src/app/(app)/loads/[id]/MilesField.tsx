@@ -113,9 +113,21 @@ export function MilesField({ dispatchedMiles, save, locale, labels }: Props) {
         // and this keeps the field from ever holding something that cannot land.
         if (DIGITS.test(next)) setValue(next)
       }}
+      // EVERY EXIT GOES THROUGH HERE, INCLUDING ESCAPE.
+      //
+      // Escape used to unmount the input directly, and React does not deliver
+      // a blur to an element it has just removed — so the `abandoned` guard
+      // never ran, and a test that broke it still passed. A safety mechanism
+      // that cannot be observed failing is not known to work, and this one was
+      // not working; it was being skipped.
+      //
+      // So Escape blurs the field and lets this decide. One exit, one place
+      // that chooses between committing and abandoning.
       onBlur={() => {
         if (abandoned.current) {
           abandoned.current = false
+          setValue(saved)
+          setEditing(false)
           return
         }
         commit()
@@ -126,9 +138,10 @@ export function MilesField({ dispatchedMiles, save, locale, labels }: Props) {
           commit()
         }
         if (event.key === 'Escape') {
+          // Flag, then blur — the blur handler is the single exit and it is
+          // what puts the saved value back and closes the field.
           abandoned.current = true
-          setValue(saved)
-          setEditing(false)
+          event.currentTarget.blur()
         }
       }}
       className={cx(
