@@ -25,6 +25,15 @@ interface InputProps
    * same way. Also sets the mono face, since §4 reserves it for exactly this.
    */
   identifier?: boolean
+  /**
+   * Hide the label visually but keep it for screen readers.
+   *
+   * The same escape `Select` has, added when the load summary grew an
+   * editable Miles field inside a description list — the `<dt>` beside it
+   * already names the field, and rendering the word twice is noise a reader
+   * has to resolve. Never for a field with no other visible name.
+   */
+  labelHidden?: boolean
 }
 
 export function Input({
@@ -33,6 +42,7 @@ export function Input({
   hint,
   required,
   identifier,
+  labelHidden,
   id,
   className,
   ...rest
@@ -43,7 +53,13 @@ export function Input({
 
   return (
     <div className="flex flex-col gap-z1">
-      <label htmlFor={inputId} className="text-sm font-medium text-ink-2">
+      <label
+        htmlFor={inputId}
+        className={cx(
+          'text-sm font-medium text-ink-2',
+          labelHidden && 'sr-only',
+        )}
+      >
         {label}
         {required ? (
           <span aria-hidden className="text-danger ms-z1">

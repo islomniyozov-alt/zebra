@@ -11,12 +11,6 @@ import {
   setRateAction,
 } from './rate-actions'
 import { RATE_INITIAL, type RateState } from './rate-state'
-import type { DetailState } from './actions'
-
-// Same reason as LoadActions': a 'use server' file may only export async
-// functions, so the initial state is declared where it is used.
-const DETAIL_INITIAL: DetailState = { error: null, notice: null }
-
 // §5 step 1 — what a load is worth, entered by OWNER or ACCOUNTING.
 //
 // THE LIVE TOTAL IS COMPUTED THE SAME WAY THE SERVER COMPUTES IT: integer
@@ -50,12 +44,6 @@ interface Props {
    * on a screen that cannot see the surcharge cannot zero it.
    */
   showFuelSurcharge: boolean
-  /** Operational, not money — see the form below. Null means not yet known. */
-  dispatchedMiles: number | null
-  /** Omitted when the reader may not edit the load; the field is then absent. */
-  setMiles?:
-    | ((previous: DetailState, formData: FormData) => Promise<DetailState>)
-    | undefined
   accessorials: readonly AccessorialRow[]
   mayEdit: boolean
   accessorialTypes: readonly { value: string; label: string }[]
@@ -64,7 +52,6 @@ interface Props {
     title: string
     linehaul: string
     fuelSurcharge: string
-    miles: string
     accessorials: string
     total: string
     save: string
@@ -83,8 +70,6 @@ export function RatePanel({
   linehaulCents,
   fuelSurchargeCents,
   showFuelSurcharge,
-  dispatchedMiles,
-  setMiles,
   accessorials,
   mayEdit,
   accessorialTypes,
@@ -100,11 +85,6 @@ export function RatePanel({
     RateState,
     FormData
   >(addAccessorialAction.bind(null, loadId), RATE_INITIAL)
-
-  const [milesState, saveMiles, savingMiles] = useActionState(
-    setMiles ?? (async () => DETAIL_INITIAL),
-    DETAIL_INITIAL,
-  )
 
   const [linehaul, setLinehaul] = useState(centsToField(linehaulCents))
   const [fuel, setFuel] = useState(centsToField(fuelSurchargeCents))
@@ -157,41 +137,6 @@ export function RatePanel({
           </Button>
         ) : null}
       </form>
-
-      {/* MILES, BESIDE THE MONEY BUT NOT PART OF IT.
-       *
-       * Its own form and its own action, because it has its own permission:
-       * `load:update`, not `load.financials`. A trip is 583 miles long
-       * whether or not the reader may see what it paid, and permission
-       * follows the field rather than the panel it was drawn in. Posting it
-       * with the rate would have quietly put an operational number behind a
-       * money gate.
-       *
-       * A dispatcher without `load.financials` never sees this panel at all,
-       * so miles stay uneditable for that role — reported rather than
-       * resolved here, because moving the field is the owner's call. */}
-      {setMiles ? (
-        <form action={saveMiles} className="mt-z3 flex items-end gap-z3">
-          <Input
-            name="miles"
-            label={labels.miles}
-            defaultValue={
-              dispatchedMiles === null ? '' : String(dispatchedMiles)
-            }
-            disabled={savingMiles}
-            inputMode="numeric"
-            className="w-[140px] font-mono"
-          />
-          <Button type="submit" variant="secondary" disabled={savingMiles}>
-            {labels.save}
-          </Button>
-          {milesState.error ? (
-            <p role="alert" className="text-sm text-danger">
-              {milesState.error}
-            </p>
-          ) : null}
-        </form>
-      ) : null}
 
       {/* §8: mono, tabular, right-aligned, minus not parentheses. */}
       <dl className="mt-z4 grid grid-cols-[1fr_auto] gap-x-z4 gap-y-z1 text-sm">

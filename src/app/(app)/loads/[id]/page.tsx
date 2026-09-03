@@ -11,6 +11,11 @@ import {
 } from '@/lib/status'
 import { formatAddress } from '@/lib/locations'
 import { newestFirst } from '@/lib/load-timeline'
+import {
+  ACCESSORIAL_TYPES,
+  accessorialChoicesFor,
+  loadDetailView,
+} from '@/lib/load-detail-view'
 import { renderStopTime, ZONE_CHOICES } from '@/lib/stop-time'
 import { latenessLabel, shownStopTime } from '@/lib/stop-actuals'
 import { isMessageKey, type MessageKey } from '@/lib/i18n'
@@ -25,6 +30,7 @@ import { LoadActions, LoadNotes } from './LoadActions'
 import { LoadAssignment } from './LoadAssignment'
 import { NoteComposer } from './NoteComposer'
 import { Copyable } from './Copyable'
+import { MilesField } from './MilesField'
 import {
   addNoteAction,
   assignLoadAction,
@@ -48,19 +54,6 @@ import type {
 // with the zone shown (rule 3), documents grouped by type with dashed warning
 // placeholders for what is missing at this stage, a notes thread writing
 // `Communication` rows, and the timeline rendered from `LoadStatusEvent`.
-
-const ACCESSORIAL_TYPES = [
-  'DETENTION',
-  'LAYOVER',
-  'TONU',
-  'LUMPER',
-  'EXTRA_STOP',
-  'DRIVER_ASSIST',
-  'REDELIVERY',
-  'STORAGE',
-  'FUEL_ADVANCE_FEE',
-  'OTHER',
-] as const
 
 const ALL_OPERATIONAL: LoadOperationalStatus[] = [
   'AVAILABLE',
@@ -184,21 +177,14 @@ export default async function LoadDetailPage({
   if (!data) notFound()
   const { load, events, documents, notes, trucks, drivers } = data
 
-  // THE DISCRIMINATOR FOR THE WHOLE REDESIGN, in one place and read from the
-  // LOAD rather than from its customer.
+  // WHAT THIS SCREEN SHOWS, decided in one place and testable without a
+  // browser. Seven display items branch on whether this freight settles
+  // directly; they were seven inline reads until `load-detail-view.ts` gave
+  // them a name and a test file that reads both answers side by side.
   //
-  // `directSettled` is copied from `Customer.settlesDirectly` when the load is
-  // booked and never re-read, which is why it is the right thing to branch on:
-  // a broker that changes terms next year must not silently reshape the screen
-  // of freight that already ran. A live join to the customer would do exactly
-  // that.
-  //
-  // IT MEANS "SETTLES DIRECTLY", NOT "IS AMAZON". Today Relay is the only such
-  // customer, so the two sets are identical. A second direct-settling customer
-  // would get this screen too — which is correct, because everything the screen
-  // removes is removed BECAUSE nobody invoices it and the broker holds the
-  // paperwork, and that is what the flag means.
-  const isAmazon = load.directSettled
+  // The flag is on the LOAD, copied from the customer at booking and never
+  // re-read — see the module for why that matters.
+  const view = loadDetailView(load)
 
   // One pair of words for every copy affordance on the screen.
   const copyLabels = { copy: t('loads.copy'), copied: t('loads.copied') }
@@ -312,7 +298,7 @@ export default async function LoadDetailPage({
       at: event.occurredAt,
       value: statusEntries[index]!,
     })),
-    isAmazon
+    view.notesInTimeline
       ? notes.map((note, index) => ({
           at: note.occurredAt,
           value: noteEntries[index]!,
@@ -372,7 +358,7 @@ export default async function LoadDetailPage({
             className={`h-z5 w-[3px] ${TONE_STRIPE[stripeTone]}`}
           />
           <h1 className="text-lg font-medium text-ink">
-            {isAmazon ? (
+            {view.copyableIdentifiers ? (
               <Copyable
                 value={load.loadNumber}
                 className="font-mono"
@@ -393,7 +379,7 @@ export default async function LoadDetailPage({
             {load.referenceNumber === null ? null : (
               <span className="ms-z2 font-mono text-sm text-ink-2" dir="ltr">
                 · {t('loads.column.reference')}{' '}
-                {isAmazon ? (
+                {view.copyableIdentifiers ? (
                   <Copyable
                     value={load.referenceNumber}
                     className="font-mono"
@@ -473,7 +459,7 @@ export default async function LoadDetailPage({
               <dd className="font-mono text-ink">
                 {load.truck?.unitNumber == null ? (
                   '—'
-                ) : isAmazon ? (
+                ) : view.copyableIdentifiers ? (
                   <Copyable value={load.truck.unitNumber} labels={copyLabels} />
                 ) : (
                   load.truck.unitNumber
@@ -485,11 +471,23 @@ export default async function LoadDetailPage({
                   ? `${load.driver.lastName}, ${load.driver.firstName}`
                   : '—'}
               </dd>
+              {/* ITEM 4, RELOCATED. Editable here rather than in the rate
+               * panel: miles are operational and this panel is not behind
+               * `load.financials`, so the dispatcher the field was asked for
+               * can actually reach it. */}
               <dt className="text-ink-2">{t('loads.miles')}</dt>
               <dd className="text-end font-mono text-ink">
-                {load.dispatchedMiles === null
-                  ? '—'
-                  : load.dispatchedMiles.toLocaleString(locale)}
+                {view.editMiles && mayUpdate ? (
+                  <MilesField
+                    dispatchedMiles={load.dispatchedMiles}
+                    save={setMilesAction.bind(null, id)}
+                    labels={{ miles: t('loads.miles'), save: t('ref.save') }}
+                  />
+                ) : load.dispatchedMiles === null ? (
+                  '—'
+                ) : (
+                  load.dispatchedMiles.toLocaleString(locale)
+                )}
               </dd>
             </dl>
             {load.isCancelled && load.cancelReason ? (
@@ -508,7 +506,7 @@ export default async function LoadDetailPage({
            * because the ruling scoped the redesign to direct-settled loads and
            * "Werner and broker freight keep the full screen". Lifting the gate
            * is deleting one condition; it is flagged rather than assumed. */}
-          {isAmazon && mayUpdate ? (
+          {view.showAssignment && mayUpdate ? (
             <LoadAssignment
               trucks={trucks.map((truck) => ({
                 value: truck.id,
@@ -605,13 +603,13 @@ export default async function LoadDetailPage({
                      * Both are carried to another system; the city under
                      * them is read, so it stays plain text. */}
                     <p className="mt-z1 flex flex-wrap items-baseline gap-z2 text-base text-ink">
-                      {isAmazon && stop.name ? (
+                      {view.copyableIdentifiers && stop.name ? (
                         <Copyable value={stop.name} labels={copyLabels} />
                       ) : (
                         (stop.name ??
                         [stop.city, stop.state].filter(Boolean).join(', '))
                       )}
-                      {isAmazon && stop.referenceNumber ? (
+                      {view.copyableIdentifiers && stop.referenceNumber ? (
                         <Copyable
                           value={stop.referenceNumber}
                           className="font-mono text-sm text-ink-2"
@@ -659,7 +657,7 @@ export default async function LoadDetailPage({
                      * carries its zone, and the offset column cross-checks it.
                      * The control stays on broker freight, where a dock is
                      * often typed once and never seen again. */}
-                    {mayUpdate && !isAmazon && stop.locationId ? (
+                    {mayUpdate && view.showStopTimezone && stop.locationId ? (
                       <form
                         action={setStopZoneAction.bind(
                           null,
@@ -690,7 +688,7 @@ export default async function LoadDetailPage({
                      * blanking the stop — `formatAddress(stop) ??
                      * formatAddress(stop.location)` is the read, so clearing
                      * the override restores the inherited value. */}
-                    {mayUpdate && isAmazon ? (
+                    {mayUpdate && view.editStopAddress ? (
                       <form
                         action={setStopAddressAction.bind(null, id, stop.id)}
                         className="mt-z2 flex flex-wrap items-end gap-z2"
@@ -733,19 +731,18 @@ export default async function LoadDetailPage({
               })}
             </ol>
           </section>
-
-          {/* ITEM 4 — LINEHAUL ONLY, AND MILES BESIDE IT.
+          {/* ITEM 4 — LINEHAUL ALONE.
            *
            * Dispatch read the second money box as a second rate and asked
            * which one Relay pays; Relay pays one figure. The COLUMN stays and
            * settlements still sum it — this hides an input, it does not change
            * what a load can carry.
            *
-           * MILES ARE OPERATIONAL, not money, so `setMiles` is gated on
-           * `load:update` while the rate keeps `load.financials`. A dispatcher
-           * without financials never sees this panel at all and therefore
-           * still cannot edit miles: reported, not resolved here, because
-           * moving the field out of the rate panel is the owner's call.
+           * MILES ARE NOT HERE. They were, for one commit, and that put an
+           * operational number behind a money gate: a dispatcher without
+           * `load.financials` never sees this panel, so the field was
+           * invisible to exactly the person the request was for. It lives in
+           * the summary now, where it already rendered.
            *
            * ITEM 5 — TONU ONLY. It is the one accessorial Relay pays; the
            * rest are broker vocabulary, and a list of twelve is how somebody
@@ -757,15 +754,12 @@ export default async function LoadDetailPage({
               loadId={id}
               linehaulCents={load.linehaulCents}
               fuelSurchargeCents={load.fuelSurchargeCents}
-              showFuelSurcharge={!isAmazon}
-              dispatchedMiles={load.dispatchedMiles}
-              {...(mayUpdate
-                ? { setMiles: setMilesAction.bind(null, id) }
-                : {})}
+              showFuelSurcharge={view.showFuelSurcharge}
               accessorials={accessorialRows}
               mayEdit={maySetRate}
-              accessorialTypes={ACCESSORIAL_TYPES.filter(
-                (type) => !isAmazon || type === 'TONU',
+              accessorialTypes={accessorialChoicesFor(
+                ACCESSORIAL_TYPES,
+                load,
               ).map((type) => ({
                 value: type,
                 label: t(`accessorial.${type}` as MessageKey),
@@ -776,7 +770,6 @@ export default async function LoadDetailPage({
                 title: t('rate.title'),
                 linehaul: t('rate.linehaul'),
                 fuelSurcharge: t('rate.fuelSurcharge'),
-                miles: t('loads.miles'),
                 accessorials: t('rate.accessorials'),
                 total: t('rate.total'),
                 save: t('rate.save'),
@@ -801,7 +794,7 @@ export default async function LoadDetailPage({
            * driver pay for every Amazon load, silently, with the loads looking
            * finished on every screen. `transitionOperational` now fires the
            * POD when a direct-settled load reaches Delivered. */}
-          {!isAmazon ? (
+          {view.showDocuments ? (
             <LoadDocuments
               loadId={id}
               slots={slots}
@@ -824,7 +817,7 @@ export default async function LoadDetailPage({
 
           <StatusTimeline
             entries={timeline}
-            {...(isAmazon && mayUpdate
+            {...(view.notesInTimeline && mayUpdate
               ? {
                   composer: (
                     <NoteComposer
@@ -855,7 +848,7 @@ export default async function LoadDetailPage({
           {/* ITEM 8 — the separate Notes panel is gone on Amazon loads; its
            * entries are in the timeline above and its box is inside that
            * section. Broker freight keeps the panel, so `LoadNotes` stays. */}
-          {isAmazon ? null : (
+          {view.notesInTimeline ? null : (
             <div className="lg:col-span-2">
               <LoadNotes
                 notes={notes.map((note) => ({
