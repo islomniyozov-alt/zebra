@@ -78,13 +78,24 @@ Rules about instruments, which are the ones that cost whole sessions:
   was `tail`'s, a `sed` that silently matched nothing after prettier reindented
   its target, and a `grep` that turned a refused run into a four-second
   mystery.
-- **Assert the anchor before replacing on it.** `str.replace` returns the
-  original string when it matches nothing, `sed` exits 0, and a filter that
-  matches nothing prints nothing — so a silent no-op is indistinguishable from
-  a successful edit. Three in one session: a `sed` prettier had reindented past,
-  a stop mapping whose anchor prettier had reformatted, and a `grep` that ate a
-  refusal banner. Where an assertion is awkward, print the lines and splice by
-  number. See `PHASE-6-BRIEF.md` flag 86.
+- **Edit source with the tool that refuses a missed anchor. Not `sed`.**
+  `str.replace` returns the original string when it matches nothing, `sed`
+  exits 0, and a filter that matches nothing prints nothing — so a silent
+  no-op is indistinguishable from a successful edit, and a `tail -n +$EMPTY`
+  appends a whole file to itself. The Edit tool fails loudly on both.
+
+  THIS RULE USED TO SAY "assert the anchor" AND THAT WAS NOT ENOUGH. It asked
+  for care, and care failed three times in one session on this exact hazard —
+  each time because prettier had reformatted the line between reading it and
+  matching it. Then, told to be careful, the next attempt reached for line
+  numbers, which is the same vigilance wearing a different hat.
+
+  So the rule names a mechanism rather than a disposition, which is flag 87's
+  lesson turned on the hands doing the work: the exit-code rule was written
+  and broken the same day, and what fixed it was capturing to a file, not
+  remembering harder. Reserve shell splicing for files no editor tool can
+  reach, and say why at the call site. See `PHASE-6-BRIEF.md` flag 86.
+
 - **Count the thing you are claiming, not a superset of it.** A corpus-wide
   count of "stops carrying an arrival" returned 1,002 of 1,285 and was used to
   retract a correct diagnosis. The claim was about one pair on one stop in one

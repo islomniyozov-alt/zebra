@@ -12,22 +12,8 @@ import {
 import { formatAddress } from '@/lib/locations'
 import { newestFirst } from '@/lib/load-timeline'
 import { attributionLabel, stopAttribution } from '@/lib/stop-attribution'
+import { milesSummary } from '@/lib/load-miles'
 import { Prisma } from '@/generated/prisma/client'
-
-/**
- * What both audit reads select. One list, so the two queries cannot drift into
- * returning differently shaped rows for the same table.
- */
-const AUDIT_FIELDS = {
-  id: true,
-  createdAt: true,
-  action: true,
-  entityType: true,
-  entityId: true,
-  userAgent: true,
-  changes: true,
-  user: { select: { name: true } },
-} as const
 import {
   ACCESSORIAL_TYPES,
   accessorialChoicesFor,
@@ -54,6 +40,7 @@ import { Copyable } from './Copyable'
 import { MilesField } from './MilesField'
 import { StopAddress } from './StopAddress'
 import { StopsTable, type StopRow } from './StopsTable'
+import { MilesSummary } from './MilesSummary'
 import {
   addNoteAction,
   assignLoadAction,
@@ -77,6 +64,21 @@ import type {
 // with the zone shown (rule 3), documents grouped by type with dashed warning
 // placeholders for what is missing at this stage, a notes thread writing
 // `Communication` rows, and the timeline rendered from `LoadStatusEvent`.
+
+/**
+ * What every audit read selects. One list, so two queries against the same
+ * table cannot drift into returning differently shaped rows.
+ */
+const AUDIT_FIELDS = {
+  id: true,
+  createdAt: true,
+  action: true,
+  entityType: true,
+  entityId: true,
+  userAgent: true,
+  changes: true,
+  user: { select: { name: true } },
+} as const
 
 const ALL_OPERATIONAL: LoadOperationalStatus[] = [
   'AVAILABLE',
@@ -273,6 +275,10 @@ export default async function LoadDetailPage({
   // made elsewhere and already tested: `shownStopTime` for which clock is
   // operative, `dwellLabel` for the wait, `attributionLabel` for who wrote a
   // check-in. The component lays them out and judges nothing.
+  // ITEM 7 — read from the two stored columns, never summed from the stops.
+  // `milesSummary` is where "null is not zero" lives; see src/lib/load-miles.ts.
+  const miles = milesSummary(load)
+
   const attribution = stopAttribution(clockWrites)
   const attributionLabels = {
     via: t('loads.viaIntegration'),
@@ -683,6 +689,27 @@ export default async function LoadDetailPage({
            * of mostly empty cells would be worse than the list it replaces —
            * so the cards below are not legacy, they are the right shape for
            * the other kind of load. */}
+          {/* ITEM 7 — Loaded / Empty / Total, beside the stops they come from.
+           * Only on freight whose legs were classified; broker loads have no
+           * split to show and the panel would be two em dashes and a number. */}
+          {view.stopsAsTable ? (
+            <MilesSummary
+              totalMiles={miles.totalMiles}
+              loadedMiles={miles.loadedMiles}
+              emptyMiles={miles.emptyMiles}
+              provisional={miles.provisional}
+              locale={locale}
+              labels={{
+                title: t('loads.milesTitle'),
+                loaded: t('loads.milesLoaded'),
+                empty: t('loads.milesEmpty'),
+                total: t('loads.milesTotal'),
+                unknown: t('loads.milesUnknown'),
+                unclassified: t('loads.milesProvisional'),
+              }}
+            />
+          ) : null}
+
           {view.stopsAsTable ? (
             <StopsTable
               stops={stopRows}
