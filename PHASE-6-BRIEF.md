@@ -2280,3 +2280,42 @@ Recorded rather than resolved, per Phase 1's discipline.
     still reflected the old table would be the screen going quiet about a
     figure that was still provisional. Both update together, on re-import, or
     not at all.
+
+    ─────────────────────────────────────────────────────────────────────────
+    TWO MORE OF THE SAME SHAPE, 2026-09-04, found while measuring why the
+    integration suite kept dying.
+
+    **A LIMIT ASSERTED IN PROSE AND NEVER DERIVED FROM THE DATABASE.** Two
+    scripts capped their pools at one connection because they ran "against a
+    branch with a connection ceiling". Nobody had read one. `max_connections`
+    on the dev branch is **901**, and the suite opens single digits. One of
+    those comments was written that same morning, by the same author who had
+    spent the previous day writing flag 88 about instruments that inherit the
+    belief they are meant to test — here the belief was inherited from nothing
+    at all, which is worse, because there was not even a stale measurement
+    behind it.
+
+    It is flag 88's family a third time: 88 was a corpus that could not contain
+    the defect, 90 was a fixture that booked freight the importer does not
+    create, and this is a constraint that was never measured in the first
+    place. The cap itself was harmless — a script needing one connection should
+    say one — and that is exactly why it survived review. **A correct decision
+    resting on an invented reason is indistinguishable from a correct decision,
+    until the reason is cited for something else.**
+
+    **AND THE RIGHT WAY TO RETIRE A WRONG NUMBER.** `LOAD_WRITE_TIMEOUT_MS`
+    carried an inference that the effective round trip reached "700–900ms under
+    eight workers" — arithmetic performed on a symptom, never measured.
+    Measurement put it at 193–203ms at 1, 4 and 8 workers, flat.
+
+    The retraction was written INTO the comment that had justified the number,
+    beside the original claim, dated, with the command that produced the new
+    reading. Not deleted: a wrong figure that simply disappears takes its
+    reasoning with it, and the next person to wonder about the ceiling starts
+    from nothing. A number and its retraction sitting together tell a reader
+    both what was believed and what is true, which is the only form in which
+    "we were wrong about this" survives long enough to be useful.
+
+    The rule this suggests: **when a measured number replaces an asserted one,
+    the assertion stays visible next to it.** Deleting it is tidy and loses the
+    only evidence that the question was ever settled.

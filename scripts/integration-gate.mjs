@@ -133,6 +133,9 @@ export async function runIntegrationSuite() {
   }
   console.log(`The suite will write to ${target.endpoint} (from .env).`)
 
+  // WAKE IT BEFORE THE CLOCK STARTS. See warmCompute below.
+  await warmCompute(envFileValues().DIRECT_DATABASE_URL)
+
   console.log('')
 
   try {
@@ -231,4 +234,61 @@ function printFailureLog() {
   console.log('')
   console.log('What failed, recorded as it happened:')
   for (const line of text.split('\n')) console.log(`  ${line}`)
+}
+
+/**
+ * Wake the compute, then wait, so a resume happens OUTSIDE the measured run.
+ *
+ * Neon suspends the dev compute after roughly five idle minutes, and a connect
+ * resumes it — measured 2026-09-04, twice, by the postmaster being younger than
+ * the query that found it. The first query then costs 1.8–7.8s, and multi-second
+ * stalls cluster in the minutes after. Inside a 20-second transaction that is an
+ * "expired transaction" error blamed on the code under test.
+ *
+ * WHAT THIS DOES AND DOES NOT DO, plainly: it moves the RESUME out of the run.
+ * It does not clear the post-resume window in which stalls were observed — that
+ * ran to about five minutes, and no gate is going to wait that long. With an
+ * always-on compute this is a no-op that costs ten seconds; without one, or if
+ * the setting is ever changed back, it removes the worst-timed failure.
+ *
+ * IT NEVER FAILS THE GATE. A warm-up that could refuse a run would be a new way
+ * to lose fourteen minutes, and the suite is perfectly able to report a database
+ * it cannot reach.
+ */
+async function warmCompute(directUrl) {
+  const started = Date.now()
+  try {
+    const { neonConfig, Pool } = await import('@neondatabase/serverless')
+    neonConfig.webSocketConstructor ??= WebSocket
+    neonConfig.poolQueryViaFetch = false
+
+    const pool = new Pool({ connectionString: directUrl, max: 1 })
+    pool.on('error', () => {})
+    try {
+      const { rows } = await pool.query(
+        'select extract(epoch from now() - pg_postmaster_start_time())::int as uptime_s',
+      )
+      const uptime = rows[0]?.uptime_s ?? -1
+      const took = Date.now() - started
+      console.log(
+        `Compute awake in ${took}ms; it has been up ${uptime}s.` +
+          (uptime < 30 ? ' (it had suspended — this run resumed it)' : ''),
+      )
+    } finally {
+      await pool.end().catch(() => {})
+    }
+  } catch (error) {
+    console.log(
+      `Could not warm the compute (${error?.message ?? error}); ` +
+        'running anyway — the suite reports a database it cannot reach.',
+    )
+  }
+
+  // Ten seconds after the wake, not after the attempt: a resume that already
+  // took eight should not then wait another ten.
+  const settle = Math.max(0, 10_000 - (Date.now() - started))
+  if (settle > 0) {
+    console.log(`Letting it settle for ${Math.round(settle / 1000)}s.`)
+    await new Promise((resolve) => setTimeout(resolve, settle))
+  }
 }
