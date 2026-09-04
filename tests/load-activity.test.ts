@@ -4,6 +4,7 @@ import {
   INTEGRATION_USER_AGENT,
   type ActivityRow,
 } from '@/lib/load-activity'
+import { stopAttribution } from '@/lib/stop-attribution'
 
 // ---------------------------------------------------------------------------
 // AUDIT ROWS, READ BY SOMEBODY WHO WAS NEVER MEANT TO SEE ALL OF THEM.
@@ -148,5 +149,58 @@ describe('the shape of the list', () => {
     expect(
       activityEntries([row({ changes: { field: 'not a pair' } })], OWNER),
     ).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TWO CONSUMERS, ONE FILTER.
+//
+// The audit rows are FETCHED twice — the timeline wants the most recent N
+// whatever they touched, attribution wants every write that ever set a stop's
+// clocks, however old. Splitting the fetch was the right call: from a truncated
+// window a stop's attribution renders as an em dash, which reads as "nobody is
+// recorded" and means "we did not look far enough".
+//
+// SPLITTING THE FETCH MUST NOT SPLIT THE RULE. `activityEntries` stays the one
+// place that decides what a role may read. This runs a mixed set through BOTH
+// consumers to pin the two halves of that: money leaves the timeline, and a
+// stop's `arrivedAt` attribution is untouched by the same pass.
+// ---------------------------------------------------------------------------
+
+describe('the filter is shared even though the fetches are not', () => {
+  const mixed: ActivityRow[] = [
+    row({
+      id: 'money',
+      entityType: 'Load',
+      entityId: 'load-1',
+      changes: { linehaulCents: { from: 100_000, to: 150_000 } },
+    }),
+    row({
+      id: 'clock',
+      entityType: 'LoadStop',
+      entityId: 'stop-1',
+      user: { name: 'Dilshod' },
+      changes: { arrivedAt: { from: null, to: '2026-08-31T13:17:00Z' } },
+    }),
+  ]
+
+  it('drops the money row from a dispatcher timeline', () => {
+    const ids = activityEntries(mixed, { maySeeMoney: false }).map((e) => e.id)
+    expect(ids).not.toContain('money')
+    expect(ids).toContain('clock')
+  })
+
+  // THE OTHER HALF, AND THE REASON THIS TEST NAMES BOTH CONSUMERS. A filter
+  // that quietly swallowed stop clocks would empty the "by" columns while the
+  // timeline still looked right, and an em dash there is indistinguishable
+  // from nobody having been recorded.
+  it('leaves the stop attribution the timeline filter did not touch', () => {
+    const found = stopAttribution(mixed)
+    expect(found.get('stop-1')?.arrival?.actor).toBe('Dilshod')
+  })
+
+  it('and the owner sees the money row the dispatcher did not', () => {
+    const ids = activityEntries(mixed, { maySeeMoney: true }).map((e) => e.id)
+    expect(ids).toContain('money')
   })
 })

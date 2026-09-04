@@ -12,6 +12,22 @@ import {
 import { formatAddress } from '@/lib/locations'
 import { newestFirst } from '@/lib/load-timeline'
 import { attributionLabel, stopAttribution } from '@/lib/stop-attribution'
+import { Prisma } from '@/generated/prisma/client'
+
+/**
+ * What both audit reads select. One list, so the two queries cannot drift into
+ * returning differently shaped rows for the same table.
+ */
+const AUDIT_FIELDS = {
+  id: true,
+  createdAt: true,
+  action: true,
+  entityType: true,
+  entityId: true,
+  userAgent: true,
+  changes: true,
+  user: { select: { name: true } },
+} as const
 import {
   ACCESSORIAL_TYPES,
   accessorialChoicesFor,
@@ -149,7 +165,7 @@ export default async function LoadDetailPage({
     // double-booking, not about authority.
     const stopIds = load.stops.map((stop) => stop.id)
 
-    const [events, documents, notes, audit, trucks, drivers] =
+    const [events, documents, notes, clockWrites, trucks, drivers] =
       await Promise.all([
         tx.loadStatusEvent.findMany({
           where: { loadId: id },
@@ -167,36 +183,38 @@ export default async function LoadDetailPage({
           take: 50,
           include: { user: { select: { name: true } } },
         }),
-        // THE AUDIT ROWS, ONCE, FOR TWO ANSWERS.
+
+        // ── ATTRIBUTION'S ROWS: THE ONES THAT TOUCHED A CLOCK, HOWEVER OLD ───
         //
-        // The Activity panel renders them as a timeline; the stops table reads
-        // the same rows to say who last wrote each check-in, because `LoadStop`
-        // has no actor column. Two queries would be two answers to "what happened
-        // to this load" and would drift the first time one grew a filter the
-        // other did not.
+        // A SEPARATE FETCH BECAUSE THE NEED IS DIFFERENT, and the difference is
+        // not cosmetic. From a truncated window, a stop whose check-in was
+        // written before the last 200 events renders as an em dash — which reads
+        // as "nobody is recorded" and actually means "we did not look far
+        // enough". A limit that renders as a confident answer is the failure this
+        // codebase keeps flagging, so this query is bounded by the QUESTION
+        // rather than by a row count: only writes that set `arrivedAt` or
+        // `departedAt`, and all of them.
         //
-        // THE LOAD AND ITS STOPS. `entityId` is the row that was written, so a
-        // stop's clocks are found under the stop's own id and the load's fields
-        // under the load's.
+        // `path` + `not: DbNull` asks whether the key is present in the JSON at
+        // all. A stop is written a handful of times in its life, so this is a
+        // small result however old the load.
+        //
+        // THE PERMISSION FILTER IS STILL SHARED. Splitting the FETCH does not
+        // split the rule: `activityEntries` remains the one place that decides
+        // what a role may read, and `tests/load-activity.test.ts` pins that a
+        // money row is dropped from the timeline while a stop's `arrivedAt`
+        // attribution survives the same pass.
         tx.auditLog.findMany({
           where: {
+            entityType: 'LoadStop',
+            entityId: { in: stopIds },
             OR: [
-              { entityType: 'Load', entityId: id },
-              { entityType: 'LoadStop', entityId: { in: stopIds } },
+              { changes: { path: ['arrivedAt'], not: Prisma.DbNull } },
+              { changes: { path: ['departedAt'], not: Prisma.DbNull } },
             ],
           },
           orderBy: { createdAt: 'desc' },
-          take: 200,
-          select: {
-            id: true,
-            createdAt: true,
-            action: true,
-            entityType: true,
-            entityId: true,
-            userAgent: true,
-            changes: true,
-            user: { select: { name: true } },
-          },
+          select: AUDIT_FIELDS,
         }),
         tx.truck.findMany({
           where: { deletedAt: null, companyId: load.companyId },
@@ -212,11 +230,19 @@ export default async function LoadDetailPage({
         }),
       ])
 
-    return { load, events, documents, notes, audit, trucks, drivers }
+    return {
+      load,
+      events,
+      documents,
+      notes,
+      clockWrites,
+      trucks,
+      drivers,
+    }
   })
 
   if (!data) notFound()
-  const { load, events, documents, notes, audit, trucks, drivers } = data
+  const { load, events, documents, notes, clockWrites, trucks, drivers } = data
 
   // WHAT THIS SCREEN SHOWS, decided in one place and testable without a
   // browser. Seven display items branch on whether this freight settles
@@ -247,7 +273,7 @@ export default async function LoadDetailPage({
   // made elsewhere and already tested: `shownStopTime` for which clock is
   // operative, `dwellLabel` for the wait, `attributionLabel` for who wrote a
   // check-in. The component lays them out and judges nothing.
-  const attribution = stopAttribution(audit)
+  const attribution = stopAttribution(clockWrites)
   const attributionLabels = {
     via: t('loads.viaIntegration'),
     unknown: '—',
