@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   isStartTransactionFailure,
   retryOnStartFailure,
+  retryStats,
 } from '@/lib/retry-transaction'
 
 // ---------------------------------------------------------------------------
@@ -115,5 +116,41 @@ describe('retrying', () => {
     )
     // A retry nobody can see is indistinguishable from a suite that got lucky.
     expect(seen).toEqual([1, 2])
+  })
+})
+
+describe('the counter, which is what turns a hypothesis into a finding', () => {
+  it('counts a retry that happened', async () => {
+    const before = retryStats().retries
+    let calls = 0
+    await retryOnStartFailure(async () => {
+      calls++
+      if (calls === 1) throw startFailure()
+      return 'ok'
+    })
+    expect(retryStats().retries).toBe(before + 1)
+  })
+
+  it('counts nothing when the first attempt works', async () => {
+    const before = retryStats()
+    await retryOnStartFailure(async () => 'ok')
+    expect(retryStats()).toEqual(before)
+  })
+
+  // THE CONTROL SWITCH. An experiment needs a control, and a control that
+  // requires reverting a commit is one nobody runs twice.
+  it('does not retry at all when switched off', async () => {
+    const previous = process.env.ZEBRA_TX_RETRY
+    process.env.ZEBRA_TX_RETRY = 'off'
+    try {
+      const attempt = vi.fn(async () => {
+        throw startFailure()
+      })
+      await expect(retryOnStartFailure(attempt)).rejects.toBeInstanceOf(Error)
+      expect(attempt).toHaveBeenCalledTimes(1)
+    } finally {
+      if (previous === undefined) delete process.env.ZEBRA_TX_RETRY
+      else process.env.ZEBRA_TX_RETRY = previous
+    }
   })
 })

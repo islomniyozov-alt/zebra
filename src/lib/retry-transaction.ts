@@ -37,6 +37,37 @@
 // ---------------------------------------------------------------------------
 
 /** How many extra attempts. Small: a compute that will not open is not busy. */
+/**
+ * How many retries this process has performed, and how many gave up.
+ *
+ * A RETRY NOBODY CAN SEE IS INDISTINGUISHABLE FROM A SUITE THAT GOT LUCKY —
+ * which is a sentence that was already written in this repository's tests when
+ * the first version of this file shipped without a counter. A gate then came
+ * back with the failure mode inverted (start-failures gone, commit expiries
+ * appeared) and there was no way to tell whether a single retry had fired.
+ *
+ * COUNTED, NOT LOGGED, because this module is imported into the worker bundle
+ * and workerd has no `node:fs`. The test harness reads these numbers and writes
+ * them where the gate can find them; production reads them not at all.
+ */
+const counters = { retries: 0, exhausted: 0 }
+
+export function retryStats(): { retries: number; exhausted: number } {
+  return { ...counters }
+}
+
+/**
+ * Off when `ZEBRA_TX_RETRY=off`, so a run can be compared against itself.
+ *
+ * The comparison this exists for: one gate with retries and one without,
+ * against the same code, to find out whether the retry is absorbing failures
+ * or manufacturing a slower kind. An experiment needs a control, and a control
+ * that requires reverting a commit is one nobody runs twice.
+ */
+function retryEnabled(): boolean {
+  return process.env.ZEBRA_TX_RETRY !== 'off'
+}
+
 const MAX_ATTEMPTS = 3
 
 /** Between attempts, giving a resuming compute time to finish waking. */
@@ -79,11 +110,13 @@ export async function retryOnStartFailure<T>(
     try {
       return await attempt()
     } catch (error) {
-      if (!isStartTransactionFailure(error)) throw error
+      if (!isStartTransactionFailure(error) || !retryEnabled()) throw error
+      counters.retries++
       lastError = error
       onRetry?.(error, attemptNumber + 1)
 
       const wait = BACKOFF_MS[attemptNumber]
+      if (wait === undefined) counters.exhausted++
       if (wait === undefined) break
       await new Promise((resolve) => setTimeout(resolve, wait))
     }

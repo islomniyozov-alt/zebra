@@ -1,3 +1,5 @@
+import { retryStats } from '@/lib/retry-transaction'
+import { recordFailure } from './failure-log'
 import { installSocketCrashGuard } from './socket-crash-guard'
 import { withDatabase, workerDatabase } from './worker-db'
 
@@ -85,3 +87,27 @@ if (process.env.ZEBRA_DB_PROBE) {
   )
   await probe.end()
 }
+
+// ---------------------------------------------------------------------------
+// WHAT THE RETRY ACTUALLY DID, WRITTEN WHERE THE GATE CAN READ IT.
+//
+// `src/lib/retry-transaction.ts` counts but cannot log: it is in the worker
+// bundle and workerd has no `node:fs`. So the count crosses the process
+// boundary here, on exit, into the same file the failure reporter appends to —
+// which the gate already reads back and prints.
+//
+// ON EXIT, SYNCHRONOUSLY. A count reported by a process that has already gone
+// is no count at all, and this file exists because a gate came back with the
+// failure mode inverted and no way to tell whether one retry had fired.
+//
+// SILENT WHEN THERE IS NOTHING TO SAY. Zero retries writes no line, so a clean
+// run's log stays a list of failures rather than a page of noughts.
+// ---------------------------------------------------------------------------
+process.on('exit', () => {
+  const { retries, exhausted } = retryStats()
+  if (retries === 0 && exhausted === 0) return
+  recordFailure(
+    `RETRY [worker ${process.env.VITEST_POOL_ID ?? '?'}] ` +
+      `${retries} transaction(s) retried, ${exhausted} gave up`,
+  )
+})
