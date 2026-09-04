@@ -21,6 +21,17 @@ import { writeReceipt } from './integration-receipt.mjs'
 // the file itself points somewhere dangerous.
 // ---------------------------------------------------------------------------
 
+/**
+ * The failure names, written as they happen, read back after a crash.
+ *
+ * DECLARED HERE, WITH THE OTHER CONSTANTS. It first lived at the bottom of the
+ * file beside the function that reads it, which put it in the temporal dead
+ * zone for `runSuite` — the gate died on "Cannot access 'FAILURE_LOG' before
+ * initialization" ten seconds in. Cheap, because it refused early rather than
+ * fourteen minutes later; the shape to avoid is a `const` declared after its
+ * first use.
+ */
+const FAILURE_LOG = '.integration-failures.log'
 const SCRUBBED = ['DATABASE_URL', 'DIRECT_DATABASE_URL', 'NEON_BRANCH']
 
 // A FILE PATH, NOT A PACKAGE SPECIFIER. `require.resolve('vitest/vitest.mjs')`
@@ -216,9 +227,6 @@ if (process.argv[1] && process.argv[1].endsWith('integration-gate.mjs')) {
   const outcome = await runIntegrationSuite()
   process.exit(outcome.ok ? 0 : 1)
 }
-
-/** The failure names, written as they happened, read back after a crash. */
-const FAILURE_LOG = '.integration-failures.log'
 
 function printFailureLog() {
   let text = ''
