@@ -265,9 +265,18 @@ function printFailureLog() {
  *
  * WHAT THIS DOES AND DOES NOT DO, plainly: it moves the RESUME out of the run.
  * It does not clear the post-resume window in which stalls were observed — that
- * ran to about five minutes, and no gate is going to wait that long. With an
- * always-on compute this is a no-op that costs ten seconds; without one, or if
- * the setting is ever changed back, it removes the worst-timed failure.
+ * ran to about five minutes, and no gate is going to wait that long.
+ *
+ * THIS IS PERMANENT, NOT A STOPGAP. Scale-to-zero after five idle minutes is
+ * fixed on the Neon Launch plan; only Scale makes it configurable, at a typical
+ * $701/mo, which is not a price for a test database. The owner decided against
+ * it on 2026-09-04. So this, the socket-crash guard, the failure log and the
+ * `withOrg` start-transaction retry are the answer rather than the interim
+ * measure — nobody is coming to remove the condition they exist for.
+ *
+ * THE RESIDUAL IS A DROP DURING `globalSetup`, which nothing at this layer can
+ * survive: there is no test running to fail, so the run dies before it starts.
+ * That is a re-run, and the compute-age line above makes it a diagnosed one.
  *
  * IT NEVER FAILS THE GATE. A warm-up that could refuse a run would be a new way
  * to lose fourteen minutes, and the suite is perfectly able to report a database
@@ -296,8 +305,17 @@ async function warmCompute(directUrl) {
       await pool.end().catch(() => {})
     }
   } catch (error) {
+    // NAME IT EVEN WHEN IT HAS NO MESSAGE. Neon's dropped-socket failure
+    // arrives as an `ErrorEvent` whose `message` is the empty string, so
+    // `error?.message ?? error` printed "Could not warm the compute ()" — a
+    // line that says something went wrong and refuses to say what. The
+    // constructor name is the part that identifies it.
+    const said =
+      (error && typeof error === 'object' && 'message' in error
+        ? String(error.message)
+        : '') || `${error?.constructor?.name ?? typeof error} with no message`
     console.log(
-      `Could not warm the compute (${error?.message ?? error}); ` +
+      `Could not warm the compute (${said}); ` +
         'running anyway — the suite reports a database it cannot reach.',
     )
   }

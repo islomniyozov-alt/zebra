@@ -94,6 +94,15 @@ import {
  * RAISING THIS NUMBER WOULD NOT HELP. A 27-second stall clears a 20-second
  * ceiling and a 30-second one; the failure is a connection that stops
  * answering, not a transaction that needs longer.
+ *
+ * AND THE CONDITION IS PERMANENT. Scale-to-zero after five idle minutes is
+ * fixed on the Neon Launch plan; only Scale makes it configurable, at a typical
+ * $701/mo, and the owner decided against that on 2026-09-04 for a test
+ * database. So the mitigations are the answer, not an interim: the gate's
+ * compute warm-up, `tests/socket-crash-guard.ts`, the failure log, and the
+ * start-transaction retry in `src/lib/retry-transaction.ts`. A future reader
+ * finding intermittent "expired transaction" failures here should reach for
+ * those rather than for this constant.
  * ─────────────────────────────────────────────────────────────────────────
  */
 export const LOAD_WRITE_TIMEOUT_MS = 20_000

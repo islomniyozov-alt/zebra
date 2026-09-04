@@ -5,6 +5,12 @@
 // cannot turn that off. Two gates in a row lost tests to it — twelve of
 // fourteen failures in the second, none of them the code under test.
 //
+// AND IT IS NOT GOING AWAY. Only the Scale plan makes the timeout
+// configurable, at a typical $701/mo; the owner decided against that on
+// 2026-09-04 for a test database. This is therefore a permanent part of how
+// the suite runs, not scaffolding around a setting somebody is about to
+// change.
+//
 // SCOPED TO WHAT WAS MEASURED, AND NO WIDER. Every one of the fifteen stack
 // traces in that run ended at `PrismaNeonAdapter.startTransaction`, and none at
 // `performIO`, `queryRaw` or a commit. So this retries a transaction that
