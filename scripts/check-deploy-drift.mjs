@@ -288,6 +288,27 @@ for (const environment of ENVIRONMENTS) {
   )
 }
 
+// ---------------------------------------------------------------------------
+// AND WHAT THIS FILE STILL CANNOT TELL YOU.
+//
+// Everything above measures an INPUT: the version message `deploy.mjs` stamped,
+// and whether a route answers 200. Neither is the response a dispatcher reads.
+// On 2026-09-04 both were green while the screen rendered markup deleted ten
+// commits earlier — see flag 93.
+//
+// `npm run verify:response` logs in and reads the body. It is not run from here
+// because it needs credentials and a browser, and a check that cannot run
+// unattended has no business inside `npm run check`. Printing the pointer costs
+// one line and closes the gap between what this says and what it is read as.
+// ---------------------------------------------------------------------------
+console.log('')
+console.log(
+  '  A version id says a deploy happened, not what is in it. To read what a',
+)
+console.log(
+  '  deployed route actually RETURNS:  VERIFY_LOAD=<number> npm run verify:response',
+)
+
 if (artifactDisagrees) {
   console.log('')
   console.log('  ' + '='.repeat(70))

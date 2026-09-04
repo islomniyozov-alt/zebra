@@ -29,6 +29,7 @@
     "db:seed": "prisma db seed",
     "check:hex": "node scripts/check-hex.mjs",
     "check:drift": "node scripts/check-deploy-drift.mjs",
+    "verify:response": "node -r dotenv/config scripts/verify-response.mjs",
     "check:unrouted": "node -r dotenv/config scripts/check-unrouted.mjs",
     "test:integration": "node scripts/integration-gate.mjs"
   },

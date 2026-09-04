@@ -2405,3 +2405,108 @@ Recorded rather than resolved, per Phase 1's discipline.
     that narrowness is what keeps the retry inside what was measured rather
     than beside it. **If a future trace shows a commit-time drop, this must not
     be widened to cover it.**
+
+93. **EVERY DEPLOY CHECK IN THIS REPOSITORY STOPPED SHORT OF THE RESPONSE, AND
+    THE ONE THAT SAID SO LOUDEST WAS THE ONE BEING MISREAD.** — 2026-09-04.
+
+    Four items shipped in `ddd4095` were not on the production screen. Three
+    checks agreed nothing was wrong:
+    - `check:drift` said production was on `8177a71`.
+    - the artifact probe said `/loads/import/trips` returned 200.
+    - grepping `.open-next` found `loads.stopN` and "No address on file" in
+      the uploaded bundle, and no trace of the markup that had been deleted.
+
+    All three were true and none of them was about the page anybody opened.
+    `check:drift` reads the **version message `deploy.mjs` stamps with
+    `--message`** — and the script says so itself, in a comment written the day
+    it was created:
+
+    > A version id tells you a deploy happened. It does not tell you what is in
+    > it.
+
+    That sentence had been sitting in the file the whole time. The drift line
+    was still being read — by me, out loud, more than once this week — as
+    "production is running this commit". It says a deploy labelled with this
+    commit occurred. The artifact probe was added precisely because a version id
+    is weak evidence, and it too stops one step short: a stale cached page
+    returns 200 with perfect confidence.
+
+    **WHAT WAS ACTUALLY HAPPENING was worse than staleness.** The owner found it
+    by hand: a request for load 1010 came back with **load 1013's HTML**, twice,
+    and only `?v=2` produced the right page. A cache that can serve one load's
+    page for another is a cache whose key is not the URL — and the question
+    immediately after that one is whether it can serve one ORGANISATION's load
+    to another, which is the single thing this codebase spends the most effort
+    on. That question is open and is not answered by this flag.
+
+    THE SHAPE, GENERALLY: **a chain of checks can be individually correct and
+    collectively miss the thing, when every link measures an input.** Source,
+    commit, bundle, status code — each is upstream of the response, and the
+    response is the only artefact a user ever meets. Flag 88's rule said build
+    the instrument from the artefact rather than from what the code believes
+    about it; this is the deployment-shaped instance, and the artefact is the
+    body of the reply.
+
+    `scripts/verify-response.mjs` is the first check here that logs in and reads
+    what a deployed route RETURNS. It asserts two markers deliberately chosen to
+    fail in opposite directions — one that `ddd4095` ADDED and one it DELETED —
+    so a stale response is distinguishable from a feature gate that is simply
+    off. And it asks the question nobody had asked: is this the page that was
+    requested?
+
+    A caution for whoever extends it: the temptation is to add a cache-buster
+    and get a green run. The plain request is the subject. The busted request is
+    a control, and the difference between them IS the finding.
+
+94. **THE PROBE REPRODUCED THE BUG IT WAS BUILT TO INVESTIGATE, AND THE
+    REPRODUCTION WAS ITS OWN DEFECT.** — 2026-09-04.
+
+    `verify-response.mjs` was written to answer one question: does a request for
+    load 1010 come back with load 1010's page, or with another load's? It was
+    wrong three times before it was right, and the third wrong version printed:
+
+        FAIL  the response is the load that was requested
+              asked 1110, header says "1114"
+
+    Which is the collision. Exactly the collision, in the exact words the real
+    finding would have used. The cause was that the loads list filters on
+    `?ref=` and the probe sent `?q=` — an ignored parameter, an unfiltered list,
+    and `.first()` returning the newest load every time.
+
+    THE OTHER TWO WERE THE SAME SHAPE. `a[href^="/loads/"]` matched the
+    sidebar's `/loads/import`, so the probe read the loads LIST and reported
+    that a load page lacked the new markup. And dev and production have separate
+    databases, so production load numbers found nothing on dev and fell through
+    to the same wrong row.
+
+    Each version failed in a way that CORROBORATED the hypothesis. That is worse
+    than a probe that simply breaks: a broken probe is discarded, a
+    corroborating one is believed, and this one had a clean transcript, sensible
+    labels and a plausible story. Had the investigation stopped one step earlier
+    — and it nearly did — the report would have been "the cross-load collision
+    reproduces on dev", with evidence.
+
+    The corrected probe returns 7/7: the right load, the new markup present, the
+    deleted markup absent, plain and cache-busted requests agreeing, a second
+    load returning its own page, and a fresh session agreeing with the first.
+    Nothing was wrong with the server.
+
+    **THE RULE, WHICH IS THE POINT OF THIS ENTRY: when an instrument reproduces
+    the bug you are looking for, verify the instrument before believing the
+    reproduction.** Confirmation is the moment to slow down, not the moment to
+    report. Flags 88, 90 and 92 are the same family from the other side —
+    instruments that inherited the belief they were meant to test and therefore
+    saw nothing. This one inherited the belief and therefore saw everything.
+
+    The three specific traps are written at the selectors that caused them in
+    `scripts/verify-response.mjs`, because "the search param is `ref`, not `q`"
+    is cheap to state and expensive to rediscover.
+
+    STILL UNTESTED, AND FLAGGED AS UNTESTED RATHER THAN SAFE: whether the
+    response varies correctly across ORGANISATIONS. Two logins, two
+    organisations, one URL. Production answers anonymous requests with a 307 to
+    `/login` and `Cache-Control: private, no-cache, no-store`, and no
+    `cf-cache-status` header appears, so a shared cache should not be holding
+    these pages at all — but "should" is what three green checks said the day
+    this started. The owner is creating a second production user; that is the
+    run to make, and until it is made this line stays as it reads.
