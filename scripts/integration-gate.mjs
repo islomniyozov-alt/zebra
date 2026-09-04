@@ -149,6 +149,12 @@ export async function runIntegrationSuite() {
       // The shell was only ever there to find `npx` on Windows, where it is
       // `npx.cmd`. Resolving the module entry removes both the shell and the
       // guessing: this is the exact vitest this repository installed.
+      // The reporter and this script must agree on where the failure list goes.
+      // Set ON `child` rather than spread at the call site, so the scrubbing
+      // guard in db-target.test.ts still sees `env: child` — the whole point of
+      // that assertion is that no OTHER environment can reach the suite.
+      child.ZEBRA_FAILURE_LOG = FAILURE_LOG
+
       const proc = spawn(
         process.execPath,
         [VITEST_ENTRY, 'run', '--project', 'integration'],
@@ -159,6 +165,17 @@ export async function runIntegrationSuite() {
     })
 
     if (status !== 0) {
+      // WHAT FAILED, FROM THE FILE, BECAUSE THE REPORTER MAY NEVER HAVE
+      // RENDERED.
+      //
+      // On 2026-09-04 a run printed "2 failed | 210 passed" and then died on a
+      // dropped socket. Vitest writes its failure list when the run ENDS, so
+      // the list was never produced and the two tests were unidentifiable —
+      // flag 87's shape, a failure whose diagnosis is destroyed by how it was
+      // reported. `tests/failure-reporter.ts` appends each failure the moment
+      // it happens; this reads that back so the gate's own output carries the
+      // names even when the process died mid-render.
+      printFailureLog()
       return { ok: false, endpoint: target.endpoint, receipt: null }
     }
 
@@ -195,4 +212,23 @@ export async function runIntegrationSuite() {
 if (process.argv[1] && process.argv[1].endsWith('integration-gate.mjs')) {
   const outcome = await runIntegrationSuite()
   process.exit(outcome.ok ? 0 : 1)
+}
+
+/** The failure names, written as they happened, read back after a crash. */
+const FAILURE_LOG = '.integration-failures.log'
+
+function printFailureLog() {
+  let text = ''
+  try {
+    text = readFileSync(FAILURE_LOG, 'utf8').trim()
+  } catch {
+    // No file means the run never started a test, which the exit code and the
+    // output above already say.
+    return
+  }
+  if (text === '') return
+
+  console.log('')
+  console.log('What failed, recorded as it happened:')
+  for (const line of text.split('\n')) console.log(`  ${line}`)
 }

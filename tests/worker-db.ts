@@ -64,6 +64,13 @@ export function workerDatabase(poolId: string | number): string {
  * here. This suite is latency-bound — roughly 200ms per statement to
  * us-east-2 — so its workers spend their lives waiting rather than computing,
  * and the useful count is above the core count rather than equal to it.
+ *
+ * CONFIRMED 2026-09-04 (`scripts/measure-neon.mjs`): the round trip is 193–203ms
+ * at 1, 4 AND 8 concurrent connections — flat, not degrading — and
+ * max_connections on the branch is 901 against the single digits this opens.
+ * So eight workers is not what makes runs unstable, and lowering the count
+ * would trade suite time for nothing. The instability is a compute resume; see
+ * the note on LOAD_WRITE_TIMEOUT_MS in src/lib/loads.ts.
  */
 export function workerCount(): number {
   const raw = Number(process.env.ZEBRA_TEST_WORKERS ?? '8')

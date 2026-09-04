@@ -42,9 +42,12 @@ if (!connectionString) {
 
 neonConfig.webSocketConstructor ??= WebSocket
 neonConfig.poolQueryViaFetch = false
-// ONE CONNECTION, SAID OUT LOUD. This script needs exactly one and runs
-// against a branch with a connection ceiling; a default pool holding idle
-// sockets is pressure on something else's transaction for no benefit here.
+// ONE CONNECTION, BECAUSE IT NEEDS EXACTLY ONE — not because the branch is
+// short of them. An earlier version of this comment claimed "a branch with a
+// connection ceiling", which nobody had measured: max_connections on the dev
+// branch is 901 (measured 2026-09-04, scripts/measure-neon.mjs) and this suite
+// opens single digits. The cap stays — a script needing one connection should
+// say one — but the reason is tidiness, not scarcity.
 const pool = new Pool({ connectionString, max: 1 })
 
 const rows = async (text, values = []) => (await pool.query(text, values)).rows

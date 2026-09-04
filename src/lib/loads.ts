@@ -63,6 +63,38 @@ import {
  * round trip is a tenth. The timeout is raised for the distance, not for the
  * work, and raising it does not excuse adding statements: everything cheap
  * has already been cut (see `writeStops` and `findAssignmentConflicts`).
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * RE-MEASURED 2026-09-04 (`node -r dotenv/config scripts/measure-neon.mjs`),
+ * because three runs died on dropped sockets in one day and the timeouts they
+ * left behind were being blamed on this ceiling being too thin.
+ *
+ *   round trip, `select 1`, median   193–203ms at 1, 4 AND 8 workers
+ *   p95 on a warm compute            206–493ms
+ *   max_connections on the branch    901
+ *
+ * SO THE 200ms ABOVE IS EXACTLY RIGHT AND CONCURRENCY DOES NOT MOVE IT. An
+ * earlier reading of these failures inferred an "effective round trip of
+ * 700–900ms under eight workers"; that was arithmetic on a symptom, and the
+ * measurement says nothing is uniformly slower.
+ *
+ * WHAT ACTUALLY HAPPENS IS A STALL. Individual round trips freeze for 12–27
+ * SECONDS — 17.4s, 18.8s, 21.0s, 27.3s observed — while the median stays at
+ * 200ms, and they hit one worker as readily as eight. A stall like that inside
+ * a 20s budget is the whole of the "expired transaction" profile: overshoots of
+ * one to eight seconds, scattered across unrelated files.
+ *
+ * THEY CLUSTER AFTER A COMPUTE RESUME. Neon suspends the dev compute after
+ * roughly five idle minutes; reconnecting starts a new postmaster (confirmed
+ * twice: a query at 17:36:52.494 met a postmaster 414ms old, and one at
+ * 17:50:40.061 met one 277ms old) and costs 1.8–7.8s on the first query. Every
+ * multi-second stall observed came within ~5 minutes of a resume; six
+ * consecutive runs past that point had a worst case of 527ms.
+ *
+ * RAISING THIS NUMBER WOULD NOT HELP. A 27-second stall clears a 20-second
+ * ceiling and a 30-second one; the failure is a connection that stops
+ * answering, not a transaction that needs longer.
+ * ─────────────────────────────────────────────────────────────────────────
  */
 export const LOAD_WRITE_TIMEOUT_MS = 20_000
 

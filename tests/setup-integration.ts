@@ -1,3 +1,4 @@
+import { installSocketCrashGuard } from './socket-crash-guard'
 import { withDatabase, workerDatabase } from './worker-db'
 
 // ---------------------------------------------------------------------------
@@ -45,6 +46,11 @@ process.env.ZEBRA_INTEGRATION_WORKER = '1'
 // transaction-mode, so session-level settings are not reliably still yours on
 // the next statement; the database is chosen when the connection is made, and
 // there is nothing to lose hold of.
+// A DROPPED CONNECTION FAILS ITS TEST AND NOTHING ELSE. Installed before any
+// pool exists, because the crash it contains happens on a socket this file
+// never sees. See tests/socket-crash-guard.ts.
+installSocketCrashGuard()
+
 const poolId = process.env.VITEST_POOL_ID
 if (poolId) {
   const database = workerDatabase(poolId)
