@@ -1,3 +1,4 @@
+import { retryOnStartFailure } from './retry-transaction'
 import { prisma } from './db'
 import {
   auditScope,
@@ -162,13 +163,19 @@ export async function runInOrg<T>(
 /**
  * `runInOrg` against the request-scoped client. This is what routes and server
  * actions call; `orgId` comes from the session and from nowhere else.
+ *
+ * RETRIED WHEN THE TRANSACTION CANNOT BE OPENED, and only then. See
+ * `src/lib/retry-transaction.ts` for the measurement and the scope: a
+ * transaction that never started allocated no counter number, wrote no row,
+ * and — because `assertOutsideTransaction` keeps third-party calls out of
+ * transactions — repeated no external side effect.
  */
 export function withOrg<T>(
   orgId: string,
   fn: (tx: TxClient) => Promise<T>,
   options: OrgTransactionOptions,
 ): Promise<T> {
-  return runInOrg(prisma, orgId, fn, options)
+  return retryOnStartFailure(() => runInOrg(prisma, orgId, fn, options))
 }
 
 /**

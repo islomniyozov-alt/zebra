@@ -62,6 +62,64 @@ export const LEG_PURPOSE_RULES: readonly LegPurposeRule[] = [
       'anchor and an EmptyContainer pattern that matched NOTHING in 2,987 ' +
       'rows, while CustomerFacingEmptyTrailer sat unclassified between them.',
   },
+  // ── KNOWN LOADED, ENUMERATED 2026-09-04 ────────────────────────────────
+  //
+  // THE TABLE USED TO LIST ONLY EMPTY PATTERNS, and everything unmatched fell
+  // through to LOADED. That default is still right — freight is the ordinary
+  // case — but it made "no rule matched" and "classified as loaded"
+  // indistinguishable, so `isUnclassifiedLeg` called ALL ordinary freight
+  // unclassified and the provisional note would have appeared on every load.
+  // The schema had three states; the table could only ever produce two.
+  //
+  // So the loaded families are listed too, and unmatched now means what it
+  // says: NOBODY HAS DECIDED. Counts are from the 1,600-file sweep, read with
+  // the real CSV parser rather than by splitting on commas — a shell census of
+  // the same corpus reported 4,367 legs with no Shipper Account at all, none of
+  // which exist; they were rows split inside quoted fields.
+  //
+  // FIRST MATCH WINS, and the EMPTY rules above run first on purpose:
+  // `TransfersEmptyCarts` is matched by /Empty/i before anything here sees it.
+  {
+    pattern: /^Outbound/i,
+    purpose: 'LOADED',
+    note: 'Freight leaving a facility. 1,067 legs across twelve variants — OutboundAmazonManaged alone is 827.',
+  },
+  {
+    pattern: /^OB(Dedicated|Web)/i,
+    purpose: 'LOADED',
+    note: 'External freight under an Amazon contract. 65 legs.',
+  },
+  {
+    pattern: /^(Amazon)?Inbound/i,
+    purpose: 'LOADED',
+    note: 'Freight arriving: AmazonInboundVendor 28, InboundRedirects 7, InboundCustomerReturns 6, AmazonInboundFba 3, and three singletons.',
+  },
+  {
+    pattern: /^ATSLTL/i,
+    purpose: 'LOADED',
+    note: 'Less-than-truckload under Amazon Transportation Services. 46 legs.',
+  },
+  {
+    pattern: /^GlobalMileInbound/i,
+    purpose: 'LOADED',
+    note: 'Cross-border inbound. 1 leg.',
+  },
+  {
+    pattern: /^SWAMFNPickup/i,
+    purpose: 'LOADED',
+    note: 'A pickup from a merchant-fulfilled seller. 3 legs.',
+  },
+  // ── AND WHAT IS DELIBERATELY ABSENT ────────────────────────────────────
+  //
+  // `Transfers*` — roughly 450 legs across 25 variants — is NOT listed, and
+  // neither is `TrailerPool*` (114). The prefix settles nothing:
+  // `TransfersSellableInventory` carries goods and `TransfersBrokenCarts` moves
+  // equipment, and the two sit side by side under one word. Listing them as
+  // loaded to make the note quieter would be inventing the classification the
+  // note exists to admit is missing.
+  //
+  // So a trip containing those legs reads as provisional. That is a larger set
+  // than `TrailerPoolAdjustment` alone, and it is the honest one.
   // TrailerPoolAdjustment (112 legs across three variants) is deliberately
   // NOT here. Whether repositioning a pool trailer is an empty move is a
   // question about this business rather than about this string, and it is

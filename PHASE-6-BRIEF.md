@@ -2319,3 +2319,89 @@ Recorded rather than resolved, per Phase 1's discipline.
     The rule this suggests: **when a measured number replaces an asserted one,
     the assertion stays visible next to it.** Deleting it is tidy and loses the
     only evidence that the question was ever settled.
+
+92. **FOUR INSTRUMENTS IN ONE DAY, EACH BROKEN IN A DIFFERENT WAY, WHILE
+    INVESTIGATING A FIFTH.** — 2026-09-04.
+
+    Two gates lost in a row, neither to code. Everything below was found while
+    fixing that, and every item is an instrument rather than a feature.
+
+    **THE REPORTER THAT DESTROYED THE EVIDENCE IT KEPT.** Built the day before
+    so a crashed run would still say which tests failed. It wrote nothing on
+    the first red gate: `reporters` is a ROOT-level option and it had been
+    declared in `vitest.integration.config.ts`, a PROJECT config, where vitest
+    ignores it. It had been "proven" with `--reporter=<path>` on the command
+    line — a configuration nothing uses. Flag 87 twice over: a fix for "the
+    diagnosis was destroyed by how it was reported", verified in a
+    configuration nobody runs.
+
+    Then, moved to the root and working, it destroyed the evidence a second
+    way. `onInit` cleared the log, and the path was a fixed filename, so a
+    node-project run started while the gate was mid-flight wiped fourteen
+    recorded failures and left one of its own — which the gate then printed as
+    though it were the gate's. The fix is ownership: whoever OWNS a run clears
+    the file, the reporter only appends, and each run writes a dated header so
+    a stale line cannot pass as today's. **Destroy-on-init is the wrong instinct
+    for a file whose entire purpose is outliving a process.**
+
+    **THE SHELL CENSUS THAT MEASURED A DIFFERENT FILE.** `awk -F','` over the
+    corpus reported 4,367 legs with no Shipper Account and 7,413 legs in total.
+    The real parser says **zero** blank accounts and **3,046** legs. Every one
+    of those 4,367 was a row split inside a quoted field — the giveaway was
+    `Texas` appearing in the Load Execution Status column. A comma-splitter on
+    a CSV containing quoted commas is not a measurement of that file; it is a
+    measurement of a different file that resembles it.
+
+    THIRD TIME THIS SHAPE HAS COST SOMETHING (see flag 88): the arrivals
+    aggregate, the per-stop miles question, and now this. The rule already
+    written — build the instrument from the artefact — has a corollary it was
+    missing: **when a parser for the format exists in the repository, the shell
+    is not a shortcut to it.** A number produced by `awk` over a CSV should be
+    treated as a hypothesis until the parser agrees.
+
+    Cost: a question was carried to the owner about freight that does not
+    exist, and a percentage was promised for a population of zero.
+
+    **A TRI-STATE ENDORSED ON A WRONG PREMISE, MINE AND THE OWNER'S BOTH.**
+    `LoadStop.legEmpty` is documented as three-state — null means nobody
+    classified it — and the writer collapsed it to two. Correcting that was
+    approved on the understanding that the schema wanted three and the code was
+    losing one. It was truer than that: **the rules table could only ever have
+    produced two**, because it enumerated EMPTY patterns alone and everything
+    unmatched fell through to LOADED. So `isUnclassifiedLeg` called all ordinary
+    freight unclassified — `OutboundAmazonManaged`, 827 legs, the single most
+    common account — and the provisional note would have appeared on every load,
+    which is the same as appearing on none.
+
+    The fix was to enumerate the LOADED families too, measured from the corpus,
+    so unmatched finally means what it says. A three-state column needs a
+    classifier that can produce three answers, and nobody checked that it could.
+
+    **AND THE RETRY, WHICH IS SAFE FOR A REASON SOMEBODY ELSE BUILT.**
+    Twelve of fourteen failures in the second lost gate were the compute, and
+    all fifteen stack traces ended at `PrismaNeonAdapter.startTransaction` —
+    none at `performIO`, `queryRaw` or a commit. A transaction that never opened
+    wrote nothing, so retrying it is safe. Two things make that true, and only
+    one of them is obvious:
+    - Load and invoice numbers come from `UPDATE "Counter" SET value = value
+      - 1 ... RETURNING` inside the transaction — a row update, deliberately
+        not a sequence. Sequences do not roll back; this does. The series stays
+        contiguous.
+
+    - **`assertOutsideTransaction` is what makes the rest of it safe, and it
+      was built for something else entirely.** It forbids R2 and other
+      third-party calls inside a Postgres transaction, added after the
+      reconciler held one open across an object-store round trip. Because no
+      external side effect CAN be inside the transaction, re-running the
+      transaction cannot repeat one. That guard is now load-bearing for a
+      retry it was never designed for, and anybody simplifying it away would
+      silently make the retry unsafe. It is not obvious from either file; it
+      is written in both now.
+
+    THE RESIDUAL, RECORDED RATHER THAN SOLVED: a drop between COMMIT and the
+    client learning of it is indistinguishable, from the client, from a drop
+    before the commit — and retrying that re-runs committed work. None of the
+    fifteen traces was that shape. The scope is `startTransaction` only, and
+    that narrowness is what keeps the retry inside what was measured rather
+    than beside it. **If a future trace shows a commit-time drop, this must not
+    be widened to cover it.**

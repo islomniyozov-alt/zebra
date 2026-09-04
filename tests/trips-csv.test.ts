@@ -9,7 +9,7 @@ import {
   tripTime,
 } from '@/lib/trips-csv'
 import { parseCsv, parseRelayCsv } from '@/lib/relay-csv'
-import { isEmptyLeg, legPurpose } from '@/lib/leg-purpose'
+import { isEmptyLeg, isUnclassifiedLeg, legPurpose } from '@/lib/leg-purpose'
 
 // ---------------------------------------------------------------------------
 // THE TRIPS EXPORT, READ THE WAY AMAZON ACTUALLY WRITES IT.
@@ -672,5 +672,72 @@ describe.skipIf(files.length === 0)('every printed actual survives', () => {
 
     expectRealSample(result)
     expect(result.lost.slice(0, 5)).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// WHAT "UNCLASSIFIED" MEANS, NOW THAT THE TABLE CAN EXPRESS IT.
+//
+// The rules listed only EMPTY patterns and everything else fell through to
+// LOADED. That default is right, and it made "no rule matched" and "classified
+// as loaded" the same answer — so `isUnclassifiedLeg` called ordinary freight
+// unclassified and the provisional note would have shown on every load. The
+// schema had three states; the table could only produce two.
+//
+// The loaded families are enumerated now, so unmatched means nobody decided.
+// These pin the three-way split, because the note's whole value is that it
+// appears where a human has genuinely not answered.
+// ---------------------------------------------------------------------------
+
+describe('the three answers a shipper account can get', () => {
+  it('calls ordinary outbound freight loaded, not unclassified', () => {
+    // 827 legs in the sweep — the single most common account there is.
+    expect(legPurpose('OutboundAmazonManaged')).toBe('LOADED')
+    expect(isUnclassifiedLeg('OutboundAmazonManaged')).toBe(false)
+  })
+
+  it('still calls the repositioning families empty', () => {
+    for (const account of [
+      'FleetManagementEquipmentRepositioning',
+      'BobtailMovementAnnotation',
+      'TransfersEmptyCarts',
+      'CustomerFacingEmptyTrailer',
+    ]) {
+      expect(legPurpose(account), account).toBe('EMPTY')
+      expect(isUnclassifiedLeg(account), account).toBe(false)
+    }
+  })
+
+  // FIRST MATCH WINS, AND THE ORDER MATTERS HERE. `TransfersEmptyCarts` starts
+  // with the word this file deliberately does NOT classify, and is caught by
+  // the /Empty/i rule above it.
+  it('lets an empty rule win over an unlisted family', () => {
+    expect(legPurpose('TransfersEmptyCarts')).toBe('EMPTY')
+    expect(isUnclassifiedLeg('TransfersEmptyCarts')).toBe(false)
+  })
+
+  // THE OPEN QUESTION, AND ITS NEIGHBOURS. Nobody has decided whether moving a
+  // pool trailer is an empty move; `Transfers*` is the same problem wearing a
+  // different prefix — sellable inventory and broken carts under one word.
+  it('leaves the undecided families undecided', () => {
+    for (const account of [
+      'TrailerPoolAdjustment',
+      'TrailerPoolAdjustmentDrop',
+      'TransfersInitialPlacement',
+      'TransfersSellableInventory',
+      'TransfersBrokenCarts',
+    ]) {
+      expect(isUnclassifiedLeg(account), account).toBe(true)
+      // They still COUNT as loaded, because the default is unchanged — it is
+      // only now possible to say the count rests on a default.
+      expect(legPurpose(account), account).toBe('LOADED')
+    }
+  })
+
+  it('does not call an absent account unclassified', () => {
+    // There is nothing to classify. Flagging every blank would make the note
+    // meaningless on freight that carries no account at all.
+    expect(isUnclassifiedLeg('')).toBe(false)
+    expect(isUnclassifiedLeg(null)).toBe(false)
   })
 })

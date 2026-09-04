@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { readFileSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
 import { writeReceipt } from './integration-receipt.mjs'
 
 // ---------------------------------------------------------------------------
@@ -167,7 +167,17 @@ export async function runIntegrationSuite() {
       // Set ON `child` rather than spread at the call site, so the scrubbing
       // guard in db-target.test.ts still sees `env: child` — the whole point of
       // that assertion is that no OTHER environment can reach the suite.
+      // THIS RUN OWNS THE LOG, SO THIS RUN CLEARS IT. The reporter only ever
+      // appends: it used to clear on init, and a node-project run started while
+      // a gate was mid-flight wiped fourteen recorded failures and left one of
+      // its own, which the gate then printed as though it were the gate's.
       child.ZEBRA_FAILURE_LOG = FAILURE_LOG
+      try {
+        rmSync(FAILURE_LOG, { force: true })
+      } catch {
+        // A log that will not clear is one this run will append to. Not worth
+        // refusing a fourteen-minute gate over.
+      }
 
       const proc = spawn(
         process.execPath,

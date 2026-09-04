@@ -1,4 +1,3 @@
-import FailureLogReporter from './tests/failure-reporter'
 import { defineConfig } from 'vitest/config'
 import tsconfigPaths from 'vite-tsconfig-paths'
 import { workerCount } from './tests/worker-db'
@@ -19,11 +18,6 @@ export default defineConfig({
     // main process, before any worker — so a bare `vitest` pays it too, which
     // `setupFiles` (once per FILE, own process) could never enforce.
     globalSetup: ['tests/integration-lock.ts'],
-    // THE DEFAULT REPORTER PLUS ONE THAT SURVIVES A CRASH. Vitest renders its
-    // failure list when the run ENDS; a process death mid-run means it never
-    // renders, and the counts printed along the way say how many failed
-    // without saying which. See tests/failure-log.ts.
-    reporters: ['default', new FailureLogReporter()],
     // PARALLEL, BECAUSE EACH WORKER OWNS A DATABASE. The old note here said
     // running these concurrently "invites the kind of interference that gets
     // blamed on the code under test", and it was right about the shared
