@@ -22,6 +22,7 @@ const row = (over: Partial<ActivityRow> = {}): ActivityRow => ({
   createdAt: new Date('2026-09-03T12:00:00Z'),
   action: 'UPDATE',
   entityType: 'Load',
+  entityId: 'load-1',
   userAgent: 'Mozilla/5.0',
   user: { name: 'Aziz' },
   changes: { dispatchedMiles: { from: 681, to: 4 } },

@@ -75,6 +75,8 @@ export interface ActivityEntry {
   via: 'integration' | null
   action: string
   entityType: string
+  /** The row this write touched. Needed to attribute a stop's clocks. */
+  entityId: string
   diffs: FieldDiff[]
 }
 
@@ -83,6 +85,8 @@ export interface ActivityRow {
   createdAt: Date
   action: string
   entityType: string
+  /** The row this write touched. Needed to attribute a stop's clocks. */
+  entityId: string
   userAgent: string | null
   user: { name: string | null } | null
   changes: unknown
@@ -134,6 +138,7 @@ export function activityEntries(
       via: row.userAgent === INTEGRATION_USER_AGENT ? 'integration' : null,
       action: row.action,
       entityType: row.entityType,
+      entityId: row.entityId,
       diffs,
     })
   }

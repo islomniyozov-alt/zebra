@@ -43,13 +43,18 @@ export interface LoadDetailView {
   /** Item 6 — Rate con / POD / BOL prompts. */
   showDocuments: boolean
   /**
-   * Item 1 (round 2) — stops numbered, not just typed.
+   * Item 6 — the stops as a TABLE, which subsumes item 1's numbering.
    *
-   * A Relay trip runs six to eight stops and PICKUP/DELIVERY alone does not
-   * say which comes third. Broker freight is usually two stops, where the
-   * labels are the order.
+   * A Relay trip runs six to eight stops. Read as a stack of cards it is a
+   * scroll; read as a table it is a route. Position carries the ordinal and the
+   * type together — "1 · PICKUP" — so the number appears once and cannot
+   * disagree with itself, which is why the label numbering added in the round
+   * before came back out.
+   *
+   * Broker freight keeps the cards: two stops, where the labels ARE the order,
+   * and eight columns of mostly empty cells would be worse than the list.
    */
-  numberedStops: boolean
+  stopsAsTable: boolean
   /**
    * Item 2 (round 2) — a stop with no address says so, loudly.
    *
@@ -86,7 +91,7 @@ export function loadDetailView(load: {
     showFuelSurcharge: !direct,
     editMiles: direct,
     showDocuments: !direct,
-    numberedStops: direct,
+    stopsAsTable: direct,
     flagMissingAddress: direct,
     notesInTimeline: direct,
   })

@@ -11,13 +11,19 @@ import {
 } from '@/lib/status'
 import { formatAddress } from '@/lib/locations'
 import { newestFirst } from '@/lib/load-timeline'
+import { attributionLabel, stopAttribution } from '@/lib/stop-attribution'
 import {
   ACCESSORIAL_TYPES,
   accessorialChoicesFor,
   loadDetailView,
 } from '@/lib/load-detail-view'
 import { renderStopTime, ZONE_CHOICES } from '@/lib/stop-time'
-import { latenessLabel, shownStopTime } from '@/lib/stop-actuals'
+import {
+  dwellLabel,
+  dwellMinutes,
+  latenessLabel,
+  shownStopTime,
+} from '@/lib/stop-actuals'
 import { isMessageKey, type MessageKey } from '@/lib/i18n'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
@@ -31,6 +37,7 @@ import { NoteComposer } from './NoteComposer'
 import { Copyable } from './Copyable'
 import { MilesField } from './MilesField'
 import { StopAddress } from './StopAddress'
+import { StopsTable, type StopRow } from './StopsTable'
 import {
   addNoteAction,
   assignLoadAction,
@@ -140,42 +147,76 @@ export default async function LoadDetailPage({
     // other company's fleet would offer an assignment that cannot legally be
     // made. `assertAssignable` would not catch it either — it asks about
     // double-booking, not about authority.
-    const [events, documents, notes, trucks, drivers] = await Promise.all([
-      tx.loadStatusEvent.findMany({
-        where: { loadId: id },
-        orderBy: { occurredAt: 'desc' },
-        include: { changedBy: { select: { name: true } } },
-      }),
-      tx.document.findMany({
-        where: { loadId: id, deletedAt: null },
-        orderBy: { uploadedAt: 'desc' },
-        include: { uploadedBy: { select: { name: true } } },
-      }),
-      tx.communication.findMany({
-        where: { loadId: id, type: 'NOTE' },
-        orderBy: { occurredAt: 'desc' },
-        take: 50,
-        include: { user: { select: { name: true } } },
-      }),
-      tx.truck.findMany({
-        where: { deletedAt: null, companyId: load.companyId },
-        orderBy: { unitNumber: 'asc' },
-        take: 500,
-        select: { id: true, unitNumber: true },
-      }),
-      tx.driver.findMany({
-        where: { deletedAt: null, companyId: load.companyId },
-        orderBy: { lastName: 'asc' },
-        take: 500,
-        select: { id: true, firstName: true, lastName: true },
-      }),
-    ])
+    const stopIds = load.stops.map((stop) => stop.id)
 
-    return { load, events, documents, notes, trucks, drivers }
+    const [events, documents, notes, audit, trucks, drivers] =
+      await Promise.all([
+        tx.loadStatusEvent.findMany({
+          where: { loadId: id },
+          orderBy: { occurredAt: 'desc' },
+          include: { changedBy: { select: { name: true } } },
+        }),
+        tx.document.findMany({
+          where: { loadId: id, deletedAt: null },
+          orderBy: { uploadedAt: 'desc' },
+          include: { uploadedBy: { select: { name: true } } },
+        }),
+        tx.communication.findMany({
+          where: { loadId: id, type: 'NOTE' },
+          orderBy: { occurredAt: 'desc' },
+          take: 50,
+          include: { user: { select: { name: true } } },
+        }),
+        // THE AUDIT ROWS, ONCE, FOR TWO ANSWERS.
+        //
+        // The Activity panel renders them as a timeline; the stops table reads
+        // the same rows to say who last wrote each check-in, because `LoadStop`
+        // has no actor column. Two queries would be two answers to "what happened
+        // to this load" and would drift the first time one grew a filter the
+        // other did not.
+        //
+        // THE LOAD AND ITS STOPS. `entityId` is the row that was written, so a
+        // stop's clocks are found under the stop's own id and the load's fields
+        // under the load's.
+        tx.auditLog.findMany({
+          where: {
+            OR: [
+              { entityType: 'Load', entityId: id },
+              { entityType: 'LoadStop', entityId: { in: stopIds } },
+            ],
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 200,
+          select: {
+            id: true,
+            createdAt: true,
+            action: true,
+            entityType: true,
+            entityId: true,
+            userAgent: true,
+            changes: true,
+            user: { select: { name: true } },
+          },
+        }),
+        tx.truck.findMany({
+          where: { deletedAt: null, companyId: load.companyId },
+          orderBy: { unitNumber: 'asc' },
+          take: 500,
+          select: { id: true, unitNumber: true },
+        }),
+        tx.driver.findMany({
+          where: { deletedAt: null, companyId: load.companyId },
+          orderBy: { lastName: 'asc' },
+          take: 500,
+          select: { id: true, firstName: true, lastName: true },
+        }),
+      ])
+
+    return { load, events, documents, notes, audit, trucks, drivers }
   })
 
   if (!data) notFound()
-  const { load, events, documents, notes, trucks, drivers } = data
+  const { load, events, documents, notes, audit, trucks, drivers } = data
 
   // WHAT THIS SCREEN SHOWS, decided in one place and testable without a
   // browser. Seven display items branch on whether this freight settles
@@ -199,6 +240,78 @@ export default async function LoadDetailPage({
   const maySetRate = await currentUserCan('update', 'load.financials')
 
   const zone = load.company.timezone
+
+  // ── THE STOPS TABLE'S ROWS (item 6) ───────────────────────────────────────
+  //
+  // Built here rather than in the component because every value is a decision
+  // made elsewhere and already tested: `shownStopTime` for which clock is
+  // operative, `dwellLabel` for the wait, `attributionLabel` for who wrote a
+  // check-in. The component lays them out and judges nothing.
+  const attribution = stopAttribution(audit)
+  const attributionLabels = {
+    via: t('loads.viaIntegration'),
+    unknown: '—',
+  }
+
+  const stopRows: StopRow[] = load.stops.map((stop) => {
+    const zoneOf = (at: Date | null) =>
+      at === null
+        ? '—'
+        : (renderStopTime(at, stop.state, { fallbackZone: zone, locale })
+            ?.text ?? '—')
+
+    const forStop = attribution.get(stop.id)
+    const address = formatAddress(stop) ?? formatAddress(stop.location)
+
+    return {
+      id: stop.id,
+      // THE ORDINAL AND THE TYPE TOGETHER, so the number appears once.
+      position: `${stop.sequence} · ${t(`stop.${stop.type}` as never)}`,
+      location: stop.name ?? '—',
+      place: [stop.city, stop.state].filter(Boolean).join(', ') || null,
+      checkedInAt: zoneOf(stop.arrivedAt),
+      checkedInBy: attributionLabel(forStop?.arrival, attributionLabels),
+      checkedOutAt: zoneOf(stop.departedAt),
+      checkedOutBy: attributionLabel(forStop?.departure, attributionLabels),
+      scheduled: zoneOf(stop.scheduledAt),
+      waiting: dwellLabel(dwellMinutes(stop)),
+      // The address, its missing-address flag and its editor, unchanged from
+      // the card layout — prose of variable length has no business being a
+      // table column.
+      address: (
+        <StopAddress
+          shown={address}
+          missing={address === null}
+          value={{
+            addressLine1: stop.addressLine1 ?? '',
+            city: stop.city ?? '',
+            state: stop.state ?? '',
+            postalCode: stop.postalCode ?? '',
+          }}
+          fallback={{
+            addressLine1: stop.location?.addressLine1 ?? '',
+            city: stop.location?.city ?? '',
+            state: stop.location?.state ?? '',
+            postalCode: stop.location?.postalCode ?? '',
+          }}
+          mayEdit={mayUpdate}
+          save={setStopAddressAction.bind(null, id, stop.id)}
+          labels={{
+            street: t('loads.stopStreet'),
+            city: t('loads.stopCity'),
+            state: t('loads.stopState'),
+            zip: t('loads.stopZip'),
+            edit: t('loads.editAddress'),
+            save: t('ref.save'),
+            cancel: t('ref.cancel'),
+            saving: t('loads.assignSaving'),
+            missing: t('loads.noAddress'),
+          }}
+        />
+      ),
+    }
+  })
+
   const stripeTone = load.isCancelled
     ? 'muted'
     : operationalTone(load.operationalStatus)
@@ -537,209 +650,234 @@ export default async function LoadDetailPage({
             />
           ) : null}
 
-          <section className="rounded-card border border-border bg-surface p-z4">
-            <h2 className="text-md font-medium text-ink">{t('loads.stops')}</h2>
-            {mayUpdate ? (
-              <p className="mt-z1 text-xs text-ink-3">
-                {t('places.timezoneHint')}
-              </p>
-            ) : null}
-            <ol className="mt-z3 flex flex-col gap-z3">
-              {load.stops.map((stop) => {
-                // Rule 3. In the STOP's zone, with the abbreviation shown.
-                // ACTUALS ARE OPERATIVE ON A FINISHED TRIP. The rule lives in
-                // stop-actuals.ts so this screen and the settlement document
-                // cannot come to different conclusions about the same stop.
-                const shown = shownStopTime(stop, { delivered })
-                const when = renderStopTime(shown.at, stop.state, {
-                  fallbackZone: zone,
-                  locale,
-                  zone: stop.location?.timezone ?? null,
-                })
-                // The plan, rendered only when it says something the actual
-                // does not — and always labelled, never bare.
-                const planned = renderStopTime(shown.scheduledAt, stop.state, {
-                  fallbackZone: zone,
-                  locale,
-                  zone: stop.location?.timezone ?? null,
-                })
-                const departed = renderStopTime(shown.departedAt, stop.state, {
-                  fallbackZone: zone,
-                  locale,
-                  zone: stop.location?.timezone ?? null,
-                })
-                const lateness = latenessLabel(shown.latenessMinutes, {
-                  late: t('stop.late'),
-                  early: t('stop.early'),
-                })
-                // The stop's own address wins; the facility book fills the
-                // silence. `formatAddress` returns null rather than '' so
-                // "has none" is distinguishable from "has an empty one".
-                const address =
-                  formatAddress(stop) ?? formatAddress(stop.location)
-                return (
-                  <li
-                    key={stop.id}
-                    className="border-b border-border pb-z2 last:border-b-0"
-                  >
-                    <div className="flex items-baseline justify-between gap-z2">
-                      {/* ITEM 1 (round 2) — THE ORDER, NOT JUST THE KIND.
-                       * A Relay trip runs six to eight stops and
-                       * "PICKUP"/"DELIVERY" alone does not say which comes
-                       * third. Broker freight is two stops, where the labels
-                       * are the order. */}
-                      <span className="text-xs uppercase tracking-[0.04em] text-ink-2">
-                        {view.numberedStops
-                          ? t('loads.stopN').replace(
-                              '{n}',
-                              String(stop.sequence),
-                            ) + ` · ${t(`stop.${stop.type}` as never)}`
-                          : t(`stop.${stop.type}` as never)}
-                      </span>
-                      <span className="flex items-baseline gap-z2">
-                        {/* A PLAN IS NEVER SHOWN AS A RECORD. On a delivered
-                         * load its neighbours are actuals, which is exactly
-                         * when an unlabelled plan reads as one. */}
-                        {shown.at && !shown.isActual ? (
-                          <span className="text-xs text-ink-3">
-                            {t('stop.scheduled')}
-                          </span>
-                        ) : null}
-                        <span
-                          className="font-mono text-sm text-ink"
-                          title={when?.zone ?? zone}
-                        >
-                          {when?.text ?? '—'}
+          {/* ITEM 6 — A TABLE FOR RELAY FREIGHT, CARDS FOR EVERYTHING ELSE.
+           *
+           * Six to eight stops read as a route in a table and as a scroll in a
+           * stack of cards. Broker freight is two stops, where eight columns
+           * of mostly empty cells would be worse than the list it replaces —
+           * so the cards below are not legacy, they are the right shape for
+           * the other kind of load. */}
+          {view.stopsAsTable ? (
+            <StopsTable
+              stops={stopRows}
+              labels={{
+                title: t('loads.stopsTitle'),
+                position: t('loads.colPosition'),
+                location: t('loads.colLocation'),
+                checkedInAt: t('loads.colInAt'),
+                checkedInBy: t('loads.colInBy'),
+                checkedOutAt: t('loads.colOutAt'),
+                checkedOutBy: t('loads.colOutBy'),
+                scheduled: t('loads.colScheduled'),
+                waiting: t('loads.colWaiting'),
+                empty: t('loads.stopsEmpty'),
+              }}
+            />
+          ) : (
+            <section className="rounded-card border border-border bg-surface p-z4">
+              <h2 className="text-md font-medium text-ink">
+                {t('loads.stops')}
+              </h2>
+              {mayUpdate ? (
+                <p className="mt-z1 text-xs text-ink-3">
+                  {t('places.timezoneHint')}
+                </p>
+              ) : null}
+              <ol className="mt-z3 flex flex-col gap-z3">
+                {load.stops.map((stop) => {
+                  // Rule 3. In the STOP's zone, with the abbreviation shown.
+                  // ACTUALS ARE OPERATIVE ON A FINISHED TRIP. The rule lives in
+                  // stop-actuals.ts so this screen and the settlement document
+                  // cannot come to different conclusions about the same stop.
+                  const shown = shownStopTime(stop, { delivered })
+                  const when = renderStopTime(shown.at, stop.state, {
+                    fallbackZone: zone,
+                    locale,
+                    zone: stop.location?.timezone ?? null,
+                  })
+                  // The plan, rendered only when it says something the actual
+                  // does not — and always labelled, never bare.
+                  const planned = renderStopTime(
+                    shown.scheduledAt,
+                    stop.state,
+                    {
+                      fallbackZone: zone,
+                      locale,
+                      zone: stop.location?.timezone ?? null,
+                    },
+                  )
+                  const departed = renderStopTime(
+                    shown.departedAt,
+                    stop.state,
+                    {
+                      fallbackZone: zone,
+                      locale,
+                      zone: stop.location?.timezone ?? null,
+                    },
+                  )
+                  const lateness = latenessLabel(shown.latenessMinutes, {
+                    late: t('stop.late'),
+                    early: t('stop.early'),
+                  })
+                  // The stop's own address wins; the facility book fills the
+                  // silence. `formatAddress` returns null rather than '' so
+                  // "has none" is distinguishable from "has an empty one".
+                  const address =
+                    formatAddress(stop) ?? formatAddress(stop.location)
+                  return (
+                    <li
+                      key={stop.id}
+                      className="border-b border-border pb-z2 last:border-b-0"
+                    >
+                      <div className="flex items-baseline justify-between gap-z2">
+                        <span className="text-xs uppercase tracking-[0.04em] text-ink-2">
+                          {t(`stop.${stop.type}` as never)}
                         </span>
-                      </span>
-                    </div>
-                    {/* ITEM 1 — THE FACILITY CODE, which is what gets typed
-                     * into Relay to find a dock, and the leg's own Load ID
-                     * beside it, which is what Relay calls this segment.
-                     * Both are carried to another system; the city under
-                     * them is read, so it stays plain text. */}
-                    <p className="mt-z1 flex flex-wrap items-baseline gap-z2 text-base text-ink">
-                      {view.copyableIdentifiers && stop.name ? (
-                        <Copyable value={stop.name} labels={copyLabels} />
-                      ) : (
-                        (stop.name ??
-                        [stop.city, stop.state].filter(Boolean).join(', '))
-                      )}
-                      {view.copyableIdentifiers && stop.referenceNumber ? (
-                        <Copyable
-                          value={stop.referenceNumber}
-                          className="font-mono text-sm text-ink-2"
-                          labels={copyLabels}
-                        />
-                      ) : null}
-                    </p>
-                    {/* THE ADDRESS, UNDER THE NAME A DISPATCHER RECOGNISES.
-                     * The stop's own address first — somebody typed or
-                     * corrected it — and the linked facility's only when the
-                     * stop has none, which is every Relay-imported stop.
-                     *
-                     * TEXT, WITH AN EDIT BEHIND IT (item 4, round 2). An
-                     * address that resolved from the book is already correct;
-                     * eight stops of four input boxes made the screen look
-                     * like an abandoned form and buried the lane a dispatcher
-                     * came to read.
-                     *
-                     * AND ABSENCE LOOKS LIKE ABSENCE (item 2). A facility with
-                     * no street used to render as blank space, which is a
-                     * driver being sent to a code nobody has an address for
-                     * with the screen saying nothing. */}
-                    {view.flagMissingAddress ? (
-                      <StopAddress
-                        shown={address}
-                        missing={address === null}
-                        value={{
-                          addressLine1: stop.addressLine1 ?? '',
-                          city: stop.city ?? '',
-                          state: stop.state ?? '',
-                          postalCode: stop.postalCode ?? '',
-                        }}
-                        fallback={{
-                          addressLine1: stop.location?.addressLine1 ?? '',
-                          city: stop.location?.city ?? '',
-                          state: stop.location?.state ?? '',
-                          postalCode: stop.location?.postalCode ?? '',
-                        }}
-                        mayEdit={mayUpdate}
-                        save={setStopAddressAction.bind(null, id, stop.id)}
-                        labels={{
-                          street: t('loads.stopStreet'),
-                          city: t('loads.stopCity'),
-                          state: t('loads.stopState'),
-                          zip: t('loads.stopZip'),
-                          edit: t('loads.editAddress'),
-                          save: t('ref.save'),
-                          cancel: t('ref.cancel'),
-                          saving: t('loads.assignSaving'),
-                          missing: t('loads.noAddress'),
-                        }}
-                      />
-                    ) : address !== null && address !== stop.name ? (
-                      // Broker freight, unchanged: suppressed when it would
-                      // only repeat the line above — a stop typed as
-                      // "Chicago, IL" has that as its name AND its whole
-                      // address, and printing it twice is noise.
-                      <p className="mt-z1 text-sm text-ink-2" dir="ltr">
-                        {address}
-                      </p>
-                    ) : null}
-                    {/* THE PLAN BENEATH THE RECORD, small, for reference —
-                     * and the lateness Relay itself shows, derived here from
-                     * the two columns rather than stored as a third. */}
-                    {planned ? (
-                      <p className="mt-z1 text-xs text-ink-3">
-                        {t('stop.scheduled')} {planned.text}
-                        {lateness ? ` · ${lateness}` : ''}
-                      </p>
-                    ) : null}
-                    {departed ? (
-                      <p className="mt-z1 text-xs text-ink-3">
-                        {t('stop.departed')} {departed.text}
-                      </p>
-                    ) : null}
-                    {when?.approximate ? (
-                      <p className="mt-z1 text-xs text-ink-3">
-                        {t('loads.zoneApprox').replace('{zone}', when.zone)}
-                      </p>
-                    ) : null}
-                    {/* ITEM 3 — NO ZONE PICKER ON AMAZON FREIGHT.
-                     *
-                     * "America/Boise" is not a question a dispatcher can
-                     * answer, and on Relay freight it is not a question worth
-                     * asking: the export names the facility, the facility
-                     * carries its zone, and the offset column cross-checks it.
-                     * The control stays on broker freight, where a dock is
-                     * often typed once and never seen again. */}
-                    {mayUpdate && view.showStopTimezone && stop.locationId ? (
-                      <form
-                        action={setStopZoneAction.bind(
-                          null,
-                          id,
-                          stop.locationId,
+                        <span className="flex items-baseline gap-z2">
+                          {/* A PLAN IS NEVER SHOWN AS A RECORD. On a delivered
+                           * load its neighbours are actuals, which is exactly
+                           * when an unlabelled plan reads as one. */}
+                          {shown.at && !shown.isActual ? (
+                            <span className="text-xs text-ink-3">
+                              {t('stop.scheduled')}
+                            </span>
+                          ) : null}
+                          <span
+                            className="font-mono text-sm text-ink"
+                            title={when?.zone ?? zone}
+                          >
+                            {when?.text ?? '—'}
+                          </span>
+                        </span>
+                      </div>
+                      {/* ITEM 1 — THE FACILITY CODE, which is what gets typed
+                       * into Relay to find a dock, and the leg's own Load ID
+                       * beside it, which is what Relay calls this segment.
+                       * Both are carried to another system; the city under
+                       * them is read, so it stays plain text. */}
+                      <p className="mt-z1 flex flex-wrap items-baseline gap-z2 text-base text-ink">
+                        {view.copyableIdentifiers && stop.name ? (
+                          <Copyable value={stop.name} labels={copyLabels} />
+                        ) : (
+                          (stop.name ??
+                          [stop.city, stop.state].filter(Boolean).join(', '))
                         )}
-                        className="mt-z2 flex items-center gap-z2"
-                      >
-                        <Select
-                          name="timezone"
-                          label={t('places.timezone')}
-                          labelHidden
-                          defaultValue={stop.location?.timezone ?? ''}
-                          options={zoneOptions}
+                        {view.copyableIdentifiers && stop.referenceNumber ? (
+                          <Copyable
+                            value={stop.referenceNumber}
+                            className="font-mono text-sm text-ink-2"
+                            labels={copyLabels}
+                          />
+                        ) : null}
+                      </p>
+                      {/* THE ADDRESS, UNDER THE NAME A DISPATCHER RECOGNISES.
+                       * The stop's own address first — somebody typed or
+                       * corrected it — and the linked facility's only when the
+                       * stop has none, which is every Relay-imported stop.
+                       *
+                       * TEXT, WITH AN EDIT BEHIND IT (item 4, round 2). An
+                       * address that resolved from the book is already correct;
+                       * eight stops of four input boxes made the screen look
+                       * like an abandoned form and buried the lane a dispatcher
+                       * came to read.
+                       *
+                       * AND ABSENCE LOOKS LIKE ABSENCE (item 2). A facility with
+                       * no street used to render as blank space, which is a
+                       * driver being sent to a code nobody has an address for
+                       * with the screen saying nothing. */}
+                      {view.flagMissingAddress ? (
+                        <StopAddress
+                          shown={address}
+                          missing={address === null}
+                          value={{
+                            addressLine1: stop.addressLine1 ?? '',
+                            city: stop.city ?? '',
+                            state: stop.state ?? '',
+                            postalCode: stop.postalCode ?? '',
+                          }}
+                          fallback={{
+                            addressLine1: stop.location?.addressLine1 ?? '',
+                            city: stop.location?.city ?? '',
+                            state: stop.location?.state ?? '',
+                            postalCode: stop.location?.postalCode ?? '',
+                          }}
+                          mayEdit={mayUpdate}
+                          save={setStopAddressAction.bind(null, id, stop.id)}
+                          labels={{
+                            street: t('loads.stopStreet'),
+                            city: t('loads.stopCity'),
+                            state: t('loads.stopState'),
+                            zip: t('loads.stopZip'),
+                            edit: t('loads.editAddress'),
+                            save: t('ref.save'),
+                            cancel: t('ref.cancel'),
+                            saving: t('loads.assignSaving'),
+                            missing: t('loads.noAddress'),
+                          }}
                         />
-                        <Button type="submit" variant="ghost" size="compact">
-                          {t('ref.save')}
-                        </Button>
-                      </form>
-                    ) : null}
-                  </li>
-                )
-              })}
-            </ol>
-          </section>
+                      ) : address !== null && address !== stop.name ? (
+                        // Broker freight, unchanged: suppressed when it would
+                        // only repeat the line above — a stop typed as
+                        // "Chicago, IL" has that as its name AND its whole
+                        // address, and printing it twice is noise.
+                        <p className="mt-z1 text-sm text-ink-2" dir="ltr">
+                          {address}
+                        </p>
+                      ) : null}
+                      {/* THE PLAN BENEATH THE RECORD, small, for reference —
+                       * and the lateness Relay itself shows, derived here from
+                       * the two columns rather than stored as a third. */}
+                      {planned ? (
+                        <p className="mt-z1 text-xs text-ink-3">
+                          {t('stop.scheduled')} {planned.text}
+                          {lateness ? ` · ${lateness}` : ''}
+                        </p>
+                      ) : null}
+                      {departed ? (
+                        <p className="mt-z1 text-xs text-ink-3">
+                          {t('stop.departed')} {departed.text}
+                        </p>
+                      ) : null}
+                      {when?.approximate ? (
+                        <p className="mt-z1 text-xs text-ink-3">
+                          {t('loads.zoneApprox').replace('{zone}', when.zone)}
+                        </p>
+                      ) : null}
+                      {/* ITEM 3 — NO ZONE PICKER ON AMAZON FREIGHT.
+                       *
+                       * "America/Boise" is not a question a dispatcher can
+                       * answer, and on Relay freight it is not a question worth
+                       * asking: the export names the facility, the facility
+                       * carries its zone, and the offset column cross-checks it.
+                       * The control stays on broker freight, where a dock is
+                       * often typed once and never seen again. */}
+                      {mayUpdate && view.showStopTimezone && stop.locationId ? (
+                        <form
+                          action={setStopZoneAction.bind(
+                            null,
+                            id,
+                            stop.locationId,
+                          )}
+                          className="mt-z2 flex items-center gap-z2"
+                        >
+                          <Select
+                            name="timezone"
+                            label={t('places.timezone')}
+                            labelHidden
+                            defaultValue={stop.location?.timezone ?? ''}
+                            options={zoneOptions}
+                          />
+                          <Button type="submit" variant="ghost" size="compact">
+                            {t('ref.save')}
+                          </Button>
+                        </form>
+                      ) : null}
+                    </li>
+                  )
+                })}
+              </ol>
+            </section>
+          )}
           {/* ITEM 4 — LINEHAUL ALONE.
            *
            * Dispatch read the second money box as a second rate and asked
