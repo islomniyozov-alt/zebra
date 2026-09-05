@@ -671,3 +671,33 @@ The §5 excerpt, box by box, with what proves it. Two are unmet and say so.
    changing it before the corpus is verified would be tuning against the
    model's own answers. Flag 10's findings are the list to start from once
    there is truth to tune against.
+
+9. **The Load Tracker's word tells a role without `load.financials` one thing
+   it could not otherwise read, and that is a ruling rather than a
+   preference.** — 2026-09-05.
+
+   `pipelineStage` separates _Delivered_ from _Invoiced_ on direct-settled
+   freight by `totalRevenueCents > 0`. No money crosses to the client — the
+   strip is handed one of five words — but on an Amazon load at POD_RECEIVED
+   those two words differ **only** by whether a rate exists. A dispatcher who
+   cannot open the rate panel can now infer that the load has one.
+
+   IT WAS BUILT THIS WAY DELIBERATELY, because the alternative is worse in the
+   direction the owner already ruled against. Gating the last two stages behind
+   `load.financials` would give the strip two vocabularies — the same load
+   reading _Delivered_ to a dispatcher and _Invoiced_ to a manager — and the
+   instruction on item 9 was explicit: **ONE story, identical on every load.**
+   A tracker whose story depends on who is looking is not a tracker.
+
+   WHAT MAKES IT ARGUABLY FINE: the billing StatusBadge beside the load number
+   is already ungated, so billing state is not secret today. What makes it
+   worth a ruling anyway: the badge does not distinguish these two cases on
+   direct-settled freight, so this is genuinely a new bit and it is derived
+   from money. "Money is only the amount" is a defensible line and it has never
+   been stated as one.
+
+   The three options, none of them taken unilaterally: leave it (the story stays
+   one story), gate the last two stages (two vocabularies), or state in
+   `permissions.ts` that `load.financials` governs amounts rather than the
+   existence of a rate — which is the honest version of what the code now does,
+   and the only one of the three that ends with a rule somebody can cite.

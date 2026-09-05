@@ -13,6 +13,7 @@ import { formatAddress } from '@/lib/locations'
 import { newestFirst } from '@/lib/load-timeline'
 import { attributionLabel, stopAttribution } from '@/lib/stop-attribution'
 import { milesSummary } from '@/lib/load-miles'
+import { pipelineStage } from '@/lib/load-pipeline'
 import { Prisma } from '@/generated/prisma/client'
 import {
   ACCESSORIAL_TYPES,
@@ -41,6 +42,7 @@ import { MilesField } from './MilesField'
 import { StopAddress } from './StopAddress'
 import { StopsTable, type StopRow } from './StopsTable'
 import { MilesSummary } from './MilesSummary'
+import { PipelineStrip } from './PipelineStrip'
 import {
   addNoteAction,
   assignLoadAction,
@@ -348,6 +350,19 @@ export default async function LoadDetailPage({
     ? 'muted'
     : operationalTone(load.operationalStatus)
 
+  // ITEM 9 — THE LOAD TRACKER. Derived here, on the server, from the two axes.
+  //
+  // ONLY THE STAGE NAME CROSSES TO THE CLIENT. `totalRevenueCents` is read to
+  // compute it and is not sent; the strip receives one of five words. See the
+  // note in PHASE-5-BRIEF on what that one word still implies for a role
+  // without `load.financials`, which is a ruling rather than a preference.
+  const stage = pipelineStage({
+    operationalStatus: load.operationalStatus,
+    billingStatus: load.billingStatus,
+    directSettled: load.directSettled,
+    totalRevenueCents: load.totalRevenueCents,
+  })
+
   // Blank first, and it means "derive it from the state" — the same fallback
   // the row had before anybody touched it.
   const zoneOptions = [
@@ -582,6 +597,31 @@ export default async function LoadDetailPage({
         className={`min-h-0 flex-1 overflow-y-auto bg-surface-2 px-gutter py-z5 ${load.isCancelled ? 'opacity-60' : ''}`}
       >
         <div className="grid max-w-[1100px] gap-z4 lg:grid-cols-2">
+          {/* ITEM 9 — THE SAME FIVE WORDS ON EVERY LOAD, ABOVE EVERYTHING.
+           *
+           * It goes first and full width because it answers the question the
+           * screen is opened to answer — roughly where is this — and a summary
+           * of the whole load belongs above the panels it summarises.
+           *
+           * A STRIP IN A CONTAINER, deliberately. When the header work moves
+           * it, only this div changes; the component takes a stage and some
+           * words and does not know where on the page it is. */}
+          <div className="lg:col-span-2">
+            <PipelineStrip
+              stage={stage}
+              cancelled={load.isCancelled}
+              labels={{
+                title: t('loads.pipelineTitle'),
+                cancelled: t('loads.cancelled'),
+                upcoming: t('loads.stageUpcoming'),
+                inTransit: t('loads.stageInTransit'),
+                delivered: t('loads.stageDelivered'),
+                invoiced: t('loads.stageInvoiced'),
+                paid: t('loads.stagePaid'),
+              }}
+            />
+          </div>
+
           <section className="rounded-card border border-border bg-surface p-z4">
             <h2 className="text-md font-medium text-ink">
               {t('loads.summary')}

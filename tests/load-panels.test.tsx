@@ -8,6 +8,7 @@ import {
   type TimelineEntry,
 } from '@/app/(app)/loads/[id]/StatusTimeline'
 import { StopsTable } from '@/app/(app)/loads/[id]/StopsTable'
+import { PipelineStrip } from '@/app/(app)/loads/[id]/PipelineStrip'
 
 // ---------------------------------------------------------------------------
 // TWO CLAIMS ABOUT ORDER AND PRESENCE, WHICH REVIEW CANNOT SEE.
@@ -122,5 +123,57 @@ describe('the stops table', () => {
     // answering a question the reader has not been asked.
     render(<StopsTable stops={[]} labels={labels} />)
     expect(screen.queryByText(labels.unattributed)).toBeNull()
+  })
+})
+
+describe('the load tracker strip', () => {
+  const labels = {
+    title: 'Load tracker',
+    cancelled: 'Cancelled',
+    upcoming: 'Upcoming',
+    inTransit: 'In-Transit',
+    delivered: 'Delivered',
+    invoiced: 'Invoiced',
+    paid: 'Paid',
+  }
+
+  it('marks exactly one stage as current', () => {
+    render(
+      <PipelineStrip stage="delivered" cancelled={false} labels={labels} />,
+    )
+    const current = document.querySelectorAll('[aria-current="step"]')
+    expect(current).toHaveLength(1)
+    expect(current[0]?.textContent).toContain('Delivered')
+  })
+
+  it('shows all five words on every load, in order', () => {
+    render(<PipelineStrip stage="upcoming" cancelled={false} labels={labels} />)
+    const items = [...document.querySelectorAll('li')].map((li) =>
+      li.textContent?.trim(),
+    )
+    expect(items).toEqual([
+      'Upcoming',
+      'In-Transit',
+      'Delivered',
+      'Invoiced',
+      'Paid',
+    ])
+  })
+
+  // NOT COLOUR ALONE. The current stage must be findable without reading a
+  // hue — by the ARIA marker for a screen reader, and by weight for an eye
+  // that cannot tell the two blues apart.
+  it('marks the current stage by something other than colour', () => {
+    render(<PipelineStrip stage="paid" cancelled={false} labels={labels} />)
+    const current = document.querySelector('[aria-current="step"]')
+    expect(current?.querySelector('.font-medium')?.textContent).toBe('Paid')
+  })
+
+  it('claims no stage at all on a cancelled load', () => {
+    render(<PipelineStrip stage="inTransit" cancelled labels={labels} />)
+    expect(document.querySelector('[aria-current="step"]')).toBeNull()
+    expect(screen.getByText('Cancelled')).toBeTruthy()
+    // And it still shows the five words, so the strip does not vanish.
+    expect(document.querySelectorAll('li')).toHaveLength(5)
   })
 })
