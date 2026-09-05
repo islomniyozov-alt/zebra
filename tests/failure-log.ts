@@ -36,6 +36,22 @@ export function resetFailureLog(): void {
   }
 }
 
+/**
+ * When this process started, so each line can say how far into the run it is.
+ *
+ * ELAPSED, NOT WALL CLOCK, BECAUSE THE QUESTION IS ABOUT DURATION. On
+ * 2026-09-05 two gates failed on compute instability and the obvious next
+ * question — do the failures cluster past some elapsed point, making two short
+ * runs safer than one long one — could not be answered, because the log
+ * recorded only one timestamp for the whole run. The failures were all there
+ * and none of them said when.
+ *
+ * That is flag 88's lesson in its cheapest possible form: the instrument has
+ * to record the axis you will want to measure along, and nobody knows they
+ * needed it until the question arrives. Six characters per line buys it.
+ */
+const STARTED_AT = Date.now()
+
 export function recordFailure(line: string): void {
   try {
     mkdirSync(dirname(FAILURE_LOG), { recursive: true })
@@ -43,7 +59,12 @@ export function recordFailure(line: string): void {
     // Directory already exists, or cannot be made. `appendFileSync` will say.
   }
   try {
-    appendFileSync(FAILURE_LOG, `${line}\n`)
+    // PER WORKER, NOT PER RUN. Vitest forks one process per worker, so this
+    // clock starts when that worker starts rather than when the gate did — a
+    // few seconds apart, which is immaterial against a fifteen-minute run and
+    // the reason the unit is seconds rather than milliseconds.
+    const elapsed = Math.round((Date.now() - STARTED_AT) / 1000)
+    appendFileSync(FAILURE_LOG, `[t+${elapsed}s] ${line}\n`)
   } catch {
     // NEVER THROW FROM THE RECORDER. A logging failure that fails the run
     // would be this file causing the outage it exists to explain.
