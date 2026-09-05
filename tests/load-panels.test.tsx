@@ -402,6 +402,27 @@ describe('the miles panel', () => {
     expect(screen.getByText('140')).toBeTruthy()
   })
 
+  // PRODUCTION LOAD 1012 SHOWED "TOTAL 188" AND A BARE "188" UNDER IT.
+  // milesSummary returns totalMiles = dispatchedMiles and MilesField renders
+  // dispatchedMiles, so the panel printed one number twice — the second one
+  // unlabelled, on a screen full of real distances. Counting occurrences is
+  // the only way to see it: both renders are individually correct.
+  it('shows the total exactly once when an editor is present', () => {
+    const { container } = render(
+      <MilesSummary
+        totalMiles={188}
+        loadedMiles={null}
+        emptyMiles={null}
+        provisional={false}
+        locale="en-US"
+        labels={labels}
+        editor={<span>188</span>}
+      />,
+    )
+    const occurrences = (container.textContent?.match(/188/g) ?? []).length
+    expect(occurrences).toBe(1)
+  })
+
   it('carries the editor when one is passed and nothing when not', () => {
     const { container, rerender } = render(
       <MilesSummary

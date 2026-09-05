@@ -107,12 +107,24 @@ export function MilesSummary({
             <Figure label={labels.empty} value={show(emptyMiles)} />
           </>
         ) : null}
-        {/* The total is the one figure that is always known when there is any
-         * distance at all, so it carries the emphasis. */}
-        <Figure label={labels.total} value={show(totalMiles)} strong />
+        {/* THE EDITOR IS THE TOTAL, IT DOES NOT SIT BENEATH IT.
+         *
+         * `milesSummary` returns `totalMiles = load.dispatchedMiles`, and
+         * `MilesField` renders `dispatchedMiles` — the SAME NUMBER. Rendering
+         * the figure and then the editor printed it twice: "TOTAL 188" with a
+         * bare "188" under it, seen on production load 1012. It read as a
+         * second, unlabelled measurement, which on a screen full of real
+         * distances is worse than untidy.
+         *
+         * So there is one slot for that value and the editor occupies it when
+         * the reader may write. Whoever adds a third way to show a mile should
+         * ask which slot it belongs in rather than adding a fourth. */}
+        <Figure
+          label={labels.total}
+          value={editor ?? show(totalMiles)}
+          strong
+        />
       </dl>
-
-      {editor ? <div className="mt-z3">{editor}</div> : null}
 
       {provisional ? (
         <p className="mt-z3 text-xs text-ink-3">{labels.unclassified}</p>
@@ -127,7 +139,8 @@ function Figure({
   strong,
 }: {
   label: string
-  value: string
+  /** A rendered figure, or the editor that stands in for one. */
+  value: ReactNode
   strong?: boolean
 }) {
   return (
