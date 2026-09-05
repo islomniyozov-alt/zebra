@@ -2647,20 +2647,42 @@ Recorded rather than resolved, per Phase 1's discipline.
 
         THIRD OCCURRENCE, 2026-09-05, AND THE FIRST ONE MEASURED PROPERLY. Four
         failures, all in `integrity.test.ts`, all `A commit cannot be executed on
-
-    an expired transaction` against Prisma's 5s default — 5761ms and 8173ms
-    against a ~200ms round trip. The change in the tree was comment-only.
+        an expired transaction` against Prisma's 5s default — 5761ms and 8173ms
+        against a ~200ms round trip. The change in the tree was comment-only.
 
         THE TEMPTING MOVE WAS TO RE-RUN AND CARRY ON, which is the exact reflex
         this flag exists to name. What was done instead cost one command: `git
-
-    stash`, run the file WITHOUT the change, watch it fail anyway (1 of 6),
-    restore, run it again (6 of 6). That is attribution rather than assumption
-    — the same shape as reading the baseline from the thing being measured, and
-    it turns "probably the compute" into a fact.
+        stash`, run the file WITHOUT the change, watch it fail anyway (1 of 6),
+        restore, run it again (6 of 6). That is attribution rather than
+        assumption — the same shape as reading the baseline from the thing being
+        measured, and it turns "probably the compute" into a fact.
 
         THE PROCEDURE IS THE INTERIM ANSWER while the fix is unchosen: when
         `check` goes red in one of the four database-touching files, do not re-run
         it. Stash and run the same file on the tree WITHOUT the change. If it fails
         there too, the compute is the cause and it is recorded here; if it passes,
         the change is the cause and re-running would have buried it.
+
+        ── A NUMBER FOR THE FIRST OPTION, AND A COUNTER-EXAMPLE ─────────────────
+
+        The three candidate fixes above were speculation. One is no longer.
+
+        Pointing the gate's readiness probe at the dev branch before a `check` run
+        caught the window in the act: **142.8 seconds**, with outright ten-second
+        connect timeouts interleaved with an 8462ms connect, on a compute that had
+        suspended and been resumed by the probe itself. `check` has no readiness
+        poll; the gate has one. That asymmetry is the finding — the two suites
+        differ in exactly the mechanism that covers this condition, and it is the
+        unprotected one that reads as flaky.
+
+        AND THE COUNTER-EXAMPLE, recorded with it so the option is not oversold: a
+        `check` run started immediately AFTER the probe reported ready still lost 26
+        tests across all four files, with 112 socket errors and no logic failure.
+        Readiness at the door does not survive a seven-minute run.
+
+        So waiting for ready would remove the runs that BEGIN inside a resume
+        window, which is some of the problem and demonstrably not all of it. The
+        rest needs resilience inside the four files, or the third option — splitting
+        audits that need a database from logic that needs nothing, so the fast half
+        stays trustworthy and the slow half's flakiness is expected rather than
+        confusing.
