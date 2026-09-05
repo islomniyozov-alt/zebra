@@ -14,6 +14,7 @@ import { newestFirst } from '@/lib/load-timeline'
 import { attributionLabel, stopAttribution } from '@/lib/stop-attribution'
 import { milesSummary } from '@/lib/load-miles'
 import { pipelineStage } from '@/lib/load-pipeline'
+import { activityEntries } from '@/lib/load-activity'
 import { Prisma } from '@/generated/prisma/client'
 import {
   ACCESSORIAL_TYPES,
@@ -43,6 +44,7 @@ import { StopAddress } from './StopAddress'
 import { StopsTable, type StopRow } from './StopsTable'
 import { MilesSummary } from './MilesSummary'
 import { PipelineStrip } from './PipelineStrip'
+import { ActivityPanel, humaniseField } from './ActivityPanel'
 import {
   addNoteAction,
   assignLoadAction,
@@ -104,6 +106,17 @@ const ALL_BILLING: LoadBillingStatus[] = [
   'DISPUTED',
   'WRITTEN_OFF',
 ]
+
+/**
+ * How many audit rows the Activity panel fetches.
+ *
+ * A WINDOW, AND THE PANEL SAYS SO WHEN IT IS FULL. One more than this is
+ * fetched purely to learn whether older rows exist; the extra row is never
+ * rendered. Without that, "the oldest thing that happened" and "the oldest
+ * thing we fetched" render as the same sentence — the mistake that split the
+ * stop-attribution query out of this one.
+ */
+const ACTIVITY_WINDOW = 50
 
 const bytes = (size: number) =>
   size < 1024
@@ -169,7 +182,7 @@ export default async function LoadDetailPage({
     // double-booking, not about authority.
     const stopIds = load.stops.map((stop) => stop.id)
 
-    const [events, documents, notes, clockWrites, trucks, drivers] =
+    const [events, documents, notes, clockWrites, auditRows, trucks, drivers] =
       await Promise.all([
         tx.loadStatusEvent.findMany({
           where: { loadId: id },
@@ -220,6 +233,23 @@ export default async function LoadDetailPage({
           orderBy: { createdAt: 'desc' },
           select: AUDIT_FIELDS,
         }),
+        // ITEM 8 — EVERY AUDITED WRITE TO THIS LOAD AND ITS STOPS.
+        //
+        // Deliberately wider than the attribution fetch above, which asks only
+        // about two clock fields: this is the whole history of the row. What
+        // may be READ from it is `activityEntries`' decision and not this
+        // query's — the money filter lives in one place.
+        tx.auditLog.findMany({
+          where: {
+            OR: [
+              { entityType: 'Load', entityId: id },
+              { entityType: 'LoadStop', entityId: { in: stopIds } },
+            ],
+          },
+          orderBy: { createdAt: 'desc' },
+          take: ACTIVITY_WINDOW + 1,
+          select: AUDIT_FIELDS,
+        }),
         tx.truck.findMany({
           where: { deletedAt: null, companyId: load.companyId },
           orderBy: { unitNumber: 'asc' },
@@ -240,13 +270,23 @@ export default async function LoadDetailPage({
       documents,
       notes,
       clockWrites,
+      auditRows,
       trucks,
       drivers,
     }
   })
 
   if (!data) notFound()
-  const { load, events, documents, notes, clockWrites, trucks, drivers } = data
+  const {
+    load,
+    events,
+    documents,
+    notes,
+    clockWrites,
+    auditRows,
+    trucks,
+    drivers,
+  } = data
 
   // WHAT THIS SCREEN SHOWS, decided in one place and testable without a
   // browser. Seven display items branch on whether this freight settles
@@ -268,6 +308,17 @@ export default async function LoadDetailPage({
   // the response body rather than the rendered text.
   const maySeeRate = await currentUserCan('read', 'load.financials')
   const maySetRate = await currentUserCan('update', 'load.financials')
+
+  // ITEM 8 — the audit log, filtered by what this reader may see.
+  //
+  // `maySeeRate` is passed in rather than re-derived: permission is decided in
+  // permissions.ts, read once above, and applied here. The extra row fetched
+  // beyond the window is dropped before filtering, so "older rows exist" stays
+  // a fact about the QUERY and not about how much the money filter removed.
+  const activityTruncated = auditRows.length > ACTIVITY_WINDOW
+  const activity = activityEntries(auditRows.slice(0, ACTIVITY_WINDOW), {
+    maySeeMoney: maySeeRate,
+  })
 
   const zone = load.company.timezone
 
@@ -1102,6 +1153,43 @@ export default async function LoadDetailPage({
               empty: t('loads.timelineEmpty'),
             }}
           />
+
+          {/* ITEM 8 — THE AUDIT LOG, SHOWN FOR THE FIRST TIME.
+           *
+           * Below the status history and full width, because it is the same
+           * question asked at a finer grain: the history says the load moved,
+           * this says which field somebody changed and to what. Two panels
+           * rather than one merged feed — a status transition is a business
+           * event and a column write is a record of who typed something, and
+           * merging them would bury the first under the second.
+           *
+           * WHAT IT MAY SHOW IS DECIDED IN load-activity.ts, not here. */}
+          <div className="lg:col-span-2">
+            <ActivityPanel
+              entries={activity}
+              truncated={activityTruncated}
+              locale={locale}
+              timeZone={zone}
+              labels={{
+                title: t('loads.activityTitle'),
+                empty: t('loads.activityEmpty'),
+                created: t('loads.activityCreated'),
+                deleted: t('loads.activityDeleted'),
+                via: t('loads.activityVia'),
+                truncated: t('loads.activityTruncated'),
+                set: t('loads.activitySet'),
+                cleared: t('loads.activityCleared'),
+                changed: t('loads.activityChanged'),
+                // A translated name where one exists, a humanised column name
+                // where none does — so a field added next month still reads
+                // as a sentence rather than as nothing.
+                field: (name: string) => {
+                  const key = `loads.field.${name}`
+                  return isMessageKey(key) ? t(key) : humaniseField(name)
+                },
+              }}
+            />
+          </div>
 
           {/* ITEM 8 — the separate Notes panel is gone on Amazon loads; its
            * entries are in the timeline above and its box is inside that

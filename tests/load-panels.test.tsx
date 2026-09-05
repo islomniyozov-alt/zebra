@@ -9,6 +9,11 @@ import {
 } from '@/app/(app)/loads/[id]/StatusTimeline'
 import { StopsTable } from '@/app/(app)/loads/[id]/StopsTable'
 import { PipelineStrip } from '@/app/(app)/loads/[id]/PipelineStrip'
+import {
+  ActivityPanel,
+  humaniseField,
+} from '@/app/(app)/loads/[id]/ActivityPanel'
+import { activityEntries } from '@/lib/load-activity'
 
 // ---------------------------------------------------------------------------
 // TWO CLAIMS ABOUT ORDER AND PRESENCE, WHICH REVIEW CANNOT SEE.
@@ -175,5 +180,147 @@ describe('the load tracker strip', () => {
     expect(screen.getByText('Cancelled')).toBeTruthy()
     // And it still shows the five words, so the strip does not vanish.
     expect(document.querySelectorAll('li')).toHaveLength(5)
+  })
+})
+
+describe('the activity panel', () => {
+  const labels = {
+    title: 'Activity',
+    empty: 'Nothing recorded on this load yet.',
+    created: 'Created',
+    deleted: 'Deleted',
+    via: 'Integration',
+    truncated: 'Older activity exists and is not shown.',
+    set: 'set',
+    cleared: 'cleared',
+    changed: 'changed',
+    field: humaniseField,
+  }
+
+  const panel = (
+    entries: ReturnType<typeof activityEntries>,
+    truncated = false,
+  ) =>
+    render(
+      <ActivityPanel
+        entries={entries}
+        truncated={truncated}
+        locale="en-US"
+        timeZone="America/Chicago"
+        labels={labels}
+      />,
+    )
+
+  const row = (over: Record<string, unknown> = {}) => ({
+    id: 'a1',
+    createdAt: new Date('2026-09-05T12:00:00Z'),
+    action: 'UPDATE',
+    entityType: 'Load',
+    entityId: 'l1',
+    userAgent: null,
+    user: { name: 'Islom' },
+    changes: { dispatchedMiles: { from: 100, to: 420 } },
+    ...over,
+  })
+
+  it('shows a field change as from and to', () => {
+    panel(activityEntries([row()], { maySeeMoney: true }))
+    expect(screen.getByText('Dispatched miles')).toBeTruthy()
+    expect(screen.getByText('100 → 420')).toBeTruthy()
+  })
+
+  // THE WHOLE POINT OF THE PANEL'S FILTER, ASSERTED AT THE SCREEN.
+  // load-activity.test.ts pins the function; this pins that the rendered
+  // output of the real pipeline carries no trace of the money row.
+  it('renders nothing at all from a money-only row for a reader without financials', () => {
+    const entries = activityEntries(
+      [row({ changes: { linehaulCents: { from: 100000, to: 250000 } } })],
+      { maySeeMoney: false },
+    )
+    const { container } = panel(entries)
+    expect(container.textContent).not.toContain('250000')
+    expect(container.textContent).not.toContain('2500')
+    expect(container.textContent).not.toContain('Linehaul')
+    // And the row is gone entirely — not an empty "Islom updated this load".
+    expect(container.textContent).not.toContain('Islom')
+    expect(screen.getByText(labels.empty)).toBeTruthy()
+  })
+
+  it('says "created" instead of listing every column a new load set', () => {
+    const entries = activityEntries(
+      [
+        row({
+          action: 'CREATE',
+          changes: {
+            loadNumber: { from: null, to: '1010' },
+            equipmentType: { from: null, to: 'DRY_VAN' },
+          },
+        }),
+      ],
+      { maySeeMoney: true },
+    )
+    panel(entries)
+    expect(screen.getByText('Created')).toBeTruthy()
+    expect(screen.queryByText('Load number')).toBeNull()
+  })
+
+  it('describes a foreign key without printing the uuid', () => {
+    const entries = activityEntries(
+      [
+        row({
+          changes: {
+            truckId: {
+              from: null,
+              to: '8f3ac1de-0000-4000-8000-000000000000',
+            },
+          },
+        }),
+      ],
+      { maySeeMoney: true },
+    )
+    const { container } = panel(entries)
+    expect(screen.getByText('Truck')).toBeTruthy()
+    expect(screen.getByText('set')).toBeTruthy()
+    expect(container.textContent).not.toContain('8f3ac1de')
+  })
+
+  it('says so when the window is full, and stays quiet when it is not', () => {
+    const entries = activityEntries([row()], { maySeeMoney: true })
+    const full = panel(entries, true)
+    expect(full.container.textContent).toContain(labels.truncated)
+    cleanup()
+    const partial = panel(entries, false)
+    expect(partial.container.textContent).not.toContain(labels.truncated)
+  })
+
+  it('never says how an unstamped write reached us', () => {
+    const { container } = panel(activityEntries([row()], { maySeeMoney: true }))
+    expect(container.textContent).toContain('Islom')
+    expect(container.textContent).not.toContain('Integration')
+  })
+
+  it('names the integration when it stamped itself', () => {
+    const entries = activityEntries(
+      [row({ userAgent: 'zebra-relay-trips-import' })],
+      { maySeeMoney: true },
+    )
+    const { container } = panel(entries)
+    expect(container.textContent).toContain('Integration')
+  })
+})
+
+describe('humaniseField', () => {
+  it('turns a column name into a sentence', () => {
+    expect(humaniseField('operationalStatus')).toBe('Operational status')
+    expect(humaniseField('arrivedAt')).toBe('Arrived at')
+  })
+
+  it('drops storage suffixes', () => {
+    expect(humaniseField('linehaulCents')).toBe('Linehaul')
+    expect(humaniseField('truckId')).toBe('Truck')
+  })
+
+  it('keeps a name that is entirely suffix', () => {
+    expect(humaniseField('id')).toBe('Id')
   })
 })
