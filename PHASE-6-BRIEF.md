@@ -2599,3 +2599,48 @@ Recorded rather than resolved, per Phase 1's discipline.
         road being travelled. An instrument that is correct and absent produces the
         same output as no instrument at all, which is why neither of these was
         noticed until a socket dropped in the one place nobody had armed.
+
+96. **INTERMITTENT RED IN THE THING PEOPLE RUN CONSTANTLY IS WORSE THAN AN
+    OCCASIONALLY LOST GATE, BECAUSE IT DEGRADES JUDGMENT RATHER THAN COSTING
+    TIME.** — 2026-09-05. **STANDING ITEM, NOT YET ADDRESSED.**
+
+    `npm run check` now fails intermittently for reasons unrelated to whatever
+    changed. Four of its files touch the database — `integrity`,
+    `isolation-coverage`, `migration-checksums`, `structure` — and when the Neon
+    dev compute stalls or drops a socket, they go red together. Observed twice
+    on 2026-09-05: nine failures, all four files, every one a compute signature,
+    with the same command green minutes earlier and minutes later.
+
+    THE GATE HAS THE SAME CONDITION AND IT MATTERS LESS. A lost gate costs
+    fourteen minutes and announces itself: no receipt, nothing deployed, and the
+    failure log names what fell over. It is expensive and it is honest.
+
+    `check` is different because of how it is used. It runs before every commit,
+    dozens of times a day, and its answer is consulted rather than studied. A
+    suite that is red for reasons unrelated to the change teaches exactly one
+    lesson, and teaches it quickly: **run it again.** After that the next real
+    failure gets the same treatment, and it gets it from someone who has been
+    trained by their own tooling to believe the first red is noise.
+
+    THAT IS THE ATTENTION FAILURE THESE FLAGS KEEP DESCRIBING, POINTED AT US.
+    Flag 91 is about a trade-off defended by the visibility of its failure mode,
+    where nobody was looking. Flag 87 is about a diagnosis destroyed by how it
+    was reported. Both assume a reader who reads. This is the mechanism that
+    stops them reading — and it does not announce itself, because a suite that
+    passes on the second run looks like a suite that passes.
+
+    WHAT IS NOT THE ANSWER, stated so it does not get tried: retrying the four
+    files, marking them flaky, or excluding them from `check`. Each converts a
+    visible intermittent failure into an invisible one, and these four are the
+    backstops — RLS coverage, migration drift, tenant-fixture coverage,
+    cross-table integrity. They are the last things that should learn to be
+    quiet.
+
+    WHAT MIGHT BE: routing them at a warm compute the way the gate does; giving
+    them the same start-transaction retry the application path has, bought with
+    the same trace census; or separating "structural audits that need a
+    database" from "logic tests that need nothing" so the fast half stays
+    trustworthy and the slow half is run deliberately. All three are
+    speculation. None has been measured, and this entry exists to record the
+    problem rather than to pick a fix — the last local fix to setup on a hunch
+    was reverted within the hour by the numbers that should have preceded it.
