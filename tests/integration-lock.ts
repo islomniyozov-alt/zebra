@@ -242,34 +242,35 @@ async function buildWorkerDatabases(adminUrl: string): Promise<void> {
     const count = workerCount()
     const startedAt = Date.now()
 
-    // COPIED ONE AT A TIME, AND THE OLD COMMENT HERE WAS WRONG ABOUT WHY THEY
-    // COULD NOT BE.
+    // COPIED CONCURRENTLY — AND THE MECHANISM THAT ARGUES AGAINST IT IS REAL,
+    // WHICH IS WHY THIS NOTE IS LONG.
     //
-    // It said the copies "are independent: each reads the same template and
-    // writes a different database". They are not. `CREATE DATABASE ... TEMPLATE`
-    // is itself a session using the SOURCE, so eight concurrent copies are
-    // eight sessions on the template refusing each other with
-    // `55006 — There is 1 other session using the database`. The "1 other
-    // session" in those errors was never a leftover from a previous run; it was
-    // the copy running beside this one.
+    // THE MECHANISM. `CREATE DATABASE ... TEMPLATE` is itself a session using
+    // the SOURCE, so eight concurrent copies are eight sessions on the template
+    // refusing each other with `55006 — There is 1 other session using the
+    // database`. An older comment here claimed the copies "are independent:
+    // each reads the same template and writes a different database". That was
+    // wrong, and the "1 other session" in those errors is usually the copy
+    // running beside this one rather than a leftover from a previous run.
     //
-    // WHAT SEQUENTIAL ACTUALLY COSTS, MEASURED RATHER THAN ESTIMATED: 81.5s,
-    // against 1.4–3.4s for all eight concurrently.
+    // SERIALISING WAS TRIED, ON 2026-09-05, AND REVERTED THE SAME HOUR.
+    // Measured: 81.5s sequential against 1.4–3.4s concurrent. Each copy costs
+    // ~10s alone and they parallelise well — a reading of "eight copies in
+    // 1.4s" as evidence that copies are cheap gets this exactly backwards, and
+    // that misreading is what justified the change.
     //
-    // The first version of this comment claimed the opposite, from the same
-    // numbers. Seeing "eight copies in 1.4s" it concluded each copy is cheap
-    // and concurrency was buying nothing — when 1.4s for eight IS concurrency
-    // working, and each copy costs ~10s on its own. The evidence for
-    // parallelism was read as evidence against it.
+    // THE RECORD THAT DECIDED IT, across six gates: 55006 killed ONE run.
+    // Compute drops killed THREE — a resume mid-setup, a socket lost taking
+    // the run lock, and a socket lost inside `awaitTemplateIdle`. Serialising
+    // addressed the rare failure and lengthened the window for the common one,
+    // and the very next gate died in that longer window.
     //
-    // SO THIS IS A TRADE, NOT A FREE FIX. It buys reliability with 81s of
-    // setup on a suite that runs about sixteen minutes: concurrent copies
-    // refuse each other with 55006, which killed three runs before a test
-    // could exist, and no amount of retrying inside the contention removes
-    // the contention. Serialising still meets the previous copy's lingering
-    // session and pays the backoff — so it MOVES the cost from an
-    // occasional lost run to a predictable minute, which is the trade worth
-    // making for a gate whose failures cost fourteen minutes each.
+    // SO: A REAL MECHANISM DOES NOT MAKE A TRADE WORTH IT. Both halves of that
+    // have to be established separately, and only the first one was. If you
+    // have just rediscovered the 55006 mechanism and are reaching for
+    // `for (const slot of slots) await copy(slot)`, this is the note saying it
+    // was measured and lost. The bounded retry below is the part that earns
+    // its place.
     const copy = async (slot: number) => {
       // AND A BOUNDED RETRY, because termination is asynchronous: the backend
       // is asked to go away, and `pg_stat_activity` stops listing it slightly
@@ -310,9 +311,9 @@ async function buildWorkerDatabases(adminUrl: string): Promise<void> {
       if (lastError) throw lastError
     }
 
-    // ONE AT A TIME. See the note above `copy`: concurrent copies are
-    // concurrent sessions on the template and refuse each other with 55006.
-    for (let slot = 1; slot <= count; slot++) await copy(slot)
+    await Promise.all(
+      Array.from({ length: count }, (_, index) => copy(index + 1)),
+    )
     console.log(
       `[integration] ${count} worker database(s) copied from ${TEMPLATE_DB} in ${Date.now() - startedAt}ms`,
     )
