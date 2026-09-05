@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import { assertSocketCrashGuard } from './socket-crash-guard'
 import { hostname } from 'node:os'
 import { readdirSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
@@ -265,6 +266,22 @@ async function buildWorkerDatabases(adminUrl: string): Promise<void> {
           // race loses it to a session, and the way to stop losing it is to
           // watch that session leave.
           await awaitTemplateIdle(admin)
+
+          // AND THEN ACTUALLY WAIT, which this did not do.
+          //
+          // `awaitTemplateIdle` returns as soon as `pg_stat_activity` shows
+          // nobody — and the comment above this loop already knew that is
+          // EARLIER than the database stops counting the session. So twelve
+          // "retries" fired within a few milliseconds of each other, every one
+          // of them into the same unfinished teardown, and the budget was gone
+          // before the condition could clear. A single-file run failed on
+          // 55006 that way while the same command a minute later succeeded.
+          //
+          // A retry with no delay against an asynchronous condition is not a
+          // retry; it is the first attempt twelve times.
+          await new Promise((resolve) =>
+            setTimeout(resolve, 500 * (attempt + 1)),
+          )
         }
       }
       if (lastError) throw lastError
@@ -282,6 +299,13 @@ async function buildWorkerDatabases(adminUrl: string): Promise<void> {
 }
 
 export async function setup(): Promise<void> {
+  // ARMED BEFORE THE FIRST POOL. globalSetup runs in the MAIN process, which
+  // was unguarded while the workers were protected — and it is where the lock
+  // and the template copy open their sockets. Asserted rather than assumed:
+  // `worker-db.ts` installs it on import and this file imports that module,
+  // so a failure here means the import chain changed.
+  assertSocketCrashGuard('the integration globalSetup')
+
   const url = process.env.DIRECT_DATABASE_URL
   if (!url) {
     throw new Error(

@@ -47,6 +47,30 @@ export function looksLikeSocketDeath(error: unknown): boolean {
 
 let installed = false
 
+/**
+ * Fail loudly where the guard is missing, rather than where a socket drops.
+ *
+ * AN ABSENT GUARD IS INVISIBLE UNTIL THE MOMENT IT WOULD HAVE MATTERED, and
+ * then it looks like the crash it was meant to contain. That is exactly how it
+ * went unnoticed: installed in `setup-integration.ts`, which only the test
+ * WORKERS load, while `globalSetup` ran unguarded in the main process and died
+ * twice before a test existed to fail.
+ *
+ * So every context that could drop one of these sockets asserts at startup that
+ * it is armed. The assertion costs nothing and fires at the point a future
+ * entry point stops importing `worker-db.ts` — which is where the mistake
+ * actually gets made, rather than fourteen minutes into a run.
+ */
+export function assertSocketCrashGuard(context: string): void {
+  if (installed) return
+  throw new Error(
+    `${context} is not armed against dropped sockets. ` +
+      'tests/worker-db.ts installs the guard on import and this context did ' +
+      'not load it; a dropped Neon socket here would kill the run before a ' +
+      'test could fail. See tests/socket-crash-guard.ts.',
+  )
+}
+
 export function installSocketCrashGuard(): void {
   if (installed) return
   installed = true

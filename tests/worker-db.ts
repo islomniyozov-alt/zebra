@@ -1,3 +1,5 @@
+import { installSocketCrashGuard } from './socket-crash-guard'
+
 // ---------------------------------------------------------------------------
 // ONE DATABASE PER WORKER, AND WHY IT IS A DATABASE RATHER THAN A SCHEMA.
 //
@@ -28,6 +30,28 @@
 // applied against the migrations folder on every run and says out loud which
 // branch it took.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// THE SOCKET GUARD IS ARMED HERE, ON IMPORT, AND THAT PLACEMENT IS THE POINT.
+//
+// It used to be installed in `setup-integration.ts`, which vitest loads through
+// `setupFiles` — IN THE TEST WORKERS ONLY. `globalSetup` runs in the main
+// process, opens its own pools to take the run lock and copy the template, and
+// had no guard at all. A dropped socket there killed the run before a test
+// existed to fail, twice, with the containment sitting one process away.
+//
+// "THE MECHANISM WORKS" AND "THE MECHANISM IS PRESENT" ARE DIFFERENT CLAIMS.
+// The guard had a test that spawned a real process, threw a real socket error
+// at it and watched it survive — proof of the first, and no evidence at all for
+// the second.
+//
+// SO IT LIVES IN THE MODULE BOTH ENTRY POINTS ALREADY IMPORT. `integration-lock`
+// (globalSetup) and `setup-integration` (workers) both need worker database
+// names, so both load this file, so both are armed — including any context
+// added later that touches a worker database, which is every context that could
+// drop one of these sockets.
+// ---------------------------------------------------------------------------
+installSocketCrashGuard()
 
 /** Databases this suite creates. Anything matching is ours to drop. */
 export const WORKER_DB_PREFIX = 'zebra_w'

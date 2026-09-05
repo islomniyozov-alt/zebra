@@ -2510,3 +2510,92 @@ Recorded rather than resolved, per Phase 1's discipline.
     these pages at all — but "should" is what three green checks said the day
     this started. The owner is creating a second production user; that is the
     run to make, and until it is made this line stays as it reads.
+
+95. **TWO GUARDS THAT WORKED PERFECTLY AND WERE NOT THERE.** — 2026-09-05.
+
+        A single test file was run alone to decide whether a gate's failures were
+        environmental. It took three attempts to get an answer, and the first two
+        were the finding.
+
+        ── "IT WORKS" AND "IT IS THERE" ARE DIFFERENT CLAIMS ────────────────────
+
+        `installSocketCrashGuard` contains the dropped-socket death that otherwise
+        kills a run. It has a test that spawns a REAL process, throws a REAL socket
+        error at it, watches it survive, and — paired — watches an ordinary error
+        still kill it. As evidence that the mechanism works, that is about as good
+        as it gets.
+
+        It was installed in `tests/setup-integration.ts`, which vitest loads through
+        `setupFiles`: **in the test workers only.** `globalSetup` runs in the main
+        process, opens its own pools to take the run lock and copy the template, and
+        was never armed. Two gates died there — before a test existed to fail —
+        with the containment sitting one process away, and the child-process test
+        passing all the while.
+
+        THE REPORTER WAS THE SAME SHAPE A DAY EARLIER. `failure-reporter.ts` was
+        proven by running it with `--reporter=<path>` on the command line, where it
+        wrote its log correctly. It was DECLARED in `vitest.integration.config.ts`,
+        a project config, where vitest ignores `reporters` — so on the first red
+        gate it produced nothing. Working mechanism, absent from the configuration
+        that runs.
+
+        **So a guard needs two proofs and they are not the same proof.** That it
+        does its job, and that it is present in every context where its job arises.
+        The first is a test. The second is an assertion at startup, or an inventory,
+        or a placement that cannot be forgotten — and "I put the call in the setup
+        file" is not it, because setup files are per-process and processes multiply
+        quietly.
+
+        THE FIX WAS PLACEMENT, NOT ANOTHER CALL SITE. The guard now installs on
+        import of `tests/worker-db.ts`, which both `integration-lock.ts` (globalSetup)
+        and `setup-integration.ts` (workers) already import for worker database
+        names. Anything that could drop one of these sockets needs a worker database
+        name to have opened it, so anything that could drop one is armed —
+        including contexts nobody has written yet.
+
+        AND THE ABSENCE IS NOW LOUD. `assertSocketCrashGuard(context)` runs before
+        the first pool in globalSetup and names what is unarmed and why it matters.
+        Watched failing: with the install removed it says "the integration
+        globalSetup is not armed against dropped sockets" and refuses, at the moment
+        the import chain breaks rather than the next time a socket drops.
+
+        ── A RETRY WITH NO DELAY IS THE FIRST ATTEMPT N TIMES ───────────────────
+
+        The same investigation's first attempt died on `55006 — source database
+
+    "zebra_template" is being accessed by other users`, from a session left by
+    the previous gate.
+
+        `awaitTemplateIdle` exists for exactly this and is careful: it terminates
+        backends, polls `pg_stat_activity`, and waits up to 60 seconds. The copy
+        around it retries twelve times on 55006. Neither was the problem.
+
+        THE RETRY HAD NO DELAY BETWEEN ATTEMPTS. `awaitTemplateIdle` returns as
+        soon as `pg_stat_activity` shows nobody — and the comment directly above
+        that loop already said this is EARLIER than the database stops counting the
+        session:
+
+        > termination is asynchronous: the backend is asked to go away, and
+        > `pg_stat_activity` stops listing it slightly before the database stops
+        > counting it.
+
+        So twelve retries fired within a few milliseconds of each other, all into
+        the same unfinished teardown, and a budget sized for twenty seconds was
+        spent in under one. The same command a minute later succeeded.
+
+        **Twelve attempts with no wait is one attempt, repeated.** It is the same
+        family as widening a timeout to fix a race: motion in the right area that
+        never touches the mechanism, and it reads as diligence — a bounded retry
+        with a named error code and a comment is exactly what careful code looks
+        like. The comment explaining the asynchrony was six lines above the loop
+        that ignored it.
+
+        ── WHAT THE TWO HAVE IN COMMON, AND WHAT THEY DO NOT ────────────────────
+
+        Different roots: one is a process boundary, the other a missing delay. The
+        shape is the same and it is worth naming as its own thing — **the mechanism
+        exists and the path does not reach it.** Flags 88, 90, 92 and 94 are about
+        instruments that lie; this is about instruments that are simply not on the
+        road being travelled. An instrument that is correct and absent produces the
+        same output as no instrument at all, which is why neither of these was
+        noticed until a socket dropped in the one place nobody had armed.
