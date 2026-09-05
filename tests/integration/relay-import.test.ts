@@ -69,15 +69,11 @@ afterAll(async () => {
 /** Plan and write one file, end to end, the way the action does. */
 async function importFile(
   csv: string,
-  options: { mode: 'booked' | 'delivered'; maySeeMoney?: boolean },
+  options: { maySeeMoney?: boolean } = {},
 ) {
   const trips = parseRelayCsv(csv)
   const plan = await inOrg((tx) =>
-    planRelayImport(tx, {
-      trips,
-      mode: options.mode,
-      maySeeMoney: options.maySeeMoney ?? true,
-    }),
+    planRelayImport(tx, { trips, maySeeMoney: options.maySeeMoney ?? true }),
   )
   const customer = await inOrg((tx) => ensureRelayCustomer(tx, organizationId))
   const written = []
@@ -87,7 +83,6 @@ async function importFile(
         importRelayLoad(tx, organizationId, planned, {
           companyId,
           customerId: customer.id,
-          mode: options.mode,
           byUserId: userId,
         }),
       ),
@@ -97,10 +92,24 @@ async function importFile(
 }
 
 describe('importing upcoming trips as booked', () => {
+  // A ROW THAT HAS NOT FINISHED, WHICH IS NOW THE ONLY WAY TO BOOK ONE.
+  //
+  // It used to pass `{ mode: 'booked' }` against a row whose own status said
+  // Completed — asserting the radio's power to overrule Amazon about Amazon's
+  // freight. That override is gone deliberately (see `landsDelivered`), so the
+  // fixture states what the test is actually about: an unfinished trip books.
   it('books the load, with the window on every stop', async () => {
     const { plan, written } = await importFile(
-      file(relayRow({ loadId: `BOOK-${nonce}` })),
-      { mode: 'booked' },
+      file(
+        relayRow({
+          loadId: `BOOK-${nonce}`,
+          execution: 'In Progress',
+          s2actArrDate: '',
+          s2actArrTime: '',
+          s2actDepDate: '',
+          s2actDepTime: '',
+        }),
+      ),
     )
 
     expect(plan.skip).toHaveLength(0)
@@ -147,7 +156,6 @@ describe('importing upcoming trips as booked', () => {
   it('files the trip’s own facts instead of guessing at the fleet', async () => {
     const { written } = await importFile(
       file(relayRow({ loadId: `NOTE-${nonce}`, driver: 'Jane Roe' })),
-      { mode: 'booked' },
     )
     const load = await inOrg((tx) =>
       tx.load.findFirstOrThrow({ where: { id: written[0]!.id } }),
@@ -168,7 +176,7 @@ describe('importing upcoming trips as booked', () => {
       relayRow({ loadId: `FAC1-${nonce}`, s1: `ZZ1-${nonce}` }),
       relayRow({ loadId: `FAC2-${nonce}`, s1: `ZZ1-${nonce}` }),
     )
-    const { written } = await importFile(csv, { mode: 'booked' })
+    const { written } = await importFile(csv)
     expect(written).toHaveLength(2)
 
     const places = await inOrg((tx) =>
@@ -190,7 +198,6 @@ describe('importing finished trips as delivered', () => {
   it('lands DELIVERED through the status engine, with the actual times', async () => {
     const { written } = await importFile(
       file(relayRow({ loadId: `DONE-${nonce}` })),
-      { mode: 'delivered' },
     )
 
     const load = await inOrg((tx) =>
@@ -246,7 +253,7 @@ describe('importing finished trips as delivered', () => {
     expect(first!.windowStart).not.toBeNull()
   })
 
-  it('skips a trip that has not finished, and says which', async () => {
+  it('imports a mixed file whole, each row landing where its status says', async () => {
     const csv = file(
       relayRow({ loadId: `MIX-A-${nonce}` }),
       relayRow({
@@ -258,16 +265,25 @@ describe('importing finished trips as delivered', () => {
         s2actDepTime: '',
       }),
     )
-    const { plan } = await importFile(csv, { mode: 'delivered' })
+    const { plan } = await importFile(csv)
 
-    expect(plan.create.map((load) => load.loadId)).toEqual([`MIX-A-${nonce}`])
-    expect(plan.skip).toEqual([
-      {
-        rowNumber: 2,
-        loadId: `MIX-B-${nonce}`,
-        reason: 'not_completed',
-      },
+    // BOTH ROWS IMPORT, EACH LANDING WHERE ITS OWN STATUS SAYS. This is the
+    // whole ruling in one assertion: a mixed file needs no question answered
+    // about it, because every row already answers for itself.
+    expect(plan.create.map((load) => load.loadId)).toEqual([
+      `MIX-A-${nonce}`,
+      `MIX-B-${nonce}`,
     ])
+    expect(plan.create.map((load) => load.delivered)).toEqual([true, false])
+
+    // AND NOTHING IS DROPPED. This test was named "skips a trip that has not
+    // finished, and says which", and it passed: under a file-wide "Finished"
+    // the unfinished row was SKIPPED. The office saw one load from a two-row
+    // file and a skip reason it had to go and read. Choosing the other radio
+    // dropped the other half instead. That silent truncation is what the
+    // per-row reading removes, and this assertion is what would catch its
+    // return.
+    expect(plan.skip).toEqual([])
   })
 
   it('imports the same row as booked when it will not import as delivered', async () => {
@@ -281,7 +297,7 @@ describe('importing finished trips as delivered', () => {
         s2actDepTime: '',
       }),
     )
-    const { plan } = await importFile(csv, { mode: 'booked' })
+    const { plan } = await importFile(csv)
     expect(plan.skip).toHaveLength(0)
     expect(plan.create).toHaveLength(1)
   })
@@ -291,7 +307,6 @@ describe('what the import refuses and what it warns about', () => {
   it('skips a row whose stop has times but no UTC offset', async () => {
     const { plan } = await importFile(
       file(relayRow({ loadId: `NOOFF-${nonce}`, s2offset: '' })),
-      { mode: 'booked' },
     )
     expect(plan.create).toHaveLength(0)
     expect(plan.skip[0]!.reason).toBe('missing_offset')
@@ -306,7 +321,6 @@ describe('what the import refuses and what it warns about', () => {
           s1planDepTime: '20:00',
         }),
       ),
-      { mode: 'booked' },
     )
     // Caught in the PREVIEW rather than by `writeStops` after the confirm.
     expect(plan.skip[0]!.reason).toBe('window_inverted')
@@ -318,7 +332,6 @@ describe('what the import refuses and what it warns about', () => {
         relayRow({ loadId: `TWICE-${nonce}` }),
         relayRow({ loadId: `TWICE-${nonce}`, s2: 'CCC3' }),
       ),
-      { mode: 'booked' },
     )
     expect(plan.create).toHaveLength(1)
     expect(plan.skip[0]!.reason).toBe('repeated_in_file')
@@ -326,10 +339,10 @@ describe('what the import refuses and what it warns about', () => {
 
   it('warns by name when the file has already been imported', async () => {
     const csv = file(relayRow({ loadId: `AGAIN-${nonce}` }))
-    const first = await importFile(csv, { mode: 'booked' })
+    const first = await importFile(csv)
     expect(first.plan.create[0]!.warnings).toHaveLength(0)
 
-    const second = await importFile(csv, { mode: 'booked' })
+    const second = await importFile(csv)
     const warning = second.plan.create[0]!.warnings.find(
       (entry) => entry.kind === 'duplicate_reference',
     )
@@ -345,13 +358,13 @@ describe('what the import refuses and what it warns about', () => {
     const csv = file(relayRow({ loadId: `SIG-${nonce}` }))
     const trips = parseRelayCsv(csv)
     const before = await inOrg((tx) =>
-      planRelayImport(tx, { trips, mode: 'booked', maySeeMoney: true }),
+      planRelayImport(tx, { trips, maySeeMoney: true }),
     )
 
-    await importFile(csv, { mode: 'booked' })
+    await importFile(csv)
 
     const after = await inOrg((tx) =>
-      planRelayImport(tx, { trips, mode: 'booked', maySeeMoney: true }),
+      planRelayImport(tx, { trips, maySeeMoney: true }),
     )
     expect(planSignature(after)).not.toBe(planSignature(before))
   })
@@ -361,7 +374,6 @@ describe('the money wall and the settlement terms', () => {
   it('creates Amazon Relay settling directly, so its loads never invoice', async () => {
     const { written } = await importFile(
       file(relayRow({ loadId: `DIR-${nonce}` })),
-      { mode: 'booked' },
     )
     const load = await inOrg((tx) =>
       tx.load.findFirstOrThrow({
@@ -381,7 +393,7 @@ describe('the money wall and the settlement terms', () => {
   it('books at no rate for a role that may not enter one', async () => {
     const { plan, written } = await importFile(
       file(relayRow({ loadId: `NOMONEY-${nonce}` })),
-      { mode: 'booked', maySeeMoney: false },
+      { maySeeMoney: false },
     )
     expect(plan.create[0]!.costCents).toBeNull()
 
@@ -398,7 +410,6 @@ describe('the money wall and the settlement terms', () => {
         relayRow({ loadId: `SEQ-A-${nonce}` }),
         relayRow({ loadId: `SEQ-B-${nonce}` }),
       ),
-      { mode: 'booked' },
     )
     const numbers = written.map((load) => Number(load.loadNumber))
     expect(numbers[1]).toBe(numbers[0]! + 1)
@@ -421,7 +432,6 @@ describe('which zone a stop’s clocks are read in (flag 14)', () => {
           s1planDepTime: '23:45',
         }),
       ),
-      { mode: 'booked' },
     )
     const load = await inOrg((tx) =>
       tx.load.findFirstOrThrow({
@@ -461,7 +471,6 @@ describe('which zone a stop’s clocks are read in (flag 14)', () => {
           s1planDepTime: '10:00',
         }),
       ),
-      { mode: 'booked' },
     )
 
     const load = await inOrg((tx) =>
@@ -495,7 +504,6 @@ describe('which zone a stop’s clocks are read in (flag 14)', () => {
   it('says nothing when the gap is the hour DST explains', async () => {
     const { plan } = await importFile(
       file(relayRow({ loadId: `TZQ-${nonce}` })),
-      { mode: 'booked' },
     )
     expect(
       plan.create[0]!.warnings.filter(
@@ -533,7 +541,7 @@ describe('which zone a stop’s clocks are read in (flag 14)', () => {
       ),
     )
     const plan = await inOrg((tx) =>
-      planRelayImport(tx, { trips, mode: 'booked', maySeeMoney: true }),
+      planRelayImport(tx, { trips, maySeeMoney: true }),
     )
     const [first, last] = plan.create[0]!.stops
     expect(previewMoment(first!.scheduledAt, first!.zone)).toBe(

@@ -6,7 +6,6 @@ import { getLocaleContext } from '@/lib/locale'
 import { formatCents } from '@/lib/money'
 import { RelayCsvError, parseRelayCsv } from '@/lib/relay-csv'
 import {
-  type ImportMode,
   type ImportPlan,
   ensureRelayCustomer,
   importRelayLoad,
@@ -42,8 +41,6 @@ export async function relayImportAction(
 
   const csv = String(formData.get('csv') ?? '')
   const companyId = String(formData.get('companyId') ?? '')
-  const mode: ImportMode =
-    formData.get('mode') === 'delivered' ? 'delivered' : 'booked'
   const acknowledged = String(formData.get('signature') ?? '')
 
   if (csv.trim() === '') {
@@ -59,7 +56,7 @@ export async function relayImportAction(
   try {
     const trips = parseRelayCsv(csv)
     plan = await withCurrentOrg('read', 'load', (tx) =>
-      planRelayImport(tx, { trips, mode, maySeeMoney }),
+      planRelayImport(tx, { trips, maySeeMoney }),
     )
   } catch (error) {
     if (error instanceof RelayCsvError) {
@@ -113,7 +110,6 @@ export async function relayImportAction(
           importRelayLoad(tx, session.organizationId, planned, {
             companyId,
             customerId: customer.id,
-            mode,
             byUserId: session.userId,
           }),
         { timeoutMs: LOAD_WRITE_TIMEOUT_MS },
@@ -154,7 +150,6 @@ function renderPlan(
   const t = context.t as (key: string) => string
 
   return {
-    mode: plan.mode,
     showsMoney: context.maySeeMoney,
     settlement: plan.customerIsNew
       ? t('relay.customerNew')

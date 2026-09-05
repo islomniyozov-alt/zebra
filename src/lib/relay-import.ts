@@ -63,8 +63,10 @@ export type RowRefusal =
   | 'too_few_stops'
   | 'missing_offset'
   | 'window_inverted'
-  | 'not_completed'
-  | 'no_actual_times'
+  // 'not_completed' and 'no_actual_times' were here until 2026-09-05. Nothing
+  // can produce them any more: a row that does not qualify as delivered is
+  // BOOKED rather than refused, so the two reasons a whole-file mode used to
+  // reject freight for no longer exist. See `landsDelivered`.
   | 'repeated_in_file'
 
 export interface PlannedStop {
@@ -100,6 +102,15 @@ export interface PlannedLoad {
   note: string
   /** Every warning this row would raise, each naming its record. */
   warnings: LoadWarning[]
+  /**
+   * Where THIS row lands, read from its own `Load Execution Status`.
+   *
+   * PER LOAD, NOT PER FILE, and that is the point of the field existing. The
+   * plan used to carry one `mode` for everything in it, which is a claim about
+   * a file that a file is not entitled to make: a Relay export routinely holds
+   * finished and unfinished freight together.
+   */
+  delivered: boolean
 }
 
 export interface SkippedRow {
@@ -110,7 +121,6 @@ export interface SkippedRow {
 }
 
 export interface ImportPlan {
-  mode: ImportMode
   customerName: string
   /** False when the customer exists and is NOT set to settle directly. */
   settlesDirectly: boolean
@@ -131,7 +141,6 @@ export async function planRelayImport(
   tx: TxClient,
   input: {
     trips: RelayTrip[]
-    mode: ImportMode
     /** `load.financials:update`. Decides whether money is in the plan at all. */
     maySeeMoney: boolean
     /** Where a stop with no offset and no recorded facility is assumed to be. */
@@ -178,7 +187,7 @@ export async function planRelayImport(
   const seen = new Set<string>()
 
   for (const trip of input.trips) {
-    const refusal = refuse(trip, input.mode, seen)
+    const refusal = refuse(trip, seen)
     if (refusal) {
       skip.push({
         rowNumber: trip.rowNumber,
@@ -191,12 +200,15 @@ export async function planRelayImport(
     const loadId = trip.loadId!
     seen.add(loadId.toLowerCase())
 
+    // THE ROW DECIDES, NOT THE FILE. See `landsDelivered`.
+    const delivered = landsDelivered(trip)
+
     const stops = trip.stops.map((stop, index) =>
       plannedStop(
         stop,
         index,
         trip.stops.length,
-        input.mode,
+        delivered ? 'delivered' : 'booked',
         zoneForRelayStop(
           recorded.get(stop.facility.toLowerCase()) ?? null,
           stop.utcOffsetHours,
@@ -257,11 +269,11 @@ export async function planRelayImport(
       costCents,
       note: tripNote(trip),
       warnings,
+      delivered,
     })
   }
 
   return {
-    mode: input.mode,
     customerName: RELAY_CUSTOMER_NAME,
     // A customer that does not exist yet will be created settling directly,
     // so the answer for a new one is yes.
@@ -279,11 +291,7 @@ export async function planRelayImport(
  * the same export as four that are done, and refusing the whole import over it
  * is how somebody ends up pasting rows into a second file.
  */
-function refuse(
-  trip: RelayTrip,
-  mode: ImportMode,
-  seen: Set<string>,
-): RowRefusal | null {
+function refuse(trip: RelayTrip, seen: Set<string>): RowRefusal | null {
   if (!trip.loadId) return 'no_load_id'
   // ONE FILE, TWO ROWS, ONE LOAD ID. Not the same as the duplicate WARNING,
   // which is about freight already in the database and is a sentence in front
@@ -322,21 +330,58 @@ function refuse(
     }
   }
 
-  if (mode === 'delivered') {
-    // `Load Execution Status` is per LOAD; `Trip Stage` is per trip and a trip
-    // can be 'In Transit' while its first load is 'Completed'. The corpus has
-    // exactly that row, which is why this reads the load's own column.
-    if ((trip.executionStatus ?? '').toLowerCase() !== 'completed') {
-      return 'not_completed'
-    }
-    // A trip whose last stop has no actual departure has not delivered,
-    // whatever its status column says. Landing it as delivered would put a
-    // POD-less load into billing.
-    const last = trip.stops[trip.stops.length - 1]!
-    if (!last.actualArrival && !last.actualDeparture) return 'no_actual_times'
-  }
-
   return null
+}
+
+/**
+ * Does THIS ROW land delivered? Read from the row, never from a radio button.
+ *
+ * THE MODE QUESTION IS GONE AND THIS IS WHAT REPLACED IT. The screen used to
+ * ask "Upcoming or Finished?" for a whole file, apply it to every row, and
+ * SKIP the rows that disagreed — so a mixed file imported under the wrong
+ * answer silently dropped freight, and under the right answer dropped the
+ * other half. Four bad imports came from that question being asked at all.
+ *
+ * `Load Execution Status` is per LOAD; `Trip Stage` is per trip, and a trip
+ * can be 'In Transit' while its first load is 'Completed'. The corpus has
+ * exactly that row, which is why this reads the load's own column.
+ *
+ * A ROW THAT FAILS THESE CHECKS IS BOOKED, NOT SKIPPED. That is the whole
+ * change: "Completed" with no actual times on its last stop is not a delivered
+ * load — landing it delivered would put a POD-less load into billing — but it
+ * is still perfectly good freight, and the old code threw it away for
+ * disagreeing with a radio button. Downgrading keeps the load and keeps the
+ * safety property.
+ *
+ * ── THE OVERRIDE IS GONE, DELIBERATELY, AND HERE IS WHAT REPLACED IT ──────
+ *
+ * The office can no longer import a Completed row as merely Booked. That was a
+ * real capability and it is not coming back by accident, so: it was removed on
+ * 2026-09-05, knowingly, and this is the reasoning.
+ *
+ * THE RADIO NEVER CARRIED KNOWLEDGE THE FILE LACKED. It recorded which button
+ * somebody clicked, and every row in the file already stated its own execution
+ * status — from Amazon, about Amazon's own freight. An import that disagreed
+ * with that was never the honest shape: it was a screen asserting a fact about
+ * a trip it had never seen, against the system that ran it.
+ *
+ * WHAT IT COST WHEN IT DISAGREED. Four bad imports came from the question
+ * being asked at all, and the worse half was silent: under "Finished" every
+ * unfinished row was SKIPPED, so a mixed file lost freight without saying so
+ * loudly enough to notice. Nothing here can do that now — every row lands
+ * somewhere.
+ *
+ * AND THE GENUINE NEED SURVIVES, somewhere better. Holding a finished load at
+ * Booked is a status change on the load screen, where `transitionOperational`
+ * writes it to the event log as a human decision with a name against it —
+ * rather than an import-time preference that leaves a load looking as though
+ * Amazon had said so.
+ */
+function landsDelivered(trip: RelayTrip): boolean {
+  if ((trip.executionStatus ?? '').toLowerCase() !== 'completed') return false
+  const last = trip.stops[trip.stops.length - 1]
+  if (!last) return false
+  return Boolean(last.actualArrival || last.actualDeparture)
 }
 
 /** Is `a` earlier on the clock than `b`? Same facility, so the zone cancels. */
@@ -511,7 +556,6 @@ function tripNote(trip: RelayTrip): string {
  */
 export function planSignature(plan: ImportPlan): string {
   return [
-    plan.mode,
     plan.settlesDirectly ? 'direct' : 'invoiced',
     ...plan.create.map(
       (load) =>
@@ -564,7 +608,6 @@ export async function ensureRelayCustomer(
 export interface ImportLoadOptions {
   companyId: string
   customerId: string
-  mode: ImportMode
   byUserId: string | null
 }
 
@@ -655,7 +698,10 @@ export async function importRelayLoad(
     { byUserId: options.byUserId },
   )
 
-  if (options.mode === 'delivered') {
+  // THE LOAD'S OWN LANDING, not the file's. `planned.delivered` was read from
+  // this row's `Load Execution Status`; a caller cannot override it, which is
+  // the property that makes a mixed file safe to import in one pass.
+  if (planned.delivered) {
     // THE ACTUAL TIMES, WHICH `createLoad` HAS NO INPUT FOR. `StopInput`
     // carries the plan; arrival and departure are things that HAPPEN, and
     // every other path writes them from a driver's action rather than at

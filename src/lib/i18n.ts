@@ -543,10 +543,6 @@ const en = {
   'relay.skip.missing_offset': 'A stop has times but no UTC offset.',
   'relay.skip.window_inverted':
     'A stop is planned out before it is planned in.',
-  'relay.skip.not_completed':
-    'Not completed yet — import it as an upcoming trip.',
-  'relay.skip.no_actual_times':
-    'No actual times at the last stop, so it has not delivered.',
   'relay.skip.repeated_in_file':
     'This Load ID appears earlier in the same file.',
   'relay.toLoads': 'Go to loads',
@@ -2204,10 +2200,6 @@ const ru: Dictionary = {
   'relay.skip.too_few_stops': 'Меньше двух точек.',
   'relay.skip.missing_offset': 'У точки есть время, но нет смещения UTC.',
   'relay.skip.window_inverted': 'Убытие с точки запланировано раньше прибытия.',
-  'relay.skip.not_completed':
-    'Рейс не завершён — импортируйте его как предстоящий.',
-  'relay.skip.no_actual_times':
-    'Нет фактического времени на последней точке — доставки не было.',
   'relay.skip.repeated_in_file':
     'Этот Load ID уже встречался выше в том же файле.',
   'relay.toLoads': 'Перейти к грузам',
@@ -3856,10 +3848,6 @@ const fa: Dictionary = {
   'relay.skip.missing_offset': 'یک توقف زمان دارد ولی اختلاف UTC ندارد.',
   'relay.skip.window_inverted':
     'خروج از یک توقف پیش از ورود به آن برنامه‌ریزی شده.',
-  'relay.skip.not_completed':
-    'هنوز تمام نشده — آن را به‌عنوان سفر پیش‌رو وارد کنید.',
-  'relay.skip.no_actual_times':
-    'در آخرین توقف زمان واقعی نیست، پس تحویلی رخ نداده.',
   'relay.skip.repeated_in_file': 'این شناسهٔ بار بالاتر در همین فایل آمده است.',
   'relay.toLoads': 'رفتن به بارها',
   'relay.why': 'چرا',

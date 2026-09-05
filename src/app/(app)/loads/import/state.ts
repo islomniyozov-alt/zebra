@@ -1,5 +1,3 @@
-import type { ImportMode } from '@/lib/relay-import'
-
 // The shape the import screen passes back and forth, in a PLAIN module.
 //
 // Not in `actions.ts`, because a "use server" file may only export async
@@ -33,7 +31,6 @@ export interface SkipView {
 }
 
 export interface PlanView {
-  mode: ImportMode
   create: PlanRowView[]
   skip: SkipView[]
   /** The sentence about how this freight gets paid. */
