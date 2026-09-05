@@ -2802,6 +2802,20 @@ Recorded rather than resolved, per Phase 1's discipline.
         done — a rule turned to `error` in the same commit as a feature is a
         rule that gets turned back off.
 
+        THE CASE FOR IT GOT MADE BY ACCIDENT, ONE COMMIT LATER. Removing the
+        import radios orphaned two `ImportMode` imports, and lint caught them
+        as **errors** — `@typescript-eslint/no-unused-vars` is configured at
+        `error` in this repo's first rules block, four lines above where the
+        one-line change goes. The build failed, the names were printed, the fix
+        took a minute.
+
+        SAME LINTER, SAME RUN, SAME KIND OF DEAD CODE. One class fails the
+        build and one class scrolls past in a stream that exits 0, and the only
+        difference between them is a word in a config file. That is a sharper
+        argument than the original entry made: the severity IS the difference
+        between a caught bug and a shipped one, and here both outcomes were
+        observed the same evening on the same command.
+
         THIS IS FLAG 87'S TWIN, AND THE DIFFERENCE IS THE POINT. There the
         diagnosis was DESTROYED by how it was reported — the reporter never
         ran, so the evidence did not exist. Here the evidence was PRODUCED,
