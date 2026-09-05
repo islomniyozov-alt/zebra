@@ -53,6 +53,35 @@ const openEditor = async (user: ReturnType<typeof userEvent.setup>) => {
 }
 
 describe('miles, edited inline', () => {
+  // LOOKING EDITABLE IS PART OF BEING EDITABLE, and this is the one property
+  // of an inline editor that a behavioural test never touches: every other
+  // test here clicks the button by its accessible name, which works perfectly
+  // whether or not a human could tell it was a button.
+  //
+  // On production load 1011 that gap showed: the resting state carried only
+  // `hover:text-accent`, so an owner holding load:update saw "TOTAL 231" and
+  // reported no editor at all. It was there, and it was invisible.
+  it('looks editable before anyone touches it', () => {
+    const { save } = recorder()
+    render(
+      <MilesField
+        dispatchedMiles={231}
+        save={save}
+        locale="en-US"
+        labels={{
+          miles: 'Miles',
+          edit: 'Edit',
+          saving: 'Saving',
+          failed: 'Save failed',
+        }}
+      />,
+    )
+    const resting = screen.getByRole('button', { name: /Edit: Miles/ })
+    // The affordance LoadDocuments and StopAddress already use for a value
+    // you can act on. Hover colour is confirmation, not invitation.
+    expect(resting.className).toContain('underline')
+  })
+
   it('commits what was typed when the field loses focus', async () => {
     const user = userEvent.setup()
     const { save, calls } = recorder()

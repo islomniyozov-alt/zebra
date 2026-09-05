@@ -79,6 +79,21 @@ export function MilesField({ dispatchedMiles, save, locale, labels }: Props) {
           aria-label={`${labels.edit}: ${labels.miles}`}
           className={cx(
             'rounded-control font-mono tabular-nums hover:text-accent',
+            // IT MUST NOT LOOK LIKE A NUMBER SOMEBODY PRINTED.
+            //
+            // At rest this button had only `hover:text-accent`, so until a
+            // mouse touched it it was pixel-identical to static text. That was
+            // survivable while it sat as its own element under a labelled
+            // figure — position said "this one is yours". Once it moved INTO
+            // the Total slot, position said nothing, and load 1011 read as a
+            // dead number to an owner holding load:update.
+            //
+            // The underline is the affordance this codebase already uses for a
+            // value you can act on: LoadDocuments' filenames and StopAddress'
+            // edit control carry the same three classes. Hover colour is a
+            // confirmation, not an invitation — nobody hovers a number to find
+            // out whether it is a button.
+            'underline decoration-border-strong underline-offset-2',
             'focus-visible:outline focus-visible:outline-2',
             'focus-visible:outline-offset-2 focus-visible:outline-accent',
             error && 'text-danger',

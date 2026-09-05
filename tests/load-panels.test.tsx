@@ -423,6 +423,49 @@ describe('the miles panel', () => {
     expect(occurrences).toBe(1)
   })
 
+  // COUNTING IS NOT ENOUGH, AND LOAD 1011 PROVED IT. The duplicate fix left
+  // exactly one number on screen, which the counting test is satisfied by —
+  // but one number is correct whether the survivor is the EDITOR or the STATIC
+  // FIGURE, and on 1011 the wrong one survived: "TOTAL 231" as dead text for an
+  // owner holding load:update. So the assertion has to name which slot won.
+  it('puts an EDITOR in the total slot when the reader may write', () => {
+    render(
+      <MilesSummary
+        totalMiles={231}
+        loadedMiles={null}
+        emptyMiles={null}
+        provisional={false}
+        locale="en-US"
+        labels={labels}
+        editor={
+          <button type="button" aria-label="Edit: Miles">
+            231
+          </button>
+        }
+      />,
+    )
+    const total = screen.getByText(labels.total).closest('div')
+    expect(total?.querySelector('button')).not.toBeNull()
+    expect(total?.textContent).toContain('231')
+  })
+
+  it('puts STATIC TEXT in the total slot when the reader may not', () => {
+    render(
+      <MilesSummary
+        totalMiles={231}
+        loadedMiles={null}
+        emptyMiles={null}
+        provisional={false}
+        locale="en-US"
+        labels={labels}
+      />,
+    )
+    const total = screen.getByText(labels.total).closest('div')
+    expect(total?.querySelector('button')).toBeNull()
+    expect(total?.querySelector('input')).toBeNull()
+    expect(total?.textContent).toContain('231')
+  })
+
   it('carries the editor when one is passed and nothing when not', () => {
     const { container, rerender } = render(
       <MilesSummary
