@@ -4,6 +4,24 @@ import { cx } from '@/lib/cx'
 // ---------------------------------------------------------------------------
 // LOADED / EMPTY / TOTAL (item 7).
 //
+// ── WHY THIS PANEL IS ON EVERY LOAD, WHICH IS NOT WHAT IT WAS BUILT FOR ────
+//
+// It shipped Amazon-only, because the loaded/empty split is Relay's alone. It
+// now renders on broker freight too, and THAT WIDENING WAS A CONSEQUENCE, NOT
+// A DECISION ABOUT BROKER FREIGHT. The header work deleted the Summary card,
+// the Summary card was where a broker load's mileage lived, and the number had
+// to go somewhere. Nobody sat down and concluded that broker loads deserved a
+// miles panel; the panel was simply the only remaining home for a figure that
+// already had to be on the screen.
+//
+// IT SURVIVED REVIEW ON ITS OWN MERITS, which is a different claim and the
+// reason it stayed: the TOTAL is meaningful on broker freight — driver pay and
+// revenue-per-mile both rest on it — while the split still appears only where
+// it was measured. So the accident landed somewhere defensible. It is written
+// down this way so that a later reader asking "who decided broker loads show
+// miles" gets the true answer rather than inferring a deliberation that never
+// happened.
+//
 // TOTAL IS COMPUTED AND NEVER TYPED. It is `Load.dispatchedMiles`, accumulated
 // per LEG once at import; the split is `Load.emptyMiles` subtracted from it.
 // Nothing here sums the stop rows — that figure exists already, and a screen
