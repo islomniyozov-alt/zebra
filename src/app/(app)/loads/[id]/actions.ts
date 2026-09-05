@@ -9,6 +9,7 @@ import {
   updateLoad,
   uncancelLoad,
   LOAD_WRITE_TIMEOUT_MS,
+  setStopAddress,
 } from '@/lib/loads'
 import { ReferenceError, optionalText } from '@/lib/reference'
 import { DispatchConflictError } from '@/lib/dispatch'
@@ -313,64 +314,7 @@ export async function setStopAddressAction(
   await withCurrentOrg(
     'update',
     'load',
-    async (tx) => {
-      const stop = await tx.loadStop.findFirst({
-        where: { id: stopId, loadId },
-        select: {
-          locationId: true,
-          location: {
-            select: {
-              id: true,
-              addressLine1: true,
-              city: true,
-              state: true,
-              postalCode: true,
-            },
-          },
-        },
-      })
-      // Scoped by LOAD as well as by id: a stop from another load cannot be
-      // posted into this form and edited through it. RLS already stops another
-      // organisation; this stops another load inside the same one.
-      if (!stop) return
-
-      await tx.loadStop.update({
-        where: { id: stopId },
-        data: address,
-      })
-
-      // AND THE FACILITY BOOK, BUT ONLY WHEN IT IS EMPTY.
-      //
-      // THE RULING (2026-09-03, reopening the stop-only rule for one case).
-      // Correcting a WRONG address stays on the stop: the book has an answer,
-      // somebody disagrees with it on this load, and one 6am correction must
-      // not rewrite every future load at that code — that is what the original
-      // rule protects and it is unchanged.
-      //
-      // A MISSING address is a different thing. There is nothing to overwrite,
-      // so there is no typo to spread; and leaving the book empty means the
-      // next load at MEM4-DRAY arrives blank and the next dispatcher fixes it
-      // again, forever. The book learns the address the first time somebody
-      // supplies it and never again.
-      //
-      // THE CONDITION IS THE BOOK'S EMPTINESS, not the form's. A dispatcher
-      // clearing a stop override back to blank passes nulls here and must not
-      // blank the facility; `bookIsEmpty` is read from the location row.
-      const book = stop.location
-      const bookIsEmpty =
-        book !== null &&
-        book.addressLine1 === null &&
-        book.city === null &&
-        book.state === null &&
-        book.postalCode === null
-
-      if (bookIsEmpty && address.addressLine1 !== null) {
-        await tx.location.update({
-          where: { id: book.id },
-          data: address,
-        })
-      }
-    },
+    (tx) => setStopAddress(tx, loadId, stopId, address),
     { timeoutMs: LOAD_WRITE_TIMEOUT_MS },
   )
 

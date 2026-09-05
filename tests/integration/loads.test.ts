@@ -10,6 +10,7 @@ import {
   podConfirmed,
   uncancelLoad,
   LOAD_WRITE_TIMEOUT_MS,
+  setStopAddress,
   updateLoad,
   type StopInput,
 } from '@/lib/loads'
@@ -938,5 +939,159 @@ describe('a delivered load that settles directly', () => {
   it('leaves broker freight at Delivered, waiting for its paperwork', async () => {
     const load = await deliver(brokerId)
     expect(load.operationalStatus).toBe('DELIVERED')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE FACILITY BOOK LEARNS AN ADDRESS ONCE, AND IS NEVER OVERWRITTEN.
+//
+// Asked from live use on load 1013 (MEM4-DRAY): when a dispatcher fills a
+// missing stop address, does the book learn it, or does the next trip through
+// that code ask again? It learns — and the rule has two halves that must not
+// be collapsed into one, because each protects against the other's failure:
+//
+//   MISSING  -> fill the book too, or the flag is a per-load nag forever.
+//   PRESENT  -> stop only, or one 6am correction rewrites every future load.
+//
+// The behaviour was written on 2026-09-03 and was correct BY READING for two
+// days with no test on either branch. That is not what this codebase counts as
+// known, and the fan-out — a write that reaches every future load at a
+// facility — is the wrong place to find out.
+// ---------------------------------------------------------------------------
+describe('an address a dispatcher fills in', () => {
+  const addressOf = {
+    addressLine1: '4000 Getwell Rd',
+    city: 'Memphis',
+    state: 'TN',
+    postalCode: '38118',
+  }
+
+  // A FRESH FACILITY CODE PER CALL. `@@unique([organizationId, facilityCode])`
+  // is real, and two tests asking for a 'written' book collided on it — the
+  // index refusing a duplicate facility, which is exactly its job.
+  let facilityCounter = 0
+
+  /** A stop pointing at a facility, with the book empty or already written. */
+  const stopAtFacility = async (book: 'empty' | 'written') => {
+    const code = `MEM4-DRAY-${nonce}-${book}-${++facilityCounter}`
+    const load = await inOrg((tx) =>
+      createLoad(tx, organizationId, {
+        companyId: alphaId,
+        customerId: brokerId,
+        stops: stops(day(4), day(5)),
+      }),
+    )
+    const location = await inOrg((tx) =>
+      tx.location.create({
+        data: {
+          organizationId,
+          name: code,
+          facilityCode: code,
+          ...(book === 'written'
+            ? {
+                addressLine1: '1 Old Book Rd',
+                city: 'Olive Branch',
+                state: 'MS',
+                postalCode: '38654',
+              }
+            : {}),
+        },
+        select: { id: true },
+      }),
+    )
+    const stop = await inOrg((tx) =>
+      tx.loadStop.findFirstOrThrow({
+        where: { loadId: load.id },
+        orderBy: { sequence: 'asc' },
+        select: { id: true },
+      }),
+    )
+    await inOrg((tx) =>
+      tx.loadStop.update({
+        where: { id: stop.id },
+        data: { locationId: location.id },
+      }),
+    )
+    return { loadId: load.id, stopId: stop.id, locationId: location.id }
+  }
+
+  const readBook = (locationId: string) =>
+    inOrg((tx) =>
+      tx.location.findFirstOrThrow({
+        where: { id: locationId },
+        select: {
+          addressLine1: true,
+          city: true,
+          state: true,
+          postalCode: true,
+        },
+      }),
+    )
+
+  const readStop = (stopId: string) =>
+    inOrg((tx) =>
+      tx.loadStop.findFirstOrThrow({
+        where: { id: stopId },
+        select: {
+          addressLine1: true,
+          city: true,
+          state: true,
+          postalCode: true,
+        },
+      }),
+    )
+
+  it('teaches the facility book when the book is empty', async () => {
+    const { loadId, stopId, locationId } = await stopAtFacility('empty')
+
+    await inOrg((tx) => setStopAddress(tx, loadId, stopId, addressOf))
+
+    expect(await readStop(stopId)).toMatchObject(addressOf)
+    // THE POINT OF THE WHOLE RULE: the next load at this code arrives filled.
+    expect(await readBook(locationId)).toMatchObject(addressOf)
+  })
+
+  it('leaves a written book alone — an override is not a correction', async () => {
+    const { loadId, stopId, locationId } = await stopAtFacility('written')
+
+    await inOrg((tx) => setStopAddress(tx, loadId, stopId, addressOf))
+
+    // The stop takes the override, because this load really does go there.
+    expect(await readStop(stopId)).toMatchObject(addressOf)
+    // And every OTHER load at this facility is untouched by one dispatcher's
+    // disagreement at 6am.
+    expect(await readBook(locationId)).toMatchObject({
+      addressLine1: '1 Old Book Rd',
+      city: 'Olive Branch',
+      state: 'MS',
+      postalCode: '38654',
+    })
+  })
+
+  // THE BRANCH A REFACTOR WOULD MOST PLAUSIBLY INVERT. The condition is the
+  // BOOK's emptiness, read from the Location row — not the form's. Clearing an
+  // override submits four nulls, and reading emptiness from the submitted
+  // values instead would blank a facility that has a perfectly good address,
+  // for every future load, from a dispatcher undoing a typo.
+  it('does not blank the book when a stop override is cleared', async () => {
+    const { loadId, stopId, locationId } = await stopAtFacility('written')
+
+    await inOrg((tx) =>
+      setStopAddress(tx, loadId, stopId, {
+        addressLine1: null,
+        city: null,
+        state: null,
+        postalCode: null,
+      }),
+    )
+
+    expect(await readStop(stopId)).toMatchObject({
+      addressLine1: null,
+      city: null,
+    })
+    expect(await readBook(locationId)).toMatchObject({
+      addressLine1: '1 Old Book Rd',
+      city: 'Olive Branch',
+    })
   })
 })

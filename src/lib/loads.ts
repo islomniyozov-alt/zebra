@@ -773,3 +773,77 @@ export function loadSearchWhere(term: string): Prisma.LoadWhereInput {
     ],
   }
 }
+
+/** The four columns a stop and a facility both carry. Null means "not given". */
+export interface StopAddressInput {
+  addressLine1: string | null
+  city: string | null
+  state: string | null
+  postalCode: string | null
+}
+
+/**
+ * Write a stop's address, and teach the facility book when it has nothing.
+ *
+ * THE RULING (2026-09-03), and the reason it is two rules rather than one:
+ *
+ *   CORRECTING A WRONG ADDRESS STAYS ON THE STOP. The book has an answer,
+ *   somebody disagrees with it on this load, and one 6am correction must not
+ *   rewrite every future load at that facility code. An override is not a
+ *   correction.
+ *
+ *   SUPPLYING A MISSING ONE ALSO FILLS THE BOOK. There is nothing to
+ *   overwrite, so there is no typo to spread — and leaving it empty means the
+ *   next load at MEM4-DRAY arrives blank and the next dispatcher fixes it
+ *   again, forever. That turns the missing-address flag into a per-load nag
+ *   instead of a fix. The book learns the first time somebody supplies it.
+ *
+ * THE CONDITION IS THE BOOK'S EMPTINESS, READ FROM THE LOCATION ROW — never
+ * the form's. A dispatcher clearing a stop override back to blank submits four
+ * nulls, and those must not blank a facility that has a good address. That is
+ * the branch a refactor would most plausibly invert, so it has a test of its
+ * own; see tests/integration/loads.test.ts.
+ *
+ * LIFTED OUT OF THE SERVER ACTION so it can be tested at all. It was correct
+ * by reading for two days and had never been watched working, which this
+ * codebase does not count as known.
+ */
+export async function setStopAddress(
+  tx: Prisma.TransactionClient,
+  loadId: string,
+  stopId: string,
+  address: StopAddressInput,
+): Promise<void> {
+  const stop = await tx.loadStop.findFirst({
+    where: { id: stopId, loadId },
+    select: {
+      location: {
+        select: {
+          id: true,
+          addressLine1: true,
+          city: true,
+          state: true,
+          postalCode: true,
+        },
+      },
+    },
+  })
+  // Scoped by LOAD as well as by id: a stop from another load cannot be posted
+  // into this form and edited through it. RLS already stops another
+  // organisation; this stops another load inside the same one.
+  if (!stop) return
+
+  await tx.loadStop.update({ where: { id: stopId }, data: address })
+
+  const book = stop.location
+  const bookIsEmpty =
+    book !== null &&
+    book.addressLine1 === null &&
+    book.city === null &&
+    book.state === null &&
+    book.postalCode === null
+
+  if (bookIsEmpty && address.addressLine1 !== null) {
+    await tx.location.update({ where: { id: book.id }, data: address })
+  }
+}
