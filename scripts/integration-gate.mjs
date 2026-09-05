@@ -312,12 +312,6 @@ export async function runIntegrationSuite() {
   }
 }
 
-// Runnable on its own: `npm run test:integration`.
-if (process.argv[1] && process.argv[1].endsWith('integration-gate.mjs')) {
-  const outcome = await runIntegrationSuite()
-  process.exit(outcome.ok ? 0 : 1)
-}
-
 function printFailureLog() {
   let text = ''
   try {
@@ -557,4 +551,33 @@ export async function warmCompute(directUrl) {
       `Last probes: ${recent()}`,
   )
   return false
+}
+
+// ---------------------------------------------------------------------------
+// THE ENTRY POINT LIVES AT THE BOTTOM, AND THAT IS LOAD-BEARING.
+//
+// It used to sit in the middle of the file, which meant top-level `await
+// runIntegrationSuite()` ran while every `const` BELOW it was still in the
+// temporal dead zone. Function declarations hoist and consts do not, so the
+// file worked for as long as its helpers needed no constants — and then
+// `warmCompute` gained six, and the gate died on "Cannot access
+// 'READY_CAP_MS' before initialization" before reaching the database.
+//
+// This is the second time this file has been bitten by exactly that; see
+// FAILURE_LOG at the top, which was moved for the same reason. Moving the
+// invocation to the end fixes the class rather than the instance: nothing can
+// be declared after it, so nothing can be uninitialised when it runs.
+//
+// AND IT ONLY BREAKS WHEN RUN AS A SCRIPT, which is what made it survive
+// verification. `warmCompute` had been exercised twice — both branches, real
+// database — through a driver that IMPORTED this module, where the guard below
+// is false and the top-level call never happens. Import is not the path anybody
+// uses. The check that would have caught it is running `npm run test:integration`
+// itself, which is the thing that acts.
+// ---------------------------------------------------------------------------
+
+// Runnable on its own: `npm run test:integration`.
+if (process.argv[1] && process.argv[1].endsWith('integration-gate.mjs')) {
+  const outcome = await runIntegrationSuite()
+  process.exit(outcome.ok ? 0 : 1)
 }
