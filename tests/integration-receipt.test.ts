@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 // A plain .mjs script, deliberately outside the app's build: the deploy
 // tooling must run from a bare checkout without a TypeScript step.
+import { describeTreeMovement } from '../scripts/integration-gate.mjs'
 import {
   checkReceipt,
   RECEIPT_MAX_AGE_MS,
@@ -174,5 +175,33 @@ describe('the wiring, so the conditions cannot be bypassed around', () => {
     )
     expect(gate).toContain('delete child[name]')
     expect(gate).toContain('env: child')
+  })
+
+  // BOTH ANSWERS WATCHED. The gate refuses to write a receipt when the tree
+  // moved under a fourteen-minute run, and that branch would otherwise only
+  // ever execute on the day it mattered.
+  describe('describeTreeMovement', () => {
+    const at = (commit: string, clean = true) => ({ commit, clean })
+
+    it('says nothing when the tree did not move', () => {
+      expect(describeTreeMovement(at('a'.repeat(40)), at('a'.repeat(40)))).toBe(
+        null,
+      )
+    })
+
+    it('names a commit made during the run', () => {
+      const said = describeTreeMovement(at('a'.repeat(40)), at('b'.repeat(40)))
+      expect(said).toContain('MOVED')
+      expect(said).toContain('aaaaaaa')
+      expect(said).toContain('bbbbbbb')
+    })
+
+    it('catches an edit that never became a commit', () => {
+      const said = describeTreeMovement(
+        at('a'.repeat(40)),
+        at('a'.repeat(40), false),
+      )
+      expect(said).toContain('EDITED')
+    })
   })
 })
