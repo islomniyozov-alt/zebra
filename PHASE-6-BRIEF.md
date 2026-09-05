@@ -2769,3 +2769,48 @@ Recorded rather than resolved, per Phase 1's discipline.
         Flag 95 said a working mechanism and a present mechanism are different
         claims; this is the third member of that family — a mechanism that is
         working, present, and invisible.
+
+99. **A PARENTHESISED `'use client'` SILENTLY TURNS A CLIENT COMPONENT INTO A
+    SERVER ONE, AND EVERY GATE WE HAVE PASSES IT.** — 2026-09-05. **NOT
+    FIXED.**
+
+        Adding an import above the directive in `TripsImportForm.tsx` left
+        `'use client'` as the second statement, which makes it an ordinary
+        expression rather than a directive. Prettier then formatted that
+        expression the way it formats any leading string expression:
+
+            ;('use client')
+
+        The file stopped being a client component. `useActionState`, `useRef`
+        and `useState` were still imported and called, and nothing said a word.
+
+        WHAT PASSED. `tsc --noEmit` — clean, because it is valid TypeScript.
+        `npm run lint` — **exit code 0**, because the only complaint is
+        `@typescript-eslint/no-unused-expressions` at severity **warning**,
+        inherited from `next/typescript`. `prettier --check` — clean; prettier
+        WROTE the broken form. The unit suite — clean, because no test renders
+        this component. `npm run check` — clean, all of it.
+
+        THE ONE-LINE CHANGE, so nobody has to go looking: in
+        `eslint.config.mjs`, the first `rules` block (beside
+        `@typescript-eslint/no-explicit-any`), add
+
+            '@typescript-eslint/no-unused-expressions': 'error',
+
+        That is broader than the directive case and would need a sweep of
+        whatever else it catches, which is why it is written down rather than
+        done — a rule turned to `error` in the same commit as a feature is a
+        rule that gets turned back off.
+
+        THIS IS FLAG 87'S TWIN, AND THE DIFFERENCE IS THE POINT. There the
+        diagnosis was DESTROYED by how it was reported — the reporter never
+        ran, so the evidence did not exist. Here the evidence was PRODUCED,
+        correctly, naming the right file and the right line, and then
+        discarded: a warning in a stream of output whose exit code says
+        everything is fine. A signal nobody reads and a signal nobody wrote
+        are the same signal.
+
+        AND IT IS WHY `npm run lint` EXITING 0 IS NOT THE SAME CLAIM AS "lint
+        found nothing". The exit-code rule in AGENTS.md says read the status
+        before anything filters the output; this is the case where the status
+        itself is the filter.
