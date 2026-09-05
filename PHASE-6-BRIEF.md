@@ -2728,3 +2728,44 @@ Recorded rather than resolved, per Phase 1's discipline.
         be expressible at all. Nobody has tried. Until somebody does, this
         entry is the rule and a reviewer is the enforcement, which is exactly
         the arrangement that failed three times.
+
+98. **A TEST THAT CLICKS BY ACCESSIBLE NAME CANNOT SEE WHETHER ANYTHING IS
+    VISIBLE, AND EVERY BEHAVIOURAL TEST WE WRITE CLICKS BY ACCESSIBLE
+    NAME.** — 2026-09-05.
+
+        Production load 1011 showed "TOTAL 231" to an owner holding
+        `load:update`, and it was reported as an editor that had gone missing.
+        The editor was rendering. `MilesField`'s resting state carried only
+        `hover:text-accent`, so until a mouse touched it, it was pixel-identical
+        to the static figure beside it.
+
+        FIVE TESTS COVERED THAT COMPONENT AND ALL FIVE PASSED. They commit on
+        blur, commit on Enter, abandon on Escape, skip the no-op save, and keep
+        the typed value when the server refuses — genuinely good tests, written
+        after a real defect, in a real DOM. Every one of them begins
+        `getByRole('button', { name: /Edit: Miles/ })`.
+
+        THAT QUERY IS THE BLIND SPOT. It finds the element through the
+        accessibility tree, which is exactly right for asserting behaviour and
+        says NOTHING about whether a human looking at the screen could tell the
+        element was there. A button styled as plain text has a perfect
+        accessible name. So does a button styled as nothing at all.
+
+        WHAT MADE IT SURFACE was a layout change, not a styling one: the editor
+        used to sit as its own element under a labelled figure, where POSITION
+        carried the affordance — "this one is yours" — and merging it into the
+        total slot to fix a duplicate removed that signal without touching a
+        line of MilesField. The component that broke was not the component that
+        changed, which is why review found nothing.
+
+        SO "CAN THE USER SEE IT" IS ITS OWN ASSERTION and now has one:
+        `looks editable before anyone touches it`, watched failing with the
+        underline removed — load 1011's exact state. It is a class assertion,
+        which is ordinarily a smell; here the class IS the affordance, and the
+        alternative is a screenshot test this project does not have.
+
+        THE GENERAL FORM, for anything else with an interactive resting state:
+        behaviour and visibility are separate claims and take separate tests.
+        Flag 95 said a working mechanism and a present mechanism are different
+        claims; this is the third member of that family — a mechanism that is
+        working, present, and invisible.
