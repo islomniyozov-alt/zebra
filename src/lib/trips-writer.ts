@@ -56,8 +56,16 @@ export type TripWriteOutcome =
       loadId: string
       tripId: string
       stops: number
-      /** The export said Completed and the load was moved on the way in. */
-      delivered: boolean
+      /**
+       * Where the export's stage put the load on the way in, or null when it
+       * said Not Started and there was nothing to move.
+       *
+       * A STATUS RATHER THAN A BOOLEAN, because there are now two landings and
+       * a `delivered: false` would be true of a load that had just been moved
+       * to In Transit — a field whose absence of one thing implies the absence
+       * of the other.
+       */
+      landed: 'DELIVERED' | 'IN_TRANSIT' | null
     }
   | { kind: 'enriched'; loadId: string; tripId: string; added: string[] }
   | { kind: 'unchanged'; loadId: string; tripId: string; reason: string }
@@ -249,27 +257,64 @@ export function stopRowsForTrip(
  * event log with a source that says a human did not click it. It refuses a
  * backwards move on its own, so a load already at POD_RECEIVED is safe.
  */
-async function deliverFinishedTrip(
+async function landTripStage(
   tx: TxClient,
   loadId: string,
   trip: PlannedTrip,
   rows: readonly TripStopRow[],
   byUserId: string | null,
-): Promise<boolean> {
-  if (trip.stage !== 'finished') return false
+): Promise<'DELIVERED' | 'IN_TRANSIT' | null> {
+  // ── A RUNNING TRIP LANDS IN TRANSIT, AND THAT IS AN ACCEPTED TRADE ───────
+  //
+  // IF YOU ARE HERE BECAUSE A LOAD SAYS "IN TRANSIT" AND IT HAS ACTUALLY
+  // DELIVERED, this is the reasoning and it was accepted knowingly on
+  // 2026-09-05 — not an oversight to correct.
+  //
+  // `In Progress` is 246 of 1,730 trips in the corpus (14.2%), the second most
+  // common state after Completed. Until now those landed BOOKED while carrying
+  // Amazon's real check-in times, which is the booked-then-ran defect that
+  // `deliverFinishedTrip` was written to fix, still open for one stage in
+  // three: freight physically mid-route, on the board claiming nobody had
+  // dispatched it.
+  //
+  // THE COST OF THE FIX IS A STALE EXPORT. A file exported this morning says
+  // In Progress for a trip that delivered at noon, so the load claims to be
+  // moving when it is done. That is wrong. It is LESS wrong than Booked with
+  // check-ins on it — which was wrong about both the status and, by implying
+  // no departure, about the freight — and the damage is bounded, because
+  // `transitionOperational` refuses a backwards move: the next import, or a
+  // POD, moves it forward and nothing drags it back.
+  //
+  // NO FINER STATES. AT_PICKUP / LOADED / AT_DELIVERY are all derivable from
+  // the per-leg clocks and none of them is worth having: it would be a second
+  // reader of the same rows, free to disagree with the first, for a
+  // distinction the Load Tracker collapses into "In-Transit" anyway.
+  const target =
+    trip.stage === 'finished'
+      ? 'DELIVERED'
+      : trip.stage === 'running'
+        ? 'IN_TRANSIT'
+        : null
+  if (target === null) return null
 
   const last = rows[rows.length - 1]
   // WHEN IT FINISHED, not when the file was uploaded — the same choice the
   // board importer makes. Departure first, arrival second, nothing third:
   // a load with no recorded time still moves, it just carries no instant.
   const finishedAt = last?.departedAt ?? last?.arrivedAt ?? null
-  const outcome = await transitionOperational(tx, loadId, 'DELIVERED', {
+  const outcome = await transitionOperational(tx, loadId, target, {
     source: 'INTEGRATION',
     userId: byUserId,
     ...(finishedAt ? { occurredAt: finishedAt } : {}),
-    note: `Relay trips export reports ${trip.tripId} completed`,
+    // The note says what the FILE reported, not what we concluded from it.
+    // A reader auditing a wrong status needs to know which of the two was
+    // wrong, and only one of them is recoverable from the row.
+    note:
+      target === 'DELIVERED'
+        ? `Relay trips export reports ${trip.tripId} completed`
+        : `Relay trips export reports ${trip.tripId} in progress`,
   })
-  return outcome.result === 'moved'
+  return outcome.result === 'moved' ? target : null
 }
 
 /**
@@ -344,20 +389,14 @@ export async function createTripLoad(
   // no earlier pass behind it is a delivered load on the FIRST import; needing
   // a second one to reach the right state made the file a two-step ritual and
   // put freight on the board claiming to be booked.
-  const delivered = await deliverFinishedTrip(
-    tx,
-    load.id,
-    input.trip,
-    rows,
-    byUserId,
-  )
+  const landed = await landTripStage(tx, load.id, input.trip, rows, byUserId)
 
   return {
     kind: 'created',
     loadId: load.id,
     tripId: input.trip.tripId,
     stops: stops.length,
-    delivered,
+    landed,
   }
 }
 
@@ -582,14 +621,9 @@ export async function enrichLoad(
   // whether there is a move to make, and `transitionOperational` refuses a
   // backwards move on its own regardless.
   if (!existing.isDelivered) {
-    const moved = await deliverFinishedTrip(
-      tx,
-      loadId,
-      trip,
-      actualRows,
-      byUserId,
-    )
-    if (moved) added.push('delivered')
+    const landed = await landTripStage(tx, loadId, trip, actualRows, byUserId)
+    if (landed === 'DELIVERED') added.push('delivered')
+    else if (landed === 'IN_TRANSIT') added.push('in transit')
   }
 
   if (added.length === 0) {

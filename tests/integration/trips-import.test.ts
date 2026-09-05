@@ -707,9 +707,19 @@ describe('booked first, then it runs — the normal lifecycle', () => {
     )
   })
 
-  // A TRIP STILL RUNNING IS NOT A DELIVERED LOAD. `In Progress` carries
-  // check-ins for the stops already made and must not move the load.
-  it('does not deliver a load whose trip is still in progress', async () => {
+  // A TRIP STILL RUNNING IS A LOAD IN TRANSIT — NOT DELIVERED, AND NOT BOOKED.
+  //
+  // THIS TEST ASSERTED `BOOKED` UNTIL 2026-09-05 and was correct about the
+  // thing it was written for: `In Progress` must not reach DELIVERED. It was
+  // wrong about the rest by inheritance, because the only two states the
+  // importer had were "moved to delivered" and "left alone".
+  //
+  // `In Progress` is 14.2% of the corpus — 246 of 1,730 trips — and every one
+  // of them landed on the board claiming nobody had dispatched it, while
+  // carrying Amazon's real check-in times. That is the booked-then-ran defect
+  // that `deliverFinishedTrip` was written to fix, still open for one stage in
+  // three.
+  it('lands a load whose trip is still in progress at IN_TRANSIT', async () => {
     const id = `LIFE-E-${nonce}`
     await importTrip([upcoming(id)])
 
@@ -730,7 +740,31 @@ describe('booked first, then it runs — the normal lifecycle', () => {
     // The actuals it does have are still worth taking.
     expect(outcome.kind).toBe('enriched')
     expect(load.stops[0]!.arrivedAt).not.toBeNull()
-    expect(load.operationalStatus).toBe('BOOKED')
+    expect(load.operationalStatus).toBe('IN_TRANSIT')
+  })
+
+  // AND IT IS STILL NOT DELIVERED, which is the half of the old assertion
+  // worth keeping: a truck that has checked in somewhere has not arrived
+  // everywhere, and nothing downstream may treat it as payable.
+  it('does not deliver a trip that is only in progress', async () => {
+    const id = `LIFE-E2-${nonce}`
+    await importTrip([upcoming(id)])
+    const { load } = await reimport([
+      leg({
+        tripId: id,
+        loadId: id,
+        status: 'In Progress',
+        stops: [
+          stop('DEN7', {
+            plannedArrival: clock('2026-08-24', '04:41'),
+            actualArrival: clock('2026-08-24', '07:17'),
+          }),
+          stop('MKC6', { plannedArrival: clock('2026-08-24', '06:32') }),
+        ],
+      }),
+    ])
+    expect(load.operationalStatus).not.toBe('DELIVERED')
+    expect(load.operationalStatus).not.toBe('POD_RECEIVED')
   })
 
   // AND THE THIRD IMPORT REALLY IS NOTHING. Idempotence is what makes
@@ -1155,16 +1189,19 @@ describe('T-115GY4TBD, the real four-leg trip', () => {
     expect(outcome.kind).toBe('unchanged')
   })
 
-  // A TRIP STILL RUNNING IS NOT DELIVERED, which is the other side of reading
-  // the stage: only `finished` moves the load, and the same import that lands
-  // one load delivered leaves the next one booked.
-  it('leaves an unfinished trip booked', async () => {
+  // THE OTHER SIDE OF READING THE STAGE, ON THE CREATE PATH: one import lands
+  // one load delivered and the next one in transit, from the same file.
+  //
+  // WAS `leaves an unfinished trip booked` until 2026-09-05, when In Progress
+  // gained a landing of its own. Booked was never a decision about running
+  // trips — it was the absence of one.
+  it('creates an unfinished trip already in transit', async () => {
     const id = `T-FRESHRUN-${nonce}`
     const { load } = await importTrip(
       fourLegs(id).map((one) => ({ ...one, status: 'In Progress' })),
     )
 
-    expect(load.operationalStatus).toBe('BOOKED')
+    expect(load.operationalStatus).toBe('IN_TRANSIT')
   })
 })
 
