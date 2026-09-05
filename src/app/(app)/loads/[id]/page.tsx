@@ -812,7 +812,23 @@ export default async function LoadDetailPage({
                 // ITEM 4's REASONING, PRESERVED. The editor sat outside the
                 // rate panel so a dispatcher could reach it; this panel is not
                 // behind `load.financials` either, so it still can be.
-                view.editMiles && mayUpdate ? (
+                //
+                // `load:update` ALONE, WHICH IS WHERE THE SUMMARY CARD HAD IT.
+                // It was `view.editMiles && mayUpdate`, and `editMiles` was
+                // `directSettled` — correct while this panel was Amazon-only,
+                // because a panel nobody else saw needed no rule about who else
+                // could edit it.
+                //
+                // THE SCOPE FOLLOWED THE PANEL; IT WAS NOT WIDENED FOR
+                // CONVENIENCE. The panel renders on every load because the
+                // total is meaningful on every load — driver pay and
+                // revenue-per-mile both rest on it — and a number that drives
+                // driver pay while refusing correction is a defect whatever
+                // broker the freight came from. The freight-type flag is gone
+                // rather than set true, because "who may edit miles" is a
+                // permission question and had no business being answered by
+                // where the load came from.
+                mayUpdate ? (
                   <MilesField
                     dispatchedMiles={load.dispatchedMiles}
                     save={setMilesAction.bind(null, id)}

@@ -38,8 +38,6 @@ export interface LoadDetailView {
   editStopAddress: boolean
   /** Item 4 — the second money box beside Linehaul. */
   showFuelSurcharge: boolean
-  /** Item 4 — Miles, editable in the summary under `load:update`. */
-  editMiles: boolean
   /** Item 6 — Rate con / POD / BOL prompts. */
   showDocuments: boolean
   /**
@@ -89,7 +87,6 @@ export function loadDetailView(load: {
     showStopTimezone: !direct,
     editStopAddress: direct,
     showFuelSurcharge: !direct,
-    editMiles: direct,
     showDocuments: !direct,
     stopsAsTable: direct,
     flagMissingAddress: direct,
