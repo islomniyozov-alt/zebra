@@ -2686,3 +2686,45 @@ Recorded rather than resolved, per Phase 1's discipline.
         audits that need a database from logic that needs nothing, so the fast half
         stays trustworthy and the slow half's flakiness is expected rather than
         confusing.
+
+97. **A RULE INLINE IN A `'use server'` ACTION IS A RULE NO TEST CAN REACH,
+    AND THAT HAS NOW BEEN THE REAL REASON THREE TIMES.** — 2026-09-05.
+
+        THE THREE, as the owner counted them: `planSignature`, the inline
+        create path, and `setStopAddress`. The fix has been identical every
+        time — move the logic to `src/lib/`, let the action delegate — which is
+        what makes it a rule about WHERE LOGIC LIVES rather than a reminder to
+        write more tests. A reminder would have been given three times too.
+
+        WHY THE ACTION IS UNREACHABLE, stated once so nobody re-derives it. A
+        server action's body runs behind `withCurrentOrg`, which resolves the
+        session, decides permission and opens the tenant transaction. A test
+        that wants the RULE has to stand up the whole authentication context to
+        get at it, so in practice nobody does, and the rule ships on a reading.
+        Meanwhile the same logic in `lib/` takes a `tx` and is callable from an
+        integration test in one line.
+
+        THE CASE THAT MADE IT THE THIRD. `setStopAddress` decides whether
+        filling a stop's address also teaches the facility book: missing fills
+        it, present does not, and emptiness is read from the Location row
+        rather than the submitted form. Correct since 2026-09-03, never once
+        watched working, and a fan-out that reaches every future load at that
+        facility. Moving it to `lib/loads.ts` cost four lines of delegation and
+        bought three tests, each of which was then watched failing ALONE —
+        inverting the emptiness source fails two and leaves one green;
+        removing the fan-out fails the other one only.
+
+        THIS IS FLAG 95'S FAMILY, one level up. That flag was about a
+        mechanism that existed and a path that never reached it. This is about
+        a rule that exists in a place no INSTRUMENT can reach — same shape,
+        except the thing failing to arrive is the test rather than the guard.
+
+        THE ENFORCEMENT QUESTION IS OPEN, and there is precedent for answering
+        it mechanically rather than by discipline: Phase 2 flag 13 banned value
+        exports from `'use server'` files with an ESLint selector after that
+        mistake shipped three times, and it has not recurred. The analogous
+        selector here — an action body may call and may branch on its result,
+        but may not contain domain logic — is harder to express and might not
+        be expressible at all. Nobody has tried. Until somebody does, this
+        entry is the rule and a reviewer is the enforcement, which is exactly
+        the arrangement that failed three times.

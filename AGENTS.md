@@ -53,6 +53,13 @@ Rules that are cheap to state and expensive to rediscover:
   not. Verify under `npm run preview`, not just `next dev`.
 - Permission is decided in `src/lib/permissions.ts` and nowhere else. Routes
   call `requirePermission`; none of them decide inline.
+- **Domain logic lives in `src/lib/`. A `'use server'` action reads the form,
+  calls one function, and revalidates.** Not a style preference: an action body
+  runs behind `withCurrentOrg`, so testing the rule inside it means standing up
+  the whole auth context, which nobody does — the rule ships on a reading
+  instead. Three times the inline placement was the actual reason something
+  went unverified, and three times the fix was the same move. See
+  `PHASE-6-BRIEF.md` flag 97.
 - Never send a field to the client that the role cannot see. Leave it out of
   the payload — hiding it in CSS is the same bug as not checking at all.
 - Money is an integer of cents, percentages are integer basis points.
