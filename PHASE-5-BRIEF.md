@@ -701,3 +701,16 @@ The §5 excerpt, box by box, with what proves it. Two are unmet and say so.
    `permissions.ts` that `load.financials` governs amounts rather than the
    existence of a rate — which is the honest version of what the code now does,
    and the only one of the three that ends with a rule somebody can cite.
+
+   **RULED 2026-09-05: the third.** `load.financials` governs **amounts**, not
+   the existence of a rate, and the rule is stated at the resource's
+   declaration in `src/lib/permissions.ts` with the tracker named as the case
+   that forced it — so the next reader knows it was written against a real
+   question rather than in the abstract.
+
+   The statement carries its own limit, which is the part that matters more
+   than the ruling: "it is only a boolean" is not a general licence. A derived
+   value is acceptable when it is something the role may act on anyway; it is
+   not acceptable when the boolean reconstructs the figure — a badge above
+   $5,000, a sort by margin, a "high value" flag. Those leak the amount through
+   a side channel, and the amount is the thing being protected.

@@ -27,6 +27,38 @@ export const RESOURCES = [
   'load',
   'calendar',
   // Money visible on an operational surface. Separate on purpose.
+  //
+  // ── IT GOVERNS AMOUNTS, NOT THE EXISTENCE OF A RATE ──────────────────────
+  //
+  // A role without `load.financials` must never learn what a load pays: the
+  // rate, the fuel surcharge, an accessorial figure, a margin, a total. Those
+  // are left out of the payload entirely, never rendered and hidden.
+  //
+  // It does NOT hide the fact that a load HAS a rate. A dispatcher can already
+  // see that freight is invoiced, that a statement paid it, and that a load
+  // with no revenue is a data problem somebody must fix — and needs to.
+  //
+  // THE CASE THAT FORCED THE DISTINCTION, so this is not read as an abstract
+  // principle: the Load Tracker (item 9, `src/lib/load-pipeline.ts`). On
+  // direct-settled freight at POD_RECEIVED it says "Invoiced" when
+  // `totalRevenueCents > 0` and "Delivered" when it is zero, so the word
+  // itself carries one bit about whether a rate exists. No figure crosses to
+  // the client — the strip receives one of five words.
+  //
+  // The alternative was gating the last two stages, which would have given the
+  // same load two vocabularies: "Delivered" to a dispatcher and "Invoiced" to
+  // a manager, on one screen, at one moment. The owner's ruling on item 9 was
+  // ONE story, identical on every load, and a tracker whose story depends on
+  // who is looking is not a tracker. So the line is drawn here instead, and it
+  // is drawn at the amount.
+  //
+  // WHAT THIS DOES NOT LICENSE. "It's only a boolean" is not a general excuse.
+  // A derived value is fine when it is something the role may act on anyway;
+  // it is NOT fine when the boolean reconstructs the amount — a badge that
+  // appears above $5,000, a sort order by margin, a "high value" flag. Each of
+  // those leaks the figure through a side channel, and the figure is the thing
+  // being protected. See PHASE-5-BRIEF flag 9.
+  // ─────────────────────────────────────────────────────────────────────────
   'load.financials',
   'driver.pay',
   // The other two money-on-a-non-money-screen fields, added in Phase 3's

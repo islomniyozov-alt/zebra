@@ -2604,43 +2604,63 @@ Recorded rather than resolved, per Phase 1's discipline.
     OCCASIONALLY LOST GATE, BECAUSE IT DEGRADES JUDGMENT RATHER THAN COSTING
     TIME.** — 2026-09-05. **STANDING ITEM, NOT YET ADDRESSED.**
 
-    `npm run check` now fails intermittently for reasons unrelated to whatever
-    changed. Four of its files touch the database — `integrity`,
-    `isolation-coverage`, `migration-checksums`, `structure` — and when the Neon
-    dev compute stalls or drops a socket, they go red together. Observed twice
-    on 2026-09-05: nine failures, all four files, every one a compute signature,
-    with the same command green minutes earlier and minutes later.
+        `npm run check` now fails intermittently for reasons unrelated to whatever
+        changed. Four of its files touch the database — `integrity`,
+        `isolation-coverage`, `migration-checksums`, `structure` — and when the Neon
+        dev compute stalls or drops a socket, they go red together. Observed twice
+        on 2026-09-05: nine failures, all four files, every one a compute signature,
+        with the same command green minutes earlier and minutes later.
 
-    THE GATE HAS THE SAME CONDITION AND IT MATTERS LESS. A lost gate costs
-    fourteen minutes and announces itself: no receipt, nothing deployed, and the
-    failure log names what fell over. It is expensive and it is honest.
+        THE GATE HAS THE SAME CONDITION AND IT MATTERS LESS. A lost gate costs
+        fourteen minutes and announces itself: no receipt, nothing deployed, and the
+        failure log names what fell over. It is expensive and it is honest.
 
-    `check` is different because of how it is used. It runs before every commit,
-    dozens of times a day, and its answer is consulted rather than studied. A
-    suite that is red for reasons unrelated to the change teaches exactly one
-    lesson, and teaches it quickly: **run it again.** After that the next real
-    failure gets the same treatment, and it gets it from someone who has been
-    trained by their own tooling to believe the first red is noise.
+        `check` is different because of how it is used. It runs before every commit,
+        dozens of times a day, and its answer is consulted rather than studied. A
+        suite that is red for reasons unrelated to the change teaches exactly one
+        lesson, and teaches it quickly: **run it again.** After that the next real
+        failure gets the same treatment, and it gets it from someone who has been
+        trained by their own tooling to believe the first red is noise.
 
-    THAT IS THE ATTENTION FAILURE THESE FLAGS KEEP DESCRIBING, POINTED AT US.
-    Flag 91 is about a trade-off defended by the visibility of its failure mode,
-    where nobody was looking. Flag 87 is about a diagnosis destroyed by how it
-    was reported. Both assume a reader who reads. This is the mechanism that
-    stops them reading — and it does not announce itself, because a suite that
-    passes on the second run looks like a suite that passes.
+        THAT IS THE ATTENTION FAILURE THESE FLAGS KEEP DESCRIBING, POINTED AT US.
+        Flag 91 is about a trade-off defended by the visibility of its failure mode,
+        where nobody was looking. Flag 87 is about a diagnosis destroyed by how it
+        was reported. Both assume a reader who reads. This is the mechanism that
+        stops them reading — and it does not announce itself, because a suite that
+        passes on the second run looks like a suite that passes.
 
-    WHAT IS NOT THE ANSWER, stated so it does not get tried: retrying the four
-    files, marking them flaky, or excluding them from `check`. Each converts a
-    visible intermittent failure into an invisible one, and these four are the
-    backstops — RLS coverage, migration drift, tenant-fixture coverage,
-    cross-table integrity. They are the last things that should learn to be
-    quiet.
+        WHAT IS NOT THE ANSWER, stated so it does not get tried: retrying the four
+        files, marking them flaky, or excluding them from `check`. Each converts a
+        visible intermittent failure into an invisible one, and these four are the
+        backstops — RLS coverage, migration drift, tenant-fixture coverage,
+        cross-table integrity. They are the last things that should learn to be
+        quiet.
 
-    WHAT MIGHT BE: routing them at a warm compute the way the gate does; giving
-    them the same start-transaction retry the application path has, bought with
-    the same trace census; or separating "structural audits that need a
-    database" from "logic tests that need nothing" so the fast half stays
-    trustworthy and the slow half is run deliberately. All three are
-    speculation. None has been measured, and this entry exists to record the
-    problem rather than to pick a fix — the last local fix to setup on a hunch
-    was reverted within the hour by the numbers that should have preceded it.
+        WHAT MIGHT BE: routing them at a warm compute the way the gate does; giving
+        them the same start-transaction retry the application path has, bought with
+        the same trace census; or separating "structural audits that need a
+        database" from "logic tests that need nothing" so the fast half stays
+        trustworthy and the slow half is run deliberately. All three are
+        speculation. None has been measured, and this entry exists to record the
+        problem rather than to pick a fix — the last local fix to setup on a hunch
+        was reverted within the hour by the numbers that should have preceded it.
+
+        THIRD OCCURRENCE, 2026-09-05, AND THE FIRST ONE MEASURED PROPERLY. Four
+        failures, all in `integrity.test.ts`, all `A commit cannot be executed on
+
+    an expired transaction` against Prisma's 5s default — 5761ms and 8173ms
+    against a ~200ms round trip. The change in the tree was comment-only.
+
+        THE TEMPTING MOVE WAS TO RE-RUN AND CARRY ON, which is the exact reflex
+        this flag exists to name. What was done instead cost one command: `git
+
+    stash`, run the file WITHOUT the change, watch it fail anyway (1 of 6),
+    restore, run it again (6 of 6). That is attribution rather than assumption
+    — the same shape as reading the baseline from the thing being measured, and
+    it turns "probably the compute" into a fact.
+
+        THE PROCEDURE IS THE INTERIM ANSWER while the fix is unchosen: when
+        `check` goes red in one of the four database-touching files, do not re-run
+        it. Stash and run the same file on the tree WITHOUT the change. If it fails
+        there too, the compute is the cause and it is recorded here; if it passes,
+        the change is the cause and re-running would have buried it.
