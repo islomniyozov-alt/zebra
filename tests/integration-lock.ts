@@ -242,11 +242,34 @@ async function buildWorkerDatabases(adminUrl: string): Promise<void> {
     const count = workerCount()
     const startedAt = Date.now()
 
-    // COPIED CONCURRENTLY, ON SEPARATE CONNECTIONS. A populated copy costs
-    // ~20 seconds — measured, 55 tables — so eight of them in series would be
-    // 160s of setup and would give back most of what parallelism won. They are
-    // independent: each reads the same template and writes a different
-    // database, and Postgres serialises only the parts that must be.
+    // COPIED ONE AT A TIME, AND THE OLD COMMENT HERE WAS WRONG ABOUT WHY THEY
+    // COULD NOT BE.
+    //
+    // It said the copies "are independent: each reads the same template and
+    // writes a different database". They are not. `CREATE DATABASE ... TEMPLATE`
+    // is itself a session using the SOURCE, so eight concurrent copies are
+    // eight sessions on the template refusing each other with
+    // `55006 — There is 1 other session using the database`. The "1 other
+    // session" in those errors was never a leftover from a previous run; it was
+    // the copy running beside this one.
+    //
+    // WHAT SEQUENTIAL ACTUALLY COSTS, MEASURED RATHER THAN ESTIMATED: 81.5s,
+    // against 1.4–3.4s for all eight concurrently.
+    //
+    // The first version of this comment claimed the opposite, from the same
+    // numbers. Seeing "eight copies in 1.4s" it concluded each copy is cheap
+    // and concurrency was buying nothing — when 1.4s for eight IS concurrency
+    // working, and each copy costs ~10s on its own. The evidence for
+    // parallelism was read as evidence against it.
+    //
+    // SO THIS IS A TRADE, NOT A FREE FIX. It buys reliability with 81s of
+    // setup on a suite that runs about sixteen minutes: concurrent copies
+    // refuse each other with 55006, which killed three runs before a test
+    // could exist, and no amount of retrying inside the contention removes
+    // the contention. Serialising still meets the previous copy's lingering
+    // session and pays the backoff — so it MOVES the cost from an
+    // occasional lost run to a predictable minute, which is the trade worth
+    // making for a gate whose failures cost fourteen minutes each.
     const copy = async (slot: number) => {
       // AND A BOUNDED RETRY, because termination is asynchronous: the backend
       // is asked to go away, and `pg_stat_activity` stops listing it slightly
@@ -287,9 +310,9 @@ async function buildWorkerDatabases(adminUrl: string): Promise<void> {
       if (lastError) throw lastError
     }
 
-    await Promise.all(
-      Array.from({ length: count }, (_, index) => copy(index + 1)),
-    )
+    // ONE AT A TIME. See the note above `copy`: concurrent copies are
+    // concurrent sessions on the template and refuse each other with 55006.
+    for (let slot = 1; slot <= count; slot++) await copy(slot)
     console.log(
       `[integration] ${count} worker database(s) copied from ${TEMPLATE_DB} in ${Date.now() - startedAt}ms`,
     )
