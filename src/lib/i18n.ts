@@ -655,6 +655,8 @@ const en = {
   'loads.colScheduled': 'Schedule time',
   'loads.colWaiting': 'Waiting',
   'loads.stopsEmpty': 'No stops on this load.',
+  'loads.stopsUnattributed':
+    'An em dash means no recorded author — times that arrived with the import have none.',
   'loads.milesTitle': 'Miles',
   'loads.milesLoaded': 'Loaded',
   'loads.milesEmpty': 'Empty',
@@ -2291,6 +2293,8 @@ const ru: Dictionary = {
   'loads.colScheduled': 'По плану',
   'loads.colWaiting': 'Ожидание',
   'loads.stopsEmpty': 'Остановок нет.',
+  'loads.stopsUnattributed':
+    'Тире означает, что автор не записан — у времени из импорта его нет.',
   'loads.milesTitle': 'Мили',
   'loads.milesLoaded': 'Гружёные',
   'loads.milesEmpty': 'Порожние',
@@ -3913,6 +3917,8 @@ const fa: Dictionary = {
   'loads.colScheduled': 'زمان برنامه',
   'loads.colWaiting': 'انتظار',
   'loads.stopsEmpty': 'توقفی ثبت نشده است.',
+  'loads.stopsUnattributed':
+    'خط تیره یعنی نویسنده‌ای ثبت نشده است — زمان‌هایی که با درون‌ریزی آمده‌اند نویسنده ندارند.',
   'loads.milesTitle': 'مایل',
   'loads.milesLoaded': 'بارگیری‌شده',
   'loads.milesEmpty': 'خالی',

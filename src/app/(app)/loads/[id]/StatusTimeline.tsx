@@ -93,8 +93,6 @@ export function StatusTimeline({
     <section className="rounded-card border border-border bg-surface p-z4">
       <h2 className="text-md font-medium text-ink">{labels.title}</h2>
 
-      {composer}
-
       {entries.length === 0 ? (
         <p className="mt-z2 text-sm text-ink-2">{labels.empty}</p>
       ) : (
@@ -191,6 +189,14 @@ export function StatusTimeline({
           })}
         </ol>
       )}
+
+      {/* THE COMPOSER GOES AFTER THE ENTRIES, NOT BETWEEN THE HEADING AND
+       * THEM. It sat directly under the title, which pushed the history a box
+       * further down and read as though the input were the panel's subject
+       * rather than an addition to it. The heading now names what is directly
+       * beneath it, and writing a note is the thing you do having read them —
+       * which is also the order the entries themselves run in. */}
+      {composer ? <div className="mt-z4">{composer}</div> : null}
     </section>
   )
 }

@@ -692,40 +692,58 @@ export default async function LoadDetailPage({
           {/* ITEM 7 — Loaded / Empty / Total, beside the stops they come from.
            * Only on freight whose legs were classified; broker loads have no
            * split to show and the panel would be two em dashes and a number. */}
+          {/* BOTH SPAN THE GRID, AND THAT IS WHAT MAKES THE TABLE READABLE.
+           *
+           * Eight columns inside a half-width cell meant Checked out, Schedule
+           * time and Waiting were all off-screen behind a horizontal scrollbar
+           * — three of the eight columns invisible on the panel built to show
+           * them, which is most of the point of a table gone. Miles was the
+           * other half of the same mistake: three numbers given a column of
+           * their own, standing as tall as the table beside it.
+           *
+           * So they stack, full width: the distances, then the stops they were
+           * measured over. The two-column grid still holds everything else,
+           * where a card of label/value pairs is exactly what fits in half a
+           * width. */}
           {view.stopsAsTable ? (
-            <MilesSummary
-              totalMiles={miles.totalMiles}
-              loadedMiles={miles.loadedMiles}
-              emptyMiles={miles.emptyMiles}
-              provisional={miles.provisional}
-              locale={locale}
-              labels={{
-                title: t('loads.milesTitle'),
-                loaded: t('loads.milesLoaded'),
-                empty: t('loads.milesEmpty'),
-                total: t('loads.milesTotal'),
-                unknown: t('loads.milesUnknown'),
-                unclassified: t('loads.milesProvisional'),
-              }}
-            />
+            <div className="lg:col-span-2">
+              <MilesSummary
+                totalMiles={miles.totalMiles}
+                loadedMiles={miles.loadedMiles}
+                emptyMiles={miles.emptyMiles}
+                provisional={miles.provisional}
+                locale={locale}
+                labels={{
+                  title: t('loads.milesTitle'),
+                  loaded: t('loads.milesLoaded'),
+                  empty: t('loads.milesEmpty'),
+                  total: t('loads.milesTotal'),
+                  unknown: t('loads.milesUnknown'),
+                  unclassified: t('loads.milesProvisional'),
+                }}
+              />
+            </div>
           ) : null}
 
           {view.stopsAsTable ? (
-            <StopsTable
-              stops={stopRows}
-              labels={{
-                title: t('loads.stopsTitle'),
-                position: t('loads.colPosition'),
-                location: t('loads.colLocation'),
-                checkedInAt: t('loads.colInAt'),
-                checkedInBy: t('loads.colInBy'),
-                checkedOutAt: t('loads.colOutAt'),
-                checkedOutBy: t('loads.colOutBy'),
-                scheduled: t('loads.colScheduled'),
-                waiting: t('loads.colWaiting'),
-                empty: t('loads.stopsEmpty'),
-              }}
-            />
+            <div className="lg:col-span-2">
+              <StopsTable
+                stops={stopRows}
+                labels={{
+                  title: t('loads.stopsTitle'),
+                  position: t('loads.colPosition'),
+                  location: t('loads.colLocation'),
+                  checkedInAt: t('loads.colInAt'),
+                  checkedInBy: t('loads.colInBy'),
+                  checkedOutAt: t('loads.colOutAt'),
+                  checkedOutBy: t('loads.colOutBy'),
+                  scheduled: t('loads.colScheduled'),
+                  waiting: t('loads.colWaiting'),
+                  empty: t('loads.stopsEmpty'),
+                  unattributed: t('loads.stopsUnattributed'),
+                }}
+              />
+            </div>
           ) : (
             <section className="rounded-card border border-border bg-surface p-z4">
               <h2 className="text-md font-medium text-ink">

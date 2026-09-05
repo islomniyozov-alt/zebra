@@ -53,7 +53,16 @@ export function MilesSummary({
     <section className="rounded-card border border-border bg-surface p-z4">
       <h2 className="text-md font-medium text-ink">{labels.title}</h2>
 
-      <dl className="mt-z3 grid grid-cols-3 gap-z3">
+      {/* THREE FIGURES SIT TOGETHER AT THE START, NOT SPREAD ACROSS THE WIDTH.
+       *
+       * As a `grid-cols-3` in a half-width column this was a tall panel
+       * holding three short numbers, and full width would only have made the
+       * gaps wider — the same three numbers with more emptiness between them.
+       * A flex row takes the space the numbers need and stops, so the panel
+       * is the height of one line and the figures stay close enough to read
+       * as a set: loaded plus empty equals total is the whole point of
+       * showing them side by side. */}
+      <dl className="mt-z3 flex flex-wrap items-baseline gap-x-z5 gap-y-z3">
         <Figure label={labels.loaded} value={show(loadedMiles)} />
         <Figure label={labels.empty} value={show(emptyMiles)} />
         {/* The total is the one figure that is always known when there is any
@@ -78,7 +87,7 @@ function Figure({
   strong?: boolean
 }) {
   return (
-    <div className="flex flex-col gap-z1">
+    <div className="flex min-w-[7rem] flex-col gap-z1">
       <dt className="text-xs uppercase tracking-[0.04em] text-ink-3">
         {label}
       </dt>

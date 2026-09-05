@@ -54,6 +54,8 @@ interface Props {
     scheduled: string
     waiting: string
     empty: string
+    /** What an em dash in a "by" column means. See the note below. */
+    unattributed: string
   }
 }
 
@@ -122,6 +124,24 @@ export function StopsTable({ stops, labels }: Props) {
           </table>
         </div>
       )}
+
+      {/* WHY THE EM DASHES ARE THERE, SAID ONCE, UNDER THE TABLE.
+       *
+       * "Checked in by" is empty on every row of an imported trip and that is
+       * CORRECT: the times were stamped by the import from Amazon's CSV, and
+       * `LoadStop` carries no actor, so the audit log is the only source of
+       * one. A pre-import write has no audit row to find. The dash is the
+       * screen refusing to name somebody it cannot identify — but a column of
+       * dashes on a brand-new panel reads as a panel that is broken, which is
+       * how Daler read it on first sight.
+       *
+       * IT IS NOT "MANUALLY" AND IT IS NOT A NAME. Those were the two
+       * temptations and both would be the screen asserting a fact about who
+       * touched freight. One sentence costs nothing and turns an apparent
+       * defect into a stated limit. */}
+      {stops.length > 0 ? (
+        <p className="mt-z3 text-xs text-ink-3">{labels.unattributed}</p>
+      ) : null}
     </section>
   )
 }
