@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { rateThatWouldLand, tripRowView } from '@/lib/trips-preview'
+import {
+  rateThatWouldLand,
+  stageSentence,
+  tripRowView,
+} from '@/lib/trips-preview'
 import type { PlannedTrip } from '@/lib/trips-import'
 
 // ---------------------------------------------------------------------------
@@ -302,5 +306,67 @@ describe('a create row from a completed export', () => {
     expect(view(true, { stage: 'running' }).actionDetail).toBe(
       'books a new load',
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE SENTENCE THE OWNER ASKED FOR, ASSERTED WORD FOR WORD.
+//
+// "3 trips: 1 books, 1 in transit, 1 files as delivered" is the whole preview
+// in one line, and it is the kind of thing that rots silently: nothing breaks
+// if a stage goes missing, the order flips, or a synonym creeps back in. It
+// lived as three .replace() calls inside a form component, where the only way
+// to check it was to read it.
+// ---------------------------------------------------------------------------
+describe('the preview sentence', () => {
+  const labels = {
+    previewTrip: '{n} trip:',
+    previewTrips: '{n} trips:',
+    stageUpcoming: '{n} books',
+    stageRunning: '{n} in transit',
+    stageFinished: '{n} files as delivered',
+  }
+
+  it("prints the owner's sentence exactly", () => {
+    expect(
+      stageSentence(3, { upcoming: 1, running: 1, finished: 1 }, labels),
+    ).toBe('3 trips: 1 books, 1 in transit, 1 files as delivered')
+  })
+
+  it('runs in the order the freight does, not the order of the counts', () => {
+    const said = stageSentence(
+      9,
+      { finished: 5, upcoming: 3, running: 1 },
+      labels,
+    )
+    expect(said.indexOf('books')).toBeLessThan(said.indexOf('in transit'))
+    expect(said.indexOf('in transit')).toBeLessThan(said.indexOf('delivered'))
+  })
+
+  it('omits a stage with nothing in it rather than printing a zero', () => {
+    // "0 in transit" is a fact nobody asked for, and three of them bury the
+    // one number that matters.
+    expect(
+      stageSentence(4, { upcoming: 0, running: 0, finished: 4 }, labels),
+    ).toBe('4 trips: 4 files as delivered')
+  })
+
+  it('says "1 trip:" rather than "1 trips:"', () => {
+    expect(
+      stageSentence(1, { upcoming: 0, running: 1, finished: 0 }, labels),
+    ).toBe('1 trip: 1 in transit')
+  })
+
+  it('never says "still running" again', () => {
+    // The synonym this replaced. A screen inventing a fourth word for a state
+    // the tracker, the badge and the dispatcher already agree on makes the
+    // reader translate before they can decide.
+    const said = stageSentence(
+      2,
+      { upcoming: 0, running: 2, finished: 0 },
+      labels,
+    )
+    expect(said).not.toContain('running')
+    expect(said).toContain('in transit')
   })
 })

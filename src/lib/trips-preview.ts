@@ -166,3 +166,62 @@ export function tripRowView(
 
   return row
 }
+
+/** The three landings a file's trips can have, counted. */
+export interface StageCounts {
+  upcoming: number
+  running: number
+  finished: number
+}
+
+/**
+ * "3 trips: 1 books, 1 in transit, 1 files as delivered" — the owner's own
+ * sentence, which is the whole preview in one line.
+ *
+ * A FUNCTION RATHER THAN JSX, so the wording has a test. It was three
+ * `.replace()` calls and a `.join()` inside the form, where the only way to
+ * check it said the right thing was to read it — and flag 97 is about exactly
+ * that: a rule somewhere no instrument can reach.
+ *
+ * IN THE FREIGHT'S ORDER, not the object's. Books, then in transit, then
+ * delivered, because that is the order the freight moves in and the order a
+ * dispatcher thinks in. A stage with no trips is omitted rather than printed
+ * as a zero: "0 in transit" is a fact nobody asked for, and three of them
+ * bury the one number that matters.
+ *
+ * THE WORDS NAME THE LANDING, NOT THE EXPORT'S VOCABULARY. Relay says
+ * "In Progress"; this screen says "in transit", because that is what the load
+ * will say on every other screen once the import runs. The old wording — "1
+ * still running" — was a fourth synonym for a state the tracker, the badge and
+ * the dispatcher already agreed on.
+ */
+export function stageSentence(
+  tripCount: number,
+  counts: StageCounts,
+  labels: {
+    /** "{n} trip:" — the singular exists because "1 trips:" is a typo. */
+    previewTrip: string
+    previewTrips: string
+    stageUpcoming: string
+    stageRunning: string
+    stageFinished: string
+  },
+): string {
+  const head = (
+    tripCount === 1 ? labels.previewTrip : labels.previewTrips
+  ).replace('{n}', String(tripCount))
+
+  const parts = [
+    counts.upcoming > 0
+      ? labels.stageUpcoming.replace('{n}', String(counts.upcoming))
+      : null,
+    counts.running > 0
+      ? labels.stageRunning.replace('{n}', String(counts.running))
+      : null,
+    counts.finished > 0
+      ? labels.stageFinished.replace('{n}', String(counts.finished))
+      : null,
+  ].filter((part): part is string => part !== null)
+
+  return parts.length === 0 ? head : `${head} ${parts.join(', ')}`
+}

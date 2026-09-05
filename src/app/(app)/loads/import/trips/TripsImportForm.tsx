@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
 import { Table, type Column } from '@/components/ui/Table'
+import { stageSentence } from '@/lib/trips-preview'
 import { tripsImportAction } from './actions'
 import { EMPTY_TRIPS_IMPORT, type TripRowView } from './state'
 
@@ -52,7 +53,8 @@ export interface TripsImportLabels {
   willEnrich: string
   unchanged: string
   skippedLegs: string
-  fromRows: string
+  previewTrip: string
+  previewTrips: string
   stageUpcoming: string
   stageFinished: string
   stageRunning: string
@@ -197,38 +199,21 @@ export function TripsImportForm({
                   )}
           </h2>
 
-          {/* WHICH SCREEN AM I ON, ANSWERED BY THE FILE ITSELF.
-           * Both importers read the same Relay export; the difference is the
-           * unit of the output. "16 trips from 41 rows" is only ever true on
-           * this screen, and it is the fastest way to notice you are on the
-           * wrong one — faster than reading a title. */}
+          {/* THE SENTENCE DALER SAID, PRINTED AS HE SAID IT:
+           *
+           *     "3 trips: 1 books, 1 in transit, 1 files as delivered"
+           *
+           * It answers the only question the screen is opened with — what will
+           * this file DO — in the words the office already uses, and it names
+           * the landing state rather than the export's vocabulary. "Still
+           * running" was a fourth word for a state the tracker, the badge and
+           * the dispatcher all call In Transit; a screen that invents a synonym
+           * makes the reader translate before they can decide.
+           *
+           * IN THE FREIGHT'S OWN ORDER — books, in transit, delivered — not the
+           * order the counts happen to sit in on the plan object. */}
           <p className="text-sm text-ink-2">
-            {labels.fromRows
-              .replace('{trips}', String(plan.tripCount))
-              .replace('{rows}', String(plan.rowCount))}
-            {' · '}
-            {[
-              plan.stageCounts.upcoming > 0
-                ? labels.stageUpcoming.replace(
-                    '{n}',
-                    String(plan.stageCounts.upcoming),
-                  )
-                : null,
-              plan.stageCounts.finished > 0
-                ? labels.stageFinished.replace(
-                    '{n}',
-                    String(plan.stageCounts.finished),
-                  )
-                : null,
-              plan.stageCounts.running > 0
-                ? labels.stageRunning.replace(
-                    '{n}',
-                    String(plan.stageCounts.running),
-                  )
-                : null,
-            ]
-              .filter(Boolean)
-              .join(' · ')}
+            {stageSentence(plan.tripCount, plan.stageCounts, labels)}
           </p>
 
           {/* THE COUNTS BEFORE THE ROWS. Someone deciding whether to confirm
