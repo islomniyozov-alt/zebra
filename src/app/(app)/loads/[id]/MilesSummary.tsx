@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { cx } from '@/lib/cx'
 
 // ---------------------------------------------------------------------------
@@ -27,6 +28,17 @@ interface Props {
   loadedMiles: number | null
   emptyMiles: number | null
   provisional: boolean
+  /**
+   * The editor for `dispatchedMiles`, when this reader may change it.
+   *
+   * IT LIVES HERE BECAUSE THE NUMBER DOES. It used to sit in a Summary card
+   * beside the customer's name — placed there deliberately, because the field
+   * was asked for by a dispatcher and the rate panel is behind
+   * `load.financials`. That reasoning still holds and this panel is not gated
+   * either, so the editor moves to the figures it edits rather than back
+   * behind the money.
+   */
+  editor?: ReactNode
   locale: string
   labels: {
     title: string
@@ -43,11 +55,19 @@ export function MilesSummary({
   loadedMiles,
   emptyMiles,
   provisional,
+  editor,
   locale,
   labels,
 }: Props) {
   const show = (value: number | null) =>
     value === null ? labels.unknown : value.toLocaleString(locale)
+
+  // THE SPLIT IS SHOWN ONLY WHERE IT EXISTS. Broker freight has never been
+  // classified — nothing on that path can be — so loaded and empty are null
+  // rather than zero, and rendering them would be two "not recorded"s flanking
+  // the one figure anybody wanted. The total is every load's fact; the split
+  // is Relay's.
+  const hasSplit = loadedMiles !== null || emptyMiles !== null
 
   return (
     <section className="rounded-card border border-border bg-surface p-z4">
@@ -63,12 +83,18 @@ export function MilesSummary({
        * as a set: loaded plus empty equals total is the whole point of
        * showing them side by side. */}
       <dl className="mt-z3 flex flex-wrap items-baseline gap-x-z5 gap-y-z3">
-        <Figure label={labels.loaded} value={show(loadedMiles)} />
-        <Figure label={labels.empty} value={show(emptyMiles)} />
+        {hasSplit ? (
+          <>
+            <Figure label={labels.loaded} value={show(loadedMiles)} />
+            <Figure label={labels.empty} value={show(emptyMiles)} />
+          </>
+        ) : null}
         {/* The total is the one figure that is always known when there is any
          * distance at all, so it carries the emphasis. */}
         <Figure label={labels.total} value={show(totalMiles)} strong />
       </dl>
+
+      {editor ? <div className="mt-z3">{editor}</div> : null}
 
       {provisional ? (
         <p className="mt-z3 text-xs text-ink-3">{labels.unclassified}</p>

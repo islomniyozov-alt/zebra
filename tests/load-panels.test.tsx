@@ -8,7 +8,9 @@ import {
   type TimelineEntry,
 } from '@/app/(app)/loads/[id]/StatusTimeline'
 import { StopsTable } from '@/app/(app)/loads/[id]/StopsTable'
+import { MilesSummary } from '@/app/(app)/loads/[id]/MilesSummary'
 import { PipelineStrip } from '@/app/(app)/loads/[id]/PipelineStrip'
+import { LoadFacts } from '@/app/(app)/loads/[id]/LoadFacts'
 import {
   ActivityPanel,
   humaniseField,
@@ -322,5 +324,107 @@ describe('humaniseField', () => {
 
   it('keeps a name that is entirely suffix', () => {
     expect(humaniseField('id')).toBe('Id')
+  })
+})
+
+describe('the header facts strip', () => {
+  it('keeps its shape when a fact is not set', () => {
+    // Unassigned freight is the normal state of a new load. The column stays
+    // so the eye learns where truck and driver sit.
+    const { container } = render(
+      <LoadFacts
+        facts={[
+          { label: 'Truck', value: null },
+          { label: 'Driver', value: 'Niyozov, Islom' },
+        ]}
+      />,
+    )
+    expect(screen.getByText('Truck')).toBeTruthy()
+    expect(container.textContent).toContain('—')
+    expect(container.textContent).toContain('Niyozov, Islom')
+  })
+
+  it('renders every fact it is given, in order', () => {
+    render(
+      <LoadFacts
+        facts={[
+          { label: 'Authority', value: 'RAM Haulage' },
+          { label: 'Customer', value: 'Amazon Relay' },
+        ]}
+      />,
+    )
+    const terms = [...document.querySelectorAll('dt')].map((d) => d.textContent)
+    expect(terms).toEqual(['Authority', 'Customer'])
+  })
+})
+
+describe('the miles panel', () => {
+  const labels = {
+    title: 'Miles',
+    loaded: 'Loaded',
+    empty: 'Empty',
+    total: 'Total',
+    unknown: 'not recorded',
+    unclassified: 'Some legs were not classified.',
+  }
+
+  it('shows only the total when the split was never measured', () => {
+    // Broker freight: nothing on that path classifies legs, so loaded and
+    // empty are null rather than zero. Rendering them would be two "not
+    // recorded"s flanking the one figure anybody wanted.
+    render(
+      <MilesSummary
+        totalMiles={1240}
+        loadedMiles={null}
+        emptyMiles={null}
+        provisional={false}
+        locale="en-US"
+        labels={labels}
+      />,
+    )
+    expect(screen.getByText('1,240')).toBeTruthy()
+    expect(screen.queryByText('Loaded')).toBeNull()
+    expect(screen.queryByText('Empty')).toBeNull()
+  })
+
+  it('shows the split where it exists', () => {
+    render(
+      <MilesSummary
+        totalMiles={1240}
+        loadedMiles={1100}
+        emptyMiles={140}
+        provisional={false}
+        locale="en-US"
+        labels={labels}
+      />,
+    )
+    expect(screen.getByText('Loaded')).toBeTruthy()
+    expect(screen.getByText('140')).toBeTruthy()
+  })
+
+  it('carries the editor when one is passed and nothing when not', () => {
+    const { container, rerender } = render(
+      <MilesSummary
+        totalMiles={10}
+        loadedMiles={null}
+        emptyMiles={null}
+        provisional={false}
+        locale="en-US"
+        labels={labels}
+        editor={<button type="button">Edit miles</button>}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Edit miles' })).toBeTruthy()
+    rerender(
+      <MilesSummary
+        totalMiles={10}
+        loadedMiles={null}
+        emptyMiles={null}
+        provisional={false}
+        locale="en-US"
+        labels={labels}
+      />,
+    )
+    expect(container.querySelector('button')).toBeNull()
   })
 })

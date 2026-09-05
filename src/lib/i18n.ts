@@ -633,7 +633,6 @@ const en = {
   'loads.timePlaceholder': 'hh:mm',
   'loads.saved': 'Load {number} saved.',
 
-  'loads.summary': 'Load',
   'loads.stops': 'Stops',
   'loads.documents': 'Documents',
   'loads.timeline': 'Status history',
@@ -2295,7 +2294,6 @@ const ru: Dictionary = {
   'loads.timePlaceholder': 'чч:мм',
   'loads.saved': 'Груз {number} сохранён.',
 
-  'loads.summary': 'Груз',
   'loads.stops': 'Точки',
   'loads.documents': 'Документы',
   'loads.timeline': 'История статусов',
@@ -3943,7 +3941,6 @@ const fa: Dictionary = {
   'loads.timePlaceholder': 'ساعت:دقیقه',
   'loads.saved': 'بار {number} ذخیره شد.',
 
-  'loads.summary': 'بار',
   'loads.stops': 'توقف‌ها',
   'loads.documents': 'اسناد',
   'loads.timeline': 'تاریخچهٔ وضعیت',

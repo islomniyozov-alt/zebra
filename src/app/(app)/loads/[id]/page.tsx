@@ -44,6 +44,7 @@ import { StopAddress } from './StopAddress'
 import { StopsTable, type StopRow } from './StopsTable'
 import { MilesSummary } from './MilesSummary'
 import { PipelineStrip } from './PipelineStrip'
+import { LoadFacts, type Fact } from './LoadFacts'
 import { ActivityPanel, humaniseField } from './ActivityPanel'
 import {
   addNoteAction,
@@ -299,6 +300,45 @@ export default async function LoadDetailPage({
 
   // One pair of words for every copy affordance on the screen.
   const copyLabels = { copy: t('loads.copy'), copied: t('loads.copied') }
+
+  // THE HEADER'S FOUR FACTS. Every one is ungated — see LoadFacts for why
+  // that is a rule about the strip rather than a property of these four.
+  const headerFacts: Fact[] = [
+    { label: t('ref.authority'), value: load.company.name },
+    {
+      label: t('loads.column.customer'),
+      value: (
+        <Link
+          href={`/brokers/${load.customer.id}`}
+          className="hover:text-accent"
+        >
+          {load.customer.name}
+        </Link>
+      ),
+    },
+    {
+      // ITEM 1 — the unit number goes onto a gate ticket and into Relay; the
+      // driver name beside it does not.
+      label: t('loads.column.truck'),
+      value:
+        load.truck?.unitNumber == null ? null : view.copyableIdentifiers ? (
+          <Copyable
+            value={load.truck.unitNumber}
+            className="font-mono"
+            labels={copyLabels}
+          />
+        ) : (
+          <span className="font-mono">{load.truck.unitNumber}</span>
+        ),
+    },
+    {
+      label: t('loads.column.driver'),
+      value: load.driver
+        ? `${load.driver.lastName}, ${load.driver.firstName}`
+        : null,
+    },
+  ]
+
   const mayUpdate = await currentUserCan('update', 'load')
   const mayUpload = await currentUserCan('create', 'document')
 
@@ -561,87 +601,104 @@ export default async function LoadDetailPage({
 
   return (
     <>
-      <div className="flex items-baseline justify-between gap-z4 border-b border-border bg-surface px-gutter py-z3">
-        <div className="flex items-center gap-z3">
-          {/* §2 — the 3px stripe on the leading edge, never animated. */}
-          <span
-            aria-hidden
-            className={`h-z5 w-[3px] ${TONE_STRIPE[stripeTone]}`}
-          />
-          <h1 className="text-lg font-medium text-ink">
-            {view.copyableIdentifiers ? (
-              <Copyable
-                value={load.loadNumber}
-                className="font-mono"
-                labels={copyLabels}
+      <div className="flex flex-col gap-z3 border-b border-border bg-surface px-gutter py-z3">
+        <div className="flex items-baseline justify-between gap-z4">
+          <div className="flex items-center gap-z3">
+            {/* §2 — the 3px stripe on the leading edge, never animated. */}
+            <span
+              aria-hidden
+              className={`h-z5 w-[3px] ${TONE_STRIPE[stripeTone]}`}
+            />
+            <h1 className="text-lg font-medium text-ink">
+              {view.copyableIdentifiers ? (
+                <Copyable
+                  value={load.loadNumber}
+                  className="font-mono"
+                  labels={copyLabels}
+                />
+              ) : (
+                <span className="font-mono">{load.loadNumber}</span>
+              )}
+              {/* THE NUMBER DISPATCH QUOTES TO AMAZON, in the header where it is
+               * read from rather than buried in the summary list. Our load
+               * number is what this office calls the freight; the reference is
+               * what the broker calls it, and a phone call about a trip starts
+               * with theirs. Dimmer, because it identifies the same load.
+               *
+               * ITEM 1: and on Amazon freight the reference IS the Trip ID —
+               * the string that gets pasted into Relay's search — so it is the
+               * one identifier on this screen most worth not retyping. */}
+              {load.referenceNumber === null ? null : (
+                <span className="ms-z2 font-mono text-sm text-ink-2" dir="ltr">
+                  · {t('loads.column.reference')}{' '}
+                  {view.copyableIdentifiers ? (
+                    <Copyable
+                      value={load.referenceNumber}
+                      className="font-mono"
+                      labels={copyLabels}
+                    />
+                  ) : (
+                    load.referenceNumber
+                  )}
+                </span>
+              )}
+            </h1>
+            {/* §7.2 — operational FILLED, billing OUTLINED, side by side. */}
+            <StatusBadge
+              tone={operationalTone(load.operationalStatus)}
+              label={t(operationalLabelKey(load.operationalStatus))}
+            />
+            <StatusBadge
+              tone={billingTone(load.billingStatus)}
+              variant="outlined"
+              label={t(billingLabelKey(load.billingStatus))}
+            />
+            {load.isCancelled ? (
+              <StatusBadge tone="muted" label={t('loads.cancelled')} />
+            ) : null}
+          </div>
+
+          <div className="flex items-center gap-z3">
+            <p className="text-xs text-ink-3">{t('loads.stripeMeaning')}</p>
+            {mayUpdate ? (
+              <LoadActions
+                isCancelled={load.isCancelled}
+                canDeliver={
+                  load.operationalStatus !== 'POD_RECEIVED' &&
+                  load.operationalStatus !== 'DELIVERED'
+                }
+                markDelivered={markDeliveredAction.bind(null, id)}
+                cancel={cancelLoadAction.bind(null, id)}
+                uncancel={uncancelLoadAction.bind(null, id)}
+                labels={{
+                  markDelivered: t('loads.markDelivered'),
+                  cancel: t('ref.cancel'),
+                  cancelTitle: t('loads.cancelTitle'),
+                  cancelBody: t('loads.cancelBody'),
+                  reason: t('loads.cancelReason'),
+                  confirmCancel: t('loads.cancel'),
+                  uncancel: t('loads.uncancel'),
+                  close: t('ref.cancel'),
+                }}
               />
-            ) : (
-              <span className="font-mono">{load.loadNumber}</span>
-            )}
-            {/* THE NUMBER DISPATCH QUOTES TO AMAZON, in the header where it is
-             * read from rather than buried in the summary list. Our load
-             * number is what this office calls the freight; the reference is
-             * what the broker calls it, and a phone call about a trip starts
-             * with theirs. Dimmer, because it identifies the same load.
-             *
-             * ITEM 1: and on Amazon freight the reference IS the Trip ID —
-             * the string that gets pasted into Relay's search — so it is the
-             * one identifier on this screen most worth not retyping. */}
-            {load.referenceNumber === null ? null : (
-              <span className="ms-z2 font-mono text-sm text-ink-2" dir="ltr">
-                · {t('loads.column.reference')}{' '}
-                {view.copyableIdentifiers ? (
-                  <Copyable
-                    value={load.referenceNumber}
-                    className="font-mono"
-                    labels={copyLabels}
-                  />
-                ) : (
-                  load.referenceNumber
-                )}
-              </span>
-            )}
-          </h1>
-          {/* §7.2 — operational FILLED, billing OUTLINED, side by side. */}
-          <StatusBadge
-            tone={operationalTone(load.operationalStatus)}
-            label={t(operationalLabelKey(load.operationalStatus))}
-          />
-          <StatusBadge
-            tone={billingTone(load.billingStatus)}
-            variant="outlined"
-            label={t(billingLabelKey(load.billingStatus))}
-          />
-          {load.isCancelled ? (
-            <StatusBadge tone="muted" label={t('loads.cancelled')} />
-          ) : null}
+            ) : null}
+          </div>
         </div>
 
-        <div className="flex items-center gap-z3">
-          <p className="text-xs text-ink-3">{t('loads.stripeMeaning')}</p>
-          {mayUpdate ? (
-            <LoadActions
-              isCancelled={load.isCancelled}
-              canDeliver={
-                load.operationalStatus !== 'POD_RECEIVED' &&
-                load.operationalStatus !== 'DELIVERED'
-              }
-              markDelivered={markDeliveredAction.bind(null, id)}
-              cancel={cancelLoadAction.bind(null, id)}
-              uncancel={uncancelLoadAction.bind(null, id)}
-              labels={{
-                markDelivered: t('loads.markDelivered'),
-                cancel: t('ref.cancel'),
-                cancelTitle: t('loads.cancelTitle'),
-                cancelBody: t('loads.cancelBody'),
-                reason: t('loads.cancelReason'),
-                confirmCancel: t('loads.cancel'),
-                uncancel: t('loads.uncancel'),
-                close: t('ref.cancel'),
-              }}
-            />
-          ) : null}
-        </div>
+        {/* THE SUMMARY CARD'S FACTS, ACROSS THE HEADER. The card that held
+         * them is gone: four short strings and a number do not need half the
+         * width of the screen, and they are the load's identity rather than
+         * its detail — the same class of thing as the number above them. */}
+        <LoadFacts facts={headerFacts} />
+
+        {/* THE CANCELLATION REASON FOLLOWS THE CANCELLED BADGE, which is in
+         * the row above. It was in the summary card only because that is where
+         * the facts were; it is a statement about the whole load. */}
+        {load.isCancelled && load.cancelReason ? (
+          <p className="rounded-control border border-danger bg-danger-soft px-z2 py-z1 text-sm text-danger">
+            {load.cancelReason}
+          </p>
+        ) : null}
       </div>
 
       <div
@@ -672,72 +729,6 @@ export default async function LoadDetailPage({
               }}
             />
           </div>
-
-          <section className="rounded-card border border-border bg-surface p-z4">
-            <h2 className="text-md font-medium text-ink">
-              {t('loads.summary')}
-            </h2>
-            <dl className="mt-z3 grid grid-cols-2 gap-x-z4 gap-y-z2 text-sm">
-              <dt className="text-ink-2">{t('ref.authority')}</dt>
-              <dd className="text-ink">{load.company.name}</dd>
-              <dt className="text-ink-2">{t('loads.column.customer')}</dt>
-              <dd className="text-ink">
-                <Link
-                  href={`/brokers/${load.customer.id}`}
-                  className="hover:text-accent"
-                >
-                  {load.customer.name}
-                </Link>
-              </dd>
-              <dt className="text-ink-2">{t('loads.column.truck')}</dt>
-              {/* ITEM 1 — the unit number goes onto a gate ticket and into
-               * Relay; the driver name below it does not. */}
-              <dd className="font-mono text-ink">
-                {load.truck?.unitNumber == null ? (
-                  '—'
-                ) : view.copyableIdentifiers ? (
-                  <Copyable value={load.truck.unitNumber} labels={copyLabels} />
-                ) : (
-                  load.truck.unitNumber
-                )}
-              </dd>
-              <dt className="text-ink-2">{t('loads.column.driver')}</dt>
-              <dd className="text-ink">
-                {load.driver
-                  ? `${load.driver.lastName}, ${load.driver.firstName}`
-                  : '—'}
-              </dd>
-              {/* ITEM 4, RELOCATED. Editable here rather than in the rate
-               * panel: miles are operational and this panel is not behind
-               * `load.financials`, so the dispatcher the field was asked for
-               * can actually reach it. */}
-              <dt className="text-ink-2">{t('loads.miles')}</dt>
-              <dd className="text-end font-mono text-ink">
-                {view.editMiles && mayUpdate ? (
-                  <MilesField
-                    dispatchedMiles={load.dispatchedMiles}
-                    save={setMilesAction.bind(null, id)}
-                    locale={locale}
-                    labels={{
-                      miles: t('loads.miles'),
-                      edit: t('loads.editValue'),
-                      saving: t('loads.assignSaving'),
-                      failed: t('loads.saveFailed'),
-                    }}
-                  />
-                ) : load.dispatchedMiles === null ? (
-                  '—'
-                ) : (
-                  load.dispatchedMiles.toLocaleString(locale)
-                )}
-              </dd>
-            </dl>
-            {load.isCancelled && load.cancelReason ? (
-              <p className="mt-z3 rounded-control border border-danger bg-danger-soft px-z2 py-z1 text-sm text-danger">
-                {load.cancelReason}
-              </p>
-            ) : null}
-          </section>
 
           {/* ASSIGNMENT, ON AMAZON LOADS. `load.directSettled` is the whole
            * discriminator for this redesign — copied from the customer when the
@@ -796,25 +787,47 @@ export default async function LoadDetailPage({
            * measured over. The two-column grid still holds everything else,
            * where a card of label/value pairs is exactly what fits in half a
            * width. */}
-          {view.stopsAsTable ? (
-            <div className="lg:col-span-2">
-              <MilesSummary
-                totalMiles={miles.totalMiles}
-                loadedMiles={miles.loadedMiles}
-                emptyMiles={miles.emptyMiles}
-                provisional={miles.provisional}
-                locale={locale}
-                labels={{
-                  title: t('loads.milesTitle'),
-                  loaded: t('loads.milesLoaded'),
-                  empty: t('loads.milesEmpty'),
-                  total: t('loads.milesTotal'),
-                  unknown: t('loads.milesUnknown'),
-                  unclassified: t('loads.milesProvisional'),
-                }}
-              />
-            </div>
-          ) : null}
+          {/* MILES ON EVERY LOAD NOW, not only on Relay freight. The panel was
+           * Amazon-only because the loaded/empty split is Relay's alone — but
+           * the TOTAL is every load's fact, and it was the summary card that
+           * carried it for broker freight. With that card gone this is where
+           * the number lives, and the split does not render where it was never
+           * measured. */}
+          <div className="lg:col-span-2">
+            <MilesSummary
+              totalMiles={miles.totalMiles}
+              loadedMiles={miles.loadedMiles}
+              emptyMiles={miles.emptyMiles}
+              provisional={miles.provisional}
+              locale={locale}
+              labels={{
+                title: t('loads.milesTitle'),
+                loaded: t('loads.milesLoaded'),
+                empty: t('loads.milesEmpty'),
+                total: t('loads.milesTotal'),
+                unknown: t('loads.milesUnknown'),
+                unclassified: t('loads.milesProvisional'),
+              }}
+              editor={
+                // ITEM 4's REASONING, PRESERVED. The editor sat outside the
+                // rate panel so a dispatcher could reach it; this panel is not
+                // behind `load.financials` either, so it still can be.
+                view.editMiles && mayUpdate ? (
+                  <MilesField
+                    dispatchedMiles={load.dispatchedMiles}
+                    save={setMilesAction.bind(null, id)}
+                    locale={locale}
+                    labels={{
+                      miles: t('loads.miles'),
+                      edit: t('loads.editValue'),
+                      saving: t('loads.assignSaving'),
+                      failed: t('loads.saveFailed'),
+                    }}
+                  />
+                ) : undefined
+              }
+            />
+          </div>
 
           {view.stopsAsTable ? (
             <div className="lg:col-span-2">
