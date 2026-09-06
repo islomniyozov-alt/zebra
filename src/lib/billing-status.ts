@@ -63,6 +63,43 @@ export interface BillingFacts {
  *
  * Pure, so the drift check and the writer cannot disagree about the rule — the
  * failure mode of a cache is two places computing it slightly differently.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * CHANGING THIS FUNCTION IS A DATA MIGRATION, AND THE DEPLOY HAS NO STEP FOR
+ * IT. Read this before you edit, not after.
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * `Load.billingStatus` is a STORED COLUMN. This decides what it should be;
+ * `refreshBillingStatus` writes it, and it is called from exactly four places
+ * — a status transition, an invoice, a payment, a rate change. Nothing else
+ * recomputes, ever.
+ *
+ * So the moment you change a clause here, every row nobody has touched since
+ * keeps the answer the OLD rule gave. The screens that read the column show
+ * the old answer; anything that derives live shows the new one; and they
+ * disagree until something unrelated happens to the load.
+ *
+ * IT HAPPENED ON 2026-09-06 AND IT REACHED PRODUCTION. `isReady` learned to
+ * require an assigned truck and driver. The Load Tracker, which computes at
+ * render, moved to Delivered immediately. The badge beside it, which reads
+ * this column, went on saying "Ready to invoice" — the exact disagreement the
+ * shared predicate had just been introduced to prevent, arriving from the
+ * cache instead of from a second rule.
+ *
+ * AND THE SIZE OF IT WAS ALREADY MEASURED AND MISREAD. A production inspector
+ * had reported `would_reclassify: 2` before the change shipped. That number was
+ * the migration's size — the rows whose stored value the new rule contradicts
+ * — and it was reported to the owner as a preview of what the screens would
+ * show, alongside the claim that "nothing in the data changes". The column is
+ * data. The count was in hand and read as the wrong kind of number.
+ *
+ * SO, WHEN YOU CHANGE THIS: count the rows the new rule would classify
+ * differently, and plan for them. `findBillingStatusDrift` names them, and
+ * `npm run check:drift` now runs it against production so a drift cannot sit
+ * unnoticed. Repair goes through `refreshBillingStatus`, never through SQL —
+ * it writes the status event that says the status moved, and a silent status
+ * change on money-adjacent freight is the failure this codebase keeps
+ * flagging.
  */
 export function billingStatusFor(facts: BillingFacts): LoadBillingStatus {
   if (facts.directSettled) {

@@ -62,6 +62,13 @@ const CHECK_READERS = [
   // Held to the stricter half of the rule below: it runs unattended in
   // `npm run check` and only ever SELECTs.
   'check-grants.mjs',
+  // ADDED 2026-09-06. `Load.billingStatus` is a cached column and changing
+  // `billingStatusFor` silently drifts every untouched row — which reached
+  // production once already. This asks the REAL function whether the stored
+  // values still agree, rather than a SQL lookalike that would be a second
+  // derivation of the rule. TypeScript for that reason, and read-only: the
+  // repair path writes a status event and is run by a human.
+  'check-billing-drift.ts',
 ]
 
 /**
@@ -115,7 +122,15 @@ const INSPECTION_READERS = [
  * A script in this list is a claim that somebody read its dry-run output before
  * it ever wrote anything.
  */
-const MAINTENANCE_READERS = ['backfill-direct-pod.mjs']
+const MAINTENANCE_READERS = [
+  'backfill-direct-pod.mjs',
+  // Written 2026-09-06 and NOT RUN. `billingStatusFor` is a rule over a cached
+  // column, so changing it drifts every untouched row; this repairs them
+  // through `refreshBillingStatus`, which writes the status event. Listed here
+  // rather than among the read-only scripts because --apply writes, and being
+  // on this list is the claim that a human read its dry run first.
+  'repair-billing-drift.ts',
+]
 
 const ALLOWED = [
   ...CHECK_READERS,
@@ -128,9 +143,16 @@ const ALLOWED = [
 /** Every script, since scripts are where a production URL would be used. */
 function sources(): { name: string; text: string }[] {
   const dir = join(process.cwd(), 'scripts')
-  return readdirSync(dir)
-    .filter((name) => name.endsWith('.mjs'))
-    .map((name) => ({ name, text: readFileSync(join(dir, name), 'utf8') }))
+  return (
+    readdirSync(dir)
+      // EVERY SCRIPT, NOT EVERY .mjs SCRIPT. This filtered on '.mjs' alone
+      // until 2026-09-06, so a TypeScript script in this directory could read
+      // the production URL and the fence would never have seen it. Nobody had
+      // written one — the gap was found while writing the first, which is the
+      // only reason it was found at all.
+      .filter((name) => /\.(mjs|ts|mts|cts|js)$/.test(name))
+      .map((name) => ({ name, text: readFileSync(join(dir, name), 'utf8') }))
+  )
 }
 
 describe('the production URL has exactly the readers it was given', () => {
