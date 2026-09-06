@@ -60,8 +60,20 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // changes nothing, while narrowing it is a permission change dressed as a
   // cleanup, and the wrong guess locks somebody out of every screen at once.
   // Worth revisiting against the role matrix, deliberately, not in passing.
-  const density = await withCurrentOrg('read', 'company', (tx, current) =>
-    readDensity(tx, current.userId),
+  const { density, account } = await withCurrentOrg(
+    'read',
+    'company',
+    async (tx, current) => ({
+      density: await readDensity(tx, current.userId),
+      // THE NAME ON THE ACCOUNT CONTROL, read here because the session does not
+      // carry one — `SessionContext` has userId and role and nothing a person
+      // would recognise as themselves. One more row on a connection already
+      // open, which is the same argument the density read makes above.
+      account: await tx.user.findUnique({
+        where: { id: current.userId },
+        select: { name: true, email: true },
+      }),
+    }),
   )
 
   return (
@@ -80,6 +92,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar
+          // NAME FIRST, EMAIL AS THE FALLBACK, and never initials. Daler on the
+          // "OW" badge it replaced: "everybody will call it account or admin
+          // account or dispatch account; OW means nothing to anyone." A name
+          // says the one thing the control needs to say — this is mine.
+          accountName={account?.name?.trim() || account?.email || ''}
           labels={{
             notifications: t('topbar.notifications'),
             userMenu: t('topbar.userMenu'),

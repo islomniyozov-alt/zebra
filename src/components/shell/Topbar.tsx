@@ -25,6 +25,8 @@ import Link from 'next/link'
 // The original §6.3 amendment ruled the switcher out for that reason; a
 // preference is the same thing wearing a settings screen.
 interface TopbarProps {
+  /** The person's name, or their email when they have not set one. */
+  accountName: string
   /** Pre-translated. A translator closure cannot cross to a client component. */
   labels: {
     notifications: string
@@ -32,7 +34,7 @@ interface TopbarProps {
   }
 }
 
-export function Topbar({ labels }: TopbarProps) {
+export function Topbar({ accountName, labels }: TopbarProps) {
   return (
     <header className="flex h-topbar shrink-0 items-center gap-z4 border-b border-border bg-surface px-gutter">
       {/* SEARCH IS NOT BUILT, SO IT IS NOT SHOWN.
@@ -60,21 +62,40 @@ export function Topbar({ labels }: TopbarProps) {
        * it today, and a dropdown holding one item is a dropdown to click
        * twice. It becomes a menu when it has a second thing to hold.
        *
-       * IT USED TO READ "OW", AND THAT WAS A HARDCODED STRING. Not the user's
-       * initials, not the role — the literal `userInitials="OW"` passed from
-       * the layout, identical for every person who has ever logged in. It read
-       * as a fact about the viewer and was a placeholder that shipped.
+       * IT READ "OW" UNTIL 2026-09-06, AND THAT WAS A HARDCODED STRING —
+       * `userInitials="OW"` passed from the layout, identical for every person
+       * who ever logged in. It looked like a fact about the viewer and was a
+       * placeholder that shipped.
        *
-       * THE LINK STAYS BECAUSE IT IS THE ONLY DOOR TO /account — nothing in the
-       * sidebar reaches it — so this is a glyph rather than a deletion. When
-       * real initials are wanted they come from the session, which is where a
-       * fact about the viewer has to come from. */}
+       * THE NAME, NOT INITIALS, AND TRUNCATED RATHER THAN ABBREVIATED. Daler,
+       * holding a Datatruck screenshot showing an avatar and "Admin Account":
+       * "everybody will call it account or admin account or dispatch account;
+       * OW means nothing to anyone." A name answers the only question the
+       * control raises — whose is this — and "Islom Niyozov" clipped at the
+       * edge still answers it, where "IN" starts a guessing game. Hence
+       * `truncate` and a max width instead of building initials.
+       *
+       * THE ROLE IS NOT SHOWN. It was the one fact on screen the viewer could
+       * not be uncertain about, and it is what "OW" was mistaken for.
+       *
+       * THE LINK STAYS WHATEVER ELSE CHANGES: nothing in the sidebar reaches
+       * /account, so this control is the only door to it. */}
       <Link
         href="/account"
         aria-label={labels.userMenu}
-        className="flex h-control-compact w-control-compact items-center justify-center rounded-control border border-border-strong bg-surface-2 text-ink-2 hover:bg-surface-3"
+        className="flex h-control-compact items-center gap-z2 rounded-control border border-border-strong bg-surface-2 px-z2 text-ink-2 hover:bg-surface-3"
       >
-        <span aria-hidden>◍</span>
+        <span
+          aria-hidden
+          className="flex h-z5 w-z5 items-center justify-center rounded-full bg-surface-3 text-xs"
+        >
+          ◍
+        </span>
+        {accountName ? (
+          <span className="max-w-[14rem] truncate text-xs font-medium">
+            {accountName}
+          </span>
+        ) : null}
       </Link>
     </header>
   )
