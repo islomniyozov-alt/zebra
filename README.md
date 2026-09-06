@@ -731,9 +731,19 @@ because reaching past the front door also skips the `can()`check §7 requires.`t
 
 `npm run db:seed` — §12 exactly, and idempotent.
 
-One organization (`INTERNAL`, five authorities) holding RAM Haulage LLC and
-Dolphins Transport Inc, plus one `OWNER` whose empty scope list means every
+One organization (`INTERNAL`) holding **two** authorities — RAM Haulage LLC and
+Dolphins Transport Inc — plus one `OWNER` whose empty scope list means every
 authority. No demo loads, no fake brokers, no placeholder trucks.
+
+**Two, not five.** This said "five authorities" until 2026-09-06, which
+confused `maxCompanies: 5` — a CEILING on what the organization may create —
+with how many it has. The seed's own comment says the rest "get added through
+the UI as they are formed", and that is what happened: production carries
+**three** as of 2026-09-06 (RAM Haulage 16 loads, Dolphins Transport 2, SIR
+CHARLES ENTERPRISES LLC 0, all active), read from the live database rather than
+inferred. The wrong number was repeated in conversation for weeks and sent
+somebody looking for two authorities that had never existed — a limit read as
+an inventory.
 
 The owner's password comes from `SEED_OWNER_PASSWORD`, or is generated and
 printed once if that is unset. There is deliberately no default password.

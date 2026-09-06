@@ -109,6 +109,9 @@ const INSPECTION_READERS = [
   // Counts loads that are finished, billable and attached to nobody, before
   // `isReady` learns to check assignment. SELECT only.
   'inspect-unassigned-pod.mjs',
+  // Why the topbar's authority filter renders three of five: inactive rows or
+  // a scoped membership are different findings and only one is a defect.
+  'inspect-authorities.mjs',
 ]
 
 /**
