@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
 import { withOrg } from '@/lib/tenancy'
 import { createBroker } from '@/lib/brokers'
+import { createDriver, createTruck } from '@/lib/fleet'
 import { LOAD_WRITE_TIMEOUT_MS, createLoad } from '@/lib/loads'
 import { transitionOperational } from '@/lib/load-status'
 import { setLoadRate } from '@/lib/rates'
@@ -38,6 +39,8 @@ let otherCompanyId = ''
 let userId = ''
 let brokerId = ''
 let relayId = ''
+let truckId = ''
+let driverId = ''
 const nonce = Math.random().toString(36).slice(2, 8)
 
 const inOrg = <T>(fn: Parameters<typeof withOrg<T>>[1]): Promise<T> =>
@@ -77,6 +80,13 @@ async function deliveredLoad(
       {
         companyId: company,
         customerId,
+        // DELIVERED FREIGHT HAS SOMEBODY ON IT. The helper is named
+        // `deliveredLoad` and used to create loads at POD_RECEIVED with no
+        // driver and no truck — the exact shape production loads 1015 and 1016
+        // were in, and the one the 2026-09-06 ruling forbids. The fixture was
+        // encoding the defect; three tests here failed the moment `isReady`
+        // learned to check, which is the guard working on its first run.
+        ...(company === companyId ? { truckId, driverId } : {}),
         stops: [
           {
             type: 'PICKUP',
@@ -174,6 +184,29 @@ beforeAll(async () => {
     where: { id: relayId },
     data: { settlesDirectly: true },
   })
+
+  // SOMEBODY TO HAVE DRIVEN THE FREIGHT. Every load in this file is delivered
+  // with a POD on it, and since the 2026-09-06 ruling that is not a state
+  // freight can reach with nobody attached — `isReady` checks assignment, so
+  // an unassigned load never becomes READY_TO_INVOICE and the invoice tests
+  // below have nothing to invoice.
+  truckId = (
+    await inOrg((tx) =>
+      createTruck(tx, organizationId, {
+        companyId,
+        unitNumber: `PAY-${nonce}`,
+      }),
+    )
+  ).id
+  driverId = (
+    await inOrg((tx) =>
+      createDriver(tx, organizationId, {
+        companyId,
+        firstName: 'Pay',
+        lastName: `Tester ${nonce}`,
+      }),
+    )
+  ).id
 }, 300_000)
 
 afterAll(async () => {
