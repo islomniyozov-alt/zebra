@@ -33,8 +33,7 @@ describe('the reader, until a real card exists', () => {
 describe('turning a licence into form values', () => {
   it('fills nothing from a read that found nothing', () => {
     // NOT empty strings. A blank the reader supplied and a blank nobody
-    // touched look identical in a form and mean different things; only one of
-    // them is a value somebody agreed to.
+    // touched look identical in a form and mean different things.
     expect(cdlPrefill(NOTHING_READ)).toEqual({})
   })
 
@@ -46,46 +45,47 @@ describe('turning a licence into form values', () => {
     ).toEqual({ cdlNumber: 'WDL-4471', cdlState: 'WA' })
   })
 
-  it('splits a printed name into given and family', () => {
-    expect(cdlPrefill(read({ fullName: field('Islom Niyozov') }))).toEqual({
-      firstName: 'Islom',
-      lastName: 'Niyozov',
-    })
+  // ── THE NAME IS NOT SPLIT ANY MORE, AND THAT IS THE FIX ──────────────────
+  //
+  // This used to take one printed name and guess which word was the surname.
+  // A test STATED that it got `Ana de la Cruz` wrong, on the reasoning that the
+  // value landed in an editable field. Keying on the AAMVA numbers removed the
+  // guess rather than improving it: field 1 IS the family name and field 2 IS
+  // the given name, printed on the card, so there is nothing left to infer.
+  it('takes family and given names exactly as the card labels them', () => {
+    expect(
+      cdlPrefill(
+        read({ familyName: field('Niyozov'), givenName: field('Islom') }),
+      ),
+    ).toEqual({ lastName: 'Niyozov', firstName: 'Islom' })
   })
 
-  it('treats every word but the last as the given name', () => {
-    expect(cdlPrefill(read({ fullName: field('Juan Carlos Mendez') }))).toEqual(
-      {
-        firstName: 'Juan Carlos',
-        lastName: 'Mendez',
-      },
-    )
+  it('does not reorder a name that defies English intuition', () => {
+    // Field 1 says the family name is Islom. A reader applying "last word is
+    // the surname" would file this person backwards, which is the mistake the
+    // AAMVA keys make impossible.
+    expect(
+      cdlPrefill(
+        read({ familyName: field('Islom'), givenName: field('Niyozov') }),
+      ),
+    ).toEqual({ lastName: 'Islom', firstName: 'Niyozov' })
   })
 
-  it('puts a single word in both rather than inventing a surname', () => {
-    // A blank surname would be a required field the reader emptied.
-    expect(cdlPrefill(read({ fullName: field('Prince') }))).toEqual({
-      firstName: 'Prince',
-      lastName: 'Prince',
-    })
+  it('keeps a compound family name whole', () => {
+    // The old splitter turned this into "Ana de la" / "Cruz".
+    expect(
+      cdlPrefill(
+        read({ familyName: field('de la Cruz'), givenName: field('Ana') }),
+      ),
+    ).toEqual({ lastName: 'de la Cruz', firstName: 'Ana' })
   })
 
-  // THE SPLIT IS WRONG FOR SOME NAMES AND THAT IS ACCEPTED, not hidden. This
-  // test states the known-wrong case so nobody "fixes" it by adding a list of
-  // particles, which is how a name rule becomes a rule about whose names are
-  // normal. The value lands in an editable field for exactly this reason.
-  it('gets a compound surname wrong, into a field a human then corrects', () => {
-    expect(cdlPrefill(read({ fullName: field('Ana de la Cruz') }))).toEqual({
-      firstName: 'Ana de la',
-      lastName: 'Cruz',
-    })
-  })
-
-  it('ignores surrounding whitespace on a scanned name', () => {
-    expect(cdlPrefill(read({ fullName: field('  Ahmad  Karimov ') }))).toEqual({
-      firstName: 'Ahmad',
-      lastName: 'Karimov',
-    })
+  it('trims what the card printed with whitespace around it', () => {
+    expect(
+      cdlPrefill(
+        read({ familyName: field('  Karimov '), givenName: field(' Aziz ') }),
+      ),
+    ).toEqual({ lastName: 'Karimov', firstName: 'Aziz' })
   })
 })
 

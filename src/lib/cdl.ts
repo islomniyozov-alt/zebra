@@ -1,4 +1,6 @@
-import type { Confidence, Maybe } from './extraction-shape'
+import type { Confidence } from './extraction-shape'
+import { codeList, refuseCdl, type CdlRefusal } from './extraction/cdl-refusal'
+import type { ExtractedCdl } from './extraction/cdl-shape'
 
 // ---------------------------------------------------------------------------
 // WHAT A COMMERCIAL DRIVER'S LICENCE IS, AS FAR AS THIS SYSTEM CARES.
@@ -32,29 +34,25 @@ import type { Confidence, Maybe } from './extraction-shape'
 // default. Add it the day something needs it, with the reason written down.
 // ---------------------------------------------------------------------------
 
-export interface ExtractedCdl {
-  /** As printed. Split into first/last by the confirm step, never by a model. */
-  fullName: Maybe<string>
-  licenceNumber: Maybe<string>
-  /** Two-letter state. `stateCode` normalises it on the way into the record. */
-  state: Maybe<string>
-  /** "A", "B", "C" — the class the card grants. */
-  licenceClass: Maybe<string>
-  /** ISO date. Feeds a ComplianceItem, which is what the alerting reads. */
-  expiresAt: Maybe<string>
-}
-
 export type CdlReadOutcome =
   | { ok: true; fields: ExtractedCdl }
-  | { ok: false; reason: 'not_implemented' | 'too_large' | 'unsupported_type' }
+  | {
+      ok: false
+      reason: 'not_implemented' | 'too_large' | 'unsupported_type' | CdlRefusal
+    }
 
 /** Nothing read, in the shape a read returns. */
 export const NOTHING_READ: ExtractedCdl = {
-  fullName: null,
   licenceNumber: null,
-  state: null,
-  licenceClass: null,
   expiresAt: null,
+  issuedAt: null,
+  class: null,
+  familyName: null,
+  givenName: null,
+  state: null,
+  restrictions: null,
+  endorsements: null,
+  isTemporary: null,
 }
 
 /**
@@ -99,16 +97,45 @@ export type { Confidence }
 export function cdlPrefill(fields: ExtractedCdl): Record<string, string> {
   const values: Record<string, string> = {}
 
-  const full = fields.fullName?.value?.trim()
-  if (full) {
-    const parts = full.split(/\s+/)
-    values.lastName = parts.length > 1 ? parts[parts.length - 1]! : full
-    values.firstName = parts.slice(0, -1).join(' ') || full
-  }
+  // NO NAME SPLITTING ANY MORE, AND THAT IS THE POINT OF THE AAMVA KEYS. This
+  // used to take one printed name and guess which word was the surname — last
+  // word wins — which is a coin flip for this office's drivers and was flagged
+  // as known-wrong at the time. Field 1 IS the family name and field 2 IS the
+  // given name, stated by the card, so the guess is gone rather than improved.
+  if (fields.familyName?.value) values.lastName = fields.familyName.value.trim()
+  if (fields.givenName?.value) values.firstName = fields.givenName.value.trim()
+
   if (fields.licenceNumber?.value) values.cdlNumber = fields.licenceNumber.value
   if (fields.state?.value) values.cdlState = fields.state.value
-  if (fields.licenceClass?.value) values.cdlClass = fields.licenceClass.value
+  if (fields.class?.value) values.cdlClass = fields.class.value
   if (fields.expiresAt?.value) values.cdlExpiresAt = fields.expiresAt.value
 
   return values
 }
+
+/**
+ * What the confirm form must SAY rather than fill in.
+ *
+ * A temporary credential is the one reading that changes what the driver is,
+ * not just what a field holds: read as a permanent card it produces a
+ * ComplianceItem four years out on the strength of a paper licence that lapses
+ * next month. Endorsements and restrictions have no column yet — they are
+ * shown so the dispatcher sees what the card said and can act on it.
+ */
+export interface CdlNotes {
+  isTemporary: boolean
+  endorsements: string[]
+  restrictions: string[]
+}
+
+export function cdlNotes(fields: ExtractedCdl): CdlNotes {
+  return {
+    isTemporary: fields.isTemporary?.value === true,
+    endorsements: codeList(fields.endorsements?.value),
+    restrictions: codeList(fields.restrictions?.value),
+  }
+}
+
+/** Re-exported so callers have one import for the contract. */
+export { refuseCdl }
+export type { ExtractedCdl, CdlRefusal }
