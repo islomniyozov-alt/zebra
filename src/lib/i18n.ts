@@ -388,6 +388,15 @@ const en = {
   'drivers.assignedTruckHint':
     'The truck this driver runs. It has to be under the same authority.',
   'drivers.employment': 'Employment',
+  'drivers.employment.OWNED': 'Company driver',
+  'drivers.employment.LEASED': 'Lease operator',
+  'drivers.employment.OWNER_OPERATOR': 'Owner-operator',
+  'drivers.cdlExpires': 'CDL expires',
+  'drivers.cdlExpiresHint': 'Warned about before it lapses.',
+  'drivers.pay': 'Pay',
+  'drivers.payPercent': 'Percent of linehaul',
+  'drivers.payPercentHint':
+    'What this driver is paid per load. Without it they cannot be paid.',
   'drivers.status.AVAILABLE': 'Available',
   'drivers.status.DISPATCHED': 'Dispatched',
   'drivers.status.ON_ROUTE': 'On route',
@@ -2055,6 +2064,15 @@ const ru: Dictionary = {
   'drivers.assignedTruckHint':
     'Тягач, на котором работает водитель. Должен быть под тем же перевозчиком.',
   'drivers.employment': 'Тип занятости',
+  'drivers.employment.OWNED': 'Водитель компании',
+  'drivers.employment.LEASED': 'Арендатор',
+  'drivers.employment.OWNER_OPERATOR': 'Владелец-водитель',
+  'drivers.cdlExpires': 'Срок CDL',
+  'drivers.cdlExpiresHint': 'Предупредим до истечения.',
+  'drivers.pay': 'Оплата',
+  'drivers.payPercent': 'Процент от фрахта',
+  'drivers.payPercentHint':
+    'Сколько получает водитель за груз. Без этого ему нельзя заплатить.',
   'drivers.status.AVAILABLE': 'Свободен',
   'drivers.status.DISPATCHED': 'Назначен',
   'drivers.status.ON_ROUTE': 'В рейсе',
@@ -3717,6 +3735,15 @@ const fa: Dictionary = {
   'drivers.assignedTruckHint':
     'کامیونی که این راننده می‌راند. باید زیر همان شرکت باشد.',
   'drivers.employment': 'نوع همکاری',
+  'drivers.employment.OWNED': 'رانندهٔ شرکت',
+  'drivers.employment.LEASED': 'رانندهٔ اجاره‌ای',
+  'drivers.employment.OWNER_OPERATOR': 'مالک-راننده',
+  'drivers.cdlExpires': 'انقضای CDL',
+  'drivers.cdlExpiresHint': 'پیش از انقضا هشدار داده می‌شود.',
+  'drivers.pay': 'دستمزد',
+  'drivers.payPercent': 'درصد از کرایه',
+  'drivers.payPercentHint':
+    'آنچه این راننده بابت هر بار می‌گیرد. بدون آن قابل پرداخت نیست.',
   'drivers.status.AVAILABLE': 'آزاد',
   'drivers.status.DISPATCHED': 'اعزام‌شده',
   'drivers.status.ON_ROUTE': 'در مسیر',

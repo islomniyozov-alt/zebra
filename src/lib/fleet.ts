@@ -1,3 +1,4 @@
+import { parsePercentToBps } from './money'
 import type { TxClient } from './tenancy'
 import {
   closeOpenPeriod,
@@ -83,6 +84,27 @@ export interface DriverInput {
   notes?: unknown
   /** The truck this driver runs. Must be under the same authority. */
   assignedTruckId?: unknown
+  /**
+   * When the licence lapses. Becomes a `ComplianceItem`, never a Driver column.
+   *
+   * ONE HOME FOR A DATE THAT RAISES AN ALARM. `ComplianceItem` is what the
+   * Phase 4 alerting reads, and it already carries `type: CDL`, `identifier`
+   * (its own comment says "policy number, permit number, CDL number"),
+   * `issuer` and `expiresAt`. A `Driver.cdlExpiresAt` beside it would be a
+   * second copy of the same date, free to drift from the one that warns.
+   */
+  cdlExpiresAt?: unknown
+  /**
+   * What the driver is paid, as a percentage string — "28", "28.5".
+   *
+   * CREATE ONLY, and it is the field whose absence was the loudest complaint
+   * about this form: a driver with no `DriverPayRule` produces an empty
+   * settlement, so the person exists and cannot be paid. After creation the
+   * driver screen owns pay, because rules are dated, supersede one another and
+   * are frozen onto settlements — a plain field on an edit form would rewrite
+   * history silently.
+   */
+  payPercent?: unknown
 }
 
 /**
@@ -401,6 +423,44 @@ export async function createDriver(
       assignedTruckId: await pairedTruck(tx, companyId, input.assignedTruckId),
     },
   })
+
+  // THE LICENCE'S EXPIRY, AS A COMPLIANCE ITEM. Written only when the form
+  // supplied one — an absent date is a licence nobody has recorded yet, not a
+  // reason to refuse the driver, and inventing an expiry would raise or
+  // suppress an alarm about a fact nobody stated.
+  const cdlExpiresAt = dateOnly(input.cdlExpiresAt, 'cdlExpiresAt')
+  if (cdlExpiresAt) {
+    await tx.complianceItem.create({
+      data: {
+        organizationId,
+        companyId,
+        type: 'CDL',
+        driverId: created.id,
+        // The same number the driver row carries. `identifier` exists for this.
+        identifier: optionalText(input.cdlNumber),
+        issuer: stateCode(input.cdlState),
+        expiresAt: cdlExpiresAt,
+      },
+    })
+  }
+
+  // AND THE PAY RULE, WITHOUT WHICH THE DRIVER CANNOT BE PAID.
+  //
+  // `parsePercentToBps` rather than arithmetic here: rule 9-money says basis
+  // points are computed in one place, and "28.5" becoming 2850 is exactly the
+  // conversion that goes wrong when two files do it.
+  const percent = optionalText(input.payPercent)
+  if (percent) {
+    await tx.driverPayRule.create({
+      data: {
+        organizationId,
+        driverId: created.id,
+        type: 'PERCENT_LINEHAUL',
+        percentBps: parsePercentToBps(percent),
+        effectiveFrom: dateOnly(input.hireDate, 'hireDate') ?? new Date(),
+      },
+    })
+  }
 
   await openFirstPeriod(
     tx,

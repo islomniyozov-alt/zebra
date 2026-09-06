@@ -926,3 +926,106 @@ describe('a driver and their truck run under one authority', () => {
     ).rejects.toBeInstanceOf(ReferenceError)
   })
 })
+
+// ---------------------------------------------------------------------------
+// A NEW DRIVER ARRIVES PAYABLE, AND WITH A LICENCE THE ALERTS CAN SEE.
+//
+// Daler's walk-through of the old form: thirteen manual fields and NO PAY
+// FIELD — the one thing that decides whether the driver can be paid. A driver
+// with no DriverPayRule generates an empty settlement, so the person exists in
+// the system and cannot be paid by it, and nothing on the create screen said
+// so.
+//
+// The licence expiry is the other half: it writes a ComplianceItem rather than
+// a Driver column, because that is the table the Phase 4 alerting reads. Two
+// homes for one date is the third-number problem wearing a compliance costume.
+// ---------------------------------------------------------------------------
+describe('creating a driver who can be paid', () => {
+  it('writes a percent pay rule from the form', async () => {
+    const driver = await inOrg((tx) =>
+      createDriver(tx, organizationId, {
+        companyId: alphaId,
+        firstName: 'Pay',
+        lastName: 'Rule',
+        payPercent: '28.5',
+        hireDate: '2026-03-02',
+      }),
+    )
+
+    const rules = await inOrg((tx) =>
+      tx.driverPayRule.findMany({ where: { driverId: driver.id } }),
+    )
+    expect(rules).toHaveLength(1)
+    // Basis points, converted in one place. "28.5" -> 2850, and the day the
+    // driver was hired is the day the rule takes effect.
+    expect(rules[0]).toMatchObject({
+      type: 'PERCENT_LINEHAUL',
+      percentBps: 2850,
+    })
+    expect(rules[0]!.effectiveFrom.toISOString()).toBe(
+      '2026-03-02T00:00:00.000Z',
+    )
+  })
+
+  it('creates no pay rule when the form left it blank', async () => {
+    // Not a default. A percentage nobody typed is a wage nobody agreed, and
+    // inventing one is worse than the driver being unpayable until somebody
+    // says what they are owed.
+    const driver = await inOrg((tx) =>
+      createDriver(tx, organizationId, {
+        companyId: alphaId,
+        firstName: 'No',
+        lastName: 'Pay',
+      }),
+    )
+    expect(
+      await inOrg((tx) =>
+        tx.driverPayRule.count({ where: { driverId: driver.id } }),
+      ),
+    ).toBe(0)
+  })
+
+  it('files the licence expiry where the alerts look for it', async () => {
+    const driver = await inOrg((tx) =>
+      createDriver(tx, organizationId, {
+        companyId: alphaId,
+        firstName: 'Cdl',
+        lastName: 'Expiry',
+        cdlNumber: 'WDL-99881',
+        cdlState: 'wa',
+        cdlExpiresAt: '2027-06-30',
+      }),
+    )
+
+    const items = await inOrg((tx) =>
+      tx.complianceItem.findMany({ where: { driverId: driver.id } }),
+    )
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({
+      type: 'CDL',
+      identifier: 'WDL-99881',
+      issuer: 'WA',
+      companyId: alphaId,
+    })
+    expect(items[0]!.expiresAt.toISOString()).toBe('2027-06-30T00:00:00.000Z')
+  })
+
+  it('files nothing when no expiry was given', async () => {
+    // An absent date is a licence nobody has recorded, not a reason to refuse
+    // the driver — and an invented expiry would raise or silence an alarm
+    // about a fact nobody stated.
+    const driver = await inOrg((tx) =>
+      createDriver(tx, organizationId, {
+        companyId: alphaId,
+        firstName: 'No',
+        lastName: 'Expiry',
+        cdlNumber: 'WDL-11223',
+      }),
+    )
+    expect(
+      await inOrg((tx) =>
+        tx.complianceItem.count({ where: { driverId: driver.id } }),
+      ),
+    ).toBe(0)
+  })
+})

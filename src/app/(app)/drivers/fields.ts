@@ -1,8 +1,16 @@
 import type { FieldSpec } from '@/components/forms/RecordForm'
 import type { SelectOption } from '@/components/ui/Select'
 import type { MessageKey, Translate } from '@/lib/i18n'
-import type { DriverStatus } from '@/generated/prisma/client'
-import { OWNERSHIP_TYPES, ownershipKey } from '../trucks/fields'
+import type { DriverStatus, OwnershipType } from '@/generated/prisma/client'
+import { OWNERSHIP_TYPES } from '../trucks/fields'
+
+// A DRIVER IS NOT OWNED. The enum is shared with trucks and trailers, where
+// `OWNED` is the plain truth about a vehicle; on a person it read as
+// "Employment: Owned", which is what Daler stopped on. Same three values, said
+// the way the industry says them about people: a company driver, a lease
+// operator, an owner-operator.
+const employmentKey = (type: OwnershipType): MessageKey =>
+  `drivers.employment.${type}` as MessageKey
 
 export const DRIVER_STATUSES: DriverStatus[] = [
   'AVAILABLE',
@@ -75,15 +83,15 @@ export function driverFields(
     },
     { kind: 'text', name: 'cdlState', label: t('drivers.cdlState') },
     { kind: 'text', name: 'cdlClass', label: t('drivers.cdlClass') },
-    { kind: 'date', name: 'hireDate', label: t('drivers.hireDate') },
+    // EXPIRY IS ON THE FORM AND NOT ON THE DRIVER. It writes a ComplianceItem,
+    // which is the table the Phase 4 alerting already watches — a
+    // `Driver.cdlExpiresAt` column beside it would be a second copy of the same
+    // date, free to disagree with the one that raises the warning.
     {
-      kind: 'select',
-      name: 'status',
-      label: t('ref.status'),
-      options: DRIVER_STATUSES.map((status) => ({
-        value: status,
-        label: t(driverStatusKey(status)),
-      })),
+      kind: 'date',
+      name: 'cdlExpiresAt',
+      label: t('drivers.cdlExpires'),
+      hint: t('drivers.cdlExpiresHint'),
     },
     {
       kind: 'select',
@@ -91,19 +99,64 @@ export function driverFields(
       label: t('drivers.employment'),
       options: OWNERSHIP_TYPES.map((type) => ({
         value: type,
-        label: t(ownershipKey(type)),
+        label: t(employmentKey(type)),
       })),
     },
-    {
-      kind: 'select',
-      name: 'assignedTruckId',
-      label: t('drivers.assignedTruck'),
-      hint: t('drivers.assignedTruckHint'),
-      options: [
-        { value: '', label: t('drivers.assignedTruckNone') },
-        ...trucks,
-      ],
-    },
-    { kind: 'textarea', name: 'notes', label: t('ref.notes') },
+    // THE PAY PERCENTAGE, ON CREATE ONLY — the field whose absence Daler named
+    // first, because it is the one that decides whether the driver can be paid
+    // at all. A driver with no DriverPayRule generates an empty settlement.
+    //
+    // CREATE ONLY, because after that the driver detail screen owns pay: rules
+    // are dated, supersede one another and are frozen onto settlements, and a
+    // plain field on an edit form would silently rewrite history. See
+    // `savePayRuleAction`.
+    ...(mode === 'create'
+      ? ([
+          {
+            kind: 'text',
+            name: 'payPercent',
+            label: t('drivers.payPercent'),
+            hint: t('drivers.payPercentHint'),
+          },
+        ] as FieldSpec[])
+      : []),
+    // ── EVERYTHING BELOW IS EDIT-ONLY ────────────────────────────────────
+    //
+    // Thirteen fields on a create form was the complaint. These four are all
+    // things a driver acquires rather than arrives with, and every one has a
+    // sensible default or a screen of its own:
+    //
+    //   status        — defaults AVAILABLE, and a driver being hired IS
+    //   hireDate        available; both are corrections rather than facts
+    //                   somebody types at the moment of hiring
+    //   assignedTruck — read "No truck" because no trucks are seeded, which is
+    //                   a field advertising an empty table. Assignment is its
+    //                   own action with its own conflict rules.
+    //   notes         — never the reason a driver could not be created
+    ...(mode === 'edit'
+      ? ([
+          { kind: 'date', name: 'hireDate', label: t('drivers.hireDate') },
+          {
+            kind: 'select',
+            name: 'status',
+            label: t('ref.status'),
+            options: DRIVER_STATUSES.map((status) => ({
+              value: status,
+              label: t(driverStatusKey(status)),
+            })),
+          },
+          {
+            kind: 'select',
+            name: 'assignedTruckId',
+            label: t('drivers.assignedTruck'),
+            hint: t('drivers.assignedTruckHint'),
+            options: [
+              { value: '', label: t('drivers.assignedTruckNone') },
+              ...trucks,
+            ],
+          },
+          { kind: 'textarea', name: 'notes', label: t('ref.notes') },
+        ] as FieldSpec[])
+      : []),
   ]
 }
