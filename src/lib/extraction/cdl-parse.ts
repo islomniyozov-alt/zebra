@@ -124,6 +124,7 @@ export function parseCdlResponse(text: string): ExtractedCdl {
     familyName: readField(root, 'familyName', asString),
     givenName: readField(root, 'givenName', asString),
     state: readField(root, 'state', asString),
+    addressStateCode: readField(root, 'addressStateCode', asString),
     restrictions: readField(root, 'restrictions', asCodes),
     endorsements: readField(root, 'endorsements', asCodes),
     isTemporary: readField(root, 'isTemporary', asBoolean),

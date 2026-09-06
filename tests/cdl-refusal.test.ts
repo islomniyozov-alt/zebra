@@ -100,9 +100,7 @@ describe('the dates', () => {
 describe('the state, read twice', () => {
   it('accepts a header that agrees with the address', () => {
     expect(
-      refuseCdl(
-        card({ state: { value: 'WA', confidence: 'high', note: 'WA 98101' } }),
-      ),
+      refuseCdl(card({ state: at('WA'), addressStateCode: at('WA') })),
     ).toBeNull()
   })
 
@@ -111,10 +109,24 @@ describe('the state, read twice', () => {
     // or the header was misread. Picking a winner would be the system deciding
     // which of its own mistakes to keep.
     expect(
-      refuseCdl(
-        card({ state: { value: 'WA', confidence: 'high', note: 'OR 97201' } }),
-      ),
+      refuseCdl(card({ state: at('WA'), addressStateCode: at('OR') })),
     ).toBe('state_disagrees')
+  })
+
+  it('refuses when there is no address state to check against', () => {
+    expect(refuseCdl(card({ state: at('WA'), addressStateCode: null }))).toBe(
+      'no_address_state',
+    )
+  })
+
+  // WHAT THE OLD CHECK COULD NOT DO. It searched `state.note` for two capitals,
+  // so a note of exactly "FL" — which the first real card returned — passed by
+  // matching the claim itself. Compared as named fields, the same shape is
+  // either agreement or disagreement and never an accident.
+  it('is not satisfied by a cross-check that merely repeats the claim', () => {
+    expect(
+      refuseCdl(card({ state: at('WA'), addressStateCode: at('OR') })),
+    ).not.toBeNull()
   })
 })
 

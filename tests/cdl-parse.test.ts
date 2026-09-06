@@ -25,7 +25,8 @@ const GOOD = JSON.stringify({
   class: { value: 'A', confidence: 'high' },
   familyName: { value: 'NIYOZOV', confidence: 'high' },
   givenName: { value: 'ISLOM', confidence: 'high' },
-  state: { value: 'FL', confidence: 'high', note: 'FL 33101' },
+  state: { value: 'FL', confidence: 'high' },
+  addressStateCode: { value: 'FL', confidence: 'high' },
   restrictions: { value: [], confidence: 'high' },
   endorsements: { value: ['N'], confidence: 'medium' },
   isTemporary: { value: false, confidence: 'high' },
@@ -162,17 +163,25 @@ describe('responses that parse but are not a licence read', () => {
   })
 
   it('refuses a header state that disagrees with the address', () => {
+    // Two named fields, compared. The old check searched a free-text note for
+    // two capitals and the first real card returned a note of exactly "FL" —
+    // so it passed by finding the value it was meant to test against.
     expect(
       refuseCdl(
         parseCdlResponse(
-          withField('state', {
-            value: 'FL',
-            confidence: 'high',
-            note: 'GA 30301',
-          }),
+          withField('addressStateCode', { value: 'GA', confidence: 'high' }),
         ),
       ),
     ).toBe('state_disagrees')
+  })
+
+  it('refuses when the address carries no state to check against', () => {
+    // NO SECOND READING IS NOT AGREEMENT. Without it the state is a single
+    // unverified claim, and it is named apart from a disagreement because the
+    // two tell a dispatcher different things.
+    expect(
+      refuseCdl(parseCdlResponse(withField('addressStateCode', null))),
+    ).toBe('no_address_state')
   })
 
   it('refuses an expiry before its issue date', () => {

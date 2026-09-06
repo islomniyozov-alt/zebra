@@ -23,6 +23,7 @@ export type CdlRefusal =
   | 'no_expiry'
   | 'low_confidence_spine'
   | 'state_disagrees'
+  | 'no_address_state'
   | 'expiry_before_issue'
 
 /** The bar the spine must clear. Anything below is treated as not read. */
@@ -59,14 +60,32 @@ export function refuseCdl(fields: ExtractedCdl): CdlRefusal | null {
     return 'low_confidence_spine'
   }
 
-  // THE STATE'S TWO READINGS MUST AGREE. The header word and the ST field of
-  // the printed address are independent; a disagreement means the reader has
-  // mixed up two documents or misread the header, and picking a winner would
-  // be the system deciding which of its own mistakes to keep.
-  if (fields.state?.value && fields.state.note) {
+  // ── THE STATE'S TWO READINGS MUST AGREE ─────────────────────────────────
+  //
+  // The header word and the ST field of the printed address are independent
+  // readings of the same fact. A disagreement means two documents got mixed or
+  // the header was misread, and picking a winner would be the system deciding
+  // which of its own mistakes to keep.
+  //
+  // TWO NAMED FIELDS, COMPARED — NOT A REGEX OVER A NOTE. This asked for the
+  // cross-check inside `state.note` as free text and searched it for two
+  // capitals. The first real card came back with a note of exactly `"FL"`, so
+  // the check passed by locating the very value it was meant to test against.
+  // It would have passed on any note containing the claimed code, and on notes
+  // containing nothing useful at all. A check that cannot discriminate is not
+  // a check — flag 101's shape, one layer along.
+  if (fields.state?.value) {
     const claimed = fields.state.value.trim().toUpperCase()
-    const crossCheck = /\b([A-Z]{2})\b/.exec(fields.state.note.toUpperCase())
-    if (crossCheck && crossCheck[1] !== claimed) return 'state_disagrees'
+    const printed = fields.addressStateCode?.value?.trim().toUpperCase()
+
+    // NO SECOND READING IS NOT AGREEMENT. Without the address code the state
+    // is a single unverified claim, and this contract's posture throughout is
+    // that an unverified value refuses rather than proceeds. Named separately
+    // from a disagreement because they mean different things to whoever reads
+    // the refusal: one is a card that could not be fully read, the other is a
+    // card contradicting itself.
+    if (!printed) return 'no_address_state'
+    if (printed !== claimed) return 'state_disagrees'
   }
 
   // A CARD CANNOT EXPIRE BEFORE IT WAS ISSUED. When both dates are present and

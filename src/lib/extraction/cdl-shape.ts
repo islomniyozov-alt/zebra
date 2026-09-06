@@ -58,15 +58,28 @@ export interface ExtractedCdl {
   /** AAMVA `2`. The given name(s). */
   givenName: Maybe<string>
   /**
-   * The issuing state, two letters.
+   * The issuing state, two letters, from the name across the top of the card.
    *
-   * DERIVED FROM THE HEADER AND CROSS-CHECKED AGAINST THE ADDRESS. The state
-   * name across the top of the card is the claim; the ST field in the printed
-   * address is the second reading. They agree on a real card, and a
-   * disagreement means the reader has combined two documents or misread the
-   * header — which is a refusal, not a value to pick a winner from.
+   * THE CLAIM. `addressStateCode` is the second reading, and `refuseCdl`
+   * compares them.
    */
   state: Maybe<string>
+  /**
+   * The ST field of the printed address, two letters. The cross-check.
+   *
+   * ITS OWN FIELD SINCE 2026-09-06, AND THE REASON IS THAT THE NOTE COULD NOT
+   * DISCRIMINATE. It was asked for inside `state.note` — free text — and
+   * `refuseCdl` regex-searched that string for two capitals. The first real
+   * card returned a note of exactly `"FL"`, so the check passed by finding the
+   * value it was supposed to be checking AGAINST. It would have passed on
+   * anything containing the claimed code and on plenty that contained nothing
+   * useful; a comparison of two named values cannot do either.
+   *
+   * TWO LETTERS, NOT THE ADDRESS. The street, city and postcode stay off this
+   * contract — see the exclusion list above. A state code is the smallest
+   * thing that answers "does the card agree with itself".
+   */
+  addressStateCode: Maybe<string>
   /** AAMVA `12`. Restriction codes. `NONE` on the card means an empty array. */
   restrictions: Field<string[]> | null
   /** AAMVA `9a`. Endorsement codes — H, N, T, P, S, X. Same NONE rule. */
@@ -112,6 +125,7 @@ export const CDL_SCHEMA = {
     familyName: field({ type: 'string' }),
     givenName: field({ type: 'string' }),
     state: field({ type: 'string' }),
+    addressStateCode: field({ type: 'string' }),
     restrictions: field({ type: 'array', items: { type: 'string' } }),
     endorsements: field({ type: 'array', items: { type: 'string' } }),
     isTemporary: field({ type: 'boolean' }),
@@ -124,6 +138,7 @@ export const CDL_SCHEMA = {
     'familyName',
     'givenName',
     'state',
+    'addressStateCode',
     'restrictions',
     'endorsements',
     'isTemporary',

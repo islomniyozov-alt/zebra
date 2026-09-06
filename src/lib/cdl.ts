@@ -59,6 +59,7 @@ export const NOTHING_READ: ExtractedCdl = {
   familyName: null,
   givenName: null,
   state: null,
+  addressStateCode: null,
   restrictions: null,
   endorsements: null,
   isTemporary: null,
