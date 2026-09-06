@@ -103,6 +103,16 @@ Rules about instruments, which are the ones that cost whole sessions:
   remembering harder. Reserve shell splicing for files no editor tool can
   reach, and say why at the call site. See `PHASE-6-BRIEF.md` flag 86.
 
+- **A rename has one destination. A split has one per importer. So the unit of
+  work is the importer, not the string.** Both look like find-and-replace and
+  only one of them is. Splitting `extraction-shape.ts` into an envelope and a
+  rate-con shape, a single sweep over every occurrence sent `Confidence`,
+  `Field` and `Maybe` to the module that had just stopped exporting them — and
+  `parse.ts` wanted both halves, which no uniform rewrite can express. Open
+  each importing file and ask what IT imports. The compiler will name the ones
+  you get wrong, which is luck rather than method: a split among values that
+  are not type-checked, or among strings, has no such backstop.
+
 - **Count the thing you are claiming, not a superset of it.** A corpus-wide
   count of "stops carrying an arrival" returned 1,002 of 1,285 and was used to
   retract a correct diagnosis. The claim was about one pair on one stop in one
