@@ -2,9 +2,8 @@ import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyIdScopeFilter, companyScopeFilter } from '@/lib/tenancy'
-import { RecordForm } from '@/components/forms/RecordForm'
-import { createDriverAction } from '../actions'
 import { driverFields } from '../fields'
+import { NewDriverFlow } from './NewDriverFlow'
 import { lastUsedAuthority } from '../../_reference/shared'
 
 export default async function NewDriverPage() {
@@ -59,16 +58,32 @@ export default async function NewDriverPage() {
         <h1 className="text-lg font-medium text-ink">{t('drivers.new')}</h1>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto bg-surface-2 px-gutter py-z5">
-        <RecordForm
+        <NewDriverFlow
+          authorities={authorities}
+          defaultAuthority={defaultAuthority}
           fields={driverFields(t, authorities, 'create', truckOptions)}
-          values={{
-            companyId: defaultAuthority,
-            status: 'AVAILABLE',
-            employmentType: 'OWNED',
+          labels={{
+            authority: t('ref.authority'),
+            dropTitle: t('drivers.cdl.dropTitle'),
+            dropBody: t('drivers.cdl.dropBody'),
+            dropHint: t('drivers.cdl.dropHint'),
+            browse: t('drivers.cdl.dropTitle'),
+            manual: t('drivers.cdl.manual'),
+            reading: t('drivers.cdl.reading'),
+            save: t('ref.save'),
+            cancel: t('ref.cancel'),
+            // PRE-TRANSLATED, KEYED BY THE KEY the action returns. A translator
+            // closure cannot cross to a client component, and the action deals
+            // in i18n keys rather than sentences so it stays language-free.
+            notices: {
+              'drivers.cdl.notReadingYet': t('drivers.cdl.notReadingYet'),
+              'drivers.cdl.unreadable': t('drivers.cdl.unreadable'),
+              'drivers.cdl.wrongType': t('drivers.cdl.wrongType'),
+              'drivers.cdl.tooLarge': t('drivers.cdl.tooLarge'),
+              'drivers.cdl.noFile': t('drivers.cdl.noFile'),
+              'drivers.cdl.notAllowed': t('drivers.cdl.notAllowed'),
+            },
           }}
-          action={createDriverAction}
-          cancelHref="/drivers"
-          labels={{ save: t('ref.save'), cancel: t('ref.cancel') }}
         />
       </div>
     </>
