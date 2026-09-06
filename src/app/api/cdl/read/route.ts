@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth-context'
 import { can } from '@/lib/permissions'
 import { DOCUMENT_TYPES, IMAGE_TYPES } from '@/lib/claude'
-import { NOTHING_READ, cdlPrefill, readCdl } from '@/lib/cdl'
+import { NOTHING_READ, cdlNotes, cdlPrefill, readCdl } from '@/lib/cdl'
 import { apiError, authFailureResponse } from '../../_lib/respond'
 
 // POST /api/cdl/read — read a licence that belongs to nobody yet.
@@ -125,5 +125,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ values: cdlPrefill(NOTHING_READ), notice })
   }
 
-  return NextResponse.json({ values: cdlPrefill(outcome.fields), notice: null })
+  // THE PARSED FIELDS TRAVEL BESIDE THE PREFILL, WITH THEIR CONFIDENCES.
+  //
+  // Not a debug hatch. The rate-con form already marks its doubtful fields —
+  // see `lowConfidenceFields` — and a licence read has exactly the same need:
+  // a digit under glare should arrive on the confirm form looking different
+  // from one printed in 14pt. `values` is what fills the inputs; `fields` is
+  // what lets the form say how sure it is.
+  //
+  // NO DISCLOSURE HERE. This is the card the caller just uploaded, returned to
+  // the caller who uploaded it, and it is dropped either way — nothing is
+  // persisted. It is also what makes an accuracy run possible at all, since
+  // per-field confidence exists nowhere else once the response is discarded.
+  return NextResponse.json({
+    values: cdlPrefill(outcome.fields),
+    fields: outcome.fields,
+    notes: cdlNotes(outcome.fields),
+    notice: null,
+  })
 }
