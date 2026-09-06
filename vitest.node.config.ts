@@ -5,6 +5,27 @@ import tsconfigPaths from 'vite-tsconfig-paths'
 // part of `npm run check`.
 export default defineConfig({
   plugins: [tsconfigPaths()],
+  // ── `server-only` IS A BUILD MARKER, NOT A RUNTIME ─────────────────────
+  //
+  // It exists so that importing a server module from a client component is a
+  // BUILD error rather than a runtime surprise, and it does that by throwing
+  // when anything but a server bundler resolves it. Under vitest that means
+  // any module reachable from `auth-context` — every route handler in this
+  // application — cannot be imported at all.
+  //
+  // WHICH IS WHY NOTHING HAD EVER TESTED A ROUTE HANDLER HERE, and why a
+  // 1MB body limit shipped to production inside one. The marker was doing its
+  // job at build time and quietly deciding what was testable.
+  //
+  // Aliased to an empty module for the node project ONLY. The workers project
+  // runs on workerd and the integration project against real Postgres; neither
+  // needs this and neither gets it.
+  resolve: {
+    alias: {
+      'server-only': new URL('./tests/server-only-shim.ts', import.meta.url)
+        .pathname,
+    },
+  },
   test: {
     name: 'node',
     // `.tsx` FOR COMPONENT TESTS, WHICH DECLARE THEIR OWN ENVIRONMENT.

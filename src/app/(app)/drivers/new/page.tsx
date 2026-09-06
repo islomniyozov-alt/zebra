@@ -81,6 +81,7 @@ export default async function NewDriverPage() {
               'drivers.cdl.wrongType': t('drivers.cdl.wrongType'),
               'drivers.cdl.tooLarge': t('drivers.cdl.tooLarge'),
               'drivers.cdl.noFile': t('drivers.cdl.noFile'),
+              'drivers.cdl.failed': t('drivers.cdl.failed'),
               'drivers.cdl.notAllowed': t('drivers.cdl.notAllowed'),
             },
           }}

@@ -1,12 +1,11 @@
 'use client'
 
-import { useActionState, useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { RecordForm, type FieldSpec } from '@/components/forms/RecordForm'
 import { Select, type SelectOption } from '@/components/ui/Select'
 import { cx } from '@/lib/cx'
+import { downscaleImage } from './downscale'
 import { createDriverAction } from '../actions'
-import { readCdlAction } from './cdl-actions'
-import { EMPTY_CDL_READ } from './cdl-state'
 
 // ---------------------------------------------------------------------------
 // TWO CONTROLS, THEN A CONFIRM. Daler's ruling, precise: Add driver opens an
@@ -54,47 +53,78 @@ export function NewDriverFlow({
   fields,
   labels,
 }: Props) {
-  const [state, read, pending] = useActionState(readCdlAction, EMPTY_CDL_READ)
   const [companyId, setCompanyId] = useState(defaultAuthority)
   const [manual, setManual] = useState(false)
   const [over, setOver] = useState(false)
-  const fileInput = useRef<HTMLInputElement>(null)
-  const formRef = useRef<HTMLFormElement>(null)
-  const [file, setFile] = useState<{
-    base64: string
-    type: string
-    name: string
+  const [reading, setReading] = useState(false)
+  const [read, setRead] = useState<{
+    values: Record<string, string>
+    notice: string | null
   } | null>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
 
-  // THE CONFIRM STEP IS REACHED BY READING OR BY ASKING. Both land on the same
-  // form; the difference is only whether anything is in it.
-  const confirming = manual || state.attempted
+  // The confirm step is reached by reading or by asking. Same form; the only
+  // difference is whether anything is in it.
+  const confirming = manual || read !== null
 
-  // A FILE CHOSEN IS A FILE SUBMITTED. Requiring a second click on an Upload
-  // button after dropping a card is the kind of step that gets called a bug.
-  useEffect(() => {
-    if (file && formRef.current) formRef.current.requestSubmit()
-  }, [file])
-
+  // ── THE UPLOAD IS A FETCH TO A ROUTE HANDLER, NOT A SERVER ACTION ────────
+  //
+  // It was an action, with the file base64'd into a hidden field, and Next
+  // rejected the body at its 1MB default — base64 inflating by 4/3 put the
+  // real ceiling at ~750KB, so every phone photo failed as a bare 500. See
+  // src/app/api/cdl/read/route.ts for why the fix is a handler rather than a
+  // raised global limit.
+  //
+  // AND THE IMAGE IS SHRUNK FIRST. A licence is legible at 1600px; sending
+  // 4MB of phone camera is transfer time and model cost for no accuracy.
   const take = async (chosen: File | null | undefined) => {
     if (!chosen) return
-    const buffer = await chosen.arrayBuffer()
-    let binary = ''
-    const bytes = new Uint8Array(buffer)
-    for (let i = 0; i < bytes.length; i++)
-      binary += String.fromCharCode(bytes[i]!)
-    setFile({ base64: btoa(binary), type: chosen.type, name: chosen.name })
+    setReading(true)
+    try {
+      const file = await downscaleImage(chosen)
+      const body = new FormData()
+      body.append('file', file)
+
+      const response = await fetch('/api/cdl/read', { method: 'POST', body })
+      if (!response.ok) {
+        // THE HANDLER'S REFUSALS ARE SHOWN AS THEMSELVES. A 413 means the file
+        // is too big and a 415 means it is the wrong kind, and a dispatcher who
+        // is told "something went wrong" photographs the licence again for no
+        // reason. The confirm form still opens, because the driver can always
+        // be typed in.
+        const notice =
+          response.status === 413
+            ? 'drivers.cdl.tooLarge'
+            : response.status === 415
+              ? 'drivers.cdl.wrongType'
+              : response.status === 403
+                ? 'drivers.cdl.notAllowed'
+                : 'drivers.cdl.failed'
+        setRead({ values: {}, notice })
+        return
+      }
+
+      const result = (await response.json()) as {
+        values: Record<string, string>
+        notice: string | null
+      }
+      setRead(result)
+    } catch {
+      setRead({ values: {}, notice: 'drivers.cdl.failed' })
+    } finally {
+      setReading(false)
+    }
   }
 
   if (confirming) {
     return (
       <div className="flex flex-col gap-z4">
-        {state.notice ? (
+        {read?.notice ? (
           <p
             role="status"
             className="max-w-[520px] rounded-card border border-warning bg-warning-soft px-z3 py-z2 text-sm text-warning"
           >
-            {labels.notices[state.notice] ?? state.notice}
+            {labels.notices[read.notice] ?? read.notice}
           </p>
         ) : null}
         <RecordForm
@@ -102,7 +132,7 @@ export function NewDriverFlow({
           values={{
             companyId,
             employmentType: 'OWNED',
-            ...state.values,
+            ...(read?.values ?? {}),
           }}
           action={createDriverAction}
           cancelHref="/drivers"
@@ -113,23 +143,13 @@ export function NewDriverFlow({
   }
 
   return (
-    <form
-      ref={formRef}
-      action={read}
-      className="flex max-w-[520px] flex-col gap-z4"
-    >
+    <div className="flex max-w-[520px] flex-col gap-z4">
       <Select
         label={labels.authority}
         value={companyId}
         onChange={(event) => setCompanyId(event.target.value)}
         options={authorities}
       />
-
-      {/* The file rides as hidden fields so the drop zone can be a div and the
-       * form can still be a form — no fetch, no JSON endpoint, one action. */}
-      <input type="hidden" name="cdl" value={file?.base64 ?? ''} />
-      <input type="hidden" name="cdlType" value={file?.type ?? ''} />
-      <input type="hidden" name="cdlName" value={file?.name ?? ''} />
 
       <div
         onDragOver={(event) => {
@@ -166,7 +186,7 @@ export function NewDriverFlow({
         <p className="text-base font-medium text-ink">{labels.dropTitle}</p>
         <p className="text-sm text-ink-2">{labels.dropBody}</p>
         <p className="text-xs text-ink-3">{labels.dropHint}</p>
-        {pending ? (
+        {reading ? (
           <p role="status" className="text-sm text-accent">
             {labels.reading}
           </p>
@@ -192,6 +212,6 @@ export function NewDriverFlow({
       >
         {labels.manual}
       </button>
-    </form>
+    </div>
   )
 }

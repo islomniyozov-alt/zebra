@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as authContext from '@/lib/auth-context'
 import { NOTHING_READ, cdlPrefill, readCdl } from '@/lib/cdl'
 import type { ExtractedCdl } from '@/lib/cdl'
 
@@ -85,5 +86,85 @@ describe('turning a licence into form values', () => {
       firstName: 'Ahmad',
       lastName: 'Karimov',
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE PATH ITSELF, WHICH NOTHING WALKED — AND THAT IS WHY THIS SHIPPED BROKEN.
+//
+// The commit that built this flow said "dropping a card walks the whole path"
+// and tested `cdlPrefill` and `readCdl` directly. Neither of them is the path.
+// The upload, the body, the handler, the response — none of it was exercised
+// by anything, and a 1.3MB PDF hit Next's 1MB server-action body limit and
+// arrived as a bare 500 with the reason only in the Worker log.
+//
+// So these call the HANDLER, with bytes, at sizes that matter.
+// ---------------------------------------------------------------------------
+describe('the read handler, walked with real bytes', () => {
+  // A SESSION, BECAUSE THE HANDLER CORRECTLY REFUSES WITHOUT ONE. The defect
+  // being tested is downstream of auth — a body limit — so the session is
+  // supplied rather than exercised, and the permission check keeps its own
+  // test below.
+  beforeEach(() => {
+    vi.spyOn(authContext, 'requireSession').mockResolvedValue({
+      userId: 'u1',
+      organizationId: 'o1',
+      role: 'OWNER',
+      companyScopes: [],
+      sessionId: 's1',
+      expiresAt: new Date(Date.now() + 3_600_000),
+    } as never)
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  /** A file of a given size, the way a phone would hand one over. */
+  const upload = (bytes: number, type = 'image/jpeg') =>
+    new File([new Uint8Array(bytes)], 'cdl.jpg', { type })
+
+  const post = async (file: File) => {
+    const body = new FormData()
+    body.append('file', file)
+    const { POST } = await import('@/app/api/cdl/read/route')
+    return POST(new Request('http://x/api/cdl/read', { method: 'POST', body }))
+  }
+
+  it('refuses a file past its own limit BEFORE reading the bytes', async () => {
+    const { MAX_CDL_BYTES } = await import('@/app/api/cdl/read/route')
+    const response = await post(upload(MAX_CDL_BYTES + 1))
+    expect(response.status).toBe(413)
+  })
+
+  // THE SIZE THAT BROKE IT. A 4MB phone photo, downscaled by the browser to a
+  // few hundred KB, is what actually arrives — but even undownscaled it must
+  // reach the handler rather than dying in a framework body check. The old
+  // path failed at ~750KB of ORIGINAL file, because base64 inflated it past a
+  // 1MB action limit.
+  it('accepts a phone-sized photograph', async () => {
+    const response = await post(upload(3 * 1024 * 1024))
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as { notice: string }
+    // Nothing read yet, said as itself rather than as a failure.
+    expect(body.notice).toBe('drivers.cdl.notReadingYet')
+  })
+
+  it('accepts a PDF, which is the file that broke on production', async () => {
+    const response = await post(upload(1_320_563, 'application/pdf'))
+    expect(response.status).toBe(200)
+  })
+
+  it('refuses a file that is neither photo nor PDF', async () => {
+    const response = await post(upload(1024, 'text/csv'))
+    expect(response.status).toBe(415)
+  })
+
+  it('refuses a request with no file at all', async () => {
+    const { POST } = await import('@/app/api/cdl/read/route')
+    const response = await POST(
+      new Request('http://x/api/cdl/read', {
+        method: 'POST',
+        body: new FormData(),
+      }),
+    )
+    expect(response.status).toBe(400)
   })
 })

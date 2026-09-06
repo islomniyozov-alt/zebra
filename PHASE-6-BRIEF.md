@@ -2895,3 +2895,50 @@ Recorded rather than resolved, per Phase 1's discipline.
       names — they belong to real people and only they know what they should
       say. And the topbar has tests about IDENTITY now rather than layout,
       watched failing by putting the literal back.
+
+101.  **A GUARD PLACED BEHIND A STRICTER GUARD IT DOES NOT KNOW ABOUT CAN NEVER
+      FIRE.** — 2026-09-06.
+
+      `/drivers/new` sent the dropped CDL as base64 in a hidden field to a
+      server action. Inside that action, before anything else:
+
+          if (base64.length > MAX_DOCUMENT_BASE64_BYTES) return tooLarge
+
+      10MB, matching the extraction cap, with a comment explaining the choice.
+      It never once executed. Next rejects a server-action body at **1MB** by
+      default, and base64 inflates by 4/3 — so the real ceiling on a dropped
+      file was **~750KB**, enforced by a framework that had never heard of this
+      check, and the refusal arrived as the generic error boundary with
+      `Error: Body exceeded 1 MB limit.` visible only in `wrangler tail`.
+
+      THE GUARD WAS CORRECT, PRESENT, AND UNREACHABLE. Flag 95 is about a
+      mechanism that works and a path that never reaches it; this is that one
+      layer down — the path reaches the guard, but only after something stricter
+      upstream has already refused. A limit is only a limit where nothing
+      rejects first, and "first" is a fact about the whole stack rather than
+      about the function.
+
+      IT LOOKED LIKE DILIGENCE, which is what made it invisible in review: a
+      named constant, a bound check, a comment citing the reason for the number.
+      Everything a careful size check has except effect.
+
+      WHAT MADE IT SHIP: nothing walked the path. `tests/cdl.test.ts` called
+      `cdlPrefill` and `readCdl` directly — both pure, both passing — while the
+      commit message said "dropping a card walks the whole path". The claim and
+      the evidence were about different things. A 67KB corpus PDF worked when
+      tried by hand, which is exactly the size that hides this.
+
+      AND WHY NO ROUTE HANDLER HAD EVER BEEN TESTED HERE: `server-only` throws
+      when anything but a server bundler resolves it, so every handler reachable
+      from `auth-context` was unimportable under vitest. A build-time marker had
+      been quietly deciding what was testable. The node project now aliases it to
+      an empty module — the real package still guards the build.
+
+      THE FIX WAS A SHAPE, NOT A NUMBER. Raising `serverActions.bodySizeLimit`
+      would have worked and was refused for being GLOBAL: every action in the
+      application accepting multi-megabyte bodies to solve one upload's problem.
+      A file upload that cannot use a presigned URL — because no driver exists
+      to mint one against — is still a file upload, and a route handler is the
+      honest shape for one, with the limit stated on the path it governs.
+      Multipart rather than base64 removed the 4/3 inflation entirely, and the
+      browser now downscales images to 1600px, which is the fix at the source.
