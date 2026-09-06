@@ -1,9 +1,10 @@
 'use server'
 
-import { changeOwnPassword } from '@/lib/auth'
+import { changeOwnPassword, setOwnName } from '@/lib/auth'
 import { ownAccountDb } from '@/lib/auth-db'
 import { requireSession } from '@/lib/auth-context'
 import { MIN_PASSWORD_LENGTH } from '@/lib/password-reset'
+import { revalidatePath } from 'next/cache'
 import type { MessageKey } from '@/lib/i18n'
 
 // Changing your own password. See src/lib/auth-db.ts for why this reaches for
@@ -55,4 +56,43 @@ export async function changePasswordAction(
           : 'account.password.wrongCurrent',
     done: false,
   }
+}
+
+export interface NameFormState {
+  error: MessageKey | null
+  done: boolean
+}
+
+/**
+ * Your own name, which until 2026-09-06 nothing could change.
+ *
+ * `revalidatePath('/', 'layout')` because the topbar reads this on every
+ * screen: without it the field saves, the page re-renders from cache, and the
+ * name in the corner still says what it said — which reads as a save that
+ * silently failed.
+ */
+export async function changeNameAction(
+  _previous: NameFormState,
+  formData: FormData,
+): Promise<NameFormState> {
+  const session = await requireSession()
+
+  const outcome = await setOwnName(
+    ownAccountDb(),
+    session.userId,
+    String(formData.get('name') ?? ''),
+  )
+
+  if (!outcome.ok) {
+    return {
+      error:
+        outcome.reason === 'too_long'
+          ? 'account.name.tooLong'
+          : 'account.name.empty',
+      done: false,
+    }
+  }
+
+  revalidatePath('/', 'layout')
+  return { error: null, done: true }
 }

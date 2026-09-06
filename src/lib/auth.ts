@@ -300,3 +300,58 @@ export async function clearLoginFailures(
   })
   return count
 }
+
+/** The bound on a display name. Long enough for any real one, short enough
+ * that the topbar truncates rather than the database refusing. */
+export const MAX_NAME_LENGTH = 120
+
+export type SetOwnNameOutcome =
+  | { ok: true; name: string }
+  | { ok: false; reason: 'empty' | 'too_long' | 'no_user' }
+
+/**
+ * Change your own display name.
+ *
+ * ── WHY THIS EXISTS, WHICH IS NOT "PROFILES ARE NICE" ──────────────────────
+ *
+ * Production, read 2026-09-06: four of five users were called `Owner`,
+ * `Dispatch`, `Accounting` and `Disptach` — job labels rather than people, one
+ * of them a typo of a job label. The owner's own row said `Owner`, straight
+ * from `prisma/seed.ts`.
+ *
+ * They had been wrong since the day each account was made, and NOBODY COULD
+ * HAVE FIXED THEM: no screen displayed a name, and no screen edited one. They
+ * surfaced the moment the topbar started showing the name instead of a
+ * hardcoded "OW", and the first thing it showed was "Owner".
+ *
+ * A FACT NOBODY RENDERS IS A FACT NOBODY CORRECTS. That is the whole reason
+ * this is a field rather than a migration: these are real people's names and
+ * only they know what they should say. Rewriting them centrally would be
+ * guessing, twice — once about the name and once about who it belongs to.
+ *
+ * NO VALIDATION BEYOND LENGTH. A name is not an identifier here; it is what a
+ * person calls themselves, and every rule beyond "not blank" is a rule about
+ * whose names count as names. `User.email` remains the identity.
+ *
+ * OUTSIDE RLS, like every other `User` write, and emphatically NOT
+ * `user:update` — that permission is about administering OTHER people. See
+ * `src/lib/auth-db.ts`.
+ */
+export async function setOwnName(
+  db: AuthDb,
+  userId: string,
+  raw: string,
+): Promise<SetOwnNameOutcome> {
+  const name = raw.trim()
+  if (name === '') return { ok: false, reason: 'empty' }
+  if (name.length > MAX_NAME_LENGTH) return { ok: false, reason: 'too_long' }
+
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { isActive: true },
+  })
+  if (!user?.isActive) return { ok: false, reason: 'no_user' }
+
+  await db.user.update({ where: { id: userId }, data: { name } })
+  return { ok: true, name }
+}

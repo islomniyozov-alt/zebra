@@ -2828,3 +2828,43 @@ Recorded rather than resolved, per Phase 1's discipline.
         found nothing". The exit-code rule in AGENTS.md says read the status
         before anything filters the output; this is the case where the status
         itself is the filter.
+
+100.  **A FACT NOBODY RENDERS IS A FACT NOBODY CORRECTS.** — 2026-09-06.
+
+      The topbar's account control read `OW` on every screen. Not the role, not
+      initials — `userInitials="OW"`, a literal in the layout, the same two
+      letters for everyone who had ever logged in. Replacing it with the real
+      name was a two-line change, and the moment it shipped it printed
+      **"Owner"**.
+
+      THAT WAS NOT A BUG IN THE REPLACEMENT. `User.name` for the owner said
+      `Owner`, straight from `prisma/seed.ts`. Reading production properly
+      showed four of five users named after their jobs — `Owner`, `Dispatch`,
+      `Accounting`, and `Disptach`, which is a TYPO OF A JOB TITLE. That last
+      one is the whole flag in one row: somebody mistyped a placeholder at
+      account creation and it survived for weeks, because no screen displayed a
+      name and no screen edited one.
+
+      SO THE FAILURE WAS NOT THE WRONG DATA. It was that the data had no
+      reader. A value nobody sees is a value nobody can notice is wrong, and a
+      value nobody can edit is one nobody can fix once they do. Both halves are
+      required, and this had neither.
+
+      IT IS FLAG 98'S SIBLING, one layer out. There the mechanism was present
+      and invisible — a button styled as text, working perfectly, uncheckable by
+      any test that finds it through the accessibility tree. Here the DATA was
+      present and invisible, uncheckable by any human because nothing put it on
+      a screen. In both cases everything passed, because "renders correctly" and
+      "renders something true" are different claims and only the first has a
+      test shape.
+
+      WHAT IT COST TO FIND: nothing, and that is the uncomfortable part. It
+      surfaced as a side effect of a cosmetic change nobody made for this
+      reason. Had Daler not asked for the name in the corner, those rows would
+      still say `Disptach`.
+
+      WHAT WAS DONE: `setOwnName` and a field on /account, so the fact now has
+      both a reader and an editor. Deliberately NOT a migration rewriting the
+      names — they belong to real people and only they know what they should
+      say. And the topbar has tests about IDENTITY now rather than layout,
+      watched failing by putting the literal back.

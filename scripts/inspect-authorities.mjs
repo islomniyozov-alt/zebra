@@ -50,7 +50,7 @@ try {
   // WHOSE VIEW IS NARROWED. An empty companyScopes means "all of them"; a
   // populated one is a membership deliberately limited.
   const members = await rows(`
-    select u.email, m.role,
+    select u.email, u.name, m.role,
            (select count(*) from "MembershipCompany" mc
              where mc."membershipId" = m.id)::int as scoped_to
     from "Membership" m

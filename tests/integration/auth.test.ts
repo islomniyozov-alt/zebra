@@ -9,6 +9,7 @@ import {
   login,
   logout,
   normalizeEmail,
+  setOwnName,
 } from '@/lib/auth'
 import {
   hashSessionToken,
@@ -680,6 +681,74 @@ describe('changeOwnPassword', () => {
       expect(
         await changeOwnPassword(app, userId, PASSWORD, NEXT, { minLength: 12 }),
       ).toEqual({ ok: false, reason: 'invalid_current' })
+    } finally {
+      await owner.user.update({
+        where: { id: userId },
+        data: { isActive: true },
+      })
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// YOUR OWN NAME, WHICH NOTHING COULD CHANGE UNTIL 2026-09-06.
+//
+// Production held `Owner`, `Dispatch`, `Accounting` and `Disptach` for four of
+// five users — job labels rather than people, one a typo of a job label — and
+// they had been wrong since each account was created. No screen displayed a
+// name and no screen edited one, so nobody could have noticed and nobody could
+// have fixed it. Same family as the hardcoded "OW" in the topbar: a fact
+// nobody renders is a fact nobody corrects.
+// ---------------------------------------------------------------------------
+describe('setOwnName', () => {
+  afterEach(async () => {
+    await owner.user.update({ where: { id: userId }, data: { name: 'Owner' } })
+  })
+
+  it('sets the name, trimmed', async () => {
+    expect(await setOwnName(app, userId, '  Islom Niyozov  ')).toEqual({
+      ok: true,
+      name: 'Islom Niyozov',
+    })
+    const user = await owner.user.findUniqueOrThrow({ where: { id: userId } })
+    expect(user.name).toBe('Islom Niyozov')
+  })
+
+  it('refuses a blank name, and leaves the old one alone', async () => {
+    expect(await setOwnName(app, userId, '   ')).toEqual({
+      ok: false,
+      reason: 'empty',
+    })
+    const user = await owner.user.findUniqueOrThrow({ where: { id: userId } })
+    expect(user.name).toBe('Owner')
+  })
+
+  it('refuses a name longer than the column should hold', async () => {
+    expect(await setOwnName(app, userId, 'x'.repeat(121))).toEqual({
+      ok: false,
+      reason: 'too_long',
+    })
+  })
+
+  // NO RULE BEYOND LENGTH, and this test is the statement of that. A name is
+  // not an identifier here — email is — and every validation past "not blank"
+  // is a rule about whose names count as names.
+  it('accepts a name that is not two capitalised Latin words', async () => {
+    for (const name of ['Ahmad', "O'Brien-Şahin", 'Нияз', '李伟']) {
+      expect(await setOwnName(app, userId, name)).toEqual({ ok: true, name })
+    }
+  })
+
+  it('refuses to name a deactivated account', async () => {
+    await owner.user.update({
+      where: { id: userId },
+      data: { isActive: false },
+    })
+    try {
+      expect(await setOwnName(app, userId, 'Somebody')).toEqual({
+        ok: false,
+        reason: 'no_user',
+      })
     } finally {
       await owner.user.update({
         where: { id: userId },
