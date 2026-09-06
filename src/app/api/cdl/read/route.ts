@@ -99,17 +99,30 @@ export async function POST(request: Request) {
     mimeType: file.type,
   })
 
-  // `not_implemented` IS A DISTINCT ANSWER from "read it and found nothing".
-  // One means enter the driver by hand; the other means take a better
-  // photograph. Collapsing them costs a dispatcher a second trip to the driver.
+  // THE REFUSALS ARE NOT ALL THE SAME ADVICE, and collapsing them costs a
+  // dispatcher a trip to the driver. Three groups:
+  //
+  //   TAKE A BETTER PHOTOGRAPH — the card was reached and could not be read
+  //   from. A low-confidence spine, a state that disagrees with itself, an
+  //   unparsable answer: all of them mean the image, not the driver.
+  //
+  //   THE CARD IS NOT WHAT WE NEED — expiry before issue is a card whose two
+  //   dates contradict, which a second photograph will not fix.
+  //
+  //   TRY AGAIN — the call failed. Ours or the network's, and nothing about
+  //   the licence.
+  //
+  // Every one of them still opens the confirm form: the driver can always be
+  // typed in, and a refusal that also blocked manual entry would make a bad
+  // photograph a reason not to hire somebody.
   if (!outcome.ok) {
-    return NextResponse.json({
-      values: cdlPrefill(NOTHING_READ),
-      notice:
-        outcome.reason === 'not_implemented'
-          ? 'drivers.cdl.notReadingYet'
-          : 'drivers.cdl.unreadable',
-    })
+    const notice =
+      outcome.reason === 'call_failed'
+        ? 'drivers.cdl.failed'
+        : outcome.reason === 'expiry_before_issue'
+          ? 'drivers.cdl.contradictory'
+          : 'drivers.cdl.unreadable'
+    return NextResponse.json({ values: cdlPrefill(NOTHING_READ), notice })
   }
 
   return NextResponse.json({ values: cdlPrefill(outcome.fields), notice: null })

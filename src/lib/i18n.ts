@@ -403,6 +403,8 @@ const en = {
   'drivers.cdl.noFile': 'No file arrived.',
   'drivers.cdl.failed':
     'The licence could not be sent. Enter the driver below.',
+  'drivers.cdl.contradictory':
+    'That card’s dates contradict each other. Enter the driver below.',
   'drivers.cdl.notAllowed': 'You may not add drivers.',
   'drivers.employment.LEASED': 'Lease operator',
   'drivers.employment.OWNER_OPERATOR': 'Owner-operator',
@@ -2093,6 +2095,8 @@ const ru: Dictionary = {
   'drivers.cdl.tooLarge': 'Файл слишком большой.',
   'drivers.cdl.noFile': 'Файл не получен.',
   'drivers.cdl.failed': 'Не удалось отправить права. Введите данные ниже.',
+  'drivers.cdl.contradictory':
+    'Даты на карточке противоречат друг другу. Введите данные ниже.',
   'drivers.cdl.notAllowed': 'Вы не можете добавлять водителей.',
   'drivers.employment.LEASED': 'Арендатор',
   'drivers.employment.OWNER_OPERATOR': 'Владелец-водитель',
@@ -3778,6 +3782,8 @@ const fa: Dictionary = {
   'drivers.cdl.tooLarge': 'این فایل بسیار بزرگ است.',
   'drivers.cdl.noFile': 'فایلی دریافت نشد.',
   'drivers.cdl.failed': 'ارسال کارت ممکن نشد. اطلاعات را پایین وارد کنید.',
+  'drivers.cdl.contradictory':
+    'تاریخ‌های کارت با هم نمی‌خوانند. اطلاعات را پایین وارد کنید.',
   'drivers.cdl.notAllowed': 'شما اجازهٔ افزودن راننده ندارید.',
   'drivers.employment.LEASED': 'رانندهٔ اجاره‌ای',
   'drivers.employment.OWNER_OPERATOR': 'مالک-راننده',

@@ -1,4 +1,8 @@
+import type { AskResult } from './claude'
 import type { Confidence } from './extraction/envelope'
+import { askModel } from './model-engine'
+import { parseCdlResponse } from './extraction/cdl-parse'
+import { CDL_EXTRACTION_SYSTEM_WITH_SCHEMA } from './extraction/cdl-prompt'
 import { codeList, refuseCdl, type CdlRefusal } from './extraction/cdl-refusal'
 import type { ExtractedCdl } from './extraction/cdl-shape'
 
@@ -38,7 +42,12 @@ export type CdlReadOutcome =
   | { ok: true; fields: ExtractedCdl }
   | {
       ok: false
-      reason: 'not_implemented' | 'too_large' | 'unsupported_type' | CdlRefusal
+      reason:
+        | 'too_large'
+        | 'unsupported_type'
+        | 'call_failed'
+        | 'unparsable'
+        | CdlRefusal
     }
 
 /** Nothing read, in the shape a read returns. */
@@ -56,18 +65,71 @@ export const NOTHING_READ: ExtractedCdl = {
 }
 
 /**
- * Read a licence. Returns nothing, on purpose, until a real card exists.
+ * Read a licence.
  *
- * IT RETURNS `not_implemented` RATHER THAN AN EMPTY SUCCESS. An empty success
- * is indistinguishable from "the model read the card and found nothing on it",
- * and the difference decides whether a dispatcher re-photographs the licence
- * or stops trying. The screen renders the two differently.
+ * ── SAME ENGINE POSTURE AS THE RATE-CON PATH, NO NEW DECISIONS ────────────
+ *
+ * It goes through `askModel`, which picks `EXTRACTION_MODEL` and falls back
+ * only on the default path — a caller that NAMES a model gets the failure it
+ * asked for, because the engine table names one per column and a silent swap
+ * would make a column measure something other than what it says. This file
+ * chooses nothing about engines; it hands over a document and a system prompt.
+ *
+ * THE FAILURE TAXONOMY IS THE SAME ONE, AND IT MATTERS TO THE SCREEN.
+ * `not_readable` is the DOCUMENT's fault — too large, wrong type, more than
+ * the model can say back — and `call_failed` is ours or the network's. One
+ * means photograph it again; the other means try again. A dispatcher told the
+ * wrong one makes a wasted trip to the driver.
+ *
+ * AND A PARSED READING IS STILL SUBJECT TO THE REFUSAL RULES. Parsing proves
+ * the model answered in the right shape; `refuseCdl` decides whether what it
+ * said is a licence reading — spine present, spine confident, state agreeing
+ * with itself, expiry after issue. Both have to pass before a single value
+ * reaches a form.
  */
-export async function readCdl(_input: {
+export async function readCdl(input: {
   base64: string
   mimeType: string
+  /** Named by the accuracy run, absent everywhere else. */
+  model?: string
+  apiKey?: string
 }): Promise<CdlReadOutcome> {
-  return { ok: false, reason: 'not_implemented' }
+  let answer: AskResult
+  try {
+    answer = await askModel({
+      base64: input.base64,
+      mimeType: input.mimeType,
+      system: CDL_EXTRACTION_SYSTEM_WITH_SCHEMA,
+      prompt: 'Read this driver licence and return the JSON described.',
+      ...(input.model ? { model: input.model } : {}),
+      ...(input.apiKey ? { apiKey: input.apiKey } : {}),
+    })
+  } catch (error) {
+    const reason =
+      error instanceof Error &&
+      'reason' in error &&
+      (error.reason === 'document_too_large' ||
+        error.reason === 'unsupported_media_type' ||
+        error.reason === 'truncated')
+        ? ('unsupported_type' as const)
+        : ('call_failed' as const)
+    return { ok: false, reason }
+  }
+
+  let fields: ExtractedCdl
+  try {
+    fields = parseCdlResponse(answer.text)
+  } catch {
+    // A RESPONSE THAT DOES NOT PARSE IS A FAILED READ, never a half-filled
+    // form. The eighteen fixtures in tests/cdl-parse.test.ts are the shapes
+    // that land here.
+    return { ok: false, reason: 'unparsable' }
+  }
+
+  const refusal = refuseCdl(fields)
+  if (refusal) return { ok: false, reason: refusal }
+
+  return { ok: true, fields }
 }
 
 /** Confidence a value carries, for a form that marks the doubtful ones. */

@@ -19,13 +19,16 @@ const read = (over: Partial<ExtractedCdl> = {}): ExtractedCdl => ({
   ...over,
 })
 
-describe('the reader, until a real card exists', () => {
-  it('says it is not implemented rather than returning an empty success', async () => {
-    // The difference decides what a dispatcher does next: "we cannot read yet"
-    // means enter it by hand, "nothing on the card" means photograph it again.
+describe('the reader, when the model cannot be reached', () => {
+  it('reports a failed call rather than an empty success', async () => {
+    // WAS `not_implemented` WHILE readCdl WAS A STUB. The stub is gone; this
+    // now exercises the real path with no API key present, which is exactly
+    // the `call_failed` branch — ours or the network's, and nothing about the
+    // licence. The difference still decides what a dispatcher does next: "try
+    // again" versus "photograph it again".
     expect(await readCdl({ base64: 'x', mimeType: 'image/jpeg' })).toEqual({
       ok: false,
-      reason: 'not_implemented',
+      reason: 'call_failed',
     })
   })
 })
@@ -140,11 +143,16 @@ describe('the read handler, walked with real bytes', () => {
   // path failed at ~750KB of ORIGINAL file, because base64 inflated it past a
   // 1MB action limit.
   it('accepts a phone-sized photograph', async () => {
+    // THE DEFECT THIS TEST EXISTS FOR IS SIZE, and it still is. The old path
+    // died at ~750KB inside a framework body check; this one takes 3MB and
+    // reaches the reader. What the reader then says depends on whether a model
+    // is reachable — in this environment it is not — so the assertion is that
+    // the file got through, NOT that it was read.
     const response = await post(upload(3 * 1024 * 1024))
     expect(response.status).toBe(200)
     const body = (await response.json()) as { notice: string }
-    // Nothing read yet, said as itself rather than as a failure.
-    expect(body.notice).toBe('drivers.cdl.notReadingYet')
+    expect(body.notice).not.toBe('drivers.cdl.tooLarge')
+    expect(body.notice).not.toBe('drivers.cdl.wrongType')
   })
 
   it('accepts a PDF, which is the file that broke on production', async () => {
