@@ -1,3 +1,4 @@
+import type { Prisma } from '@/generated/prisma/client'
 import type { CompanyScopeFilter, TxClient } from './tenancy'
 import { readyToInvoiceWhere } from './invoices'
 import { complianceCount } from './compliance'
@@ -32,6 +33,27 @@ import { can } from './permissions'
 // ---------------------------------------------------------------------------
 
 /** A row in the action queue: what needs doing, how many, and where. */
+/**
+ * Finished, billable, and attached to nobody.
+ *
+ * THE SAME SHAPE `isReady` NOW REFUSES, asked as a question instead of an
+ * answer: these are the loads whose badge dropped off Ready to invoice, and
+ * the reason they must be counted somewhere is that dropping off a queue is
+ * not the same as being noticed.
+ */
+export function unassignedFinishedWhere(): Prisma.LoadWhereInput {
+  return {
+    deletedAt: null,
+    isCancelled: false,
+    operationalStatus: 'POD_RECEIVED',
+    totalRevenueCents: { gt: 0 },
+    // Either half missing is the alarm. Driver is the one that stops the pay;
+    // truck is the owner's ruling and the evidence that a POD arrived for a
+    // movement nobody witnessed. See `isAssigned`.
+    OR: [{ driverId: null }, { truckId: null }],
+  }
+}
+
 export interface ActionRow {
   key: string
   /** Counted, never estimated. Zero rows are dropped before render. */
@@ -124,6 +146,45 @@ const ACTIONS: ActionSpec[] = [
     tone: 'warning',
     count: (tx, scope) =>
       tx.load.count({ where: { ...readyToInvoiceWhere(), ...scope } }),
+  },
+  {
+    // ── FINISHED FREIGHT NOBODY IS ATTACHED TO (ruled 2026-09-06) ─────────
+    //
+    // THE ALARM FOR AN OMISSION, WHICH IS WHY IT HAD TO BE BUILT NOW.
+    // `settleableWhere(driverId, …)` filters on driverId as an equality, so a
+    // load with no driver matches NO driver's query: it is never refused, it is
+    // simply never found, and nobody is paid. Every other check on this
+    // dashboard counts things that are THERE. This one exists because the
+    // failure mode is absence, and absence is invisible to every query that
+    // filters for what it wants.
+    //
+    // Production, 2026-09-06: loads 1015 and 1016, $2,703.58 of finished
+    // freight attached to nobody, neither on any settlement. Daler had found
+    // one of them by opening it; nothing would have found the other.
+    //
+    // IT NAMES THE MONEY, and that is not decoration. "2 loads finished with no
+    // driver" is a filing job somebody scrolls past; "$2,703.58" is the driver's
+    // pay, and it is the half that gets acted on. The row shape already carries
+    // an amount for exactly this reason — see `amountCents`.
+    key: 'unassignedFinished',
+    resource: 'load',
+    // The loads list, narrowed to the status they are all sitting at. It does
+    // not filter on assignment — that would be a query parameter invented for
+    // one dashboard row — so this lands on a short list a human can scan.
+    href: '/loads?status=POD_RECEIVED',
+    // DANGER, not warning. The scale on this dashboard is "danger for money
+    // going stale"; a driver not being paid for finished work is exactly that,
+    // and it goes stale silently rather than aging into a report.
+    tone: 'danger',
+    count: (tx, scope) =>
+      tx.load.count({ where: { ...unassignedFinishedWhere(), ...scope } }),
+    amount: async (tx, scope) => {
+      const total = await tx.load.aggregate({
+        where: { ...unassignedFinishedWhere(), ...scope },
+        _sum: { totalRevenueCents: true },
+      })
+      return total._sum.totalRevenueCents ?? 0
+    },
   },
   {
     key: 'overdue',

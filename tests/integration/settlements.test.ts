@@ -1072,3 +1072,105 @@ describe('§7: a mixed-rule week, and Relay revenue', () => {
     expect(line?.amountCents).toBe(45000)
   }, 300_000)
 })
+
+// ---------------------------------------------------------------------------
+// A LOAD WITH NO DRIVER MUST NEVER REACH A SETTLEMENT — STATED, NOT ASSUMED.
+//
+// This has always been true and NOTHING SAID SO. `settleableWhere` filters on
+// `driverId` as an equality, so a null-driver load matches no driver's query:
+// it is never refused, it is simply never found. Correct behaviour, arrived at
+// by accident, and one refactor from being ungated — a `driverId` clause
+// rewritten as optional, or a query that ORs in unassigned freight "so nothing
+// gets lost", would open it with every existing test still green.
+//
+// The failure it protects against is the expensive direction. Paying the wrong
+// driver is loud and gets corrected; the load simply never appearing is what
+// happened on production loads 1015 and 1016, where $2,703.58 of finished
+// freight sat attached to nobody and nothing said a word.
+//
+// SO THE RULE IS ASSERTED FROM BOTH ENDS: the load is absent from the
+// settleable set, and generating the week does not put it on a sheet.
+// ---------------------------------------------------------------------------
+describe('freight nobody drove', () => {
+  it('is invisible to settlement, and to every driver', async () => {
+    const orphan = await inOrg((tx) =>
+      createLoad(
+        tx,
+        organizationId,
+        {
+          companyId,
+          customerId: brokerId,
+          // The whole point: no driverId at all.
+          stops: [
+            {
+              type: 'PICKUP',
+              city: 'Chicago',
+              state: 'IL',
+              scheduledAt: new Date(Date.UTC(2026, 6, 28)),
+            },
+            {
+              type: 'DELIVERY',
+              city: 'Dallas',
+              state: 'TX',
+              scheduledAt: new Date(Date.UTC(2026, 6, 29)),
+            },
+          ],
+          linehaulCents: 250_000,
+        },
+        { byUserId: userId },
+      ),
+    )
+
+    // It reaches POD_RECEIVED exactly like assigned freight does — that is the
+    // point of the 2026-09-06 ruling: the POD is a fact and gets recorded.
+    // The same call the rest of this file uses to finish a load.
+    await inOrg((tx) =>
+      transitionOperational(tx, orphan.id, 'POD_RECEIVED', {
+        source: 'AUTOMATIC',
+        userId,
+        // INSIDE THE WEEK, and this line is the test. The first version put
+        // the POD on 2026-08-05, outside WEEK_START..WEEK_END, so the load was
+        // excluded by DATE and the assertion passed without ever exercising
+        // the driver filter — proven by opening the gate and watching it still
+        // pass. A guard that cannot fail is not a guard.
+        occurredAt: new Date(Date.UTC(2026, 6, 30)),
+      }),
+    )
+
+    const load = await inOrg((tx) =>
+      tx.load.findFirstOrThrow({
+        where: { id: orphan.id },
+        select: { operationalStatus: true, driverId: true },
+      }),
+    )
+    expect(load.operationalStatus).toBe('POD_RECEIVED')
+    expect(load.driverId).toBeNull()
+
+    // AND YET IT IS SETTLEABLE FOR NOBODY. Asked for the file's own driver,
+    // who is the only driver in this organisation.
+    const settleable = await inOrg((tx) =>
+      settleableLoads(tx, driverId, WEEK_START, WEEK_END),
+    )
+    expect(settleable.map((row) => row.id)).not.toContain(orphan.id)
+
+    // And generating the week does not sweep it up.
+    const outcome = await inOrg((tx) =>
+      generateSettlement(tx, organizationId, {
+        driverId,
+        periodStart: WEEK_START,
+        periodEnd: WEEK_END,
+        labels,
+      }),
+    )
+    if (outcome.ok) {
+      // Whatever the week did contain, it did not contain this.
+      const lines = await inOrg((tx) =>
+        tx.settlementLine.findMany({
+          where: { settlementId: outcome.settlementId },
+          select: { loadId: true },
+        }),
+      )
+      expect(lines.map((line) => line.loadId)).not.toContain(orphan.id)
+    }
+  })
+})

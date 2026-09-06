@@ -1,4 +1,5 @@
 import type { LoadBillingStatus, StatusSource } from '@/generated/prisma/client'
+import { isAssigned } from './load-readiness'
 import type { TxClient } from './tenancy'
 
 // ---------------------------------------------------------------------------
@@ -106,6 +107,10 @@ export async function billingFactsFor(
       operationalStatus: true,
       directSettled: true,
       totalRevenueCents: true,
+      // THE 2026-09-06 RULING. Finished freight attached to nobody is not
+      // ready for money; see `isAssigned` for which half carries the pay.
+      driverId: true,
+      truckId: true,
       paymentApplications: { select: { amountCents: true } },
       invoiceLines: {
         select: {
@@ -155,7 +160,8 @@ export async function billingFactsFor(
       isReady:
         !load.isCancelled &&
         load.operationalStatus === 'POD_RECEIVED' &&
-        load.totalRevenueCents > 0,
+        load.totalRevenueCents > 0 &&
+        isAssigned(load),
       directSettled: load.directSettled,
       totalRevenueCents: load.totalRevenueCents,
       appliedCents: load.paymentApplications.reduce(

@@ -97,7 +97,12 @@ const WALKTHROUGH_READERS = [
  * that reading it cannot change the thing being read. A question that edits its
  * subject is not a question.
  */
-const INSPECTION_READERS = ['inspect-relay-customer.mjs']
+const INSPECTION_READERS = [
+  'inspect-relay-customer.mjs',
+  // Counts loads that are finished, billable and attached to nobody, before
+  // `isReady` learns to check assignment. SELECT only.
+  'inspect-unassigned-pod.mjs',
+]
 
 /**
  * Run by a human, deliberately, and permitted to write.

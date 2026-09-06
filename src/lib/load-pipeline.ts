@@ -78,6 +78,18 @@ export interface PipelineInput {
   billingStatus: LoadBillingStatus
   directSettled: boolean
   totalRevenueCents: number
+  /**
+   * Somebody drove this, in something. See `isAssigned`.
+   *
+   * IT IS AN INPUT RATHER THAN A LOOKUP because this file decides nothing and
+   * reads nothing — but it MUST be consulted here, and the reason is that the
+   * strip does not go through `billingStatus` on direct-settled freight. It
+   * reads the operational column directly, so a load whose badge had correctly
+   * dropped to Uninvoiced would still have shown "Invoiced" on the strip: two
+   * lines of one screen disagreeing about the same load, which is worse than
+   * either being wrong alone.
+   */
+  assigned: boolean
 }
 
 export function pipelineStage(load: PipelineInput): PipelineStage {
@@ -90,7 +102,16 @@ export function pipelineStage(load: PipelineInput): PipelineStage {
     // The awaiting-statement milestone, wearing the word "Invoiced". A load
     // with no revenue on it has nothing to be paid for and stays at delivered
     // — the same clause `directSettledAwaiting` uses.
-    if (load.operationalStatus === 'POD_RECEIVED' && load.totalRevenueCents > 0)
+    //
+    // AND NEITHER HAS ONE NOBODY DROVE. "Invoiced" here means "reached POD and
+    // is waiting to appear on a statement"; a load with no driver will never
+    // appear on one, so it is not waiting for anything. Delivered is the
+    // honest end of the line until somebody is attached to it.
+    if (
+      load.operationalStatus === 'POD_RECEIVED' &&
+      load.totalRevenueCents > 0 &&
+      load.assigned
+    )
       return 'invoiced'
   } else if (BILLED.has(load.billingStatus)) {
     return 'invoiced'

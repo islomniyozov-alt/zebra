@@ -27,6 +27,9 @@ const load = (over: Partial<PipelineInput> = {}): PipelineInput => ({
   billingStatus: 'UNINVOICED',
   directSettled: false,
   totalRevenueCents: 100_000,
+  // Assigned by default, so every existing test keeps asking what it asked.
+  // The unassigned case is its own describe below.
+  assigned: true,
   ...over,
 })
 
@@ -151,5 +154,58 @@ describe('the strip itself', () => {
   it('orders every stage it can return', () => {
     expect(stageIndex('upcoming')).toBe(0)
     expect(stageIndex('paid')).toBe(4)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// FINISHED FREIGHT NOBODY DROVE STOPS AT DELIVERED (ruled 2026-09-06).
+//
+// The strip does NOT consult `billingStatus` on direct-settled freight — it
+// reads the operational column straight — so teaching `isReady` alone would
+// have left the badge saying Uninvoiced beside a strip saying Invoiced. Two
+// lines of one screen disagreeing about one load is worse than either being
+// wrong by itself, which is why this input exists at all.
+// ---------------------------------------------------------------------------
+describe('a load with nobody attached to it', () => {
+  it('stops at delivered on direct-settled freight', () => {
+    expect(
+      pipelineStage(
+        load({
+          directSettled: true,
+          operationalStatus: 'POD_RECEIVED',
+          totalRevenueCents: 175_215,
+          assigned: false,
+        }),
+      ),
+    ).toBe('delivered')
+  })
+
+  it('reaches invoiced once somebody is attached', () => {
+    // The same load, the only difference being a driver and a truck.
+    expect(
+      pipelineStage(
+        load({
+          directSettled: true,
+          operationalStatus: 'POD_RECEIVED',
+          totalRevenueCents: 175_215,
+          assigned: true,
+        }),
+      ),
+    ).toBe('invoiced')
+  })
+
+  it('still reaches paid, because paid is a fact about money that moved', () => {
+    // If a statement paid it, arguing about assignment is arguing with the
+    // bank. The strip says how far the money got, and it got all the way.
+    expect(
+      pipelineStage(
+        load({
+          directSettled: true,
+          billingStatus: 'PAID',
+          operationalStatus: 'POD_RECEIVED',
+          assigned: false,
+        }),
+      ),
+    ).toBe('paid')
   })
 })

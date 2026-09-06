@@ -94,6 +94,12 @@ describe('who gets which rows in the action queue', () => {
       'podMissing',
       'noRate',
       'readyToInvoice',
+      // Finished freight attached to nobody — the omission alarm, ruled
+      // 2026-09-06. Directly after readyToInvoice on purpose, and in that
+      // order: one counts finished freight nobody has BILLED, the next counts
+      // finished freight nobody is being PAID for. The second is the one with
+      // no other way of being noticed.
+      'unassignedFinished',
       'overdue',
       'unapplied',
       'draftSettlements',

@@ -14,6 +14,7 @@ import { newestFirst } from '@/lib/load-timeline'
 import { attributionLabel, stopAttribution } from '@/lib/stop-attribution'
 import { milesSummary } from '@/lib/load-miles'
 import { pipelineStage } from '@/lib/load-pipeline'
+import { isAssigned } from '@/lib/load-readiness'
 import { activityEntries } from '@/lib/load-activity'
 import { Prisma } from '@/generated/prisma/client'
 import {
@@ -452,6 +453,7 @@ export default async function LoadDetailPage({
     billingStatus: load.billingStatus,
     directSettled: load.directSettled,
     totalRevenueCents: load.totalRevenueCents,
+    assigned: isAssigned(load),
   })
 
   // Blank first, and it means "derive it from the state" — the same fallback
