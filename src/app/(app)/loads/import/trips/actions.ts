@@ -7,7 +7,12 @@ import { LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import { ensureRelayCustomer } from '@/lib/relay-import'
 import { parseTripsCsv } from '@/lib/trips-csv'
 import { tripRowView } from '@/lib/trips-preview'
-import { nearMissWarnings, planSignature, planTrips } from '@/lib/trips-import'
+import {
+  nearMissWarnings,
+  planSignature,
+  planTrips,
+  type TripGrouping,
+} from '@/lib/trips-import'
 import {
   createTripLoad,
   enrichLoad,
@@ -51,6 +56,12 @@ export async function tripsImportAction(
   const csv = String(formData.get('csv') ?? '')
   const companyId = String(formData.get('companyId') ?? '')
   const acknowledged = String(formData.get('signature') ?? '')
+  // THE ESCAPE HATCH, ARRIVING AS A FIELD ON THE SAME FORM. The preview's
+  // second button posts the file it already has with `grouping=row`, so the
+  // hatch costs no navigation and no re-choosing of the file — which is what
+  // made the old cross-link a trap rather than an option.
+  const grouping: TripGrouping =
+    formData.get('grouping') === 'row' ? 'row' : 'trip'
 
   if (csv.trim() === '') {
     return { ...EMPTY_TRIPS_IMPORT, error: t('relay.error.noFile') }
@@ -61,7 +72,7 @@ export async function tripsImportAction(
     return { ...EMPTY_TRIPS_IMPORT, error: t('trips.error.noTrips') }
   }
 
-  const plan = planTrips(legs)
+  const plan = planTrips(legs, grouping)
   const signature = planSignature(plan)
 
   // --- what it would do, decided against the database ----------------------
@@ -151,12 +162,13 @@ export async function tripsImportAction(
       ...new Set(decided.rows.flatMap((row) => row.unresolved)),
     ],
     showsMoney: maySeeMoney,
-    // THE NUMBER THAT TELLS THE SCREENS APART. Both importers accept the same
-    // Relay export; the difference is the unit of the output. Saying it out
-    // loud is the body-level answer to "which screen am I on" that the titles
-    // alone could not give.
+    // THERE IS ONE SCREEN NOW, so these two numbers stopped being "which
+    // screen am I on" and became the escape hatch's arithmetic: rowCount is
+    // what one-load-per-row would produce, tripCount is what this preview
+    // holds, and the hatch prints both so choosing it is a decision.
     tripCount: plan.trips.length,
     rowCount: legs.length,
+    grouping,
     stageCounts: {
       upcoming: plan.trips.filter((trip) => trip.stage === 'upcoming').length,
       running: plan.trips.filter((trip) => trip.stage === 'running').length,

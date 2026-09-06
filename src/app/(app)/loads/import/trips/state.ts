@@ -43,6 +43,8 @@ export interface TripsPlanView {
    */
   tripCount: number
   rowCount: number
+  /** Which reading produced this preview, so the hatch knows what to offer. */
+  grouping: 'trip' | 'row'
   /** Where the file's trips are in their life, from the legs themselves. */
   stageCounts: { upcoming: number; running: number; finished: number }
 }

@@ -1,98 +1,31 @@
-import Link from 'next/link'
-import { notFound } from 'next/navigation'
-import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
-import { getLocaleContext } from '@/lib/locale'
-import { companyIdScopeFilter } from '@/lib/tenancy'
-import { lastUsedAuthority } from '../../_reference/shared'
-import { RelayImportForm } from './RelayImportForm'
+import { redirect } from 'next/navigation'
 
-// Loads → Import from Amazon Relay (Phase 6 §3a).
+// ---------------------------------------------------------------------------
+// THE BOARD IMPORT'S URL, KEPT AS A DOOR TO THE ONE SCREEN THAT REMAINS.
 //
-// GATED ON `load:create`, because that is exactly what this screen does — in
-// bulk. There is no separate import permission: a role that may book a load
-// may book forty-five of them, and inventing a second permission for the same
-// act would be a wall with a door beside it.
-
-export default async function RelayImportPage() {
-  if (!(await currentUserCan('create', 'load'))) notFound()
-
-  const { t } = await getLocaleContext()
-
-  const companies = await withCurrentOrg('read', 'load', (tx, session) =>
-    tx.company.findMany({
-      // `id`, not `companyId` — Company IS the authority. See tenancy.ts.
-      where: { isActive: true, ...companyIdScopeFilter(session.companyScopes) },
-      orderBy: { name: 'asc' },
-      select: { id: true, name: true },
-    }),
-  )
-
-  const remembered = await lastUsedAuthority()
-
-  return (
-    <div className="flex flex-col gap-z4">
-      <div className="flex flex-col gap-z1">
-        <h1 className="text-xl font-semibold text-ink">{t('relay.title')}</h1>
-        <p className="text-sm text-ink-2">{t('relay.subtitle')}</p>
-        {/* ONE FILE, TWO OUTCOMES — and the earlier version of this comment
-         * had it wrong. There is a single Relay export; both importers read
-         * the same columns. What differs is the UNIT of the result: this
-         * screen makes one load per ROW, the other groups legs into one load
-         * per TRIP.
-         *
-         * So the link says what the other screen DOES rather than what file
-         * it wants. A dispatcher choosing a screen is choosing an outcome, and
-         * the question "which file do I have" has no answer. */}
-        <p className="text-sm text-ink-2">
-          <Link
-            href="/loads/import/trips"
-            className="text-accent underline underline-offset-2"
-          >
-            {t('relay.otherScreen')}
-          </Link>
-        </p>
-      </div>
-
-      <RelayImportForm
-        companies={companies}
-        defaultCompanyId={
-          companies.find((company) => company.id === remembered)?.id ??
-          companies[0]?.id ??
-          ''
-        }
-        labels={{
-          authority: t('relay.authority'),
-          mode: t('relay.mode'),
-          modeBooked: t('relay.modeBooked'),
-          modeBookedHint: t('relay.modeBookedHint'),
-          modeDelivered: t('relay.modeDelivered'),
-          modeDeliveredHint: t('relay.modeDeliveredHint'),
-          choose: t('relay.choose'),
-          file: t('relay.file'),
-          preview: t('relay.preview'),
-          previewTitle: t('relay.previewTitle'),
-          previewOne: t('relay.previewOne'),
-          previewNone: t('relay.previewNone'),
-          confirm: t('relay.confirm'),
-          back: t('relay.back'),
-          row: t('relay.row'),
-          loadId: t('relay.loadId'),
-          lane: t('relay.lane'),
-          stops: t('relay.stops'),
-          first: t('relay.first'),
-          last: t('relay.last'),
-          miles: t('relay.miles'),
-          rate: t('relay.rate'),
-          skippedTitle: t('relay.skippedTitle'),
-          warningsTitle: t('relay.warningsTitle'),
-          done: t('relay.done'),
-          doneFailed: t('relay.doneFailed'),
-          stale: t('relay.stale'),
-          why: t('relay.why'),
-          toLoads: t('relay.toLoads'),
-          noFile: t('relay.error.noFile'),
-        }}
-      />
-    </div>
-  )
+// This was a screen: authority, an Upcoming/Finished radio pair, and a file
+// picker, reading one Relay export as one load per row. It is gone as a
+// destination, and Daler reached it four times by accident and never on
+// purpose — the Amazon tab's only button pointed here, at the reading that is
+// wrong for about 95% of the files this office imports.
+//
+// THE ROUTE STAYS SO A BOOKMARK LANDS SOMEWHERE THAT WORKS. Deleting it would
+// turn a saved link into a 404 for a capability that still exists; the
+// redirect turns it into the screen that replaced it, which is what somebody
+// following an old link actually wanted.
+//
+// THE CAPABILITY LIVES ON AS THE PREVIEW'S ESCAPE HATCH. One load per row is
+// now a grouping — `planTrips(legs, 'row')` — offered as a button that prints
+// what it would produce ("12 loads instead of 3"), after a file has been
+// chosen and a preview has been read. Same parse, same landing derivation,
+// same writer.
+//
+// AND THE RADIO PAIR WENT WITH IT, which was the urgent part. `landsDelivered`
+// reads each row's own execution status, so the action had already stopped
+// consulting the radios — leaving a control on production that a dispatcher
+// could set and nothing would honour. A screen that ignores a deliberate
+// choice is worse than either the old behaviour or the new one.
+// ---------------------------------------------------------------------------
+export default function RelayImportRedirect(): never {
+  redirect('/loads/import/trips')
 }

@@ -4,7 +4,8 @@ import {
   stageSentence,
   tripRowView,
 } from '@/lib/trips-preview'
-import type { PlannedTrip } from '@/lib/trips-import'
+import { planTrips, type PlannedTrip } from '@/lib/trips-import'
+import type { TripLeg } from '@/lib/trips-csv'
 
 // ---------------------------------------------------------------------------
 // THE MONEY WALL ON THE PREVIEW, ASSERTED IN BOTH DIRECTIONS.
@@ -368,5 +369,53 @@ describe('the preview sentence', () => {
     )
     expect(said).not.toContain('running')
     expect(said).toContain('in transit')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE ESCAPE HATCH IS A GROUPING, NOT A SECOND IMPORTER.
+// ---------------------------------------------------------------------------
+describe('one load per row', () => {
+  const leg = (tripId: string, loadId: string): TripLeg => ({
+    tripId,
+    loadId,
+    facilitySequence: 'DEN7->MKC6',
+    status: 'Completed',
+    distance: 100,
+    costCents: null,
+    distanceUnit: 'mi',
+    shipperAccount: 'Outbound',
+    driverName: '',
+    trailerId: '',
+    tractorId: '',
+    stops: [],
+  })
+
+  const legs = [
+    leg('T-1', 'L-A'),
+    leg('T-1', 'L-B'),
+    leg('T-1', 'L-C'),
+    leg('T-2', 'L-D'),
+  ]
+
+  it('groups by trip by default — four rows, two loads', () => {
+    expect(planTrips(legs).trips.map((t) => t.tripId)).toEqual(['T-1', 'T-2'])
+  })
+
+  it('groups by row when asked — four rows, four loads', () => {
+    // The number the hatch prints: "4 loads instead of 2".
+    expect(planTrips(legs, 'row').trips.map((t) => t.tripId)).toEqual([
+      'L-A',
+      'L-B',
+      'L-C',
+      'L-D',
+    ])
+  })
+
+  it('reads the same file both ways without reparsing it', () => {
+    // Same legs in, both groupings out: the readings cannot drift apart,
+    // because there is only one parse and one planner behind both.
+    expect(planTrips(legs).trips).toHaveLength(2)
+    expect(planTrips(legs, 'row').trips).toHaveLength(4)
   })
 })

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
 import { Table, type Column } from '@/components/ui/Table'
+import { cx } from '@/lib/cx'
 import { stageSentence } from '@/lib/trips-preview'
 import { tripsImportAction } from './actions'
 import { EMPTY_TRIPS_IMPORT, type TripRowView } from './state'
@@ -64,6 +65,7 @@ export interface TripsImportLabels {
   warningsTitle: string
   notAssigned: string
   confirm: string
+  perRow: string
   back: string
   stale: string
   done: string
@@ -333,6 +335,43 @@ export function TripsImportForm({
               {labels.back}
             </Button>
           </div>
+
+          {/* THE ESCAPE HATCH, AND IT SAYS WHAT IT WOULD DO.
+           *
+           * "Import each row as its own load instead — 12 loads instead of 3."
+           * The count is IN the control, because the thing this replaces was a
+           * cross-link that read like a refinement and silently switched the
+           * unit of the output. Four bad imports came from clicking something
+           * that looked like a settings tweak, so the number goes where the
+           * decision is made rather than on the screen it lands on.
+           *
+           * IT RE-POSTS THE FILE THIS FORM ALREADY HOLDS, with grouping=row.
+           * No navigation, no re-choosing the file, no second authority
+           * question — which is what made the old cross-link a trap rather
+           * than an option.
+           *
+           * ONLY OFFERED WHEN IT WOULD DIFFER. On a file where every trip is
+           * one row the two readings produce identical output, and a control
+           * promising "12 loads instead of 12" is noise inviting a pointless
+           * decision. */}
+          {plan.grouping === 'trip' && plan.rowCount > plan.tripCount ? (
+            <button
+              type="submit"
+              name="grouping"
+              value="row"
+              disabled={pending}
+              className={cx(
+                'self-start rounded-control text-sm text-ink-2',
+                'underline decoration-border-strong underline-offset-2',
+                'hover:text-accent focus-visible:outline focus-visible:outline-2',
+                'focus-visible:outline-offset-2 focus-visible:outline-accent',
+              )}
+            >
+              {labels.perRow
+                .replace('{rows}', String(plan.rowCount))
+                .replace('{trips}', String(plan.tripCount))}
+            </button>
+          ) : null}
         </section>
       ) : null}
     </form>

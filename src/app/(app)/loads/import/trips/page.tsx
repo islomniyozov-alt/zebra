@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
@@ -34,16 +33,12 @@ export default async function TripsImportPage() {
       <div className="flex flex-col gap-z1">
         <h1 className="text-xl font-semibold text-ink">{t('trips.title')}</h1>
         <p className="text-sm text-ink-2">{t('trips.subtitle')}</p>
-        {/* What the other screen DOES, not what file it wants — see the note
-         * on the sibling. One Relay export, two units of output. */}
-        <p className="text-sm text-ink-2">
-          <Link
-            href="/loads/import"
-            className="text-accent underline underline-offset-2"
-          >
-            {t('trips.otherScreen')}
-          </Link>
-        </p>
+        {/* THE CROSS-LINK IS GONE. It offered the other reading of the same
+         * file as a link at the top of the screen — before anybody had chosen
+         * a file, let alone seen what either reading would produce. That is
+         * the wrong-screen trap: a choice presented as navigation, decided
+         * without information. The same capability is now a button ON the
+         * preview, printing what it would make. */}
       </div>
 
       <TripsImportForm
@@ -75,6 +70,7 @@ export default async function TripsImportPage() {
           skippedLegs: t('trips.skippedLegs'),
           previewTrip: t('trips.previewTrip'),
           previewTrips: t('trips.previewTrips'),
+          perRow: t('trips.perRow'),
           stageUpcoming: t('trips.stageUpcoming'),
           stageFinished: t('trips.stageFinished'),
           stageRunning: t('trips.stageRunning'),

@@ -350,7 +350,10 @@ export function RateConOffer({ companyId, onExtracted, labels }: Props) {
         // forty-five-row file belongs in a single-load form. The booking
         // sheet, which IS one load, is still §3b's.
         <div className="flex flex-col gap-z2">
-          <Link href="/loads/import" tabIndex={-1}>
+          {/* STRAIGHT AT THE ONE SCREEN. This pointed at /loads/import, the
+           * one-load-per-row reading, which is wrong for about 95% of this
+           * office's files — a tab whose only button was a wrong default. */}
+          <Link href="/loads/import/trips" tabIndex={-1}>
             <Button type="button" variant="secondary">
               {labels.methodAmazonImport}
             </Button>

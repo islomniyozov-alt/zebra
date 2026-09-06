@@ -161,14 +161,38 @@ function legStops(leg: TripLeg): TripLegStop[] {
  * from really did visit it twice, and collapsing that would erase a stop the
  * driver made.
  */
-export function planTrips(legs: readonly TripLeg[]): TripsPlan {
+/**
+ * How the rows are grouped into loads. The ONLY difference between the two
+ * readings of a Relay export, which is why it is a key and not a second
+ * importer.
+ *
+ * `trip` — legs sharing a Trip ID become one load, the trip's own id its
+ *          reference. What ~95% of the office's files want.
+ * `row`  — every row is its own load, carrying its own Load ID. The escape
+ *          hatch on the preview, for the file where a trip is not the unit.
+ *
+ * EVERYTHING ELSE IS IDENTICAL: same parse, same landing derivation, same
+ * preview, same writer. It used to be a second screen with a second parser and
+ * a second action, and being two pipelines is what let them disagree — one
+ * asked a booked/delivered question the other had no need for, and the wrong
+ * screen was the default for 95% of the files.
+ */
+export type TripGrouping = 'trip' | 'row'
+
+export function planTrips(
+  legs: readonly TripLeg[],
+  grouping: TripGrouping = 'trip',
+): TripsPlan {
   const warnings: TripWarning[] = []
   const byTrip = new Map<string, TripLeg[]>()
 
   for (const leg of legs) {
-    const existing = byTrip.get(leg.tripId)
+    // THE LOAD ID IS THE KEY UNDER `row`, so a row that shares a Trip ID with
+    // eleven others still lands as its own load, referenced by its own number.
+    const key = grouping === 'row' ? leg.loadId : leg.tripId
+    const existing = byTrip.get(key)
     if (existing) existing.push(leg)
-    else byTrip.set(leg.tripId, [leg])
+    else byTrip.set(key, [leg])
   }
 
   const trips: PlannedTrip[] = []

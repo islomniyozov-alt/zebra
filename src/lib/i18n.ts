@@ -597,6 +597,8 @@ const en = {
   'trips.toLoads': 'Go to loads',
   'trips.otherScreen': 'Import each row as its own load instead',
   'trips.previewTrips': '{n} trips:',
+  'trips.perRow':
+    'Import each row as its own load instead — {rows} loads instead of {trips}',
   'trips.previewTrip': '{n} trip:',
   'trips.stageUpcoming': '{n} books',
   'trips.stageFinished': '{n} files as delivered',
@@ -2255,6 +2257,8 @@ const ru: Dictionary = {
   'trips.toLoads': 'К грузам',
   'trips.otherScreen': 'Импортировать каждую строку как отдельный груз',
   'trips.previewTrips': 'рейсов {n}:',
+  'trips.perRow':
+    'Импортировать каждую строку отдельным грузом — {rows} вместо {trips}',
   'trips.previewTrip': 'рейс {n}:',
   'trips.stageUpcoming': '{n} в бронь',
   'trips.stageFinished': '{n} сразу доставлено',
@@ -3899,6 +3903,7 @@ const fa: Dictionary = {
   'trips.toLoads': 'رفتن به بارها',
   'trips.otherScreen': 'هر ردیف را به‌عنوان بار جداگانه وارد کن',
   'trips.previewTrips': '{n} سفر:',
+  'trips.perRow': 'هر ردیف را بار جداگانه وارد کن — {rows} بار به جای {trips}',
   'trips.previewTrip': '{n} سفر:',
   'trips.stageUpcoming': '{n} رزرو می‌شود',
   'trips.stageFinished': '{n} تحویل‌شده ثبت می‌شود',
