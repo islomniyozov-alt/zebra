@@ -2458,6 +2458,33 @@ Recorded rather than resolved, per Phase 1's discipline.
     and get a green run. The plain request is the subject. The busted request is
     a control, and the difference between them IS the finding.
 
+    ── SECOND OCCURRENCE, 2026-09-06, AND THE CHEAP DISCRIMINATOR ────────────
+
+    The New Driver form was reported unchanged on production **after a hard
+    refresh**, at a commit that contains the change. Same shape as load 1010,
+    and the hard refresh is what made it look like a server problem.
+
+    **"HARD REFRESH DIDN'T FIX IT" IS NOT EVIDENCE ABOUT THE SERVER.** It
+    defeats the browser's HTTP cache and leaves Next's client router cache
+    alone, so a stale RSC payload survives it intact — and the person doing the
+    refreshing reasonably concludes the deployment is wrong. Both times that
+    conclusion sent somebody to check the deploy, and both times the deploy was
+    fine.
+
+    **INCOGNITO IS THE DISCRIMINATOR AND IT COSTS TEN SECONDS.** A fresh
+    profile has no router cache, so: incognito correct + normal window stale
+    means the client; both stale means the server or the build. Ask for that
+    before reading a version id, because it separates the two cases faster than
+    any tooling here can.
+
+    WHAT THE TOOLING ADDED ANYWAY: `npm run verify:driver-form`, beside
+    `verify:response`. Two occurrences make "what does the deployed page
+    actually render" a recurring question, and the answer should not be
+    rewritten from memory each time. It reads `input[name=...]` off the live
+    page — the string the form will POST, which is also the string the field
+    spec declares — rather than labels, which are translated, or screenshots,
+    which are pictures.
+
 94. **THE PROBE REPRODUCED THE BUG IT WAS BUILT TO INVESTIGATE, AND THE
     REPRODUCTION WAS ITS OWN DEFECT.** — 2026-09-04.
 
