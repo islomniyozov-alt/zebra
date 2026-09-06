@@ -58,6 +58,7 @@ export default async function LoadsPage({
 
   const {
     rows,
+    authorities,
     companyCount,
     savedViews,
     density,
@@ -69,7 +70,21 @@ export default async function LoadsPage({
     // means every authority in the organization.
     const scope = companyScopeFilter(session.companyScopes)
 
-    const companyCount = await tx.company.count()
+    // THE AUTHORITIES THIS VIEWER MAY NARROW TO — fetched here since
+    // 2026-09-06, where the narrowing lives, rather than in the app layout on
+    // every page of the shell. Same predicate the topbar filter used: active
+    // companies, restricted to the viewer's own scope when they have one.
+    const authorities = await tx.company.findMany({
+      where: {
+        isActive: true,
+        ...(session.companyScopes.length > 0
+          ? { id: { in: [...session.companyScopes] } }
+          : {}),
+      },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    })
+    const companyCount = authorities.length
 
     // The filters other than the one being counted. Each chip's count is
     // "how many rows would I get if I clicked this", so it honours every
@@ -217,6 +232,7 @@ export default async function LoadsPage({
 
     return {
       rows,
+      authorities,
       companyCount,
       savedViews,
       density,
@@ -339,6 +355,33 @@ export default async function LoadsPage({
               count: billingCounts[status] ?? 0,
             })),
           },
+          // AUTHORITY, WHICH USED TO LIVE IN THE TOPBAR (2026-09-06). It was a
+          // filter there too — it only ever wrote `?company=` — so this is the
+          // same narrowing on the screen that has a filter bar, rather than at
+          // the top of every screen in the application.
+          //
+          // ONLY WHEN THERE IS A CHOICE TO MAKE. A single-authority carrier
+          // gets no group at all, which is the rule the topbar had and the one
+          // worth keeping: a filter offering one option is furniture.
+          //
+          // NO COUNTS ON THESE CHIPS, deliberately. Every other group here
+          // promises "this many rows if you click me" and honours the other
+          // active filters to do it; adding a third counted dimension means a
+          // third groupBy on every load-list render for a filter used rarely.
+          // A chip with no number is honest about being a narrowing rather
+          // than a report.
+          ...(authorities.length > 1
+            ? [
+                {
+                  param: 'company',
+                  label: t('loads.filter.authority'),
+                  choices: authorities.map((company) => ({
+                    value: company.id,
+                    label: company.name,
+                  })),
+                },
+              ]
+            : []),
         ]}
         search={{
           param: 'ref',

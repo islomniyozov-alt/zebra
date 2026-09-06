@@ -1,62 +1,38 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { cx } from '@/lib/cx'
 
 // §6.1 — 48px. Search, company filter, notification bell, user menu.
 //
-// §6.3 AS AMENDED: the company control is a FILTER, not a switcher. It narrows
-// the view; it does not put the interface into one authority. And it renders
-// only when the organization holds more than one company — a single-authority
-// customer never sees an authority picker anywhere.
-
-export interface CompanyOption {
-  id: string
-  name: string
-  /** The per-company chip colour, as a token name (§6.3). */
-  tone: 'accent' | 'progress' | 'success' | 'warning' | 'danger' | 'muted'
-}
-
-const CHIP: Record<CompanyOption['tone'], string> = {
-  accent: 'bg-accent',
-  progress: 'bg-progress',
-  success: 'bg-success',
-  warning: 'bg-warning',
-  danger: 'bg-danger',
-  muted: 'bg-muted',
-}
-
+// §6.3 AS AMENDED, AND THEN AMENDED AGAIN 2026-09-06: THE AUTHORITY FILTER IS
+// GONE FROM HERE.
+//
+// It was a FILTER and never a switcher — it wrote `?company=` into the URL and
+// nothing else — which is exactly why removing it costs so little. No state was
+// stored, so none is lost. `?company=` is still honoured by every screen that
+// read it; the loads list now offers it beside its other filters, where a
+// narrowing belongs. A bookmark carrying the parameter still works.
+//
+// WHY IT WENT: the owner does not need it. Of five production memberships only
+// one is unscoped — the other four are already restricted to two authorities by
+// their membership, so for them this offered a choice between two things they
+// could equally reach by filtering. It occupied the top of every screen to do
+// it.
+//
+// A STORED DEFAULT WAS REJECTED and the reasoning belongs here rather than in a
+// commit message: a saved scope is a MODE, and a dashboard silently narrowed to
+// one authority under-reports receivables with nothing on the page saying why.
+// The original §6.3 amendment ruled the switcher out for that reason; a
+// preference is the same thing wearing a settings screen.
 interface TopbarProps {
-  companies: readonly CompanyOption[]
-  userInitials: string
   /** Pre-translated. A translator closure cannot cross to a client component. */
   labels: {
-    allAuthorities: string
-    authority: string
     notifications: string
     userMenu: string
   }
 }
 
-export function Topbar({ companies, userInitials, labels }: TopbarProps) {
-  const router = useRouter()
-  const pathname = usePathname()
-  const params = useSearchParams()
-
-  // §6.3: only when the org holds more than one authority.
-  const showCompanyFilter = companies.length > 1
-  const selected = params.get('company')
-
-  const narrowTo = (companyId: string | null) => {
-    const next = new URLSearchParams(params.toString())
-    if (companyId === null) next.delete('company')
-    else next.set('company', companyId)
-    router.replace(next.size > 0 ? `${pathname}?${next}` : pathname, {
-      scroll: false,
-    })
-  }
-
+export function Topbar({ labels }: TopbarProps) {
   return (
     <header className="flex h-topbar shrink-0 items-center gap-z4 border-b border-border bg-surface px-gutter">
       {/* SEARCH IS NOT BUILT, SO IT IS NOT SHOWN.
@@ -72,48 +48,6 @@ export function Topbar({ companies, userInitials, labels }: TopbarProps) {
        * same reason: three translations that would have to be written again. */}
       <div aria-hidden className="flex-1" />
 
-      {showCompanyFilter ? (
-        <div
-          className="flex items-center gap-z1"
-          role="group"
-          aria-label={labels.authority}
-        >
-          <button
-            type="button"
-            aria-pressed={selected === null}
-            onClick={() => narrowTo(null)}
-            className={cx(
-              'h-control-compact rounded-control border px-z2 text-xs font-medium',
-              selected === null
-                ? 'border-accent bg-accent-soft text-accent'
-                : 'border-border-strong bg-surface text-ink-2 hover:bg-surface-3',
-            )}
-          >
-            {labels.allAuthorities}
-          </button>
-          {companies.map((company) => (
-            <button
-              key={company.id}
-              type="button"
-              aria-pressed={selected === company.id}
-              onClick={() => narrowTo(company.id)}
-              className={cx(
-                'flex h-control-compact items-center gap-z1 rounded-control border px-z2 text-xs font-medium',
-                selected === company.id
-                  ? 'border-accent bg-accent-soft text-accent'
-                  : 'border-border-strong bg-surface text-ink-2 hover:bg-surface-3',
-              )}
-            >
-              <span
-                aria-hidden
-                className={cx('h-z3 w-[3px] rounded-full', CHIP[company.tone])}
-              />
-              {company.name}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
       <button
         type="button"
         aria-label={labels.notifications}
@@ -124,13 +58,23 @@ export function Topbar({ companies, userInitials, labels }: TopbarProps) {
 
       {/* A link, not a menu. The account screen is the only destination behind
        * it today, and a dropdown holding one item is a dropdown to click
-       * twice. It becomes a menu when it has a second thing to hold. */}
+       * twice. It becomes a menu when it has a second thing to hold.
+       *
+       * IT USED TO READ "OW", AND THAT WAS A HARDCODED STRING. Not the user's
+       * initials, not the role — the literal `userInitials="OW"` passed from
+       * the layout, identical for every person who has ever logged in. It read
+       * as a fact about the viewer and was a placeholder that shipped.
+       *
+       * THE LINK STAYS BECAUSE IT IS THE ONLY DOOR TO /account — nothing in the
+       * sidebar reaches it — so this is a glyph rather than a deletion. When
+       * real initials are wanted they come from the session, which is where a
+       * fact about the viewer has to come from. */}
       <Link
         href="/account"
         aria-label={labels.userMenu}
-        className="flex h-control-compact w-control-compact items-center justify-center rounded-control border border-border-strong bg-surface-2 text-xs font-medium text-ink-2 hover:bg-surface-3"
+        className="flex h-control-compact w-control-compact items-center justify-center rounded-control border border-border-strong bg-surface-2 text-ink-2 hover:bg-surface-3"
       >
-        {userInitials}
+        <span aria-hidden>◍</span>
       </Link>
     </header>
   )

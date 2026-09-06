@@ -5,7 +5,7 @@ import { getLocaleContext } from '@/lib/locale'
 import { navigationFor } from '@/lib/permissions'
 import { readDensity } from '@/lib/preferences'
 import { Sidebar, type SidebarGroup } from '@/components/shell/Sidebar'
-import { Topbar, type CompanyOption } from '@/components/shell/Topbar'
+import { Topbar } from '@/components/shell/Topbar'
 import type { MessageKey } from '@/lib/i18n'
 
 // §6.1 — the app shell. Sidebar 224px, topbar 48px, content the only scrolling
@@ -15,15 +15,6 @@ import type { MessageKey } from '@/lib/i18n'
 // designated table bodies. That is why this is h-screen with min-h-0 on the
 // column rather than a page that grows and scrolls the body — the table body
 // owns the scroll, and nothing else does.
-
-const CHIP_TONES: ReadonlyArray<CompanyOption['tone']> = [
-  'accent',
-  'progress',
-  'success',
-  'warning',
-  'danger',
-  'muted',
-]
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const session = await getSession()
@@ -58,29 +49,20 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // more row read on a connection that is already open, and putting it in its
   // own `withCurrentOrg` would cost a second round trip to us-east-2 on every
   // single page — see the arithmetic on LOAD_WRITE_TIMEOUT_MS.
-  const { authorities, density } = await withCurrentOrg(
-    'read',
-    'company',
-    async (tx, current) => ({
-      authorities: await tx.company.findMany({
-        where: {
-          isActive: true,
-          ...(current.companyScopes.length > 0
-            ? { id: { in: [...current.companyScopes] } }
-            : {}),
-        },
-        orderBy: { name: 'asc' },
-        select: { id: true, name: true },
-      }),
-      density: await readDensity(tx, current.userId),
-    }),
+  // THE AUTHORITY LIST WENT WITH THE TOPBAR FILTER (2026-09-06). Every page in
+  // the shell used to load every active company the viewer could see, purely to
+  // draw buttons at the top. The loads list fetches its own now, on the one
+  // screen that offers the narrowing.
+  //
+  // THE RESOURCE STAYS `company` DELIBERATELY, even though this reads only a
+  // density preference now. Every role that can load the shell already holds
+  // `company:read` — that is what makes the app render today — so leaving it
+  // changes nothing, while narrowing it is a permission change dressed as a
+  // cleanup, and the wrong guess locks somebody out of every screen at once.
+  // Worth revisiting against the role matrix, deliberately, not in passing.
+  const density = await withCurrentOrg('read', 'company', (tx, current) =>
+    readDensity(tx, current.userId),
   )
-
-  const companies: CompanyOption[] = authorities.map((company, index) => ({
-    id: company.id,
-    name: company.name,
-    tone: CHIP_TONES[index % CHIP_TONES.length]!,
-  }))
 
   return (
     /* §5.1 lives HERE rather than on <html>: the preference belongs to a
@@ -98,11 +80,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar
-          companies={companies}
-          userInitials="OW"
           labels={{
-            allAuthorities: t('topbar.allAuthorities'),
-            authority: t('loads.filter.authority'),
             notifications: t('topbar.notifications'),
             userMenu: t('topbar.userMenu'),
           }}
