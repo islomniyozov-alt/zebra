@@ -12,8 +12,8 @@ import {
   EXTRACTED_FIELDS,
   EXTRACTION_SCHEMA,
   STOP_FIELDS,
-} from '@/lib/extraction-shape'
-import type { Extracted } from '@/lib/extraction-shape'
+} from '@/lib/extraction/rate-con-shape'
+import type { Extracted } from '@/lib/extraction/rate-con-shape'
 import { centsToInput } from '@/lib/money'
 
 // ---------------------------------------------------------------------------

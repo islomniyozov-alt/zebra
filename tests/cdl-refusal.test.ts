@@ -139,7 +139,7 @@ describe('endorsement and restriction codes', () => {
 
 describe('the contract itself', () => {
   it('asks for exactly the fields the type declares', () => {
-    // extraction-shape.ts's argument, applied here: the schema is written out
+    // rate-con-shape.ts's argument, applied here: the schema is written out
     // rather than derived, so a test has to keep the two in step.
     expect([...CDL_FIELDS].sort()).toEqual(Object.keys(NOTHING_READ).sort())
   })

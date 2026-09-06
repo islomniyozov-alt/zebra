@@ -1,4 +1,4 @@
-import type { Field, Maybe } from '../extraction-shape'
+import type { Field, Maybe } from './envelope'
 
 // ---------------------------------------------------------------------------
 // WHAT A COMMERCIAL DRIVER'S LICENCE IS, AS FAR AS THIS SYSTEM CARES.
@@ -86,7 +86,7 @@ export interface ExtractedCdl {
  * The JSON Schema the model is held to.
  *
  * WRITTEN OUT RATHER THAN DERIVED from the types, exactly as
- * `extraction-shape.ts` argues: it is the CONTRACT with an outside system, and
+ * `rate-con-shape.ts` argues: it is the CONTRACT with an outside system, and
  * a derivation would let a TypeScript refactor silently change what the model
  * is asked for. The test asserts the two agree field for field.
  */

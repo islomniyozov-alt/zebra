@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { cx } from '@/lib/cx'
 import { Button } from '@/components/ui/Button'
 import type { ExtractedWithoutMoney } from '@/lib/extraction/parse'
-import type { Extracted } from '@/lib/extraction-shape'
+import type { Extracted } from '@/lib/extraction/rate-con-shape'
 
 // PHASE 5 §3 STEP 2 — the offer slot.
 //

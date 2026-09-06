@@ -2,7 +2,7 @@ import type { TxClient } from './tenancy'
 import { withOrg } from './tenancy'
 import { unattributed } from './audit'
 import type { AskedExtraction } from './rate-confirmation'
-import type { Extracted } from './extraction-shape'
+import type { Extracted } from './extraction/rate-con-shape'
 import {
   isEmptyReading,
   withoutMoney,

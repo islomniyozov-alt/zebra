@@ -1,7 +1,16 @@
 import type { EquipmentType, StopType } from '@/generated/prisma/client'
+import type { Maybe } from './envelope'
 
 // ---------------------------------------------------------------------------
 // WHAT A RATE CONFIRMATION IS, AS FAR AS THIS SYSTEM CARES (Phase 5 §3 step 1).
+//
+// NAMED FOR ITS DOCUMENT, beside `cdl-shape.ts`. It was `extraction-shape.ts`
+// while a rate confirmation was the only thing read here — "the" shape — and
+// that name stopped being true the moment a second document arrived. Neither
+// is the default now, and the pairing reads itself.
+//
+// The `{value, confidence}` envelope both shapes use went to `envelope.ts`,
+// because a shared idea filed under one document's name is one nobody finds.
 //
 // One file, imported by the parser, the prompt builder and the tests, so the
 // three cannot disagree about the shape. §1.2: "a strict JSON shape, per-field
@@ -20,21 +29,6 @@ import type { EquipmentType, StopType } from '@/generated/prisma/client'
 // 9-money means that is the only place it can happen. A model that returns
 // `1850.5` as a number has already made a rounding decision nobody reviewed.
 // ---------------------------------------------------------------------------
-
-/** How sure the model is. Three buckets, because a percentage invites false precision. */
-export type Confidence = 'high' | 'medium' | 'low'
-
-export const CONFIDENCES: readonly Confidence[] = ['high', 'medium', 'low']
-
-export interface Field<T> {
-  value: T
-  confidence: Confidence
-  /** Where on the document it was read, when the model can say. For a human. */
-  note?: string
-}
-
-/** A field the document did not carry. Absent, never a guessed default. */
-export type Maybe<T> = Field<T> | null
 
 export interface ExtractedStop {
   type: Maybe<StopType>

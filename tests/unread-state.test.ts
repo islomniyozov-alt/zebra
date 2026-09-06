@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import { stateFor } from '@/lib/inbound-email'
 import { isEmptyReading } from '@/lib/extraction/parse'
-import type { Extracted } from '@/lib/extraction-shape'
+import type { Extracted } from '@/lib/extraction/rate-con-shape'
 
 // ---------------------------------------------------------------------------
 // THREE KINDS OF NOTHING, TOLD APART.

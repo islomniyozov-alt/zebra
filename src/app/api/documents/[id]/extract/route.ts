@@ -24,7 +24,7 @@ import {
   type FacilityMemory,
 } from '@/lib/facility-memory'
 import { can } from '@/lib/permissions'
-import type { ExtractedStop } from '@/lib/extraction-shape'
+import type { ExtractedStop } from '@/lib/extraction/rate-con-shape'
 import type { TxClient } from '@/lib/tenancy'
 import { apiError, authFailureResponse } from '../../../_lib/respond'
 

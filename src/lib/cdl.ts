@@ -1,4 +1,4 @@
-import type { Confidence } from './extraction-shape'
+import type { Confidence } from './extraction/envelope'
 import { codeList, refuseCdl, type CdlRefusal } from './extraction/cdl-refusal'
 import type { ExtractedCdl } from './extraction/cdl-shape'
 
@@ -23,7 +23,7 @@ import type { ExtractedCdl } from './extraction/cdl-shape'
 // leaving somebody to conclude the upload failed.
 //
 // WHAT IT NEEDS WHEN A CARD ARRIVES: the fields below, a JSON Schema written
-// out (not derived — see extraction-shape.ts on why), a system prompt, and a
+// out (not derived — see rate-con-shape.ts on why), a system prompt, and a
 // refusal rule. `extraction.ts` treats "no stops" as a failed extraction
 // because a rate confirmation without a lane was not read; the CDL's spine is
 // LICENCE NUMBER AND EXPIRY, and a card yielding neither was not read either.

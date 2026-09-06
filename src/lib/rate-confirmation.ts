@@ -1,14 +1,14 @@
 import { costMilliCents, type Usage } from './claude'
 import { askModel } from './model-engine'
 import type { AskResult } from './claude'
-import { EXTRACTION_SCHEMA } from './extraction-shape'
+import { EXTRACTION_SCHEMA } from './extraction/rate-con-shape'
 import {
   ExtractionParseError,
   moneyToCents,
   parseExtraction,
   type ExtractedMoneyCents,
 } from './extraction/parse'
-import type { Extracted } from './extraction-shape'
+import type { Extracted } from './extraction/rate-con-shape'
 import type { TxClient } from './tenancy'
 
 // ---------------------------------------------------------------------------

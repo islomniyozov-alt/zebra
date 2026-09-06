@@ -1,4 +1,4 @@
-import type { Confidence } from '../extraction-shape'
+import type { Confidence } from './envelope'
 import type { ExtractedCdl } from './cdl-shape'
 
 // ---------------------------------------------------------------------------

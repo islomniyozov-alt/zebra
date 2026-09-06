@@ -2,11 +2,10 @@ import { MoneyFormatError, parseMoneyToCents } from '../money'
 import {
   CONFIDENCES,
   type Confidence,
-  type Extracted,
-  type ExtractedStop,
   type Field,
   type Maybe,
-} from '../extraction-shape'
+} from './envelope'
+import type { Extracted, ExtractedStop } from './rate-con-shape'
 import type { EquipmentType, StopType } from '@/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
