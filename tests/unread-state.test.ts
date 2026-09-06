@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import { stateFor } from '@/lib/inbound-email'
-import { isEmptyReading } from '@/lib/extraction'
+import { isEmptyReading } from '@/lib/extraction/parse'
 import type { Extracted } from '@/lib/extraction-shape'
 
 // ---------------------------------------------------------------------------

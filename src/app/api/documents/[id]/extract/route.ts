@@ -12,7 +12,7 @@ import {
   formatCostMilliCents,
   isPricedModel,
 } from '@/lib/claude'
-import { withoutMoney } from '@/lib/extraction'
+import { withoutMoney } from '@/lib/extraction/parse'
 import {
   noteAliasApplied,
   normalizeAlias,

@@ -7,7 +7,7 @@ import {
   parseExtraction,
   parseResponseText,
   withoutMoney,
-} from '@/lib/extraction'
+} from '@/lib/extraction/parse'
 import {
   EXTRACTED_FIELDS,
   EXTRACTION_SCHEMA,

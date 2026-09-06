@@ -1,4 +1,4 @@
-import { MoneyFormatError, parseMoneyToCents } from './money'
+import { MoneyFormatError, parseMoneyToCents } from '../money'
 import {
   CONFIDENCES,
   type Confidence,
@@ -6,7 +6,7 @@ import {
   type ExtractedStop,
   type Field,
   type Maybe,
-} from './extraction-shape'
+} from '../extraction-shape'
 import type { EquipmentType, StopType } from '@/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
