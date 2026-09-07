@@ -420,6 +420,10 @@ const en = {
   'drivers.cdl.endorsements': 'Endorsements',
   'drivers.cdl.restrictions': 'Restrictions',
   'drivers.cdl.none': 'None',
+  'drivers.cdl.codeUnread':
+    'A code is printed here and could not be read. It has not been guessed at — check the card.',
+  'drivers.cdl.codeUnknown':
+    'Read clearly, but not a code this system knows. States add their own, so this is not necessarily wrong.',
   'drivers.cdl.temporary': 'Temporary credential',
   'drivers.cdl.temporaryBody':
     'This card is marked temporary or interim. It expires far sooner than a permanent licence — check the expiry below before saving.',
@@ -2129,6 +2133,10 @@ const ru: Dictionary = {
   'drivers.cdl.endorsements': 'Допуски',
   'drivers.cdl.restrictions': 'Ограничения',
   'drivers.cdl.none': 'Нет',
+  'drivers.cdl.codeUnread':
+    'Здесь напечатан код, который не удалось прочитать. Он не был угадан — проверьте карточку.',
+  'drivers.cdl.codeUnknown':
+    'Прочитан чётко, но это не известный системе код. Штаты добавляют свои, так что он не обязательно неверный.',
   'drivers.cdl.temporary': 'Временный документ',
   'drivers.cdl.temporaryBody':
     'Карточка отмечена как временная. Срок её действия намного короче постоянных прав — проверьте дату ниже, прежде чем сохранять.',
@@ -3833,6 +3841,10 @@ const fa: Dictionary = {
   'drivers.cdl.endorsements': 'مجوزها',
   'drivers.cdl.restrictions': 'محدودیت‌ها',
   'drivers.cdl.none': 'ندارد',
+  'drivers.cdl.codeUnread':
+    'کدی اینجا چاپ شده که خوانده نشد. حدس زده نشده است — کارت را بررسی کنید.',
+  'drivers.cdl.codeUnknown':
+    'واضح خوانده شد، اما کدی نیست که این سامانه بشناسد. ایالت‌ها کدهای خود را دارند، پس لزوماً نادرست نیست.',
   'drivers.cdl.temporary': 'مدرک موقت',
   'drivers.cdl.temporaryBody':
     'این کارت موقت است و اعتبار آن بسیار کوتاه‌تر از گواهی‌نامهٔ دائمی است — پیش از ثبت، تاریخ انقضا را بررسی کنید.',

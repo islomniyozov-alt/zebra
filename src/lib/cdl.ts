@@ -3,7 +3,12 @@ import type { Confidence } from './extraction/envelope'
 import { askModel } from './model-engine'
 import { parseCdlResponse } from './extraction/cdl-parse'
 import { CDL_EXTRACTION_SYSTEM_WITH_SCHEMA } from './extraction/cdl-prompt'
-import { codeList, refuseCdl, type CdlRefusal } from './extraction/cdl-refusal'
+import {
+  codeList,
+  refuseCdl,
+  type CdlRefusal,
+  type CodeReadout,
+} from './extraction/cdl-refusal'
 import { operationalClass } from './extraction/cdl-class'
 import type { ExtractedCdl } from './extraction/cdl-shape'
 
@@ -226,8 +231,9 @@ export function cdlPrefill(fields: ExtractedCdl): Record<string, string> {
  */
 export interface CdlNotes {
   isTemporary: boolean
-  endorsements: string[]
-  restrictions: string[]
+  /** One entry per code, each with its own confidence and recognition flag. */
+  endorsements: CodeReadout[]
+  restrictions: CodeReadout[]
   /**
    * What field 9 actually said, kept beside the class the form was given.
    *
@@ -247,8 +253,8 @@ export interface CdlNotes {
 export function cdlNotes(fields: ExtractedCdl): CdlNotes {
   return {
     isTemporary: fields.isTemporary?.value === true,
-    endorsements: codeList(fields.endorsements?.value),
-    restrictions: codeList(fields.restrictions?.value),
+    endorsements: codeList('endorsement', fields.endorsements),
+    restrictions: codeList('restriction', fields.restrictions),
     classPrinted: fields.class?.value?.trim() || null,
   }
 }

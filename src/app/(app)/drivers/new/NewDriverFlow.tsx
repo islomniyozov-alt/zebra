@@ -48,6 +48,8 @@ interface Props {
     endorsements: string
     restrictions: string
     none: string
+    codeUnread: string
+    codeUnknown: string
     temporary: string
     temporaryBody: string
     notices: Record<string, string>
@@ -65,10 +67,16 @@ interface Props {
  * dispatcher sees what the card said", which was true of the payload and not
  * of any pixel.
  */
+interface CodeReadout {
+  code: string | null
+  confidence: 'high' | 'medium' | 'low'
+  recognised: boolean
+}
+
 interface CardNotes {
   isTemporary: boolean
-  endorsements: string[]
-  restrictions: string[]
+  endorsements: CodeReadout[]
+  restrictions: CodeReadout[]
   classPrinted: string | null
 }
 
@@ -145,8 +153,50 @@ export function NewDriverFlow({
 
   if (confirming) {
     const notes = read?.notes
-    const codes = (list: readonly string[] | undefined) =>
-      list && list.length > 0 ? list.join(', ') : labels.none
+    // ── ONE CHIP PER CODE, EACH SAYING WHAT IT KNOWS ABOUT ITSELF ─────────
+    //
+    // A joined string was the old rendering and could express none of this: a
+    // code the reader could not make out, or a code that is real text this
+    // system does not recognise. Ten runs of one card returned five different
+    // first restrictions under a single confidence for the whole list — the
+    // shape is per code now, so the display is too.
+    const codes = (list: readonly CodeReadout[] | undefined) => {
+      if (!list || list.length === 0) {
+        return <span className="text-ink-3">{labels.none}</span>
+      }
+      return (
+        <span className="flex flex-wrap gap-z1">
+          {list.map((entry, index) => (
+            <span
+              key={index}
+              // UNREAD IS NOT UNRECOGNISED, and they must not look alike: one
+              // is "a code is printed here and could not be made out", the
+              // other is "read clearly, and not a code we know".
+              title={
+                entry.code === null
+                  ? labels.codeUnread
+                  : entry.recognised
+                    ? undefined
+                    : labels.codeUnknown
+              }
+              className={cx(
+                'rounded-control border px-z1 font-mono text-xs',
+                entry.code === null
+                  ? 'border-dashed border-warning text-warning'
+                  : entry.recognised
+                    ? 'border-border text-ink'
+                    : 'border-warning text-warning',
+              )}
+            >
+              {entry.code ?? '??'}
+              {entry.confidence === 'high' ? null : (
+                <span className="ms-z1 text-ink-3">{entry.confidence}</span>
+              )}
+            </span>
+          ))}
+        </span>
+      )
+    }
 
     // THE PRINTED CLASS RIDES ON THE FIELD IT QUALIFIES. `AM` maps to `A` and
     // the two are not the same statement — the dispatcher confirming this form

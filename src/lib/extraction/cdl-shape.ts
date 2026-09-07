@@ -45,6 +45,15 @@ import type { Field, Maybe } from './envelope'
 // discarded. See both fields below.
 // ---------------------------------------------------------------------------
 
+/**
+ * One code off the card, with how sure the reader is of THAT code.
+ *
+ * The shared envelope applied per element rather than around the array — see
+ * `restrictions` below for the measurement that forced it. `value: null` is a
+ * code that is printed and unreadable.
+ */
+export type CodeReading = Field<string | null>
+
 export interface ExtractedCdl {
   /**
    * AAMVA field `4d`. The licence number, and ONLY from 4d.
@@ -136,10 +145,33 @@ export interface ExtractedCdl {
    * and the smallest thing that answers it is a state code.
    */
   addressStateCode: Maybe<string>
-  /** AAMVA `12`. Restriction codes. `NONE` on the card means an empty array. */
-  restrictions: Field<string[]> | null
-  /** AAMVA `9a`. Endorsement codes — H, N, T, P, S, X. Same NONE rule. */
-  endorsements: Field<string[]> | null
+  /**
+   * AAMVA `12`. Restriction codes, ONE ENVELOPE PER CODE.
+   *
+   * ── WHY THE CONFIDENCE MOVED ONTO THE ELEMENTS ──────────────────────────
+   *
+   * This was `Field<string[]>` — one confidence for the whole list — and ten
+   * runs of one Georgia card measured what that costs. The card prints two
+   * codes; the second came back `M` on all ten runs and the first came back
+   * `A`, `B`, `E`, `O` and `5`. Seven of those runs reported `high` for the
+   * field, carrying four mutually exclusive first codes.
+   *
+   * A single confidence had to cover a certain element and an illegible one,
+   * and it reported the best case. Per element, the `M` can stay `high` while
+   * the glyph under glare says `low` — which is the true statement, and the
+   * one a dispatcher can act on. `EXTRACTION-CONTRACT.md` has the numbers.
+   *
+   * `value: null` ON AN ELEMENT MEANS A CODE IS PRINTED HERE AND COULD NOT BE
+   * READ. That is not the same as the list being absent, and it is emphatically
+   * not the same as guessing a letter: a guessed character on a legal document
+   * is the VIN-with-an-O error — a value every check downstream will trust.
+   *
+   * An EMPTY array is the card printing NONE. `null` for the whole field is a
+   * card that was not read here at all.
+   */
+  restrictions: CodeReading[] | null
+  /** AAMVA `9a`. Endorsement codes, one envelope per code. Same rules. */
+  endorsements: CodeReading[] | null
   /**
    * A temporary or interim credential rather than a permanent card.
    *
@@ -171,6 +203,26 @@ const field = (type: unknown, extra: Record<string, unknown> = {}) => ({
   additionalProperties: false,
 })
 
+/**
+ * A list of code envelopes: `[{value, confidence}, ...]`, or null.
+ *
+ * `value` is nullable ON PURPOSE — it is how the model says "a code is printed
+ * here and I cannot read it" instead of picking a letter.
+ */
+const codeList = () => ({
+  type: ['array', 'null'],
+  items: {
+    type: 'object',
+    properties: {
+      value: { type: ['string', 'null'] },
+      confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+      note: { type: 'string' },
+    },
+    required: ['value', 'confidence'],
+    additionalProperties: false,
+  },
+})
+
 export const CDL_SCHEMA = {
   type: 'object',
   properties: {
@@ -188,8 +240,11 @@ export const CDL_SCHEMA = {
     addressCity: field({ type: 'string' }),
     addressPostalCode: field({ type: 'string' }),
     addressStateCode: field({ type: 'string' }),
-    restrictions: field({ type: 'array', items: { type: 'string' } }),
-    endorsements: field({ type: 'array', items: { type: 'string' } }),
+    // ONE ENVELOPE PER CODE, and NO enum of known codes anywhere in here.
+    // `cdl-codes.ts` checks recognition AFTER the read; telling the model
+    // which codes exist is what turned `AM` into `A`.
+    restrictions: codeList(),
+    endorsements: codeList(),
     isTemporary: field({ type: 'boolean' }),
   },
   required: [

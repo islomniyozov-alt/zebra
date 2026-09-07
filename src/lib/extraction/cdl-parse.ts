@@ -1,5 +1,5 @@
 import { CONFIDENCES, type Confidence, type Maybe } from './envelope'
-import type { ExtractedCdl } from './cdl-shape'
+import type { CodeReading, ExtractedCdl } from './cdl-shape'
 import { ExtractionParseError, parseResponseText } from './parse'
 
 // ---------------------------------------------------------------------------
@@ -27,6 +27,14 @@ import { ExtractionParseError, parseResponseText } from './parse'
 // ---------------------------------------------------------------------------
 
 type Json = Record<string, unknown>
+
+/** A confidence, or a refusal. Shared by `readField` and `readCodeList`. */
+const asConfidence = (value: unknown, at: string): Confidence => {
+  if (typeof value !== 'string' || !CONFIDENCES.includes(value as Confidence)) {
+    throw new ExtractionParseError('bad_confidence', at)
+  }
+  return value as Confidence
+}
 
 /** `{value, confidence}` or null. Anything else refuses rather than coerces. */
 function readField<T>(
@@ -84,15 +92,44 @@ const asBoolean = (value: unknown, at: string): boolean => {
   return value
 }
 
-const asCodes = (value: unknown, at: string): string[] => {
-  // AN ARRAY, EVEN FOR ONE CODE. A model that returns `"H"` where `["H"]`
-  // belongs has decided the shape for us, and the next response with two
-  // endorsements would arrive as `"H, N"` — a string this system would then
-  // have to guess how to split.
-  if (!Array.isArray(value)) {
-    throw new ExtractionParseError('bad_value_type', at)
-  }
-  return value.map((code) => asString(code, at))
+/**
+ * A list of code envelopes, read straight off the response.
+ *
+ * NOT `readField`, BECAUSE THE ARRAY IS NOT WRAPPED. The confidence lives on
+ * each element rather than around the list — see `cdl-shape.ts` for the ten
+ * runs that forced it — so this is an array of `{value, confidence}` and not a
+ * `Field<string[]>`.
+ *
+ * AN ARRAY, EVEN FOR ONE CODE. A model that returns `"H"` where `[...]`
+ * belongs has decided the shape for us, and the next response with two
+ * endorsements would arrive as `"H, N"` — a string this system would then have
+ * to guess how to split.
+ */
+const readCodeList = (parent: Json, key: string): CodeReading[] | null => {
+  const at = `$.${key}`
+  if (!(key in parent)) throw new ExtractionParseError('missing_field', at)
+  const raw = parent[key]
+  if (raw === null) return null
+  if (!Array.isArray(raw)) throw new ExtractionParseError('bad_value_type', at)
+
+  return raw.map((entry, index) => {
+    const where = `${at}[${index}]`
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      // A BARE STRING IS THE OLD SHAPE. Refused rather than promoted into an
+      // envelope with a confidence nobody stated: inventing `high` here is the
+      // exact failure the per-element change exists to end.
+      throw new ExtractionParseError('bad_field_shape', where)
+    }
+    const record = entry as Json
+    if (!('value' in record) || !('confidence' in record)) {
+      throw new ExtractionParseError('bad_field_shape', where)
+    }
+    // `value: null` IS LEGITIMATE AND LOAD-BEARING: a code is printed here and
+    // could not be read. Anything other than a string or null is a shape error.
+    const value =
+      record['value'] === null ? null : asString(record['value'], where)
+    return { value, confidence: asConfidence(record['confidence'], where) }
+  })
 }
 
 /**
@@ -129,8 +166,8 @@ export function parseCdlResponse(text: string): ExtractedCdl {
     addressCity: readField(root, 'addressCity', asString),
     addressPostalCode: readField(root, 'addressPostalCode', asString),
     addressStateCode: readField(root, 'addressStateCode', asString),
-    restrictions: readField(root, 'restrictions', asCodes),
-    endorsements: readField(root, 'endorsements', asCodes),
+    restrictions: readCodeList(root, 'restrictions'),
+    endorsements: readCodeList(root, 'endorsements'),
     isTemporary: readField(root, 'isTemporary', asBoolean),
   }
 }

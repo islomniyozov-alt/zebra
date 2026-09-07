@@ -30,8 +30,8 @@ const GOOD = JSON.stringify({
   addressCity: { value: 'SUGARHILL', confidence: 'high' },
   addressPostalCode: { value: '30518-7869', confidence: 'high' },
   addressStateCode: { value: 'FL', confidence: 'high' },
-  restrictions: { value: [], confidence: 'high' },
-  endorsements: { value: ['N'], confidence: 'medium' },
+  restrictions: [],
+  endorsements: [{ value: 'N', confidence: 'medium' }],
   isTemporary: { value: false, confidence: 'high' },
 })
 
@@ -65,7 +65,7 @@ describe('a well-formed licence response', () => {
     })
     expect(card.class?.value).toBe('A')
     expect(card.isTemporary?.value).toBe(false)
-    expect(card.endorsements?.value).toEqual(['N'])
+    expect(card.endorsements).toEqual([{ value: 'N', confidence: 'medium' }])
   })
 
   it('passes the refusal rules and prefills the form', () => {
@@ -325,25 +325,59 @@ describe('the printed class, and what it means operationally', () => {
 })
 
 describe('NONE, which is not a code', () => {
+  const code = (value: string | null, confidence = 'high') => ({
+    value,
+    confidence,
+  })
+
   it('reads NONE as no endorsements at all', () => {
-    const card = parseCdlResponse(
-      withField('endorsements', { value: ['NONE'], confidence: 'high' }),
-    )
+    const card = parseCdlResponse(withField('endorsements', [code('NONE')]))
     // It PARSES — NONE is a legitimate string on the card — and becomes an
     // empty list where the form is told about it. Carried through it would
     // read, on a compliance screen, as a driver holding something.
-    expect(card.endorsements?.value).toEqual(['NONE'])
+    expect(card.endorsements).toEqual([{ value: 'NONE', confidence: 'high' }])
     expect(cdlNotes(card).endorsements).toEqual([])
   })
 
   it('keeps real codes beside it', () => {
     const card = parseCdlResponse(
-      withField('endorsements', {
-        value: ['H', 'NONE', 'n'],
-        confidence: 'high',
-      }),
+      withField('endorsements', [code('H'), code('NONE'), code('n')]),
     )
-    expect(cdlNotes(card).endorsements).toEqual(['H', 'N'])
+    expect(cdlNotes(card).endorsements).toEqual([
+      { code: 'H', confidence: 'high', recognised: true },
+      { code: 'N', confidence: 'high', recognised: true },
+    ])
+  })
+})
+
+describe('a code list that is not a list of envelopes', () => {
+  const codes = (value: unknown) => withField('endorsements', value)
+
+  it('refuses a bare string where an envelope belongs', () => {
+    // THE OLD SHAPE, REFUSED RATHER THAN PROMOTED. Wrapping `"H"` into
+    // `{value:"H", confidence:"high"}` would invent a certainty nobody stated,
+    // which is the exact failure per-element confidence exists to end.
+    expect(refusalOf(codes(['H']))).toBe('bad_field_shape')
+  })
+
+  it('refuses an envelope with no confidence', () => {
+    expect(refusalOf(codes([{ value: 'H' }]))).toBe('bad_field_shape')
+  })
+
+  it('refuses a confidence outside the three buckets', () => {
+    expect(refusalOf(codes([{ value: 'H', confidence: 0.9 }]))).toBe(
+      'bad_confidence',
+    )
+  })
+
+  it('refuses a string where the whole list belongs', () => {
+    expect(refusalOf(codes('H, N'))).toBe('bad_value_type')
+  })
+
+  it('accepts null as the whole list, meaning the field was not read', () => {
+    const card = parseCdlResponse(codes(null))
+    expect(card.endorsements).toBeNull()
+    expect(cdlNotes(card).endorsements).toEqual([])
   })
 })
 

@@ -131,21 +131,78 @@ describe('the state, read twice', () => {
 })
 
 describe('endorsement and restriction codes', () => {
+  // ONE ENVELOPE PER CODE. Ten runs of one Georgia card returned five
+  // different first restrictions under a single `high` for the whole list —
+  // the confidence now sits on each code, and so does recognition.
+  const read = (
+    value: string | null,
+    confidence: 'high' | 'medium' | 'low' = 'high',
+  ) => ({ value, confidence })
+
   it('turns NONE into an empty list rather than a code', () => {
     // Carried through, it becomes an endorsement called NONE — which reads on
     // a compliance screen as a driver holding something.
-    expect(codeList(['NONE'])).toEqual([])
-    expect(codeList(['N/A'])).toEqual([])
-    expect(codeList([])).toEqual([])
-    expect(codeList(null)).toEqual([])
+    expect(codeList('endorsement', [read('NONE')])).toEqual([])
+    expect(codeList('endorsement', [read('N/A')])).toEqual([])
+    expect(codeList('endorsement', [])).toEqual([])
+    expect(codeList('endorsement', null)).toEqual([])
   })
 
-  it('keeps real codes, uppercased and trimmed', () => {
-    expect(codeList([' h ', 'n', 'T'])).toEqual(['H', 'N', 'T'])
+  it('keeps real codes, uppercased and trimmed, each with its own confidence', () => {
+    expect(
+      codeList('endorsement', [read(' h '), read('n', 'medium'), read('T')]),
+    ).toEqual([
+      { code: 'H', confidence: 'high', recognised: true },
+      { code: 'N', confidence: 'medium', recognised: true },
+      { code: 'T', confidence: 'high', recognised: true },
+    ])
   })
 
   it('drops NONE from a list that also has codes', () => {
-    expect(codeList(['H', 'NONE'])).toEqual(['H'])
+    expect(codeList('endorsement', [read('H'), read('NONE')])).toEqual([
+      { code: 'H', confidence: 'high', recognised: true },
+    ])
+  })
+
+  it('keeps an unreadable code as unread rather than dropping or guessing it', () => {
+    // A GUESSED CHARACTER ON A LEGAL DOCUMENT is the VIN-with-an-O error. The
+    // entry survives so the COUNT of codes stays right and somebody can see
+    // that a code is printed there.
+    expect(codeList('restriction', [read('M'), read(null, 'low')])).toEqual([
+      { code: 'M', confidence: 'high', recognised: true },
+      { code: null, confidence: 'low', recognised: true },
+    ])
+  })
+
+  it('flags a code it does not recognise, and never corrects it', () => {
+    // The five first-codes the real card produced across ten runs: E, O and M
+    // are federal restrictions; A, B and 5 are not. Every one is carried
+    // through UNCHANGED — `5` does not become `S`.
+    expect(
+      codeList('restriction', [read('E'), read('O'), read('A'), read('5')]),
+    ).toEqual([
+      { code: 'E', confidence: 'high', recognised: true },
+      { code: 'O', confidence: 'high', recognised: true },
+      { code: 'A', confidence: 'high', recognised: false },
+      { code: '5', confidence: 'high', recognised: false },
+    ])
+  })
+
+  it('recognises against the right vocabulary for each kind', () => {
+    // P is an endorsement and not a restriction; O is the reverse. A single
+    // shared list would call both of them fine.
+    expect(codeList('endorsement', [read('P')])[0]!.recognised).toBe(true)
+    expect(codeList('restriction', [read('P')])[0]!.recognised).toBe(false)
+    expect(codeList('restriction', [read('O')])[0]!.recognised).toBe(true)
+    expect(codeList('endorsement', [read('O')])[0]!.recognised).toBe(false)
+  })
+
+  it('does not call an unread code unrecognised', () => {
+    // There is nothing to recognise, and a warning on a blank is noise that
+    // teaches people to ignore the warning that matters.
+    expect(codeList('restriction', [read(null, 'low')])[0]!.recognised).toBe(
+      true,
+    )
   })
 })
 

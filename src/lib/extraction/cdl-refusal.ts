@@ -1,6 +1,8 @@
 import type { Confidence } from './envelope'
 import type { ExtractedCdl } from './cdl-shape'
 import { operationalClass } from './cdl-class'
+import { isKnownCode, type CodeKind } from './cdl-codes'
+import type { CodeReading } from './cdl-shape'
 
 // ---------------------------------------------------------------------------
 // WHEN A CARD WAS NOT READ — WHICH IS DIFFERENT FROM READ AND EMPTY.
@@ -119,15 +121,55 @@ export function refuseCdl(fields: ExtractedCdl): CdlRefusal | null {
 }
 
 /**
- * "NONE" is an empty list, never a code.
+ * The codes on a card, each with how sure the reader was and whether this
+ * system recognises it.
  *
- * The card prints the word where a driver has no endorsements or no
- * restrictions. Carried through as a string it becomes an endorsement called
- * NONE — which reads, on a compliance screen, as a driver holding something.
+ * ── THREE THINGS THAT USED TO BE ONE STRING ───────────────────────────────
+ *
+ * This took `string[]`, upper-cased it and dropped `NONE`. It now takes an
+ * envelope per code, because ten runs of one card returned five different
+ * first codes under a single `high` for the whole list. See `cdl-shape.ts`.
+ *
+ * "NONE" IS AN EMPTY LIST, NEVER A CODE. The card prints the word where a
+ * driver has none. Carried through it becomes an endorsement called NONE,
+ * which reads on a compliance screen as a driver holding something.
+ *
+ * AN UNREADABLE CODE SURVIVES AS `code: null`. It is not dropped — a dispatcher
+ * needs to know a code is printed there — and it is not guessed at, because a
+ * guessed character on a legal document is a value every downstream check will
+ * trust. The VIN rules make the same argument about a letter `O`.
+ *
+ * RECOGNITION IS A FLAG, NEVER A CORRECTION. `recognised: false` says this
+ * list does not know the code; states add their own, so that is not the same
+ * as invalid, and nothing here snaps `5` to `S`.
  */
-export function codeList(raw: readonly string[] | null | undefined): string[] {
+export interface CodeReadout {
+  /** The code as printed, upper-cased, or null when it could not be read. */
+  code: string | null
+  confidence: Confidence
+  /** False when the code is real text this system does not recognise. */
+  recognised: boolean
+}
+
+export function codeList(
+  kind: CodeKind,
+  raw: readonly CodeReading[] | null | undefined,
+): CodeReadout[] {
   if (!raw) return []
   return raw
-    .map((code) => code.trim().toUpperCase())
-    .filter((code) => code !== '' && code !== 'NONE' && code !== 'N/A')
+    .filter((entry) => {
+      const text = entry.value?.trim().toUpperCase()
+      // NONE and N/A are the card saying "no codes", not codes themselves.
+      return text !== 'NONE' && text !== 'N/A' && text !== ''
+    })
+    .map((entry) => {
+      const code = entry.value?.trim().toUpperCase() ?? null
+      return {
+        code,
+        confidence: entry.confidence,
+        // An unread code is not "unrecognised" — there is nothing to
+        // recognise. Saying otherwise would put a warning on a blank.
+        recognised: code === null ? true : isKnownCode(kind, code),
+      }
+    })
 }
