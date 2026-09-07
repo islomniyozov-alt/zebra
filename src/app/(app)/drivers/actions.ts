@@ -20,6 +20,9 @@ function read(formData: FormData) {
     addressCity: formData.get('addressCity'),
     addressState: formData.get('addressState'),
     addressPostalCode: formData.get('addressPostalCode'),
+    // The confirm step's tick, and the marker saying it was asked for.
+    codesPresented: formData.get('codesPresented'),
+    codesConfirmed: formData.get('codesConfirmed'),
     cdlNumber: formData.get('cdlNumber'),
     cdlState: formData.get('cdlState'),
     cdlClass: formData.get('cdlClass'),

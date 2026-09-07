@@ -27,6 +27,19 @@ export type ReferenceFailure =
   | 'truck_other_authority'
   /** A stop whose arrival window ends before it starts (Phase 5). */
   | 'window_inverted'
+  /**
+   * Codes were read off a licence and nobody confirmed them against the card.
+   *
+   * RECOGNITION IS NOT THE GATE, AND THIS IS WHY. Two batches of ten runs over
+   * one Georgia card produced seven different letters for one printed glyph —
+   * and `E` and `O` were among them. Both are REAL restriction codes, so a
+   * recognition check waves them through; it caught nine of ten in the second
+   * batch by luck of which letters the model happened to guess. A check whose
+   * success depends on the shape of the error is not a check.
+   *
+   * So the codes are never auto-accepted. A person says they match the card.
+   */
+  | 'codes_unconfirmed'
 
 export class ReferenceError extends Error {
   readonly code: ReferenceFailure
@@ -57,6 +70,7 @@ export const REFERENCE_ERROR_KEYS: Record<ReferenceFailure, MessageKey> = {
   number_taken_since: 'ref.error.numberTakenSince',
   truck_other_authority: 'ref.error.truckOtherAuthority',
   window_inverted: 'ref.error.windowInverted',
+  codes_unconfirmed: 'ref.error.codesUnconfirmed',
 }
 
 /**

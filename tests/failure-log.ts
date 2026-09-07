@@ -1,4 +1,10 @@
-import { appendFileSync, mkdirSync, rmSync } from 'node:fs'
+import {
+  appendFileSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname } from 'node:path'
 
 // ---------------------------------------------------------------------------
@@ -68,5 +74,44 @@ export function recordFailure(line: string): void {
   } catch {
     // NEVER THROW FROM THE RECORDER. A logging failure that fails the run
     // would be this file causing the outage it exists to explain.
+  }
+}
+
+/**
+ * Where the reporter records how many test cases executed.
+ *
+ * BESIDE THE FAILURE LOG AND FOR THE SAME REASON: the gate spawns vitest with
+ * inherited stdio, so there is no output to parse, and a count written by the
+ * reporter is a count of what actually ran rather than a description of it.
+ */
+export const RUN_COUNT_FILE = `${FAILURE_LOG}.count`
+
+/** Overwrites, never appends — one run, one count. Zero is the useful case. */
+export function writeRunCount(ran: number): void {
+  try {
+    mkdirSync(dirname(RUN_COUNT_FILE), { recursive: true })
+    writeFileSync(RUN_COUNT_FILE, String(ran))
+  } catch {
+    // A count that will not write must not fail a suite that passed. The gate
+    // treats a missing count as "unknown" rather than as zero — see
+    // `readRunCount`.
+  }
+}
+
+/**
+ * How many tests the last run executed, or null when nothing said.
+ *
+ * NULL IS NOT ZERO. Zero means the reporter ran and saw no test; null means
+ * the count is missing, and inferring "nothing ran" from a missing file would
+ * turn every unrelated write failure into a false diagnosis.
+ */
+export function readRunCount(): number | null {
+  try {
+    const text = readFileSync(RUN_COUNT_FILE, 'utf8').trim()
+    if (text === '') return null
+    const value = Number(text)
+    return Number.isInteger(value) && value >= 0 ? value : null
+  } catch {
+    return null
   }
 }

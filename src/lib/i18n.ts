@@ -324,6 +324,12 @@ const en = {
   'ref.error.invalidAuthority': 'Choose an authority you work under.',
   'ref.error.truckOtherAuthority':
     'That truck runs under a different authority. A driver and their truck must be under the same one — transfer the truck first, or pick another.',
+  'ref.error.codesUnconfirmed':
+    'Confirm the endorsements and restrictions against the card before saving.',
+  'drivers.cdl.confirmCodes':
+    'These endorsements and restrictions match the card',
+  'drivers.cdl.confirmCodesHint':
+    'Read off the licence and not reliable on their own — the same card has produced seven different restriction codes across repeated reads, most of them at high confidence. Check them against the card in front of you.',
   'ref.error.windowInverted':
     'That stop’s arrival window ends before it starts. Check the times.',
   'ref.error.sameAuthority': 'It already works under that authority.',
@@ -2038,6 +2044,11 @@ const ru: Dictionary = {
   'ref.error.invalidAuthority': 'Выберите перевозчика, с которым вы работаете.',
   'ref.error.truckOtherAuthority':
     'Этот тягач числится за другим перевозчиком. Водитель и его тягач должны быть под одним — сначала переведите тягач или выберите другой.',
+  'ref.error.codesUnconfirmed':
+    'Подтвердите допуски и ограничения по карточке перед сохранением.',
+  'drivers.cdl.confirmCodes': 'Эти допуски и ограничения совпадают с карточкой',
+  'drivers.cdl.confirmCodesHint':
+    'Считаны с прав и сами по себе ненадёжны — одна и та же карточка дала семь разных кодов ограничений при повторных чтениях, большинство с высокой уверенностью. Сверьте их с карточкой.',
   'ref.error.windowInverted':
     'Окно прибытия на этой остановке заканчивается раньше, чем начинается. Проверьте время.',
   'ref.error.sameAuthority': 'Уже работает под этим перевозчиком.',
@@ -3746,6 +3757,11 @@ const fa: Dictionary = {
   'ref.error.invalidAuthority': 'شرکتی را انتخاب کنید که با آن کار می‌کنید.',
   'ref.error.truckOtherAuthority':
     'این کامیون زیر شرکت دیگری کار می‌کند. راننده و کامیونش باید زیر یک شرکت باشند — نخست کامیون را منتقل کنید یا کامیون دیگری برگزینید.',
+  'ref.error.codesUnconfirmed':
+    'پیش از ذخیره، مجوزها و محدودیت‌ها را با کارت تطبیق دهید.',
+  'drivers.cdl.confirmCodes': 'این مجوزها و محدودیت‌ها با کارت مطابقت دارند',
+  'drivers.cdl.confirmCodesHint':
+    'از روی گواهی‌نامه خوانده شده و به‌تنهایی قابل اتکا نیست — همان کارت در خواندن‌های مکرر هفت کد محدودیت متفاوت داده است. آن‌ها را با کارت بررسی کنید.',
   'ref.error.windowInverted':
     'بازهٔ ورود این توقف پیش از آغازش پایان می‌یابد. زمان‌ها را بررسی کنید.',
   'ref.error.sameAuthority': 'هم‌اکنون زیر نظر همان شرکت است.',

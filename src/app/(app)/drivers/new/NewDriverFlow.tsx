@@ -50,6 +50,8 @@ interface Props {
     none: string
     codeUnread: string
     codeUnknown: string
+    confirmCodes: string
+    confirmCodesHint: string
     temporary: string
     temporaryBody: string
     notices: Record<string, string>
@@ -203,6 +205,31 @@ export function NewDriverFlow({
     // is the last person who can notice the difference, so the card's own text
     // sits under the input holding the mapped value rather than in a panel
     // somewhere else on the screen.
+    // ── THE CODES ARE NEVER AUTO-ACCEPTED ──────────────────────────────────
+    //
+    // A required tick, appended to the form itself so the browser refuses the
+    // submit and `assertCodesConfirmed` refuses it again on the server. The
+    // hidden marker is what lets the server tell a manual entry — nothing to
+    // confirm — from a read whose box was never ticked.
+    //
+    // RECOGNITION IS NOT THE TRIGGER. Twenty reads of one card produced seven
+    // letters for one glyph, and `E` and `O` were among them: both real
+    // restriction codes, both wrong, both waved through by any recognition
+    // check. The flags beside each code are signal for the person; the gate is
+    // that a person looked.
+    const confirmFields: FieldSpec[] = notes
+      ? [
+          { kind: 'hidden', name: 'codesPresented', value: 'yes' },
+          {
+            kind: 'confirm',
+            name: 'codesConfirmed',
+            label: labels.confirmCodes,
+            hint: labels.confirmCodesHint,
+            required: true,
+          },
+        ]
+      : []
+
     const shown = notes?.classPrinted
       ? fields.map((field) =>
           field.name === 'cdlClass'
@@ -270,7 +297,7 @@ export function NewDriverFlow({
         ) : null}
 
         <RecordForm
-          fields={shown}
+          fields={[...shown, ...confirmFields]}
           values={{
             companyId,
             employmentType: 'OWNED',

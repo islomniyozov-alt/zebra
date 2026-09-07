@@ -1,5 +1,5 @@
 import type { Reporter } from 'vitest/node'
-import { recordFailure } from './failure-log'
+import { recordFailure, writeRunCount } from './failure-log'
 
 // A reporter whose only job is to survive the run it is reporting on.
 //
@@ -32,6 +32,24 @@ export default class FailureLogReporter implements Reporter {
     recordFailure(`--- run ${new Date().toISOString()} ---`)
   }
 
+  /**
+   * How many test cases actually executed.
+   *
+   * ── A NON-ZERO EXIT DOES NOT SAY WHETHER ANY TEST RAN ────────────────────
+   *
+   * On 2026-09-07 all 29 integration files failed to LOAD — "Vitest failed to
+   * find the runner", `Tests no tests` — and the deploy gate called it "the
+   * integration suite is red". Nothing was red. Nothing ran. That is the same
+   * wrong-cause failure the gate's own refusal wording was just fixed for, one
+   * layer down: the exit code cannot tell a suite that failed from a suite
+   * that never started, so the caller cannot either.
+   *
+   * Counted here rather than parsed out of stdout, because the gate inherits
+   * stdio and there is nothing to parse — and a count from the reporter is the
+   * thing that ran, not a description of it.
+   */
+  private ran = 0
+
   onTestCaseResult(testCase: {
     fullName?: string
     name?: string
@@ -40,6 +58,9 @@ export default class FailureLogReporter implements Reporter {
     result: () => { state?: string; errors?: readonly { message?: string }[] }
   }): void {
     const result = testCase.result()
+    // EVERY case that reached a result, passed or failed. A skipped test did
+    // not run and must not count towards "the suite started".
+    if (result.state === 'passed' || result.state === 'failed') this.ran++
     if (result.state !== 'failed') return
 
     const project =
@@ -50,5 +71,14 @@ export default class FailureLogReporter implements Reporter {
     recordFailure(
       `FAIL [${project}] ${where} > ${what}${why ? ` — ${why}` : ''}`,
     )
+  }
+
+  /**
+   * The count, where the gate can read it without parsing anything.
+   *
+   * WRITTEN EVEN WHEN IT IS ZERO — that is the case it exists for.
+   */
+  onTestRunEnd(): void {
+    writeRunCount(this.ran)
   }
 }

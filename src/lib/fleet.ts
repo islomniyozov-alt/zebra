@@ -88,6 +88,9 @@ export interface DriverInput {
   addressCity?: unknown
   addressState?: unknown
   addressPostalCode?: unknown
+  /** Set by the confirm step when a licence was read. See assertCodesConfirmed. */
+  codesPresented?: unknown
+  codesConfirmed?: unknown
   cdlNumber?: unknown
   cdlState?: unknown
   cdlClass?: unknown
@@ -403,6 +406,39 @@ export async function updateTrailer(
   }
 }
 
+/**
+ * A licence's codes are never accepted without a person saying they match.
+ *
+ * ── WHY THIS IS A HARD GATE AND NOT A WARNING ─────────────────────────────
+ *
+ * Twenty reads of one Georgia card produced SEVEN different letters for one
+ * printed restriction glyph: A, B, C, E, O, S and 5. Seventeen of those reads
+ * returned a letter at `high` confidence; one admitted it could not read the
+ * character. Endorsements were stable on that card, which is not a reason to
+ * trust them on the next one.
+ *
+ * AND RECOGNITION CANNOT BE THE GATE. `E` and `O` are both real restriction
+ * codes and both were wrong, so a recognition check passes them. It flagged
+ * nine of ten in one batch purely by which letters the model guessed — a check
+ * whose success depends on the shape of the error is not a check. Recognition
+ * stays as SIGNAL beside the values; the gate is a person.
+ *
+ * `codesPresented` IS WHY A HIDDEN FIELD EXISTS. Without it the server cannot
+ * tell a manual entry, which has no codes to confirm, from a read whose
+ * confirmation was never ticked — an absent checkbox looks identical either
+ * way, and defaulting to "fine" would make the gate decorative.
+ */
+export function assertCodesConfirmed(input: {
+  codesPresented?: unknown
+  codesConfirmed?: unknown
+}): void {
+  const presented = String(input.codesPresented ?? '') === 'yes'
+  if (!presented) return
+  if (String(input.codesConfirmed ?? '') !== 'yes') {
+    throw new ReferenceError('codes_unconfirmed', { field: 'codesConfirmed' })
+  }
+}
+
 // --- drivers ----------------------------------------------------------------
 //
 // No unique index on a driver: two people genuinely can share a name, and a
@@ -417,6 +453,7 @@ export async function createDriver(
 ) {
   const companyId = requiredText(input.companyId, 'companyId')
   await assertCompanyInScope(tx, companyId)
+  assertCodesConfirmed(input)
 
   const created = await tx.driver.create({
     data: {

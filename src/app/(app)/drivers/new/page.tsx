@@ -79,6 +79,8 @@ export default async function NewDriverPage() {
             none: t('drivers.cdl.none'),
             codeUnread: t('drivers.cdl.codeUnread'),
             codeUnknown: t('drivers.cdl.codeUnknown'),
+            confirmCodes: t('drivers.cdl.confirmCodes'),
+            confirmCodesHint: t('drivers.cdl.confirmCodesHint'),
             temporary: t('drivers.cdl.temporary'),
             temporaryBody: t('drivers.cdl.temporaryBody'),
             // PRE-TRANSLATED, KEYED BY THE KEY the action returns. A translator

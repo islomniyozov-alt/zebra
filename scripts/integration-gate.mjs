@@ -32,6 +32,36 @@ import { workingCopy, writeReceipt } from './integration-receipt.mjs'
  * first use.
  */
 const FAILURE_LOG = '.integration-failures.log'
+
+/**
+ * Where the reporter writes how many test cases executed.
+ *
+ * THE TWO SIDES MUST AGREE ON THIS NAME. `tests/failure-log.ts` derives it the
+ * same way — the failure log's path plus `.count` — and this file cannot
+ * import it, being .mjs to that module's TypeScript. The same standing hazard
+ * as the failure log itself, and the same answer: one convention, written down
+ * at both ends.
+ */
+const RUN_COUNT_FILE = `${FAILURE_LOG}.count`
+
+/**
+ * How many tests ran, or null when nobody said.
+ *
+ * NULL IS NOT ZERO, and the distinction decides a diagnosis. Zero means the
+ * reporter ran and saw no case; null means the count is missing, and reading
+ * "nothing ran" from a missing file would turn an unrelated write failure into
+ * a confident wrong answer.
+ */
+function readRunCount() {
+  try {
+    const text = readFileSync(RUN_COUNT_FILE, 'utf8').trim()
+    if (text === '') return null
+    const value = Number(text)
+    return Number.isInteger(value) && value >= 0 ? value : null
+  } catch {
+    return null
+  }
+}
 const SCRUBBED = ['DATABASE_URL', 'DIRECT_DATABASE_URL', 'NEON_BRANCH']
 
 // A FILE PATH, NOT A PACKAGE SPECIFIER. `require.resolve('vitest/vitest.mjs')`
@@ -243,6 +273,9 @@ export async function runIntegrationSuite() {
       child.ZEBRA_FAILURE_LOG = FAILURE_LOG
       try {
         rmSync(FAILURE_LOG, { force: true })
+        // AND THE COUNT, for the same reason: a stale count from a previous
+        // run would let a suite that never started look like one that ran.
+        rmSync(RUN_COUNT_FILE, { force: true })
       } catch {
         // A log that will not clear is one this run will append to. Not worth
         // refusing a fourteen-minute gate over.
@@ -258,6 +291,38 @@ export async function runIntegrationSuite() {
     })
 
     if (status !== 0) {
+      // ── DID ANY TEST ACTUALLY RUN? ──────────────────────────────────────
+      //
+      // A non-zero exit says the run ended badly and nothing more. On
+      // 2026-09-07 all 29 integration files failed to LOAD — `Tests no tests`
+      // — and this reported "the integration suite is red", sending the reader
+      // to debug tests that had never executed. That is the same wrong-cause
+      // failure the deploy's refusal wording was fixed for, one layer down.
+      //
+      // The COUNT comes from our own reporter (`writeRunCount`), because this
+      // spawns vitest with inherited stdio and there is nothing to parse.
+      //
+      // NULL IS NOT ZERO. A missing count means nobody said, and guessing
+      // "nothing ran" from a missing file would turn an unrelated write
+      // failure into a confident wrong diagnosis — so only a definite 0
+      // downgrades this to `not_runnable`.
+      const ran = readRunCount()
+      if (ran === 0) {
+        console.error('')
+        console.error(
+          'The suite exited non-zero and NO TEST RAN — every file failed to ' +
+            'load, or setup died before the first case. Nothing has been ' +
+            'proven about the tests themselves.',
+        )
+        printFailureLog()
+        return {
+          ok: false,
+          reason: 'not_runnable',
+          endpoint: target.endpoint,
+          receipt: null,
+        }
+      }
+
       // WHAT FAILED, FROM THE FILE, BECAUSE THE REPORTER MAY NEVER HAVE
       // RENDERED.
       //
