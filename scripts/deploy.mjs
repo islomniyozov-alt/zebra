@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
 import { check as checkMigrationGap } from './check-migration-gap.mjs'
 import { runIntegrationSuite, resolveEndpoint } from './integration-gate.mjs'
+import { refusalMessage } from './deploy-refusal.mjs'
 import {
   checkReceipt,
   readReceipt,
@@ -211,45 +212,13 @@ if (process.argv.includes('--skip-integration')) {
 
     const outcome = await runIntegrationSuite()
     if (!outcome.ok) {
-      // ── NAME THE CAUSE THAT ACTUALLY STOPPED THE DEPLOY ─────────────────
-      //
-      // This said "the integration suite is red" for every refusal. On
-      // 2026-09-07 it said it after a run of 482 passing tests: the tree had
-      // been edited mid-run, so no receipt could be written. The suite was
-      // green and the message sent the reader to debug tests that had passed —
-      // an instrument naming the wrong cause, which is the failure this
-      // codebase keeps writing down.
-      //
-      // The gate now returns WHY, and each branch says what to do about it,
-      // because the three need different actions and only one of them is
-      // "fix the tests".
+      // THE CAUSE, NAMED. See scripts/deploy-refusal.mjs — the mapping lives
+      // there because this file deploys on import and could not otherwise be
+      // tested.
+      const [headline, advice] = refusalMessage(outcome.reason, deployTarget)
       console.error('')
-      if (outcome.reason === 'tree_moved') {
-        console.error(
-          `Refusing to deploy to ${deployTarget}: THE SUITE PASSED, but the ` +
-            'working tree changed while it ran, so no receipt was written.',
-        )
-        console.error(
-          'Nothing is wrong with the tests. Commit or stash, then re-run —' +
-            ' and leave the tree alone for the duration of the run.',
-        )
-      } else if (outcome.reason === 'not_runnable') {
-        console.error(
-          `Refusing to deploy to ${deployTarget}: the integration suite could ` +
-            'not run. It never reached the tests, so nothing has been proven ' +
-            'about them either way.',
-        )
-        console.error(
-          'Read the reason printed above; it is not a test failure.',
-        )
-      } else {
-        console.error(
-          `Refusing to deploy to ${deployTarget}: the integration suite is red.`,
-        )
-        console.error(
-          'Fix it, or deploy with --skip-integration and say why in the report.',
-        )
-      }
+      console.error(headline)
+      console.error(advice)
       process.exit(1)
     }
   }

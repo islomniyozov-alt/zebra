@@ -198,10 +198,16 @@ describe('the two gates, and which suite belongs in which', () => {
     // earns a receipt and a run which gates a deploy are the same run. The
     // RULING is unchanged and still asserted: deploy refuses on red.
     expect(deployScript).toContain('runIntegrationSuite()')
-    expect(deployScript).toContain('the integration suite is red')
-    // Before the build: a refusal that arrives after a thirty-second bundle is
-    // one people learn to skip.
-    expect(deployScript.indexOf('the integration suite is red')).toBeLessThan(
+
+    // THE WORDING MOVED, THE RULING DID NOT. The refusal text now lives in
+    // scripts/deploy-refusal.mjs so it can be unit-tested — deploy.mjs ships
+    // on import and cannot be imported by a test. What must stay true of THIS
+    // file is that a failed suite refuses, and refuses BEFORE the build: a
+    // refusal that arrives after a thirty-second bundle is one people learn to
+    // skip. `tests/deploy-refusal.test.ts` owns the words themselves.
+    expect(deployScript).toContain('refusalMessage(')
+    expect(deployScript).toContain('if (!outcome.ok)')
+    expect(deployScript.indexOf('refusalMessage(')).toBeLessThan(
       deployScript.indexOf("run(['opennextjs-cloudflare', 'build'])"),
     )
   })

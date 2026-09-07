@@ -6,8 +6,10 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { neonConfig, Pool } from '@neondatabase/serverless'
 import {
+  TEMPLATE_APPLICATION_NAME,
   TEMPLATE_DB,
   WORKER_DB_PREFIX,
+  withApplicationName,
   withDatabase,
   workerCount,
   workerDatabase,
@@ -88,7 +90,14 @@ async function ensureTemplate(adminUrl: string): Promise<void> {
   // copies from it. `CREATE DATABASE ... TEMPLATE` refuses while any session is
   // connected to the source, so every read of the template is opened and shut
   // rather than held.
-  const templateUrl = withDatabase(adminUrl, TEMPLATE_DB)
+  // STAMPED, so the sessions we are about to open to the template can be told
+  // apart from anybody else's. Both consumers below — the probe pool and the
+  // `migrate deploy` child — get this URL, and `awaitTemplateIdle` will only
+  // terminate what carries this name.
+  const templateUrl = withApplicationName(
+    withDatabase(adminUrl, TEMPLATE_DB),
+    TEMPLATE_APPLICATION_NAME,
+  )
   let applied: string[] = []
   const probe = new Pool({ connectionString: templateUrl, max: 1 })
   try {
@@ -172,38 +181,93 @@ async function ensureTemplate(adminUrl: string): Promise<void> {
  * a new migration landed.
  *
  * So this loops until `pg_stat_activity` agrees the template is idle, and says
- * so if it never does. Safe for the same reason the sweep is: the run lock is
- * held, so any session on the template is a leftover of ours.
+ * so if it never does.
+ *
+ * ── IT ONLY TERMINATES WHAT IT CAN PROVE IS ITS OWN ───────────────────────
+ *
+ * This used to terminate EVERY session on the template, justified by the run
+ * lock: the lock is held, therefore anything here is a leftover of ours. That
+ * reasoning assumes the invariant it is protecting, and this project has
+ * already had the lock violated once — two runners against the same branch,
+ * fifteen seconds apart, which is the incident the header of this file
+ * describes. Under exactly that condition the old wait does not merely fail to
+ * protect: it reaches into the other runner and kills its connections, and the
+ * harder it tries the more of somebody else's work it destroys.
+ *
+ * So termination is scoped to `application_name = TEMPLATE_APPLICATION_NAME`,
+ * which this suite stamps onto every template URL it hands out. Anything else
+ * is WAITED FOR — never killed — and if it outlasts the deadline the error
+ * names it rather than removing it.
+ *
+ * AN UNIDENTIFIED SESSION IS TREATED AS SOMEBODY ELSE'S, including our own
+ * `migrate deploy` child if its client ignores the parameter. Waiting for a
+ * backend that is already winding down costs a moment; the alternative costs
+ * somebody else their run.
  */
+interface ForeignSession {
+  pid: number
+  application_name: string | null
+  usename: string | null
+  client_addr: string | null
+  backend_start: string | null
+}
+
 async function awaitTemplateIdle(admin: Pool): Promise<void> {
   const deadline = Date.now() + 60_000
   let waited = false
 
   for (;;) {
+    // OURS, BY NAME. Anything without this application_name is left alone.
     await admin.query(
       `select pg_terminate_backend(pid) from pg_stat_activity
-        where datname = $1 and pid <> pg_backend_pid()`,
-      [TEMPLATE_DB],
+        where datname = $1 and pid <> pg_backend_pid()
+          and application_name = $2`,
+      [TEMPLATE_DB, TEMPLATE_APPLICATION_NAME],
     )
+
     const { rows } = await admin.query(
-      `select count(*)::int as n from pg_stat_activity
+      `select pid, application_name, usename::text as usename,
+              client_addr::text as client_addr,
+              backend_start::text as backend_start
+         from pg_stat_activity
         where datname = $1 and pid <> pg_backend_pid()`,
       [TEMPLATE_DB],
     )
-    const busy = rows[0]?.n ?? 0
-    if (busy === 0) {
+    const busy = rows as ForeignSession[]
+    if (busy.length === 0) {
       if (waited) console.log(`[integration] template ${TEMPLATE_DB} is idle`)
       return
     }
+
     if (Date.now() > deadline) {
+      // NAMED, NOT REMOVED. If this is another runner, the useful thing is to
+      // say who is holding the template — not to take it from them.
+      const who = busy
+        .map(
+          (session) =>
+            `pid ${session.pid} (application_name ${
+              session.application_name || '(none)'
+            }, user ${session.usename ?? '?'}, from ${
+              session.client_addr ?? 'local'
+            }, since ${session.backend_start ?? '?'})`,
+        )
+        .join('; ')
       throw new Error(
-        `${busy} session(s) still connected to ${TEMPLATE_DB} after 60s; ` +
-          'CREATE DATABASE ... TEMPLATE cannot copy a database in use.',
+        `${busy.length} session(s) still connected to ${TEMPLATE_DB} after 60s, ` +
+          `and none of them is ours to terminate: ${who}. ` +
+          'CREATE DATABASE ... TEMPLATE cannot copy a database in use. ' +
+          'If another integration run is in flight against this branch, let it ' +
+          'finish — this wait will not kill it.',
       )
     }
+
     if (!waited) {
+      const mine = busy.filter(
+        (session) => session.application_name === TEMPLATE_APPLICATION_NAME,
+      ).length
       console.log(
-        `[integration] waiting for ${busy} session(s) to leave ${TEMPLATE_DB}`,
+        `[integration] waiting for ${busy.length} session(s) to leave ${TEMPLATE_DB}` +
+          ` (${mine} ours, ${busy.length - mine} not ours and not terminated)`,
       )
       waited = true
     }

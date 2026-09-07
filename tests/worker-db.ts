@@ -1,3 +1,4 @@
+import { hostname } from 'node:os'
 import { installSocketCrashGuard } from './socket-crash-guard'
 
 // ---------------------------------------------------------------------------
@@ -69,6 +70,39 @@ export const TEMPLATE_DB = 'zebra_template'
 export function withDatabase(url: string, database: string): string {
   const parsed = new URL(url)
   parsed.pathname = `/${database}`
+  return parsed.toString()
+}
+
+/**
+ * The `application_name` every connection this suite opens to the TEMPLATE
+ * carries, so a session can be recognised as ours rather than assumed to be.
+ *
+ * IT IS AN IDENTIFIER, NOT A LABEL FOR LOGS. `awaitTemplateIdle` terminates
+ * backends, and the only thing standing between that and somebody else's run
+ * is being able to tell the two apart. See the note there.
+ *
+ * The host is in it because two runners on different machines against the same
+ * branch is precisely the case that matters, and `pid` alone is meaningless
+ * across them.
+ */
+export const TEMPLATE_APPLICATION_NAME = `zebra-integration-${hostname()}`
+
+/**
+ * The same URL, stamped so sessions opened with it can be identified.
+ *
+ * A QUERY PARAMETER because that is the one channel that reaches a CHILD
+ * PROCESS. `prisma migrate deploy` gets a connection string and nothing else;
+ * we cannot run `SET application_name` inside a connection we never hold.
+ *
+ * AND IT IS BEST-EFFORT ON PURPOSE. If the client ignores the parameter the
+ * session is simply unidentified, and `awaitTemplateIdle` then WAITS for it
+ * instead of terminating it — which is the correct behaviour for a session we
+ * cannot prove is ours, and costs only the moment it takes a winding-down
+ * backend to close.
+ */
+export function withApplicationName(url: string, name: string): string {
+  const parsed = new URL(url)
+  parsed.searchParams.set('application_name', name)
   return parsed.toString()
 }
 
