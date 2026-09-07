@@ -51,8 +51,21 @@ export interface ExtractedCdl {
   expiresAt: Maybe<string>
   /** AAMVA `4a`. ISO date. */
   issuedAt: Maybe<string>
-  /** AAMVA `9`. A, B or C — the commercial class the card grants. */
-  class: Maybe<'A' | 'B' | 'C'>
+  /**
+   * AAMVA `9`. THE CLASS EXACTLY AS PRINTED — transcription, not judgement.
+   *
+   * NOT AN ENUM, AND THAT IS THE FIX. It was `'A' | 'B' | 'C'`, with the same
+   * three values in the JSON Schema and in the prompt, and a Georgia card
+   * printing `AM` came back as `A` at high confidence: told the answer had to
+   * be one of three, the model made it one of three. The `bad_enum` refusal
+   * that existed for precisely this could never fire, because the value it
+   * would have caught was destroyed before it arrived.
+   *
+   * The mapping from printed to operational lives in `cdl-class.ts`, on a
+   * value that survived the trip, where an unknown class refuses by name and
+   * says what it read.
+   */
+  class: Maybe<string>
   /** AAMVA `1`. The family name, as the card labels it. Never inferred. */
   familyName: Maybe<string>
   /** AAMVA `2`. The given name(s). */
@@ -121,7 +134,10 @@ export const CDL_SCHEMA = {
     licenceNumber: field({ type: 'string' }),
     expiresAt: field({ type: 'string' }),
     issuedAt: field({ type: 'string' }),
-    class: field({ type: 'string', enum: ['A', 'B', 'C'] }),
+    // NO ENUM. See the note on `class` above: constraining this to three
+    // values is what made the model return one of three for a card printing
+    // something else. The schema asks for a string; the table decides.
+    class: field({ type: 'string' }),
     familyName: field({ type: 'string' }),
     givenName: field({ type: 'string' }),
     state: field({ type: 'string' }),

@@ -121,10 +121,27 @@ describe('responses that are not a reading', () => {
     ).toBe('bad_confidence')
   })
 
-  it('refuses a class the card cannot grant', () => {
+  it('no longer refuses a class at the parser — it is a free string now', () => {
+    // THE ENUM IS GONE ON PURPOSE. It used to be ['A','B','C'] here and in the
+    // schema the model is handed, and a Georgia card printing AM came back as
+    // A at high confidence — the model made the answer one of three because it
+    // was told there were three. `bad_enum` could not fire because the value
+    // that would trip it never survived. The judgement moved to CLASS_MAP,
+    // where it acts on what the card actually said.
     expect(
-      refusalOf(withField('class', { value: 'D', confidence: 'high' })),
-    ).toBe('bad_enum')
+      refusalOf(withField('class', { value: 'AM', confidence: 'high' })),
+    ).toBe(null)
+    expect(
+      parseCdlResponse(withField('class', { value: 'AM', confidence: 'high' }))
+        .class?.value,
+    ).toBe('AM')
+  })
+
+  it('still refuses a class that is not a string at all', () => {
+    // Dropping the enum must not drop the TYPE check with it.
+    expect(
+      refusalOf(withField('class', { value: 3, confidence: 'high' })),
+    ).toBe('bad_value_type')
   })
 
   it('refuses one code where an array belongs', () => {
@@ -192,6 +209,63 @@ describe('responses that parse but are not a licence read', () => {
         ),
       ),
     ).toBe('expiry_before_issue')
+  })
+})
+
+describe('the printed class, and what it means operationally', () => {
+  // THE FAILURE THIS REPLACED, IN ONE SENTENCE: a Georgia card printing
+  // `CLASS AM` was returned by the model as `"A"`, confidence high, because
+  // the schema and the prompt both told it the answer was one of A, B or C.
+  // Nothing refused. The class is transcribed now and judged here.
+
+  it('maps the qualifier classes the table names', () => {
+    for (const [printed, operational] of [
+      ['A', 'A'],
+      ['B', 'B'],
+      ['C', 'C'],
+      ['AM', 'A'],
+      ['BM', 'B'],
+      ['CM', 'C'],
+    ] as const) {
+      const card = parseCdlResponse(
+        withField('class', { value: printed, confidence: 'high' }),
+      )
+      expect(refuseCdl(card), printed).toBeNull()
+      expect(cdlPrefill(card).cdlClass, printed).toBe(operational)
+      // AND THE CARD'S OWN TEXT SURVIVES BESIDE THE MAPPED VALUE.
+      expect(cdlNotes(card).classPrinted, printed).toBe(printed)
+    }
+  })
+
+  it('refuses a printed class the table does not know, rather than reducing it', () => {
+    // The refusal that was unreachable while the enum stood. `AX` is not in
+    // CLASS_MAP; a prefix rule would happily call it A, which is the same
+    // silent conformance moved from the model into our code.
+    for (const printed of ['AX', 'D', 'A1', 'MA', 'CLASS A']) {
+      const card = parseCdlResponse(
+        withField('class', { value: printed, confidence: 'high' }),
+      )
+      expect(refuseCdl(card), printed).toBe('unknown_class')
+    }
+  })
+
+  it('tolerates transcription noise but never changes the letters', () => {
+    // Case and space are how a character was typed, not what it is.
+    const noisy = parseCdlResponse(
+      withField('class', { value: ' am ', confidence: 'high' }),
+    )
+    expect(refuseCdl(noisy)).toBeNull()
+    expect(cdlPrefill(noisy).cdlClass).toBe('A')
+    expect(cdlNotes(noisy).classPrinted).toBe('am')
+  })
+
+  it('lets a card with no class through, because the class is not the spine', () => {
+    // The spine is the licence number and the expiry. A missing class is a
+    // blank on the confirm form; an UNREADABLE one is a refusal. Different.
+    const card = parseCdlResponse(withField('class', null))
+    expect(refuseCdl(card)).toBeNull()
+    expect(cdlPrefill(card).cdlClass).toBeUndefined()
+    expect(cdlNotes(card).classPrinted).toBeNull()
   })
 })
 

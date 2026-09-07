@@ -1,5 +1,6 @@
 import type { Confidence } from './envelope'
 import type { ExtractedCdl } from './cdl-shape'
+import { operationalClass } from './cdl-class'
 
 // ---------------------------------------------------------------------------
 // WHEN A CARD WAS NOT READ — WHICH IS DIFFERENT FROM READ AND EMPTY.
@@ -25,6 +26,7 @@ export type CdlRefusal =
   | 'state_disagrees'
   | 'no_address_state'
   | 'expiry_before_issue'
+  | 'unknown_class'
 
 /** The bar the spine must clear. Anything below is treated as not read. */
 const SPINE_CONFIDENCE: readonly Confidence[] = ['high', 'medium']
@@ -86,6 +88,23 @@ export function refuseCdl(fields: ExtractedCdl): CdlRefusal | null {
     // card contradicting itself.
     if (!printed) return 'no_address_state'
     if (printed !== claimed) return 'state_disagrees'
+  }
+
+  // ── A PRINTED CLASS THE TABLE DOES NOT KNOW ─────────────────────────────
+  //
+  // NOW REACHABLE, WHICH IS THE WHOLE POINT OF THE CHANGE ABOVE IT. While the
+  // schema declared `enum: ['A','B','C']` the model simply never returned
+  // anything else — a Georgia `AM` arrived as `A`, high confidence, and the
+  // parser's `bad_enum` sat there unreachable. The class is a free string now,
+  // so an unrecognised one gets this far and stops here.
+  //
+  // REFUSED RATHER THAN NULLED. A driver whose class this system cannot
+  // interpret is not a driver with no class — it is a card somebody has to
+  // look at. Nulling the field would file them as unclassified and let the
+  // rest of the read through, which is the half-driver prefill this file
+  // exists to prevent.
+  if (fields.class?.value?.trim() && !operationalClass(fields.class.value)) {
+    return 'unknown_class'
   }
 
   // A CARD CANNOT EXPIRE BEFORE IT WAS ISSUED. When both dates are present and

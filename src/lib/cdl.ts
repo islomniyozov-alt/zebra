@@ -4,6 +4,7 @@ import { askModel } from './model-engine'
 import { parseCdlResponse } from './extraction/cdl-parse'
 import { CDL_EXTRACTION_SYSTEM_WITH_SCHEMA } from './extraction/cdl-prompt'
 import { codeList, refuseCdl, type CdlRefusal } from './extraction/cdl-refusal'
+import { operationalClass } from './extraction/cdl-class'
 import type { ExtractedCdl } from './extraction/cdl-shape'
 
 // ---------------------------------------------------------------------------
@@ -170,7 +171,14 @@ export function cdlPrefill(fields: ExtractedCdl): Record<string, string> {
 
   if (fields.licenceNumber?.value) values.cdlNumber = fields.licenceNumber.value
   if (fields.state?.value) values.cdlState = fields.state.value
-  if (fields.class?.value) values.cdlClass = fields.class.value
+
+  // THE MAPPED CLASS FILLS THE FIELD; THE PRINTED ONE IS IN `cdlNotes`.
+  // `Driver.cdlClass` is what dispatch and compliance read, so it holds the
+  // operational class — but the card's own text is not discarded to get it.
+  // `refuseCdl` has already stopped anything the table does not know, so this
+  // cannot silently blank a class it failed to understand.
+  const operational = operationalClass(fields.class?.value)
+  if (operational) values.cdlClass = operational
   if (fields.expiresAt?.value) values.cdlExpiresAt = fields.expiresAt.value
 
   return values
@@ -189,6 +197,20 @@ export interface CdlNotes {
   isTemporary: boolean
   endorsements: string[]
   restrictions: string[]
+  /**
+   * What field 9 actually said, kept beside the class the form was given.
+   *
+   * A LEGAL DOCUMENT'S OWN TEXT IS NOT DISCARDED AT THE DOOR. `AM` maps to `A`
+   * for operating purposes and the two are not the same statement; a record
+   * that keeps only the mapped value cannot answer "what did the card say",
+   * which is the question every dispute about a licence turns on.
+   *
+   * IT SITS HERE BECAUSE THERE IS NO COLUMN FOR IT, exactly like endorsements
+   * and restrictions above — shown to the dispatcher on the confirm step
+   * rather than persisted. Giving it a column on `Driver` is a migration and a
+   * separate decision.
+   */
+  classPrinted: string | null
 }
 
 export function cdlNotes(fields: ExtractedCdl): CdlNotes {
@@ -196,6 +218,7 @@ export function cdlNotes(fields: ExtractedCdl): CdlNotes {
     isTemporary: fields.isTemporary?.value === true,
     endorsements: codeList(fields.endorsements?.value),
     restrictions: codeList(fields.restrictions?.value),
+    classPrinted: fields.class?.value?.trim() || null,
   }
 }
 

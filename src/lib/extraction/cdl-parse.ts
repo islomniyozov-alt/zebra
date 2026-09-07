@@ -28,8 +28,6 @@ import { ExtractionParseError, parseResponseText } from './parse'
 
 type Json = Record<string, unknown>
 
-const CLASSES = ['A', 'B', 'C'] as const
-
 /** `{value, confidence}` or null. Anything else refuses rather than coerces. */
 function readField<T>(
   parent: Json,
@@ -86,14 +84,6 @@ const asBoolean = (value: unknown, at: string): boolean => {
   return value
 }
 
-const asClass = (value: unknown, at: string): 'A' | 'B' | 'C' => {
-  const text = asString(value, at).toUpperCase()
-  if (!CLASSES.includes(text as (typeof CLASSES)[number])) {
-    throw new ExtractionParseError('bad_enum', at)
-  }
-  return text as 'A' | 'B' | 'C'
-}
-
 const asCodes = (value: unknown, at: string): string[] => {
   // AN ARRAY, EVEN FOR ONE CODE. A model that returns `"H"` where `["H"]`
   // belongs has decided the shape for us, and the next response with two
@@ -120,7 +110,18 @@ export function parseCdlResponse(text: string): ExtractedCdl {
     licenceNumber: readField(root, 'licenceNumber', asString),
     expiresAt: readField(root, 'expiresAt', asString),
     issuedAt: readField(root, 'issuedAt', asString),
-    class: readField(root, 'class', asClass),
+    // A PLAIN STRING. `asClass` used to live here and check the value against
+    // ['A','B','C'] — the THIRD copy of that list, after the JSON Schema and
+    // the prompt. All three said the same thing, which is why a Georgia card
+    // printing AM never reached any of them: the model resolved the conflict
+    // upstream by returning A at high confidence.
+    //
+    // The class is transcribed here and interpreted by CLASS_MAP in
+    // cdl-class.ts, where an unrecognised one refuses by name and says what it
+    // read. `bad_enum` remains in the error vocabulary — nothing else uses it
+    // today, and it is the right refusal the day a genuinely closed list
+    // arrives from a standard rather than from our own convenience.
+    class: readField(root, 'class', asString),
     familyName: readField(root, 'familyName', asString),
     givenName: readField(root, 'givenName', asString),
     state: readField(root, 'state', asString),
