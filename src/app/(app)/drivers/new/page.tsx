@@ -72,6 +72,13 @@ export default async function NewDriverPage() {
             reading: t('drivers.cdl.reading'),
             save: t('ref.save'),
             cancel: t('ref.cancel'),
+            cardSays: t('drivers.cdl.cardSays'),
+            classPrinted: t('drivers.cdl.classPrinted'),
+            endorsements: t('drivers.cdl.endorsements'),
+            restrictions: t('drivers.cdl.restrictions'),
+            none: t('drivers.cdl.none'),
+            temporary: t('drivers.cdl.temporary'),
+            temporaryBody: t('drivers.cdl.temporaryBody'),
             // PRE-TRANSLATED, KEYED BY THE KEY the action returns. A translator
             // closure cannot cross to a client component, and the action deals
             // in i18n keys rather than sentences so it stays language-free.

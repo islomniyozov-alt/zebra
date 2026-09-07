@@ -176,7 +176,7 @@ export async function runIntegrationSuite() {
       }).trimEnd(),
     )
     console.error('Commit or stash, then re-run.')
-    return { ok: false, endpoint: null, receipt: null }
+    return { ok: false, reason: 'not_runnable', endpoint: null, receipt: null }
   }
   console.log(`Tree clean at ${before.commit.slice(0, 7)}.`)
 
@@ -184,7 +184,7 @@ export async function runIntegrationSuite() {
   if (!target.ok) {
     console.error('')
     console.error(`Refusing to run the integration suite: ${target.message}`)
-    return { ok: false, endpoint: null, receipt: null }
+    return { ok: false, reason: 'not_runnable', endpoint: null, receipt: null }
   }
 
   const child = { ...process.env }
@@ -208,7 +208,12 @@ export async function runIntegrationSuite() {
         'failures that describe the database rather than the code — which is ' +
         'what five of eight gates on 2026-09-05 did.',
     )
-    return { ok: false, endpoint: target.endpoint, receipt: null }
+    return {
+      ok: false,
+      reason: 'not_runnable',
+      endpoint: target.endpoint,
+      receipt: null,
+    }
   }
 
   console.log('')
@@ -264,7 +269,12 @@ export async function runIntegrationSuite() {
       // it happens; this reads that back so the gate's own output carries the
       // names even when the process died mid-render.
       printFailureLog()
-      return { ok: false, endpoint: target.endpoint, receipt: null }
+      return {
+        ok: false,
+        reason: 'tests_failed',
+        endpoint: target.endpoint,
+        receipt: null,
+      }
     }
 
     // DID THE TREE MOVE UNDER THE RUN? `writeReceipt` reads HEAD when it is
@@ -280,7 +290,14 @@ export async function runIntegrationSuite() {
         'No receipt written. The suite ran the earlier tree, so a receipt ' +
           'would vouch for code that was never tested. Re-run on a settled tree.',
       )
-      return { ok: false, endpoint: target.endpoint, receipt: null }
+      // THE TESTS PASSED. Only the receipt is missing, and the caller must say
+      // so — see the note on `reason` at the returns above.
+      return {
+        ok: false,
+        reason: 'tree_moved',
+        endpoint: target.endpoint,
+        receipt: null,
+      }
     }
 
     const receipt = writeReceipt({ endpoint: target.endpoint })
@@ -308,7 +325,12 @@ export async function runIntegrationSuite() {
     // keeps the gate's contract of returning rather than exploding.
     console.error('')
     console.error(String(error))
-    return { ok: false, endpoint: target.endpoint, receipt: null }
+    return {
+      ok: false,
+      reason: 'not_runnable',
+      endpoint: target.endpoint,
+      receipt: null,
+    }
   }
 }
 

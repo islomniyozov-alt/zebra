@@ -415,6 +415,14 @@ const en = {
   'drivers.cdl.contradictory':
     'That card’s dates contradict each other. Enter the driver below.',
   'drivers.cdl.notAllowed': 'You may not add drivers.',
+  'drivers.cdl.cardSays': 'What the card says',
+  'drivers.cdl.classPrinted': 'The card prints class {value}.',
+  'drivers.cdl.endorsements': 'Endorsements',
+  'drivers.cdl.restrictions': 'Restrictions',
+  'drivers.cdl.none': 'None',
+  'drivers.cdl.temporary': 'Temporary credential',
+  'drivers.cdl.temporaryBody':
+    'This card is marked temporary or interim. It expires far sooner than a permanent licence — check the expiry below before saving.',
   'drivers.employment.LEASED': 'Lease operator',
   'drivers.employment.OWNER_OPERATOR': 'Owner-operator',
   'drivers.cdlExpires': 'CDL expires',
@@ -2116,6 +2124,14 @@ const ru: Dictionary = {
   'drivers.cdl.contradictory':
     'Даты на карточке противоречат друг другу. Введите данные ниже.',
   'drivers.cdl.notAllowed': 'Вы не можете добавлять водителей.',
+  'drivers.cdl.cardSays': 'Что написано на карточке',
+  'drivers.cdl.classPrinted': 'На карточке указан класс {value}.',
+  'drivers.cdl.endorsements': 'Допуски',
+  'drivers.cdl.restrictions': 'Ограничения',
+  'drivers.cdl.none': 'Нет',
+  'drivers.cdl.temporary': 'Временный документ',
+  'drivers.cdl.temporaryBody':
+    'Карточка отмечена как временная. Срок её действия намного короче постоянных прав — проверьте дату ниже, прежде чем сохранять.',
   'drivers.employment.LEASED': 'Арендатор',
   'drivers.employment.OWNER_OPERATOR': 'Владелец-водитель',
   'drivers.cdlExpires': 'Срок CDL',
@@ -3812,6 +3828,14 @@ const fa: Dictionary = {
   'drivers.cdl.contradictory':
     'تاریخ‌های کارت با هم نمی‌خوانند. اطلاعات را پایین وارد کنید.',
   'drivers.cdl.notAllowed': 'شما اجازهٔ افزودن راننده ندارید.',
+  'drivers.cdl.cardSays': 'آنچه روی کارت نوشته شده',
+  'drivers.cdl.classPrinted': 'روی کارت کلاس {value} چاپ شده است.',
+  'drivers.cdl.endorsements': 'مجوزها',
+  'drivers.cdl.restrictions': 'محدودیت‌ها',
+  'drivers.cdl.none': 'ندارد',
+  'drivers.cdl.temporary': 'مدرک موقت',
+  'drivers.cdl.temporaryBody':
+    'این کارت موقت است و اعتبار آن بسیار کوتاه‌تر از گواهی‌نامهٔ دائمی است — پیش از ثبت، تاریخ انقضا را بررسی کنید.',
   'drivers.employment.LEASED': 'رانندهٔ اجاره‌ای',
   'drivers.employment.OWNER_OPERATOR': 'مالک-راننده',
   'drivers.cdlExpires': 'انقضای CDL',

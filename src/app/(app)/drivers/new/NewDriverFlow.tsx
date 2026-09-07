@@ -43,8 +43,33 @@ interface Props {
     reading: string
     save: string
     cancel: string
+    cardSays: string
+    classPrinted: string
+    endorsements: string
+    restrictions: string
+    none: string
+    temporary: string
+    temporaryBody: string
     notices: Record<string, string>
   }
+}
+
+/**
+ * The four readings the card carries that no form field holds.
+ *
+ * THEY WERE COMPUTED AND THROWN AWAY. `cdlNotes` has been returned by
+ * `/api/cdl/read` since the reader existed and this component never looked at
+ * the key — so a temporary credential, the endorsements, the restrictions and
+ * (once it existed) the printed class all reached the browser and were
+ * dropped. The comment in `src/lib/cdl.ts` said they were "shown so the
+ * dispatcher sees what the card said", which was true of the payload and not
+ * of any pixel.
+ */
+interface CardNotes {
+  isTemporary: boolean
+  endorsements: string[]
+  restrictions: string[]
+  classPrinted: string | null
 }
 
 export function NewDriverFlow({
@@ -60,6 +85,7 @@ export function NewDriverFlow({
   const [read, setRead] = useState<{
     values: Record<string, string>
     notice: string | null
+    notes?: CardNotes
   } | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
 
@@ -107,6 +133,7 @@ export function NewDriverFlow({
       const result = (await response.json()) as {
         values: Record<string, string>
         notice: string | null
+        notes?: CardNotes
       }
       setRead(result)
     } catch {
@@ -117,6 +144,29 @@ export function NewDriverFlow({
   }
 
   if (confirming) {
+    const notes = read?.notes
+    const codes = (list: readonly string[] | undefined) =>
+      list && list.length > 0 ? list.join(', ') : labels.none
+
+    // THE PRINTED CLASS RIDES ON THE FIELD IT QUALIFIES. `AM` maps to `A` and
+    // the two are not the same statement — the dispatcher confirming this form
+    // is the last person who can notice the difference, so the card's own text
+    // sits under the input holding the mapped value rather than in a panel
+    // somewhere else on the screen.
+    const shown = notes?.classPrinted
+      ? fields.map((field) =>
+          field.name === 'cdlClass'
+            ? {
+                ...field,
+                hint: labels.classPrinted.replace(
+                  '{value}',
+                  notes.classPrinted!,
+                ),
+              }
+            : field,
+        )
+      : fields
+
     return (
       <div className="flex flex-col gap-z4">
         {read?.notice ? (
@@ -127,8 +177,50 @@ export function NewDriverFlow({
             {labels.notices[read.notice] ?? read.notice}
           </p>
         ) : null}
+
+        {/* NOT A FOOTNOTE. A temporary credential expires in weeks and reads
+            as a four-year licence if nobody looks; it is the one note on this
+            screen that changes what the driver IS, so it gets the same weight
+            as a refusal rather than a line in a list. */}
+        {notes?.isTemporary ? (
+          <div
+            role="alert"
+            className="max-w-[520px] rounded-card border-2 border-warning bg-warning-soft px-z3 py-z3"
+          >
+            <p className="text-sm font-semibold uppercase tracking-wide text-warning">
+              {labels.temporary}
+            </p>
+            <p className="mt-z1 text-sm text-ink">{labels.temporaryBody}</p>
+          </div>
+        ) : null}
+
+        {/* Endorsements and restrictions have no column and no field, so they
+            are shown read-only rather than silently discarded. */}
+        {notes &&
+        (notes.endorsements.length > 0 || notes.restrictions.length > 0) ? (
+          <dl className="max-w-[520px] rounded-card border border-border bg-surface px-z3 py-z2 text-sm">
+            <p className="mb-z2 text-xs uppercase tracking-wide text-ink-3">
+              {labels.cardSays}
+            </p>
+            <div className="flex gap-z4">
+              <div>
+                <dt className="text-xs text-ink-3">{labels.endorsements}</dt>
+                <dd className="font-mono text-ink">
+                  {codes(notes.endorsements)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-ink-3">{labels.restrictions}</dt>
+                <dd className="font-mono text-ink">
+                  {codes(notes.restrictions)}
+                </dd>
+              </div>
+            </div>
+          </dl>
+        ) : null}
+
         <RecordForm
-          fields={fields}
+          fields={shown}
           values={{
             companyId,
             employmentType: 'OWNED',

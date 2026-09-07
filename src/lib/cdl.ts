@@ -213,8 +213,16 @@ export function cdlPrefill(fields: ExtractedCdl): Record<string, string> {
  * A temporary credential is the one reading that changes what the driver is,
  * not just what a field holds: read as a permanent card it produces a
  * ComplianceItem four years out on the strength of a paper licence that lapses
- * next month. Endorsements and restrictions have no column yet — they are
- * shown so the dispatcher sees what the card said and can act on it.
+ * next month. Endorsements, restrictions and the printed class have no column
+ * — they qualify what the form holds rather than filling it.
+ *
+ * RENDERED BY `NewDriverFlow`'s CONFIRM STEP, and that sentence used to be
+ * false. This value was returned by `/api/cdl/read` and the component never
+ * read the key, so every one of these reached the browser and was dropped
+ * while the comment here claimed they were "shown so the dispatcher sees what
+ * the card said" — true of the payload, true of nothing on screen. If the
+ * component stops rendering them, this comment is wrong again: it names the
+ * renderer so the claim can be checked rather than believed.
  */
 export interface CdlNotes {
   isTemporary: boolean
