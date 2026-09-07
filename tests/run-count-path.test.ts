@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { FAILURE_LOG, RUN_COUNT_FILE } from './failure-log'
-// @ts-expect-error — a .mjs script with no declarations. Imported for its
-// CONSTANTS only; `runIntegrationSuite` is never called from here.
+// A .mjs script, imported for its CONSTANTS only — `runIntegrationSuite` is
+// never called from here, and importing the module has no side effects.
 import * as gate from '../scripts/integration-gate.mjs'
 
 // ---------------------------------------------------------------------------
