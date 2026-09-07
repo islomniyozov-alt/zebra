@@ -2,7 +2,11 @@ import { neonConfig } from '@neondatabase/serverless'
 import { readFileSync } from 'node:fs'
 import { createPrismaClient } from '@/lib/db'
 import { asRecords, readXlsx } from '@/lib/datatruck/xlsx'
-import { planDrivers, type PlannedDriver } from '@/lib/datatruck/drivers'
+import {
+  employmentFromColumn,
+  planDrivers,
+  type PlannedDriver,
+} from '@/lib/datatruck/drivers'
 import { openFirstPeriod } from '@/lib/asset-transfer'
 import type { TxClient } from '@/lib/tenancy'
 import type { PrismaClient } from '../src/generated/prisma/client'
@@ -225,6 +229,43 @@ function preview(
   console.log('  cdlState stays null on every one. Not from the area code, not')
   console.log('  from the authority, not from where the others are licensed.')
 
+  // ── PAY CLASS, DERIVED — AND EVERY DISAGREEMENT NAMED ───────────────────
+  //
+  // The ruling: 85% and above is an owner-operator, below is a company driver,
+  // read off the percentage rather than off `Driver Type`. That column is a
+  // payroll label — 21 rows marked company_driver are paid 88-90%. Deriving
+  // quietly would be this system overruling a human-entered field in silence,
+  // so the ones it overrules are listed here in full.
+  const derivedCounts = new Map<string, number>()
+  for (const d of planned) {
+    derivedCounts.set(
+      d.employmentType,
+      (derivedCounts.get(d.employmentType) ?? 0) + 1,
+    )
+  }
+  heading('PAY CLASS, DERIVED FROM THE TARIFF')
+  for (const [type, n] of [...derivedCounts].sort()) {
+    console.log(`  ${String(n).padStart(3)}  ${type}`)
+  }
+
+  const disagreeing = planned.filter((d) => {
+    const declared = employmentFromColumn(d.declaredType)
+    return declared !== null && declared !== d.employmentType
+  })
+  heading(
+    `DERIVED TYPE DISAGREES WITH THE EXPORT'S COLUMN — ${disagreeing.length}`,
+  )
+  for (const d of disagreeing) {
+    console.log(
+      `  ${`${d.firstName} ${d.lastName}`.padEnd(28)} id=${d.externalId.padEnd(5)} ` +
+        `${String(d.payBps / 100).padStart(5)}%  column=${(d.declaredType ?? '').padEnd(15)} -> ${d.employmentType}`,
+    )
+  }
+  console.log('')
+  console.log('  Editable per driver on screen. The column is not deleted or')
+  console.log('  corrected in Datatruck by this seed — only disagreed with,')
+  console.log('  in writing.')
+
   const corrected = planned.filter((d) => d.corrections.length > 0)
   heading(`REWRITES — ${corrected.length} rows`)
   for (const d of corrected) {
@@ -273,6 +314,7 @@ async function write(
   let rules = 0
   let compliance = 0
   let periods = 0
+  let promoted = 0
   let linked = 0
 
   for (const driver of planned) {
@@ -298,15 +340,20 @@ async function write(
           cdlNumber: driver.cdlNumber,
           cdlState: driver.cdlState,
           assignedTruckId: truckId,
+          // DERIVED FROM THE TARIFF, per the ruling — see
+          // `employmentFromTariff`. The export's `Driver Type` column is a
+          // payroll label and is recorded in the report, not written here.
+          employmentType: driver.employmentType,
           // STATUS IS NOT IMPORTED, same as the trucks. The export says 26
           // dispatched and 5 in_transit; Zebra's DriverStatus follows dispatch,
           // and a driver seeded DISPATCHED with no load is a board claiming
           // somebody is out when nothing sent them.
           //
-          // employmentType IS NOT IMPORTED EITHER. `Driver Type` splits 39
-          // company_driver / 15 company_owner, and whether company_owner means
-          // OWNER_OPERATOR in this schema's sense is a ruling, not a mapping.
-          // The 15 are named in the report; the column keeps its default.
+          // THE RULING CAME ON 2026-09-07 and this comment used to say the
+          // opposite: that whether company_owner meant OWNER_OPERATOR was a
+          // ruling nobody had made, so the column kept its default. It has
+          // been made, and it went the other way — the COLUMN is not the
+          // signal at all. See `employmentFromTariff`.
         },
       })
       created++
@@ -338,6 +385,29 @@ async function write(
           `  updated  ${driver.firstName} ${driver.lastName}  ${Object.keys(changes).join(', ')}`,
         )
       }
+    }
+
+    // ── THE DERIVED PAY CLASS, ON A ROW THAT PREDATES THE RULING ────────
+    //
+    // The 54 dev rows were seeded before `employmentType` was derived, so they
+    // all hold the schema default. Promoting them is the point of a re-run.
+    //
+    // ONLY FROM THE DEFAULT, THOUGH. If the stored value is anything else,
+    // somebody chose it on the driver screen — the ruling says this is
+    // editable per driver — and a seed that overwrote that would undo the
+    // correction every time it ran. `--overwrite` is the deliberate way past.
+    if (
+      row.employmentType !== driver.employmentType &&
+      (row.employmentType === 'OWNED' || OVERWRITE)
+    ) {
+      await db.driver.update({
+        where: { id: row.id },
+        data: { employmentType: driver.employmentType },
+      })
+      promoted++
+      console.log(
+        `  class    ${driver.firstName} ${driver.lastName}: ${row.employmentType} -> ${driver.employmentType} (${driver.payBps / 100}%)`,
+      )
     }
 
     // ── THE PAY RULE ────────────────────────────────────────────────────
@@ -436,6 +506,7 @@ async function write(
   console.log(`  ${compliance} CDL compliance items`)
   console.log(`  ${periods} asset-history periods from ${EFFECTIVE_FROM_DAY}`)
   console.log(`  ${linked} drivers linked to a seeded truck`)
+  console.log(`  ${promoted} pay class(es) promoted from the schema default`)
 }
 
 async function main(): Promise<void> {

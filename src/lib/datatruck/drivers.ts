@@ -189,6 +189,44 @@ const AUTHORITY_BY_MC: Readonly<Record<string, string>> = {
   'Dolphin Transport inc': 'Dolphins Transport',
 }
 
+// ---------------------------------------------------------------------------
+// WHAT A DRIVER IS PAID DECIDES WHAT THEY ARE, NOT WHAT THE COLUMN CALLS THEM.
+//
+// `Driver Type` splits 39 company_driver / 15 company_owner, and 21 of those
+// company_driver rows sit at 88-90% of gross. The owner confirms the real
+// split: company drivers run 28-35%, owner-operators 88-90%. So that column is
+// a PAYROLL LABEL, not the pay class — and the percentage, which is the number
+// that actually settles, is the honest signal.
+//
+// THE THRESHOLD IS STATED AND IT IS A RULING, not a cluster found in the data.
+// 85% sits in the empty space between the two populations rather than being
+// derived from them, so a new driver at 80% or 92% lands somewhere predictable
+// instead of moving the boundary.
+//
+// EVERY DISAGREEMENT IS NAMED IN THE REPORT. Deriving quietly would be this
+// system overruling a human-entered column without telling anybody; the point
+// is that the list exists and somebody can look down it. And the value is
+// editable per driver afterwards, because a rule about two populations will be
+// wrong about somebody.
+const OWNER_OPERATOR_FLOOR_BPS = 8500
+
+export type DriverEmployment = 'OWNED' | 'OWNER_OPERATOR'
+
+/** The pay class the percentage implies. `OWNED` is a company driver. */
+export function employmentFromTariff(payBps: number): DriverEmployment {
+  return payBps >= OWNER_OPERATOR_FLOOR_BPS ? 'OWNER_OPERATOR' : 'OWNED'
+}
+
+/** What the export's `Driver Type` column claims, mapped onto the same axis. */
+export function employmentFromColumn(
+  raw: string | null | undefined,
+): DriverEmployment | null {
+  const value = (raw ?? '').trim().toLowerCase()
+  if (value === 'company_owner') return 'OWNER_OPERATOR'
+  if (value === 'company_driver') return 'OWNED'
+  return null
+}
+
 /** A phone with fewer real digits than a phone number has. */
 const MIN_PHONE_DIGITS = 10
 
@@ -207,6 +245,10 @@ export interface PlannedDriver {
   /** The unit number this driver drives, as the export spells it. */
   truckUnit: string | null
   payBps: number
+  /** Derived from `payBps`, never from the export's `Driver Type`. */
+  employmentType: DriverEmployment
+  /** What `Driver Type` said, so the report can name every disagreement. */
+  declaredType: string | null
   corrections: string[]
 }
 
@@ -341,6 +383,8 @@ export function planDrivers(
       cdlExpiresAt,
       truckUnit: text(record, 'Truck') || null,
       payBps: tariff.bps,
+      employmentType: employmentFromTariff(tariff.bps),
+      declaredType: text(record, 'Driver Type') || null,
       corrections,
     })
   }

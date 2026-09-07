@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { parseLicenceExpiry, parseTariff } from '@/lib/datatruck/drivers'
+import {
+  employmentFromColumn,
+  employmentFromTariff,
+  parseLicenceExpiry,
+  parseTariff,
+} from '@/lib/datatruck/drivers'
 import { resolveState } from '@/lib/datatruck/states'
 
 // ---------------------------------------------------------------------------
@@ -175,5 +180,69 @@ describe('the state table both exports need', () => {
     // Texas, which is not. Neither is a guess this table makes.
     expect(resolveState('Wisconsin')).toEqual({ ok: false, raw: 'Wisconsin' })
     expect(resolveState('')).toEqual({ ok: false, raw: '' })
+  })
+})
+
+describe('what a driver IS, derived from what they are paid', () => {
+  // THE COLUMN IS A PAYROLL LABEL, NOT THE PAY CLASS. `Driver Type` marks 39
+  // rows company_driver and 21 of those are paid 88-90% of gross, which is
+  // owner-operator money. The owner confirms the real split — company drivers
+  // 28-35%, owner-operators 88-90% — so the percentage is the honest signal
+  // and the column is recorded, disagreed with, and left alone.
+
+  it('puts the two real populations on the right side', () => {
+    // Every percentage in the export, by band.
+    for (const bps of [300, 400, 3000, 3200, 3300, 3800, 5200, 5800, 6000]) {
+      expect(employmentFromTariff(bps), String(bps)).toBe('OWNED')
+    }
+    for (const bps of [8800, 8900, 9000]) {
+      expect(employmentFromTariff(bps), String(bps)).toBe('OWNER_OPERATOR')
+    }
+  })
+
+  it('draws the line at exactly 85%, inclusive', () => {
+    // A STATED THRESHOLD, NOT A CLUSTER FOUND IN THE DATA. 85% sits in the gap
+    // between the two populations — nothing in the export is paid 61% to 87% —
+    // so the boundary does not move when a new driver arrives at 80% or 92%.
+    expect(employmentFromTariff(8499)).toBe('OWNED')
+    expect(employmentFromTariff(8500)).toBe('OWNER_OPERATOR')
+    expect(employmentFromTariff(8501)).toBe('OWNER_OPERATOR')
+  })
+
+  it('reads the export column onto the same axis, and refuses anything else', () => {
+    expect(employmentFromColumn('company_owner')).toBe('OWNER_OPERATOR')
+    expect(employmentFromColumn('company_driver')).toBe('OWNED')
+    // null means "the column said something this rule has no opinion about",
+    // which the report must treat as no disagreement rather than as a clash.
+    for (const raw of ['', '   ', 'contractor', null, undefined]) {
+      expect(employmentFromColumn(raw)).toBeNull()
+    }
+  })
+
+  it('disagrees with the column exactly where the export does', () => {
+    // The 24 the seed report names, in miniature: a company_driver paid 90% is
+    // an owner-operator, and a company_owner paid 32% is not.
+    const rows = [
+      { bps: 9000, column: 'company_driver' },
+      { bps: 3200, column: 'company_owner' },
+      { bps: 3000, column: 'company_driver' },
+      { bps: 9000, column: 'company_owner' },
+    ]
+    const disagreeing = rows.filter(
+      (r) => employmentFromColumn(r.column) !== employmentFromTariff(r.bps),
+    )
+    expect(disagreeing).toEqual([
+      { bps: 9000, column: 'company_driver' },
+      { bps: 3200, column: 'company_owner' },
+    ])
+  })
+
+  it('classifies the three dispatch-fee rows as company drivers, not owners', () => {
+    // 3%, 3% and 4% are the company's own dispatch or referral fee rather than
+    // a person's wage — seeded exactly as printed, per the ruling. They must
+    // not fall out on the owner-operator side of a threshold about wages.
+    for (const bps of [300, 300, 400]) {
+      expect(employmentFromTariff(bps)).toBe('OWNED')
+    }
   })
 })
