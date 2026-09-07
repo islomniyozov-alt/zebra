@@ -185,32 +185,103 @@ export async function check({
   return { ok: confirmed, gap }
 }
 
-/** Record the local set as applied. Run AFTER `prisma migrate deploy`. */
-function record() {
+/**
+ * Record what PRODUCTION says it has applied. Run AFTER `prisma migrate deploy`.
+ *
+ * ---------------------------------------------------------------------------
+ * IT READS PRODUCTION OR IT WRITES NOTHING. Flag 106, and the cardinal
+ * instrument rule with the baseline written to disk.
+ *
+ * This used to be:
+ *
+ *     const local = localMigrations()
+ *     const verified = Boolean(process.env.PROD_DIRECT_DATABASE_URL)
+ *
+ * — the local `prisma/migrations/` listing, saved into a file named
+ * `production-migrations.json` under the key `applied`, having never asked
+ * production anything. The marker asserted that production holds whatever this
+ * checkout holds, which is the belief the marker exists to check.
+ *
+ * AND `verified` MEASURED A CREDENTIAL, NOT A READ. `Boolean(url)` is true when
+ * the string is merely PRESENT in the environment. The run that exposed this
+ * happened to be in a window without it, so it wrote `verified: false` and was
+ * honest by accident; with the variable in scope the same code would have
+ * stamped `verified: true` over a list it had read from a directory.
+ *
+ * So the list now comes from `appliedFromDatabase` — the same query `check`
+ * runs — and there is no path that writes without it.
+ * ---------------------------------------------------------------------------
+ */
+async function record() {
+  const url = process.env.PROD_DIRECT_DATABASE_URL
+  if (!url) {
+    console.error('REFUSING TO RECORD: no PROD_DIRECT_DATABASE_URL.')
+    console.error('')
+    console.error('  This file is a claim about production, so it is written')
+    console.error('  from production or not at all. Without the URL the only')
+    console.error('  list available is this checkout’s own migrations')
+    console.error('  folder, which is the belief the marker exists to test.')
+    console.error('')
+    console.error('  Re-run with the production URL as a ONE-SHOT prefix:')
+    console.error('')
+    console.error(
+      '    PROD_DIRECT_DATABASE_URL=<direct url> ' +
+        BACKSLASH +
+        '\n      node scripts/check-migration-gap.mjs --record',
+    )
+    console.error('')
+    console.error('  Never `export`. The next command must not inherit it.')
+    return false
+  }
+
+  // SORTED BEFORE WRITING. `_prisma_migrations` returns rows in whatever order
+  // the query planner likes, and the previous implementation was accidentally
+  // stable because a directory listing is sorted. Writing production's raw row
+  // order re-shuffles all 32 lines on every record, so a real change — one
+  // migration appearing — would arrive buried in a diff nobody reads.
+  // `migrationGap` compares sets, so order is presentation only.
+  const applied = (await appliedFromDatabase(url)).sort()
   const local = localMigrations()
-  const verified = Boolean(process.env.PROD_DIRECT_DATABASE_URL)
+  const gap = migrationGap(local, applied)
+
   writeFileSync(
     MARKER,
     `${JSON.stringify(
       {
-        // Not a high-water mark: the full list, so a migration inserted out of
-        // order by a merge cannot hide behind a later timestamp.
-        applied: local,
+        // PRODUCTION'S list, not this machine's. Not a high-water mark either:
+        // the full set, so a migration inserted out of order by a merge cannot
+        // hide behind a later timestamp.
+        applied,
         recordedAt: new Date().toISOString().slice(0, 10),
-        // Whether this was read from the production database or taken on
-        // somebody's word. A reader is entitled to know which.
-        verified,
+        // Now derived from the read having HAPPENED — this line is only
+        // reached after `appliedFromDatabase` returned. A `false` in this file
+        // can therefore only have come from the old code, which is worth
+        // knowing when reading an older marker.
+        verified: true,
       },
       null,
       2,
     )}\n`,
   )
+
   console.log(
-    `recorded ${local.length} migrations as applied to production` +
-      (verified
-        ? ' (verified against the database)'
-        : ' (UNVERIFIED — on report)'),
+    `recorded ${applied.length} migrations, read from the production database`,
   )
+
+  // SAID OUT LOUD RATHER THAN LEFT TO THE NEXT RUN. Recording is honest even
+  // when production is behind — the marker describes production, and the gap
+  // is recomputed on every check — but somebody who just ran a migration and
+  // is told nothing will assume it landed.
+  if (gap.length > 0) {
+    console.log('')
+    console.log(
+      `  NOTE: production is still missing ${gap.length} migration(s) that`,
+    )
+    console.log('  exist locally. The marker is correct; the migration is not')
+    console.log('  finished:')
+    for (const name of gap) console.log(`    ${name}`)
+  }
+  return true
 }
 
 if (
@@ -219,7 +290,10 @@ if (
     new URL(`file://${process.argv[1].replace(/\\/g, '/')}`).href
 ) {
   if (process.argv.includes('--record')) {
-    record()
+    // EXIT CODE FOLLOWS THE REFUSAL. A record step that silently does nothing
+    // and returns 0 is how a stale marker outlives the migration it was meant
+    // to describe.
+    process.exit((await record()) ? 0 : 1)
   } else {
     const result = await check({
       confirmed: process.argv.includes('--migrations-applied'),

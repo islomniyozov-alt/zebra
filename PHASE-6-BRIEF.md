@@ -3089,9 +3089,24 @@ Recorded rather than resolved, per Phase 1's discipline.
       `settlement_line_stop_dates`) alongside the new one, because nobody had
       run it since.
 
-      NOT FIXED IN THIS COMMIT, deliberately: the fix changes the script the
-      owner's deploy ritual is mid-way through using. `record()` should take the
-      applied list from the same production query the check performs, refuse to
-      write when it has not read production, and set `verified` from whether
-      that read happened rather than from whether a string exists in the
-      environment.
+      NOT FIXED WHEN FIRST RECORDED, deliberately: the fix changes the script
+      the owner's deploy ritual was mid-way through using. FIXED immediately
+      after that deploy verified. `record()` now takes its list from
+      `appliedFromDatabase` — the same query `check` runs — refuses with a
+      non-zero exit and writes nothing when there is no production URL, and
+      sets `verified` on the far side of that read, where it cannot be reached
+      without one. A `false` in the marker can now only have come from the old
+      code.
+
+      TWO THINGS THE FIX TURNED UP. The list is sorted before writing: a
+      directory listing was accidentally ordered and `_prisma_migrations` is
+      not, so recording production's raw row order re-shuffled all 32 lines and
+      would have buried a real one-line change in noise. And `record()` now
+      says out loud when production is still behind, instead of writing a
+      correct marker and letting somebody who just ran a migration assume it
+      landed.
+
+      THE RE-RECORD ALSO SETTLED THE CONTENT QUESTION: reading production and
+      sorting produced a one-line diff, `verified: false` to `true`. The 32
+      names were identical, so the original record had been right — it simply
+      had no way to know it.
