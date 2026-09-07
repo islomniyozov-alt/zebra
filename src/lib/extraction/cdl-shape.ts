@@ -25,15 +25,24 @@ import type { Field, Maybe } from './envelope'
 //
 // ── WHAT IS DELIBERATELY NOT HERE ─────────────────────────────────────────
 //
-// Date of birth, address, sex, height, weight, eye colour, signature, portrait.
-// Every one of them is printed on the card and none is consumed by anything in
-// this system. Extracting personal data because it happens to be in the frame
-// is the wrong default: it creates a copy of somebody's identity documents in
-// a database that never asked for one. Add a field the day something needs it,
-// with the reason written beside it.
+// Date of birth, sex, height, weight, eye colour, signature, portrait.
 //
-// The ADDRESS is read but never returned — see `state` below, which uses it as
-// a cross-check and keeps nothing.
+// THE TEST IS A CONSUMER, NOT SENSITIVITY. The rule has never been "no
+// personal data" — it is DON'T EXTRACT SOMETHING BECAUSE IT HAPPENS TO BE IN
+// THE FRAME. A field earns its place when something in this system reads it,
+// and the ones above still have nothing that does. Add one the day that
+// changes, with the reason written beside it.
+//
+// THE ADDRESS CROSSED THAT LINE ON 2026-09-07 and is now read and stored:
+// dispatch and correspondence need it, and it appears on the driver record
+// and the detail screen. It is transcribed from field 8 — street, city and
+// postal code — and it is STALE MORE OFTEN THAN NOT, because a driver who
+// moves has no reason to reissue the card until it expires. A starting point
+// for a human to confirm; never a payroll or tax address.
+//
+// `addressStateCode` REMAINS A DIFFERENT THING FROM THE STORED STATE. It is a
+// second reading of the ISSUING state, used to cross-check the header and then
+// discarded. See both fields below.
 // ---------------------------------------------------------------------------
 
 export interface ExtractedCdl {
@@ -78,7 +87,39 @@ export interface ExtractedCdl {
    */
   state: Maybe<string>
   /**
+   * AAMVA `8`, the street line, transcribed as printed.
+   *
+   * ── WHY THIS IS HERE WHEN DOB AND SEX ARE NOT ───────────────────────────
+   *
+   * The rule was never "no personal data". It was DON'T EXTRACT SOMETHING
+   * BECAUSE IT HAPPENS TO BE PRINTED — a consumer is what justifies a field.
+   * The address has one now: it goes on the driver record and the detail
+   * screen, where dispatch and correspondence need it. Date of birth, sex,
+   * height, weight and eye colour still have none, so they are still absent.
+   *
+   * A LICENCE ADDRESS IS OFTEN STALE. Drivers move and do not reissue the
+   * card. This is a starting point on a form somebody confirms, never a source
+   * of truth for payroll or a tax document — said in the schema, in the
+   * migration, and in the words on the confirm form, because it is the kind of
+   * thing that gets forgotten precisely where it matters.
+   */
+  addressLine1: Maybe<string>
+  /** AAMVA `8`, the city line, as printed. */
+  addressCity: Maybe<string>
+  /**
+   * AAMVA `8`, the postal code, as printed. Never reformatted or completed —
+   * a ZIP+4 stays a ZIP+4 and a five-digit code is not padded into one.
+   */
+  addressPostalCode: Maybe<string>
+  /**
    * The ST field of the printed address, two letters. The cross-check.
+   *
+   * NOT THE STORED ADDRESS'S STATE, even though the two agree on nearly every
+   * card. This one exists ONLY to be compared against `state`, and it is
+   * discarded afterwards; `Driver.addressState` is what gets written down.
+   * Collapsing them would mean the cross-check silently starts depending on
+   * what somebody edited on the confirm form, which is a check reading its own
+   * answer — the failure the note below already records once.
    *
    * ITS OWN FIELD SINCE 2026-09-06, AND THE REASON IS THAT THE NOTE COULD NOT
    * DISCRIMINATE. It was asked for inside `state.note` — free text — and
@@ -88,9 +129,11 @@ export interface ExtractedCdl {
    * anything containing the claimed code and on plenty that contained nothing
    * useful; a comparison of two named values cannot do either.
    *
-   * TWO LETTERS, NOT THE ADDRESS. The street, city and postcode stay off this
-   * contract — see the exclusion list above. A state code is the smallest
-   * thing that answers "does the card agree with itself".
+   * TWO LETTERS, AND STILL ONLY TWO. The street, city and postal code are on
+   * this contract now — as `addressLine1`, `addressCity` and
+   * `addressPostalCode`, which are stored — but this field did not grow to
+   * meet them. It answers one question, "does the card agree with itself",
+   * and the smallest thing that answers it is a state code.
    */
   addressStateCode: Maybe<string>
   /** AAMVA `12`. Restriction codes. `NONE` on the card means an empty array. */
@@ -141,6 +184,9 @@ export const CDL_SCHEMA = {
     familyName: field({ type: 'string' }),
     givenName: field({ type: 'string' }),
     state: field({ type: 'string' }),
+    addressLine1: field({ type: 'string' }),
+    addressCity: field({ type: 'string' }),
+    addressPostalCode: field({ type: 'string' }),
     addressStateCode: field({ type: 'string' }),
     restrictions: field({ type: 'array', items: { type: 'string' } }),
     endorsements: field({ type: 'array', items: { type: 'string' } }),
@@ -154,6 +200,9 @@ export const CDL_SCHEMA = {
     'familyName',
     'givenName',
     'state',
+    'addressLine1',
+    'addressCity',
+    'addressPostalCode',
     'addressStateCode',
     'restrictions',
     'endorsements',

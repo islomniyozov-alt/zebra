@@ -26,6 +26,9 @@ const GOOD = JSON.stringify({
   familyName: { value: 'NIYOZOV', confidence: 'high' },
   givenName: { value: 'ISLOM', confidence: 'high' },
   state: { value: 'FL', confidence: 'high' },
+  addressLine1: { value: '394 AMBROSE CREEK DR', confidence: 'high' },
+  addressCity: { value: 'SUGARHILL', confidence: 'high' },
+  addressPostalCode: { value: '30518-7869', confidence: 'high' },
   addressStateCode: { value: 'FL', confidence: 'high' },
   restrictions: { value: [], confidence: 'high' },
   endorsements: { value: ['N'], confidence: 'medium' },
@@ -75,6 +78,10 @@ describe('a well-formed licence response', () => {
       cdlState: 'FL',
       cdlClass: 'A',
       cdlExpiresAt: '2029-04-14',
+      addressLine1: '394 AMBROSE CREEK DR',
+      addressCity: 'SUGARHILL',
+      addressState: 'FL',
+      addressPostalCode: '30518-7869',
     })
   })
 
@@ -209,6 +216,54 @@ describe('responses that parse but are not a licence read', () => {
         ),
       ),
     ).toBe('expiry_before_issue')
+  })
+})
+
+describe('the address, which is read now and was not before', () => {
+  // IT IS HERE BECAUSE SOMETHING READS IT, not because it is printed. The
+  // exclusion list is unchanged for DOB, sex, height, weight and eye colour —
+  // still nothing consumes those, so they are still absent from the contract.
+
+  it('transcribes the three printed parts without reformatting them', () => {
+    const card = parseCdlResponse(GOOD)
+    expect(card.addressLine1?.value).toBe('394 AMBROSE CREEK DR')
+    expect(card.addressCity?.value).toBe('SUGARHILL')
+    // A ZIP+4 STAYS A ZIP+4. Trimming it to five would be the parser deciding
+    // the card is more precise than it needs to be.
+    expect(card.addressPostalCode?.value).toBe('30518-7869')
+  })
+
+  it('keeps the stored state and the cross-check state as separate readings', () => {
+    // THEY AGREE ON ALMOST EVERY CARD, which is exactly why this is asserted.
+    // `addressStateCode` exists to be compared against the header and is then
+    // discarded; `addressState` is what gets written to the driver. A future
+    // edit that collapsed them would make the cross-check read a value a
+    // dispatcher can edit on the confirm form.
+    const card = parseCdlResponse(GOOD)
+    expect(card.addressStateCode?.value).toBe('FL')
+    expect(cdlPrefill(card).addressState).toBe('FL')
+    // The shape has no `addressState`; the stored one is derived at prefill.
+    expect('addressState' in card).toBe(false)
+  })
+
+  it('still refuses a card whose two state readings disagree', () => {
+    // The address being stored must not have weakened the check that made it
+    // trustworthy in the first place.
+    expect(
+      refuseCdl(
+        parseCdlResponse(
+          withField('addressStateCode', { value: 'GA', confidence: 'high' }),
+        ),
+      ),
+    ).toBe('state_disagrees')
+  })
+
+  it('leaves the address out of the prefill when the card did not yield it', () => {
+    const card = parseCdlResponse(withField('addressLine1', null))
+    expect(refuseCdl(card)).toBeNull()
+    expect(cdlPrefill(card).addressLine1).toBeUndefined()
+    // A missing street is not a missing licence: the spine is unaffected.
+    expect(cdlPrefill(card).cdlNumber).toBe('N520-400-84-123-0')
   })
 })
 

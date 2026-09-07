@@ -380,6 +380,15 @@ const en = {
   'drivers.phone': 'Phone',
   'drivers.email': 'Email',
   'drivers.cdlNumber': 'CDL number',
+  'drivers.addressLine1': 'Street address',
+  'drivers.addressCity': 'City',
+  'drivers.addressState': 'State',
+  'drivers.addressPostalCode': 'Postal code',
+  'drivers.addressHint':
+    'From the licence, and often out of date — drivers move without reissuing the card. Confirm it before using it for payroll or tax documents.',
+  'drivers.address': 'Address',
+  'drivers.addressStale':
+    'From the licence. Confirm before using for payroll or tax.',
   'drivers.cdlState': 'CDL state',
   'drivers.cdlClass': 'CDL class',
   'drivers.hireDate': 'Hire date',
@@ -2073,6 +2082,15 @@ const ru: Dictionary = {
   'drivers.phone': 'Телефон',
   'drivers.email': 'Электронная почта',
   'drivers.cdlNumber': 'Номер CDL',
+  'drivers.addressLine1': 'Улица',
+  'drivers.addressCity': 'Город',
+  'drivers.addressState': 'Штат',
+  'drivers.addressPostalCode': 'Почтовый индекс',
+  'drivers.addressHint':
+    'С водительского удостоверения — часто устаревший: водители переезжают, не меняя карточку. Проверьте перед использованием для зарплаты или налоговых документов.',
+  'drivers.address': 'Адрес',
+  'drivers.addressStale':
+    'С удостоверения. Проверьте перед использованием для зарплаты или налогов.',
   'drivers.cdlState': 'Штат CDL',
   'drivers.cdlClass': 'Класс CDL',
   'drivers.hireDate': 'Дата приёма',
@@ -3760,6 +3778,15 @@ const fa: Dictionary = {
   'drivers.phone': 'تلفن',
   'drivers.email': 'رایانامه',
   'drivers.cdlNumber': 'شمارهٔ گواهی‌نامه',
+  'drivers.addressLine1': 'نشانی خیابان',
+  'drivers.addressCity': 'شهر',
+  'drivers.addressState': 'ایالت',
+  'drivers.addressPostalCode': 'کد پستی',
+  'drivers.addressHint':
+    'از روی گواهی‌نامه، و اغلب قدیمی است — رانندگان جابه‌جا می‌شوند بدون آنکه کارت را عوض کنند. پیش از استفاده برای حقوق یا اسناد مالیاتی آن را تأیید کنید.',
+  'drivers.address': 'نشانی',
+  'drivers.addressStale':
+    'از روی گواهی‌نامه. پیش از استفاده برای حقوق یا مالیات تأیید کنید.',
   'drivers.cdlState': 'ایالت گواهی‌نامه',
   'drivers.cdlClass': 'کلاس گواهی‌نامه',
   'drivers.hireDate': 'تاریخ استخدام',

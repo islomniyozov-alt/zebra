@@ -724,6 +724,29 @@ model Driver {
   phone     String?
   email     String?
 
+  // ── THE DRIVER'S ADDRESS, USUALLY READ FROM FIELD 8 OF THE LICENCE ──────
+  //
+  // A LICENCE ADDRESS IS OFTEN STALE. Drivers move and do not update the card
+  // — there is no reason to until it expires — so this is a starting point a
+  // dispatcher confirms, NOT a source of truth. Nothing that must be right
+  // may read it without a human having looked: not payroll, not a 1099, not
+  // anything posted to a tax authority. The confirm form says so in words.
+  //
+  // NAMED `address*` RATHER THAN MATCHING `Company`'s BARE `city`/`state`.
+  // Company can afford `state` because it has only one; a Driver already has
+  // `cdlState`, and `driver.state` beside `driver.cdlState` is a pair somebody
+  // will eventually mix up — in a payroll context, silently and in the wrong
+  // direction. The prefix costs four characters and removes the question.
+  //
+  // AND `addressState` IS NOT `ExtractedCdl.addressStateCode`. That one is a
+  // second reading of the ISSUING state, kept only to cross-check the header
+  // and never stored. They agree on almost every card, which is exactly why
+  // the distinction has to be written down rather than left to be noticed.
+  addressLine1      String?
+  addressCity       String?
+  addressState      String?
+  addressPostalCode String?
+
   cdlNumber String?
   cdlState  String?
   cdlClass  String?

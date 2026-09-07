@@ -60,6 +60,9 @@ export const NOTHING_READ: ExtractedCdl = {
   familyName: null,
   givenName: null,
   state: null,
+  addressLine1: null,
+  addressCity: null,
+  addressPostalCode: null,
   addressStateCode: null,
   restrictions: null,
   endorsements: null,
@@ -179,6 +182,26 @@ export function cdlPrefill(fields: ExtractedCdl): Record<string, string> {
   // cannot silently blank a class it failed to understand.
   const operational = operationalClass(fields.class?.value)
   if (operational) values.cdlClass = operational
+
+  // ── THE ADDRESS, INTO EDITABLE FIELDS ────────────────────────────────────
+  //
+  // `addressState` COMES FROM `addressStateCode`, AND THAT IS THE ONLY PLACE
+  // THE TWO MEET. The cross-check has already run by the time anything reaches
+  // here — `refuseCdl` compared it against the header and refused a card that
+  // contradicted itself — so what is copied is a value that survived the
+  // comparison, not a value the comparison will later depend on. Nothing reads
+  // `Driver.addressState` back into the check.
+  //
+  // AND EVERY ONE OF THESE IS EDITABLE ON THE CONFIRM FORM, because a licence
+  // address is frequently the one the driver had two moves ago.
+  if (fields.addressLine1?.value)
+    values.addressLine1 = fields.addressLine1.value.trim()
+  if (fields.addressCity?.value)
+    values.addressCity = fields.addressCity.value.trim()
+  if (fields.addressStateCode?.value)
+    values.addressState = fields.addressStateCode.value.trim().toUpperCase()
+  if (fields.addressPostalCode?.value)
+    values.addressPostalCode = fields.addressPostalCode.value.trim()
   if (fields.expiresAt?.value) values.cdlExpiresAt = fields.expiresAt.value
 
   return values

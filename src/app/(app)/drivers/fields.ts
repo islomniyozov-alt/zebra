@@ -75,6 +75,26 @@ export function driverFields(
     },
     { kind: 'tel', name: 'phone', label: t('drivers.phone') },
     { kind: 'email', name: 'email', label: t('drivers.email') },
+    // ── THE ADDRESS, PREFILLED FROM THE LICENCE AND ALWAYS EDITABLE ───────
+    //
+    // THE HINT IS NOT DECORATION. A licence address is frequently the one the
+    // driver had two moves ago — nothing forces a reissue until the card
+    // expires — and the person most likely to paste it into a 1099 is the
+    // person looking at this form. It says so at the point of use rather than
+    // only in a comment nobody reading the screen will ever see.
+    {
+      kind: 'text',
+      name: 'addressLine1',
+      label: t('drivers.addressLine1'),
+      hint: t('drivers.addressHint'),
+    },
+    { kind: 'text', name: 'addressCity', label: t('drivers.addressCity') },
+    { kind: 'text', name: 'addressState', label: t('drivers.addressState') },
+    {
+      kind: 'text',
+      name: 'addressPostalCode',
+      label: t('drivers.addressPostalCode'),
+    },
     {
       kind: 'text',
       name: 'cdlNumber',

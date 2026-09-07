@@ -75,6 +75,19 @@ export interface DriverInput {
   lastName: string
   phone?: unknown
   email?: unknown
+  /**
+   * The address, usually transcribed from field 8 of the licence.
+   *
+   * STALE MORE OFTEN THAN NOT — a driver who moves has no reason to reissue
+   * the card. A starting point somebody confirms, never a payroll or tax
+   * address. `addressState` is the STORED state and is unrelated to
+   * `ExtractedCdl.addressStateCode`, which exists only to cross-check the
+   * issuing state and is discarded.
+   */
+  addressLine1?: unknown
+  addressCity?: unknown
+  addressState?: unknown
+  addressPostalCode?: unknown
   cdlNumber?: unknown
   cdlState?: unknown
   cdlClass?: unknown
@@ -413,6 +426,15 @@ export async function createDriver(
       lastName: requiredText(input.lastName, 'lastName'),
       phone: optionalText(input.phone),
       email: optionalText(input.email),
+      addressLine1: optionalText(input.addressLine1),
+      addressCity: optionalText(input.addressCity),
+      // `stateCode` TRUNCATES TO TWO CHARACTERS, which is right here and wrong
+      // in the Datatruck seeds — see `datatruck/states.ts`. The difference is
+      // the source: this value came off a card that prints a two-letter code,
+      // or from a person typing into a field labelled with one. The seeds read
+      // spelled-out names, where truncating "TEXAS" gives "TE".
+      addressState: stateCode(input.addressState),
+      addressPostalCode: optionalText(input.addressPostalCode),
       cdlNumber: optionalText(input.cdlNumber),
       cdlState: stateCode(input.cdlState),
       cdlClass: optionalText(input.cdlClass),
@@ -499,6 +521,15 @@ export async function updateDriver(
       lastName: requiredText(input.lastName, 'lastName'),
       phone: optionalText(input.phone),
       email: optionalText(input.email),
+      addressLine1: optionalText(input.addressLine1),
+      addressCity: optionalText(input.addressCity),
+      // `stateCode` TRUNCATES TO TWO CHARACTERS, which is right here and wrong
+      // in the Datatruck seeds — see `datatruck/states.ts`. The difference is
+      // the source: this value came off a card that prints a two-letter code,
+      // or from a person typing into a field labelled with one. The seeds read
+      // spelled-out names, where truncating "TEXAS" gives "TE".
+      addressState: stateCode(input.addressState),
+      addressPostalCode: optionalText(input.addressPostalCode),
       cdlNumber: optionalText(input.cdlNumber),
       cdlState: stateCode(input.cdlState),
       cdlClass: optionalText(input.cdlClass),
