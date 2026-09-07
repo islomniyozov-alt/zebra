@@ -27,8 +27,12 @@
     "20260811153140_factor_remittance_address",
     "20260813150000_inbound_email",
     "20260815180813_unrouted_email",
-    "20260816153612_inbound_email_unread"
+    "20260816153612_inbound_email_unread",
+    "20260817213454_location_facility_code",
+    "20260817225524_load_stop_leg_miles",
+    "20260826010000_settlement_line_stop_dates",
+    "20260907120000_driver_external_id"
   ],
-  "recordedAt": "2026-08-16",
-  "verified": true
+  "recordedAt": "2026-09-07",
+  "verified": false
 }

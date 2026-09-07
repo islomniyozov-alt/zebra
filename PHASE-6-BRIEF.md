@@ -3053,3 +3053,45 @@ Recorded rather than resolved, per Phase 1's discipline.
       the write uses and the two agree by construction — and the cross-authority
       12 are printed as their own section, unresolved, because choosing a
       carrier for them is the question the record exists to answer.
+
+106.  **`--record` WRITES THE LOCAL FOLDER LISTING UNDER A PRODUCTION LABEL,
+      AND ITS `verified` FLAG MEASURES A CREDENTIAL RATHER THAN A READ.** —
+      2026-09-07.
+
+      Reported by the owner after the `driver_external_id` migration: the
+      record step printed `UNVERIFIED — on report`. It is worse than that
+      sentence suggests, and the failure is the cardinal instrument rule.
+
+          const local = localMigrations()
+          const verified = Boolean(process.env.PROD_DIRECT_DATABASE_URL)
+
+      `record()` writes `local` — a listing of `prisma/migrations/` on this
+      machine — into a file named `production-migrations.json`, describing it as
+      `applied`. Production is never asked. The check half of the same script
+      DOES query production when the URL is present and prints
+      `source: production database`; `record()` reuses none of it.
+
+      SO THE DANGEROUS CASE IS NOT THE ONE THAT WAS SEEN. `verified: false` was
+      correct here by accident — the owner ran `--record` in a fresh window
+      without the production URL in it. Had that variable been present, the
+      script would have written `verified: true` having still never read a row
+      from production: the marker would assert that production holds whatever
+      this checkout's folder holds, and carry a flag claiming it was confirmed.
+      "Never supply the baseline you are testing", with the baseline written to
+      disk and stamped verified.
+
+      THE CONTENT IS NONETHELESS CORRECT THIS TIME, and that distinction
+      matters: the check immediately before it read production directly and
+      reported 32/32, no gap. What is untrustworthy is the mechanism, not this
+      file. It also revealed the marker had been stale since 2026-08-16 —
+      `--record` added three migrations applied weeks ago
+      (`location_facility_code`, `load_stop_leg_miles`,
+      `settlement_line_stop_dates`) alongside the new one, because nobody had
+      run it since.
+
+      NOT FIXED IN THIS COMMIT, deliberately: the fix changes the script the
+      owner's deploy ritual is mid-way through using. `record()` should take the
+      applied list from the same production query the check performs, refuse to
+      write when it has not read production, and set `verified` from whether
+      that read happened rather than from whether a string exists in the
+      environment.
