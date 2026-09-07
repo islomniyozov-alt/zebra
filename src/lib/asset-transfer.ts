@@ -48,6 +48,14 @@ export function linkFor(kind: FleetKind, id: string): AssetLink {
  * transferred would have no authority at all by that reading.
  *
  * The history has to start where the asset does.
+ *
+ * `effectiveFrom` DEFAULTS TO NOW AND THE MIGRATION SEEDS PASS A STATED DATE.
+ * An asset created through the interface starts its history the moment
+ * somebody adds it, which is true. A fleet imported from Datatruck did NOT
+ * start working the afternoon the import ran, and dating 49 trucks by when a
+ * script happened to execute makes "which authority ran unit 105 in August"
+ * answer with the import date forever. Same reasoning as the driver pay
+ * rules' fixed `effectiveFrom` — a stated date, not the seed-run date.
  */
 export async function openFirstPeriod(
   tx: TxClient,
@@ -55,6 +63,7 @@ export async function openFirstPeriod(
   companyId: string,
   link: AssetLink,
   byUserId?: string | null,
+  effectiveFrom?: Date,
 ): Promise<void> {
   await tx.assetAssignment.create({
     data: {
@@ -62,6 +71,9 @@ export async function openFirstPeriod(
       companyId,
       ...link,
       createdByUserId: byUserId ?? null,
+      // Omitted rather than passed as undefined-or-now, so the schema's own
+      // `@default(now())` stays the single answer for the interface path.
+      ...(effectiveFrom ? { effectiveFrom } : {}),
     },
   })
 }
@@ -265,15 +277,40 @@ export async function findAuthorityDrift(
     },
   ]
 
+  // ── ONE QUERY FOR EVERY OPEN PERIOD, NOT ONE PER ASSET ──────────────────
+  //
+  // This used to call `currentAuthority` in the loop below, which is a query
+  // per asset, serially, INSIDE a 5-second interactive transaction. That is
+  // fine against the handful of demo rows it was written against and it stops
+  // working at the size of the real fleet: seeding the 49 Datatruck trucks
+  // took the run past the timeout, and the failure was not "drift found" but
+  // `A query cannot be executed on an expired transaction` — a backstop that
+  // reports an infrastructure error instead of an answer.
+  //
+  // THE CHECK IS UNCHANGED. Same assets, same comparison, same definition of
+  // drift including "no open period at all"; only the fetching is different.
+  // `currentAuthority` stays as it is — it is the right shape for one asset on
+  // one screen, and this is the only caller that wanted all of them.
+  const openPeriods = await tx.assetAssignment.findMany({
+    where: { effectiveTo: null },
+    select: { companyId: true, truckId: true, trailerId: true, driverId: true },
+  })
+
+  const openBy = new Map<string, string>()
+  for (const period of openPeriods) {
+    const id = period.truckId ?? period.trailerId ?? period.driverId
+    if (id) openBy.set(id, period.companyId)
+  }
+
   for (const { kind, rows } of kinds) {
     for (const row of rows) {
-      const open = await currentAuthority(tx, kind, row.id)
-      if (open?.companyId !== row.companyId) {
+      const openCompanyId = openBy.get(row.id) ?? null
+      if (openCompanyId !== row.companyId) {
         drift.push({
           kind,
           assetId: row.id,
           assetCompanyId: row.companyId,
-          openPeriodCompanyId: open?.companyId ?? null,
+          openPeriodCompanyId: openCompanyId,
         })
       }
     }

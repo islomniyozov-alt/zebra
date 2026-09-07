@@ -2942,3 +2942,114 @@ Recorded rather than resolved, per Phase 1's discipline.
       honest shape for one, with the limit stated on the path it governs.
       Multipart rather than base64 removed the 4/3 inflation entirely, and the
       browser now downscales images to 1600px, which is the fix at the source.
+
+102.  **A BRIEF CAN ASK FOR A ROW SHAPE THE SCHEMA HAS NO COLUMN FOR.** —
+      2026-09-07.
+
+            Two of them, in one ruling, and both were found by building rather than
+            by reading — which is the argument for previewing before writing.
+
+            **`Truck.companyId` is `NOT NULL`, so a truck cannot "seed unassigned."**
+            The ruling said the Midwest Global truck and the two with a blank MC
+            "seed unassigned, three unassigned total". There is no such row: a truck
+            belongs to an operating authority in this schema, which is the whole
+            mechanism behind "which authority ran unit 105 in Q2". The seed HOLDS
+            those three and names them with year, make, VIN and plate. Parking them
+            under a default authority would have been this system inventing which
+            carrier is legally responsible for a vehicle.
+
+            **`Driver ID` — the stated idempotency key — has nowhere to live.** The
+            ruling named it correctly and for the right reason: it is stable where
+            names are not. `Driver` has no `externalId`, and neither does any other
+            model — the string does not appear in `schema.prisma`. So the drivers
+            seed is the trucks seed minus a key, and it is not written.
+
+            THE SCHEMA WINS AND THE CONTRADICTION GETS FLAGGED, per AGENTS.md,
+            rather than being resolved by matching on `(companyId, firstName,
+
+      lastName)` — which happens to be unique across all 54 rows TODAY and is
+      therefore the most comfortable way to be wrong. It works until somebody
+      marries, or until two Ivanovs are hired.
+
+103.  **A BACKSTOP SIZED FOR DEMO DATA IS NOT KNOWN TO WORK ON THE REAL
+      FLEET.** — 2026-09-07.
+
+      `findAuthorityDrift` called `currentAuthority` once per asset, serially,
+      inside the 5-second interactive transaction `runInOrg` opens. Against the
+      three trucks dev had, ~1s. Against the 49 real ones, 5542ms — and the
+      failure was not "drift found" but
+
+          A query cannot be executed on an expired transaction
+
+      a backstop reporting an infrastructure error where an answer belongs. It
+      is now one query for every open period plus an in-memory lookup; the
+      assets, the comparison and the definition of drift are unchanged.
+      `currentAuthority` is untouched, being the right shape for one asset on
+      one screen.
+
+      IT WAS FOUND BY SEEDING, NOT BY REVIEW. Nothing was wrong with the check
+      until the database held a realistic number of rows, and no test would have
+      said so, because every test that exercised it ran against fixtures. The
+      54 drivers would have made it worse.
+
+      THE SAME SEED ALSO PROVED THE CHECK STILL BITES: its first run created 46
+      trucks with a bare `truck.create` and no open `AssetAssignment`, which is
+      drift by that function's own definition — "a missing period means somebody
+      wrote a row around the service layer", and a seed is exactly that. All 46
+      were caught. The seed now opens the period, dated `2026-08-01` rather than
+      the moment the script ran, and repairs a missing one on re-run.
+
+104.  **TESTING A GUARD BY EDITING THE CONSTANT IT GUARDS, WITH `--write` STILL
+      ON THE COMMAND LINE.** — 2026-09-07.
+
+      The drivers seed refuses to write if any load picks up before its stated
+      `effectiveFrom`. To watch that refusal fire, the constant was moved from
+      `2026-08-01` to `2026-09-01` — and the command that had been used all
+      session, `--write`, was run unchanged. The date was not late enough to
+      trip the guard, so nothing refused: the seed proceeded and wrote **54 pay
+      rules dated 2026-09-01**, a month wrong, on the one table whose whole
+      purpose is to be correct about dates.
+
+      It was caught immediately, the 54 rules and 54 asset periods were deleted
+      by a scoped statement that counted what must SURVIVE before deleting
+      anything, and the seed re-ran clean. Nothing reached production.
+
+      TWO SEPARATE LESSONS AND THE SECOND IS THE REAL ONE:
+
+      A guard test changes the input, never the constant, whenever the constant
+      is also what gets written. Here the same value does both jobs, so an
+      edit meant to probe the check silently re-dated the data.
+
+      And a guard test runs in the mode that CANNOT write. `--write` was left on
+      out of habit from the previous command. The seed already had the right
+      shape — preview by default, writing behind a flag — and the flag was
+      typed anyway.
+
+      THE FIRST ATTEMPT ALSO PROVED NOTHING, which is how the mistake surfaced:
+      `2026-09-01` did not fire because dev's earliest pickup is
+      `2026-09-01T09:00`, and `lt` midnight correctly matched nothing. A guard
+      that stays silent has not been shown to work — it has been shown to be
+      silent. Re-tested at `2026-09-05`: refused, named 6 stops and load 1113
+      by number and exact time, wrote nothing.
+
+105.  **THE PREVIEW MEASURED A SUPERSET OF WHAT THE WRITE MATCHED ON.** —
+      2026-09-07.
+
+      The drivers seed links a driver to a truck on `(authority, unitNumber)`,
+      because that is what `truck_unit_per_company` makes unique. Its preview
+      asked a different question — does this unit number exist ANYWHERE — and
+      so reported **3** drivers whose truck was missing. The write then linked
+      **32 of 47**.
+
+      The 12 in between are drivers whose row names one carrier and whose truck
+      belongs to the other. Real, interesting, and exactly the sort of thing a
+      preview exists to surface before anybody presses the button; instead the
+      preview gave the comfortable number and the discrepancy showed up in a
+      count afterwards.
+
+      Twin of "count the thing you are claiming, not a superset of it", one
+      layer along: the instrument and the action must share a key, not merely
+      resemble each other. The preview now derives from the same composite key
+      the write uses and the two agree by construction — and the cross-authority
+      12 are printed as their own section, unresolved, because choosing a
+      carrier for them is the question the record exists to answer.

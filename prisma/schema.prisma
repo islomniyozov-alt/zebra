@@ -702,6 +702,23 @@ model Driver {
   userId String?
   user   User?   @relation(fields: [userId], references: [id])
 
+  // The id this driver carried in the system they were migrated from.
+  //
+  // THE KEY A RE-RUN OF THE IMPORT MATCHES ON. Names are not stable — people
+  // marry, and two Ivanovs get hired — so matching an import on
+  // (company, first, last) works until exactly the day it silently merges two
+  // people or splits one. The Datatruck export carries a stable numeric id on
+  // all 54 rows; this is where it lands.
+  //
+  // NULL FOR ANYONE ADDED THROUGH THE INTERFACE, which is most drivers from
+  // here on. Postgres treats NULLs as distinct in a unique index, so any
+  // number of driver rows may have none.
+  //
+  // UNIQUE PER ORGANIZATION, not per company: a driver moves between sister
+  // authorities (that is what `AssetAssignment` exists for) and their id in
+  // the old system does not change when they do.
+  externalId String?
+
   firstName String
   lastName  String
   phone     String?
@@ -738,6 +755,7 @@ model Driver {
   claims          Claim[]
   communications  Communication[]
 
+  @@unique([organizationId, externalId])
   @@index([companyId, status])
   @@index([companyId, lastName])
 }

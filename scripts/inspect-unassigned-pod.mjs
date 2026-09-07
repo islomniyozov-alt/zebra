@@ -93,6 +93,51 @@ try {
   console.log(`\nDriverless POD loads (first ${settled.length}):`)
   console.table(settled)
 
+  // ── EACH AFFECTED LOAD, WITH BOTH HALVES OF THE ASSIGNMENT ────────────
+  //
+  // ADDED 2026-09-07. The list above filters `driverId is null`, so a load
+  // that HAS a driver and no truck never appears in it — and the totals give
+  // only a population count. Asked which of two named production loads was
+  // missing which half, this script could not say, which is a gap in the
+  // instrument rather than in the data.
+  //
+  // The distinction decides the repair. A load whose driver and truck are both
+  // there and whose column merely disagrees is a stale cache, and
+  // `refreshBillingStatus` is right. A load genuinely missing an assignment is
+  // freight nobody is being paid for, and repairing the column would make the
+  // badge look correct while the driver stays missing — the failure
+  // `repair-billing-drift.ts` warns about in its own header.
+  const affected = await rows(`
+    select l."loadNumber",
+           (l."driverId" is not null) as has_driver,
+           (l."truckId"  is not null) as has_truck,
+           l."billingStatus", l."directSettled", l."totalRevenueCents",
+           count(sl.id)::int as settlement_lines
+    from "Load" l
+    left join "SettlementLine" sl on sl."loadId" = l.id
+    where l."deletedAt" is null
+      and l."isCancelled" = false
+      and l."operationalStatus" = 'POD_RECEIVED'
+      and l."totalRevenueCents" > 0
+      and (l."driverId" is null or l."truckId" is null)
+    group by l.id, l."loadNumber", l."driverId", l."truckId",
+             l."billingStatus", l."directSettled", l."totalRevenueCents"
+    order by l."loadNumber"
+    limit 50
+  `)
+  console.log('\nBillable POD loads missing a driver, a truck, or both:')
+  console.table(affected)
+  for (const row of affected) {
+    const missing = [
+      row.has_driver ? null : 'driver',
+      row.has_truck ? null : 'truck',
+    ].filter(Boolean)
+    console.log(
+      `  ${row.loadNumber}: missing ${missing.join(' and ')} — ` +
+        `${missing.includes('driver') ? 'ASSIGN, do not repair the cache' : 'no truck; assignment, not a stale column'}`,
+    )
+  }
+
   const paid = settled.filter((row) => row.settlement_lines > 0)
   console.log(
     paid.length === 0
