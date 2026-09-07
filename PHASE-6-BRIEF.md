@@ -3110,3 +3110,31 @@ Recorded rather than resolved, per Phase 1's discipline.
       sorting produced a one-line diff, `verified: false` to `true`. The 32
       names were identical, so the original record had been right — it simply
       had no way to know it.
+
+107.  **A PER-FIELD CONFIDENCE CANNOT DESCRIBE AN ARRAY WITH ONE CERTAIN
+      ELEMENT AND ONE UNREADABLE ONE.** — 2026-09-07.
+
+      Measured, not argued: ten runs of one Georgia licence, byte-identical
+      input. `restrictions` returned five distinct values and the seven `high`
+      runs contained four mutually exclusive ones. Full numbers and method in
+      `EXTRACTION-CONTRACT.md`, "Licence run-to-run variance"; they are not
+      repeated here, so there is one copy to correct.
+
+      THE FIGURE IS 1 FIELD IN 28 AND IT NEVER TRAVELS ALONE. Quoted bare
+      against the rate-con corpus's ~1 in 285 it says "licences are ten times
+      noisier", which is false. One obscured field on one card was 50%
+      unstable; thirteen others were perfectly stable across all ten runs.
+      Anyone citing the ratio without that sentence is citing a superset —
+      AGENTS.md's own rule, applied to a number this project produced.
+
+      WHAT IS ACTUALLY BROKEN is the shape rather than the prompt. Confidence
+      is per FIELD; this field is an array whose `M` was identical on all ten
+      runs and whose first element moved across `A`, `B`, `E`, `O`, `5`. One
+      number has to cover both, and it reports the best case — so a dispatcher
+      shown `["O","M"]` at high confidence has no signal that six other runs
+      disagreed. Per-element confidence, or a refusal that drops an element the
+      reader cannot hold still, are the two shapes that would help.
+
+      NOT ACTED ON. The ruling was to measure first, and no prompt edit was
+      made. Which restriction the card actually prints is still unknown: `A`
+      winning five of ten is a vote, not a reading.

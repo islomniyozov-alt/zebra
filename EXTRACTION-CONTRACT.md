@@ -161,3 +161,61 @@ documents are 12 loads.
   measurement column cannot secretly become Sonnet; and a parse failure cannot
   reach the fallback at all, because parsing happens downstream — asserted
   anyway, since "it cannot happen" is a claim with a history.
+
+---
+
+## Licence run-to-run variance — one card, ten runs
+
+Run on 2026-09-07 against the deployed dev reader, `corpus/cdl/ga-classam-01.jpg`,
+byte-identical input each time.
+
+**The figure is 1 field in 28, and it never travels without its caveat.** The
+honest statement is longer than the number and has to be quoted whole:
+
+> One obscured field on one card was 50% unstable. Thirteen other fields were
+> perfectly stable across all ten runs.
+
+| field                                                                                                  | distinct values in 10 runs | confidences      |
+| ------------------------------------------------------------------------------------------------------ | -------------------------- | ---------------- |
+| `restrictions`                                                                                         | **5**                      | high×7, medium×3 |
+| the other 13 (`class`, `licenceNumber`, dates, names, address, `endorsements`, `isTemporary`, `state`) | 1 each                     | high×10          |
+
+`restrictions` came back `["A","M"]`×5, `["B","M"]`×2, `["E","M"]`, `["O","M"]`,
+`["5","M"]`. Only the FIRST element moved; the `M` was identical on all ten.
+Field 12 is under glare on this photograph, so the variance is one illegible
+glyph rather than a field the reader is generally bad at — and `O` and `5`
+among the readings is the confusable-character problem the VIN rules already
+name, on a code with no checksum behind it.
+
+**Why the aggregate misleads.** 5 disagreements across 140 field-observations
+is 1 in 28, against roughly 1 in 285 for rate confirmations — which invites
+"licence reading is ten times noisier". It is not. The distribution is 0 in 130
+for thirteen fields and 5 in 10 for one. Quoting the ratio alone is the
+superset error AGENTS.md already names: one card, one glare, ten runs,
+generalised into a property of licences. A comparable rate needs several cards.
+
+### Confidence does not track correctness on this field
+
+The weak claim — "it always says high" — is false: `restrictions` reported
+`medium` on 3 of 10. The useful claim is worse than that.
+
+- The **7 `high` runs contain 4 mutually exclusive values** (`A`, `B`, `E`,
+  `O`). At most one can be right, so `high` sat on at least three wrong
+  readings.
+- The 3 `medium` runs contain 3 distinct values.
+
+So `high` carries no information about whether the value is right, and a
+dispatcher shown `["O","M"]` at high confidence has no signal that six other
+runs disagreed. The modal value is commoner under `high` (4 of 7) than under
+`medium` (1 of 3), but at n=10 that is noise and does not rescue the field.
+
+**A structural reason it cannot help.** Confidence is PER FIELD, and this field
+is an array with one certain element and one unreadable one. The envelope has
+no way to say "the M is solid, the first code is not", so a single value covers
+both — and it reports the field's best case. Any fix is a change to the shape,
+not to the prompt.
+
+**Nothing was changed on the strength of this.** No prompt edit — the ruling
+was to measure first. And which restriction is actually printed is still
+unknown: `A` winning 5 of 10 is a vote, not a reading, and asserting it would
+be inventing truth. That needs somebody holding the card.
