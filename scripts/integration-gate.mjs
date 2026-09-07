@@ -31,7 +31,7 @@ import { workingCopy, writeReceipt } from './integration-receipt.mjs'
  * fourteen minutes later; the shape to avoid is a `const` declared after its
  * first use.
  */
-const FAILURE_LOG = '.integration-failures.log'
+export const FAILURE_LOG = '.integration-failures.log'
 
 /**
  * Where the reporter writes how many test cases executed.
@@ -42,7 +42,7 @@ const FAILURE_LOG = '.integration-failures.log'
  * as the failure log itself, and the same answer: one convention, written down
  * at both ends.
  */
-const RUN_COUNT_FILE = `${FAILURE_LOG}.count`
+export const RUN_COUNT_FILE = `${FAILURE_LOG}.count`
 
 /**
  * How many tests ran, or null when nobody said.
