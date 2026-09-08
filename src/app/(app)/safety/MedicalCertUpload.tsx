@@ -53,12 +53,26 @@ interface Proposal {
   examinerName: string | null
   examinerRegistryNumber: string | null
   nameDisagreement: { printed: string; expected: string } | null
+  printedName: string | null
 }
 
+interface Candidate {
+  id: string
+  firstName: string
+  lastName: string
+}
+
+type Match =
+  | { kind: 'one'; driver: Candidate }
+  | { kind: 'none' }
+  | { kind: 'many'; drivers: Candidate[] }
+
 interface Props {
-  driverId: string
-  /** Named on screen: the queue has many drivers, the driver page had one. */
-  driverLabel: string
+  /** Set when a compliance row stated its subject; empty at the front door. */
+  driverId?: string
+  driverLabel?: string
+  /** The picker's options, for when the printed name matches none or many. */
+  roster?: readonly Candidate[]
   labels: {
     dropTitle: string
     dropBody: string
@@ -76,16 +90,32 @@ interface Props {
     filed: string
     none: string
     forDriver: string
+    subjectStated: string
+    subjectProposed: string
+    notThem: string
+    askNone: string
+    askMany: string
+    askBody: string
     notices: Record<string, string>
   }
 }
 
-export function MedicalCertUpload({ driverId, driverLabel, labels }: Props) {
+export function MedicalCertUpload({
+  driverId = '',
+  driverLabel = '',
+  roster = [],
+  labels,
+}: Props) {
   const [reading, setReading] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [proposal, setProposal] = useState<Proposal | null>(null)
+  // WHO IT WILL BE FILED AGAINST — proposed by the read, or picked below.
+  // Held beside the proposal so choosing a driver after a "none" costs no
+  // second upload: the values are already in hand.
+  const [match, setMatch] = useState<Match | null>(null)
+  const [chosen, setChosen] = useState<Candidate | null>(null)
   const [state, formAction] = useActionState<FileMedicalCertState, FormData>(
-    fileMedicalCertAction.bind(null, driverId),
+    fileMedicalCertAction,
     FILE_MEDICAL_CERT_INITIAL,
   )
 
@@ -118,10 +148,18 @@ export function MedicalCertUpload({ driverId, driverLabel, labels }: Props) {
       }
       const result = (await response.json()) as {
         proposal: Proposal | null
+        match?: Match
         notice: string | null
       }
-      if (result.proposal) setProposal(result.proposal)
-      else setNotice(result.notice ?? 'drivers.med.unreadable')
+      if (result.proposal) {
+        setProposal(result.proposal)
+        const found = result.match ?? { kind: 'none' as const }
+        setMatch(found)
+        // ONE MATCH IS A PROPOSAL, NOT A DECISION: it pre-selects and a person
+        // still confirms. None and several leave nobody chosen, and the picker
+        // asks — with these values already read.
+        setChosen(found.kind === 'one' ? found.driver : null)
+      } else setNotice(result.notice ?? 'drivers.med.unreadable')
     } catch {
       setNotice('drivers.med.failed')
     } finally {
@@ -150,11 +188,71 @@ export function MedicalCertUpload({ driverId, driverLabel, labels }: Props) {
           <p className="mb-z2 text-xs uppercase tracking-wide text-ink-3">
             {labels.heading}
           </p>
-          {/* WHO IT IS BEING FILED FOR, ON THE CONFIRM STEP ITSELF. On the
-              driver's own page this was the page. In a queue of many drivers
-              it has to be said, or the click is made without the subject in
-              view. */}
-          <p className="mb-z3 text-sm font-medium text-ink">{driverLabel}</p>
+          {/* ── WHO IT WILL BE FILED AGAINST ─────────────────────────────
+           *
+           * Named on the confirm step itself, because a click made without
+           * the subject in view is the mistake this whole flow is arranged to
+           * prevent. When the printed name matched exactly, this is a
+           * PROPOSAL and the person is agreeing to it; when it matched none
+           * or several, there is nothing to agree to yet and the picker below
+           * asks instead. */}
+          {chosen ? (
+            <div className="mb-z3">
+              <p className="text-sm font-medium text-ink">
+                {chosen.firstName} {chosen.lastName}
+              </p>
+              <p className="text-xs text-ink-3">
+                {driverId
+                  ? labels.subjectStated
+                  : labels.subjectProposed.replace(
+                      '{printed}',
+                      proposal.printedName ?? '',
+                    )}
+              </p>
+              {!driverId ? (
+                <button
+                  type="button"
+                  onClick={() => setChosen(null)}
+                  className="mt-z1 text-xs text-ink-2 underline decoration-border-strong underline-offset-2 hover:text-accent"
+                >
+                  {labels.notThem}
+                </button>
+              ) : null}
+            </div>
+          ) : (
+            <div
+              role="group"
+              className="mb-z3 rounded-card border-2 border-warning bg-warning-soft px-z3 py-z2"
+            >
+              <p className="text-sm font-medium text-ink">
+                {match?.kind === 'many'
+                  ? labels.askMany.replace(
+                      '{printed}',
+                      proposal.printedName ?? '',
+                    )
+                  : labels.askNone.replace(
+                      '{printed}',
+                      proposal.printedName ?? '',
+                    )}
+              </p>
+              <p className="mt-z1 text-xs text-ink-2">{labels.askBody}</p>
+              <ul className="mt-z2 flex flex-wrap gap-x-z4 gap-y-z1">
+                {(match?.kind === 'many' ? match.drivers : roster).map(
+                  (driver) => (
+                    <li key={driver.id}>
+                      <button
+                        type="button"
+                        onClick={() => setChosen(driver)}
+                        className="text-sm text-accent hover:underline"
+                      >
+                        {driver.lastName}, {driver.firstName}
+                      </button>
+                    </li>
+                  ),
+                )}
+              </ul>
+            </div>
+          )}
 
           {/* NOT A FOOTNOTE. A certificate filed against the wrong person is
               the failure this comparison exists for, and it is shown ONLY when
@@ -206,6 +304,7 @@ export function MedicalCertUpload({ driverId, driverLabel, labels }: Props) {
         {/* WHAT IS FILED IS WHAT WAS SHOWN. The values ride in the form rather
             than being carried server-side from the read, so the row records
             the date somebody actually looked at. */}
+        <input type="hidden" name="driverId" value={chosen?.id ?? ''} />
         <input type="hidden" name="expiresAt" value={proposal.expiresAt} />
         <input type="hidden" name="issuedAt" value={proposal.issuedAt ?? ''} />
         <input
@@ -228,6 +327,9 @@ export function MedicalCertUpload({ driverId, driverLabel, labels }: Props) {
         <div className="flex items-center gap-z3">
           <button
             type="submit"
+            // NOTHING TO FILE WITHOUT A SUBJECT. Disabled rather than hidden,
+            // so the person can see what they are being asked to complete.
+            disabled={!chosen}
             className={cx(
               'inline-flex h-control items-center rounded-control bg-accent px-z4',
               'text-base font-medium text-on-accent hover:bg-accent-strong',
@@ -257,9 +359,11 @@ export function MedicalCertUpload({ driverId, driverLabel, labels }: Props) {
           {labels.notices[notice] ?? notice}
         </p>
       ) : null}
-      <p className="text-sm text-ink-2">
-        {labels.forDriver.replace('{driver}', driverLabel)}
-      </p>
+      {driverLabel ? (
+        <p className="text-sm text-ink-2">
+          {labels.forDriver.replace('{driver}', driverLabel)}
+        </p>
+      ) : null}
       <DropZone
         labels={{
           title: labels.dropTitle,

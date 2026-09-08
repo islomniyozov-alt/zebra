@@ -105,11 +105,14 @@ export type NameCheck =
  *
  * ── IT WARNS. IT NEVER CHOOSES. ───────────────────────────────────────────
  *
- * The driver is stated by WHERE THE UPLOAD HAPPENED. This comparison exists so
- * a certificate filed against the wrong person is visible, and it must not be
- * allowed to become a matcher: a reader that picked a driver from a name could
- * attach a medical card to somebody else, and it would look like a successful
- * upload rather than a mistake.
+ * THIS IS THE WARNING, NOT THE MATCHER. `matchDriverByName` in `med-cert.ts`
+ * proposes a driver from the printed name and is STRICT — an equal set of name
+ * words, with none and several both meaning ask. This one is deliberately
+ * LOOSE, and the two must not be confused for each other: a loose warning that
+ * fires rarely is useful, and a loose match is a wrong driver chosen quietly.
+ *
+ * It earns its place after a person has picked a driver by hand, where the
+ * printed name is a second opinion on that choice.
  *
  * SO A DISAGREEMENT IS NOT A REFUSAL EITHER. The card may be right and the
  * page wrong, or the reading may simply be poor; deciding which is a person's

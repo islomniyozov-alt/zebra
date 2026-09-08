@@ -2,10 +2,15 @@ import { NextResponse } from 'next/server'
 import { requireSession, withCurrentOrg } from '@/lib/auth-context'
 import { can } from '@/lib/permissions'
 import { DOCUMENT_TYPES, IMAGE_TYPES } from '@/lib/claude'
-import { medicalCertProposal, readMedicalCert } from '@/lib/med-cert'
+import {
+  matchDriverByName,
+  medicalCertProposal,
+  readMedicalCert,
+} from '@/lib/med-cert'
+import { companyScopeFilter } from '@/lib/tenancy'
 import { apiError, authFailureResponse } from '../../_lib/respond'
 
-// POST /api/med/read — read a medical certificate FOR A DRIVER WHO EXISTS.
+// POST /api/med/read — read a medical certificate, and say whose it is.
 //
 // ── THE SAME SHAPE AS /api/cdl/read, AND ONE REAL DIFFERENCE ──────────────
 //
@@ -15,11 +20,19 @@ import { apiError, authFailureResponse } from '../../_lib/respond'
 // base64's 4/3 inflation was pure cost, and raising `bodySizeLimit` would have
 // been a global change to solve one upload's problem.
 //
-// WHAT DIFFERS IS THAT THIS ONE NAMES A DRIVER. The CDL is read before a
-// driver exists; a medical certificate arrives on somebody's page. So this
-// handler must prove the caller may see that driver before it reads anything,
-// and it must resolve the driver's name through the tenant-scoped client — an
-// id that came from the browser is a claim, not a permission.
+// WHAT DIFFERS IS THE SUBJECT. The CDL is read before a driver exists and
+// identifies nobody. A medical certificate becomes a row against a PERSON, so
+// this route has to end up with one — and it gets there two ways.
+//
+// STATED, when a compliance row sent its own subject: resolved through the
+// tenant-scoped client, because an id from a browser is a claim rather than a
+// permission, and a driver in another organization must come back as not found.
+//
+// PROPOSED, when the certificate came through the front door and nothing
+// stated it: matched against the tenant-scoped roster on an EXACT set of name
+// words, with none and several both answering "ask". Never nearest-match — the
+// roster holds near-duplicates and rows that are not people, and a nearest
+// match over it eventually files a certificate against a company.
 //
 // NOTHING IS PERSISTED. The certificate is read, compared and dropped. Filing
 // it is a separate, confirmed action — see `fileMedicalCert`. A ComplianceItem
@@ -54,10 +67,17 @@ export async function POST(request: Request) {
     return apiError(400, 'invalid_body', 'Expected a file upload.')
   }
 
-  const driverId = form.get('driverId')
-  if (typeof driverId !== 'string' || driverId === '') {
-    return apiError(400, 'no_driver', 'No driver was named.')
-  }
+  // ── THE DRIVER MAY OR MAY NOT BE KNOWN YET ─────────────────────────────
+  //
+  // From a compliance row it is: the row states its subject and sends it. From
+  // the front door it is not — a certificate is dropped before anybody has
+  // been named — and the printed name proposes one below.
+  //
+  // OPTIONAL RATHER THAN TWO ROUTES, because everything after this point is
+  // identical and a second handler would be a second place to change the size
+  // limit, the permission and the refusal mapping.
+  const driverId =
+    typeof form.get('driverId') === 'string' ? String(form.get('driverId')) : ''
 
   const file = form.get('file')
   if (!(file instanceof File)) {
@@ -80,13 +100,15 @@ export async function POST(request: Request) {
   // is the same answer as one that does not exist — and that is the correct
   // answer to give, because distinguishing them would confirm the row is
   // there.
-  const driver = await withCurrentOrg('read', 'driver', async (tx) =>
-    tx.driver.findFirst({
-      where: { id: driverId, deletedAt: null },
-      select: { id: true, firstName: true, lastName: true },
-    }),
-  )
-  if (!driver) {
+  const stated = driverId
+    ? await withCurrentOrg('read', 'driver', async (tx) =>
+        tx.driver.findFirst({
+          where: { id: driverId, deletedAt: null },
+          select: { id: true, firstName: true, lastName: true },
+        }),
+      )
+    : null
+  if (driverId && !stated) {
     return apiError(404, 'no_driver', 'That driver was not found.')
   }
 
@@ -122,10 +144,41 @@ export async function POST(request: Request) {
     return NextResponse.json({ proposal: null, notice })
   }
 
-  const proposal = medicalCertProposal(
-    outcome.fields,
-    `${driver.firstName} ${driver.lastName}`,
-  )
+  // ── WHO IT IS FOR: STATED, OR PROPOSED FROM THE PRINTED NAME ───────────
+  //
+  // MATCHED SERVER-SIDE, AGAINST THE TENANT-SCOPED ROSTER. Doing it in the
+  // browser would mean shipping every driver's name to it and trusting the
+  // answer that came back; here row-level security decides which drivers exist
+  // to be matched against at all.
+  //
+  // EXACT SET OF NAME WORDS, and none and several both mean ask — see
+  // `matchDriverByName` for why nearest-match is refused over a roster holding
+  // `TJK logistic` and `7 Star`.
+  const match = stated
+    ? { kind: 'one', driver: stated }
+    : matchDriverByName(
+        outcome.fields.driverName?.value ?? null,
+        await withCurrentOrg('read', 'driver', async (tx, session) =>
+          tx.driver.findMany({
+            where: {
+              ...companyScopeFilter(session.companyScopes),
+              deletedAt: null,
+            },
+            orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+            take: 500,
+            select: { id: true, firstName: true, lastName: true },
+          }),
+        ),
+      )
+
+  // The name comparison is against the driver we are PROPOSING, when there is
+  // one. With nobody proposed there is nothing to compare and the warning is
+  // withheld rather than invented.
+  const against =
+    match.kind === 'one'
+      ? `${match.driver.firstName} ${match.driver.lastName}`
+      : ''
+  const proposal = medicalCertProposal(outcome.fields, against)
   if (!proposal) {
     // Unreachable after `refuseMedicalCert` passes — it checks the same
     // conversion — and handled rather than asserted, because "cannot happen"
@@ -142,6 +195,10 @@ export async function POST(request: Request) {
   // to the caller who uploaded it, and nothing is persisted either way.
   return NextResponse.json({
     proposal,
+    // WHO TO FILE IT AGAINST, AND HOW SURE. `one` is a proposal a person still
+    // confirms; `none` and `many` send the caller to a picker with these
+    // values already in hand, so nothing is uploaded twice.
+    match,
     fields: outcome.fields,
     notice: null,
   })

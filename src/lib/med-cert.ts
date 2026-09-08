@@ -119,6 +119,15 @@ export interface MedicalCertProposal {
   examinerRegistryNumber: string | null
   /** Present only when the printed name disagrees with the driver's. */
   nameDisagreement: { printed: string; expected: string } | null
+  /**
+   * The name as the card prints it, shown when the screen has to ASK.
+   *
+   * NOT STORED, and not the same thing as `nameDisagreement`. That one fires
+   * when a chosen driver contradicts the card; this is what the card said,
+   * displayed so a person picking from a list can see what they are matching
+   * against instead of holding it in their head.
+   */
+  printedName: string | null
 }
 
 /**
@@ -160,8 +169,95 @@ export function medicalCertProposal(
       check.agrees === false
         ? { printed: check.printed, expected: check.expected }
         : null,
+    printedName: fields.driverName?.value?.trim() ?? null,
   }
 }
 
 export { refuseMedicalCert, checkDriverName }
 export type { ExtractedMedicalCert, MedicalCertRefusal }
+
+// ---------------------------------------------------------------------------
+// PROPOSING A DRIVER FROM THE NAME ON THE CARD.
+//
+// ── THIS OVERTURNS AN EARLIER POSTURE, DELIBERATELY ───────────────────────
+//
+// `driverName` was read ONLY to be compared, and this module said in as many
+// words that the reader identifies nobody. That was correct while the upload
+// lived on a driver's own page: the page stated the subject, so matching a
+// name could only ever add a way to get it wrong.
+//
+// The upload is now the front door — "add cert, then it reads the cert" — and
+// nothing states the subject any more. A property that held because of where
+// the control lived does not survive the control moving, and pretending
+// otherwise would leave the comments asserting an invariant the code no longer
+// has. So the name becomes the matching key, under conditions.
+//
+// ── EXACT, THEN ASK. NEVER NEAREST. ───────────────────────────────────────
+//
+// The roster is exactly the wrong shape for fuzzy matching. It holds
+// near-duplicate names, and rows that are not people at all — `TJK logistic`,
+// `7 Star`, `Said truck 3609`. A nearest-match over that set will eventually
+// file a medical certificate against a company, and it will look like it
+// worked.
+//
+// So the comparison is an EQUAL SET of name words, not a subset. That is
+// stricter than `checkDriverName`, which stays loose on purpose — the two do
+// different jobs. A loose WARNING that fires rarely is useful; a loose MATCH
+// is a wrong driver chosen quietly. `ADNAN M GASHI` against a record of
+// `Adnan Gashi` is a question, not an answer.
+//
+// NOTHING IS EVER FILED FROM THIS. It proposes; a person confirms. No match
+// and several matches both mean the same thing — ask — and the caller falls
+// back to a picker with the read values already in hand, so nothing is
+// uploaded twice.
+// ---------------------------------------------------------------------------
+
+/** Name words, normalised for transcription noise and nothing else. */
+function nameKey(text: string): string {
+  return (
+    text
+      .toLowerCase()
+      // Punctuation is how a card lays a name out — `SMITH, JOHN` — not part of
+      // the name. Ordering is handled by sorting, for the same reason.
+      .replace(/[.,]/g, ' ')
+      .split(/\s+/)
+      .filter((word) => word !== '')
+      .sort()
+      .join(' ')
+  )
+}
+
+export interface DriverCandidate {
+  id: string
+  firstName: string
+  lastName: string
+}
+
+export type DriverMatch =
+  | { kind: 'one'; driver: DriverCandidate }
+  | { kind: 'none' }
+  | { kind: 'many'; drivers: DriverCandidate[] }
+
+/**
+ * Every driver whose name is exactly the one printed, ignoring order and
+ * punctuation.
+ *
+ * `many` IS NOT A TIE TO BREAK. Two drivers with the same name is precisely
+ * when a system must stop and ask; picking the first, or the most recently
+ * hired, would be the machine resolving an ambiguity that belongs to whoever
+ * knows which person handed over the card.
+ */
+export function matchDriverByName(
+  printed: string | null | undefined,
+  roster: readonly DriverCandidate[],
+): DriverMatch {
+  const key = nameKey(printed ?? '')
+  if (key === '') return { kind: 'none' }
+
+  const hits = roster.filter(
+    (driver) => nameKey(`${driver.firstName} ${driver.lastName}`) === key,
+  )
+  if (hits.length === 1) return { kind: 'one', driver: hits[0]! }
+  if (hits.length === 0) return { kind: 'none' }
+  return { kind: 'many', drivers: hits }
+}

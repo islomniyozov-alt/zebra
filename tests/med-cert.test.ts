@@ -6,7 +6,7 @@ import {
   refuseMedicalCert,
 } from '@/lib/extraction/med-refusal'
 import { parseMedDate } from '@/lib/extraction/med-dates'
-import { medicalCertProposal } from '@/lib/med-cert'
+import { matchDriverByName, medicalCertProposal } from '@/lib/med-cert'
 import {
   MEDICAL_CERT_FIELDS,
   MEDICAL_CERT_FORBIDDEN_FIELDS,
@@ -418,5 +418,85 @@ describe('the proposal a person confirms', () => {
         'Adnan Gashi',
       ),
     ).toBeNull()
+  })
+})
+
+describe('proposing a driver from the printed name', () => {
+  // The roster's real shape: near-duplicate names, and rows that are not
+  // people at all. This is why nearest-match is refused.
+  const roster = [
+    { id: 'd1', firstName: 'ADNAN', lastName: 'GASHI' },
+    { id: 'd2', firstName: 'HAIDAR', lastName: 'NIYOZOV' },
+    { id: 'd3', firstName: 'ODILJON', lastName: 'NIYOZOV' },
+    { id: 'd4', firstName: 'TJK', lastName: 'logistic' },
+    { id: 'd5', firstName: '7', lastName: 'Star' },
+    { id: 'd6', firstName: 'Said truck', lastName: '3609' },
+  ]
+
+  it('proposes the one driver whose name matches exactly', () => {
+    expect(matchDriverByName('ADNAN GASHI', roster)).toEqual({
+      kind: 'one',
+      driver: roster[0],
+    })
+  })
+
+  it('sees through the ways a card lays a name out', () => {
+    // Ordering, case and punctuation are how the card is printed, not part of
+    // the name. Nothing else is normalised.
+    for (const printed of ['Gashi, Adnan', 'adnan  gashi', 'GASHI ADNAN']) {
+      expect(matchDriverByName(printed, roster), printed).toEqual({
+        kind: 'one',
+        driver: roster[0],
+      })
+    }
+  })
+
+  it('ASKS rather than guessing when a word differs', () => {
+    // THE STRICTNESS IS THE POINT, and it is stricter than `checkDriverName`
+    // on purpose — that one warns, this one chooses. A middle initial the
+    // record lacks is a question, not an answer.
+    expect(matchDriverByName('ADNAN M GASHI', roster).kind).toBe('none')
+    expect(matchDriverByName('ADNAN', roster).kind).toBe('none')
+    expect(matchDriverByName('GASHI', roster).kind).toBe('none')
+  })
+
+  it('never reaches for the nearest name on a roster like this one', () => {
+    // `NIYOZOV` alone is one word away from two different drivers. A nearest
+    // match picks one of them; this asks.
+    expect(matchDriverByName('NIYOZOV', roster).kind).toBe('none')
+    // And these are not people. A fuzzy matcher files a medical certificate
+    // against a company and it looks like it worked.
+    expect(matchDriverByName('TJK', roster).kind).toBe('none')
+    expect(matchDriverByName('Star', roster).kind).toBe('none')
+    expect(matchDriverByName('Said truck 3610', roster).kind).toBe('none')
+  })
+
+  it('asks when two drivers share the name exactly', () => {
+    // NOT A TIE TO BREAK. Picking the first, or the most recently hired, is
+    // the machine resolving an ambiguity that belongs to whoever knows which
+    // person handed over the card.
+    const twins = [
+      { id: 'a', firstName: 'JOHN', lastName: 'SMITH' },
+      { id: 'b', firstName: 'John', lastName: 'Smith' },
+    ]
+    const found = matchDriverByName('SMITH, JOHN', twins)
+    expect(found.kind).toBe('many')
+    if (found.kind === 'many') expect(found.drivers).toHaveLength(2)
+  })
+
+  it('asks when the card printed no name at all', () => {
+    for (const printed of [null, undefined, '', '   ']) {
+      expect(matchDriverByName(printed, roster).kind).toBe('none')
+    }
+  })
+
+  it('carries the printed name into the proposal, for the screen that asks', () => {
+    // A person choosing from a list needs to see what they are matching
+    // against rather than holding it in their head.
+    const p = medicalCertProposal(parseMedicalCertResponse(GOOD), '')
+    expect(p!.printedName).toBe('ADNAN GASHI')
+    // And with nobody proposed there is nothing to disagree with, so the
+    // warning is withheld rather than invented.
+    expect(p!.nameDisagreement).toBeNull()
   })
 })

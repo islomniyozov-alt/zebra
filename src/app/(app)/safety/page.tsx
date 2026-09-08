@@ -137,10 +137,13 @@ export default async function SafetyPage({
         )
       : null
 
-  // The picker's options, loaded only when somebody has asked for one. A
-  // driver with no compliance row cannot be reached from the queue, so this is
-  // the way in for them — and it ASKS rather than inferring, because there is
-  // no row stating who it is for.
+  // ── THE FALLBACK PICKER'S OPTIONS, NOT A PRE-PICK ──────────────────────
+  //
+  // The front door drops a certificate FIRST and the printed name proposes a
+  // driver; this roster is only reached when that name matches none or several
+  // — the two cases that mean ask. Loading it here rather than fetching it
+  // after the read means the question can be answered without a second round
+  // trip, and without re-uploading anything.
   const pickable =
     mayFileCompliance && medFor === 'new'
       ? await withCurrentOrg('read', 'driver', async (tx, session) =>
@@ -353,31 +356,17 @@ export default async function SafetyPage({
         </div>
       ) : null}
 
+      {/* ── THE FRONT DOOR: DROP FIRST, THEN IT SAYS WHOSE IT IS ─────────
+       *
+       * "add cert, then it reads the cert, and it alarms whenever it
+       * expires." Picking a driver out of fifty-four before the card has been
+       * read is the wrong order — the card already says who it belongs to,
+       * and the roster is only needed when that name matches none or several.
+       * It is passed in for exactly that, and the component asks. */}
       {medFor === 'new' && mayFileCompliance ? (
         <div className="border-b border-border bg-surface-2 px-gutter py-z4">
-          <div className="flex max-w-[640px] flex-col gap-z2">
-            <h2 className="text-base font-medium text-ink">
-              {t('safety.med.pickTitle')}
-            </h2>
-            <p className="max-w-[60ch] text-sm text-ink-2">
-              {t('safety.med.pickBody')}
-            </p>
-            {pickable.length === 0 ? (
-              <p className="text-sm text-ink-3">{t('safety.med.noDrivers')}</p>
-            ) : (
-              <ul className="flex flex-wrap gap-x-z4 gap-y-z2">
-                {pickable.map((driver) => (
-                  <li key={driver.id}>
-                    <Link
-                      href={`/safety?medFor=${driver.id}`}
-                      className="text-sm text-accent hover:underline"
-                    >
-                      {driver.lastName}, {driver.firstName}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
+          <div className="flex max-w-[560px] flex-col gap-z3">
+            <MedicalCertUpload roster={pickable} labels={medLabels(t)} />
             <Link
               href="/safety"
               className="self-start text-sm text-ink-2 underline decoration-border-strong underline-offset-2 hover:text-accent"

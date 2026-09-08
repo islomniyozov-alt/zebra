@@ -71,22 +71,27 @@ export interface ExtractedMedicalCert {
    */
   examinerRegistryNumber: Maybe<string>
   /**
-   * The driver's printed name, READ ONLY TO BE COMPARED.
+   * The driver's printed name — the matching key, and never stored.
    *
-   * ── THE READER NEVER CHOOSES A DRIVER ─────────────────────────────────
+   * ── THIS FIELD'S JOB CHANGED ON 2026-09-08, AND THE REASON IS THE FLOW ──
    *
-   * This certificate is uploaded on a driver's own page, so WHO it belongs to
-   * is stated by where the upload happened, not by what the document says.
-   * That is the whole point: a reader that matched a name could attach a
-   * medical card to the wrong person, and the failure would look like a
-   * successful upload.
+   * It was read ONLY to be compared, and this comment said the reader
+   * identifies nobody. That was true while the upload lived on a driver's own
+   * page: the page stated the subject, so matching a name could only add a way
+   * to get it wrong.
    *
-   * So this is never used to find, select or create a driver. It is compared
-   * with the driver whose page received it, and a disagreement WARNS rather
-   * than decides — the same posture as `addressStateCode` on the CDL, which
-   * exists to cross-check the issuing state and is then discarded.
+   * The upload is the front door now — a certificate is dropped before any
+   * driver is named — so nothing states the subject and this is what proposes
+   * one. A property that held because of where a control lived does not
+   * survive the control moving; leaving the old sentence here would have been
+   * a comment asserting an invariant the code no longer has.
    *
-   * It is not stored. Nothing in the contract's four fields is this.
+   * WHAT DID NOT CHANGE IS THAT IT NEVER DECIDES. `matchDriverByName` requires
+   * an EXACT set of name words and treats none and several identically — ask.
+   * A person confirms the driver before anything is filed. See `med-cert.ts`
+   * for why nearest-match is refused over this particular roster.
+   *
+   * Still not stored: the four contracted fields are what becomes a row.
    */
   driverName: Maybe<string>
 }

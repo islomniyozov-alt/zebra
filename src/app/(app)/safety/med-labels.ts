@@ -25,6 +25,12 @@ export function medLabels(t: Translate) {
     filed: t('drivers.med.filed'),
     none: t('drivers.med.none'),
     forDriver: t('safety.med.forDriver'),
+    subjectStated: t('safety.med.subjectStated'),
+    subjectProposed: t('safety.med.subjectProposed'),
+    notThem: t('safety.med.notThem'),
+    askNone: t('safety.med.askNone'),
+    askMany: t('safety.med.askMany'),
+    askBody: t('safety.med.askBody'),
     // PRE-TRANSLATED AND KEYED BY WHAT THE ROUTE RETURNS. The route deals in
     // i18n keys rather than sentences so it stays language-free.
     notices: {

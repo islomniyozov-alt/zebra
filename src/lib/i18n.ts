@@ -420,6 +420,7 @@ const en = {
   'drivers.med.discard': 'Discard and read another',
   'drivers.med.filed': 'Filed. It will appear in the compliance queue.',
   'drivers.med.none': 'Not on the card',
+  'drivers.med.noDriver': 'Choose the driver this certificate belongs to.',
   'drivers.med.noExpiry': 'That certificate has no expiry date to file.',
   'drivers.med.duplicate': 'A certificate with that expiry is already filed.',
   'drivers.med.badDates': 'The examination date is after the expiry.',
@@ -1167,6 +1168,14 @@ const en = {
   'safety.med.pickBody':
     'A driver with no medical card on file has no row in the queue, so there is nothing here that states who this belongs to. Choose them — it is not read off the certificate.',
   'safety.med.cancel': 'Cancel',
+  'safety.med.subjectStated': 'From the compliance row you opened.',
+  'safety.med.subjectProposed':
+    'Proposed from the name on the card ({printed}). Check it before filing.',
+  'safety.med.notThem': 'Not them — choose someone else',
+  'safety.med.askNone': 'No driver is named exactly {printed} on this roster.',
+  'safety.med.askMany': 'More than one driver is named {printed}.',
+  'safety.med.askBody':
+    'The certificate has been read and nothing is lost — choose who it belongs to and file it. Names are matched exactly, never approximately, because the roster holds near-duplicates and rows that are not people.',
   'safety.med.forDriver': 'Filing against {driver}.',
   'safety.med.noDrivers': 'No drivers to file against.',
   'safety.column.status': 'Status',
@@ -2176,6 +2185,7 @@ const ru: Dictionary = {
   'drivers.med.discard': 'Отменить и прочитать другую',
   'drivers.med.filed': 'Сохранено. Появится в очереди соответствия.',
   'drivers.med.none': 'Нет на карточке',
+  'drivers.med.noDriver': 'Выберите водителя, которому принадлежит справка.',
   'drivers.med.noExpiry': 'В справке нет даты окончания.',
   'drivers.med.duplicate': 'Справка с такой датой уже сохранена.',
   'drivers.med.badDates': 'Дата осмотра позже даты окончания.',
@@ -2928,6 +2938,14 @@ const ru: Dictionary = {
   'safety.med.pickBody':
     'У водителя без медсправки нет строки в очереди, поэтому здесь ничего не указывает, кому она принадлежит. Выберите его — это не считывается со справки.',
   'safety.med.cancel': 'Отмена',
+  'safety.med.subjectStated': 'Из строки соответствия, которую вы открыли.',
+  'safety.med.subjectProposed':
+    'Предложено по имени на карточке ({printed}). Проверьте перед сохранением.',
+  'safety.med.notThem': 'Не он — выбрать другого',
+  'safety.med.askNone': 'В списке нет водителя с именем ровно {printed}.',
+  'safety.med.askMany': 'Несколько водителей носят имя {printed}.',
+  'safety.med.askBody':
+    'Справка прочитана, ничего не потеряно — выберите, кому она принадлежит, и сохраните. Имена сверяются точно, а не приблизительно: в списке есть похожие имена и строки, которые вообще не люди.',
   'safety.med.forDriver': 'Сохраняем для {driver}.',
   'safety.med.noDrivers': 'Нет водителей для сохранения.',
   'safety.column.status': 'Статус',
@@ -3926,6 +3944,8 @@ const fa: Dictionary = {
   'drivers.med.discard': 'انصراف و خواندن دیگری',
   'drivers.med.filed': 'ثبت شد. در صف انطباق دیده می‌شود.',
   'drivers.med.none': 'روی کارت نیست',
+  'drivers.med.noDriver':
+    'راننده‌ای را که این گواهی متعلق به اوست انتخاب کنید.',
   'drivers.med.noExpiry': 'این گواهی تاریخ انقضا ندارد.',
   'drivers.med.duplicate': 'گواهی با همین تاریخ قبلاً ثبت شده است.',
   'drivers.med.badDates': 'تاریخ معاینه پس از تاریخ انقضاست.',
@@ -4669,6 +4689,14 @@ const fa: Dictionary = {
   'safety.med.pickBody':
     'راننده‌ای که گواهی پزشکی ثبت‌شده ندارد در صف نیست، پس چیزی اینجا نمی‌گوید این متعلق به کیست. او را انتخاب کنید — این از روی گواهی خوانده نمی‌شود.',
   'safety.med.cancel': 'انصراف',
+  'safety.med.subjectStated': 'از ردیف انطباقی که باز کردید.',
+  'safety.med.subjectProposed':
+    'بر اساس نام روی کارت ({printed}) پیشنهاد شد. پیش از ثبت بررسی کنید.',
+  'safety.med.notThem': 'او نیست — انتخاب شخص دیگر',
+  'safety.med.askNone': 'راننده‌ای دقیقاً با نام {printed} در فهرست نیست.',
+  'safety.med.askMany': 'بیش از یک راننده با نام {printed} وجود دارد.',
+  'safety.med.askBody':
+    'گواهی خوانده شد و چیزی از دست نرفت — انتخاب کنید متعلق به کیست و ثبت کنید. نام‌ها دقیق مطابقت داده می‌شوند نه تقریبی، چون فهرست نام‌های مشابه و ردیف‌هایی دارد که اصلاً شخص نیستند.',
   'safety.med.forDriver': 'ثبت برای {driver}.',
   'safety.med.noDrivers': 'راننده‌ای برای ثبت وجود ندارد.',
   'safety.column.status': 'وضعیت',
