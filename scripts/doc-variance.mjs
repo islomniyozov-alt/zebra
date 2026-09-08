@@ -43,6 +43,28 @@ const KIND = process.argv[2]
 const CARD = process.argv[3]
 const RUNS = Number(process.argv[4] ?? 10)
 
+// ── --shape-only: MEASURE STABILITY WITHOUT DISCLOSING CONTENT ────────────
+//
+// A variance run tells you whether a field moved. It does NOT need to tell you
+// what the field said — and on a document whose truth file has not been
+// written yet, saying so is actively harmful: a truth set drafted after
+// reading the model's answers is a transcription of the answer being graded,
+// which is the caveat the first CDL truth file records about itself.
+//
+// SO IT IS A FLAG RATHER THAN A PROMISE. The alternative was reporting the
+// shape carefully by hand and remembering not to quote a value in passing;
+// this whole codebase's position on that is `sed`, the exit-code rule and the
+// pre-commit hook — a mechanism, because care is what fails.
+//
+// VALUES ARE REPLACED BY FREQUENCY RANK, not by a hash or a redaction. `#1×7
+// #2×2 #3×1` says everything about agreement between runs and nothing about
+// content — not a digit, not a length, not a character class.
+//
+// THE RAW DUMP IS STILL WRITTEN. Evidence outlives a summary; that rule does
+// not bend for this one. Whoever wrote the truth file may read it. The person
+// who must not is the one about to report the shape.
+const SHAPE_ONLY = process.argv.includes('--shape-only')
+
 if (!KIND || !CARD || !EMAIL || !PASSWORD) {
   console.error(
     'Usage: node -r dotenv/config scripts/doc-variance.mjs <cdl|med> <path> [runs]',
@@ -86,7 +108,11 @@ try {
     const reading = readingOf(parsed?.fields?.[watched])
     console.log(
       `run ${String(run).padStart(2)}  http ${answer.status}  ` +
-        `${String(ms).padStart(6)}ms  ${watched}=${reading.value}/${reading.confidence}` +
+        `${String(ms).padStart(6)}ms  ${watched}=` +
+        // The live line is output too. Suppressed here as well, or the flag
+        // would leak the very field most likely to be the interesting one.
+        (SHAPE_ONLY ? '(hidden)' : reading.value) +
+        `/${reading.confidence}` +
         (parsed?.notice ? `  NOTICE ${parsed.notice}` : ''),
     )
   }
@@ -124,7 +150,17 @@ let disagreements = 0
 const unstable = []
 
 console.log(`\n${ok.length}/${results.length} runs returned fields\n`)
-console.log('field'.padEnd(20) + 'distinct  values (count)  [confidences]')
+console.log(
+  'field'.padEnd(20) +
+    (SHAPE_ONLY
+      ? 'distinct  agreement (rank×runs)  [confidences]'
+      : 'distinct  values (count)  [confidences]'),
+)
+if (SHAPE_ONLY) {
+  console.log(
+    'SHAPE ONLY — values withheld. Ranks say which runs agreed, not what they said.',
+  )
+}
 console.log('-'.repeat(100))
 for (const key of keys) {
   const values = new Map()
@@ -138,9 +174,11 @@ for (const key of keys) {
   disagreements += ok.length - Math.max(...values.values())
   if (values.size > 1) unstable.push({ key, distinct: values.size })
 
-  const vs = [...values]
-    .sort((a, b) => b[1] - a[1])
-    .map(([v, n]) => `${v}×${n}`)
+  // RANK, NOT CONTENT, under --shape-only. `#1×7 #2×2` carries the whole
+  // agreement structure and nothing about what was read.
+  const ranked = [...values].sort((a, b) => b[1] - a[1])
+  const vs = ranked
+    .map(([v, n], index) => `${SHAPE_ONLY ? `#${index + 1}` : v}×${n}`)
     .join('  ')
   const cs = [...confidences]
     .sort((a, b) => b[1] - a[1])
