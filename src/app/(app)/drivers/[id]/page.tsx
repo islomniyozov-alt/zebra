@@ -11,7 +11,6 @@ import { PAY_RULE_TYPES, payRulesFor } from '@/lib/driver-pay'
 import { bpsToInput, formatCents } from '@/lib/money'
 import { RecordForm } from '@/components/forms/RecordForm'
 import { AssetActions } from '../../_reference/AssetActions'
-import { MedicalCertUpload } from './MedicalCertUpload'
 import { updateDriverAction } from '../actions'
 import { PayRules, type PayRuleRowView } from './PayRules'
 import type { MessageKey } from '@/lib/i18n'
@@ -231,49 +230,6 @@ export default async function EditDriverPage({
         {/* PHASE 4 §5 STEP 2. A driver's CDL and medical card, on the screen
          * that already carries their licence details. Operational, so a
          * DISPATCHER sees it — unlike the pay panel below. */}
-        {/* THE MEDICAL CERTIFICATE DROP ZONE, ABOVE THE PANEL IT FILES INTO.
-         * Gated on `compliance:create`, which is what filing needs — reading a
-         * certificate to propose a row somebody may not create is work done
-         * for a refusal, and the route checks the same permission.
-         *
-         * IT WRITES NOTHING BY ITSELF. The read returns a proposal and the row
-         * appears only after somebody clicks; see MedicalCertUpload. */}
-        {mayRenewCompliance ? (
-          <div className="mt-z4 max-w-[520px]">
-            <MedicalCertUpload
-              driverId={id}
-              labels={{
-                dropTitle: t('drivers.med.dropTitle'),
-                dropBody: t('drivers.med.dropBody'),
-                dropHint: t('drivers.med.dropHint'),
-                reading: t('drivers.med.reading'),
-                heading: t('drivers.med.heading'),
-                expires: t('drivers.med.expires'),
-                issued: t('drivers.med.issued'),
-                examiner: t('drivers.med.examiner'),
-                registry: t('drivers.med.registry'),
-                asPrinted: t('drivers.med.asPrinted'),
-                nameWarning: t('drivers.med.nameWarning'),
-                file: t('drivers.med.file'),
-                discard: t('drivers.med.discard'),
-                filed: t('drivers.med.filed'),
-                none: t('drivers.med.none'),
-                // PRE-TRANSLATED AND KEYED BY WHAT THE ROUTE RETURNS. A
-                // translator closure cannot cross to a client component, and
-                // the route deals in i18n keys so it stays language-free.
-                notices: {
-                  'drivers.med.unreadable': t('drivers.med.unreadable'),
-                  'drivers.med.contradictory': t('drivers.med.contradictory'),
-                  'drivers.med.wrongType': t('drivers.med.wrongType'),
-                  'drivers.med.tooLarge': t('drivers.med.tooLarge'),
-                  'drivers.med.notAllowed': t('drivers.med.notAllowed'),
-                  'drivers.med.failed': t('drivers.med.failed'),
-                },
-              }}
-            />
-          </div>
-        ) : null}
-
         {maySeeCompliance ? (
           <div className="mt-z4 max-w-[900px]">
             <CompliancePanel

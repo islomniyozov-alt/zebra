@@ -12,20 +12,33 @@ import {
 // ---------------------------------------------------------------------------
 // DROP A MEDICAL CERTIFICATE ON THE DRIVER IT BELONGS TO.
 //
+// ── IT LIVES ON SAFETY, WHICH IS WHERE THE WORK HAPPENS ───────────────────
+//
+// It was on the driver's page first, and the owner moved it: "driver sector is
+// only for adding driver, medical card is safety." Dispatch works from the
+// expiry queue — they see a card lapsing and upload the replacement on the row
+// that told them about it, rather than navigating to a person to do it.
+//
+// THE SUBJECT IS STILL STATED, WHICH IS THE PART THAT MATTERED. A compliance
+// row already names its driver and its document type, so opening the upload
+// from a row states whose certificate this is exactly as the driver's page
+// did. The id travels as a search param and is RE-RESOLVED server-side against
+// the tenant scope — see the page — so it is a claim the server checks rather
+// than one the browser makes.
+//
+// AND FOR A DRIVER WITH NO ROW YET, IT ASKS. There is nothing to state, so the
+// screen offers a driver to pick instead of inferring one. Reading the name
+// off the certificate and matching it would be the failure this contract
+// exists to prevent — see `checkDriverName`.
+//
 // ── READ, THEN CONFIRM. NEVER READ AND FILE. ──────────────────────────────
 //
-// The CDL's flow prefills a form that CREATES a driver, so a person reads
-// every value before anything exists. This lands on a driver who already
-// exists, and the row it writes decides whether they may legally drive — so
-// the confirm step is not a formality. It shows what will be filed, in the
-// words the card used and the date this system read them as, and nothing is
-// written until somebody clicks.
-//
-// THE DRIVER IS NOT IN QUESTION HERE. Whose certificate this is comes from the
-// page it was dropped on, never from the document — see `checkDriverName`. If
-// the card prints a name that disagrees, that is SHOWN and the click is still
-// the person's to make: the card may be right and the page wrong, and deciding
-// which is not this screen's job.
+// The row it writes decides whether somebody may legally drive, so the confirm
+// step is not a formality. It shows what will be filed, in the words the card
+// used and the date this system read them as, and nothing is written until
+// somebody clicks. If the printed name disagrees with the driver, that is
+// SHOWN and the click is still the person's to make: the card may be right and
+// the row wrong, and deciding which is not this screen's job.
 //
 // THE ZONE IS THE CDL's ZONE. `components/forms/DropZone` — one control, one
 // paste handler, one accept list.
@@ -44,6 +57,8 @@ interface Proposal {
 
 interface Props {
   driverId: string
+  /** Named on screen: the queue has many drivers, the driver page had one. */
+  driverLabel: string
   labels: {
     dropTitle: string
     dropBody: string
@@ -60,11 +75,12 @@ interface Props {
     discard: string
     filed: string
     none: string
+    forDriver: string
     notices: Record<string, string>
   }
 }
 
-export function MedicalCertUpload({ driverId, labels }: Props) {
+export function MedicalCertUpload({ driverId, driverLabel, labels }: Props) {
   const [reading, setReading] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [proposal, setProposal] = useState<Proposal | null>(null)
@@ -134,6 +150,11 @@ export function MedicalCertUpload({ driverId, labels }: Props) {
           <p className="mb-z2 text-xs uppercase tracking-wide text-ink-3">
             {labels.heading}
           </p>
+          {/* WHO IT IS BEING FILED FOR, ON THE CONFIRM STEP ITSELF. On the
+              driver's own page this was the page. In a queue of many drivers
+              it has to be said, or the click is made without the subject in
+              view. */}
+          <p className="mb-z3 text-sm font-medium text-ink">{driverLabel}</p>
 
           {/* NOT A FOOTNOTE. A certificate filed against the wrong person is
               the failure this comparison exists for, and it is shown ONLY when
@@ -236,6 +257,9 @@ export function MedicalCertUpload({ driverId, labels }: Props) {
           {labels.notices[notice] ?? notice}
         </p>
       ) : null}
+      <p className="text-sm text-ink-2">
+        {labels.forDriver.replace('{driver}', driverLabel)}
+      </p>
       <DropZone
         labels={{
           title: labels.dropTitle,

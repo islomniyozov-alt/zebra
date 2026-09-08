@@ -81,7 +81,9 @@ export async function fileMedicalCertAction(
     return { error: message, filedRecordId: null }
   }
 
-  revalidatePath(`/drivers/${driverId}`)
+  // BOTH SCREENS. The queue is where this is filed from, and the driver's own
+  // page still SHOWS their compliance rows even though it no longer uploads.
   revalidatePath('/safety')
+  revalidatePath(`/drivers/${driverId}`)
   return { error: null, filedRecordId: result.recordId }
 }
