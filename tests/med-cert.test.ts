@@ -6,6 +6,7 @@ import {
   refuseMedicalCert,
 } from '@/lib/extraction/med-refusal'
 import { parseMedDate } from '@/lib/extraction/med-dates'
+import { medicalCertProposal } from '@/lib/med-cert'
 import {
   MEDICAL_CERT_FIELDS,
   MEDICAL_CERT_FORBIDDEN_FIELDS,
@@ -355,5 +356,67 @@ describe('the driver name, compared and never chosen', () => {
       agrees: 'unknown',
       why: 'no_printed_name',
     })
+  })
+})
+
+describe('the proposal a person confirms', () => {
+  it('carries the converted date AND the printed one', () => {
+    // TWO DIFFERENT CLAIMS. What the card says, and what this system read it
+    // as — the second is what gets stored, so the screen shows both.
+    const p = medicalCertProposal(parseMedicalCertResponse(GOOD), 'Adnan Gashi')
+    expect(p).not.toBeNull()
+    expect(p!.expiresAt).toBe('2027-03-04')
+    expect(p!.expiresAtPrinted).toBe('03/04/2027')
+    expect(p!.issuedAt).toBe('2025-03-04')
+    expect(p!.examinerName).toBe('DANA R OKONKWO, DO')
+    expect(p!.examinerRegistryNumber).toBe('1234567890')
+  })
+
+  it('carries the expiry confidence, so a medium read is visible', () => {
+    const p = medicalCertProposal(
+      parseMedicalCertResponse(
+        withField('expiresAt', { value: '03/04/2027', confidence: 'medium' }),
+      ),
+      'Adnan Gashi',
+    )
+    expect(p!.expiresAtConfidence).toBe('medium')
+  })
+
+  it('raises the name warning only when the names disagree', () => {
+    const agreeing = medicalCertProposal(
+      parseMedicalCertResponse(GOOD),
+      'Adnan Gashi',
+    )
+    expect(agreeing!.nameDisagreement).toBeNull()
+
+    const disagreeing = medicalCertProposal(
+      parseMedicalCertResponse(GOOD),
+      'Roland Dupuy',
+    )
+    expect(disagreeing!.nameDisagreement).toEqual({
+      printed: 'ADNAN GASHI',
+      expected: 'Roland Dupuy',
+    })
+  })
+
+  it('does not warn when the card printed no name at all', () => {
+    // `unknown` is not a disagreement — there is nothing to compare, and a
+    // warning on a blank is noise that teaches people to dismiss warnings.
+    const p = medicalCertProposal(
+      parseMedicalCertResponse(withField('driverName', null)),
+      'Adnan Gashi',
+    )
+    expect(p!.nameDisagreement).toBeNull()
+  })
+
+  it('proposes nothing when there is no expiry to file', () => {
+    // A proposal with no expiry has nothing to write, and the type says so
+    // rather than carrying an empty string somebody could file.
+    expect(
+      medicalCertProposal(
+        parseMedicalCertResponse(withField('expiresAt', null)),
+        'Adnan Gashi',
+      ),
+    ).toBeNull()
   })
 })

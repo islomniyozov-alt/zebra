@@ -1,7 +1,8 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { RecordForm, type FieldSpec } from '@/components/forms/RecordForm'
+import { DropZone } from '@/components/forms/DropZone'
 import { Select, type SelectOption } from '@/components/ui/Select'
 import { cx } from '@/lib/cx'
 import { downscaleImage } from './downscale'
@@ -90,14 +91,12 @@ export function NewDriverFlow({
 }: Props) {
   const [companyId, setCompanyId] = useState(defaultAuthority)
   const [manual, setManual] = useState(false)
-  const [over, setOver] = useState(false)
   const [reading, setReading] = useState(false)
   const [read, setRead] = useState<{
     values: Record<string, string>
     notice: string | null
     notes?: CardNotes
   } | null>(null)
-  const fileInput = useRef<HTMLInputElement>(null)
 
   // The confirm step is reached by reading or by asking. Same form; the only
   // difference is whether anything is in it.
@@ -320,54 +319,20 @@ export function NewDriverFlow({
         options={authorities}
       />
 
-      <div
-        onDragOver={(event) => {
-          event.preventDefault()
-          setOver(true)
+      {/* THE ZONE IS SHARED WITH THE MEDICAL CERTIFICATE UPLOAD. It was
+          inline here until a second screen needed the same control; two drop
+          zones is two places to fix the paste handler and the accept list.
+          See components/forms/DropZone.tsx. */}
+      <DropZone
+        labels={{
+          title: labels.dropTitle,
+          body: labels.dropBody,
+          hint: labels.dropHint,
+          busy: labels.reading,
         }}
-        onDragLeave={() => setOver(false)}
-        onDrop={(event) => {
-          event.preventDefault()
-          setOver(false)
-          void take(event.dataTransfer.files?.[0])
-        }}
-        // PASTE LANDS ON THE ZONE, not on the window: a paste handler on the
-        // document would swallow Ctrl+V in the authority select beside it.
-        onPaste={(event) => void take(event.clipboardData.files?.[0])}
-        tabIndex={0}
-        role="button"
-        aria-label={labels.dropTitle}
-        onClick={() => fileInput.current?.click()}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault()
-            fileInput.current?.click()
-          }
-        }}
-        className={cx(
-          'flex cursor-pointer flex-col items-center gap-z2 rounded-card border-2 border-dashed px-z4 py-z5 text-center',
-          'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
-          over
-            ? 'border-accent bg-accent-soft'
-            : 'border-border-strong bg-surface hover:bg-surface-3',
-        )}
-      >
-        <p className="text-base font-medium text-ink">{labels.dropTitle}</p>
-        <p className="text-sm text-ink-2">{labels.dropBody}</p>
-        <p className="text-xs text-ink-3">{labels.dropHint}</p>
-        {reading ? (
-          <p role="status" className="text-sm text-accent">
-            {labels.reading}
-          </p>
-        ) : null}
-        <input
-          ref={fileInput}
-          type="file"
-          accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
-          className="sr-only"
-          onChange={(event) => void take(event.target.files?.[0])}
-        />
-      </div>
+        busy={reading}
+        onFile={(file) => void take(file)}
+      />
 
       <button
         type="button"
