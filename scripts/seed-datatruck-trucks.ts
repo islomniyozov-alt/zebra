@@ -5,6 +5,7 @@ import { asRecords, readXlsx } from '@/lib/datatruck/xlsx'
 import { planTrucks, type PlannedTruck } from '@/lib/datatruck/trucks'
 import { openFirstPeriod } from '@/lib/asset-transfer'
 import type { TxClient } from '@/lib/tenancy'
+import { assertTenancy } from './datatruck-tenancy'
 import type { PrismaClient } from '../src/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -54,6 +55,45 @@ const FILE =
   process.argv.find((argument) => argument.endsWith('.xlsx')) ?? DEFAULT_EXPORT
 
 const ORGANIZATION_SLUG = 'zebra'
+
+// ── WHICH DATABASE, AND HOW IT IS CHOSEN ──────────────────────────────────
+//
+// `--production` READS `PROD_DIRECT_DATABASE_URL` AND NOTHING ASSIGNS IT
+// ANYWHERE. It is passed to `createPrismaClient` as an argument and never
+// written into `DATABASE_URL` or `DIRECT_DATABASE_URL` — the fence in
+// tests/prod-url-guard.test.ts asserts that literally, because on 2026-08-15
+// an owner connection string reached production's `DATABASE_URL` by clipboard
+// and only `db.ts` refusing anything without `zebra_app` turned a silent
+// row-level-security bypass into a loud outage.
+//
+// THIS SCRIPT IS ONE OF THE FENCE'S FIRST TWO WRITERS. Every other name on
+// that list either only SELECTs or is a walkthrough. The safety here is the
+// same shape the maintenance readers use: preview is the default, `--write` is
+// a second decision, and `assertTenancy` names the organization and refuses
+// one it did not expect.
+const PRODUCTION = process.argv.includes('--production')
+
+/** Stated by the owner who ran the migration ritual, not discovered here. */
+const PRODUCTION_ORGANIZATION_ID = 'cmsbsc82y0000nsvsa6yffuyh'
+
+function target() {
+  const url = PRODUCTION
+    ? process.env.PROD_DIRECT_DATABASE_URL
+    : process.env.DIRECT_DATABASE_URL
+  if (!url) {
+    throw new Error(
+      PRODUCTION
+        ? 'PROD_DIRECT_DATABASE_URL is not set.'
+        : 'DIRECT_DATABASE_URL is not set.',
+    )
+  }
+  return {
+    url,
+    label: PRODUCTION ? 'PRODUCTION' : 'DEV',
+    host: new URL(url).hostname,
+    expectOrganizationId: PRODUCTION ? PRODUCTION_ORGANIZATION_ID : null,
+  }
+}
 
 /**
  * When this fleet's recorded history begins in Zebra.
@@ -277,57 +317,70 @@ async function write(db: PrismaClient, plan: PlannedTruck[]): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const branch = process.env.NEON_BRANCH ?? '(unnamed)'
   const bytes = new Uint8Array(readFileSync(FILE))
   const records = asRecords(await readXlsx(bytes))
   const plan = planTrucks(records)
+  const where = target()
 
   console.log(`export  ${FILE} (${bytes.length} bytes, ${plan.read} data rows)`)
-  console.log(`branch  ${branch}`)
   console.log(`mode    ${WRITE ? 'WRITE' : 'preview only'}`)
 
-  preview(plan.planned)
-
-  heading(`HELD — ${plan.held.length} rows this seed will not write`)
-  for (const truck of plan.held) {
-    console.log(`  unit ${truck.unitNumber.padEnd(6)} ${truck.reason}`)
-    console.log(`         ${truck.detail}`)
-  }
-
-  heading('NOT IMPORTED, ON PURPOSE')
-  console.log('  Odometer      47 of 49 rows read 0; the other two read 385.99')
-  console.log('                and 136.2. The column holds nothing.')
-  console.log('  Status        9 rows say in_transit. Zebra sets truck status')
-  console.log(
-    '                from dispatch; seeding it invents a moving truck.',
-  )
-  console.log(
-    '  Warnings      expired registration and insurance dates, derived',
-  )
-  console.log(
-    '                by Datatruck. Real, and only ever listing what is',
-  )
-  console.log(
-    '                ALREADY expired — seeding compliance from it would',
-  )
-  console.log('                build a table whose every row is a breach.')
-  console.log('  Owner name    blank on all 49.')
-  console.log('  Trailer       blank on all 49. The operation is power-only.')
-  console.log('  Operator      not a person on every row ("TJK logistic" is a')
-  console.log(
-    '                company); driver links come from the drivers seed.',
-  )
-
-  if (!WRITE) {
-    heading('NOTHING WAS WRITTEN')
-    console.log('  Re-run with --write once the rewrites above are agreed.')
-    return
-  }
-
-  const url = process.env.DIRECT_DATABASE_URL
-  if (!url) throw new Error('DIRECT_DATABASE_URL is not set.')
-  const db = createPrismaClient(url)
+  // THE TENANT IS NAMED BEFORE ANYTHING ELSE IS PRINTED, and before a single
+  // row is planned against it. This connection bypasses row-level security, so
+  // there is nothing downstream to catch a wrong-organization write.
+  const db = createPrismaClient(where.url)
   try {
+    await assertTenancy(db, {
+      label: where.label,
+      host: where.host,
+      slug: ORGANIZATION_SLUG,
+      expectOrganizationId: where.expectOrganizationId,
+    })
+
+    preview(plan.planned)
+
+    heading(`HELD — ${plan.held.length} rows this seed will not write`)
+    for (const truck of plan.held) {
+      console.log(`  unit ${truck.unitNumber.padEnd(6)} ${truck.reason}`)
+      console.log(`         ${truck.detail}`)
+    }
+
+    heading('NOT IMPORTED, ON PURPOSE')
+    console.log(
+      '  Odometer      47 of 49 rows read 0; the other two read 385.99',
+    )
+    console.log('                and 136.2. The column holds nothing.')
+    console.log(
+      '  Status        9 rows say in_transit. Zebra sets truck status',
+    )
+    console.log(
+      '                from dispatch; seeding it invents a moving truck.',
+    )
+    console.log(
+      '  Warnings      expired registration and insurance dates, derived',
+    )
+    console.log(
+      '                by Datatruck. Real, and only ever listing what is',
+    )
+    console.log(
+      '                ALREADY expired — seeding compliance from it would',
+    )
+    console.log('                build a table whose every row is a breach.')
+    console.log('  Owner name    blank on all 49.')
+    console.log('  Trailer       blank on all 49. The operation is power-only.')
+    console.log(
+      '  Operator      not a person on every row ("TJK logistic" is a',
+    )
+    console.log(
+      '                company); driver links come from the drivers seed.',
+    )
+
+    if (!WRITE) {
+      heading('NOTHING WAS WRITTEN')
+      console.log('  Re-run with --write once the above is agreed.')
+      return
+    }
+
     await write(db, plan.planned)
   } finally {
     await db.$disconnect()

@@ -9,6 +9,7 @@ import {
 } from '@/lib/datatruck/drivers'
 import { openFirstPeriod } from '@/lib/asset-transfer'
 import type { TxClient } from '@/lib/tenancy'
+import { assertTenancy } from './datatruck-tenancy'
 import type { PrismaClient } from '../src/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -46,6 +47,45 @@ const FILE =
   process.argv.find((argument) => argument.endsWith('.xlsx')) ?? DEFAULT_EXPORT
 
 const ORGANIZATION_SLUG = 'zebra'
+
+// ── WHICH DATABASE, AND HOW IT IS CHOSEN ──────────────────────────────────
+//
+// `--production` READS `PROD_DIRECT_DATABASE_URL` AND NOTHING ASSIGNS IT
+// ANYWHERE. It is passed to `createPrismaClient` as an argument and never
+// written into `DATABASE_URL` or `DIRECT_DATABASE_URL` — the fence in
+// tests/prod-url-guard.test.ts asserts that literally, because on 2026-08-15
+// an owner connection string reached production's `DATABASE_URL` by clipboard
+// and only `db.ts` refusing anything without `zebra_app` turned a silent
+// row-level-security bypass into a loud outage.
+//
+// THIS SCRIPT IS ONE OF THE FENCE'S FIRST TWO WRITERS. Every other name on
+// that list either only SELECTs or is a walkthrough. The safety here is the
+// same shape the maintenance readers use: preview is the default, `--write` is
+// a second decision, and `assertTenancy` names the organization and refuses
+// one it did not expect.
+const PRODUCTION = process.argv.includes('--production')
+
+/** Stated by the owner who ran the migration ritual, not discovered here. */
+const PRODUCTION_ORGANIZATION_ID = 'cmsbsc82y0000nsvsa6yffuyh'
+
+function target() {
+  const url = PRODUCTION
+    ? process.env.PROD_DIRECT_DATABASE_URL
+    : process.env.DIRECT_DATABASE_URL
+  if (!url) {
+    throw new Error(
+      PRODUCTION
+        ? 'PROD_DIRECT_DATABASE_URL is not set.'
+        : 'DIRECT_DATABASE_URL is not set.',
+    )
+  }
+  return {
+    url,
+    label: PRODUCTION ? 'PRODUCTION' : 'DEV',
+    host: new URL(url).hostname,
+    expectOrganizationId: PRODUCTION ? PRODUCTION_ORGANIZATION_ID : null,
+  }
+}
 
 /** The stated start of this fleet's recorded history. Never the run date. */
 const EFFECTIVE_FROM = new Date('2026-08-01T00:00:00.000Z')
@@ -510,19 +550,26 @@ async function write(
 }
 
 async function main(): Promise<void> {
-  const branch = process.env.NEON_BRANCH ?? '(unnamed)'
   const bytes = new Uint8Array(readFileSync(FILE))
   const plan = planDrivers(asRecords(await readXlsx(bytes)))
+  const where = target()
 
   console.log(`export  ${FILE} (${bytes.length} bytes, ${plan.read} data rows)`)
-  console.log(`branch  ${branch}`)
   console.log(`mode    ${WRITE ? 'WRITE' : 'preview only'}`)
 
-  const url = process.env.DIRECT_DATABASE_URL
-  if (!url) throw new Error('DIRECT_DATABASE_URL is not set.')
-  const db = createPrismaClient(url)
+  const db = createPrismaClient(where.url)
 
   try {
+    // THE TENANT IS NAMED BEFORE ANYTHING ELSE. This connection bypasses
+    // row-level security, so nothing downstream would refuse a write into the
+    // wrong organization — it would simply succeed and look right.
+    await assertTenancy(db, {
+      label: where.label,
+      host: where.host,
+      slug: ORGANIZATION_SLUG,
+      expectOrganizationId: where.expectOrganizationId,
+    })
+
     // READ FIRST, EVEN IN PREVIEW. The truck match and the date assertion are
     // both facts about the database, and a preview that guessed at them would
     // be describing a seed run that cannot happen.

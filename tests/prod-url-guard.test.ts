@@ -112,6 +112,13 @@ const INSPECTION_READERS = [
   // Why the topbar's authority filter renders three of five: inactive rows or
   // a scoped membership are different findings and only one is a defect.
   'inspect-authorities.mjs',
+  // ADDED 2026-09-07, read-only. The Datatruck seed left production with two
+  // trucks numbered 1024 — the real one and a hand-made row carrying `WW2020`
+  // where a VIN belongs. Whether that row is deleted or corrected depends on
+  // what points at it, and the honest order is to ask before touching it, not
+  // after. Enumerates every referencing table by hand, the way `companies.ts`
+  // counts what a cascade would destroy.
+  'inspect-asset-refs.mjs',
 ]
 
 /**
@@ -135,11 +142,40 @@ const MAINTENANCE_READERS = [
   'repair-billing-drift.ts',
 ]
 
+/**
+ * ── THE FIRST SCRIPTS ON THIS FENCE THAT WRITE ────────────────────────────
+ *
+ * Everything above either only SELECTs, passes the URL on, or is a walkthrough
+ * a human drives. These two INSERT — the Datatruck migration seeds, ~100 rows
+ * of real fleet including 54 money-bearing pay rules — and that difference is
+ * why they are listed apart rather than folded in beside the readers.
+ *
+ * WHAT STANDS IN FOR ROW-LEVEL SECURITY. They connect as the database owner,
+ * because they write for an organization they are not a member of, and the
+ * owner carries BYPASSRLS. The mechanism that makes a wrong-tenant write
+ * impossible everywhere else in this system is absent here, so its replacement
+ * is explicit and lives in `scripts/datatruck-tenancy.ts`:
+ *
+ *   * `--production` is required; the default target is dev
+ *   * the organization is resolved, NAMED, and its id checked against one
+ *     stated by the owner — a slug resolves on either database and proves
+ *     nothing about which was reached
+ *   * pre-existing counts are printed, so "46 created" against a table that
+ *     already held 46 is a distinguishable event
+ *   * preview is the default and `--write` is a second, separate decision
+ *
+ * Being on this list is the claim that somebody read the preview — the same
+ * claim MAINTENANCE_READERS makes, one step further, because these create
+ * rows rather than repairing them.
+ */
+const SEED_WRITERS = ['seed-datatruck-trucks.ts', 'seed-datatruck-drivers.ts']
+
 const ALLOWED = [
   ...CHECK_READERS,
   ...DEPLOY_READERS,
   ...INSPECTION_READERS,
   ...MAINTENANCE_READERS,
+  ...SEED_WRITERS,
   ...WALKTHROUGH_READERS,
 ]
 
