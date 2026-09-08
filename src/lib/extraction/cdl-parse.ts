@@ -1,4 +1,8 @@
-import { CONFIDENCES, type Confidence, type Maybe } from './envelope'
+import type { Confidence } from './envelope'
+// THE ENVELOPE READERS ARE SHARED WITH THE MEDICAL CERTIFICATE. They lived
+// here until a second document needed them; copying would have made two
+// parsers of the layer that decides whether a value was measured or invented.
+import { asConfidence, asString, readField, type Json } from './envelope-parse'
 import type { CodeReading, ExtractedCdl } from './cdl-shape'
 import { ExtractionParseError, parseResponseText } from './parse'
 
@@ -25,62 +29,6 @@ import { ExtractionParseError, parseResponseText } from './parse'
 // reason it exists, because the success path is the one a bad response is
 // least likely to take.
 // ---------------------------------------------------------------------------
-
-type Json = Record<string, unknown>
-
-/** A confidence, or a refusal. Shared by `readField` and `readCodeList`. */
-const asConfidence = (value: unknown, at: string): Confidence => {
-  if (typeof value !== 'string' || !CONFIDENCES.includes(value as Confidence)) {
-    throw new ExtractionParseError('bad_confidence', at)
-  }
-  return value as Confidence
-}
-
-/** `{value, confidence}` or null. Anything else refuses rather than coerces. */
-function readField<T>(
-  parent: Json,
-  key: string,
-  check: (value: unknown, at: string) => T,
-): Maybe<T> {
-  if (!Object.hasOwn(parent, key)) {
-    throw new ExtractionParseError('missing_field', `$.${key}`)
-  }
-
-  const raw = parent[key]
-  if (raw === null || raw === undefined) return null
-
-  if (typeof raw !== 'object' || Array.isArray(raw)) {
-    // A bare `"WDL9911234"` where the envelope belongs. Accepting it means
-    // inventing a confidence, and an invented confidence is indistinguishable
-    // from a measured one — which the refusal rules then weigh.
-    throw new ExtractionParseError('bad_field_shape', `$.${key}`)
-  }
-
-  const object = raw as Json
-  const confidence = object['confidence']
-  if (
-    typeof confidence !== 'string' ||
-    !CONFIDENCES.includes(confidence as Confidence)
-  ) {
-    throw new ExtractionParseError('bad_confidence', `$.${key}`)
-  }
-
-  const value = check(object['value'], `$.${key}`)
-  const note = object['note']
-
-  return {
-    value,
-    confidence: confidence as Confidence,
-    ...(typeof note === 'string' && note !== '' ? { note } : {}),
-  }
-}
-
-const asString = (value: unknown, at: string): string => {
-  if (typeof value !== 'string' || value.trim() === '') {
-    throw new ExtractionParseError('bad_value_type', at)
-  }
-  return value.trim()
-}
 
 const asBoolean = (value: unknown, at: string): boolean => {
   // A BOOLEAN, not "true". `isTemporary` decides whether a paper credential is
