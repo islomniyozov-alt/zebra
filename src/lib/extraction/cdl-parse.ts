@@ -1,4 +1,3 @@
-import type { Confidence } from './envelope'
 // THE ENVELOPE READERS ARE SHARED WITH THE MEDICAL CERTIFICATE. They lived
 // here until a second document needed them; copying would have made two
 // parsers of the layer that decides whether a value was measured or invented.
