@@ -1,0 +1,59 @@
+#!/bin/sh
+# ---------------------------------------------------------------------------
+# REFUSE A COMMIT THAT DOES NOT TYPECHECK, LINT AND FORMAT.
+#
+# ── WHY THIS EXISTS RATHER THAN A RESOLUTION TO BE CAREFUL ─────────────────
+#
+# On 2026-09-08, twice in one day, a commit shipped with a failing gate. Both
+# times the cause was identical: the gate and the commit were chained with
+# `&&` in one shell line, so a non-zero exit from `tsc` or `eslint` never
+# reached the commit decision and `git commit` ran anyway. Both times the fix
+# offered was "run them separately from now on".
+#
+# THAT IS A HABIT, AND HABITS ARE WHAT FAILED. AGENTS.md already says this
+# about `sed`: the rule names a mechanism rather than a disposition, because
+# asking for care failed three times on that exact hazard. This is the same
+# lesson applied to the gate — a check somebody can forget to read is
+# advisory, and an advisory check is one that eventually ships a red commit.
+#
+# ── WHAT IT RUNS, AND WHAT IT DELIBERATELY DOES NOT ───────────────────────
+#
+# The three static gates, which are exactly the ones that failed: prettier,
+# tsc, eslint. Measured at 8s, 6s and 15s — about half a minute, which is the
+# real design constraint. A pre-commit hook long enough to be annoying is one
+# people pass `--no-verify` to, and a hook that is routinely bypassed is worse
+# than none, because it also carries the belief that commits are checked.
+#
+# THE TEST SUITE IS NOT HERE. `test:check` is another 25 seconds and it has
+# never been the thing that broke; `npm run check` remains the full gate and
+# the deploy still runs the integration suite. This covers the specific,
+# repeated failure rather than everything imaginable.
+#
+# ── WHAT IT CANNOT SEE ────────────────────────────────────────────────────
+#
+# It checks the WORKING TREE, not the staged snapshot. With a partial `git add
+# -p` the two differ, and this would pass on a tree whose staged half is
+# broken. Stashing the unstaged half to check properly risks losing work in a
+# hook, which is a worse trade. Named here rather than papered over.
+#
+# `--no-verify` still bypasses it. That is git's design and it is fine: the
+# point is that skipping the gate becomes a thing somebody TYPES, not a thing
+# that happens because a shell operator swallowed an exit code.
+# ---------------------------------------------------------------------------
+
+set -e
+
+echo "pre-commit: format, types, lint"
+
+fail() {
+  echo ""
+  echo "  COMMIT REFUSED: $1 failed."
+  echo "  Fix it, or use --no-verify deliberately and say why."
+  exit 1
+}
+
+npx prettier --check . || fail "prettier --check"
+npx tsc --noEmit || fail "tsc --noEmit"
+npx eslint src tests scripts || fail "eslint"
+
+echo "pre-commit: ok"

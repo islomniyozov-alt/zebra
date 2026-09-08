@@ -18,6 +18,7 @@
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run check:hex && npm run test:check && npm run check:drift && npm run check:unrouted && npm run check:grants",
     "check:grants": "node -r dotenv/config scripts/check-grants.mjs",
     "postinstall": "prisma generate",
+    "prepare": "git config core.hooksPath .githooks || true",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
