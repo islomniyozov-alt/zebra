@@ -1,11 +1,20 @@
 import { chromium } from 'playwright'
-import { readFileSync, mkdirSync, writeFileSync } from 'node:fs'
-import { basename, extname } from 'node:path'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { basename } from 'node:path'
+import {
+  documentType,
+  mimeTypeOf,
+  readDocument,
+  readingOf,
+  signIn,
+} from './document-types.mjs'
 
 // ---------------------------------------------------------------------------
-// HOW STABLE IS THIS CARD, FIELD BY FIELD?
+// HOW STABLE IS THIS DOCUMENT, FIELD BY FIELD?
 //
-// ── WHY A CARD IS MEASURED RATHER THAN READ ONCE ──────────────────────────
+//   node -r dotenv/config scripts/doc-variance.mjs <cdl|med> <path> [runs]
+//
+// ── WHY A DOCUMENT IS MEASURED RATHER THAN READ ONCE ──────────────────────
 //
 // On 2026-09-07 the same Georgia licence was read twice and `restrictions`
 // came back ["S","M"] and then ["E","M"], both at high confidence. A single
@@ -18,16 +27,11 @@ import { basename, extname } from 'node:path'
 // onto each code and taught the reader to say a code is unreadable — none of
 // which is visible from one run.
 //
-// SO EVERY NEW CARD GETS MEASURED THIS WAY. `EXTRACTION-CONTRACT.md` holds the
-// numbers and the caveat they must travel with.
+// SO EVERY NEW DOCUMENT GETS MEASURED THIS WAY. `EXTRACTION-CONTRACT.md` holds
+// the numbers and the caveat they must travel with.
 //
-//   node -r dotenv/config scripts/cdl-variance.mjs corpus/cdl/<card>.jpg [runs]
-//
-// IT GOES THROUGH THE DEPLOYED WORKER, because the API key lives there —
-// `wrangler secret put`, the owner's arrangement — and there is none on this
-// machine. That also makes it a reading of what is actually deployed.
-//
-// ONE LOGIN, N SEQUENTIAL READS. Concurrency would measure the rate limiter as
+// IT GOES THROUGH THE DEPLOYED WORKER, because the API key lives there. ONE
+// LOGIN, N SEQUENTIAL READS: concurrency would measure the rate limiter as
 // well as the model, and sequential keeps each read independent.
 // ---------------------------------------------------------------------------
 
@@ -35,54 +39,25 @@ const BASE =
   process.env.VERIFY_BASE ?? 'https://zebra-dev.tajikcargollc.workers.dev'
 const EMAIL = process.env.VERIFY_EMAIL ?? process.env.SEED_OWNER_EMAIL
 const PASSWORD = process.env.VERIFY_PASSWORD ?? process.env.SEED_OWNER_PASSWORD
-const CARD = process.argv[2]
-const RUNS = Number(process.argv[3] ?? 10)
+const KIND = process.argv[2]
+const CARD = process.argv[3]
+const RUNS = Number(process.argv[4] ?? 10)
 
-if (!CARD || !EMAIL || !PASSWORD) {
+if (!KIND || !CARD || !EMAIL || !PASSWORD) {
   console.error(
-    'Usage: node -r dotenv/config scripts/cdl-variance.mjs <card> [runs]',
+    'Usage: node -r dotenv/config scripts/doc-variance.mjs <cdl|med> <path> [runs]',
   )
   console.error('Needs VERIFY_EMAIL and VERIFY_PASSWORD (or the SEED_OWNER_*).')
   process.exit(1)
 }
 
-const MIME =
-  {
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.png': 'image/png',
-    '.webp': 'image/webp',
-    '.pdf': 'application/pdf',
-  }[extname(CARD).toLowerCase()] ?? 'application/octet-stream'
-
+const type = documentType(KIND)
 const bytes = readFileSync(CARD)
-console.log(`card   ${CARD} (${bytes.length} bytes as ${MIME})`)
-console.log(`target ${BASE}`)
-console.log(`runs   ${RUNS}\n`)
-
-const show = (value) => JSON.stringify(value ?? null)
-
-/**
- * A field's reading, flattened so two runs can be compared.
- *
- * CODE LISTS ARE ARRAYS OF ENVELOPES, so the values AND the per-element
- * confidences both matter: a run returning the same codes with different
- * confidences has not returned the same answer, and collapsing that would hide
- * the very instability this script exists to find.
- */
-const readingOf = (field) => {
-  if (Array.isArray(field)) {
-    return {
-      value: show(field.map((entry) => entry?.value ?? null)),
-      confidence:
-        field.map((entry) => entry?.confidence ?? '—').join('+') || '—',
-    }
-  }
-  return {
-    value: show(field?.value ?? null),
-    confidence: field?.confidence ?? '—',
-  }
-}
+console.log(`document ${type.label}`)
+console.log(`card     ${CARD} (${bytes.length} bytes as ${mimeTypeOf(CARD)})`)
+console.log(`target   ${BASE}${type.route}`)
+console.log(`runs     ${RUNS}
+`)
 
 const browser = await chromium.launch(
   process.env.SHOT_CHROME ? { executablePath: process.env.SHOT_CHROME } : {},
@@ -90,26 +65,11 @@ const browser = await chromium.launch(
 const results = []
 try {
   const page = await (await browser.newContext()).newPage()
-  await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded' })
-  await page.fill('input[name="email"]', EMAIL)
-  await page.fill('input[name="password"]', PASSWORD)
-  await page.click('button[type="submit"]')
-  await page.waitForURL(/\/(loads|dashboard)/, { timeout: 60_000 })
+  await signIn(page, BASE, EMAIL, PASSWORD)
 
   for (let run = 1; run <= RUNS; run++) {
     const started = Date.now()
-    const answer = await page.evaluate(
-      async ({ b64, name, mime }) => {
-        const binary = atob(b64)
-        const array = new Uint8Array(binary.length)
-        for (let i = 0; i < binary.length; i++) array[i] = binary.charCodeAt(i)
-        const body = new FormData()
-        body.append('file', new File([array], name, { type: mime }))
-        const response = await fetch('/api/cdl/read', { method: 'POST', body })
-        return { status: response.status, text: await response.text() }
-      },
-      { b64: bytes.toString('base64'), name: basename(CARD), mime: MIME },
-    )
+    const answer = await readDocument(page, type, bytes, basename(CARD))
     const ms = Date.now() - started
     let parsed = null
     try {
@@ -118,11 +78,15 @@ try {
       // Kept raw in the dump: a run that did not parse is still evidence.
     }
     results.push({ run, ms, status: answer.status, parsed, raw: answer.text })
-    const rest = readingOf(parsed?.fields?.restrictions)
+
+    // ONE FIELD ON THE LIVE LINE, CHOSEN PER DOCUMENT — the one already known
+    // to move. Everything else is in the table below; this is so a long run
+    // can be watched rather than waited out.
+    const watched = KIND === 'cdl' ? 'restrictions' : 'expiresAt'
+    const reading = readingOf(parsed?.fields?.[watched])
     console.log(
       `run ${String(run).padStart(2)}  http ${answer.status}  ` +
-        `${String(ms).padStart(6)}ms  class=${show(parsed?.fields?.class?.value)}  ` +
-        `restrictions=${rest.value}/${rest.confidence}` +
+        `${String(ms).padStart(6)}ms  ${watched}=${reading.value}/${reading.confidence}` +
         (parsed?.notice ? `  NOTICE ${parsed.notice}` : ''),
     )
   }
@@ -131,15 +95,20 @@ try {
 }
 
 // THE RAW RUNS ARE DUMPED BEFORE ANYTHING IS SUMMARISED, so a wrong summary
-// cannot destroy the evidence — the rule `cdl-accuracy.mjs` already follows.
+// cannot destroy the evidence — the rule `doc-accuracy.mjs` also follows.
 mkdirSync('corpus/.extractions', { recursive: true })
 const stamp = new Date().toISOString().replace(/[:.]/g, '-')
 const out = `corpus/.extractions/variance-${basename(CARD).replace(/\W+/g, '-')}-${stamp}.json`
 writeFileSync(
   out,
-  JSON.stringify({ card: CARD, base: BASE, runs: results }, null, 2),
+  JSON.stringify(
+    { kind: KIND, card: CARD, base: BASE, runs: results },
+    null,
+    2,
+  ),
 )
-console.log(`\nraw runs dumped to ${out}`)
+console.log(`
+raw runs dumped to ${out}`)
 
 const ok = results.filter((r) => r.parsed?.fields)
 if (ok.length === 0) {
