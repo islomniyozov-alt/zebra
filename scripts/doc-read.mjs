@@ -48,7 +48,11 @@ if (!KIND || !DOC || !EMAIL || !PASSWORD) {
 const type = documentType(KIND)
 const bytes = readFileSync(DOC)
 
-const browser = await chromium.launch()
+// SHOT_CHROME NAMES A BROWSER THIS MACHINE ALREADY HAS, the way every other
+// runner here does — Playwright's own download is not always present.
+const browser = await chromium.launch(
+  process.env.SHOT_CHROME ? { executablePath: process.env.SHOT_CHROME } : {},
+)
 const page = await browser.newPage()
 
 let response

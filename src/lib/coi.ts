@@ -425,7 +425,11 @@ export function coiProposal(
   const coverages: CoiCoverage[] = (fields.coverages ?? []).map((row) => {
     const dates = judgeCoverageRow(row)
     const printedType = row.type?.value?.trim() || null
-    const proposal = proposeCoverage(printedType)
+    const printedLimit = row.limit?.value?.trim() || null
+    // THE WHOLE ROW, NOT THE TYPE CELL. On the first real certificate the
+    // words "Non-Trucking Liability" came back in the LIMIT — see
+    // `coi-coverages.ts` for the read and the asymmetry it forced.
+    const proposal = proposeCoverage(printedType, printedLimit)
 
     const cells = [
       row.type,
@@ -452,7 +456,7 @@ export function coiProposal(
       effectiveAt: dates.ok ? dates.effectiveIso : null,
       identifier: row.policyNumber?.value?.trim() || null,
       issuer: row.insurer?.value?.trim() || null,
-      limit: row.limit?.value?.trim() || null,
+      limit: printedLimit,
       confidence,
       refusal: dates.ok ? null : dates.reason,
     }

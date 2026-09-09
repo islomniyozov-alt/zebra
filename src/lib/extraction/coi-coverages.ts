@@ -23,7 +23,7 @@ import type { ComplianceType } from '@/generated/prisma/client'
 //
 // ── NON-TRUCKING LIABILITY IS THE REASON THIS FILE IS CAREFUL ────────────
 //
-// `corpus/coi/acord25-01.pdf` prints "Non-Trucking Liability", and the naive
+// `corpus/coi/acord25-01.pdf` evidences non-trucking liability, and the naive
 // substring rule — it contains "liability" — would file it as
 // `INSURANCE_LIABILITY`. That is not a spelling difference. Non-trucking
 // (bobtail) liability covers a tractor when it is NOT under dispatch; it is
@@ -31,9 +31,37 @@ import type { ComplianceType } from '@/generated/prisma/client'
 // as the other would make an owner-operator look covered for exactly the miles
 // they are not covered for, and the safety queue would show green.
 //
-// So the table is ORDERED, the narrow patterns are tested first, and the
-// coverages this system does not file as an obligation of their own carry a
-// `caution` sentence that goes on screen beside the row.
+// So the table is ORDERED and the narrow patterns are tested first.
+//
+// ── AND A QUALIFIER IS NOT ALWAYS IN THE TYPE CELL ───────────────────────
+//
+// THE MEASURED CASE, from the first read of that certificate on 2026-09-09.
+// The model returned:
+//
+//   type:  "AUTOMOBILE LIABILITY"          <- the form's PRE-PRINTED heading
+//   limit: "Non-Trucking Liability $ 750,000"   <- the agency's write-in
+//
+// which is a defensible reading of the layout — ACORD prints the AUTOMOBILE
+// LIABILITY section and the agency writes its descriptor into the LIMITS
+// column beside the amount. It is also, read cell by cell, the exact failure
+// above: `AUTOMOBILE LIABILITY` proposes `INSURANCE_LIABILITY` with nothing to
+// warn anybody, and two tractors get filed as covered on dispatch.
+//
+// So the CAUTION PATTERNS ARE TESTED AGAINST THE WHOLE ROW and the affirmative
+// ones against the type cell alone. The asymmetry is deliberate:
+//
+//   A QUALIFIER THAT CHANGES WHAT A COVERAGE IS can be written in any cell of
+//   the row, and the cost of missing one is a false green on a compliance
+//   screen. So it is looked for everywhere.
+//
+//   A COVERAGE NAME found in the wrong cell would be a misclassification —
+//   "cargo excluded" in a limits box is not cargo cover — and the cost of
+//   missing one is only that somebody picks from a list. So those are read
+//   where they belong.
+//
+// This is still not a correction. The transcription is untouched; the type
+// cell goes on screen exactly as printed, next to the sentence explaining what
+// the rest of the row says about it.
 // ---------------------------------------------------------------------------
 
 export interface CoverageProposal {
@@ -47,11 +75,16 @@ export interface CoverageProposal {
  * The table, in order. FIRST MATCH WINS, and the order is load-bearing:
  * "Non-Trucking Liability" must be tested before anything matching
  * "liability", and "Motor Truck Cargo" before anything matching "truck".
+ *
+ * `wholeRow` marks the patterns that are looked for in every cell rather than
+ * only in the type — the qualifiers. See the header for the read that forced
+ * the distinction.
  */
 const PATTERNS: {
   match: RegExp
   type: ComplianceType | null
   caution: string | null
+  wholeRow?: true
 }[] = [
   {
     // Bobtail / deadhead / non-trucking. NOT primary liability — see above.
@@ -59,6 +92,7 @@ const PATTERNS: {
     type: 'OTHER',
     caution:
       'Non-trucking (bobtail) liability covers the tractor when it is not under dispatch. It is not the primary auto liability a DOT filing requires.',
+    wholeRow: true,
   },
   {
     match: /cargo/i,
@@ -99,19 +133,28 @@ const PATTERNS: {
 ]
 
 /**
- * What a printed coverage type might be.
+ * What a printed coverage row might be.
+ *
+ * TAKES THE ROW, NOT THE TYPE CELL. That is the change of 2026-09-09 and the
+ * header says why: on the first real certificate the words that decide what
+ * the coverage IS were printed in the limits column.
  *
  * Called on the transcription, after the read, and its answer is a default on
  * a control a person can change — never a value written anywhere on its own.
  */
 export function proposeCoverage(
-  printed: string | null | undefined,
+  printedType: string | null | undefined,
+  printedLimit?: string | null,
 ): CoverageProposal {
-  const text = printed?.trim()
-  if (!text) return { type: null, caution: null }
+  const type = printedType?.trim() ?? ''
+  const wholeRow = [type, printedLimit?.trim() ?? ''].join(' ').trim()
+  if (wholeRow === '') return { type: null, caution: null }
 
   for (const row of PATTERNS) {
-    if (row.match.test(text)) return { type: row.type, caution: row.caution }
+    const against = row.wholeRow ? wholeRow : type
+    if (against !== '' && row.match.test(against)) {
+      return { type: row.type, caution: row.caution }
+    }
   }
 
   return { type: null, caution: null }

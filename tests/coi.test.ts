@@ -333,6 +333,35 @@ describe('what a printed coverage might be', () => {
     expect(proposeCoverage('AUTOMOBILE LIABILITY').type).toBe(
       'INSURANCE_LIABILITY',
     )
+    expect(
+      proposeCoverage(
+        'AUTOMOBILE LIABILITY',
+        'COMBINED SINGLE LIMIT $1,000,000',
+      ).type,
+    ).toBe('INSURANCE_LIABILITY')
+  })
+
+  // ── THE MEASURED CASE, 2026-09-09 ──────────────────────────────────────
+  //
+  // The first read of `acord25-01.pdf` returned the form's pre-printed
+  // heading in the type cell and the agency's write-in descriptor in the
+  // limit. Read cell by cell that is primary auto liability with nothing to
+  // warn anybody — on a certificate that evidences bobtail cover.
+  it('catches a non-trucking qualifier written into the limits column', () => {
+    const proposal = proposeCoverage(
+      'AUTOMOBILE LIABILITY',
+      'Non-Trucking Liability $ 750,000',
+    )
+    expect(proposal.type).toBe('OTHER')
+    expect(proposal.caution).toContain('not under dispatch')
+  })
+
+  // AND THE ASYMMETRY, OBSERVED IN BOTH DIRECTIONS. A coverage NAME in a
+  // limits cell must not reclassify the row; only a qualifier may.
+  it('does not read a coverage name out of the limits column', () => {
+    expect(proposeCoverage('AUTOMOBILE LIABILITY', 'Cargo excluded').type).toBe(
+      'INSURANCE_LIABILITY',
+    )
   })
 
   // UNRECOGNISED IS NOT INVALID — the `cdl-codes.ts` wording, for the same
@@ -539,6 +568,30 @@ describe('the proposal the confirm step renders', () => {
     expect(proposal.coverages[0]!.printedType).toBe('Non-Trucking Liability')
     expect(proposal.coverages[0]!.proposedType).toBe('OTHER')
     expect(proposal.coverages[1]!.printedType).toBe('Physical Damage')
+  })
+
+  // WHAT THE DEPLOYED READER ACTUALLY RETURNED for the same certificate, kept
+  // beside the text-layer fixture rather than replacing it: the two disagree
+  // about which cell the descriptor is in, and the proposal must survive both.
+  it('proposes the same obligation from the reading that split the row', () => {
+    const proposal = coiProposal(
+      parsed({
+        coverages: [
+          cell({
+            type: field('AUTOMOBILE LIABILITY'),
+            insurer: field('PROGRESSIVE EXPRESS INSURANCE COMPANY'),
+            policyNumber: field('878508616'),
+            effectiveAt: field('08/14/2026'),
+            expiresAt: field('08/14/2027'),
+            limit: field('Non-Trucking Liability $ 750,000'),
+          }),
+        ],
+      }),
+      { authorities: [ram], trucks: [] },
+    )
+    expect(proposal.coverages[0]!.printedType).toBe('AUTOMOBILE LIABILITY')
+    expect(proposal.coverages[0]!.proposedType).toBe('OTHER')
+    expect(proposal.coverages[0]!.caution).toContain('not under dispatch')
   })
 
   // THE LIMIT CELL IS NOT ALWAYS A LIMIT, which is why nothing parses it.

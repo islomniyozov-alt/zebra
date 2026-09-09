@@ -106,3 +106,14 @@ next-env.d.ts
 # dies mid-render still says which tests failed. Evidence, not source.
 .integration-failures.log
 .integration-failures.log.count
+
+# Raw model responses, dumped by `doc-read.mjs`, `doc-accuracy.mjs` and
+# `doc-variance.mjs` beside whatever they measured.
+#
+# SAME RULING AS ./corpus, AND FOR A SHARPER REASON: these are verbatim
+# readings of real customer documents — a driver's licence number, a carrier's
+# policy number, an owner-operator's VINs — held only so a surprising summary
+# can be checked against what actually came back. They are evidence about one
+# run on one machine, they belong beside the document they read, and neither
+# git nor prettier has any business touching them.
+/.extractions/
