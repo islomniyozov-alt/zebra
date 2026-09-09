@@ -70,12 +70,35 @@ const TARIFF_SUFFIX = /\s*(from|of)\s+gross\s*$/i
 const TARIFF_NAME = /'name':\s*'([^']*)'/
 const TARIFF_PERCENT = /'percent':\s*([\d.]+)/
 
+/** Datatruck's own word for what KIND of rate this is. */
+const TARIFF_KIND = /'tariff':\s*'([^']*)'/
+
 function tariffLabel(value: string): { label: string; why: string | null } {
   if (!value.startsWith('{')) return { label: value, why: null }
 
   const name = TARIFF_NAME.exec(value)?.[1]?.trim()
   if (!name) {
     return { label: value, why: 'a tariff object with no readable name' }
+  }
+
+  // ── A PER-MILE TARIFF IS NOT A PERCENTAGE THAT DISAGREES WITH ITSELF ────
+  //
+  // Checked BEFORE the cross-check below, because without it a `per_mile`
+  // record reports as "the object says 0.0% and its name says 0.7%" — the row
+  // is refused either way and the sentence is a wrong diagnosis. It has no
+  // percent because it is not a percentage at all: `0.7$ per mil` is 70 cents
+  // a mile, and `PERCENT_LINEHAUL` cannot express it.
+  //
+  // Two of the applicant rows are this. Naming it properly is what tells
+  // somebody the answer is a new pay-rule type rather than a typo to correct.
+  const kind = TARIFF_KIND.exec(value)?.[1]
+  if (kind && kind !== 'percentage_from_gross') {
+    return {
+      label: name,
+      why:
+        `a ${JSON.stringify(kind)} tariff (${JSON.stringify(name)}), which is not a ` +
+        `percentage of gross — this system has no pay rule type for it`,
+    }
   }
 
   // The cross-check. `percent` is Datatruck's own number for the same rate.
@@ -322,8 +345,23 @@ export interface PlannedDriver {
   cdlExpiresAt: string | null
   /** The unit number this driver drives, as the export spells it. */
   truckUnit: string | null
-  payBps: number
-  /** Derived from `payBps`, never from the export's `Driver Type`. */
+  /**
+   * Basis points of linehaul, or null when the tariff would not read AND the
+   * caller asked for that to be survivable — see `unreadableTariff`.
+   *
+   * NULL IS NOT ZERO. A driver paid 0% and a driver whose rate nobody could
+   * read are different facts, and only one of them may ever reach a pay rule.
+   * Every writer of `DriverPayRule` must therefore check this; the compiler
+   * makes that unavoidable, which is why the field is nullable rather than
+   * carrying a sentinel.
+   */
+  payBps: number | null
+  /**
+   * Derived from `payBps`, never from the export's `Driver Type`.
+   *
+   * Falls back to the SCHEMA DEFAULT when there is no readable rate, because
+   * this is a label and a label is not worth holding a row over.
+   */
   employmentType: DriverEmployment
   /** What `Driver Type` said, so the report can name every disagreement. */
   declaredType: string | null
@@ -342,9 +380,30 @@ export interface DriverPlan {
   read: number
 }
 
+/**
+ * What to do with a row whose tariff will not read.
+ *
+ * `hold` — the default, and what the active and terminated seeds use. A rate
+ * nobody can read is a rate nobody should be paid on, and those seeds write
+ * money.
+ *
+ * `default` — plan the row anyway with no rate and the schema's default
+ * employment type. For an import where NO pay rule is written, the tariff
+ * decides only a label, and holding a row over a label would strip a driver
+ * out of the import and leave their loads with nobody to attach to. The
+ * owner's ruling of 2026-09-09, for the applicant rows.
+ */
+export type UnreadableTariff = 'hold' | 'default'
+
+export interface PlanDriversOptions {
+  unreadableTariff?: UnreadableTariff
+}
+
 export function planDrivers(
   records: readonly Record<string, string>[],
+  options: PlanDriversOptions = {},
 ): DriverPlan {
+  const unreadableTariff = options.unreadableTariff ?? 'hold'
   const planned: PlannedDriver[] = []
   const held: HeldDriver[] = []
   const seen = new Set<string>()
@@ -393,7 +452,7 @@ export function planDrivers(
 
     // ── PAY, WHICH HOLDS THE ROW IF IT WILL NOT READ ────────────────────
     const tariff = parseTariff(text(record, 'Driver tariff'))
-    if (!tariff.ok) {
+    if (!tariff.ok && unreadableTariff === 'hold') {
       held.push({
         externalId,
         who,
@@ -403,6 +462,16 @@ export function planDrivers(
     }
 
     const corrections: string[] = []
+    if (!tariff.ok) {
+      // NAMED IN THE PREVIEW, NOT SWALLOWED. The row survives because no pay
+      // rule depends on it, and the report still says the rate was unreadable
+      // — otherwise "seeded with the default" and "seeded from the export"
+      // look identical afterwards.
+      corrections.push(
+        `tariff ${JSON.stringify(tariff.raw)} would not read (${tariff.why}); ` +
+          `no rate recorded and employment left at the schema default`,
+      )
+    }
     seen.add(externalId)
 
     // ── CDL STATE: NO INFERENCE, EVER ───────────────────────────────────
@@ -460,8 +529,16 @@ export function planDrivers(
       cdlState,
       cdlExpiresAt,
       truckUnit: text(record, 'Truck') || null,
-      payBps: tariff.bps,
-      employmentType: employmentFromTariff(tariff.bps),
+      // NO RATE MEANS NO RATE. `null` reaches every writer of a pay rule as a
+      // value it has to handle, rather than a 0 that reads like a decision
+      // somebody made.
+      payBps: tariff.ok ? tariff.bps : null,
+      // SCHEMA DEFAULT WHEN THERE IS NOTHING TO DERIVE FROM. `OWNED` is what
+      // `Driver.employmentType` defaults to in the schema, so a row planned
+      // this way is indistinguishable from one created through the interface
+      // without anybody stating a class — which is the honest outcome, since
+      // nobody has.
+      employmentType: tariff.ok ? employmentFromTariff(tariff.bps) : 'OWNED',
       declaredType: text(record, 'Driver Type') || null,
       corrections,
     })

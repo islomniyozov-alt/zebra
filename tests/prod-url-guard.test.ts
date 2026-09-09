@@ -192,6 +192,17 @@ const SEED_WRITERS = [
   // file. That makes it the narrowest writer on this list — the active driver
   // seed writes money and this one deliberately does not.
   'seed-datatruck-terminated-drivers.ts',
+  // ADDED 2026-09-09. The last 39 names the load history carries, whom
+  // Datatruck files as `applicant` while their freight says otherwise — up to
+  // 191 loads each. With these, all 155 driver names in the history resolve.
+  //
+  // IT READS THE LOAD EXPORT TOO, which no other seed does, because the
+  // selection rule is the freight rather than a status column: a row is
+  // seeded only when at least one load names it, and the eight with none are
+  // left out by ruling.
+  //
+  // Driver rows only. No pay rules, no compliance items, no asset history.
+  'seed-datatruck-applicant-drivers.ts',
 ]
 
 const ALLOWED = [

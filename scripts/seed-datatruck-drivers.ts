@@ -141,6 +141,39 @@ async function assertNoEarlierFreight(db: PrismaClient): Promise<void> {
   )
 }
 
+/**
+ * A planned driver this seed is allowed to write, which means one with a rate.
+ *
+ * ── THE INVARIANT, MADE UNAVOIDABLE RATHER THAN REMEMBERED ────────────────
+ *
+ * `planDrivers` gained an `unreadableTariff` option on 2026-09-09 so the
+ * applicant import could survive a rate it cannot read — that import writes no
+ * pay rules, so for it the tariff decides only a label. THIS seed writes 54
+ * money-bearing pay rules, and for it an unreadable rate is exactly the
+ * refusal the planner has always given.
+ *
+ * It asks for `hold` and so cannot receive a null. The narrowing below asserts
+ * that rather than trusting it: if somebody ever passes `default` here, this
+ * throws by name instead of writing a `PERCENT_LINEHAUL` rule at 0% or at
+ * whatever a `?? 0` would have invented.
+ */
+type PricedDriver = PlannedDriver & { payBps: number }
+
+function priced(planned: readonly PlannedDriver[]): PricedDriver[] {
+  const withRate = planned.filter((d): d is PricedDriver => d.payBps !== null)
+  if (withRate.length !== planned.length) {
+    const rateless = planned
+      .filter((d) => d.payBps === null)
+      .map((d) => `${d.firstName} ${d.lastName} (${d.externalId})`)
+    throw new Error(
+      `${rateless.length} planned driver(s) carry no rate and this seed writes ` +
+        `pay rules: ${rateless.join(', ')}. It asks planDrivers for ` +
+        `unreadableTariff: 'hold', so this cannot happen without that changing.`,
+    )
+  }
+  return withRate
+}
+
 function preview(
   plan: ReturnType<typeof planDrivers>,
   /** `authority/unit` — the same key the write matches on. */
@@ -148,7 +181,10 @@ function preview(
   /** Unit numbers under any authority, to tell "missing" from "elsewhere". */
   anyUnit: Set<string>,
 ): void {
-  const { planned, held } = plan
+  // Narrowed once, here, rather than at each of the six places below
+  // that do arithmetic on a percentage.
+  const planned = priced(plan.planned)
+  const { held } = plan
 
   heading('COUNTS')
   const byAuthority = new Map<string, number>()
@@ -325,7 +361,7 @@ function preview(
 
 async function write(
   db: PrismaClient,
-  planned: PlannedDriver[],
+  planned: PricedDriver[],
   truckIdByKey: Map<string, string>,
 ): Promise<void> {
   const organization = await db.organization.findUnique({
@@ -607,7 +643,7 @@ async function main(): Promise<void> {
       return
     }
 
-    await write(db, plan.planned, truckIdByKey)
+    await write(db, priced(plan.planned), truckIdByKey)
   } finally {
     await db.$disconnect()
   }
