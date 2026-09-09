@@ -100,6 +100,15 @@ interface Props {
     askBody: string
     notices: Record<string, string>
   }
+  /**
+   * A reading the INTAKE already performed, when it came in that way.
+   *
+   * The front door classifies a dropped document and extracts with the
+   * matching contract, so re-uploading here would be a second read of a file
+   * this browser has already sent. Absent on the driver-page path, which still
+   * uploads for itself.
+   */
+  initial?: { proposal: Proposal; match: Match } | null
 }
 
 export function MedicalCertUpload({
@@ -107,16 +116,31 @@ export function MedicalCertUpload({
   driverLabel = '',
   roster = [],
   prominent = false,
+  initial = null,
   labels,
 }: Props) {
   const [reading, setReading] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
-  const [proposal, setProposal] = useState<Proposal | null>(null)
+  // ── ALREADY READ, WHEN THE INTAKE READ IT ─────────────────────────────
+  //
+  // `ComplianceIntake` classifies before it extracts, so by the time a
+  // medical card reaches this component the values are in hand. Seeding the
+  // state from them skips straight to the confirm step rather than showing a
+  // second drop zone for a file that has already been uploaded.
+  //
+  // WITHOUT `initial` NOTHING CHANGES. The driver-page path still drops a file
+  // here and this component still reads it, which is why the upload half is
+  // not deleted.
+  const [proposal, setProposal] = useState<Proposal | null>(
+    initial?.proposal ?? null,
+  )
   // WHO IT WILL BE FILED AGAINST — proposed by the read, or picked below.
   // Held beside the proposal so choosing a driver after a "none" costs no
   // second upload: the values are already in hand.
-  const [match, setMatch] = useState<Match | null>(null)
-  const [chosen, setChosen] = useState<Candidate | null>(null)
+  const [match, setMatch] = useState<Match | null>(initial?.match ?? null)
+  const [chosen, setChosen] = useState<Candidate | null>(
+    initial?.match?.kind === 'one' ? initial.match.driver : null,
+  )
   const [state, formAction] = useActionState<FileMedicalCertState, FormData>(
     fileMedicalCertAction,
     FILE_MEDICAL_CERT_INITIAL,

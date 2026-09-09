@@ -635,20 +635,42 @@ export async function recordRenewal(
   // The subject decides the tenant and the authority — read from the asset
   // rather than taken from the caller, so a forged id lands on nothing.
   const subject =
-    input.subject === 'truck'
-      ? await tx.truck.findFirst({
-          where: { id: input.subjectId, deletedAt: null },
-          select: { id: true, organizationId: true, companyId: true },
-        })
-      : input.subject === 'trailer'
-        ? await tx.trailer.findFirst({
+    input.subject === 'company'
+      ? // ── A FLEET POLICY'S SUBJECT IS THE CARRIER ITSELF ────────────────
+        //
+        // Liability and cargo are written per authority, so the row carries a
+        // companyId and no asset link. The company is still READ rather than
+        // taken from the caller — the same reason every other branch does: an
+        // id from a browser is a claim, and row-level security is what turns
+        // one from another tenant into a `subject_not_found`.
+        await tx.company
+          .findFirst({
+            where: { id: input.subjectId },
+            select: { id: true, organizationId: true },
+          })
+          .then((row) =>
+            row
+              ? {
+                  id: row.id,
+                  organizationId: row.organizationId,
+                  companyId: row.id,
+                }
+              : null,
+          )
+      : input.subject === 'truck'
+        ? await tx.truck.findFirst({
             where: { id: input.subjectId, deletedAt: null },
             select: { id: true, organizationId: true, companyId: true },
           })
-        : await tx.driver.findFirst({
-            where: { id: input.subjectId, deletedAt: null },
-            select: { id: true, organizationId: true, companyId: true },
-          })
+        : input.subject === 'trailer'
+          ? await tx.trailer.findFirst({
+              where: { id: input.subjectId, deletedAt: null },
+              select: { id: true, organizationId: true, companyId: true },
+            })
+          : await tx.driver.findFirst({
+              where: { id: input.subjectId, deletedAt: null },
+              select: { id: true, organizationId: true, companyId: true },
+            })
 
   if (!subject) return { ok: false, reason: 'subject_not_found' }
 
@@ -661,6 +683,18 @@ export async function recordRenewal(
       deletedAt: null,
       type: input.type,
       expiresAt: input.expiresAt,
+      // A FLEET POLICY IS IDENTIFIED BY ITS CARRIER AND THE ABSENCE OF AN
+      // ASSET. Without the three nulls this would also match a per-truck row
+      // of the same type and date, and refuse a legitimate policy as a
+      // duplicate of a vehicle's own record.
+      ...(input.subject === 'company'
+        ? {
+            companyId: subject.id,
+            truckId: null,
+            trailerId: null,
+            driverId: null,
+          }
+        : {}),
       ...(input.subject === 'truck' ? { truckId: subject.id } : {}),
       ...(input.subject === 'trailer' ? { trailerId: subject.id } : {}),
       ...(input.subject === 'driver' ? { driverId: subject.id } : {}),

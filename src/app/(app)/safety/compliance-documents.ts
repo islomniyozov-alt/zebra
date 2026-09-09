@@ -1,4 +1,4 @@
-import type { ComplianceType } from '@/generated/prisma/client'
+import type { ComplianceType, DocumentType } from '@/generated/prisma/client'
 import type { MessageKey } from '@/lib/i18n'
 
 // ---------------------------------------------------------------------------
@@ -26,30 +26,73 @@ import type { MessageKey } from '@/lib/i18n'
 // contract behind it: a registration read by the medical reader would be
 // refused for having no expiry it recognises, or worse, would not be.
 //
-// WHILE THERE IS EXACTLY ONE READABLE TYPE, the intake goes straight to it and
-// says so in the copy. When there are two, it has to ask which — and that is a
-// change to the intake's rendering, not to this file. The comment is here so
-// the person adding registration knows the asking is owed.
+// ── THE ASKING IS OWED NOW, AND IT IS A PROPOSAL ─────────────────────────
+//
+// There are two readable types since 2026-09-09, so the intake can no longer
+// go straight to one. The owner's ruling settles how it asks:
+//
+//   CLASSIFICATION PROPOSES, NEVER CHOOSES. The document is classified, read
+//   with the proposed type's contract, and the confirm step NAMES the type it
+//   decided and lets the person change it — which re-reads with the correct
+//   contract. A wrong guess costs one re-read and can never cause a wrong
+//   filing. A low-confidence classification asks BEFORE extracting, so a guess
+//   never spends a read.
+//
+// That is the one place the paragraph above bends, and the verdict on the
+// confirm step is what makes the bend safe: the type is on screen beside the
+// values, and nothing is stored until somebody agrees with both.
 // ---------------------------------------------------------------------------
 
 export interface ReadableComplianceDocument {
-  /** The row this eventually becomes. */
+  /** The compliance row this eventually becomes. */
   type: ComplianceType
+  /**
+   * The DOCUMENT this is, in the vocabulary the classifier speaks.
+   *
+   * Two vocabularies, deliberately: `DocumentType` describes the FILE and
+   * `ComplianceType` the OBLIGATION, and they are not one-to-one. One ACORD
+   * certificate evidences liability AND cargo — one document, two obligations
+   * — which is exactly why the classifier answers in the first vocabulary and
+   * the reader produces rows in the second.
+   */
+  documentType: DocumentType
   /** The read route. Returns a proposal; it never writes. */
   route: string
   /** What a person calls it — "Medical card". */
   nameKey: MessageKey
+  /**
+   * What the CLASSIFIER is told to look for. One sentence, about the
+   * document's own headings rather than about what we want off it — a
+   * description that mentions expiry dates teaches it to find expiry dates on
+   * anything.
+   */
+  looksLike: string
 }
 
 export const READABLE_COMPLIANCE_DOCUMENTS: readonly ReadableComplianceDocument[] =
   [
     {
       type: 'MEDICAL_CARD',
+      documentType: 'MEDICAL_CARD',
       route: '/api/med/read',
       nameKey: 'complianceType.MEDICAL_CARD',
+      looksLike:
+        'a Medical Examiner’s Certificate — a small federal form naming a driver and a medical examiner, with a National Registry number',
+    },
+    {
+      // LIABILITY IS THE ROW THIS FILES FIRST. A certificate usually evidences
+      // cargo as well, and `coiProposal` produces that second row when the
+      // document actually carries a cargo line — which is why one entry here
+      // maps to two possible obligations.
+      type: 'INSURANCE_LIABILITY',
+      documentType: 'INSURANCE_CERT',
+      route: '/api/coi/read',
+      nameKey: 'complianceType.INSURANCE_LIABILITY',
+      looksLike:
+        'an ACORD certificate of liability insurance — a wide grid of coverage rows with INSURED, INSURER and POLICY NUMBER columns, usually headed ACORD',
     },
     // REGISTRATION and ANNUAL_INSPECTION go here, each with a reader behind
     // the route. Neither has one yet, and listing a type whose route 404s
-    // would put a control on screen that cannot work — the intake would offer
-    // a choice and then fail on it.
+    // would put a control on screen that cannot work — and would give the
+    // classifier a type it can propose and nothing can read.
   ]
