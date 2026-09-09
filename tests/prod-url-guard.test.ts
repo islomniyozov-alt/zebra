@@ -150,6 +150,16 @@ const MAINTENANCE_READERS = [
   // today. Dry run by default, `--apply` a second decision, and a second run
   // reports the row as already deleted and leaves it.
   'remove-datatruck-sample-driver.ts',
+  // ADDED 2026-09-09. Undoes what the trucks seed wrote onto the wrong `1024`
+  // — production carries two trucks with that unit number, the seed took `[0]`
+  // of the matches, and the hand-made Dolphins row got the real truck's plate
+  // and a compliance item. The seed now refuses an ambiguous unit; this
+  // repairs the rows already written.
+  //
+  // Targeted at ONE truck id and ONE item id, both named in the report that
+  // found them, and every identifying field asserted before it writes. Dry run
+  // by default; a second run finds nothing to undo.
+  'repair-1024-plate-and-compliance.ts',
 ]
 
 /**
