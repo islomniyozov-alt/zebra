@@ -1,3 +1,4 @@
+import { NOT_CLOSED_HISTORY } from './billing-status'
 import type { Prisma } from '@/generated/prisma/client'
 import type { TxClient } from './tenancy'
 import { refreshBillingStatus } from './billing-status'
@@ -33,6 +34,10 @@ import { loadRevenueCents } from './money'
 /** Every clause of the derivation, as a Prisma filter. */
 export function readyToInvoiceWhere(): Prisma.LoadWhereInput {
   return {
+    // FREIGHT CLOSED IN ANOTHER SYSTEM IS NOT READY FOR ANYTHING HERE. It is
+    // excluded at the source rather than by each caller, so the invoice queue,
+    // the dashboard row and the loads-list chip cannot disagree about it.
+    ...NOT_CLOSED_HISTORY,
     deletedAt: null,
     isCancelled: false,
     operationalStatus: 'POD_RECEIVED',

@@ -2,6 +2,7 @@ import type { Prisma } from '@/generated/prisma/client'
 import type { CompanyScopeFilter, TxClient } from './tenancy'
 import { readyToInvoiceWhere } from './invoices'
 import { complianceCount } from './compliance'
+import { NOT_CLOSED_HISTORY } from './billing-status'
 import type { AuthorizedSession, Resource } from './permissions'
 import { can } from './permissions'
 
@@ -43,6 +44,7 @@ import { can } from './permissions'
  */
 export function unassignedFinishedWhere(): Prisma.LoadWhereInput {
   return {
+    ...NOT_CLOSED_HISTORY,
     deletedAt: null,
     isCancelled: false,
     operationalStatus: 'POD_RECEIVED',
@@ -114,6 +116,7 @@ const ACTIONS: ActionSpec[] = [
       tx.load.count({
         where: {
           ...scope,
+          ...NOT_CLOSED_HISTORY,
           deletedAt: null,
           isCancelled: false,
           operationalStatus: 'DELIVERED',
@@ -130,6 +133,7 @@ const ACTIONS: ActionSpec[] = [
       tx.load.count({
         where: {
           ...scope,
+          ...NOT_CLOSED_HISTORY,
           deletedAt: null,
           isCancelled: false,
           operationalStatus: 'POD_RECEIVED',
@@ -177,10 +181,20 @@ const ACTIONS: ActionSpec[] = [
     // and it goes stale silently rather than aging into a report.
     tone: 'danger',
     count: (tx, scope) =>
-      tx.load.count({ where: { ...unassignedFinishedWhere(), ...scope } }),
+      tx.load.count({
+        where: {
+          ...unassignedFinishedWhere(),
+          ...NOT_CLOSED_HISTORY,
+          ...scope,
+        },
+      }),
     amount: async (tx, scope) => {
       const total = await tx.load.aggregate({
-        where: { ...unassignedFinishedWhere(), ...scope },
+        where: {
+          ...unassignedFinishedWhere(),
+          ...NOT_CLOSED_HISTORY,
+          ...scope,
+        },
         _sum: { totalRevenueCents: true },
       })
       return total._sum.totalRevenueCents ?? 0

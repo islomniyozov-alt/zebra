@@ -152,6 +152,18 @@ export async function findAssignmentConflicts(
         // A finished load is not a conflict: the truck is free again.
         operationalStatus: { notIn: ['DELIVERED', 'POD_RECEIVED'] },
       },
+      // ── BOUNDED, THOUGH IT IS ALREADY NARROW ────────────────────────────
+      //
+      // The only load query on a listing path that had no `take`. It is
+      // narrowed twice already — to the specific trucks and drivers in this
+      // dispatch window, and to loads that have not finished — so the
+      // Datatruck history cannot reach it: all 14,345 imported loads are
+      // DELIVERED. That is safety by coincidence rather than by rule, and the
+      // coincidence stops holding the first time somebody reopens one.
+      //
+      // A conflict check that returned 500 rows would be unreadable anyway;
+      // the cap is a bound on a query, not a page size.
+      take: 200,
       select: {
         id: true,
         loadNumber: true,

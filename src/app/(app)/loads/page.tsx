@@ -38,6 +38,37 @@ export default async function LoadsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const params = await searchParams
+
+  // ── PAGINATION, BECAUSE THE HISTORY IS 14,451 ROWS ──────────────────────
+  //
+  // The list has always taken 100. That was a sensible cap on a screen holding
+  // a few weeks of freight and it became a ceiling the moment a year of
+  // Datatruck history landed: the newest hundred, and no way to reach load
+  // 101. A cap without a next page is not a cap, it is a truncation nobody is
+  // told about.
+  //
+  // OFFSET, NOT A CURSOR. `orderBy bookedAt desc` over a stable historical set
+  // is exactly where offset paging is honest — the rows do not shift under the
+  // reader, because the freight that would shift them stopped moving a year
+  // ago. A cursor would be the right answer for an infinite live feed and is
+  // more machinery than this screen has a reason for.
+  const PAGE_SIZE = 100
+  const pageParam = Number(
+    typeof params['page'] === 'string' ? params['page'] : '1',
+  )
+  const page =
+    Number.isFinite(pageParam) && pageParam >= 1 ? Math.floor(pageParam) : 1
+
+  /** Every current parameter, with `page` replaced. Filters must survive. */
+  const pageHref = (to: number) => {
+    const next = new URLSearchParams()
+    for (const [key, value] of Object.entries(params)) {
+      if (key === 'page') continue
+      if (typeof value === 'string' && value !== '') next.set(key, value)
+    }
+    if (to > 1) next.set('page', String(to))
+    return next.toString()
+  }
   const { t, locale } = await getLocaleContext()
 
   const statusParam =
@@ -58,6 +89,7 @@ export default async function LoadsPage({
 
   const {
     rows,
+    matching,
     authorities,
     companyCount,
     savedViews,
@@ -119,10 +151,17 @@ export default async function LoadsPage({
           ? { billingStatus: billingParam as LoadBillingStatus }
           : {}
 
+    // The total under the CURRENT filter, so the footer can say "101–200 of
+    // 2,156" rather than leaving somebody to guess whether there is more.
+    const matching = await tx.load.count({
+      where: { ...base, ...statusWhere, ...billingWhere },
+    })
+
     const loads = await tx.load.findMany({
       where: { ...base, ...statusWhere, ...billingWhere },
       orderBy: { bookedAt: 'desc' },
-      take: 100,
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
       select: {
         id: true,
         loadNumber: true,
@@ -232,6 +271,7 @@ export default async function LoadsPage({
 
     return {
       rows,
+      matching,
       authorities,
       companyCount,
       savedViews,
@@ -426,6 +466,56 @@ export default async function LoadsPage({
           clearFilters: t('loads.filter.clear'),
         }}
       />
+
+      {/* ── THE PAGER ────────────────────────────────────────────────────
+       *
+       * Rendered only when there is a second page, so a carrier with forty
+       * loads never sees paging furniture. It carries EVERY current parameter
+       * forward — filters, search, saved view — because a next button that
+       * silently drops the filter is worse than no next button.
+       *
+       * Real anchors rather than buttons: middle-click opens a tab, the
+       * keyboard reaches them in tab order, and the URL is shareable. Same
+       * reason `Table` uses `rowHref`. */}
+      {matching > PAGE_SIZE ? (
+        <nav
+          aria-label={t('loads.pager.label')}
+          className="flex items-center justify-between gap-z3 border-t border-border px-gutter py-z3"
+        >
+          <p className="text-sm text-ink-2">
+            {t('loads.pager.range')
+              .replace('{from}', String((page - 1) * PAGE_SIZE + 1))
+              .replace('{to}', String(Math.min(page * PAGE_SIZE, matching)))
+              .replace('{total}', matching.toLocaleString())}
+          </p>
+          <div className="flex items-center gap-z4">
+            {page > 1 ? (
+              <Link
+                href={`/loads?${pageHref(page - 1)}`}
+                className="text-sm font-medium text-accent hover:underline"
+              >
+                {t('loads.pager.previous')}
+              </Link>
+            ) : (
+              <span className="text-sm text-ink-3">
+                {t('loads.pager.previous')}
+              </span>
+            )}
+            {page * PAGE_SIZE < matching ? (
+              <Link
+                href={`/loads?${pageHref(page + 1)}`}
+                className="text-sm font-medium text-accent hover:underline"
+              >
+                {t('loads.pager.next')}
+              </Link>
+            ) : (
+              <span className="text-sm text-ink-3">
+                {t('loads.pager.next')}
+              </span>
+            )}
+          </div>
+        </nav>
+      ) : null}
     </>
   )
 }

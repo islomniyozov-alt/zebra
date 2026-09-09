@@ -1,4 +1,8 @@
-import type { LoadBillingStatus, StatusSource } from '@/generated/prisma/client'
+import type {
+  LoadBillingStatus,
+  Prisma,
+  StatusSource,
+} from '@/generated/prisma/client'
 import { isAssigned } from './load-readiness'
 import type { TxClient } from './tenancy'
 
@@ -59,6 +63,37 @@ const DECIDED: readonly LoadBillingStatus[] = [
   // year of settled loads as READY_TO_INVOICE.
   'CLOSED_IN_DATATRUCK',
 ]
+
+/**
+ * Freight this system is responsible for — which excludes imported history.
+ *
+ * ── A NEEDS-ATTENTION SURFACE MUST NOT COUNT THE PAST ─────────────────────
+ *
+ * The Datatruck import put 14,363 finished loads into this database, 14,345 of
+ * them DELIVERED. Every one is real freight and none of it needs anybody:
+ * it ran, it was billed and it was paid, in another system, before this one
+ * existed.
+ *
+ * The `podMissing` row counted them — "14,346 delivered, waiting on a POD" —
+ * which is not a queue anybody can work. A dashboard whose first number is
+ * five orders of magnitude too big is a dashboard nobody reads, and the rows
+ * beneath it that ARE real lose their only audience.
+ *
+ * ONE PREDICATE, SPREAD INTO EVERY ROW THAT COUNTS LOADS, rather than a clause
+ * added to the one that was visibly wrong. `noRate` and `unassignedFinished`
+ * happen to be safe today because they ask for POD_RECEIVED and the import
+ * writes DELIVERED — safe by coincidence, not by rule, and a coincidence is
+ * not a thing to leave holding a dashboard up.
+ *
+ * IT IS THE BILLING AXIS THAT SAYS SO, not a date or an `externalId`. A load
+ * closed in Datatruck is closed whatever its operational status, and an
+ * imported load that somebody legitimately reopens stops being closed and
+ * starts counting again — which is the correct behaviour and falls out of
+ * asking the status rather than asking where the row came from.
+ */
+export const NOT_CLOSED_HISTORY: Prisma.LoadWhereInput = {
+  billingStatus: { not: 'CLOSED_IN_DATATRUCK' },
+}
 
 export interface BillingFacts {
   /** POD in, rate on it, not cancelled — the load could be billed today. */
