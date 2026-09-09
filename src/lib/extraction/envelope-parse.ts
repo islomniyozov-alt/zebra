@@ -46,9 +46,18 @@ export function readField<T>(
   parent: Json,
   key: string,
   check: (value: unknown, at: string) => T,
+  /**
+   * Where `parent` sits, for the error path. Defaults to the root.
+   *
+   * PASSED BY LIST READERS so a bad cell reports `$.coverages[1].expiresAt`
+   * rather than `$.expiresAt`. An error path that names the wrong place is a
+   * measurement that lies, which this codebase has paid for elsewhere.
+   */
+  prefix = '$',
 ): Maybe<T> {
+  const at = `${prefix}.${key}`
   if (!Object.hasOwn(parent, key)) {
-    throw new ExtractionParseError('missing_field', `$.${key}`)
+    throw new ExtractionParseError('missing_field', at)
   }
 
   const raw = parent[key]
@@ -58,12 +67,12 @@ export function readField<T>(
     // A bare `"WDL9911234"` where the envelope belongs. Accepting it means
     // inventing a confidence, and an invented confidence is indistinguishable
     // from a measured one — which the refusal rules then weigh.
-    throw new ExtractionParseError('bad_field_shape', `$.${key}`)
+    throw new ExtractionParseError('bad_field_shape', at)
   }
 
   const object = raw as Json
-  const confidence = asConfidence(object['confidence'], `$.${key}`)
-  const value = check(object['value'], `$.${key}`)
+  const confidence = asConfidence(object['confidence'], at)
+  const value = check(object['value'], at)
   const note = object['note']
 
   return {

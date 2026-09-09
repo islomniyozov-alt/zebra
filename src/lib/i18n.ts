@@ -1171,12 +1171,50 @@ const en = {
   'safety.coi.expiresAt': 'Expires',
   'safety.coi.limit': 'limit',
   'safety.coi.file': 'File this certificate',
-  'safety.coi.filed': 'Filed. It is on the carrier now.',
+  'safety.coi.filed': 'Filed — {count} compliance record(s).',
   'safety.coi.unreadable':
     'That certificate could not be read. Photograph it again, straight on and in good light.',
   'safety.coi.contradictory':
     'That certificate contradicts itself — its dates do not make a policy term. Check the document.',
   'safety.coi.noCompany': 'Say which carrier this certificate is for.',
+  'safety.coi.noSubject':
+    'Say what this certificate covers — a carrier, or the trucks it names.',
+  'safety.coi.insured': 'Insured',
+  'safety.coi.filesAgainst': 'Files against',
+  'safety.coi.nobody': 'nothing yet',
+  'safety.coi.coverages': 'Coverages, as printed',
+  'safety.coi.unnamedCoverage': 'A coverage whose type could not be read',
+  'safety.coi.filesAs': 'Files as',
+  'safety.coi.pickType': 'Choose what this is',
+  'safety.coi.cannotFile': 'This row cannot become a record.',
+  'safety.coi.confidence': 'Read at {level} confidence',
+  'safety.coi.confidence.high': 'high',
+  'safety.coi.confidence.medium': 'medium',
+  'safety.coi.confidence.low': 'low',
+  'safety.coi.vehicles': 'Vehicles this certificate names',
+  'safety.coi.vinFills': 'Filing adds this VIN to unit {unit}.',
+  'safety.coi.vinAlready': 'Already on unit {unit} ({carrier}).',
+  'safety.coi.vinNoTruck': 'No truck on record carries this VIN.',
+  'safety.coi.vinUnreadable': 'Not a VIN this check recognises — {reason}.',
+  'safety.coi.vinsWritten': 'A VIN was added to {count} truck(s).',
+  'safety.coi.vin.wrongLength': 'it is not 17 characters',
+  'safety.coi.vin.illegalCharacter': 'it contains a character no VIN uses',
+  'safety.coi.vin.checkDigit': 'its check digit does not agree with the rest',
+  'safety.coi.noType': 'Say what each ticked coverage files as.',
+  'safety.coi.notFleetType':
+    'Only liability and cargo can be filed against a carrier. Physical damage and other coverages belong on the vehicles they insure.',
+  'safety.coi.row.noExpiry':
+    'This row prints no expiry date, so it cannot become a record that alarms.',
+  'safety.coi.row.lowConfidenceExpiry':
+    'The expiry on this row was a guess. Read it off the certificate and add it by hand.',
+  'safety.coi.row.unreadableExpiry':
+    'The expiry on this row could not be read.',
+  'safety.coi.row.unreadableEffective':
+    'The effective date on this row could not be read, so neither date is trusted.',
+  'safety.coi.row.expiryBeforeEffective':
+    'This row expires before it starts. Check the document.',
+  'safety.coi.row.implausibleTerm':
+    'This row runs for longer than any policy term. A year digit was probably misread.',
   'safety.coi.noExpiry': 'A certificate needs an expiry date.',
   'safety.coi.noCoverage': 'Tick at least one coverage to file.',
   'safety.coi.duplicate':
@@ -2980,12 +3018,50 @@ const ru: Dictionary = {
   'safety.coi.expiresAt': 'Окончание',
   'safety.coi.limit': 'лимит',
   'safety.coi.file': 'Сохранить сертификат',
-  'safety.coi.filed': 'Сохранено. Теперь это на перевозчике.',
+  'safety.coi.filed': 'Сохранено — записей: {count}.',
   'safety.coi.unreadable':
     'Этот сертификат не удалось прочитать. Сфотографируйте его снова, прямо и при хорошем свете.',
   'safety.coi.contradictory':
     'Сертификат противоречит сам себе — его даты не образуют срок полиса. Проверьте документ.',
   'safety.coi.noCompany': 'Укажите, для какого перевозчика этот сертификат.',
+  'safety.coi.noSubject':
+    'Укажите, что покрывает сертификат — перевозчика или названные тягачи.',
+  'safety.coi.insured': 'Страхователь',
+  'safety.coi.filesAgainst': 'Сохраняем на',
+  'safety.coi.nobody': 'пока ни на что',
+  'safety.coi.coverages': 'Покрытия, как напечатано',
+  'safety.coi.unnamedCoverage': 'Покрытие, тип которого прочитать не удалось',
+  'safety.coi.filesAs': 'Сохранить как',
+  'safety.coi.pickType': 'Выберите, что это',
+  'safety.coi.cannotFile': 'Эта строка не может стать записью.',
+  'safety.coi.confidence': 'Уверенность: {level}',
+  'safety.coi.confidence.high': 'высокая',
+  'safety.coi.confidence.medium': 'средняя',
+  'safety.coi.confidence.low': 'низкая',
+  'safety.coi.vehicles': 'Транспорт, названный в сертификате',
+  'safety.coi.vinFills': 'При сохранении VIN добавится к единице {unit}.',
+  'safety.coi.vinAlready': 'Уже на единице {unit} ({carrier}).',
+  'safety.coi.vinNoTruck': 'Ни один тягач в системе не несёт этот VIN.',
+  'safety.coi.vinUnreadable': 'Проверка не признаёт это VIN — {reason}.',
+  'safety.coi.vinsWritten': 'VIN добавлен тягачам: {count}.',
+  'safety.coi.vin.wrongLength': 'в нём не 17 символов',
+  'safety.coi.vin.illegalCharacter': 'в нём символ, которого в VIN не бывает',
+  'safety.coi.vin.checkDigit': 'контрольный разряд не сходится с остальными',
+  'safety.coi.noType': 'Укажите, чем сохраняется каждое отмеченное покрытие.',
+  'safety.coi.notFleetType':
+    'На перевозчика сохраняются только ответственность и груз. Физический ущерб и прочие покрытия принадлежат транспорту, который они страхуют.',
+  'safety.coi.row.noExpiry':
+    'В строке нет даты окончания, поэтому запись не сможет предупреждать.',
+  'safety.coi.row.lowConfidenceExpiry':
+    'Дата окончания в этой строке — догадка. Прочитайте её в сертификате и введите вручную.',
+  'safety.coi.row.unreadableExpiry':
+    'Дату окончания в этой строке прочитать не удалось.',
+  'safety.coi.row.unreadableEffective':
+    'Дату начала прочитать не удалось, поэтому обеим датам доверия нет.',
+  'safety.coi.row.expiryBeforeEffective':
+    'Строка заканчивается раньше, чем начинается. Проверьте документ.',
+  'safety.coi.row.implausibleTerm':
+    'Срок строки длиннее любого полиса. Скорее всего, неверно прочитан год.',
   'safety.coi.noExpiry': 'Сертификату нужна дата окончания.',
   'safety.coi.noCoverage': 'Отметьте хотя бы одно покрытие.',
   'safety.coi.duplicate': 'Запись с таким покрытием и датой уже есть.',
@@ -4768,12 +4844,49 @@ const fa: Dictionary = {
   'safety.coi.expiresAt': 'انقضا',
   'safety.coi.limit': 'سقف',
   'safety.coi.file': 'ثبت این گواهی',
-  'safety.coi.filed': 'ثبت شد. اکنون روی شرکت است.',
+  'safety.coi.filed': 'ثبت شد — {count} رکورد.',
   'safety.coi.unreadable':
     'این گواهی خوانده نشد. دوباره و در نور مناسب عکس بگیرید.',
   'safety.coi.contradictory':
     'این گواهی با خودش در تضاد است — تاریخ‌هایش دورهٔ بیمه نمی‌سازند. سند را بررسی کنید.',
   'safety.coi.noCompany': 'مشخص کنید این گواهی برای کدام شرکت است.',
+  'safety.coi.noSubject':
+    'مشخص کنید این گواهی چه چیزی را پوشش می‌دهد — یک شرکت، یا کامیون‌هایی که نام برده است.',
+  'safety.coi.insured': 'بیمه‌گذار',
+  'safety.coi.filesAgainst': 'ثبت می‌شود روی',
+  'safety.coi.nobody': 'هنوز هیچ‌چیز',
+  'safety.coi.coverages': 'پوشش‌ها، همان‌گونه که چاپ شده',
+  'safety.coi.unnamedCoverage': 'پوششی که نوع آن خوانده نشد',
+  'safety.coi.filesAs': 'ثبت به‌عنوان',
+  'safety.coi.pickType': 'انتخاب کنید این چیست',
+  'safety.coi.cannotFile': 'این سطر نمی‌تواند به یک رکورد تبدیل شود.',
+  'safety.coi.confidence': 'با اطمینان {level} خوانده شد',
+  'safety.coi.confidence.high': 'بالا',
+  'safety.coi.confidence.medium': 'متوسط',
+  'safety.coi.confidence.low': 'پایین',
+  'safety.coi.vehicles': 'خودروهایی که این گواهی نام می‌برد',
+  'safety.coi.vinFills': 'با ثبت، این VIN به واحد {unit} افزوده می‌شود.',
+  'safety.coi.vinAlready': 'از پیش روی واحد {unit} ({carrier}) است.',
+  'safety.coi.vinNoTruck': 'هیچ کامیونی در سامانه این VIN را ندارد.',
+  'safety.coi.vinUnreadable': 'این بررسی آن را VIN نمی‌شناسد — {reason}.',
+  'safety.coi.vinsWritten': 'VIN به {count} کامیون افزوده شد.',
+  'safety.coi.vin.wrongLength': 'هفده نویسه نیست',
+  'safety.coi.vin.illegalCharacter': 'نویسه‌ای دارد که در VIN به کار نمی‌رود',
+  'safety.coi.vin.checkDigit': 'رقم کنترلی آن با بقیه نمی‌خواند',
+  'safety.coi.noType': 'مشخص کنید هر پوشش علامت‌خورده به چه چیزی ثبت می‌شود.',
+  'safety.coi.notFleetType':
+    'تنها مسئولیت و بار روی یک شرکت ثبت می‌شوند. خسارت فیزیکی و پوشش‌های دیگر به خودرویی تعلق دارند که بیمه می‌کنند.',
+  'safety.coi.row.noExpiry':
+    'این سطر تاریخ انقضا ندارد، پس رکوردی که هشدار بدهد نمی‌شود.',
+  'safety.coi.row.lowConfidenceExpiry':
+    'تاریخ انقضای این سطر حدس بود. آن را از روی گواهی بخوانید و دستی وارد کنید.',
+  'safety.coi.row.unreadableExpiry': 'تاریخ انقضای این سطر خوانده نشد.',
+  'safety.coi.row.unreadableEffective':
+    'تاریخ شروع این سطر خوانده نشد، پس به هیچ‌کدام از دو تاریخ اعتماد نیست.',
+  'safety.coi.row.expiryBeforeEffective':
+    'این سطر پیش از آغاز، پایان می‌یابد. سند را بررسی کنید.',
+  'safety.coi.row.implausibleTerm':
+    'مدت این سطر از هر دوره بیمه‌ای بلندتر است. احتمالاً رقم سال اشتباه خوانده شده.',
   'safety.coi.noExpiry': 'گواهی به تاریخ انقضا نیاز دارد.',
   'safety.coi.noCoverage': 'دست‌کم یک پوشش را انتخاب کنید.',
   'safety.coi.duplicate': 'رکوردی با همین پوشش و تاریخ از قبل ثبت شده است.',

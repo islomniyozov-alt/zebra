@@ -5,8 +5,7 @@ import { getLocaleContext } from '@/lib/locale'
 import { ComplianceIntake } from './ComplianceIntake'
 import { medLabels } from './med-labels'
 import { coiLabels } from './coi-labels'
-import { companyIdScopeFilter, companyScopeFilter } from '@/lib/tenancy'
-import { SELECTABLE_AUTHORITY } from '@/lib/companies'
+import { companyScopeFilter } from '@/lib/tenancy'
 import {
   COMPLIANCE_SUBJECTS,
   TRACKED_TYPES,
@@ -162,25 +161,6 @@ export default async function SafetyPage({
           orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
           take: 300,
           select: { id: true, firstName: true, lastName: true },
-        }),
-      )
-    : []
-
-  // ── THE CARRIERS A CERTIFICATE MAY BE FILED AGAINST ───────────────────
-  //
-  // Liability and cargo belong to the company, so the intake needs to know
-  // which carriers this viewer may file for. `SELECTABLE_AUTHORITY` is the
-  // same predicate every creation surface asks — a retired carrier's history
-  // stays readable and nothing new may be filed under it.
-  const carriers = mayFileCompliance
-    ? await withCurrentOrg('read', 'company', async (tx, session) =>
-        tx.company.findMany({
-          where: {
-            ...SELECTABLE_AUTHORITY,
-            ...companyIdScopeFilter(session.companyScopes),
-          },
-          orderBy: { name: 'asc' },
-          select: { id: true, name: true },
         }),
       )
     : []
@@ -376,7 +356,6 @@ export default async function SafetyPage({
               driverLabel={`${filingFor.firstName} ${filingFor.lastName}`}
               labels={medLabels(t)}
               coi={coiLabels(t)}
-              carriers={carriers}
             />
             <Link
               href="/safety"
@@ -421,7 +400,6 @@ export default async function SafetyPage({
               roster={pickable}
               labels={medLabels(t)}
               coi={coiLabels(t)}
-              carriers={carriers}
             />
           </div>
         </div>
@@ -461,7 +439,6 @@ export default async function SafetyPage({
                       roster={pickable}
                       labels={medLabels(t)}
                       coi={coiLabels(t)}
-                      carriers={carriers}
                       prominent
                     />
                   </div>

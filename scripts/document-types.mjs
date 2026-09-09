@@ -48,6 +48,20 @@ export const DOCUMENT_TYPES = {
     corpus: 'corpus/cdl',
     extras: () => ({}),
   },
+  coi: {
+    label: 'ACORD certificate of insurance',
+    // THE FRONT DOOR, NOT `/api/coi/read`, AND THAT IS DELIBERATE. A runner
+    // that skipped the classifier would measure the reader alone and report it
+    // as what a person gets — and on this document type the classifier is part
+    // of the answer. `/api/compliance/read` returns the verdict beside the
+    // proposal, which is the whole reading.
+    route: '/api/compliance/read',
+    corpus: 'corpus/coi',
+    // NOTHING BESIDES THE FILE. A certificate used to need a `companyId` and no
+    // longer does: `decideCoiSubject` places it from the insured and the VINs.
+    // A runner supplying a carrier would be answering the question under test.
+    extras: () => ({}),
+  },
   med: {
     label: 'medical examiner certificate',
     route: '/api/med/read',

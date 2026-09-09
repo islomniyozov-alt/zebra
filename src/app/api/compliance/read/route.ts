@@ -10,8 +10,10 @@ import {
   readMedicalCert,
 } from '@/lib/med-cert'
 import { READABLE_COMPLIANCE_DOCUMENTS } from '@/app/(app)/safety/compliance-documents'
-import { companyIdScopeFilter, companyScopeFilter } from '@/lib/tenancy'
+import { companyScopeFilter } from '@/lib/tenancy'
 import { apiError, authFailureResponse } from '../../_lib/respond'
+import { loadCoiContext } from '../../_lib/coi-context'
+import { coiNoticeFor } from '../../_lib/coi-notice'
 import { recordUsageQuietly } from '../../_lib/record-usage'
 import type { DocumentType } from '@/generated/prisma/client'
 
@@ -162,25 +164,11 @@ export async function POST(request: Request) {
 
   // ── READ IT WITH THAT TYPE'S CONTRACT ───────────────────────────────────
   if (documentType === 'INSURANCE_CERT') {
-    const companyId = String(form.get('companyId') ?? '')
-    if (companyId === '') {
-      // The carrier is stated, never inferred — see `/api/coi/read`.
-      return NextResponse.json({
-        verdict,
-        proposal: null,
-        needsCompany: true,
-        notice: null,
-      })
-    }
-    const company = await withCurrentOrg('read', 'company', async (tx, ctx) =>
-      tx.company.findFirst({
-        where: { id: companyId, ...companyIdScopeFilter(ctx.companyScopes) },
-        select: { id: true, name: true, mcNumber: true, dotNumber: true },
-      }),
-    )
-    if (!company)
-      return apiError(404, 'no_company', 'That carrier was not found.')
-
+    // NO `companyId` IS ASKED FOR, AND THAT IS THE CHANGE OF 2026-09-09. This
+    // branch used to return `needsCompany` before spending a read, on the
+    // belief that a certificate belongs to a carrier somebody names. The first
+    // real certificate insures an owner-operator's entity against two of our
+    // tractors — so the DOCUMENT places it, and `decideCoiSubject` is the rule.
     const outcome = await readCoi({ base64, mimeType: file.type })
     if (!outcome.ok) {
       await recordUsageQuietly(outcome.cost, {
@@ -190,29 +178,22 @@ export async function POST(request: Request) {
       return NextResponse.json({
         verdict,
         proposal: null,
-        notice:
-          outcome.reason === 'call_failed'
-            ? 'safety.coi.failed'
-            : outcome.reason === 'expiry_before_effective' ||
-                outcome.reason === 'implausible_term'
-              ? 'safety.coi.contradictory'
-              : 'safety.coi.unreadable',
+        notice: coiNoticeFor(outcome.reason),
       })
     }
     await recordUsageQuietly(outcome.cost, { documentType: 'INSURANCE_CERT' })
 
-    const proposal = coiProposal(outcome.fields, {
-      name: company.name,
-      mcNumber: company.mcNumber,
-      dotNumber: company.dotNumber,
-    })
+    const proposal = coiProposal(
+      outcome.fields,
+      await loadCoiContext(outcome.fields),
+    )
     return NextResponse.json({
       verdict,
       proposal,
-      carrier: proposal?.carrier ?? null,
+      carrier: proposal.carrier,
       fields: outcome.fields,
       cost: costBlock(outcome.cost),
-      notice: proposal ? null : 'safety.coi.unreadable',
+      notice: null,
     })
   }
 

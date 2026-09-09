@@ -35,17 +35,22 @@ import type { coiLabels } from './coi-labels'
 // THE FILE IS HELD, NOT RE-REQUESTED. Changing the type re-posts the same
 // `File` object this browser already has, so an override costs one read rather
 // than a read and a second upload.
+//
+// ── AND IT NO LONGER ASKS WHICH CARRIER ───────────────────────────────────
+//
+// This screen used to hold a carrier picker, because a certificate of
+// insurance was assumed to belong to one of ours. `acord25-01.pdf` insures
+// CHAPAN INC — an owner-operator's entity — against two tractors that run
+// under RAM Haulage, and no answer to "which of your carriers is this for"
+// would have been true. So the DOCUMENT places itself: `decideCoiSubject`
+// matches the insured against the authorities, then the VINs against the
+// trucks, and the confirm step names what it decided and why.
 // ---------------------------------------------------------------------------
 
 interface Candidate {
   id: string
   firstName: string
   lastName: string
-}
-
-interface Carrier {
-  id: string
-  name: string
 }
 
 interface Verdict {
@@ -57,8 +62,6 @@ interface Verdict {
 
 interface Props {
   roster: readonly Candidate[]
-  /** The carriers a certificate may be filed against. */
-  carriers: readonly Carrier[]
   labels: ReturnType<typeof medLabels>
   coi: ReturnType<typeof coiLabels>
   prominent?: boolean
@@ -68,11 +71,10 @@ interface Props {
 
 type Reading =
   | { kind: 'medical'; proposal: unknown; match: unknown }
-  | { kind: 'coi'; proposal: CoiProposalView; company: Carrier }
+  | { kind: 'coi'; proposal: CoiProposalView }
 
 export function ComplianceIntake({
   roster,
-  carriers,
   labels,
   coi,
   prominent,
@@ -84,21 +86,15 @@ export function ComplianceIntake({
   const [held, setHeld] = useState<File | null>(null)
   const [verdict, setVerdict] = useState<Verdict | null>(null)
   const [needsType, setNeedsType] = useState(false)
-  const [needsCompany, setNeedsCompany] = useState(false)
   const [result, setResult] = useState<Reading | null>(null)
 
-  // A single carrier needs no picker — the same rule the loads screen applies
-  // to its authority filter: a choice of one is furniture.
-  const [carrierId, setCarrierId] = useState(carriers[0]?.id ?? '')
-
-  const post = async (file: File, type?: string, company?: string) => {
+  const post = async (file: File, type?: string) => {
     setReading(true)
     setNotice(null)
     try {
       const body = new FormData()
       body.append('file', file)
       if (type) body.append('type', type)
-      if (company) body.append('companyId', company)
       if (driverId) body.append('driverId', driverId)
 
       const response = await fetch('/api/compliance/read', {
@@ -126,30 +122,22 @@ export function ComplianceIntake({
         match?: unknown
         carrier?: { agrees: boolean; notes: string[] } | null
         needsType?: boolean
-        needsCompany?: boolean
         notice: string | null
       }
 
       setVerdict(payload.verdict)
       setNeedsType(Boolean(payload.needsType))
-      setNeedsCompany(Boolean(payload.needsCompany))
 
-      if (payload.needsType || payload.needsCompany) return
+      if (payload.needsType) return
       if (!payload.proposal) {
         setNotice(payload.notice ?? 'safety.intake.unreadable')
         return
       }
 
       if (payload.verdict?.type === 'INSURANCE_CERT') {
-        const chosen = carriers.find((row) => row.id === (company ?? carrierId))
-        if (!chosen) {
-          setNeedsCompany(true)
-          return
-        }
         setResult({
           kind: 'coi',
           proposal: payload.proposal as CoiProposalView,
-          company: chosen,
         })
       } else {
         setResult({
@@ -169,7 +157,6 @@ export function ComplianceIntake({
     setResult(null)
     setVerdict(null)
     setNeedsType(false)
-    setNeedsCompany(false)
     setHeld(null)
   }
 
@@ -183,7 +170,7 @@ export function ComplianceIntake({
       <p className="text-sm text-ink-2">
         {coi.readAs.replace(
           '{type}',
-          coi.typeNames[verdict.type] ?? verdict.type,
+          coi.documentNames[verdict.type] ?? verdict.type,
         )}
         {verdict.because ? (
           <span className="text-ink-3"> — {verdict.because}</span>
@@ -204,7 +191,6 @@ export function ComplianceIntake({
         {verdictLine}
         <CoiConfirm
           proposal={result.proposal}
-          company={result.company}
           labels={coi}
           onCancel={restart}
         />
@@ -250,42 +236,10 @@ export function ComplianceIntake({
               key={row.documentType}
               type="button"
               disabled={reading}
-              onClick={() => void post(held, row.documentType, carrierId)}
+              onClick={() => void post(held, row.documentType)}
               className="rounded-card border border-border-strong bg-surface px-z3 py-z2 text-sm text-ink hover:bg-surface-3"
             >
-              {coi.typeNames[row.documentType] ?? row.documentType}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={restart}
-            className="px-z2 text-sm text-ink-2 underline decoration-border-strong underline-offset-2 hover:text-accent"
-          >
-            {coi.cancel}
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  // ── WHOSE CERTIFICATE, WHEN THERE IS MORE THAN ONE CARRIER ────────────
-  if (needsCompany && held) {
-    return (
-      <div className="flex flex-col gap-z3">
-        <p className="text-sm text-ink">{coi.whichCarrier}</p>
-        <div className="flex flex-wrap gap-z2">
-          {carriers.map((carrier) => (
-            <button
-              key={carrier.id}
-              type="button"
-              disabled={reading}
-              onClick={() => {
-                setCarrierId(carrier.id)
-                void post(held, 'INSURANCE_CERT', carrier.id)
-              }}
-              className="rounded-card border border-border-strong bg-surface px-z3 py-z2 text-sm text-ink hover:bg-surface-3"
-            >
-              {carrier.name}
+              {coi.documentNames[row.documentType] ?? row.documentType}
             </button>
           ))}
           <button
@@ -330,7 +284,7 @@ export function ComplianceIntake({
           // HELD, so an override or a carrier choice costs one read rather
           // than a read and a second upload.
           setHeld(file)
-          void post(file, undefined, carrierId)
+          void post(file)
         }}
       />
     </div>

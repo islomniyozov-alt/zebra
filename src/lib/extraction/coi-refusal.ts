@@ -1,5 +1,5 @@
 import type { Confidence } from './envelope'
-import type { ExtractedCoi } from './coi-shape'
+import type { CoverageReading, ExtractedCoi } from './coi-shape'
 import { parseUsDate } from './us-dates'
 
 // ---------------------------------------------------------------------------
@@ -10,13 +10,23 @@ import { parseUsDate } from './us-dates'
 // form invites somebody to trust the half they did not check, and a refusal
 // sends them to manual entry knowing they are typing.
 //
-// ── THE SPINE IS THE EXPIRY, AND ONLY THE EXPIRY ──────────────────────────
+// ── THE SPINE IS AN EXPIRY, AND IT IS NOW PER ROW ────────────────────────
 //
-// A certificate becomes one thing here: a `ComplianceItem` on the carrier,
-// whose `expiresAt` is NOT NULL and is the only field that feeds an alarm. So
-// a certificate yielding no expiry has not been read, whatever else came back
-// — the policy number and the limits are useful and none of them can be the
-// spine, because none of them decides when somebody has to act.
+// A certificate becomes `ComplianceItem` rows whose `expiresAt` is NOT NULL
+// and is the only field that feeds an alarm. So a row yielding no usable
+// expiry cannot become a compliance record, whatever else it carried.
+//
+// WHAT CHANGED ON 2026-09-09 IS THE UNIT. The first version read one expiry
+// for the whole certificate and refused the document when it was missing. That
+// only worked while a certificate was assumed to be one policy — and
+// `acord25-01.pdf` is two named coverages against one date pair, which is the
+// gentle version of the problem. A certificate placing liability with one
+// insurer to March and physical damage with another to September is ordinary,
+// and reading one date for both would file an alarm nine months late.
+//
+// So each row is judged on its own and a bad row is DROPPED AND NAMED rather
+// than taking the certificate down with it. The document is refused only when
+// no row survives — which is the same rule as before, applied to a list.
 //
 // THE POLICY NUMBER IS NOT THE SPINE, and that is worth writing down because
 // it is the obvious candidate. It identifies the policy but it triggers
@@ -26,6 +36,12 @@ import { parseUsDate } from './us-dates'
 // ---------------------------------------------------------------------------
 
 export type CoiRefusal =
+  | 'not_a_certificate'
+  | 'no_coverage_rows'
+  | 'no_usable_coverage'
+
+/** Why one row cannot become a compliance record. Shown beside the row. */
+export type RowRefusal =
   | 'no_expiry'
   | 'low_confidence_expiry'
   | 'unreadable_expiry'
@@ -62,43 +78,84 @@ function daysBetween(fromIso: string, toIso: string): number {
   return (Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86_400_000
 }
 
-export function refuseCoi(fields: ExtractedCoi): CoiRefusal | null {
-  const expiry = fields.expiresAt
-  if (!expiry?.value?.trim()) return 'no_expiry'
+/** One row's dates, converted — or the reason it cannot become a record. */
+export type RowDates =
+  | { ok: true; expiresIso: string; effectiveIso: string | null }
+  | { ok: false; reason: RowRefusal }
 
-  // A GUESS ABOUT THE SPINE IS NOT A SPINE. Everything else on this
-  // certificate can arrive uncertain and be corrected on a form; this one date
-  // decides when a carrier's coverage lapses, and a low-confidence reading of
-  // it is worse than none.
+export function judgeCoverageRow(row: CoverageReading): RowDates {
+  const expiry = row.expiresAt
+  if (!expiry?.value?.trim()) return { ok: false, reason: 'no_expiry' }
+
+  // A GUESS ABOUT THE SPINE IS NOT A SPINE. Everything else on this row can
+  // arrive uncertain and be corrected on a form; this one date decides when
+  // coverage lapses, and a low-confidence reading of it is worse than none.
+  //
+  // AND IT IS NOW A LIVE RULE RATHER THAN A THEORETICAL ONE. The prompt tells
+  // the model to answer `low` when it is guessing which row a value belongs
+  // to — exactly the case a certificate with one date pair and two coverage
+  // rows creates — so this is the clause that stops an inherited date becoming
+  // an alarm nobody checked.
   if (!SPINE_CONFIDENCE.includes(expiry.confidence)) {
-    return 'low_confidence_expiry'
+    return { ok: false, reason: 'low_confidence_expiry' }
   }
 
   // CONVERTED HERE, NOT UPSTREAM. `us-dates.ts` states the rule and refuses a
   // format nobody planned for, rather than handing it to a parser that always
   // returns something.
   const expires = parseUsDate(expiry.value)
-  if (!expires.ok) return 'unreadable_expiry'
+  if (!expires.ok) return { ok: false, reason: 'unreadable_expiry' }
 
-  const effective = fields.effectiveAt
-  if (effective?.value?.trim()) {
-    const from = parseUsDate(effective.value)
-    // AN EFFECTIVE DATE THAT WILL NOT READ IS A REFUSAL, not a shrug. Both
-    // dates come off the same row of the same table in the same hand; if one
-    // of them is unreadable, the reading of the other is not to be trusted
-    // either.
-    if (!from.ok) return 'unreadable_effective'
-
-    // COMPARED AS TEXT. Two ISO strings sort correctly and no timezone can get
-    // between them — the same reason `cdl-refusal.ts` compares them this way.
-    if (expires.iso < from.iso) return 'expiry_before_effective'
-
-    if (daysBetween(from.iso, expires.iso) > MAX_TERM_DAYS) {
-      return 'implausible_term'
-    }
+  const effective = row.effectiveAt
+  if (!effective?.value?.trim()) {
+    return { ok: true, expiresIso: expires.iso, effectiveIso: null }
   }
 
-  return null
+  const from = parseUsDate(effective.value)
+  // AN EFFECTIVE DATE THAT WILL NOT READ IS A REFUSAL, not a shrug. Both dates
+  // come off the same row of the same table in the same hand; if one of them
+  // is unreadable, the reading of the other is not to be trusted either.
+  if (!from.ok) return { ok: false, reason: 'unreadable_effective' }
+
+  // COMPARED AS TEXT. Two ISO strings sort correctly and no timezone can get
+  // between them — the same reason `cdl-refusal.ts` compares them this way.
+  if (expires.iso < from.iso) {
+    return { ok: false, reason: 'expiry_before_effective' }
+  }
+  if (daysBetween(from.iso, expires.iso) > MAX_TERM_DAYS) {
+    return { ok: false, reason: 'implausible_term' }
+  }
+
+  return { ok: true, expiresIso: expires.iso, effectiveIso: from.iso }
+}
+
+/**
+ * Whether the certificate as a whole was read.
+ *
+ * THREE REFUSALS, AND THEY SAY DIFFERENT THINGS TO A PERSON:
+ *
+ *   `not_a_certificate` — nothing came back at all. Probably not an ACORD
+ *   form, or a photograph of one nobody could read.
+ *   `no_coverage_rows` — it read as a certificate and the coverages table came
+ *   back empty. Worth a second look at the document rather than a second
+ *   photograph.
+ *   `no_usable_coverage` — rows were read and not one of them yields an
+ *   expiry. A better photograph might fix this.
+ */
+export function refuseCoi(fields: ExtractedCoi): CoiRefusal | null {
+  const rows = fields.coverages
+  if (rows === null) {
+    // NOTHING AT ALL, which the prompt reserves for "not an ACORD
+    // certificate". An insured name without coverages is still a certificate
+    // that was reached, so the two are told apart rather than merged.
+    return fields.insuredName === null
+      ? 'not_a_certificate'
+      : 'no_coverage_rows'
+  }
+  if (rows.length === 0) return 'no_coverage_rows'
+
+  const usable = rows.some((row) => judgeCoverageRow(row).ok)
+  return usable ? null : 'no_usable_coverage'
 }
 
 /**
@@ -133,10 +190,27 @@ export interface CarrierCheck {
 }
 
 /** Letters and digits only, folded — for comparing names nobody typed twice. */
-const fold = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, '')
+export const fold = (text: string) =>
+  text.toLowerCase().replace(/[^a-z0-9]/g, '')
 
 /** Digits only. `MC-1234567` and `1234567` are the same number. */
-const digits = (text: string) => text.replace(/\D/g, '')
+export const digits = (text: string) => text.replace(/\D/g, '')
+
+/**
+ * Whether a printed insured name and one of our carriers are the same entity,
+ * as far as a string comparison can tell.
+ *
+ * CONTAINMENT EITHER WAY, because `RAM HAULAGE LLC` contains `RAM Haulage` and
+ * a legal suffix is not a disagreement. Extracted from `checkCarrier` because
+ * `decideCoiSubject` asks the same question of every authority — and a second
+ * copy of a matching rule is two rules that drift.
+ */
+export function namesAgree(printed: string, ours: string): boolean {
+  const a = fold(printed)
+  const b = fold(ours)
+  if (a === '' || b === '') return false
+  return a.includes(b) || b.includes(a)
+}
 
 export function checkCarrier(
   fields: ExtractedCoi,
@@ -146,17 +220,11 @@ export function checkCarrier(
   let agrees = true
 
   const printed = fields.insuredName?.value?.trim()
-  if (printed) {
-    const a = fold(printed)
-    const b = fold(against.name)
-    // CONTAINMENT EITHER WAY, because `RAM HAULAGE LLC` contains `RAM Haulage`
-    // and a legal suffix is not a disagreement.
-    if (a !== '' && b !== '' && !a.includes(b) && !b.includes(a)) {
-      agrees = false
-      notes.push(
-        `The certificate names ${JSON.stringify(printed)}; you are filing it against ${JSON.stringify(against.name)}.`,
-      )
-    }
+  if (printed && !namesAgree(printed, against.name)) {
+    agrees = false
+    notes.push(
+      `The certificate names ${JSON.stringify(printed)}; you are filing it against ${JSON.stringify(against.name)}.`,
+    )
   }
 
   // THE NUMBERS, WHERE BOTH SIDES HAVE ONE. Absence is never a disagreement:

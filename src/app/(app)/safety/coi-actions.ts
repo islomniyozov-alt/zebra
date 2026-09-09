@@ -2,36 +2,35 @@
 
 import { revalidatePath } from 'next/cache'
 import { withCurrentOrg } from '@/lib/auth-context'
-import { recordRenewal } from '@/lib/compliance'
+import { fileCoi, type CoiCoverageToFile } from '@/lib/coi-filing'
 import { getLocaleContext } from '@/lib/locale'
+import type { ComplianceType } from '@/generated/prisma/client'
 import type { FileCoiState } from './coi-state'
 
 // ---------------------------------------------------------------------------
 // FILING A CONFIRMED CERTIFICATE OF INSURANCE.
 //
-// ── ONE CERTIFICATE, UP TO TWO ROWS, AND THE FORM SAYS WHICH ─────────────
+// ── THIS READS THE FORM, CALLS ONE FUNCTION, AND REVALIDATES ─────────────
 //
-// An ACORD certificate usually evidences auto liability AND cargo. They are
-// separate obligations with separate limits that a carrier can hold one of and
-// not the other, so they are separate `ComplianceItem` rows — and which ones
-// exist comes off the FORM rather than off the read, because the person on the
-// confirm step may have unticked a coverage the document mentions in passing.
+// The standing rule about `'use server'` bodies, and the rule this file used
+// to bend: it held the coverage table, the note format and the subject choice
+// inline. All three now live in `src/lib/coi-filing.ts`, where a test can
+// reach them with a transaction and nothing else.
 //
-// ── COMPANY-LEVEL, WHICH IS THE WHOLE POINT ─────────────────────────────
+// ── WHICH COVERAGES COMES OFF THE FORM, NOT OFF THE READ ─────────────────
 //
-// `subject: 'company'` writes a row with a carrier and no asset link. Trucks
-// inherit it — see `FLEET_COMPLIANCE_TYPES` — rather than each holding a copy,
-// which is the arrangement 25 duplicated production rows earned.
+// The person on the confirm step may have unticked a coverage, or changed what
+// obligation a printed row files as — "Non-Trucking Liability" has no
+// obligation of its own in this system and the reader will not guess one. So
+// every value here is what was on screen when somebody clicked, which is the
+// only version anybody agreed to.
 //
-// NOT TRUSTED FOR BEING ON THE FORM. `recordRenewal` resolves the company
+// NOT TRUSTED FOR BEING ON THE FORM. `recordRenewal` resolves every subject
 // itself and returns `subject_not_found` for anything this tenant cannot see,
 // so a forged id lands on nothing.
-//
-// DOMAIN LOGIC IS NOT HERE. This reads the form, calls one function per
-// coverage, and revalidates — the standing rule about `'use server'` bodies.
 // ---------------------------------------------------------------------------
 
-/** `2027-03-04` from a date input, as a UTC day. Never `new Date(text)`. */
+/** `2027-03-04` from a hidden field, as a UTC day. Never `new Date(text)`. */
 function utcDay(value: string): Date | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim())
   if (!match) return null
@@ -46,82 +45,86 @@ export async function fileCoiAction(
   formData: FormData,
 ): Promise<FileCoiState> {
   const { t } = await getLocaleContext()
+  const nothing = { filedRecordIds: [], vinsFilled: [] }
 
   const companyId = String(formData.get('companyId') ?? '').trim()
-  if (!companyId) {
-    return { error: t('safety.coi.noCompany'), filedRecordIds: [] }
+  const truckIds = formData
+    .getAll('truckId')
+    .map((value) => String(value).trim())
+    .filter((value) => value !== '')
+
+  if (companyId === '' && truckIds.length === 0) {
+    return { error: t('safety.coi.noSubject'), ...nothing }
   }
 
-  const expiresAt = utcDay(String(formData.get('expiresAt') ?? ''))
-  if (!expiresAt) {
-    return { error: t('safety.coi.noExpiry'), filedRecordIds: [] }
-  }
-  const effectiveRaw = String(formData.get('effectiveAt') ?? '')
-  const issuedAt = effectiveRaw ? utcDay(effectiveRaw) : null
+  // ── THE COVERAGES, ONE INDEXED GROUP PER TICKED ROW ────────────────────
+  const coverages: CoiCoverageToFile[] = []
+  for (const raw of formData.getAll('coverage')) {
+    const index = String(raw)
+    const expiresAt = utcDay(String(formData.get(`expiresAt.${index}`) ?? ''))
+    if (!expiresAt) return { error: t('safety.coi.noExpiry'), ...nothing }
 
-  const policyNumber = String(formData.get('policyNumber') ?? '').trim()
-  const insurer = String(formData.get('insurer') ?? '').trim()
+    const type = String(formData.get(`type.${index}`) ?? '').trim()
+    if (type === '') return { error: t('safety.coi.noType'), ...nothing }
 
-  // WHICH COVERAGES, FROM THE FORM. A limit is recorded as a note rather than
-  // a column: `ComplianceItem` has no money field, and adding one for a
-  // printed limit would be a column null on every other row.
-  const coverages: {
-    type: 'INSURANCE_LIABILITY' | 'INSURANCE_CARGO'
-    limit: string
-  }[] = []
-  if (formData.get('liability') === 'on') {
+    const effectiveRaw = String(formData.get(`effectiveAt.${index}`) ?? '')
     coverages.push({
-      type: 'INSURANCE_LIABILITY',
-      limit: String(formData.get('liabilityLimit') ?? '').trim(),
-    })
-  }
-  if (formData.get('cargo') === 'on') {
-    coverages.push({
-      type: 'INSURANCE_CARGO',
-      limit: String(formData.get('cargoLimit') ?? '').trim(),
+      type: type as ComplianceType,
+      expiresAt,
+      effectiveAt: effectiveRaw ? utcDay(effectiveRaw) : null,
+      identifier:
+        String(formData.get(`identifier.${index}`) ?? '').trim() || null,
+      issuer: String(formData.get(`issuer.${index}`) ?? '').trim() || null,
+      printedType:
+        String(formData.get(`printedType.${index}`) ?? '').trim() || null,
+      limit: String(formData.get(`limit.${index}`) ?? '').trim() || null,
     })
   }
   if (coverages.length === 0) {
-    return { error: t('safety.coi.noCoverage'), filedRecordIds: [] }
+    return { error: t('safety.coi.noCoverage'), ...nothing }
   }
 
-  const filed: string[] = []
-  for (const coverage of coverages) {
-    const result = await withCurrentOrg('create', 'compliance', async (tx) =>
-      recordRenewal(tx, {
-        subject: 'company',
-        subjectId: companyId,
-        type: coverage.type,
-        issuedAt,
-        expiresAt,
-        // THE POLICY NUMBER IDENTIFIES THE POLICY and the insurer is who
-        // carries the risk. Both on the row, because a certificate nobody can
-        // trace back to a policy is worth a second look.
-        identifier: policyNumber || null,
-        issuer: insurer || null,
-        notes: coverage.limit ? `Limit as printed: ${coverage.limit}` : null,
-      }),
-    )
+  // ── THE VINs TO FILL, AS `truckId:VIN` PAIRS ──────────────────────────
+  const vins = formData
+    .getAll('vinFill')
+    .map((value) => String(value).split(':'))
+    .filter((parts): parts is [string, string] => parts.length === 2)
+    .map(([truckId, vin]) => ({ truckId, vin }))
 
-    if (!result.ok) {
-      // PARTIAL SUCCESS IS REPORTED, NOT ROLLED BACK. If liability filed and
-      // cargo collided with an existing row, the liability row is real and
-      // deleting it would be this action inventing a failure. The message says
-      // what landed.
-      const message =
-        result.reason === 'duplicate'
-          ? t('safety.coi.duplicate')
-          : result.reason === 'bad_dates'
-            ? t('safety.coi.badDates')
-            : result.reason === 'subject_not_found'
+  const result = await withCurrentOrg('create', 'compliance', async (tx) =>
+    fileCoi(tx, {
+      subject:
+        companyId !== ''
+          ? { kind: 'company', companyId }
+          : { kind: 'trucks', truckIds },
+      coverages,
+      vins,
+    }),
+  )
+
+  const filled = result.vinsFilled
+
+  if (result.failure) {
+    // PARTIAL SUCCESS IS REPORTED, NOT ROLLED BACK — see `fileCoi`.
+    const message =
+      result.failure.reason === 'duplicate'
+        ? t('safety.coi.duplicate')
+        : result.failure.reason === 'bad_dates'
+          ? t('safety.coi.badDates')
+          : result.failure.reason === 'not_a_fleet_type'
+            ? t('safety.coi.notFleetType')
+            : result.failure.reason === 'subject_not_found'
               ? t('ref.error.notFound')
               : t('safety.coi.failed')
-      return { error: message, filedRecordIds: filed }
+    return {
+      error: message,
+      filedRecordIds: result.recordIds,
+      vinsFilled: filled,
     }
-    filed.push(result.recordId)
   }
 
   revalidatePath('/safety')
   revalidatePath('/companies')
-  return { error: null, filedRecordIds: filed }
+  revalidatePath('/trucks')
+  return { error: null, filedRecordIds: result.recordIds, vinsFilled: filled }
 }

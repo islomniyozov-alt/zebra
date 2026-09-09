@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server'
-import { requireSession, withCurrentOrg } from '@/lib/auth-context'
+import { requireSession } from '@/lib/auth-context'
 import { can } from '@/lib/permissions'
 import { DOCUMENT_TYPES, IMAGE_TYPES, formatCostMilliCents } from '@/lib/claude'
 import { coiProposal, readCoi } from '@/lib/coi'
-import { companyIdScopeFilter } from '@/lib/tenancy'
 import { apiError, authFailureResponse } from '../../_lib/respond'
+import { loadCoiContext } from '../../_lib/coi-context'
+import { coiNoticeFor } from '../../_lib/coi-notice'
 import { recordUsageQuietly } from '../../_lib/record-usage'
 
-// POST /api/coi/read — read a certificate of insurance for one carrier.
+// POST /api/coi/read — read a certificate of insurance.
 //
 // ── THE SAME SHAPE AS /api/med/read, AND ONE REAL DIFFERENCE ──────────────
 //
@@ -15,19 +16,20 @@ import { recordUsageQuietly } from '../../_lib/record-usage'
 // and the size limit stated on this path: all three for the reasons written
 // out in `/api/cdl/read/route.ts`.
 //
-// WHAT DIFFERS IS THE SUBJECT. A medical certificate belongs to a person the
-// reader has to identify; a certificate of insurance belongs to the CARRIER,
-// and the carrier is stated by whoever is filing it. So this route takes a
-// `companyId` and there is no matching to do — only CHECKING, which never
-// decides anything: `checkCarrier` returns sentences for the confirm step.
+// ── IT NO LONGER ASKS WHOSE CERTIFICATE THIS IS ──────────────────────────
 //
-// THE COMPANY IS RESOLVED THROUGH THE TENANT SCOPE, NOT TRUSTED. The id
-// arrives from the browser. Reading it inside `withCurrentOrg` means
-// row-level security decides whether this caller may see that carrier at all,
-// and one from another organization comes back as not found — the same answer
-// as one that does not exist, which is the correct answer to give.
+// This route used to require a `companyId` before it would read anything, on
+// the reasoning that a certificate belongs to a carrier and the carrier is
+// stated by whoever is filing it. The first real certificate retired that: its
+// insured is CHAPAN INC, an owner-operator's entity, and no answer to "which
+// of your six carriers is this for" would have been true.
 //
-// NOTHING IS PERSISTED. The certificate is read, checked and dropped. Filing
+// So the DOCUMENT decides, and `decideCoiSubject` is the rule — an authority
+// match files at the company, a VIN match files per truck, and neither asks.
+// The subject and the reason travel to the confirm step in words, and a person
+// can override both.
+//
+// NOTHING IS PERSISTED. The certificate is read, matched and dropped. Filing
 // it is a separate, confirmed action — a compliance row created straight from
 // a read is a compliance record nobody looked at.
 // ---------------------------------------------------------------------------
@@ -60,18 +62,6 @@ export async function POST(request: Request) {
     return apiError(400, 'invalid_body', 'Expected a file upload.')
   }
 
-  const companyId =
-    typeof form.get('companyId') === 'string'
-      ? String(form.get('companyId'))
-      : ''
-  if (companyId === '') {
-    // WHOSE POLICY IS NOT A GUESS. A certificate names an insured and this
-    // system holds several carriers; which one it is filed against is stated
-    // by the person filing it, and `checkCarrier` tells them when the document
-    // disagrees.
-    return apiError(400, 'no_company', 'Say which carrier this is for.')
-  }
-
   const file = form.get('file')
   if (!(file instanceof File)) {
     return apiError(400, 'no_file', 'No file arrived.')
@@ -83,19 +73,6 @@ export async function POST(request: Request) {
   // limit is only a limit where nothing rejects first.
   if (file.size > MAX_COI_BYTES) {
     return apiError(413, 'too_large', 'That file is too large to read.')
-  }
-
-  const company = await withCurrentOrg('read', 'company', async (tx, ctx) =>
-    tx.company.findFirst({
-      where: {
-        id: companyId,
-        ...companyIdScopeFilter(ctx.companyScopes),
-      },
-      select: { id: true, name: true, mcNumber: true, dotNumber: true },
-    }),
-  )
-  if (!company) {
-    return apiError(404, 'no_company', 'That carrier was not found.')
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer())
@@ -117,47 +94,25 @@ export async function POST(request: Request) {
       documentType: 'INSURANCE_CERT',
       refused: outcome.reason,
     })
-
-    // THE REFUSALS SORT INTO THE SAME THREE GROUPS the other readers use, and
-    // for the same reason: a dispatcher told the wrong one wastes a trip.
-    //
-    //   TAKE A BETTER PHOTOGRAPH — the certificate was reached and could not
-    //   be read from.
-    //   THE DOCUMENT CONTRADICTS ITSELF — an expiry before the effective date,
-    //   or a term no policy runs for. A second photograph will not fix either.
-    //   TRY AGAIN — the call failed. Ours or the network's.
-    const notice =
-      outcome.reason === 'call_failed'
-        ? 'safety.coi.failed'
-        : outcome.reason === 'expiry_before_effective' ||
-            outcome.reason === 'implausible_term'
-          ? 'safety.coi.contradictory'
-          : 'safety.coi.unreadable'
-    return NextResponse.json({ proposal: null, notice })
+    return NextResponse.json({
+      proposal: null,
+      notice: coiNoticeFor(outcome.reason),
+    })
   }
 
   await recordUsageQuietly(outcome.cost, { documentType: 'INSURANCE_CERT' })
 
-  const proposal = coiProposal(outcome.fields, {
-    name: company.name,
-    mcNumber: company.mcNumber,
-    dotNumber: company.dotNumber,
-  })
-  if (!proposal) {
-    // Unreachable after `refuseCoi` passes — it checks the same conversion —
-    // and handled rather than asserted, because "cannot happen" is a claim
-    // with a history in this codebase.
-    return NextResponse.json({
-      proposal: null,
-      notice: 'safety.coi.unreadable',
-    })
-  }
+  const proposal = coiProposal(
+    outcome.fields,
+    await loadCoiContext(outcome.fields),
+  )
 
   return NextResponse.json({
     proposal,
     // THE CARRIER CHECK TRAVELS WITH THE PROPOSAL and is displayed, never
     // acted on. An insurer writes RAM HAULAGE LLC where this system holds RAM
-    // Haulage; a person reads the sentence and decides.
+    // Haulage; a person reads the sentence and decides. It is null on the
+    // per-truck branch, where a different insured is the expected case.
     carrier: proposal.carrier,
     fields: outcome.fields,
     cost: {
