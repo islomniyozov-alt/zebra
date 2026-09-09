@@ -114,7 +114,11 @@ describe('the plate state, which stateCode would get wrong', () => {
   })
 
   it('drops a name it was not told about instead of shortening it', () => {
-    const truck = only({ State: 'Wisconsin' }).planned[0]!
+    // `Ontario` rather than `Wisconsin` since 2026-09-09 — the table grew to
+    // all fifty states for the load import, so Wisconsin resolves now. A
+    // province is a name this table will never hold, which is what the
+    // assertion needs.
+    const truck = only({ State: 'Ontario' }).planned[0]!
     expect(truck.plateState).toBeNull()
     expect(truck.corrections.join()).toContain('not in the stated name table')
   })

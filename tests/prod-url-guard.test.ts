@@ -203,6 +203,16 @@ const SEED_WRITERS = [
   //
   // Driver rows only. No pay rules, no compliance items, no asset history.
   'seed-datatruck-applicant-drivers.ts',
+  // ADDED 2026-09-09, and by far the largest thing on this list: 14,451 loads
+  // and $17.2M of freight. It writes Load, LoadStop, LoadAccessorial and the
+  // Customer rows those loads need — and no pay rule, settlement, invoice or
+  // payment, because none of that money moved through Zebra.
+  //
+  // IT RECONCILES BEFORE IT WRITES. The sum of what it would import must equal
+  // the sum of the column it came from, to the cent, and the preview prints
+  // both sides. It is batched and resumable by `externalId`: a run that dies
+  // halfway is re-run with the same command.
+  'seed-datatruck-loads.ts',
 ]
 
 const ALLOWED = [

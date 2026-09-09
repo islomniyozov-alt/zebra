@@ -176,9 +176,15 @@ describe('the state table both exports need', () => {
   })
 
   it('refuses a name it was not told about instead of truncating it', () => {
-    // `stateCode` would return "WI" here, which is right by luck, and "TE" for
-    // Texas, which is not. Neither is a guess this table makes.
-    expect(resolveState('Wisconsin')).toEqual({ ok: false, raw: 'Wisconsin' })
+    // THE EXAMPLE MOVED FROM `Wisconsin` TO `Ontario` ON 2026-09-09, and the
+    // assertion is unchanged. The table used to hold the nine states the fleet
+    // ROSTERS mentioned; the load history needed all fifty, so Wisconsin is in
+    // it now and stopped being an example of an unknown name.
+    //
+    // A Canadian province is the better example anyway: it is a real place a
+    // truck can be plated in, it will never be in a table of US states, and
+    // `stateCode` would happily shorten it to "On".
+    expect(resolveState('Ontario')).toEqual({ ok: false, raw: 'Ontario' })
     expect(resolveState('')).toEqual({ ok: false, raw: '' })
   })
 })
