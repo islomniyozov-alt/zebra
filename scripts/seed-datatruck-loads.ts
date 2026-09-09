@@ -244,12 +244,46 @@ async function main(): Promise<void> {
     // thing.
     const trucks = await db.truck.findMany({
       where: { organizationId: tenancy.organizationId, deletedAt: null },
-      select: { id: true, unitNumber: true },
+      select: { id: true, unitNumber: true, companyId: true },
     })
-    const truckByUnit = new Map<string, string[]>()
+    const truckByUnit = new Map<string, { id: string; companyId: string }[]>()
     for (const truck of trucks) {
       const key = nameKey(truck.unitNumber)
-      truckByUnit.set(key, [...(truckByUnit.get(key) ?? []), truck.id])
+      truckByUnit.set(key, [
+        ...(truckByUnit.get(key) ?? []),
+        { id: truck.id, companyId: truck.companyId },
+      ])
+    }
+
+    /**
+     * The one truck this load means, or null.
+     *
+     * ── ORG-WIDE FIRST, THEN THE AUTHORITY AS A TIE-BREAK ────────────────
+     *
+     * Units move between carriers — 54 of 102 ran under more than one MC — so
+     * the match is org-wide, exactly as ruled. But two trucks can genuinely
+     * carry one unit number under DIFFERENT authorities, and production has
+     * such a pair: `1024` is a RAM Volvo and a Dolphins Freightliner. For
+     * those, the LOAD already says which carrier it ran for, and that is a
+     * fact from the export rather than a guess.
+     *
+     * STILL AMBIGUOUS AFTER THAT IS STILL A REFUSAL. Two trucks with one unit
+     * under ONE authority is a duplicate somebody has to resolve, and this
+     * seed will not pick between them.
+     */
+    const resolveTruck = (
+      unit: string | null,
+      companyId: string,
+    ): { id: string | null; ambiguous: boolean } => {
+      if (!unit) return { id: null, ambiguous: false }
+      const hits = truckByUnit.get(nameKey(unit)) ?? []
+      if (hits.length === 1) return { id: hits[0]!.id, ambiguous: false }
+      if (hits.length === 0) return { id: null, ambiguous: false }
+      const sameAuthority = hits.filter((hit) => hit.companyId === companyId)
+      if (sameAuthority.length === 1) {
+        return { id: sameAuthority[0]!.id, ambiguous: false }
+      }
+      return { id: null, ambiguous: true }
     }
 
     const drivers = await db.driver.findMany({
@@ -268,13 +302,15 @@ async function main(): Promise<void> {
     const ambiguousDrivers = new Map<string, number>()
     for (const load of plan.planned) {
       if (load.truckUnit) {
+        const companyId = companyByName.get(load.authority) ?? ''
         const hits = truckByUnit.get(nameKey(load.truckUnit)) ?? []
+        const resolved = resolveTruck(load.truckUnit, companyId)
         if (hits.length === 0) {
           unresolvedTrucks.set(
             load.truckUnit,
             (unresolvedTrucks.get(load.truckUnit) ?? 0) + 1,
           )
-        } else if (hits.length > 1) {
+        } else if (resolved.ambiguous) {
           ambiguousTrucks.set(
             load.truckUnit,
             (ambiguousTrucks.get(load.truckUnit) ?? 0) + 1,
@@ -594,9 +630,10 @@ async function main(): Promise<void> {
 
         // ── ADD-MISSING: A TRUCK THAT NOW RESOLVES ────────────────────────
         if (row.truckId === null && load.truckUnit) {
-          const hits = truckByUnit.get(nameKey(load.truckUnit)) ?? []
-          if (hits.length === 1) {
-            data['truckId'] = hits[0]!
+          const companyId = companyByName.get(load.authority) ?? ''
+          const truck = resolveTruck(load.truckUnit, companyId)
+          if (truck.id) {
+            data['truckId'] = truck.id
             trucksFilled++
           }
         }
@@ -730,15 +767,14 @@ async function main(): Promise<void> {
       // by the ids that came back.
       const rows = await db.load.createManyAndReturn({
         data: fresh.map((load) => {
-          const truckIds = load.truckUnit
-            ? (truckByUnit.get(nameKey(load.truckUnit)) ?? [])
-            : []
+          const companyId = companyByName.get(load.authority)!
+          const truck = resolveTruck(load.truckUnit, companyId)
           const driverIds = load.driverName
             ? (driverByName.get(nameKey(load.driverName)) ?? [])
             : []
           return {
             organizationId: tenancy.organizationId,
-            companyId: companyByName.get(load.authority)!,
+            companyId,
             customerId: customerByName.get(
               nameKey(resolvedName(load.customerName)),
             )!,
@@ -754,9 +790,10 @@ async function main(): Promise<void> {
             billingStatus: load.billing,
             isCancelled: load.cancelled,
             ...(load.equipment ? { equipmentType: load.equipment } : {}),
-            // ONLY WHEN IT RESOLVES TO EXACTLY ONE. None and several both mean
-            // the load carries no truck rather than a guessed one.
-            ...(truckIds.length === 1 ? { truckId: truckIds[0] } : {}),
+            // ONLY WHEN IT RESOLVES TO EXACTLY ONE — org-wide, then narrowed
+            // by this load's own authority. Still ambiguous means no truck
+            // rather than a guessed one.
+            ...(truck.id ? { truckId: truck.id } : {}),
             ...(driverIds.length === 1 ? { driverId: driverIds[0] } : {}),
             linehaulCents: load.linehaulCents,
             accessorialsCents: load.accessorialCents,
