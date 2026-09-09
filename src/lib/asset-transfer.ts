@@ -271,7 +271,25 @@ export async function findAuthorityDrift(
     {
       kind: 'driver',
       rows: await tx.driver.findMany({
-        where: { deletedAt: null },
+        // ── INACTIVE DRIVERS ARE NOT DRIFT ────────────────────────────────
+        //
+        // Added 2026-09-09 with the terminated-driver import. This check asks
+        // "which authority currently runs this asset, and does the asset's own
+        // column agree" — and for somebody who left the company in January the
+        // question has no answer. An OPEN `AssetAssignment` for them would be
+        // the lie that made the check pass: it would claim 69 people who no
+        // longer work here currently drive for a carrier, and `currentAuthority`
+        // would repeat it on every screen that asks.
+        //
+        // A CLOSED period would be the honest record and the export cannot
+        // support one — it gives a hire date on 6 of 69 rows, so every other
+        // period would start on a date this system invented.
+        //
+        // THE NARROWING IS REAL AND SO IS ITS COST: a live driver wrongly set
+        // INACTIVE now hides its own drift. That is the trade, taken because
+        // the alternative writes false history into the table whose entire job
+        // is being true about the past.
+        where: { deletedAt: null, status: { not: 'INACTIVE' } },
         select: { id: true, companyId: true },
       }),
     },

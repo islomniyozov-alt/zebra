@@ -45,9 +45,62 @@ export type TariffResult =
 /** The trailing words the export puts after every percentage. */
 const TARIFF_SUFFIX = /\s*(from|of)\s+gross\s*$/i
 
+/**
+ * The tariff's `name`, when the column holds Datatruck's whole tariff object.
+ *
+ * ── TWO EXPORTS, TWO SHAPES, ONE RULE ─────────────────────────────────────
+ *
+ * The active-driver export writes this column as the plain label — `88% from
+ * gross`. The terminated-driver export of 2026-09-09 writes the entire tariff
+ * record instead, a Python `repr` of a dict, with the same label inside it as
+ * `'name': '88% from gross'`. Every one of its 69 rows was held for "does not
+ * end in from gross" until this existed.
+ *
+ * IT UNWRAPS AND HANDS THE SAME STRING TO THE SAME RULE. The alternative was
+ * reading `'percent': 88.0` straight out of the blob, which is a SECOND
+ * derivation of what a driver is paid — and the whole reason `parseTariff`
+ * delegates to `parsePercentToBps` is that this file must not grow a second
+ * answer to that question.
+ *
+ * A DISAGREEMENT INSIDE THE BLOB IS A REFUSAL, not a preference. Both numbers
+ * are right there, so they can be compared, and a record whose label says 88%
+ * while its percent says 90 is not a row to resolve by picking the one this
+ * code happens to read. It is held and named.
+ */
+const TARIFF_NAME = /'name':\s*'([^']*)'/
+const TARIFF_PERCENT = /'percent':\s*([\d.]+)/
+
+function tariffLabel(value: string): { label: string; why: string | null } {
+  if (!value.startsWith('{')) return { label: value, why: null }
+
+  const name = TARIFF_NAME.exec(value)?.[1]?.trim()
+  if (!name) {
+    return { label: value, why: 'a tariff object with no readable name' }
+  }
+
+  // The cross-check. `percent` is Datatruck's own number for the same rate.
+  const percent = TARIFF_PERCENT.exec(value)?.[1]
+  if (percent !== undefined) {
+    const fromName = /^\s*([\d.]+)\s*%?/.exec(name)?.[1]
+    if (fromName !== undefined && Number(fromName) !== Number(percent)) {
+      return {
+        label: name,
+        why: `the object says ${percent}% and its name says ${fromName}% — they disagree`,
+      }
+    }
+  }
+  return { label: name, why: null }
+}
+
 export function parseTariff(raw: string | null | undefined): TariffResult {
-  const value = (raw ?? '').trim()
-  if (value === '') return { ok: false, raw: value, why: 'empty' }
+  const outer = (raw ?? '').trim()
+  if (outer === '') return { ok: false, raw: outer, why: 'empty' }
+
+  const unwrapped = tariffLabel(outer)
+  if (unwrapped.why) {
+    return { ok: false, raw: outer, why: unwrapped.why }
+  }
+  const value = unwrapped.label
 
   const suffix = TARIFF_SUFFIX.exec(value)
   if (!suffix) {
@@ -183,10 +236,35 @@ export function parseLicenceExpiry(
 // the report with the raw text.
 // ---------------------------------------------------------------------------
 
-/** The authority a row files under, by the exact text of its `MC number`. */
+/**
+ * The authority a row files under, by the exact text of its `MC number`.
+ *
+ * ── THE RETIRED THREE ARE HERE, AND THEY MAP TO THEMSELVES ────────────────
+ *
+ * Added 2026-09-09, when the terminated-driver export arrived: 11 of its 69
+ * rows file under `Midwest Global Logistics LLC` and one under `AG FREIGHT
+ * INC`. Both are `Company` rows now — created retired by
+ * `seed-datatruck-authorities.ts`, which is why that seed was a prerequisite
+ * and not a convenience — so a driver who last drove for one of them has
+ * somewhere to be filed instead of being held.
+ *
+ * IDENTITY MAPPINGS, WHERE THE FIRST TWO ARE NOT. `RAM Haulage LLC` and
+ * `Dolphin Transport inc` are Datatruck's spellings of carriers this system
+ * names differently, matched by hand for the reason `trucks.ts` writes out.
+ * The retired three were CREATED from the export's own spelling, so there is
+ * nothing to translate — and writing them out anyway keeps every authority
+ * this file accepts in one readable list, rather than half a list plus a rule.
+ *
+ * A NAME NOT ON THIS TABLE IS STILL A REFUSAL. That is the point: a new
+ * carrier appearing in a future export is a held row somebody reads, never a
+ * driver quietly filed under the wrong company.
+ */
 const AUTHORITY_BY_MC: Readonly<Record<string, string>> = {
   'RAM Haulage LLC': 'RAM Haulage',
   'Dolphin Transport inc': 'Dolphins Transport',
+  'Midwest Global Logistics LLC': 'Midwest Global Logistics LLC',
+  'American Soldier Transport LLC': 'American Soldier Transport LLC',
+  'AG FREIGHT INC': 'AG FREIGHT INC',
 }
 
 // ---------------------------------------------------------------------------

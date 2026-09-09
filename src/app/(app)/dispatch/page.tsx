@@ -1,3 +1,4 @@
+import { ASSIGNABLE_DRIVER } from '@/lib/driver-availability'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyScopeFilter } from '@/lib/tenancy'
@@ -68,7 +69,7 @@ export default async function DispatchPage({
       // trucks that already have a driver would leave the load at Booked with
       // no way to say who is driving it — §7 needs both before it dispatches.
       tx.driver.findMany({
-        where: { ...where, deletedAt: null },
+        where: { ...where, ...ASSIGNABLE_DRIVER },
         orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
         take: 300,
         select: { id: true, firstName: true, lastName: true },

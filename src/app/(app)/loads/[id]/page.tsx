@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
+import { ASSIGNABLE_DRIVER } from '@/lib/driver-availability'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import {
@@ -259,7 +260,7 @@ export default async function LoadDetailPage({
           select: { id: true, unitNumber: true },
         }),
         tx.driver.findMany({
-          where: { deletedAt: null, companyId: load.companyId },
+          where: { ...ASSIGNABLE_DRIVER, companyId: load.companyId },
           orderBy: { lastName: 'asc' },
           take: 500,
           select: { id: true, firstName: true, lastName: true },

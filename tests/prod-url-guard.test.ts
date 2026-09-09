@@ -182,6 +182,16 @@ const SEED_WRITERS = [
   // second decision, `assertTenancy` before anything. It writes THREE rows and
   // no money, which is the smallest thing on this list.
   'seed-datatruck-authorities.ts',
+  // ADDED 2026-09-09. 69 people who used to drive here, because 4,118 loads in
+  // the history are theirs and a load needs a driver to point at. They land
+  // INACTIVE, keyed on `Driver ID` like the active 54, and the two sets were
+  // measured disjoint before this was written — no id and no name in common.
+  //
+  // IT WRITES DRIVER ROWS AND NOTHING ELSE: no pay rules, no compliance items,
+  // no asset history, each refused for a reason written out at the top of the
+  // file. That makes it the narrowest writer on this list — the active driver
+  // seed writes money and this one deliberately does not.
+  'seed-datatruck-terminated-drivers.ts',
 ]
 
 const ALLOWED = [
