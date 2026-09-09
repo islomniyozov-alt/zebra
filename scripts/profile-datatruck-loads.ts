@@ -726,6 +726,35 @@ for (const held of truckPlan.held) {
     `  ${held.unitNumber.padEnd(8)} ${String(mine.length).padStart(5)} load(s)  ` +
       `$${(paid / 100).toFixed(2).padStart(12)}  — ${held.reason}`,
   )
+
+  // ── WHICH AUTHORITY SHOULD THE TRUCK ROW CARRY? ────────────────────────
+  //
+  // Two of the three are held for having NO authority in the trucks export,
+  // so the answer is not in that file and has to come from the freight. It
+  // does not come out clean: a unit runs under several MCs across the year,
+  // which is the same finding as `TRUCK ↔ AUTHORITY` above.
+  //
+  // BOTH READINGS ARE PRINTED — where it ran MOST, and where it ran LAST —
+  // because they can disagree, and a script that showed only one would be
+  // making the choice while looking like it was reporting one. `Truck.
+  // companyId` is a single column and somebody has to decide it.
+  const byAuthority = tally(mine.map((r) => get(r, 'MC Number')))
+  for (const [authority, count] of byAuthority) {
+    console.log(
+      `             ${String(count).padStart(5)}  ${authority === '' ? '(blank)' : authority}`,
+    )
+  }
+  const dated = mine
+    .map((r) => ({
+      day: isoDate(get(r, 'PU date')),
+      authority: get(r, 'MC Number'),
+    }))
+    .filter((row) => row.day !== null)
+    .sort((a, b) => a.day!.localeCompare(b.day!))
+  const last = dated.at(-1)
+  console.log(
+    `             last ran ${last?.day ?? '—'} under ${last?.authority ?? '—'}`,
+  )
 }
 
 rule('MILES')

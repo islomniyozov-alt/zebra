@@ -45,6 +45,45 @@ const AUTHORITY_BY_MC: Readonly<Record<string, string>> = {
 const RETIRED_MC: readonly string[] = ['Midwest Global Logistics LLC']
 
 /**
+ * Units whose authority the trucks export does not state, decided from freight.
+ *
+ * ── WHY A TABLE AND NOT A RULE ───────────────────────────────────────────
+ *
+ * Three units were held by the seed: `7072` and `2400` carry a blank MC
+ * number, and `9587` is filed under `Midwest Global Logistics LLC`. Between
+ * them they run 891 loads worth $835,724 in the Datatruck load history, so
+ * they are not decommissioned equipment — all three moved freight in the week
+ * the export was taken.
+ *
+ * The trucks export cannot answer this and the LOAD history can, imperfectly:
+ * every one of these units ran under several MC numbers across the year, which
+ * is the finding that also made the load↔truck join org-wide rather than
+ * per-authority. `scripts/profile-datatruck-loads.ts` prints both readings
+ * that could decide it — where a unit ran MOST, and where it ran LAST — and
+ * for all three they agree:
+ *
+ *   7072   81 of 172 loads RAM Haulage, last ran 2026-09-05 RAM Haulage
+ *   9587  144 of 344 loads RAM Haulage, last ran 2026-09-03 RAM Haulage
+ *   2400  264 of 375 loads RAM Haulage, last ran 2026-09-06 RAM Haulage
+ *
+ * NOTE WHAT 9587 SAYS. The trucks export files it under Midwest Global and its
+ * freight says otherwise twice over — the export's MC column is stale for that
+ * row. A rule that trusted the export would put a live RAM truck under a
+ * retired carrier; a rule that trusted the plurality everywhere would rewrite
+ * the 46 rows that are already right. Hence a table of three, by hand.
+ *
+ * IT IS A STATEMENT, NOT A DERIVATION, and that is deliberate — the same
+ * reasoning `AUTHORITY_BY_MC` is written around. A table can be read and
+ * disagreed with in review. A majority-vote over loads cannot, and it would
+ * silently re-decide every future export.
+ */
+const UNIT_AUTHORITY: Readonly<Record<string, string>> = {
+  '7072': 'RAM Haulage',
+  '9587': 'RAM Haulage',
+  '2400': 'RAM Haulage',
+}
+
+/**
  * Make abbreviations, spelled out.
  *
  * `FREGHITLAINR` IS IN HERE ON PURPOSE. It is a typo, four rows carry it, and
@@ -157,7 +196,11 @@ export function planTrucks(
     // with no carrier. These are held and named rather than parked under a
     // default, because a default here is this system inventing which carrier
     // is responsible for a vehicle.
-    const authority = AUTHORITY_BY_MC[mc]
+    // THE STATED UNIT OVERRIDE WINS OVER THE MC COLUMN, and only for the
+    // three units named in `UNIT_AUTHORITY`. Two of them have no MC at all;
+    // the third has one the freight contradicts. Everything else resolves
+    // through the export exactly as before.
+    const authority = UNIT_AUTHORITY[unitNumber] ?? AUTHORITY_BY_MC[mc]
     if (!authority) {
       held.push({
         unitNumber,
