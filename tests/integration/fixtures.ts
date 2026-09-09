@@ -517,6 +517,27 @@ export async function seedOrganization(
       },
     }),
   )
+  // THE COST LEDGER. It carries a tenant and therefore needs a row here in the
+  // same commit — `tests/isolation-coverage.test.ts` fails by name otherwise,
+  // and "sees no rows from the other organization" is trivially true of an
+  // empty table, which is the most comfortable way to be wrong.
+  //
+  // This one is worth seeding properly rather than minimally: a leak here does
+  // not show a wrong load, it shows one carrier what another carrier costs to
+  // serve, which is commercial information about a third party.
+  record(
+    'extractionUsage',
+    await db.extractionUsage.create({
+      data: {
+        organizationId,
+        documentType: 'MEDICAL_CARD',
+        model: 'gemini-3.6-flash',
+        inputTokens: 4_593,
+        outputTokens: 1_076,
+        milliCents: 1_496,
+      },
+    }),
+  )
   record(
     'iftaMileage',
     await db.iftaMileage.create({

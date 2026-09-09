@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireSession, withCurrentOrg } from '@/lib/auth-context'
 import { can } from '@/lib/permissions'
-import { DOCUMENT_TYPES, IMAGE_TYPES } from '@/lib/claude'
+import { DOCUMENT_TYPES, IMAGE_TYPES, formatCostMilliCents } from '@/lib/claude'
 import {
   matchDriverByName,
   medicalCertProposal,
@@ -9,6 +9,7 @@ import {
 } from '@/lib/med-cert'
 import { companyScopeFilter } from '@/lib/tenancy'
 import { apiError, authFailureResponse } from '../../_lib/respond'
+import { recordUsageQuietly } from '../../_lib/record-usage'
 
 // POST /api/med/read — read a medical certificate, and say whose it is.
 //
@@ -134,6 +135,15 @@ export async function POST(request: Request) {
     //   validity period no certificate can have. A second photograph of the
     //   same card will not fix either.
     //   TRY AGAIN — the call failed. Ours or the network's.
+    // BILLED EVEN THOUGH IT WAS REFUSED — and the medical card refuses more
+    // often than the CDL by design, since an unreadable expiry is a refusal
+    // rather than a guess. Dropping these rows would understate this document
+    // type's cost by more than any other in the system.
+    await recordUsageQuietly(outcome.cost, {
+      documentType: 'MEDICAL_CARD',
+      refused: outcome.reason,
+    })
+
     const notice =
       outcome.reason === 'call_failed'
         ? 'drivers.med.failed'
@@ -143,6 +153,8 @@ export async function POST(request: Request) {
           : 'drivers.med.unreadable'
     return NextResponse.json({ proposal: null, notice })
   }
+
+  await recordUsageQuietly(outcome.cost, { documentType: 'MEDICAL_CARD' })
 
   // ── WHO IT IS FOR: STATED, OR PROPOSED FROM THE PRINTED NAME ───────────
   //
@@ -200,6 +212,25 @@ export async function POST(request: Request) {
     // values already in hand, so nothing is uploaded twice.
     match,
     fields: outcome.fields,
+    // WHAT THE READ COST, ON THE WIRE — the same block the rate-con route has
+    // carried since Phase 5, now on this one too. `doc-variance.mjs` and
+    // `doc-accuracy.mjs` dump the whole response body, so putting it here is
+    // what makes a variance run measure price as well as stability, with no
+    // change to either instrument.
+    cost: {
+      milliCents: outcome.cost.milliCents,
+      display: formatCostMilliCents(outcome.cost.milliCents),
+      inputTokens: outcome.cost.usage.inputTokens,
+      outputTokens: outcome.cost.usage.outputTokens,
+      cacheWriteTokens: outcome.cost.usage.cacheWriteTokens ?? 0,
+      cacheReadTokens: outcome.cost.usage.cacheReadTokens ?? 0,
+      model: outcome.cost.model,
+      // The swap, on the wire as well as in the ledger — so a measurement run
+      // counts fallbacks instead of silently reporting the wrong engine.
+      ...(outcome.cost.fellBackFrom
+        ? { fellBackFrom: outcome.cost.fellBackFrom }
+        : {}),
+    },
     notice: null,
   })
 }

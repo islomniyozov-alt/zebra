@@ -26,9 +26,15 @@ describe('the reader, when the model cannot be reached', () => {
     // the `call_failed` branch — ours or the network's, and nothing about the
     // licence. The difference still decides what a dispatcher does next: "try
     // again" versus "photograph it again".
+    //
+    // AND `cost` IS NULL, NOT A ZERO-TOKEN READING. No engine was reached, so
+    // nothing was billed — a zero here would claim a call happened and was
+    // free, which is the one thing a cost ledger must never say. The refusals
+    // that DO reach an engine carry a real cost; see the ledger tests.
     expect(await readCdl({ base64: 'x', mimeType: 'image/jpeg' })).toEqual({
       ok: false,
       reason: 'call_failed',
+      cost: null,
     })
   })
 })

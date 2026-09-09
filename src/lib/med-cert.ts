@@ -1,4 +1,4 @@
-import type { AskResult } from './claude'
+import { readCostOf, type AskResult, type ReadCost } from './claude'
 import type { Confidence } from './extraction/envelope'
 import { askModel } from './model-engine'
 import { parseMedicalCertResponse } from './extraction/med-parse'
@@ -31,7 +31,7 @@ import type { ExtractedMedicalCert } from './extraction/med-shape'
 // ---------------------------------------------------------------------------
 
 export type MedicalCertReadOutcome =
-  | { ok: true; fields: ExtractedMedicalCert }
+  | { ok: true; fields: ExtractedMedicalCert; cost: ReadCost }
   | {
       ok: false
       reason:
@@ -39,6 +39,15 @@ export type MedicalCertReadOutcome =
         | 'call_failed'
         | 'unparsable'
         | MedicalCertRefusal
+      /**
+       * What the attempt cost, or null when no engine was ever reached.
+       *
+       * The medical card refuses more often than the CDL by design — an
+       * unreadable expiry is a refusal rather than a guess — so counting only
+       * successful reads here would understate the true cost by more than it
+       * does anywhere else in this system.
+       */
+      cost: ReadCost | null
     }
 
 /** Nothing read, in the shape a read returns. */
@@ -77,20 +86,23 @@ export async function readMedicalCert(input: {
         error.reason === 'truncated')
         ? ('unsupported_type' as const)
         : ('call_failed' as const)
-    return { ok: false, reason }
+    // Nothing was billed: the call never produced an answer.
+    return { ok: false, reason, cost: null }
   }
+
+  const cost = readCostOf(answer)
 
   let fields: ExtractedMedicalCert
   try {
     fields = parseMedicalCertResponse(answer.text)
   } catch {
-    return { ok: false, reason: 'unparsable' }
+    return { ok: false, reason: 'unparsable', cost }
   }
 
   const refusal = refuseMedicalCert(fields)
-  if (refusal) return { ok: false, reason: refusal }
+  if (refusal) return { ok: false, reason: refusal, cost }
 
-  return { ok: true, fields }
+  return { ok: true, fields, cost }
 }
 
 /**

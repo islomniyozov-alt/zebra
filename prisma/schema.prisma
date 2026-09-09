@@ -161,6 +161,7 @@ model Organization {
   claimNotes      ClaimNote[]
   customerAliases CustomerAlias[]
   corrections     ExtractionCorrection[]
+  extractionUsage ExtractionUsage[]
   counters        Counter[]
   documents       Document[]
   drivers         Driver[]
@@ -1944,6 +1945,90 @@ model ExtractionCorrection {
   @@index([organizationId, field])
   @@index([documentId])
   @@index([loadId])
+}
+
+/// WHAT ONE EXTRACTION COST, AS A ROW.
+///
+/// ── A LEDGER, NOT A COLUMN ON `Document` ─────────────────────────────────
+///
+/// The owner's ruling, and the reasons are worth writing down because the
+/// convenient shape is the wrong one. A column on `Document` would tie the
+/// cost to an artefact that need not exist: the CDL and the medical card are
+/// read BEFORE anything is filed — that is the whole point of the confirm-then
+/// -file flow — so most reads have no document to hang a number on. It would
+/// also inherit `Document`'s lifecycle, and a deleted document would take its
+/// cost with it, which is a ledger that can be edited by tidying up.
+///
+/// ONE ROW PER CALL TO AN ENGINE, including the calls whose answers were
+/// refused. A read that cost money and produced nothing usable is still money,
+/// and the refusal rate is precisely what a prompt change is trying to move.
+///
+/// ── WHY IT CARRIES THE TENANT ────────────────────────────────────────────
+///
+/// This is the per-customer cost ledger. When Zebra is multi-tenant, "what
+/// does this customer cost us to serve" is a pricing question with real money
+/// behind it, and the only honest answer is a sum over rows this tenant
+/// caused. So `organizationId` is not bookkeeping here, it is the point, and
+/// it carries the ordinary `org_isolation` policy like every other tenant
+/// table.
+///
+/// NO FOREIGN KEY TO Document OR Driver ON PURPOSE. A cascade from either
+/// would silently delete history the moment somebody removed a row, and a cost
+/// ledger with holes is worse than no ledger — it reads as a smaller bill.
+model ExtractionUsage {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  /// Which reader was called, in the vocabulary `Document` already speaks.
+  ///
+  /// REUSED RATHER THAN INVENTED. A parallel enum would be a second list of
+  /// what a document can be, and the two would disagree the first time one of
+  /// them gained a value — registration and annual inspection are already
+  /// named as the next readers.
+  documentType DocumentType
+
+  /// Who ANSWERED, and who was asked when those differ.
+  ///
+  /// `model` is the engine that produced the tokens, so the price applied to
+  /// them is the price of this string. `askedModel` is set only on a fallback:
+  /// a month of quiet Sonnet bills after a Gemini outage is a question this
+  /// pair can answer and a single column cannot.
+  model      String
+  askedModel String?
+
+  /// Tokens, exactly as the engine reported them.
+  ///
+  /// THE MEASURED HALF. Everything else here is arithmetic over a constant
+  /// somebody typed — `MODEL_PRICES`, recorded from a price list on a date —
+  /// so the tokens are kept beside the money to be re-priced later. A published
+  /// price change makes `milliCents` stale and leaves these true.
+  inputTokens      Int
+  outputTokens     Int
+  cacheWriteTokens Int @default(0)
+  cacheReadTokens  Int @default(0)
+
+  /// THOUSANDTHS OF A CENT, because whole cents cannot tell 0.6 from 1.4 and
+  /// those are different claims about a thousand loads a month. The same unit
+  /// `costMilliCents` returns, stored as the integer it already is.
+  milliCents Int
+
+  /// Whether the rules accepted the answer these tokens bought.
+  ///
+  /// A refused read is billed exactly like an accepted one, so the row exists
+  /// either way; this is what lets the ledger answer "how much did we spend on
+  /// answers we threw away" without a second table.
+  refused Boolean @default(false)
+  /// The refusal, in the reader's own vocabulary — `low_confidence_expiry`,
+  /// `unparsable`. Null when the read was accepted.
+  reason  String?
+
+  createdAt DateTime @default(now())
+
+  /// The shape of the only question this table exists to answer: what did a
+  /// tenant spend, over a period, broken down by document type.
+  @@index([organizationId, createdAt])
+  @@index([organizationId, documentType, createdAt])
 }
 
 // ============================================================================

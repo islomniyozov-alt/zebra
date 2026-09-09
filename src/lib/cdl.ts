@@ -1,4 +1,4 @@
-import type { AskResult } from './claude'
+import { readCostOf, type AskResult, type ReadCost } from './claude'
 import type { Confidence } from './extraction/envelope'
 import { askModel } from './model-engine'
 import { parseCdlResponse } from './extraction/cdl-parse'
@@ -45,7 +45,7 @@ import type { ExtractedCdl } from './extraction/cdl-shape'
 // ---------------------------------------------------------------------------
 
 export type CdlReadOutcome =
-  | { ok: true; fields: ExtractedCdl }
+  | { ok: true; fields: ExtractedCdl; cost: ReadCost }
   | {
       ok: false
       reason:
@@ -54,6 +54,15 @@ export type CdlReadOutcome =
         | 'call_failed'
         | 'unparsable'
         | CdlRefusal
+      /**
+       * What the attempt cost, or null when no engine was ever reached.
+       *
+       * A refused reading is a BILLED reading — the model answered and the
+       * rules rejected it — and a ledger that dropped those would understate
+       * by exactly the refusal rate. `null` is reserved for the branch above,
+       * where the call itself failed.
+       */
+      cost: ReadCost | null
     }
 
 /** Nothing read, in the shape a read returns. */
@@ -123,8 +132,12 @@ export async function readCdl(input: {
         error.reason === 'truncated')
         ? ('unsupported_type' as const)
         : ('call_failed' as const)
-    return { ok: false, reason }
+    // NO ENGINE ANSWERED, SO THERE IS NOTHING TO BILL. Null rather than a
+    // zero-token reading, which would claim a call happened and was free.
+    return { ok: false, reason, cost: null }
   }
+
+  const cost = readCostOf(answer)
 
   let fields: ExtractedCdl
   try {
@@ -133,13 +146,13 @@ export async function readCdl(input: {
     // A RESPONSE THAT DOES NOT PARSE IS A FAILED READ, never a half-filled
     // form. The eighteen fixtures in tests/cdl-parse.test.ts are the shapes
     // that land here.
-    return { ok: false, reason: 'unparsable' }
+    return { ok: false, reason: 'unparsable', cost }
   }
 
   const refusal = refuseCdl(fields)
-  if (refusal) return { ok: false, reason: refusal }
+  if (refusal) return { ok: false, reason: refusal, cost }
 
-  return { ok: true, fields }
+  return { ok: true, fields, cost }
 }
 
 /** Confidence a value carries, for a form that marks the doubtful ones. */

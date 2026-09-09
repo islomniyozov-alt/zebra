@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth-context'
 import { can } from '@/lib/permissions'
-import { DOCUMENT_TYPES, IMAGE_TYPES } from '@/lib/claude'
+import { DOCUMENT_TYPES, IMAGE_TYPES, formatCostMilliCents } from '@/lib/claude'
 import { NOTHING_READ, cdlNotes, cdlPrefill, readCdl } from '@/lib/cdl'
 import { apiError, authFailureResponse } from '../../_lib/respond'
+import { recordUsageQuietly } from '../../_lib/record-usage'
 
 // POST /api/cdl/read — read a licence that belongs to nobody yet.
 //
@@ -116,6 +117,15 @@ export async function POST(request: Request) {
   // typed in, and a refusal that also blocked manual entry would make a bad
   // photograph a reason not to hire somebody.
   if (!outcome.ok) {
+    // A REFUSED READ IS A BILLED READ. The engine answered and the rules threw
+    // the answer away; the tokens were spent either way, so the ledger gets
+    // its row here as well as on the accepted branch. `cost` is null only when
+    // no engine was reached at all, and `recordUsageQuietly` skips that.
+    await recordUsageQuietly(outcome.cost, {
+      documentType: 'CDL_COPY',
+      refused: outcome.reason,
+    })
+
     const notice =
       outcome.reason === 'call_failed'
         ? 'drivers.cdl.failed'
@@ -124,6 +134,8 @@ export async function POST(request: Request) {
           : 'drivers.cdl.unreadable'
     return NextResponse.json({ values: cdlPrefill(NOTHING_READ), notice })
   }
+
+  await recordUsageQuietly(outcome.cost, { documentType: 'CDL_COPY' })
 
   // THE PARSED FIELDS TRAVEL BESIDE THE PREFILL, WITH THEIR CONFIDENCES.
   //
@@ -141,6 +153,25 @@ export async function POST(request: Request) {
     values: cdlPrefill(outcome.fields),
     fields: outcome.fields,
     notes: cdlNotes(outcome.fields),
+    // WHAT THE READ COST, ON THE WIRE — the same block the rate-con route has
+    // carried since Phase 5, now on this one too. `doc-variance.mjs` and
+    // `doc-accuracy.mjs` dump the whole response body, so putting it here is
+    // what makes a variance run measure price as well as stability, with no
+    // change to either instrument.
+    cost: {
+      milliCents: outcome.cost.milliCents,
+      display: formatCostMilliCents(outcome.cost.milliCents),
+      inputTokens: outcome.cost.usage.inputTokens,
+      outputTokens: outcome.cost.usage.outputTokens,
+      cacheWriteTokens: outcome.cost.usage.cacheWriteTokens ?? 0,
+      cacheReadTokens: outcome.cost.usage.cacheReadTokens ?? 0,
+      model: outcome.cost.model,
+      // The swap, on the wire as well as in the ledger — so a measurement run
+      // counts fallbacks instead of silently reporting the wrong engine.
+      ...(outcome.cost.fellBackFrom
+        ? { fellBackFrom: outcome.cost.fellBackFrom }
+        : {}),
+    },
     notice: null,
   })
 }

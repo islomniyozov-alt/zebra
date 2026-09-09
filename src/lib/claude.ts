@@ -112,6 +112,48 @@ export interface Usage {
 }
 
 /**
+ * WHAT ONE READ COST, TRAVELLING WITH THE READ.
+ *
+ * ── WHY EVERY READER RETURNS THIS AND NOT JUST THE RATE-CON ONE ───────────
+ *
+ * `askModel` has always returned `usage` on every call. `readCdl` and
+ * `readMedicalCert` threw it away one line later, so the CDL and the medical
+ * certificate had no measured cost anywhere — not in the database, not in the
+ * accuracy dumps, not in a log. The rate confirmation's figure survived only
+ * because a walkthrough printed a total and somebody copied it into a markdown
+ * file. That is a note, not a ledger.
+ *
+ * A REFUSAL COSTS THE SAME AS A READING, which is why this is carried on the
+ * failure branch too. The model answered, the tokens were billed, and the
+ * rules then rejected what it said — a cost ledger that counted only successes
+ * would understate by exactly the refusal rate, and the refusal rate is the
+ * number anybody tuning a prompt is trying to move.
+ *
+ * NULL WHERE THERE GENUINELY WAS NO CALL. A document rejected for its size or
+ * type never reached an engine and cost nothing; `null` says that, where a
+ * zero would claim a free call was made.
+ */
+export interface ReadCost {
+  usage: Usage
+  /** Who ANSWERED. Not who was asked — see `fellBackFrom`. */
+  model: string
+  /** Thousandths of a cent, priced by `costMilliCents` at the answering model. */
+  milliCents: number
+  /** Set when the engine that was asked failed and the fallback answered. */
+  fellBackFrom?: { model: string; reason: ClaudeFailure; status?: number }
+}
+
+/** The cost of an answer, in the shape every reader hands back. */
+export function readCostOf(answer: AskResult): ReadCost {
+  return {
+    usage: answer.usage,
+    model: answer.model,
+    milliCents: costMilliCents(answer.usage, answer.model),
+    ...(answer.fellBackFrom ? { fellBackFrom: answer.fellBackFrom } : {}),
+  }
+}
+
+/**
  * Cents per million tokens for one model, cache rates included.
  *
  * Falls back to the Sonnet price for a model nobody has priced: a cost that is
