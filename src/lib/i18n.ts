@@ -1160,6 +1160,7 @@ const en = {
   'safety.hint':
     'Everything expiring within {days} days, and everything already past. Worst first. A record a newer one has replaced is history and is not listed here.',
   'safety.subject': 'On',
+  'safety.subject.company': 'Carrier',
   'safety.subject.truck': 'Trucks',
   'safety.subject.trailer': 'Trailers',
   'safety.subject.driver': 'Drivers',
@@ -2940,6 +2941,7 @@ const ru: Dictionary = {
   'safety.hint':
     'Всё, что истекает в ближайшие {days} дн., и всё просроченное. Худшее сверху. Запись, которую заменила более новая, — это история, здесь её нет.',
   'safety.subject': 'Объект',
+  'safety.subject.company': 'Перевозчик',
   'safety.subject.truck': 'Тягачи',
   'safety.subject.trailer': 'Прицепы',
   'safety.subject.driver': 'Водители',
@@ -4701,6 +4703,7 @@ const fa: Dictionary = {
   'safety.hint':
     'هر چه ظرف {days} روز آینده منقضی می‌شود و هر چه گذشته است. بدترین در بالا. رکوردی که نسخهٔ تازه‌تری جایش را گرفته تاریخچه است و اینجا نمی‌آید.',
   'safety.subject': 'روی',
+  'safety.subject.company': 'شرکت حمل‌ونقل',
   'safety.subject.truck': 'کامیون‌ها',
   'safety.subject.trailer': 'تریلرها',
   'safety.subject.driver': 'رانندگان',

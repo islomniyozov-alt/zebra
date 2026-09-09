@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { createPrismaClient } from '@/lib/db'
 import { asRecords, readXlsx } from '@/lib/datatruck/xlsx'
 import { planTrucks, type PlannedTruck } from '@/lib/datatruck/trucks'
+import { FLEET_COMPLIANCE_TYPES } from '@/lib/compliance'
 import { assertTenancy } from './datatruck-tenancy'
 import type { ComplianceType } from '../src/generated/prisma/client'
 
@@ -238,6 +239,11 @@ async function main(): Promise<void> {
     let skipped = 0
     let complianceCreated = 0
     let filled = 0
+    /** One per (company, type, expiry) — see the note in the loop below. */
+    const fleetPolicies = new Map<
+      string,
+      { companyId: string; type: ComplianceType; iso: string }
+    >()
 
     for (const truck of plan.planned) {
       // Ambiguous units are refused above and are not written to at all.
@@ -321,6 +327,27 @@ async function main(): Promise<void> {
       for (const expiry of EXPIRIES) {
         const iso = truck[expiry.field]
         if (!iso) continue
+
+        // ── A FLEET POLICY IS NOT A PROPERTY OF A TRUCK ──────────────────
+        //
+        // Liability and cargo are written per authority and cover every
+        // vehicle. This seed used to file them per truck because that is where
+        // the export puts the date — one column on each row — and production
+        // ended up with 17 Dolphins trucks and 5 RAM trucks all carrying a
+        // liability expiry of 2025-10-21: two policies stored twenty-two
+        // times.
+        //
+        // Collected here and written once each, below, keyed on the same
+        // (company, type, expiry) the migration script groups by.
+        if (FLEET_COMPLIANCE_TYPES.includes(expiry.type)) {
+          fleetPolicies.set(`${companyId}|${expiry.type}|${iso}`, {
+            companyId,
+            type: expiry.type,
+            iso,
+          })
+          continue
+        }
+
         const present = await db.complianceItem.findFirst({
           where: { truckId, type: expiry.type, deletedAt: null },
           select: { id: true },
@@ -339,9 +366,41 @@ async function main(): Promise<void> {
       }
     }
 
+    // ── THE FLEET POLICIES, ONE ROW EACH ────────────────────────────────
+    let fleetCreated = 0
+    for (const policy of fleetPolicies.values()) {
+      const present = await db.complianceItem.findFirst({
+        where: {
+          companyId: policy.companyId,
+          type: policy.type,
+          truckId: null,
+          trailerId: null,
+          driverId: null,
+          expiresAt: new Date(`${policy.iso}T00:00:00.000Z`),
+          deletedAt: null,
+        },
+        select: { id: true },
+      })
+      if (present) continue
+      await db.complianceItem.create({
+        data: {
+          organizationId: tenancy.organizationId,
+          companyId: policy.companyId,
+          type: policy.type,
+          // NO ASSET LINK. That is what makes it a carrier policy — see
+          // `FLEET_COMPLIANCE_TYPES` for why no column was needed.
+          expiresAt: new Date(`${policy.iso}T00:00:00.000Z`),
+        },
+      })
+      fleetCreated++
+    }
+
     heading('WRITTEN')
     console.log(
       `  ${created} trucks created OUT_OF_SERVICE, ${skipped} already there (${filled} gained a missing value)`,
+    )
+    console.log(
+      `  ${fleetCreated} fleet policy(ies) on the carrier, from ${fleetPolicies.size} distinct (company, type, expiry)`,
     )
     console.log(`  ${complianceCreated} compliance items from the three dates`)
     console.log('  0 asset-history periods — the extras are not in service')

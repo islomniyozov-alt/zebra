@@ -160,6 +160,15 @@ const MAINTENANCE_READERS = [
   // found them, and every identifying field asserted before it writes. Dry run
   // by default; a second run finds nothing to undo.
   'repair-1024-plate-and-compliance.ts',
+  // ADDED 2026-09-09. Liability and cargo belong to the carrier, not the
+  // vehicle. Production held 25 per-truck rows that are really 5 policies —
+  // 17 Dolphins trucks and 5 RAM trucks all expiring 2025-10-21. This
+  // promotes the oldest row of each group by clearing its asset link and
+  // soft-deletes the copies.
+  //
+  // It REFUSES if a duplicate carries a document, since soft-deleting the row
+  // would hide the document with it. Dry run by default.
+  'migrate-insurance-to-company.ts',
 ]
 
 /**

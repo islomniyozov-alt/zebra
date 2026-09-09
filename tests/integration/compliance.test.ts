@@ -643,3 +643,103 @@ describe('the queue shows only what somebody can act on', () => {
     })
   }, 300_000)
 })
+
+// ---------------------------------------------------------------------------
+// LIABILITY AND CARGO BELONG TO THE CARRIER.
+//
+// Production held 25 per-truck insurance rows that were really 5 policies — 17
+// Dolphins trucks and 5 RAM trucks all expiring 2025-10-21. A fleet policy is
+// a ComplianceItem with no asset link, which the schema always allowed and
+// `shapeRecords` used to DROP as malformed.
+//
+// Every assertion here is about a silent failure: a policy that renders
+// nowhere, a truck that looks uninsured, or one carrier's renewal marking
+// another carrier's live policy as history.
+// ---------------------------------------------------------------------------
+describe('a fleet policy belongs to the carrier', () => {
+  async function policy(
+    days: number,
+    type: 'INSURANCE_LIABILITY' = 'INSURANCE_LIABILITY',
+  ) {
+    const expiresAt = new Date(NOW.getTime())
+    expiresAt.setUTCDate(expiresAt.getUTCDate() + days)
+    return owner.complianceItem.create({
+      data: { organizationId, companyId, type, expiresAt },
+    })
+  }
+
+  it('appears in the queue, attached to nothing, under the carrier', async () => {
+    const item = await policy(-10)
+    const queue = await inOrg((tx) => complianceQueue(tx, {}, {}, NOW))
+    const row = queue.rows.find((r) => r.id === item.id)
+    expect(row).toBeDefined()
+    expect(row?.subject).toBe('company')
+    // The carrier's own name, not a unit number and not an em-dash.
+    expect(row?.subjectLabel).toBeTruthy()
+  }, 300_000)
+
+  it('is reachable by the company subject filter', async () => {
+    const item = await policy(-11)
+    const narrowed = await inOrg((tx) =>
+      complianceQueue(tx, {}, { subject: 'company' }, NOW),
+    )
+    expect(narrowed.rows.map((r) => r.id)).toContain(item.id)
+    expect(narrowed.rows.every((r) => r.subject === 'company')).toBe(true)
+  }, 300_000)
+
+  // THE INHERITANCE. A truck's page must still answer "is this insured", and
+  // the answer now lives on its carrier rather than on twenty-two copies.
+  it('shows on a truck of that carrier without being stored there', async () => {
+    const item = await policy(-12)
+    const panel = await inOrg((tx) =>
+      recordsForSubject(tx, 'truck', truckId, NOW),
+    )
+    const row = panel.find((r) => r.id === item.id)
+    expect(row).toBeDefined()
+    expect(row?.subject).toBe('company')
+
+    // And it really is not on the truck: the row carries no truckId.
+    const stored = await owner.complianceItem.findUniqueOrThrow({
+      where: { id: item.id },
+      select: { truckId: true },
+    })
+    expect(stored.truckId).toBeNull()
+  }, 300_000)
+
+  // ONE CARRIER'S RENEWAL MUST NOT AGE ANOTHER'S POLICY. Before the supersede
+  // key learned about companies, every unattached liability row shared the key
+  // `:INSURANCE_LIABILITY`.
+  it('does not let one carrier supersede another', async () => {
+    const other = await owner.company.create({
+      data: { organizationId, name: `Second carrier ${nonce}` },
+    })
+    const mine = await policy(-13)
+    const expiresAt = new Date(NOW.getTime())
+    expiresAt.setUTCDate(expiresAt.getUTCDate() + 300)
+    await owner.complianceItem.create({
+      data: {
+        organizationId,
+        companyId: other.id,
+        type: 'INSURANCE_LIABILITY',
+        expiresAt,
+      },
+    })
+
+    const queue = await inOrg((tx) => complianceQueue(tx, {}, {}, NOW))
+    const row = queue.rows.find((r) => r.id === mine.id)
+    expect(row).toBeDefined()
+    expect(row?.isSuperseded).toBe(false)
+  }, 300_000)
+
+  // A ROW ATTACHED TO NOTHING IS ONLY A POLICY IF ITS TYPE SAYS SO. An
+  // unattached CDL is malformed and stays dropped, exactly as before.
+  it('still drops an unattached record that is not a fleet obligation', async () => {
+    const expiresAt = new Date(NOW.getTime())
+    expiresAt.setUTCDate(expiresAt.getUTCDate() - 5)
+    const orphan = await owner.complianceItem.create({
+      data: { organizationId, companyId, type: 'CDL', expiresAt },
+    })
+    const queue = await inOrg((tx) => complianceQueue(tx, {}, {}, NOW))
+    expect(queue.rows.map((r) => r.id)).not.toContain(orphan.id)
+  }, 300_000)
+})

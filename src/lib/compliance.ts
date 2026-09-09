@@ -38,12 +38,40 @@ import type { CompanyScopeFilter, TxClient } from './tenancy'
 export type ComplianceStatus = 'current' | 'expiring' | 'expired'
 
 /** The three things a compliance record can hang off. */
-export type ComplianceSubject = 'truck' | 'trailer' | 'driver'
+export type ComplianceSubject = 'company' | 'truck' | 'trailer' | 'driver'
 
 export const COMPLIANCE_SUBJECTS: readonly ComplianceSubject[] = [
+  'company',
   'truck',
   'trailer',
   'driver',
+]
+
+/**
+ * Obligations that belong to the CARRIER, not to a vehicle.
+ *
+ * ── ONE POLICY, NOT ONE ROW PER TRUCK ─────────────────────────────────────
+ *
+ * Liability and cargo are written per authority and cover the fleet. The
+ * Datatruck import stored them per truck because that is where the export put
+ * the date, and production showed what that costs: 17 Dolphins trucks and 5
+ * RAM trucks all carrying a liability expiry of 2025-10-21 — two fleet
+ * policies stored twenty-two times. Renewing one meant editing twenty-two
+ * rows, and a queue listing twenty-two identical alarms is a queue nobody
+ * reads.
+ *
+ * PHYSICAL DAMAGE IS NOT HERE, deliberately. It insures a particular vehicle
+ * for a particular value; it is per-truck by nature, and folding it in would
+ * be tidiness overriding what the thing actually is.
+ *
+ * A FLEET POLICY IS A ComplianceItem WITH NO ASSET LINK. The schema already
+ * allowed that — `companyId` is NOT NULL and every asset column is optional —
+ * so no column was needed. What was needed is for such a row to MEAN
+ * something: `shapeRecords` used to drop anything attached to nothing.
+ */
+export const FLEET_COMPLIANCE_TYPES: readonly ComplianceType[] = [
+  'INSURANCE_LIABILITY',
+  'INSURANCE_CARGO',
 ]
 
 /**
@@ -179,7 +207,14 @@ export function shapeRecords(
   latestByKey?: ReadonlyMap<string, number>,
 ): ComplianceRow[] {
   const keyOf = (row: (typeof rows)[number]) => {
-    const subjectId = row.truck?.id ?? row.trailer?.id ?? row.driver?.id ?? ''
+    // A FLEET POLICY IS KEYED BY ITS COMPANY. Without this every unattached
+    // liability row shared the key `:INSURANCE_LIABILITY`, so one carrier's
+    // renewal would mark another carrier's live policy as superseded.
+    const subjectId =
+      row.truck?.id ??
+      row.trailer?.id ??
+      row.driver?.id ??
+      (FLEET_COMPLIANCE_TYPES.includes(row.type) ? row.companyId : '')
     return `${subjectId}:${row.type}`
   }
 
@@ -202,17 +237,32 @@ export function shapeRecords(
         ? 'trailer'
         : row.driver
           ? 'driver'
-          : null
+          : // ── ATTACHED TO NOTHING MEANS ONE OF TWO THINGS ────────────────
+            //
+            // A fleet policy — liability or cargo, written per authority and
+            // covering every vehicle — or a row somebody failed to attach.
+            // The TYPE tells them apart, which is why this is not simply
+            // "unattached = company": an unattached CDL is malformed and is
+            // still dropped, exactly as before.
+            FLEET_COMPLIANCE_TYPES.includes(row.type)
+            ? 'company'
+            : null
 
-    // A record attached to nothing is not something to render. The columns are
-    // all nullable, so the row can exist; it cannot be shown against an asset
-    // because there is no asset. Dropped rather than displayed as "—".
+    // A record attached to nothing and not a fleet obligation cannot be shown
+    // against an asset, because there is no asset. Dropped rather than
+    // displayed as "—".
     if (!subject) return []
 
-    const subjectId = (row.truck ?? row.trailer ?? row.driver)!.id
-    const subjectLabel = row.driver
-      ? `${row.driver.firstName} ${row.driver.lastName}`
-      : (row.truck ?? row.trailer)!.unitNumber
+    const subjectId =
+      subject === 'company'
+        ? row.companyId
+        : (row.truck ?? row.trailer ?? row.driver)!.id
+    const subjectLabel =
+      subject === 'company'
+        ? row.company.name
+        : row.driver
+          ? `${row.driver.firstName} ${row.driver.lastName}`
+          : (row.truck ?? row.trailer)!.unitNumber
 
     return [
       {
@@ -410,6 +460,14 @@ function subjectWhere(
   if (subject === 'truck') return { truckId: { not: null } }
   if (subject === 'trailer') return { trailerId: { not: null } }
   if (subject === 'driver') return { driverId: { not: null } }
+  if (subject === 'company') {
+    return {
+      truckId: null,
+      trailerId: null,
+      driverId: null,
+      type: { in: [...FLEET_COMPLIANCE_TYPES] },
+    }
+  }
   return {}
 }
 
@@ -439,12 +497,59 @@ export async function recordsForSubject(
   subjectId: string,
   now: Date = new Date(),
 ): Promise<ComplianceRow[]> {
+  // ── A VEHICLE INHERITS ITS CARRIER'S FLEET POLICIES ───────────────────
+  //
+  // Liability and cargo are not stored on the truck any more, and a truck's
+  // page must still answer "is this vehicle insured". So the panel shows the
+  // truck's own records PLUS the policies its authority carries — which is
+  // what "inherit" means here: one row, read from several places, rather than
+  // one copy per vehicle.
+  const carrier =
+    subject === 'truck' || subject === 'trailer'
+      ? await (subject === 'truck'
+          ? tx.truck.findUnique({
+              where: { id: subjectId },
+              select: { companyId: true },
+            })
+          : tx.trailer.findUnique({
+              where: { id: subjectId },
+              select: { companyId: true },
+            }))
+      : null
+
   const rows = await tx.complianceItem.findMany({
     where: {
       deletedAt: null,
-      ...(subject === 'truck' ? { truckId: subjectId } : {}),
-      ...(subject === 'trailer' ? { trailerId: subjectId } : {}),
+      ...(subject === 'company'
+        ? {
+            companyId: subjectId,
+            truckId: null,
+            trailerId: null,
+            driverId: null,
+            type: { in: [...FLEET_COMPLIANCE_TYPES] },
+          }
+        : {}),
       ...(subject === 'driver' ? { driverId: subjectId } : {}),
+      ...(subject === 'truck' || subject === 'trailer'
+        ? {
+            OR: [
+              subject === 'truck'
+                ? { truckId: subjectId }
+                : { trailerId: subjectId },
+              ...(carrier
+                ? [
+                    {
+                      companyId: carrier.companyId,
+                      truckId: null,
+                      trailerId: null,
+                      driverId: null,
+                      type: { in: [...FLEET_COMPLIANCE_TYPES] },
+                    },
+                  ]
+                : []),
+            ],
+          }
+        : {}),
     },
     orderBy: { expiresAt: 'desc' },
     select: SELECT,
