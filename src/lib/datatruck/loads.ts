@@ -671,3 +671,79 @@ export function syncDecisionFor(
 
   return { operational, billing, notes }
 }
+
+/**
+ * Whether a fresh export may restate an imported load's money.
+ *
+ * ── DATATRUCK IS THE SOURCE OF TRUTH UNTIL IT IS NOT ─────────────────────
+ *
+ * While dispatchers work over there, a live load's rate is theirs to change
+ * and Zebra should follow. The moment Zebra has money of its own against the
+ * load, that stops: a settlement line means a driver has been paid on this
+ * figure and a payment application means a customer's money has been matched
+ * to it. Changing the rate underneath either would silently make a settled
+ * cheque or a reconciled payment disagree with the load it settled.
+ *
+ * SO THE GATE IS "HAS ZEBRA TOUCHED THE MONEY", NOT "IS IT OLD". Age is not
+ * the risk; commitment is. A load from January with nothing against it is
+ * safe to restate, and one from this morning that has already been settled is
+ * not.
+ *
+ * CLOSED IS FROZEN TOO, for the same reason `syncDecisionFor` refuses it: the
+ * freight finished its life in the other system and this one will not take it
+ * back.
+ */
+export type RateFreeze =
+  | { frozen: false }
+  | { frozen: true; why: 'closed' | 'settled' | 'paid' }
+
+export function rateFreezeFor(load: {
+  billing: LoadBillingStatus
+  settlementLines: number
+  paymentApplications: number
+}): RateFreeze {
+  if (load.billing === 'CLOSED_IN_DATATRUCK')
+    return { frozen: true, why: 'closed' }
+  if (load.settlementLines > 0) return { frozen: true, why: 'settled' }
+  if (load.paymentApplications > 0) return { frozen: true, why: 'paid' }
+  return { frozen: false }
+}
+
+export interface RateChange {
+  linehaulCents: number
+  accessorialCents: number
+  totalRevenueCents: number
+  /** The sentence the BILLING event carries, old and new, in money. */
+  note: string
+}
+
+/**
+ * What changed about the money, or null when nothing did.
+ *
+ * THE WHOLE PICTURE MOVES TOGETHER. `Load.accessorialsCents` is documented as
+ * the sum of its billable `LoadAccessorial` rows, so restating the linehaul
+ * without the accessorial would leave the two disagreeing — and the
+ * reconciliation this import is measured by sums all three.
+ */
+export function rateChangeFor(
+  current: { linehaulCents: number; accessorialCents: number },
+  incoming: { linehaulCents: number; accessorialCents: number },
+): RateChange | null {
+  if (
+    current.linehaulCents === incoming.linehaulCents &&
+    current.accessorialCents === incoming.accessorialCents
+  ) {
+    return null
+  }
+  const money = (cents: number) => `$${(cents / 100).toFixed(2)}`
+  return {
+    linehaulCents: incoming.linehaulCents,
+    accessorialCents: incoming.accessorialCents,
+    totalRevenueCents: incoming.linehaulCents + incoming.accessorialCents,
+    // OLD AND NEW, BOTH, IN THE EVENT. "The rate changed" is not an audit
+    // answer; a dispute turns on what it changed FROM.
+    note:
+      `Datatruck export restated the rate: linehaul ${money(current.linehaulCents)} -> ` +
+      `${money(incoming.linehaulCents)}, accessorial ${money(current.accessorialCents)} -> ${money(incoming.accessorialCents)}.`,
+  }
+}

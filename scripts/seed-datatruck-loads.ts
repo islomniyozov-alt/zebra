@@ -5,6 +5,8 @@ import { asRecords, readXlsx } from '@/lib/datatruck/xlsx'
 import {
   datatruckCents,
   planLoads,
+  rateChangeFor,
+  rateFreezeFor,
   syncDecisionFor,
   type PlannedLoad,
 } from '@/lib/datatruck/loads'
@@ -538,7 +540,9 @@ async function main(): Promise<void> {
     let skipped = 0
     let trucksFilled = 0
     let advanced = 0
+    let ratesUpdated = 0
     const heldBackwards: string[] = []
+    const rateFrozen: string[] = []
     let batchIndex = 0
 
     for (const batch of chunk(toCreate, BATCH)) {
@@ -556,6 +560,15 @@ async function main(): Promise<void> {
           truckId: true,
           operationalStatus: true,
           billingStatus: true,
+          linehaulCents: true,
+          accessorialsCents: true,
+          organizationId: true,
+          // WHAT ZEBRA HAS SPENT AGAINST THIS LOAD. Counted, not inferred from
+          // a status: a settlement line means a driver was paid on this figure
+          // and an application means a customer's money was matched to it.
+          _count: {
+            select: { settlementLines: true, paymentApplications: true },
+          },
         },
       })
       const already = new Map(present.map((row) => [row.externalId ?? '', row]))
@@ -609,8 +622,93 @@ async function main(): Promise<void> {
             heldBackwards.push(`${load.externalId} ${note}`)
         }
 
+        // ── THE RATE, WHICH DATATRUCK OWNS UNTIL ZEBRA SPENDS ────────────
+        //
+        // While dispatchers work over there a live load's rate is theirs and
+        // this system follows. The freeze is about COMMITMENT rather than age:
+        // once a settlement line or a payment application exists, the figure
+        // has been paid on, and moving it would make a cheque disagree with
+        // the load it settled.
+        const freeze = rateFreezeFor({
+          billing: row.billingStatus,
+          settlementLines: row._count.settlementLines,
+          paymentApplications: row._count.paymentApplications,
+        })
+        const rate = freeze.frozen
+          ? null
+          : rateChangeFor(
+              {
+                linehaulCents: row.linehaulCents,
+                accessorialCents: row.accessorialsCents,
+              },
+              {
+                linehaulCents: load.linehaulCents,
+                accessorialCents: load.accessorialCents,
+              },
+            )
+        if (rate) {
+          data['linehaulCents'] = rate.linehaulCents
+          data['accessorialsCents'] = rate.accessorialCents
+          data['totalRevenueCents'] = rate.totalRevenueCents
+        } else if (
+          freeze.frozen &&
+          freeze.why !== 'closed' &&
+          (row.linehaulCents !== load.linehaulCents ||
+            row.accessorialsCents !== load.accessorialCents)
+        ) {
+          // Named, not skipped in silence: the export disagrees with a figure
+          // Zebra has already paid against, and somebody should know.
+          rateFrozen.push(
+            `${load.externalId} ${freeze.why}: export ${load.linehaulCents}+${load.accessorialCents}, database ${row.linehaulCents}+${row.accessorialsCents}`,
+          )
+        }
+
         if (Object.keys(data).length === 0) continue
         await db.load.update({ where: { id: row.id }, data })
+
+        if (rate) {
+          // ── THE ACCESSORIAL ROW FOLLOWS THE COLUMN ────────────────────
+          //
+          // `accessorialsCents` is documented as the SUM of billable
+          // `LoadAccessorial` rows. Restating the column without the rows
+          // would leave the two disagreeing, which is exactly the quiet
+          // inconsistency the money checks exist to catch.
+          await db.loadAccessorial.deleteMany({
+            where: { loadId: row.id, notes: 'Datatruck "Total other pay".' },
+          })
+          if (rate.accessorialCents > 0) {
+            await db.loadAccessorial.create({
+              data: {
+                loadId: row.id,
+                organizationId: row.organizationId,
+                type: 'OTHER',
+                amountCents: rate.accessorialCents,
+                isBillable: true,
+                status: 'BILLED',
+                notes: 'Datatruck "Total other pay".',
+              },
+            })
+          }
+
+          // ── VISIBLE RATHER THAN SILENT ────────────────────────────────
+          //
+          // A BILLING event on the load's own timeline, carrying old AND new.
+          // "The rate changed" is not an audit answer; a dispute turns on what
+          // it changed from. INTEGRATION, because that is what this is:
+          // another system telling us something.
+          await db.loadStatusEvent.create({
+            data: {
+              loadId: row.id,
+              organizationId: row.organizationId,
+              axis: 'BILLING',
+              fromStatus: row.billingStatus,
+              toStatus: decision.billing ?? row.billingStatus,
+              source: 'INTEGRATION',
+              note: rate.note,
+            },
+          })
+          ratesUpdated++
+        }
       }
 
       if (fresh.length === 0) continue
@@ -793,6 +891,18 @@ async function main(): Promise<void> {
     console.log(
       `  ${advanced} already-imported load(s) advanced by this export`,
     )
+    console.log(
+      `  ${ratesUpdated} rate(s) restated, each with a BILLING event naming old and new`,
+    )
+    if (rateFrozen.length > 0) {
+      console.log(
+        `  ${rateFrozen.length} rate change(s) REFUSED — Zebra has money against them:`,
+      )
+      for (const line of rateFrozen.slice(0, 20)) console.log(`    ${line}`)
+      if (rateFrozen.length > 20) {
+        console.log(`    … and ${rateFrozen.length - 20} more`)
+      }
+    }
     if (heldBackwards.length > 0) {
       console.log(
         `  ${heldBackwards.length} refused as BACKWARD — this export is behind the database:`,

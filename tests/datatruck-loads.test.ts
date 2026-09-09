@@ -5,6 +5,8 @@ import {
   planLoads,
   readEquipment,
   readPlace,
+  rateChangeFor,
+  rateFreezeFor,
   readStatus,
   syncDecisionFor,
 } from '@/lib/datatruck/loads'
@@ -383,5 +385,92 @@ describe('what a later export may change', () => {
       syncDecisionFor(at('DELIVERED', 'PAID'), at('DELIVERED', 'INVOICED'))
         .billing,
     ).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE RATE, WHICH DATATRUCK OWNS UNTIL ZEBRA SPENDS AGAINST IT.
+//
+// The gate is commitment, not age: a load from January with nothing against it
+// may be restated, and one from this morning that has been settled may not.
+// Every branch is asserted because the failure is silent — a rate moving under
+// a settled cheque makes the cheque disagree with the load it settled, and
+// nothing on any screen would say so.
+// ---------------------------------------------------------------------------
+
+describe('when a fresh export may restate the money', () => {
+  const load = (over: Partial<Parameters<typeof rateFreezeFor>[0]> = {}) => ({
+    billing: 'UNINVOICED' as const,
+    settlementLines: 0,
+    paymentApplications: 0,
+    ...over,
+  })
+
+  it('allows it on an open imported load with no money against it', () => {
+    expect(rateFreezeFor(load())).toEqual({ frozen: false })
+  })
+
+  it('freezes once a settlement line exists', () => {
+    expect(rateFreezeFor(load({ settlementLines: 1 }))).toEqual({
+      frozen: true,
+      why: 'settled',
+    })
+  })
+
+  it('freezes once a payment has been applied', () => {
+    expect(rateFreezeFor(load({ paymentApplications: 1 }))).toEqual({
+      frozen: true,
+      why: 'paid',
+    })
+  })
+
+  it('freezes a closed load, whatever else is true of it', () => {
+    expect(rateFreezeFor(load({ billing: 'CLOSED_IN_DATATRUCK' }))).toEqual({
+      frozen: true,
+      why: 'closed',
+    })
+  })
+})
+
+describe('what a restated rate looks like', () => {
+  it('returns null when nothing moved', () => {
+    expect(
+      rateChangeFor(
+        { linehaulCents: 100_000, accessorialCents: 0 },
+        { linehaulCents: 100_000, accessorialCents: 0 },
+      ),
+    ).toBeNull()
+  })
+
+  // THE WHOLE PICTURE MOVES TOGETHER. `accessorialsCents` is the sum of the
+  // load's billable accessorial rows; restating one without the other leaves
+  // the two disagreeing, and the import's reconciliation sums all three.
+  it('carries linehaul, accessorial and total together', () => {
+    const change = rateChangeFor(
+      { linehaulCents: 100_000, accessorialCents: 0 },
+      { linehaulCents: 120_000, accessorialCents: 17_500 },
+    )
+    expect(change?.linehaulCents).toBe(120_000)
+    expect(change?.accessorialCents).toBe(17_500)
+    expect(change?.totalRevenueCents).toBe(137_500)
+  })
+
+  // OLD AND NEW, BOTH. "The rate changed" is not an audit answer; a dispute
+  // turns on what it changed FROM.
+  it('names both figures in the event note', () => {
+    const change = rateChangeFor(
+      { linehaulCents: 100_000, accessorialCents: 0 },
+      { linehaulCents: 120_000, accessorialCents: 17_500 },
+    )
+    expect(change?.note).toContain('$1000.00 -> $1200.00')
+    expect(change?.note).toContain('$0.00 -> $175.00')
+  })
+
+  it('notices an accessorial moving on its own', () => {
+    const change = rateChangeFor(
+      { linehaulCents: 100_000, accessorialCents: 0 },
+      { linehaulCents: 100_000, accessorialCents: 5_000 },
+    )
+    expect(change?.totalRevenueCents).toBe(105_000)
   })
 })
