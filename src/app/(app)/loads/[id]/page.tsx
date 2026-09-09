@@ -108,6 +108,7 @@ const ALL_BILLING: LoadBillingStatus[] = [
   'PAID',
   'DISPUTED',
   'WRITTEN_OFF',
+  'CLOSED_IN_DATATRUCK',
 ]
 
 /**

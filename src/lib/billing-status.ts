@@ -43,7 +43,22 @@ import type { TxClient } from './tenancy'
  * two are decisions somebody made, and the module leaves them exactly alone —
  * both when writing and when checking for drift.
  */
-const DECIDED: readonly LoadBillingStatus[] = ['DISPUTED', 'WRITTEN_OFF']
+const DECIDED: readonly LoadBillingStatus[] = [
+  'DISPUTED',
+  'WRITTEN_OFF',
+  // ADDED 2026-09-09 WITH THE DATATRUCK HISTORY IMPORT. 14,345 loads were
+  // delivered, invoiced or paid in another system; none of it happened here,
+  // so there is no invoice and no payment for this rule to read and it would
+  // compute UNINVOICED for all of them.
+  //
+  // IT IS THE SAME KIND OF FACT AS THE TWO ABOVE — something somebody knows,
+  // not something arithmetic produces — which is why it belongs in this set
+  // rather than in the function. And it has to be here rather than merely
+  // written once: the planned POD import turns `isReady` true for delivered
+  // freight, and without this line the drift check would then reclassify a
+  // year of settled loads as READY_TO_INVOICE.
+  'CLOSED_IN_DATATRUCK',
+]
 
 export interface BillingFacts {
   /** POD in, rate on it, not cancelled — the load could be billed today. */

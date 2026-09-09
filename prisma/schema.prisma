@@ -1179,6 +1179,16 @@ model Load {
   loadNumber      String // allocated via Counter
   referenceNumber String? // the broker's load/PRO number
 
+  /// The id this load carried in the system it was migrated from.
+  ///
+  /// `Shipment ID` from Datatruck — the only column in that export unique
+  /// across all 14,451 rows. `Load ID` looks like the key and is the
+  /// CUSTOMER's reference: it repeats and it is sometimes blank, which is why
+  /// it lands in `referenceNumber` and this exists.
+  ///
+  /// NULL FOR EVERYTHING BOOKED IN ZEBRA, which is every load from here on.
+  externalId String?
+
   // PHASE 5 §3 STEP 5. The extraction has read both since step 1 and had
   // nowhere to put them: the step asks for a duplicate-BOL warning, and a
   // warning about a number the system never keeps cannot be written. Both are
@@ -1280,6 +1290,7 @@ model Load {
   inboundEmails       InboundEmail[]
 
   @@unique([companyId, loadNumber])
+  @@unique([organizationId, externalId])
   @@index([companyId, operationalStatus])
   @@index([companyId, billingStatus])
   @@index([companyId, customerId])
@@ -1310,6 +1321,13 @@ enum LoadBillingStatus {
   PAID
   DISPUTED
   WRITTEN_OFF
+
+  /// Billed, or not billed, in Datatruck — before this system existed.
+  ///
+  /// One of the DECIDED statuses in `billing-status.ts`: `billingStatusFor`
+  /// does not own it, so neither the writer nor the drift check will move it.
+  /// See 20260909120000 for why a computed status could not express this.
+  CLOSED_IN_DATATRUCK
 }
 
 enum EquipmentType {

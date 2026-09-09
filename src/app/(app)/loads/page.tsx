@@ -269,6 +269,9 @@ export default async function LoadsPage({
     'PAID',
     'DISPUTED',
     'WRITTEN_OFF',
+    // Imported history. It appears in the filter because a year of Datatruck
+    // freight is the largest thing on this screen and has to be narrowable to.
+    'CLOSED_IN_DATATRUCK',
   ]
 
   const mayCreate = await currentUserCan('create', 'load')

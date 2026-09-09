@@ -52,6 +52,11 @@ const BILLING: Record<LoadBillingStatus, StatusTone> = {
   PAID: 'success',
   DISPUTED: 'danger',
   WRITTEN_OFF: 'muted',
+  // MUTED, LIKE A WRITE-OFF AND FOR THE OPPOSITE REASON. Nothing is owed and
+  // nothing is due; this freight was settled in another system and no action
+  // on this screen can change it. A success tone would claim Zebra collected
+  // it, and a neutral one would invite somebody to try.
+  CLOSED_IN_DATATRUCK: 'muted',
 }
 
 export function operationalTone(status: LoadOperationalStatus): StatusTone {
