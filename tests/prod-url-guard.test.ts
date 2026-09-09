@@ -140,6 +140,16 @@ const MAINTENANCE_READERS = [
   // rather than among the read-only scripts because --apply writes, and being
   // on this list is the claim that a human read its dry run first.
   'repair-billing-drift.ts',
+  // ADDED 2026-09-09. `Sample Driver` — Datatruck's own test row, Driver ID 1
+  // — reached production with the terminated-driver import. `TEST_DATA` in
+  // drivers.ts stops a re-run recreating it; this removes the row already
+  // there, by soft delete, so it stays reversible and keeps its externalId.
+  //
+  // It counts all eleven tables that can point at a driver and REFUSES if any
+  // is non-zero: "it had nothing attached last Tuesday" is not a fact about
+  // today. Dry run by default, `--apply` a second decision, and a second run
+  // reports the row as already deleted and leaves it.
+  'remove-datatruck-sample-driver.ts',
 ]
 
 /**
