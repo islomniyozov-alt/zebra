@@ -138,10 +138,26 @@ async function main(): Promise<void> {
       existingByUnit.set(key, [...(existingByUnit.get(key) ?? []), truck])
     }
 
+    // ── A UNIT NUMBER HELD BY TWO TRUCKS IS A REFUSAL ──────────────────
+    //
+    // AND THIS ONE BIT. Production carries two trucks numbered `1024`: the
+    // real RAM Haulage Volvo and a hand-made Dolphins row with `WW2020` where
+    // a VIN belongs. This seed took `[0]` of the matches — an order Postgres
+    // never promised — so the first run filled the hand-made row's plate from
+    // the REAL truck's registration and wrote its compliance item there, and
+    // the second run picked the other row and wrote a duplicate.
+    //
+    // A seed that lands on a different row each time is not idempotent, and
+    // the damage is quiet: a plate copied onto the wrong vehicle reads exactly
+    // like a plate somebody entered. So an ambiguous unit is held and named,
+    // the same answer the load import gives for the same question.
     const fresh: PlannedTruck[] = []
     const known: PlannedTruck[] = []
+    const ambiguous: PlannedTruck[] = []
     for (const truck of plan.planned) {
-      if (existingByUnit.has(unitKey(truck.unitNumber))) known.push(truck)
+      const matches = existingByUnit.get(unitKey(truck.unitNumber)) ?? []
+      if (matches.length > 1) ambiguous.push(truck)
+      else if (matches.length === 1) known.push(truck)
       else fresh.push(truck)
     }
 
@@ -153,7 +169,22 @@ async function main(): Promise<void> {
     console.log(
       `  ${String(fresh.length).padStart(3)}  new units — created OUT_OF_SERVICE`,
     )
+    console.log(
+      `  ${String(ambiguous.length).padStart(3)}  units held by TWO trucks — refused`,
+    )
     console.log(`  ${String(plan.held.length).padStart(3)}  held`)
+
+    for (const truck of ambiguous) {
+      const matches = existingByUnit.get(unitKey(truck.unitNumber)) ?? []
+      console.log(
+        `
+  AMBIGUOUS unit ${truck.unitNumber}: ${matches.length} trucks carry it —`,
+      )
+      for (const match of matches) console.log(`    ${match.id}`)
+      console.log(
+        '    Refused. This seed will not guess which one the export means.',
+      )
+    }
 
     heading(`HELD — ${plan.held.length} rows this seed will not write`)
     for (const held of plan.held) {
@@ -209,6 +240,10 @@ async function main(): Promise<void> {
     let filled = 0
 
     for (const truck of plan.planned) {
+      // Ambiguous units are refused above and are not written to at all.
+      if ((existingByUnit.get(unitKey(truck.unitNumber)) ?? []).length > 1) {
+        continue
+      }
       const companyId = companyByName.get(truck.authority)
       if (!companyId) {
         console.log(
