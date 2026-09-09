@@ -5,6 +5,7 @@ import {
   addCompany,
   companyUsage,
   deleteCompany,
+  SELECTABLE_AUTHORITY,
   setCompanyActive,
   updateCompany,
 } from '@/lib/companies'
@@ -403,5 +404,111 @@ describe('deactivating rather than deleting', () => {
 
     const refused = await inOrg((tx) => deleteCompany(tx, company.id))
     expect(refused).toMatchObject({ ok: false, reason: 'has_history' })
+  }, 300_000)
+})
+
+describe('retiring an authority, which is not the same as deactivating it', () => {
+  // ── THE DISTINCTION IS THE WHOLE FEATURE ─────────────────────────────────
+  //
+  // The Datatruck load history names three authorities this group no longer
+  // runs under — Midwest Global Logistics, American Soldier Transport, AG
+  // FREIGHT — carrying 2,757 loads and $2.77M between them. Those loads have
+  // to land somewhere, be filterable, and never be joinable by anything new.
+  //
+  // `isActive: false` gets two of those three right and fails the middle one:
+  // the load list's authority filter uses the same predicate as the create
+  // select, so deactivating would hide 2,757 loads behind a chip that is no
+  // longer rendered. Hence a second flag, and hence this test — because two
+  // booleans that mean nearly the same thing are exactly where a rule gets
+  // applied to the wrong one.
+  it('leaves every creation picker and stays in the history filter', async () => {
+    const retired = await owner.company.create({
+      data: {
+        organizationId,
+        name: `Midwest Global ${nonce}`,
+        retired: true,
+      },
+    })
+
+    // WHAT THE NINE CREATION SCREENS ASK. One predicate, so this is the real
+    // one rather than a copy of it that could drift.
+    const bookable = await inOrg((tx) =>
+      tx.company.findMany({
+        where: { ...SELECTABLE_AUTHORITY },
+        select: { id: true },
+      }),
+    )
+    expect(bookable.map((row) => row.id)).not.toContain(retired.id)
+
+    // WHAT THE LOAD LIST'S AUTHORITY FILTER ASKS, which is `isActive` alone.
+    // A retired authority MUST still be here: this is the assertion that
+    // stops somebody "simplifying" the two flags back into one.
+    const filterable = await inOrg((tx) =>
+      tx.company.findMany({
+        where: { isActive: true },
+        select: { id: true },
+      }),
+    )
+    expect(filterable.map((row) => row.id)).toContain(retired.id)
+  }, 300_000)
+
+  // THE OTHER BRANCH, WATCHED. A guard seen only passing is not known to work:
+  // if `retired` were ignored by the predicate, the test above would still be
+  // green for a live company and this one proves the column is what does it.
+  it('and the same row, not retired, IS offered', async () => {
+    const company = await owner.company.findFirstOrThrow({
+      where: { organizationId, name: `Midwest Global ${nonce}` },
+    })
+
+    await owner.company.update({
+      where: { id: company.id },
+      data: { retired: false },
+    })
+    const nowBookable = await inOrg((tx) =>
+      tx.company.findMany({
+        where: { ...SELECTABLE_AUTHORITY },
+        select: { id: true },
+      }),
+    )
+    expect(nowBookable.map((row) => row.id)).toContain(company.id)
+
+    await owner.company.update({
+      where: { id: company.id },
+      data: { retired: true },
+    })
+  }, 300_000)
+
+  // RETIRED AND INACTIVE ARE INDEPENDENT, and the seed relies on it: the three
+  // imported authorities are created retired and LEFT ACTIVE, which is what
+  // keeps their freight filterable. A retired row that also went inactive
+  // would be invisible in both places, which is the failure this whole design
+  // exists to avoid.
+  it('is created retired and active in one statement, never in two', async () => {
+    // THE PLAN LIMIT IS RAISED HERE, DELIBERATELY. This suite's organization is
+    // created with `maxCompanies: 2` so the limit tests above can reach it, and
+    // those have already run. Raising it now is the cheapest way to exercise
+    // `addCompany` itself rather than asserting the seed path through a
+    // hand-made row, which would be a test of Prisma's default rather than of
+    // our code.
+    await owner.organization.update({
+      where: { id: organizationId },
+      data: { maxCompanies: 20 },
+    })
+
+    const outcome = await inOrg((tx) =>
+      addCompany(tx, organizationId, {
+        name: `AG Freight ${nonce}`,
+        retired: true,
+      }),
+    )
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) return
+
+    const created = await owner.company.findUniqueOrThrow({
+      where: { id: outcome.id },
+      select: { retired: true, isActive: true },
+    })
+    expect(created.retired).toBe(true)
+    expect(created.isActive).toBe(true)
   }, 300_000)
 })

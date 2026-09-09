@@ -1,0 +1,35 @@
+-- AN AUTHORITY THIS GROUP NO LONGER OPERATES UNDER, KEPT BECAUSE ITS FREIGHT
+-- IS REAL.
+--
+-- The Datatruck load history names five authorities. Two of them this system
+-- has never heard of — `American Soldier Transport LLC` (599 loads) and
+-- `AG FREIGHT INC` (2) — and a third, `Midwest Global Logistics LLC` (2,156),
+-- exists in the code only as a string in `RETIRED_MC` inside `trucks.ts`,
+-- where the truck seeder used it to refuse rows. Together they carry 2,757
+-- loads and $2.77M of real freight that has to land somewhere it can be read.
+--
+-- ── WHY NOT `isActive: false`, WHICH ALREADY EXISTS ──────────────────────
+--
+-- Deactivation is documented in `src/lib/companies.ts` as "take an authority
+-- out of service without taking its history with it", and it does most of what
+-- is wanted here: the row stays, its loads keep rendering, and it disappears
+-- from the topbar switcher and the create-load select.
+--
+-- It disappears from ONE PLACE TOO MANY. The load list's authority filter uses
+-- the same `isActive: true` predicate, so deactivating these three would hide
+-- 2,757 loads behind a filter chip that no longer exists — history that is in
+-- the database and unreachable from the interface. And `reactivateCompanyAction`
+-- is one button: an authority we can never legally run freight under again
+-- should not be one click from being offered in a picker.
+--
+-- So this is a SECOND, ORTHOGONAL FLAG rather than a reuse of the first, and
+-- the two are kept from contradicting each other by a rule rather than by
+-- care: a retired company stays `isActive: true`. Creation surfaces filter on
+-- both; history surfaces filter on neither.
+--
+-- ADDITIVE, NOT NULL, DEFAULT FALSE. Every existing row is a live authority
+-- and false is the truthful value for all three of them. No backfill.
+ALTER TABLE "Company" ADD COLUMN "retired" BOOLEAN NOT NULL DEFAULT false;
+
+-- NO GRANT AND NO POLICY NEEDED: a column on a table that already carries its
+-- grants and its org_isolation policy from 20260728224443_init.

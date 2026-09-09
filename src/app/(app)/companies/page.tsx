@@ -25,6 +25,7 @@ interface Row {
   dot: string
   where: string
   isActive: boolean
+  retired: boolean
 }
 
 export default async function CompaniesPage() {
@@ -46,6 +47,7 @@ export default async function CompaniesPage() {
           city: true,
           state: true,
           isActive: true,
+          retired: true,
         },
       }),
       tx.organization.findFirst({ select: { maxCompanies: true } }),
@@ -60,6 +62,7 @@ export default async function CompaniesPage() {
     dot: company.dotNumber ?? '—',
     where: [company.city, company.state].filter(Boolean).join(', ') || '—',
     isActive: company.isActive,
+    retired: company.retired,
   }))
 
   const columns: Column<Row>[] = [
@@ -98,8 +101,16 @@ export default async function CompaniesPage() {
     {
       key: 'status',
       header: t('companies.status'),
+      // RETIRED OUTRANKS ACTIVE HERE, and that is not a contradiction:
+      // a retired authority stays `isActive` ON PURPOSE, so that its freight
+      // keeps a filter chip on the load list. Reporting it as "Active" would
+      // be true of the column and false of the thing — this is the one screen
+      // where somebody asks why a carrier is missing from a select, and the
+      // answer has to be readable.
       render: (row: Row) =>
-        row.isActive ? (
+        row.retired ? (
+          <span className="text-ink-3">{t('companies.retired')}</span>
+        ) : row.isActive ? (
           t('companies.active')
         ) : (
           <span className="text-ink-3">{t('companies.inactive')}</span>

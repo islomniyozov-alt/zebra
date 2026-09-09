@@ -151,6 +151,7 @@ const en = {
   'fmcsa.error.tooMany':
     'That is a lot of lookups. Wait {seconds} seconds and try again — the FMCSA key is shared, so a burst here costs everybody.',
   'companies.inactive': 'Deactivated',
+  'companies.retired': 'Retired',
   'companies.editHint':
     'Correcting an authority changes what prints on every invoice it sends. The FMCSA lookup works here too.',
   'companies.usageSummary':
@@ -1921,6 +1922,7 @@ const ru: Dictionary = {
   'fmcsa.error.tooMany':
     'Слишком много запросов. Подождите {seconds} с и попробуйте снова — ключ FMCSA общий, и всплеск здесь стоит всем.',
   'companies.inactive': 'Отключён',
+  'companies.retired': 'Выведен',
   'companies.editHint':
     'Изменение перевозчика меняет то, что печатается на каждом его счёте. Поиск в FMCSA работает и здесь.',
   'companies.usageSummary':
@@ -3687,6 +3689,7 @@ const fa: Dictionary = {
   'fmcsa.error.tooMany':
     'تعداد جست‌وجوها زیاد است. {seconds} ثانیه صبر کنید و دوباره تلاش کنید — کلید FMCSA مشترک است و انفجار درخواست اینجا برای همه هزینه دارد.',
   'companies.inactive': 'غیرفعال شده',
+  'companies.retired': 'بازنشسته',
   'companies.editHint':
     'تغییر یک شرکت، چیزی را که روی هر فاکتور آن چاپ می‌شود عوض می‌کند. جست‌وجوی FMCSA اینجا هم کار می‌کند.',
   'companies.usageSummary':

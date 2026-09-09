@@ -213,6 +213,22 @@ model Company {
 
   isActive Boolean @default(true)
 
+  /// An authority this carrier group no longer operates under, kept because
+  /// its freight is real.
+  ///
+  /// NOT `isActive`, AND THE DIFFERENCE IS THE POINT. Deactivating takes an
+  /// authority we still own out of service: it leaves every picker AND the
+  /// load list's authority filter, and one click in the interface brings it
+  /// back. A retired authority is the opposite arrangement — it must never be
+  /// offered for NEW freight, and must stay visible everywhere history is
+  /// read, because 2,757 imported Datatruck loads are filed under three of
+  /// them and an authority you cannot filter to is history you cannot find.
+  ///
+  /// So retired rows stay `isActive: true` and the two flags never contradict
+  /// each other. Creation surfaces ask for both; history surfaces ask for
+  /// neither.
+  retired Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1094,10 +1110,10 @@ model Location {
 
   stops LoadStop[]
 
+  @@unique([organizationId, facilityCode])
   @@index([organizationId, name])
   @@index([organizationId, state, city])
   @@index([organizationId, normalizedAddress])
-  @@unique([organizationId, facilityCode])
 }
 
 model FactoringCompany {

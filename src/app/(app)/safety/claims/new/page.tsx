@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation'
+import { SELECTABLE_AUTHORITY } from '@/lib/companies'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyIdScopeFilter, companyScopeFilter } from '@/lib/tenancy'
@@ -19,7 +20,7 @@ export default async function NewClaimPage() {
         tx.company.findMany({
           // `id`, not `companyId` — Company IS the authority. See tenancy.ts.
           where: {
-            isActive: true,
+            ...SELECTABLE_AUTHORITY,
             ...companyIdScopeFilter(session.companyScopes),
           },
           orderBy: { name: 'asc' },

@@ -168,7 +168,21 @@ const MAINTENANCE_READERS = [
  * claim MAINTENANCE_READERS makes, one step further, because these create
  * rows rather than repairing them.
  */
-const SEED_WRITERS = ['seed-datatruck-trucks.ts', 'seed-datatruck-drivers.ts']
+const SEED_WRITERS = [
+  'seed-datatruck-trucks.ts',
+  'seed-datatruck-drivers.ts',
+  // ADDED 2026-09-08. The load history names five MC holders; three of them
+  // exist nowhere in Zebra and carry 2,757 loads between them. This creates
+  // those three as RETIRED companies — never offered for new freight, always
+  // visible where history is read — and it is a prerequisite rather than a
+  // convenience: nothing about the load import can begin while 2,757 loads
+  // have no authority to be filed under.
+  //
+  // Held to the same rule as the two above: preview by default, `--write` a
+  // second decision, `assertTenancy` before anything. It writes THREE rows and
+  // no money, which is the smallest thing on this list.
+  'seed-datatruck-authorities.ts',
+]
 
 const ALLOWED = [
   ...CHECK_READERS,

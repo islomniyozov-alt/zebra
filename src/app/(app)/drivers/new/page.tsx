@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation'
+import { SELECTABLE_AUTHORITY } from '@/lib/companies'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyIdScopeFilter, companyScopeFilter } from '@/lib/tenancy'
@@ -22,7 +23,7 @@ export default async function NewDriverPage() {
       return {
         companies: await tx.company.findMany({
           // `id`, not `companyId` — Company IS the authority. See tenancy.ts.
-          where: { isActive: true, ...companyIdScope },
+          where: { ...SELECTABLE_AUTHORITY, ...companyIdScope },
           orderBy: { name: 'asc' },
           select: { id: true, name: true },
         }),

@@ -20,6 +20,37 @@ import { optionalText, stateCode } from './reference'
 // reasoning `factoring.ts` records about its own company lookup.
 // ---------------------------------------------------------------------------
 
+/**
+ * THE AUTHORITIES SOMETHING NEW MAY BE FILED UNDER.
+ *
+ * ONE PREDICATE, NOT NINE COPIES OF A RULE. Nine screens offer a choice of
+ * authority — create load, the Relay import, new driver, new truck, new
+ * trailer, the two asset transfers, a new claim — and each carried its own
+ * inline `{ isActive: true }`. Adding a second condition to a rule written out
+ * nine times is nine chances to miss one, and the one you miss is a screen
+ * that still offers a carrier nothing may be filed under. This is the same
+ * move `permissions.ts` makes for permission and `companyScopeFilter` for
+ * scope: the rule has one home and the screens ask it.
+ *
+ * TWO FLAGS, TWO DIFFERENT QUESTIONS:
+ *
+ *   `isActive: false` — an authority we own, out of service for now, one
+ *   click from coming back.
+ *   `retired: true` — an authority we will never run freight under again,
+ *   kept because 2,757 imported Datatruck loads are filed under three of them.
+ *
+ * BOTH ARE EXCLUDED FROM NEW WORK AND ONLY ONE IS EXCLUDED FROM HISTORY, which
+ * is why this predicate belongs to CREATION surfaces alone. The load list's
+ * authority filter, the settlement list and the companies screen deliberately
+ * do not call it: an authority you cannot filter to is history you cannot
+ * find, and hiding 2,757 loads is a worse failure than offering one carrier
+ * too many in a select.
+ */
+export const SELECTABLE_AUTHORITY = {
+  isActive: true,
+  retired: false,
+} as const
+
 export type AddCompanyFailure =
   | 'no_name'
   | 'duplicate_name'
@@ -43,6 +74,14 @@ export interface AddCompanyInput {
   postalCode?: string | null
   phone?: string | null
   email?: string | null
+  /**
+   * An authority created only to hold history — see `SELECTABLE_AUTHORITY`.
+   *
+   * Absent from `addCompanyAction`'s form on purpose: the interface has no way
+   * to create one, because "add a carrier we may never use" is not a thing
+   * anybody does on a screen. The migration seed passes it.
+   */
+  retired?: boolean
 }
 
 /**
@@ -84,7 +123,25 @@ export async function addCompany(
   })
   const limit = organization?.maxCompanies ?? 1
 
-  const existing = await tx.company.count()
+  // ── SCOPED BY organizationId, NOT BY WHO IS ASKING ──────────────────────
+  //
+  // These three lookups used to be bare — no `where` at all — and were correct
+  // for every caller there was: the action runs behind `withCurrentOrg`, so
+  // row-level security had already narrowed `Company` to the tenant and an
+  // unscoped count WAS the tenant's count.
+  //
+  // THE SEED IS A CALLER RLS IS NOT WATCHING. `seed-datatruck-authorities.ts`
+  // connects as the database owner, which carries BYPASSRLS, and there the
+  // same three queries see every organization on the database. The plan limit
+  // then counts other tenants' carriers against this one's allowance, and the
+  // duplicate-name check refuses a name because a DIFFERENT customer uses it.
+  // Both were observed on dev: the third authority came back `limit_reached`
+  // with two of five used.
+  //
+  // Stated explicitly, so the function is correct on its own terms rather than
+  // correct because of where it happens to be called from. Under RLS this is
+  // redundant and free; off it, it is the whole thing.
+  const existing = await tx.company.count({ where: { organizationId } })
   if (existing >= limit) {
     return { ok: false, reason: 'limit_reached', limit }
   }
@@ -95,7 +152,7 @@ export async function addCompany(
   // enforced by RLS and a unique index would have to include it, which is a
   // migration this screen does not need to earn.
   const clash = await tx.company.findFirst({
-    where: { name: { equals: name, mode: 'insensitive' } },
+    where: { organizationId, name: { equals: name, mode: 'insensitive' } },
     select: { id: true },
   })
   if (clash) return { ok: false, reason: 'duplicate_name' }
@@ -115,7 +172,7 @@ export async function addCompany(
   const dotNumber = optionalText(input.dotNumber)
   if (dotNumber !== null) {
     const sameDot = await tx.company.findFirst({
-      where: { dotNumber },
+      where: { organizationId, dotNumber },
       select: { id: true },
     })
     if (sameDot) {
@@ -137,6 +194,14 @@ export async function addCompany(
       postalCode: optionalText(input.postalCode),
       phone: optionalText(input.phone),
       email: optionalText(input.email),
+      // RETIRED FROM THE FIRST INSTANT, WHEN THAT IS WHAT IT IS.
+      //
+      // The three Datatruck authorities are created retired — they exist to
+      // hold 2,757 imported loads and nothing else. Create-then-update would
+      // leave a window, however short, in which a live carrier nobody may file
+      // under is sitting in the create-load select. The interface never sends
+      // this; only the migration seed does.
+      retired: input.retired === true,
     },
     select: { id: true },
   })
