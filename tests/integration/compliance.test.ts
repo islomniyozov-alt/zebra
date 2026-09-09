@@ -530,3 +530,116 @@ describe('§4: an expired truck warns at dispatch and does not block', () => {
     expect(line).toBe('truck 104 INSURANCE_LIABILITY expired 2026-06-27')
   })
 })
+
+// ---------------------------------------------------------------------------
+// THE QUEUE IS WHAT SOMEBODY CAN ACT ON.
+//
+// Added with the all-trucks import, which writes compliance rows from the
+// registration, inspection and insurance dates on EVERY truck — 67 expired
+// registrations and 25 expired insurance dates among them, most on trucks that
+// left the fleet. Without this narrowing the safety queue fills with renewals
+// nobody can perform, and a work list that cannot be worked stops being read.
+//
+// BOTH BRANCHES ARE WATCHED HERE. A test that only ever sees the row excluded
+// would pass just as happily against a filter that excluded everything.
+// ---------------------------------------------------------------------------
+describe('the queue shows only what somebody can act on', () => {
+  // ITS OWN TRUCK, NOT THE FIXTURE'S. The shared truck already carries a
+  // RENEWED registration, and a second one dated earlier is superseded by
+  // design — which is correct behaviour and would have hidden this filter
+  // behind an unrelated rule. Found by the test failing.
+  async function ownTruck(label: string) {
+    const truck = await owner.truck.create({
+      data: {
+        organizationId,
+        companyId,
+        unitNumber: `Q-${label}-${nonce}`,
+      },
+    })
+    const item = await owner.complianceItem.create({
+      data: {
+        organizationId,
+        companyId,
+        type: 'REGISTRATION',
+        truckId: truck.id,
+        expiresAt: new Date(NOW.getTime() - 30 * 24 * 60 * 60 * 1000),
+      },
+    })
+    return { truckId: truck.id, item }
+  }
+
+  it('drops a truck taken out of service, and brings it back when it returns', async () => {
+    const { truckId, item } = await ownTruck('oos')
+
+    const live = await inOrg((tx) => complianceQueue(tx, {}, {}, NOW))
+    expect(live.rows.map((row) => row.id)).toContain(item.id)
+
+    await owner.truck.update({
+      where: { id: truckId },
+      data: { status: 'OUT_OF_SERVICE' },
+    })
+    const parked = await inOrg((tx) => complianceQueue(tx, {}, {}, NOW))
+    expect(parked.rows.map((row) => row.id)).not.toContain(item.id)
+
+    // AND THE ROW IS STILL THERE. Only the queue is narrowed; the truck's own
+    // page is the history and must keep showing what the vehicle carried.
+    const panel = await inOrg((tx) =>
+      recordsForSubject(tx, 'truck', truckId, NOW),
+    )
+    expect(panel.map((row) => row.id)).toContain(item.id)
+
+    await owner.truck.update({
+      where: { id: truckId },
+      data: { status: 'AVAILABLE' },
+    })
+    const back = await inOrg((tx) => complianceQueue(tx, {}, {}, NOW))
+    expect(back.rows.map((row) => row.id)).toContain(item.id)
+  }, 300_000)
+
+  it('drops an inactive driver the same way', async () => {
+    const driver = await owner.driver.create({
+      data: {
+        organizationId,
+        companyId,
+        firstName: 'Queue',
+        lastName: `Tester ${nonce}`,
+      },
+    })
+    const item = await owner.complianceItem.create({
+      data: {
+        organizationId,
+        companyId,
+        type: 'CDL',
+        driverId: driver.id,
+        expiresAt: new Date(NOW.getTime() - 30 * 24 * 60 * 60 * 1000),
+      },
+    })
+
+    const live = await inOrg((tx) => complianceQueue(tx, {}, {}, NOW))
+    expect(live.rows.map((row) => row.id)).toContain(item.id)
+
+    await owner.driver.update({
+      where: { id: driver.id },
+      data: { status: 'INACTIVE' },
+    })
+    const gone = await inOrg((tx) => complianceQueue(tx, {}, {}, NOW))
+    expect(gone.rows.map((row) => row.id)).not.toContain(item.id)
+  }, 300_000)
+
+  // A truck in the shop is coming back this week and its registration still
+  // has to be current — the same line `ASSIGNABLE_TRUCK` draws.
+  it('keeps a truck that is only in for maintenance', async () => {
+    const { truckId, item } = await ownTruck('maint')
+    await owner.truck.update({
+      where: { id: truckId },
+      data: { status: 'MAINTENANCE' },
+    })
+    const queue = await inOrg((tx) => complianceQueue(tx, {}, {}, NOW))
+    expect(queue.rows.map((row) => row.id)).toContain(item.id)
+
+    await owner.truck.update({
+      where: { id: truckId },
+      data: { status: 'AVAILABLE' },
+    })
+  }, 300_000)
+})

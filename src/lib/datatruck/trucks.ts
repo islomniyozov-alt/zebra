@@ -101,6 +101,47 @@ const UNIT_AUTHORITY: Readonly<Record<string, string>> = {
   '7072': 'RAM Haulage',
   '9587': 'RAM Haulage',
   '2400': 'RAM Haulage',
+
+  // ── THIRTEEN MORE, 2026-09-09, FROM THE ALL-TRUCKS EXPORT ─────────────
+  //
+  // The same measurement and the same table. These units carry a BLANK MC
+  // number and between them 1,089 loads that would otherwise import naming no
+  // truck. Plurality and last-ran, per unit, from
+  // `scripts/profile-datatruck-loads.ts`.
+  //
+  // ELEVEN AGREE OUTRIGHT — the unit ran under one authority, or overwhelmingly
+  // under one, and finished there.
+  '51129': 'Dolphins Transport', //  24 loads, all Dolphin
+  '2589': 'Dolphins Transport', //    1 load,  Dolphin
+  '4475': 'Midwest Global Logistics LLC', //  40, all Midwest
+  '4329': 'American Soldier Transport LLC', // 9 of 12, and last
+  '3929': 'Midwest Global Logistics LLC', // 133, all Midwest
+  '3287': 'Midwest Global Logistics LLC', //  55, all Midwest
+  '2979': 'Midwest Global Logistics LLC', //   6, all Midwest
+  '1367': 'RAM Haulage', //  90 of 146, and last (2026-03-11)
+  '1341': 'Dolphins Transport', // 131 of 145, and last
+  '255': 'Dolphins Transport', // 113 of 139, and last
+  //
+  // ── THREE WHERE THE TWO SIGNALS DISAGREE, AND PLURALITY DECIDES ───────
+  //
+  // Stated as a rule rather than settled case by case: WHERE A UNIT RAN is
+  // better evidence of whose truck it was than where it happened to finish. A
+  // last load is one load, and one load is not where a vehicle lived.
+  //
+  //   520  148 Midwest / 67 Dolphin / 15 American Soldier; last was Dolphin.
+  //        More than double, so Midwest.
+  //   155  97 American Soldier / 1 AG FREIGHT; last was that single AG load.
+  //        Ninety-seven to one is not a close call.
+  //   03   31 Midwest / 21 Dolphin / 5 RAM / 3 American Soldier; last was RAM
+  //        on 5 loads. The weakest of the three and still Midwest by half.
+  '520': 'Midwest Global Logistics LLC',
+  '155': 'American Soldier Transport LLC',
+  '03': 'Midwest Global Logistics LLC',
+  //
+  // UNIT `10` IS DELIBERATELY ABSENT. It has a blank MC and NO FREIGHT AT ALL
+  // in the history — nothing to measure, so nothing to state. It stays held
+  // and named in the seed report, which is the honest outcome: this table is
+  // evidence written down, and there is none for that unit.
 }
 
 /**

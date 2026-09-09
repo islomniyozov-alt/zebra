@@ -292,6 +292,7 @@ export async function complianceQueue(
       ...scope,
       deletedAt: null,
       expiresAt: { lte: horizon },
+      ...ACTIONABLE_SUBJECT,
       ...(query.type ? { type: query.type } : {}),
       ...subjectWhere(query.subject),
     },
@@ -364,6 +365,45 @@ function subjectIdOf(row: {
 }
 
 /** `{ truckId: { not: null } }` and friends — the subject filter. */
+/**
+ * The queue is only what somebody can act on.
+ *
+ * ── A SOLD TRUCK'S EXPIRED REGISTRATION IS HISTORY, NOT A TASK ────────────
+ *
+ * The all-trucks import writes compliance rows from the registration, annual
+ * inspection and insurance dates on EVERY truck, live or not — the owner's
+ * ruling, because a lapsed registration on a truck that left the fleet is
+ * worth having. 67 of 87 registrations and all 25 insurance dates in that
+ * import are already expired.
+ *
+ * Every one of those would otherwise land in this queue, which exists to tell
+ * a safety manager what to renew. Nobody can renew the registration on a truck
+ * the company no longer owns, and a queue whose rows cannot be acted on stops
+ * being read — which costs the rows that CAN be acted on their only audience.
+ *
+ * THE ROWS ARE NOT HIDDEN, ONLY THE QUEUE IS NARROWED. A compliance item still
+ * renders on its own truck's or driver's page, where it is what it is: the
+ * record of a vehicle this carrier ran. `complianceQueue` is the work list;
+ * the asset page is the history.
+ *
+ * IT LIVES HERE RATHER THAN ON THE SCREEN because the Safety page derives its
+ * chip counts from this same function — a filter applied in the page would
+ * make every count disagree with the list beneath it.
+ *
+ * MAINTENANCE IS NOT EXCLUDED, matching `ASSIGNABLE_TRUCK`: a truck in the shop
+ * is coming back and its registration still has to be current.
+ */
+const ACTIONABLE_SUBJECT: Prisma.ComplianceItemWhereInput = {
+  OR: [
+    { truck: { status: { notIn: ['OUT_OF_SERVICE', 'SOLD'] } } },
+    { driver: { status: { not: 'INACTIVE' } } },
+    // A trailer has no such status, and an item attached to none of the three
+    // is an organization-level document — neither is excluded by this.
+    { trailerId: { not: null } },
+    { truckId: null, driverId: null, trailerId: null },
+  ],
+}
+
 function subjectWhere(
   subject: ComplianceSubject | undefined,
 ): Prisma.ComplianceItemWhereInput {
