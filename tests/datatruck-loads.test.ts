@@ -6,6 +6,7 @@ import {
   readEquipment,
   readPlace,
   readStatus,
+  syncDecisionFor,
 } from '@/lib/datatruck/loads'
 
 // ---------------------------------------------------------------------------
@@ -284,5 +285,103 @@ describe('planning a load', () => {
     const [load] = planLoads([row()]).planned
     expect(load?.driverName).toBe('Sebastian Zorzoli')
     expect(load?.truckUnit).toBe('1995')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE RECURRING SYNC, WHICH ONLY EVER MOVES FREIGHT FORWARD.
+//
+// Dispatchers stay on Datatruck until Zebra is finished, so the same export
+// arrives again with the same Shipment IDs and some rows have moved on. Every
+// assertion here is about the direction of travel, because the failure mode is
+// silent: a stale export re-run would undeliver freight that has arrived, and
+// nothing on any screen would say it had happened.
+// ---------------------------------------------------------------------------
+
+describe('what a later export may change', () => {
+  const at = (
+    operational: Parameters<typeof syncDecisionFor>[0]['operational'],
+    billing: Parameters<typeof syncDecisionFor>[0]['billing'],
+  ) => ({ operational, billing })
+
+  it('advances a load that has moved on', () => {
+    const decision = syncDecisionFor(
+      at('BOOKED', 'UNINVOICED'),
+      at('IN_TRANSIT', 'UNINVOICED'),
+    )
+    expect(decision.operational).toBe('IN_TRANSIT')
+    expect(decision.billing).toBeNull()
+    expect(decision.notes.join()).toContain('BOOKED -> IN_TRANSIT')
+  })
+
+  // THE ONE THAT MATTERS. Re-running last Tuesday's file must not undeliver
+  // freight that arrived on Wednesday.
+  it('REFUSES to walk a load backwards, and says so', () => {
+    const decision = syncDecisionFor(
+      at('DELIVERED', 'UNINVOICED'),
+      at('BOOKED', 'UNINVOICED'),
+    )
+    expect(decision.operational).toBeNull()
+    expect(decision.notes.join()).toContain('behind DELIVERED')
+  })
+
+  it('closes a load whatever its rank', () => {
+    const decision = syncDecisionFor(
+      at('BOOKED', 'UNINVOICED'),
+      at('DELIVERED', 'CLOSED_IN_DATATRUCK'),
+    )
+    expect(decision.operational).toBe('DELIVERED')
+    expect(decision.billing).toBe('CLOSED_IN_DATATRUCK')
+  })
+
+  // CLOSED IS FINAL. Nothing in a later export reopens finished history —
+  // not a status, not a billing state, not a backward step.
+  it('leaves a closed load entirely alone', () => {
+    const decision = syncDecisionFor(
+      at('DELIVERED', 'CLOSED_IN_DATATRUCK'),
+      at('BOOKED', 'UNINVOICED'),
+    )
+    expect(decision).toEqual({ operational: null, billing: null, notes: [] })
+  })
+
+  it('does nothing at all when nothing moved', () => {
+    const decision = syncDecisionFor(
+      at('DELIVERED', 'UNINVOICED'),
+      at('DELIVERED', 'UNINVOICED'),
+    )
+    expect(decision).toEqual({ operational: null, billing: null, notes: [] })
+  })
+
+  // A DISPUTE IS NOT A POINT ON THE LADDER. `billingStatusFor` does not own
+  // DISPUTED or WRITTEN_OFF, and neither does an import: they are decisions
+  // somebody made here, and an export has no opinion worth acting on.
+  it('refuses to order a decided billing state', () => {
+    const decision = syncDecisionFor(
+      at('DELIVERED', 'DISPUTED'),
+      at('DELIVERED', 'UNINVOICED'),
+    )
+    expect(decision.billing).toBeNull()
+    expect(decision.notes.join()).toContain('not comparable')
+  })
+
+  it('still closes a disputed load, because closing is always allowed', () => {
+    const decision = syncDecisionFor(
+      at('DELIVERED', 'DISPUTED'),
+      at('DELIVERED', 'CLOSED_IN_DATATRUCK'),
+    )
+    expect(decision.billing).toBe('CLOSED_IN_DATATRUCK')
+  })
+
+  it('advances billing forward when the ladder allows it', () => {
+    expect(
+      syncDecisionFor(
+        at('DELIVERED', 'UNINVOICED'),
+        at('DELIVERED', 'INVOICED'),
+      ).billing,
+    ).toBe('INVOICED')
+    expect(
+      syncDecisionFor(at('DELIVERED', 'PAID'), at('DELIVERED', 'INVOICED'))
+        .billing,
+    ).toBeNull()
   })
 })

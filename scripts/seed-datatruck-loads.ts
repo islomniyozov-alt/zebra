@@ -5,6 +5,7 @@ import { asRecords, readXlsx } from '@/lib/datatruck/xlsx'
 import {
   datatruckCents,
   planLoads,
+  syncDecisionFor,
   type PlannedLoad,
 } from '@/lib/datatruck/loads'
 import { formatCents } from '@/lib/money'
@@ -32,13 +33,21 @@ import { assertTenancy } from './datatruck-tenancy'
 // It is checked in the PREVIEW, so a discrepancy is found before a row lands
 // rather than after 14,451 of them do.
 //
-// ── RESUMABLE, WHICH MEANS IDEMPOTENT BY externalId ───────────────────────
+// ── RESUMABLE, AND A RECURRING SYNC ───────────────────────────────────────
 //
-// Every batch asks which of its Shipment IDs are already present and skips
-// them. A run that dies at row 9,000 is re-run with the same command and
-// continues; a run that completes and is run again writes nothing. There is no
+// Every batch asks which of its Shipment IDs are already present. A run that
+// dies at row 9,000 is re-run with the same command and continues. There is no
 // checkpoint file, because a checkpoint is a second source of truth about what
 // happened and the database is the first one.
+//
+// AND RE-RUNNING IS NOT A NO-OP ANY MORE. Dispatchers stay on Datatruck until
+// Zebra is finished, so the same export comes back with some loads moved on. A
+// row this import created and has not closed may be ADVANCED — never walked
+// backwards, and closing is always allowed. `syncDecisionFor` owns that rule
+// and is tested without a database; this file only writes what it returns.
+//
+// A load with no `externalId` was booked in Zebra and is none of the sync's
+// business: those stay add-missing, as they always were.
 //
 // ── WHAT IT NEVER TOUCHES ─────────────────────────────────────────────────
 //
@@ -528,6 +537,8 @@ async function main(): Promise<void> {
     let created = 0
     let skipped = 0
     let trucksFilled = 0
+    let advanced = 0
+    const heldBackwards: string[] = []
     let batchIndex = 0
 
     for (const batch of chunk(toCreate, BATCH)) {
@@ -539,7 +550,13 @@ async function main(): Promise<void> {
           organizationId: tenancy.organizationId,
           externalId: { in: batch.map((load) => load.externalId) },
         },
-        select: { id: true, externalId: true, truckId: true },
+        select: {
+          id: true,
+          externalId: true,
+          truckId: true,
+          operationalStatus: true,
+          billingStatus: true,
+        },
       })
       const already = new Map(present.map((row) => [row.externalId ?? '', row]))
       const fresh = batch.filter((load) => !already.has(load.externalId))
@@ -558,14 +575,42 @@ async function main(): Promise<void> {
       // newer truths than this file.
       for (const load of batch) {
         const row = already.get(load.externalId)
-        if (!row || row.truckId !== null || !load.truckUnit) continue
-        const hits = truckByUnit.get(nameKey(load.truckUnit)) ?? []
-        if (hits.length !== 1) continue
-        await db.load.update({
-          where: { id: row.id },
-          data: { truckId: hits[0]! },
-        })
-        trucksFilled++
+        if (!row) continue
+
+        const data: Record<string, unknown> = {}
+
+        // ── ADD-MISSING: A TRUCK THAT NOW RESOLVES ────────────────────────
+        if (row.truckId === null && load.truckUnit) {
+          const hits = truckByUnit.get(nameKey(load.truckUnit)) ?? []
+          if (hits.length === 1) {
+            data['truckId'] = hits[0]!
+            trucksFilled++
+          }
+        }
+
+        // ── FORWARD ONLY: THE RECURRING SYNC ──────────────────────────────
+        //
+        // Dispatchers stay on Datatruck until Zebra is finished, so the same
+        // Shipment IDs come back with some of them moved on. `syncDecisionFor`
+        // owns the direction rule; this only writes what it returns.
+        const decision = syncDecisionFor(
+          {
+            operational: row.operationalStatus,
+            billing: row.billingStatus,
+          },
+          { operational: load.operational, billing: load.billing },
+        )
+        if (decision.operational)
+          data['operationalStatus'] = decision.operational
+        if (decision.billing) data['billingStatus'] = decision.billing
+        if (decision.operational || decision.billing) advanced++
+        for (const note of decision.notes) {
+          if (note.startsWith('held:'))
+            heldBackwards.push(`${load.externalId} ${note}`)
+        }
+
+        if (Object.keys(data).length === 0) continue
+        await db.load.update({ where: { id: row.id }, data })
       }
 
       if (fresh.length === 0) continue
@@ -745,6 +790,18 @@ async function main(): Promise<void> {
     console.log(
       `  ${trucksFilled} already-imported load(s) gained a truck that now resolves`,
     )
+    console.log(
+      `  ${advanced} already-imported load(s) advanced by this export`,
+    )
+    if (heldBackwards.length > 0) {
+      console.log(
+        `  ${heldBackwards.length} refused as BACKWARD — this export is behind the database:`,
+      )
+      for (const line of heldBackwards.slice(0, 20)) console.log(`    ${line}`)
+      if (heldBackwards.length > 20) {
+        console.log(`    … and ${heldBackwards.length - 20} more`)
+      }
+    }
     console.log(`  ${enriched} live loads enriched`)
     console.log(`  ${missingCustomers.length} customers created`)
     console.log(

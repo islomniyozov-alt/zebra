@@ -531,3 +531,143 @@ export function planLoads(
 
   return { planned, held, read: records.length }
 }
+
+// ---------------------------------------------------------------------------
+// THE RECURRING SYNC.
+//
+// Dispatchers stay on Datatruck until Zebra is finished, so this import is not
+// a one-off: the same export arrives again with the same `Shipment ID`s and
+// some of them have moved on. A load booked last week is delivered this week,
+// and the row that carried it must follow.
+//
+// ── FORWARD ONLY, AND THE ASYMMETRY IS THE WHOLE RULE ────────────────────
+//
+// A later export may ADVANCE a load and may CLOSE it. It may never walk one
+// backwards. Two reasons, and the second is the one that matters:
+//
+//   A BACKWARD MOVE IS ALMOST ALWAYS THE EXPORT BEING STALE — somebody
+//   re-running last Tuesday's file — and a sync that obeyed it would undeliver
+//   freight that has arrived.
+//
+//   AND ZEBRA MAY HAVE MOVED IT. Once a dispatcher touches a load here, this
+//   system knows something the export does not. Advancing is additive: it can
+//   only agree with a change Datatruck saw first. Reversing overwrites a fact
+//   somebody in this building established.
+//
+// ── ONLY FOR ROWS THIS IMPORT CREATED, AND ONLY WHILE THEY ARE OPEN ──────
+//
+// A load with no `externalId` was booked in Zebra and is none of the sync's
+// business — those stay add-missing, as they were. A load already
+// CLOSED_IN_DATATRUCK is finished history; nothing in a later export can
+// reopen it, because "closed" is the one state this system will not let an
+// import take back.
+// ---------------------------------------------------------------------------
+
+/**
+ * The operational axis, in the order freight actually moves.
+ *
+ * Taken from the enum's own declaration order, which is already the
+ * progression — booked, dispatched, at the shipper, loaded, rolling, at the
+ * consignee, delivered, paperwork in.
+ */
+const OPERATIONAL_RANK: Readonly<Record<LoadOperationalStatus, number>> = {
+  AVAILABLE: 0,
+  BOOKED: 1,
+  DISPATCHED: 2,
+  AT_PICKUP: 3,
+  LOADED: 4,
+  IN_TRANSIT: 5,
+  AT_DELIVERY: 6,
+  DELIVERED: 7,
+  POD_RECEIVED: 8,
+}
+
+/**
+ * The billing axis, ranked — with the three DECIDED states left out.
+ *
+ * DISPUTED, WRITTEN_OFF and CLOSED_IN_DATATRUCK are not points on a line; they
+ * are decisions somebody made, and `billingStatusFor` does not own them. A
+ * sync must never move a load OFF one of them, so they have no rank and the
+ * comparison below refuses rather than guessing where they sit.
+ *
+ * In practice the planner only ever produces UNINVOICED for a live row and
+ * CLOSED_IN_DATATRUCK for a finished one, so the ladder is short by
+ * construction. It is written out in full anyway: the day this system starts
+ * invoicing imported freight, the ranks are what stop a stale export
+ * un-invoicing it.
+ */
+const BILLING_RANK: Readonly<Partial<Record<LoadBillingStatus, number>>> = {
+  UNINVOICED: 0,
+  READY_TO_INVOICE: 1,
+  INVOICED: 2,
+  PARTIALLY_PAID: 3,
+  PAID: 4,
+}
+
+export interface SyncDecision {
+  operational: LoadOperationalStatus | null
+  billing: LoadBillingStatus | null
+  /** Why, in words, for the report. Empty when nothing moves. */
+  notes: string[]
+}
+
+/**
+ * What a fresh export may change about a load this import already created.
+ *
+ * Returns nulls for "leave it alone". The caller writes only the fields that
+ * come back non-null, so a row that has not moved costs no update.
+ */
+export function syncDecisionFor(
+  current: { operational: LoadOperationalStatus; billing: LoadBillingStatus },
+  incoming: { operational: LoadOperationalStatus; billing: LoadBillingStatus },
+): SyncDecision {
+  const notes: string[] = []
+
+  // CLOSED IS FINAL. Checked first, so no later clause can reopen it.
+  if (current.billing === 'CLOSED_IN_DATATRUCK') {
+    return { operational: null, billing: null, notes: [] }
+  }
+
+  let operational: LoadOperationalStatus | null = null
+  if (
+    OPERATIONAL_RANK[incoming.operational] >
+    OPERATIONAL_RANK[current.operational]
+  ) {
+    operational = incoming.operational
+    notes.push(`${current.operational} -> ${incoming.operational}`)
+  } else if (incoming.operational !== current.operational) {
+    notes.push(
+      `held: export says ${incoming.operational}, which is behind ${current.operational}`,
+    )
+  }
+
+  let billing: LoadBillingStatus | null = null
+  if (incoming.billing === 'CLOSED_IN_DATATRUCK') {
+    // CLOSING IS ALWAYS ALLOWED, whatever the ranks say. It is the export
+    // telling us the freight finished its life over there, which is the one
+    // thing this system cannot learn on its own while dispatch runs elsewhere.
+    billing = 'CLOSED_IN_DATATRUCK'
+    notes.push(`${current.billing} -> CLOSED_IN_DATATRUCK`)
+  } else {
+    const from = BILLING_RANK[current.billing]
+    const to = BILLING_RANK[incoming.billing]
+    if (from === undefined || to === undefined) {
+      // One of them is a DECIDED state with no rank. Refused rather than
+      // ordered — a dispute is not a point on this ladder.
+      if (incoming.billing !== current.billing) {
+        notes.push(
+          `held: ${current.billing} and ${incoming.billing} are not comparable`,
+        )
+      }
+    } else if (to > from) {
+      billing = incoming.billing
+      notes.push(`${current.billing} -> ${incoming.billing}`)
+    } else if (to < from) {
+      notes.push(
+        `held: export says ${incoming.billing}, which is behind ${current.billing}`,
+      )
+    }
+  }
+
+  return { operational, billing, notes }
+}
