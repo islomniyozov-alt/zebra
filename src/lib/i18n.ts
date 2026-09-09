@@ -404,7 +404,7 @@ const en = {
     'The truck this driver runs. It has to be under the same authority.',
   'drivers.employment': 'Employment',
   'drivers.employment.OWNED': 'Company driver',
-  'drivers.med.dropTitle': 'Add the medical certificate',
+  'drivers.med.dropTitle': 'Drop a medical card here or click to add',
   'drivers.med.dropBody': 'Drop a photo here, paste one, or click to browse.',
   'drivers.med.dropHint': 'Photo or PDF of the examiner’s certificate.',
   'drivers.med.reading': 'Reading the certificate...',
@@ -1176,6 +1176,8 @@ const en = {
   'safety.med.askMany': 'More than one driver is named {printed}.',
   'safety.med.askBody':
     'The certificate has been read and nothing is lost — choose who it belongs to and file it. Names are matched exactly, never approximately, because the roster holds near-duplicates and rows that are not people.',
+  'safety.med.chooseType':
+    'More than one kind of compliance document can be read now, so this intake has to ask which — that step has not been built yet.',
   'safety.med.forDriver': 'Filing against {driver}.',
   'safety.med.noDrivers': 'No drivers to file against.',
   'safety.column.status': 'Status',
@@ -2169,7 +2171,7 @@ const ru: Dictionary = {
     'Тягач, на котором работает водитель. Должен быть под тем же перевозчиком.',
   'drivers.employment': 'Тип занятости',
   'drivers.employment.OWNED': 'Водитель компании',
-  'drivers.med.dropTitle': 'Добавьте медицинскую справку',
+  'drivers.med.dropTitle': 'Перетащите медсправку сюда или нажмите',
   'drivers.med.dropBody': 'Перетащите фото, вставьте или нажмите для выбора.',
   'drivers.med.dropHint': 'Фото или PDF справки врача.',
   'drivers.med.reading': 'Читаем справку...',
@@ -2946,6 +2948,8 @@ const ru: Dictionary = {
   'safety.med.askMany': 'Несколько водителей носят имя {printed}.',
   'safety.med.askBody':
     'Справка прочитана, ничего не потеряно — выберите, кому она принадлежит, и сохраните. Имена сверяются точно, а не приблизительно: в списке есть похожие имена и строки, которые вообще не люди.',
+  'safety.med.chooseType':
+    'Теперь читается более одного типа документов, поэтому здесь нужно спросить какой — этот шаг ещё не сделан.',
   'safety.med.forDriver': 'Сохраняем для {driver}.',
   'safety.med.noDrivers': 'Нет водителей для сохранения.',
   'safety.column.status': 'Статус',
@@ -3928,7 +3932,7 @@ const fa: Dictionary = {
     'کامیونی که این راننده می‌راند. باید زیر همان شرکت باشد.',
   'drivers.employment': 'نوع همکاری',
   'drivers.employment.OWNED': 'رانندهٔ شرکت',
-  'drivers.med.dropTitle': 'افزودن گواهی پزشکی',
+  'drivers.med.dropTitle': 'کارت پزشکی را اینجا رها کنید یا کلیک کنید',
   'drivers.med.dropBody': 'عکس را اینجا رها کنید، بچسبانید یا کلیک کنید.',
   'drivers.med.dropHint': 'عکس یا PDF گواهی معاینه‌کننده.',
   'drivers.med.reading': 'در حال خواندن گواهی...',
@@ -4697,6 +4701,8 @@ const fa: Dictionary = {
   'safety.med.askMany': 'بیش از یک راننده با نام {printed} وجود دارد.',
   'safety.med.askBody':
     'گواهی خوانده شد و چیزی از دست نرفت — انتخاب کنید متعلق به کیست و ثبت کنید. نام‌ها دقیق مطابقت داده می‌شوند نه تقریبی، چون فهرست نام‌های مشابه و ردیف‌هایی دارد که اصلاً شخص نیستند.',
+  'safety.med.chooseType':
+    'اکنون بیش از یک نوع سند خوانده می‌شود، پس این بخش باید بپرسد کدام — این مرحله هنوز ساخته نشده است.',
   'safety.med.forDriver': 'ثبت برای {driver}.',
   'safety.med.noDrivers': 'راننده‌ای برای ثبت وجود ندارد.',
   'safety.column.status': 'وضعیت',

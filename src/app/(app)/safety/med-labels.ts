@@ -25,6 +25,7 @@ export function medLabels(t: Translate) {
     filed: t('drivers.med.filed'),
     none: t('drivers.med.none'),
     forDriver: t('safety.med.forDriver'),
+    chooseType: t('safety.med.chooseType'),
     subjectStated: t('safety.med.subjectStated'),
     subjectProposed: t('safety.med.subjectProposed'),
     notThem: t('safety.med.notThem'),

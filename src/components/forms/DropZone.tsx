@@ -40,13 +40,29 @@ interface Props {
   /** Files this zone will offer. Stated by the caller, not assumed here. */
   accept?: string
   busy?: boolean
+  /**
+   * A front door rather than a field.
+   *
+   * SIZE IS THE WHOLE DIFFERENCE, and it is a real one: the CDL zone sits
+   * inside a two-control form where it is obviously the point, and the Safety
+   * intake competes with a table, a filter bar and a header. A control nobody
+   * notices is a control nobody uses — the intake was a link in the top-right
+   * corner first, and it was too quiet.
+   */
+  prominent?: boolean
   onFile: (file: File) => void
 }
 
 const DEFAULT_ACCEPT =
   'image/jpeg,image/png,image/webp,image/gif,application/pdf'
 
-export function DropZone({ labels, accept, busy = false, onFile }: Props) {
+export function DropZone({
+  labels,
+  accept,
+  busy = false,
+  prominent = false,
+  onFile,
+}: Props) {
   const [over, setOver] = useState(false)
   const input = useRef<HTMLInputElement>(null)
 
@@ -78,14 +94,22 @@ export function DropZone({ labels, accept, busy = false, onFile }: Props) {
         }
       }}
       className={cx(
-        'flex cursor-pointer flex-col items-center gap-z2 rounded-card border-2 border-dashed px-z4 py-z5 text-center',
+        'flex cursor-pointer flex-col items-center gap-z2 rounded-card border-2 border-dashed text-center',
+        prominent ? 'px-z5 py-z8' : 'px-z4 py-z5',
         'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
         over
           ? 'border-accent bg-accent-soft'
           : 'border-border-strong bg-surface hover:bg-surface-3',
       )}
     >
-      <p className="text-base font-medium text-ink">{labels.title}</p>
+      <p
+        className={cx(
+          'font-medium text-ink',
+          prominent ? 'text-md' : 'text-base',
+        )}
+      >
+        {labels.title}
+      </p>
       <p className="text-sm text-ink-2">{labels.body}</p>
       <p className="text-xs text-ink-3">{labels.hint}</p>
       {busy ? (

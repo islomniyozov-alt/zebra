@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { MedicalCertUpload } from './MedicalCertUpload'
+import { ComplianceIntake } from './ComplianceIntake'
 import { medLabels } from './med-labels'
 import { companyScopeFilter } from '@/lib/tenancy'
 import {
@@ -62,10 +62,16 @@ export default async function SafetyPage({
 
   // ── WHOSE MEDICAL CERTIFICATE IS BEING FILED ────────────────────────────
   //
-  // A driver id, or the literal `new` when nobody has been chosen yet. It
+  // A driver id, set only by a compliance ROW naming its own subject. It
   // travels in the URL and is RE-RESOLVED below against the tenant scope, so
   // the subject is a claim the server checks rather than one a browser makes —
   // the same posture `/api/med/read` takes with the id it receives.
+  //
+  // THERE IS NO `new` SENTINEL ANY MORE. It meant "nobody chosen yet", which
+  // was a state worth having while the picker came first; the front door reads
+  // the certificate before anyone is named, so the empty case is just the
+  // absence of this parameter. A stale `?medFor=new` bookmark resolves to no
+  // driver and the page renders its front door, which is the right answer.
   const medFor = typeof params['medFor'] === 'string' ? params['medFor'] : null
   const mayFileCompliance = await currentUserCan('create', 'compliance')
 
@@ -128,7 +134,7 @@ export default async function SafetyPage({
   // somebody may not file is work done for a refusal, and the route checks the
   // same permission again on the way in.
   const filingFor =
-    mayFileCompliance && medFor && medFor !== 'new'
+    mayFileCompliance && medFor
       ? await withCurrentOrg('read', 'driver', async (tx) =>
           tx.driver.findFirst({
             where: { id: medFor, deletedAt: null },
@@ -144,20 +150,19 @@ export default async function SafetyPage({
   // — the two cases that mean ask. Loading it here rather than fetching it
   // after the read means the question can be answered without a second round
   // trip, and without re-uploading anything.
-  const pickable =
-    mayFileCompliance && medFor === 'new'
-      ? await withCurrentOrg('read', 'driver', async (tx, session) =>
-          tx.driver.findMany({
-            where: {
-              ...companyScopeFilter(session.companyScopes),
-              deletedAt: null,
-            },
-            orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
-            take: 300,
-            select: { id: true, firstName: true, lastName: true },
-          }),
-        )
-      : []
+  const pickable = mayFileCompliance
+    ? await withCurrentOrg('read', 'driver', async (tx, session) =>
+        tx.driver.findMany({
+          where: {
+            ...companyScopeFilter(session.companyScopes),
+            deletedAt: null,
+          },
+          orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+          take: 300,
+          select: { id: true, firstName: true, lastName: true },
+        }),
+      )
+    : []
 
   const isFiltered = Boolean(subjectParam || typeParam)
   const day = (value: Date) => value.toISOString().slice(0, 10)
@@ -270,20 +275,25 @@ export default async function SafetyPage({
           <p className="max-w-[60ch] text-sm text-ink-3">
             {t('safety.hint').replace('{days}', String(leadDays))}
           </p>
-          {/* The queue's sibling. Inspections are not a queue — a clean one
-           * needs nothing done and still belongs on file — so they get their
-           * own screen rather than rows here, and this is the way in. */}
-          {/* THE WAY IN FOR A DRIVER WITH NO ROW. Everyone else is reachable
-           * from the queue; somebody who has never had a medical card on
-           * file is not, and this is how they get one. */}
-          {mayFileCompliance && !filingFor && medFor !== 'new' ? (
-            <Link
-              href="/safety?medFor=new"
+          {/* SECONDARY NOW, AND A JUMP RATHER THAN A ROUTE. The intake is on
+           * the screen; this scrolls to it.
+           *
+           * It used to be `href="/safety?medFor=new"`, and when the zone
+           * became always-visible that branch stopped rendering anything —
+           * the link survived it and pointed at a screen that no longer
+           * existed. An anchor cannot rot that way: it addresses the element
+           * by id, and the id is on a zone rendered in every state below. */}
+          {mayFileCompliance && !filingFor ? (
+            <a
+              href="#file-compliance"
               className="whitespace-nowrap text-sm text-accent hover:underline"
             >
               {t('safety.med.open')}
-            </Link>
+            </a>
           ) : null}
+          {/* The queue's sibling. Inspections are not a queue — a clean one
+           * needs nothing done and still belongs on file — so they get their
+           * own screen rather than rows here, and this is the way in. */}
           {maySeeInspections ? (
             <Link
               href="/safety/inspections"
@@ -330,18 +340,17 @@ export default async function SafetyPage({
         ]}
       />
 
-      {/* ── FILING A CERTIFICATE, ABOVE THE QUEUE IT CAME FROM ────────────
+      {/* ── OPENED FROM A ROW, WHICH ALREADY STATED ITS SUBJECT ───────────
        *
-       * Two shapes, and the difference is whether anything states the
-       * subject. From a row: the driver is named and resolved, so it goes
-       * straight to the drop zone. From the header link: nothing states it,
-       * so the screen ASKS — it does not read the name off the certificate
-       * and match, which is the failure `checkDriverName` exists to warn
-       * about rather than to perform. */}
+       * The same intake, with the driver already known. A row names its
+       * subject, so there is nothing for the printed name to propose and
+       * nothing to ask — which is strictly better than the front door, and
+       * why the row link is kept rather than folded away. */}
       {filingFor ? (
         <div className="border-b border-border bg-surface-2 px-gutter py-z4">
           <div className="flex max-w-[520px] flex-col gap-z3">
-            <MedicalCertUpload
+            <ComplianceIntake
+              roster={pickable}
               driverId={filingFor.id}
               driverLabel={`${filingFor.firstName} ${filingFor.lastName}`}
               labels={medLabels(t)}
@@ -356,23 +365,36 @@ export default async function SafetyPage({
         </div>
       ) : null}
 
-      {/* ── THE FRONT DOOR: DROP FIRST, THEN IT SAYS WHOSE IT IS ─────────
+      {/* ── THE FRONT DOOR, ON THE SCREEN RATHER THAN BEHIND A LINK ──────
        *
-       * "add cert, then it reads the cert, and it alarms whenever it
-       * expires." Picking a driver out of fifty-four before the card has been
-       * read is the wrong order — the card already says who it belongs to,
-       * and the roster is only needed when that name matches none or several.
-       * It is passed in for exactly that, and the component asks. */}
-      {medFor === 'new' && mayFileCompliance ? (
-        <div className="border-b border-border bg-surface-2 px-gutter py-z4">
-          <div className="flex max-w-[560px] flex-col gap-z3">
-            <MedicalCertUpload roster={pickable} labels={medLabels(t)} />
-            <Link
-              href="/safety"
-              className="self-start text-sm text-ink-2 underline decoration-border-strong underline-offset-2 hover:text-accent"
-            >
-              {t('safety.med.cancel')}
-            </Link>
+       * It was a link in the top-right corner and it was too quiet: a control
+       * nobody notices is a control nobody uses. It sits above the list when
+       * there are rows, and inside the empty state when there are none —
+       * the same component in both, not two with matching copy.
+       *
+       * A FILTER THAT MATCHES NOTHING STILL GETS THE ZONE. That case has no
+       * rows and is not the empty queue either, so neither of the two obvious
+       * conditions covers it; without `isFiltered` here a filtered-to-nothing
+       * screen would offer no way to add a document, and the header link would
+       * point at an id that is not on the page.
+       *
+       * ONE INTAKE FOR EVERY COMPLIANCE DOCUMENT, not one per type.
+       * Registration and inspections mount their readers through
+       * `ComplianceIntake`; see `compliance-documents.ts` for what adding one
+       * costs.
+       *
+       * NOT WHILE A ROW HAS ONE OPEN. `filingFor` renders the same control
+       * with the driver already known; showing the front door under it puts
+       * two drop zones on one screen, and the one that reads a name would
+       * quietly undo the subject the row just stated. The header link hides
+       * on the same condition. */}
+      {mayFileCompliance && !filingFor && (rows.length > 0 || isFiltered) ? (
+        <div
+          id="file-compliance"
+          className="scroll-mt-z4 border-b border-border bg-surface-2 px-gutter py-z4"
+        >
+          <div className="max-w-[560px]">
+            <ComplianceIntake roster={pickable} labels={medLabels(t)} />
           </div>
         </div>
       ) : null}
@@ -395,6 +417,26 @@ export default async function SafetyPage({
             <EmptyState
               title={t('safety.empty.title')}
               body={t('safety.empty.body').replace('{days}', String(leadDays))}
+              // PROMINENT HERE, because an empty queue offers nothing else to
+              // do and the way out of it is putting a document in.
+              // THE SAME ID AS THE ZONE ABOVE THE TABLE, and never on screen
+              // with it: this branch needs `rows.length === 0 && !isFiltered`,
+              // which is exactly what that one excludes. The header anchor
+              // resolves to whichever of the two is rendered.
+              action={
+                mayFileCompliance && !filingFor ? (
+                  <div
+                    id="file-compliance"
+                    className="mx-auto max-w-[520px] scroll-mt-z4 text-start"
+                  >
+                    <ComplianceIntake
+                      roster={pickable}
+                      labels={medLabels(t)}
+                      prominent
+                    />
+                  </div>
+                ) : undefined
+              }
             />
           )
         }

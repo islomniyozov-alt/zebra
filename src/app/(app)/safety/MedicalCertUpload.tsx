@@ -73,6 +73,8 @@ interface Props {
   driverLabel?: string
   /** The picker's options, for when the printed name matches none or many. */
   roster?: readonly Candidate[]
+  /** Front-door sizing. See DropZone's note on why this is a real difference. */
+  prominent?: boolean
   labels: {
     dropTitle: string
     dropBody: string
@@ -104,6 +106,7 @@ export function MedicalCertUpload({
   driverId = '',
   driverLabel = '',
   roster = [],
+  prominent = false,
   labels,
 }: Props) {
   const [reading, setReading] = useState(false)
@@ -372,6 +375,7 @@ export function MedicalCertUpload({
           busy: labels.reading,
         }}
         busy={reading}
+        prominent={prominent}
         onFile={(file) => void take(file)}
       />
     </div>
