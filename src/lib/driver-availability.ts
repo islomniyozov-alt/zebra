@@ -41,3 +41,23 @@ export const ASSIGNABLE_DRIVER = {
   deletedAt: null,
   status: { not: 'INACTIVE' },
 } as const satisfies Prisma.DriverWhereInput
+
+/**
+ * A truck that can be given freight today.
+ *
+ * ── THE SAME SHAPE AS `ASSIGNABLE_DRIVER`, AND FOR THE SAME REASON ────────
+ *
+ * The all-trucks import adds 53 units that left the fleet, created
+ * OUT_OF_SERVICE because `TruckStatus` has no `INACTIVE` and AVAILABLE would
+ * put a sold truck on the dispatch board. Without this predicate the status
+ * would be a label nothing reads: every truck picker filtered on `deletedAt`
+ * alone, exactly as the driver pickers did.
+ *
+ * MAINTENANCE IS NOT EXCLUDED, and that is deliberate. A truck in the shop is
+ * coming back this week and a dispatcher may well plan around it; a truck that
+ * left the fleet is not. Only the two terminal states go.
+ */
+export const ASSIGNABLE_TRUCK = {
+  deletedAt: null,
+  status: { notIn: ['OUT_OF_SERVICE', 'SOLD'] },
+} as const satisfies Prisma.TruckWhereInput

@@ -257,7 +257,23 @@ export async function findAuthorityDrift(
     {
       kind: 'truck',
       rows: await tx.truck.findMany({
-        where: { deletedAt: null },
+        // ── A TRUCK THAT LEFT THE FLEET IS NOT DRIFT ────────────────────
+        //
+        // The same narrowing inactive drivers got on 2026-09-09, and the same
+        // argument: this check asks "which authority currently runs this
+        // asset", and for a truck that was sold or taken out of service there
+        // is no answer. The all-trucks import adds 53 of them, each with a
+        // companyId and no open period — an OPEN period would be the lie that
+        // made the check pass, claiming a sold truck currently runs for a
+        // carrier.
+        //
+        // OUT_OF_SERVICE AND SOLD ONLY. A truck in MAINTENANCE is coming back
+        // and still belongs to an authority; excluding it would hide real
+        // drift on a live asset.
+        where: {
+          deletedAt: null,
+          status: { notIn: ['OUT_OF_SERVICE', 'SOLD'] },
+        },
         select: { id: true, companyId: true },
       }),
     },

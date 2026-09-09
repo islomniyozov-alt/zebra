@@ -1,4 +1,6 @@
+import { parseLicenceExpiry } from './drivers'
 import { resolveState } from './states'
+import type { OwnershipType } from '@/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
 // THE DATATRUCK TRUCK EXPORT, TURNED INTO ROWS THIS SYSTEM WILL STAND BEHIND.
@@ -33,6 +35,14 @@ const AUTHORITY_BY_MC: Readonly<Record<string, string>> = {
   // decides which carrier a load invoices under.
   'RAM Haulage LLC': 'RAM Haulage',
   'Dolphin Transport inc': 'Dolphins Transport',
+  // ADDED 2026-09-09, the same three `drivers.ts` learned and for the same
+  // reason: they are `Company` rows now, created retired by
+  // `seed-datatruck-authorities.ts`. Identity mappings, because those rows
+  // were created from the export's own spelling — unlike the two above, which
+  // are Datatruck's names for carriers this system calls something else.
+  'Midwest Global Logistics LLC': 'Midwest Global Logistics LLC',
+  'American Soldier Transport LLC': 'American Soldier Transport LLC',
+  'AG FREIGHT INC': 'AG FREIGHT INC',
 }
 
 /**
@@ -42,7 +52,17 @@ const AUTHORITY_BY_MC: Readonly<Record<string, string>> = {
  * appearing in a future export is a refusal that gets read, instead of quietly
  * joining the pile of trucks with no authority.
  */
-const RETIRED_MC: readonly string[] = ['Midwest Global Logistics LLC']
+const RETIRED_MC: readonly string[] = [
+  // EMPTY SINCE 2026-09-09, DELIBERATELY LEFT IN PLACE. Midwest Global was the
+  // only entry, and it moved to `AUTHORITY_BY_MC` when it became a retired
+  // `Company` — a carrier we no longer run under, whose trucks and freight are
+  // real and now have somewhere to live.
+  //
+  // The list stays because the DISTINCTION it draws still matters: a name here
+  // refuses with "which this system does not operate under", an unrecognised
+  // one with "unrecognised authority". The first is a fact somebody recorded;
+  // the second is a surprise worth reading.
+]
 
 /**
  * Units whose authority the trucks export does not state, decided from freight.
@@ -141,6 +161,18 @@ export interface PlannedTruck {
   year: number | null
   plate: string | null
   plateState: string | null
+  /**
+   * ISO days, or null where the export carries no date.
+   *
+   * Each becomes a `ComplianceItem`, whose `expiresAt` is NOT NULL — so there
+   * is nothing to write without one, and null here is an absence rather than a
+   * date to invent.
+   */
+  registrationExpiry: string | null
+  inspectionExpiry: string | null
+  insuranceExpiry: string | null
+  /** `company` or `owner_operator`, mapped rather than inferred. */
+  ownership: OwnershipType
   /** Every value this planner changed or dropped, in words, for the preview. */
   corrections: string[]
 }
@@ -158,6 +190,52 @@ export interface TruckPlan {
   held: HeldTruck[]
   /** Rows read from the file, planned or not. */
   read: number
+}
+
+/**
+ * One of the three expiry dates, as an ISO day.
+ *
+ * REUSES THE DRIVER EXPORT'S PARSER, which is named for a licence and is
+ * really Datatruck's single date format — `Aug 31, 2027`, stated and nothing
+ * else. A second parser for one format is a second thing to get wrong.
+ *
+ * A DATE THAT WILL NOT READ IS DROPPED AND NAMED, never coerced. These become
+ * compliance rows: a registration expiring on the wrong day is an alarm that
+ * fires on the wrong day, every time, forever.
+ */
+function expiryOf(
+  raw: string | undefined,
+  what: string,
+  corrections: string[],
+): string | null {
+  const value = (raw ?? '').trim()
+  if (value === '') return null
+  const parsed = parseLicenceExpiry(value)
+  if (parsed.ok) return parsed.iso
+  corrections.push(`${what} expiry ${JSON.stringify(value)} — ${parsed.why}`)
+  return null
+}
+
+/**
+ * `company` or `owner_operator`.
+ *
+ * `LEASED` exists in the enum and the export never says it, so it is never
+ * written. An unrecognised word falls to the schema default and is named —
+ * ownership decides who pays for a repair, which is not a thing to guess.
+ */
+function ownershipOf(
+  raw: string | undefined,
+  corrections: string[],
+): OwnershipType {
+  const value = (raw ?? '').trim().toLowerCase()
+  if (value === 'company') return 'OWNED'
+  if (value === 'owner_operator') return 'OWNER_OPERATOR'
+  if (value !== '') {
+    corrections.push(
+      `ownership ${JSON.stringify(raw)} is not one this system knows; left at OWNED`,
+    )
+  }
+  return 'OWNED'
 }
 
 export function planTrucks(
@@ -322,6 +400,22 @@ export function planTrucks(
       year,
       plate: real(record['Plate number']),
       plateState,
+      registrationExpiry: expiryOf(
+        record['Registration expiry date'],
+        'registration',
+        corrections,
+      ),
+      inspectionExpiry: expiryOf(
+        record['Annual inspection expiry date'],
+        'annual inspection',
+        corrections,
+      ),
+      insuranceExpiry: expiryOf(
+        record['Insurance expiry date'],
+        'insurance',
+        corrections,
+      ),
+      ownership: ownershipOf(record['Ownership'], corrections),
       corrections,
     })
   }

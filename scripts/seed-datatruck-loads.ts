@@ -83,6 +83,34 @@ const FILE =
  */
 const BATCH = 250
 
+/**
+ * Customers the export names differently from the rows Zebra already has.
+ *
+ * ── STATED, LIKE `AUTHORITY_BY_MC`, AND FOR THE SAME REASON ───────────────
+ *
+ * Exact-name matching would make `AMAZON LOGISTICS` (11,196 loads) a second
+ * customer beside the `Amazon Relay` that holds the live freight, and
+ * `WERNER ENTERPRISES INC` (2,483) a second beside `Werner`. `createBroker`
+ * spells out what that costs: two customers for one broker split the payment
+ * history, the credit limit and the aging of a single relationship, and
+ * nothing downstream notices — an unpaid invoice sits under one row while the
+ * payments land against the other.
+ *
+ * A TABLE, NOT A SIMILARITY RULE. A matcher loose enough to pair
+ * `AMAZON LOGISTICS` with `Amazon Relay` is loose enough to pair two real and
+ * different brokers somewhere else, silently, on the table that decides who
+ * gets invoiced. This one can be read and disagreed with.
+ *
+ * EVERYTHING ELSE CREATES FRESH, including `DOLPHINS TRANSPORT LLC` — the
+ * group brokering to itself on 45 loads. It becomes a Customer row that shares
+ * a name with a Company, which is confusing enough to be worth naming in the
+ * report rather than quietly aliasing to something.
+ */
+const CUSTOMER_ALIASES: Readonly<Record<string, string>> = {
+  'AMAZON LOGISTICS': 'Amazon Relay',
+  'WERNER ENTERPRISES INC': 'Werner',
+}
+
 const ORGANIZATION_SLUG = 'zebra'
 
 /** Stated by the owner who ran the migration ritual, not discovered here. */
@@ -285,12 +313,60 @@ async function main(): Promise<void> {
     const customerByName = new Map(
       customers.map((customer) => [nameKey(customer.name), customer.id]),
     )
+    /** The export's name, or the Zebra row a stated alias points it at. */
+    const resolvedName = (exportName: string) =>
+      CUSTOMER_ALIASES[exportName] ?? exportName
+
     const wanted = new Map<string, number>()
     for (const load of plan.planned) {
       wanted.set(load.customerName, (wanted.get(load.customerName) ?? 0) + 1)
     }
+
+    heading('CUSTOMER ALIASES — stated, never inferred')
+    const danglingAliases: string[] = []
+    for (const [from, to] of Object.entries(CUSTOMER_ALIASES)) {
+      const hit = customerByName.get(nameKey(to))
+      if (!hit) danglingAliases.push(`${from} -> ${to}`)
+      console.log(
+        `  ${from.padEnd(26)} -> ${to.padEnd(16)} ${hit ? 'matched' : 'NO SUCH CUSTOMER'}`,
+      )
+    }
+    // ── AN ALIAS THAT POINTS AT NOTHING IS A REFUSAL ────────────────────
+    //
+    // The table's whole claim is "this export name means that EXISTING row".
+    // When the row is absent the claim is false, and creating it under the
+    // alias name quietly turns a merge into a second empty customer — which is
+    // exactly what happened on dev, where the first import had already created
+    // `AMAZON LOGISTICS` before this table existed, so the alias pointed at an
+    // `Amazon Relay` that was not there and made one.
+    //
+    // Refused before anything is written, because the fix is either to correct
+    // the table or to run this against a database that has the row.
+    if (danglingAliases.length > 0) {
+      heading('REFUSED — a stated alias points at a customer that is not here')
+      for (const line of danglingAliases) console.log(`  ${line}`)
+      console.log(
+        '\n  Fix the table or run against a database holding those rows.',
+      )
+      console.log('  Nothing was written.')
+      return
+    }
+    const selfBrokered = [...wanted].filter(([name]) =>
+      tenancy.companies.some(
+        (company) => nameKey(company.name) === nameKey(name),
+      ),
+    )
+    for (const [name, count] of selfBrokered) {
+      console.log(
+        `
+  ${name} is also a COMPANY here, and appears as a customer on ${count} load(s).`,
+      )
+      console.log(
+        '  It becomes its own Customer row: the group brokering to itself.',
+      )
+    }
     const missingCustomers = [...wanted]
-      .filter(([name]) => !customerByName.has(nameKey(name)))
+      .filter(([name]) => !customerByName.has(nameKey(resolvedName(name))))
       .sort((a, b) => b[1] - a[1])
 
     heading(
@@ -432,7 +508,8 @@ async function main(): Promise<void> {
 
     // ── WRITING ────────────────────────────────────────────────────────
     heading('CUSTOMERS')
-    for (const [name] of missingCustomers) {
+    for (const [exportName] of missingCustomers) {
+      const name = resolvedName(exportName)
       const created = await db.customer.create({
         data: {
           organizationId: tenancy.organizationId,
@@ -450,6 +527,7 @@ async function main(): Promise<void> {
     const writeStarted = Date.now()
     let created = 0
     let skipped = 0
+    let trucksFilled = 0
     let batchIndex = 0
 
     for (const batch of chunk(toCreate, BATCH)) {
@@ -461,11 +539,35 @@ async function main(): Promise<void> {
           organizationId: tenancy.organizationId,
           externalId: { in: batch.map((load) => load.externalId) },
         },
-        select: { externalId: true },
+        select: { id: true, externalId: true, truckId: true },
       })
-      const already = new Set(present.map((row) => row.externalId ?? ''))
+      const already = new Map(present.map((row) => [row.externalId ?? '', row]))
       const fresh = batch.filter((load) => !already.has(load.externalId))
       skipped += batch.length - fresh.length
+
+      // ── A RE-RUN FILLS A TRUCK THAT WAS NOT RESOLVABLE LAST TIME ──────
+      //
+      // The owner's ruling, and it is what makes importing the rest of the
+      // fleet worth doing after the loads already landed: 4,179 loads came in
+      // with a driver and no truck because the unit had no row yet. Now it
+      // does.
+      //
+      // ADD-MISSING, NEVER REPLACE. Only a NULL `truckId` is written. A load
+      // that already names a truck keeps it — that is either what the first
+      // import resolved or what a dispatcher has since corrected, and both are
+      // newer truths than this file.
+      for (const load of batch) {
+        const row = already.get(load.externalId)
+        if (!row || row.truckId !== null || !load.truckUnit) continue
+        const hits = truckByUnit.get(nameKey(load.truckUnit)) ?? []
+        if (hits.length !== 1) continue
+        await db.load.update({
+          where: { id: row.id },
+          data: { truckId: hits[0]! },
+        })
+        trucksFilled++
+      }
+
       if (fresh.length === 0) continue
 
       // ── THREE STATEMENTS PER BATCH, NOT FORTY NESTED CREATES ─────────
@@ -494,7 +596,9 @@ async function main(): Promise<void> {
           return {
             organizationId: tenancy.organizationId,
             companyId: companyByName.get(load.authority)!,
-            customerId: customerByName.get(nameKey(load.customerName))!,
+            customerId: customerByName.get(
+              nameKey(resolvedName(load.customerName)),
+            )!,
             externalId: load.externalId,
             // THE SHIPMENT ID IS THE LOAD NUMBER. No counter is touched, and
             // `DT-016082` is visibly not a number this system allocated.
@@ -638,6 +742,9 @@ async function main(): Promise<void> {
     const seconds = (Date.now() - startedAt) / 1000
     heading('WRITTEN')
     console.log(`  ${created} loads created, ${skipped} already present`)
+    console.log(
+      `  ${trucksFilled} already-imported load(s) gained a truck that now resolves`,
+    )
     console.log(`  ${enriched} live loads enriched`)
     console.log(`  ${missingCustomers.length} customers created`)
     console.log(

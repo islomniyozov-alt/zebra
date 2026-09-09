@@ -213,6 +213,13 @@ const SEED_WRITERS = [
   // both sides. It is batched and resumable by `externalId`: a run that dies
   // halfway is re-run with the same command.
   'seed-datatruck-loads.ts',
+  // ADDED 2026-09-09. The all-trucks export: 113 units where the first held
+  // 49. The extras arrive OUT_OF_SERVICE with no asset-history period — the
+  // terminated-driver shape — and every truck gains compliance rows from the
+  // registration, annual-inspection and insurance dates the first export never
+  // carried. Where a unit exists already it adds missing values and replaces
+  // nothing.
+  'seed-datatruck-all-trucks.ts',
 ]
 
 const ALLOWED = [

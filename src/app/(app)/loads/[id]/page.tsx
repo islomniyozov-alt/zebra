@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { ASSIGNABLE_DRIVER } from '@/lib/driver-availability'
+import { ASSIGNABLE_DRIVER, ASSIGNABLE_TRUCK } from '@/lib/driver-availability'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import {
@@ -255,7 +255,7 @@ export default async function LoadDetailPage({
           select: AUDIT_FIELDS,
         }),
         tx.truck.findMany({
-          where: { deletedAt: null, companyId: load.companyId },
+          where: { ...ASSIGNABLE_TRUCK, companyId: load.companyId },
           orderBy: { unitNumber: 'asc' },
           take: 500,
           select: { id: true, unitNumber: true },

@@ -1,4 +1,4 @@
-import { ASSIGNABLE_DRIVER } from '@/lib/driver-availability'
+import { ASSIGNABLE_DRIVER, ASSIGNABLE_TRUCK } from '@/lib/driver-availability'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyScopeFilter } from '@/lib/tenancy'
@@ -51,7 +51,7 @@ export default async function DispatchPage({
 
     const [trucks, drivers, loads, available] = await Promise.all([
       tx.truck.findMany({
-        where: { ...where, deletedAt: null, status: { notIn: ['SOLD'] } },
+        where: { ...where, ...ASSIGNABLE_TRUCK },
         orderBy: [{ company: { name: 'asc' } }, { unitNumber: 'asc' }],
         select: {
           id: true,

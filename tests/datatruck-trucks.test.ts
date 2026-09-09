@@ -44,15 +44,27 @@ describe('which authority a truck files under', () => {
     expect(plan.held).toEqual([])
   })
 
-  it('holds a retired authority, a blank one, and an unknown one apart', () => {
+  // ── THIS TEST CHANGED ON 2026-09-09 AND THE CHANGE IS THE POINT ─────────
+  //
+  // Midwest Global used to be held: a name in `RETIRED_MC`, refused because no
+  // `Company` existed for it. `seed-datatruck-authorities.ts` created all three
+  // retired carriers, so it now plans like any other authority — a carrier we
+  // no longer run under, whose trucks are real and have somewhere to live.
+  //
+  // WHAT THE TEST STILL PROTECTS is the distinction between the two refusals
+  // that remain. A blank MC and an unrecognised one are different findings: one
+  // is a row nobody filled in, the other is a carrier that appeared from
+  // nowhere and wants reading.
+  it('plans a retired authority, and holds a blank and an unknown apart', () => {
     const plan = planTrucks([
       row({ 'MC number': 'Midwest Global Logistics LLC', 'Unit number': '1' }),
       row({ 'MC number': '', 'Unit number': '2' }),
       row({ 'MC number': 'Someone Else LLC', 'Unit number': '3' }),
     ])
-    expect(plan.planned).toEqual([])
+    expect(plan.planned.map((t) => t.authority)).toEqual([
+      'Midwest Global Logistics LLC',
+    ])
     expect(plan.held.map((h) => h.reason)).toEqual([
-      'filed under Midwest Global Logistics LLC, which this system does not operate under',
       'no authority in the export',
       'unrecognised authority "Someone Else LLC"',
     ])

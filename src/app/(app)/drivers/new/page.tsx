@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation'
+import { ASSIGNABLE_TRUCK } from '@/lib/driver-availability'
 import { SELECTABLE_AUTHORITY } from '@/lib/companies'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
@@ -28,7 +29,7 @@ export default async function NewDriverPage() {
           select: { id: true, name: true },
         }),
         trucks: await tx.truck.findMany({
-          where: { ...scope, deletedAt: null, status: { not: 'SOLD' } },
+          where: { ...scope, ...ASSIGNABLE_TRUCK },
           orderBy: [{ company: { name: 'asc' } }, { unitNumber: 'asc' }],
           select: {
             id: true,
