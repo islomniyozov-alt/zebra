@@ -4,6 +4,7 @@ import {
   employmentFromTariff,
   parseLicenceExpiry,
   parseTariff,
+  planDrivers,
 } from '@/lib/datatruck/drivers'
 import { resolveState } from '@/lib/datatruck/states'
 
@@ -250,5 +251,59 @@ describe('what a driver IS, derived from what they are paid', () => {
     for (const bps of [300, 300, 400]) {
       expect(employmentFromTariff(bps)).toBe('OWNED')
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// DATATRUCK'S OWN TEST DATA, WHICH REACHED PRODUCTION ONCE.
+//
+// `Sample Driver` (Driver ID 1, AG FREIGHT INC, CDL "1") came in with the
+// terminated-driver export and sat on the production driver list until the
+// owner spotted it. It has no loads, no settlements and no compliance,
+// because it never drove anything.
+//
+// THE GUARD IS A PAIR, AND BOTH HALVES ARE WATCHED HERE. An id of `1` is
+// exactly the sort of value a future export could hand a real person, and a
+// name alone would refuse a real driver who happens to be called Sample. Only
+// the two together skip a row.
+// ---------------------------------------------------------------------------
+
+const driverRow = (
+  over: Record<string, string> = {},
+): Record<string, string> => ({
+  'Driver ID': '77',
+  'First name': 'Real',
+  'Last name': 'Person',
+  'MC number': 'RAM Haulage LLC',
+  'Driver tariff': '88% from gross',
+  'Contact number': '+19296759693',
+  ...over,
+})
+
+describe("the export's own test data", () => {
+  it('holds Sample Driver by name AND id, with a reason', () => {
+    const plan = planDrivers([
+      driverRow({
+        'Driver ID': '1',
+        'First name': 'Sample',
+        'Last name': 'Driver',
+      }),
+    ])
+    expect(plan.planned).toEqual([])
+    expect(plan.held[0]?.reason).toContain('Datatruck test data')
+  })
+
+  it('does NOT hold a real driver who merely carries id 1', () => {
+    const plan = planDrivers([driverRow({ 'Driver ID': '1' })])
+    expect(plan.planned).toHaveLength(1)
+    expect(plan.planned[0]?.firstName).toBe('Real')
+  })
+
+  it('does NOT hold a real person who happens to be called Sample', () => {
+    const plan = planDrivers([
+      driverRow({ 'First name': 'Sample', 'Last name': 'Driver' }),
+    ])
+    expect(plan.planned).toHaveLength(1)
+    expect(plan.planned[0]?.externalId).toBe('77')
   })
 })

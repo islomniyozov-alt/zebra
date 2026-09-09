@@ -399,6 +399,31 @@ export interface PlanDriversOptions {
   unreadableTariff?: UnreadableTariff
 }
 
+/**
+ * Rows in the export that are Datatruck's own test data, not people.
+ *
+ * ── STATED BY NAME, LIKE EVERY OTHER TABLE IN THIS FILE ───────────────────
+ *
+ * `Sample Driver` (Driver ID 1, AG FREIGHT INC, CDL number "1") arrived with
+ * the all-drivers export and reached production before anybody looked at the
+ * list. It has no loads, no settlements, no pay rules and no compliance —
+ * checked across all eleven tables that point at a driver — because it never
+ * drove anything.
+ *
+ * BY NAME AND BY ID, BOTH. Either alone would be a weaker guard: an id of `1`
+ * is exactly the sort of value a future export could reuse for a real person,
+ * and a name alone would refuse a real driver who happens to be called Sample.
+ * A row must match both to be skipped, and the pair is written out so it can
+ * be read and disagreed with.
+ *
+ * IT IS A REFUSAL, NOT A SILENT DROP. The row lands in `held` with a reason,
+ * so a re-run says "this was skipped and here is why" rather than quietly
+ * producing one fewer driver than the file contains.
+ */
+const TEST_DATA: readonly { externalId: string; who: string }[] = [
+  { externalId: '1', who: 'sample driver' },
+]
+
 export function planDrivers(
   records: readonly Record<string, string>[],
   options: PlanDriversOptions = {},
@@ -416,6 +441,23 @@ export function planDrivers(
     const firstName = text(record, 'First name')
     const lastName = text(record, 'Last name')
     const who = `${firstName} ${lastName}`.trim() || '(unnamed)'
+
+    // ── DATATRUCK'S OWN TEST DATA, SKIPPED BY NAME AND ID ───────────────
+    if (
+      TEST_DATA.some(
+        (row) =>
+          row.externalId === externalId &&
+          row.who === who.toLowerCase().replace(/\s+/g, ' '),
+      )
+    ) {
+      held.push({
+        externalId,
+        who,
+        reason:
+          'Datatruck test data, not a person — see TEST_DATA in drivers.ts',
+      })
+      continue
+    }
 
     if (externalId === '') {
       held.push({

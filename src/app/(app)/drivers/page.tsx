@@ -41,6 +41,19 @@ export default async function DriversPage({
   const { t } = await getLocaleContext()
 
   const showRetired = params['removed'] === '1'
+  // ── ACTIVE BY DEFAULT, SINCE THE DATATRUCK IMPORT ──────────────────────
+  //
+  // This screen listed every driver row, which was the whole roster while the
+  // whole roster was 54 people. The migration brought 69 terminated drivers
+  // and 39 applicants who last drove in 2025, so the default view became 162
+  // rows of which 108 are nobody a dispatcher can send anywhere.
+  //
+  // TWO INDEPENDENT TOGGLES, NOT ONE. Removed and inactive are different
+  // facts: `deletedAt` means the row was a mistake, `INACTIVE` means a real
+  // person who no longer drives here. Folding them together would make
+  // "show removed" resurrect 108 former employees, and hide a mistaken row
+  // among them.
+  const showInactive = params['inactive'] === '1'
   const companyParam =
     typeof params['company'] === 'string' ? params['company'] : undefined
 
@@ -54,6 +67,7 @@ export default async function DriversPage({
           ...companyScopeFilter(session.companyScopes),
           ...(companyParam ? { companyId: companyParam } : {}),
           ...(showRetired ? {} : { deletedAt: null }),
+          ...(showInactive ? {} : { status: { not: 'INACTIVE' } }),
         },
         orderBy: [{ company: { name: 'asc' } }, { lastName: 'asc' }],
         take: 200,
@@ -176,12 +190,30 @@ export default async function DriversPage({
         </div>
       </div>
 
-      <div className="flex items-center gap-z3 border-b border-border bg-surface-2 px-gutter py-z2">
+      {/* EACH TOGGLE KEEPS THE OTHER, so turning one on does not silently
+       * turn the other off — they answer different questions and a dispatcher
+       * looking for a removed row should not lose the inactive ones to find
+       * it. */}
+      <div className="flex items-center gap-z4 border-b border-border bg-surface-2 px-gutter py-z2">
         <Link
-          href={showRetired ? '/drivers' : '/drivers?removed=1'}
+          href={`/drivers?${new URLSearchParams({
+            ...(companyParam ? { company: companyParam } : {}),
+            ...(showInactive ? { inactive: '1' } : {}),
+            ...(showRetired ? {} : { removed: '1' }),
+          }).toString()}`}
           className="text-sm font-medium text-ink-2 hover:text-accent"
         >
           {showRetired ? t('ref.hideRetired') : t('ref.showRetired')}
+        </Link>
+        <Link
+          href={`/drivers?${new URLSearchParams({
+            ...(companyParam ? { company: companyParam } : {}),
+            ...(showRetired ? { removed: '1' } : {}),
+            ...(showInactive ? {} : { inactive: '1' }),
+          }).toString()}`}
+          className="text-sm font-medium text-ink-2 hover:text-accent"
+        >
+          {showInactive ? t('drivers.hideInactive') : t('drivers.showInactive')}
         </Link>
       </div>
 

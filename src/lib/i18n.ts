@@ -307,6 +307,8 @@ const en = {
   'ref.retired': 'Removed',
   'ref.showRetired': 'Show removed',
   'ref.hideRetired': 'Hide removed',
+  'drivers.showInactive': 'Show inactive',
+  'drivers.hideInactive': 'Hide inactive',
   'ref.transfer': 'Transfer authority',
   'ref.transferTitle': 'Transfer to another authority',
   'ref.transferBody':
@@ -2078,6 +2080,8 @@ const ru: Dictionary = {
   'ref.retired': 'Удалено',
   'ref.showRetired': 'Показать удалённые',
   'ref.hideRetired': 'Скрыть удалённые',
+  'drivers.showInactive': 'Показать неактивных',
+  'drivers.hideInactive': 'Скрыть неактивных',
   'ref.transfer': 'Передать перевозчику',
   'ref.transferTitle': 'Передача другому перевозчику',
   'ref.transferBody':
@@ -3841,6 +3845,8 @@ const fa: Dictionary = {
   'ref.retired': 'حذف‌شده',
   'ref.showRetired': 'نمایش حذف‌شده‌ها',
   'ref.hideRetired': 'پنهان کردن حذف‌شده‌ها',
+  'drivers.showInactive': 'نمایش غیرفعال‌ها',
+  'drivers.hideInactive': 'پنهان کردن غیرفعال‌ها',
   'ref.transfer': 'انتقال به شرکت دیگر',
   'ref.transferTitle': 'انتقال به شرکت دیگر',
   'ref.transferBody':
