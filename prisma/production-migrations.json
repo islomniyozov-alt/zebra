@@ -31,8 +31,16 @@
     "20260817213454_location_facility_code",
     "20260817225524_load_stop_leg_miles",
     "20260826010000_settlement_line_stop_dates",
-    "20260907120000_driver_external_id"
+    "20260907120000_driver_external_id",
+    "20260907170000_driver_address",
+    "20260908210000_company_retired",
+    "20260908230000_extraction_usage",
+    "20260909120000_load_external_id_and_closed_history",
+    "20260910180000_driver_opening_balance",
+    "20260910190000_remittance_idempotency",
+    "20260910200000_deduction_engine",
+    "20260910210000_factoring_packet"
   ],
-  "recordedAt": "2026-09-07",
+  "recordedAt": "2026-09-10",
   "verified": true
 }
