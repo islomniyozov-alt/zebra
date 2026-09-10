@@ -266,6 +266,61 @@ describe('the packet, read back out of its own bytes', () => {
     expect(built.reason).toEqual({ kind: 'not_ready', missing: ['BOL'] })
   })
 
+  // ── THE SILENT SHORTFALL, NOW LOUD ───────────────────────────────────
+  //
+  // A broker's rate confirmation is compressed and multi-stream, which
+  // `contentStreamsOf` cannot read. It used to contribute zero pages and the
+  // packet shipped without it — five pages where the real artefact has eight,
+  // no error, and a factor holding a packet with no agreement in it.
+  //
+  // The load looked READY the whole time: the document is on it. Only the
+  // assembler knows how many pages it actually got, so only the assembler can
+  // catch this.
+  it('refuses when a required PDF contributes no pages', () => {
+    // A PDF shaped like a broker's: one FlateDecode stream whose bytes carry
+    // no text operators this reader can find.
+    const foreign = new TextEncoder().encode(
+      [
+        '%PDF-1.7',
+        '1 0 obj',
+        '<< /Filter /FlateDecode /Length 40 >>',
+        'stream',
+        'compressed bytes nothing here can read',
+        'endstream',
+        'endobj',
+      ].join(String.fromCharCode(10)),
+    )
+    const built = buildFactoringPacket({
+      invoicePdf: invoice(),
+      parts: [
+        ...parts().filter((part) => part.type !== 'RATE_CONFIRMATION'),
+        {
+          type: 'RATE_CONFIRMATION',
+          mimeType: 'application/pdf',
+          bytes: foreign,
+          filename: 'werner-ratecon.pdf',
+        },
+      ],
+    })
+    expect(built.ok).toBe(false)
+    if (built.ok) return
+    expect(built.reason).toEqual({
+      kind: 'no_pages_from',
+      type: 'RATE_CONFIRMATION',
+      filename: 'werner-ratecon.pdf',
+    })
+  })
+
+  // THE OTHER SIDE. Without this the assertion above would pass against an
+  // assembler that refused every PDF part.
+  it('still builds when the rate confirmation is one this system wrote', () => {
+    const built = buildFactoringPacket({
+      invoicePdf: invoice(),
+      parts: parts(),
+    })
+    expect(built.ok).toBe(true)
+  })
+
   it('refuses an image it cannot measure rather than emitting a broken page', () => {
     const built = buildFactoringPacket({
       invoicePdf: invoice(),

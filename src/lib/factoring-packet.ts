@@ -114,11 +114,29 @@ export interface PacketPart {
   type: DocumentType
   mimeType: string
   bytes: Uint8Array
+  /** Named in a refusal, so somebody knows which file to look at. */
+  filename?: string
 }
 
 export type PacketRefusal =
   | { kind: 'not_ready'; missing: RequiredPacketDocument[] }
   | { kind: 'unreadable_image'; type: DocumentType }
+  /**
+   * A document is on the load and contributed no pages.
+   *
+   * ── SILENT WAS THE FIRST BEHAVIOUR AND IT WAS WRONG ───────────────────
+   *
+   * `contentStreamsOf` reads the PDFs this system writes — uncompressed, one
+   * stream per page. A broker's rate confirmation is usually neither, so it
+   * yielded nothing and the packet was assembled WITHOUT it: five pages
+   * instead of the eight the real artefact carries, no error, and a factor
+   * receiving a packet with no agreement in it.
+   *
+   * A packet that is missing the thing it is required to contain must refuse.
+   * The load looked ready — the document is there — so nothing upstream could
+   * have caught it; only the assembler knows how many pages it actually got.
+   */
+  | { kind: 'no_pages_from'; type: DocumentType; filename: string }
 
 export type PacketOutcome =
   | { ok: true; pdf: Uint8Array; pageCount: number; order: DocumentType[] }
@@ -195,8 +213,20 @@ export function buildFactoringPacket(input: {
         order.push(type)
         continue
       }
-      // A PDF part contributes its pages as text streams.
-      for (const content of contentStreamsOf(part.bytes)) {
+      // A PDF part contributes its pages as text streams — and if it
+      // contributes none, the packet REFUSES rather than shipping without it.
+      const streams = contentStreamsOf(part.bytes)
+      if (streams.length === 0) {
+        return {
+          ok: false,
+          reason: {
+            kind: 'no_pages_from',
+            type,
+            filename: part.filename ?? '',
+          },
+        }
+      }
+      for (const content of streams) {
         pages.push({ kind: 'text', content })
         order.push(type)
       }
@@ -217,8 +247,18 @@ export function buildFactoringPacket(input: {
  * NARROW ON PURPOSE. It reads the documents `pdf.ts` produces — uncompressed,
  * one stream per page — and nothing else. A general PDF importer would be a
  * parser for every file a broker ever emailed, which is a far larger promise
- * than a packet needs. A part this cannot read contributes no pages, and the
- * caller sees that in the page count.
+ * than a packet needs.
+ *
+ * ── AND ITS LIMIT IS A REFUSAL, NOT A SHORTFALL ─────────────────────────
+ *
+ * A part this cannot read contributes NO pages, and `buildFactoringPacket`
+ * refuses on that rather than assembling a packet without it. The first
+ * version let the page count carry the news, which meant a factor could
+ * receive a packet whose rate confirmation was simply absent.
+ *
+ * EMBEDDING A FOREIGN PDF IS OWED — see MONEY-DESIGN.md §7. Until it is built,
+ * a compressed or multi-stream rate confirmation cannot go in a packet at all,
+ * and the refusal says so by name.
  */
 export function contentStreamsOf(bytes: Uint8Array): string[] {
   const text = new TextDecoder('latin1').decode(bytes)

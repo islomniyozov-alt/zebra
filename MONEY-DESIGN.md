@@ -218,6 +218,14 @@ The percentage is applied **per load line and rounded per line**, not once on th
 - A yard drop's POD is **phone photos of the trailer**, so the packet must accept images as POD, not only documents.
 - After filing, a person clicks PAID.
 
+**OWED, and named here because the packet is otherwise done: embedding a foreign PDF.**
+
+The assembler splices pages out of PDFs *this system wrote* — uncompressed, one content stream per page. A broker's rate confirmation is normally neither: compressed, multi-stream, sometimes scanned. Today such a part contributes no pages, so the packet **refuses to build** and names the file, which is correct but means a compressed rate confirmation cannot be filed at all.
+
+It was silent until 2026-09-10 — the packet assembled without the agreement in it, five pages where DT-015981 has eight, no error, and a factor holding a packet with nothing to check the rate against. The load looked ready the whole time, because the document *is* on it; only the assembler knows how many pages it actually got.
+
+Until this is built, filing a Werner load needs its rate confirmation re-saved as something this system wrote. Two ways out when somebody picks it up: inflate and re-embed foreign content streams, or carry the original file's pages through as embedded objects the way the JPEGs already are. The second is closer to what the artefact does and does not require understanding the file.
+
 Factoring money stays out of the software — funded amounts, fees, reserves and disputes remain manual, by his ruling.
 
 ---
