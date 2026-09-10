@@ -56,6 +56,7 @@ const BILLING: Record<LoadBillingStatus, StatusTone> = {
   // nothing is due; this freight was settled in another system and no action
   // on this screen can change it. A success tone would claim Zebra collected
   // it, and a neutral one would invite somebody to try.
+  FILED_WITH_FACTOR: 'progress',
   CLOSED_IN_DATATRUCK: 'muted',
 }
 

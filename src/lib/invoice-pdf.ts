@@ -188,6 +188,15 @@ export interface RemitParty {
   contactName?: string | null
   phone?: string | null
   email?: string | null
+  /**
+   * The notice of assignment, printed last in the block.
+   *
+   * DATA, NOT CODE. Every factor words this differently and RTS has not yet
+   * said what it requires; the day they do it is a field somebody edits. Null
+   * prints nothing — the real Datatruck invoice carries the factor's name and
+   * no notice at all.
+   */
+  noticeOfAssignment?: string | null
   /** The lockbox. Frequently in another state from the factor's offices. */
   remitAddressLine1?: string | null
   remitAddressLine2?: string | null
@@ -220,6 +229,25 @@ export interface RemitCompany {
  *      must not mean "no instruction" — a reader always knows where to send
  *      the cheque.
  */
+/**
+ * Is this line worth printing?
+ *
+ * ── THE `, 0,` BUG, NOT REPRODUCED ───────────────────────────────────────
+ *
+ * Werner's own invoice to Dolphins prints
+ * `PO BOX 45308, 0, OMAHA, NE, 68145-0308` — an empty address line 2 rendered
+ * as a literal zero, measured off `DT-015981-documents.pdf`. `Boolean(line)`
+ * alone does not catch it, because `"0"` is a non-empty string.
+ *
+ * An absent line is OMITTED. Same rule as an omitted section on a settlement:
+ * a placeholder claims a fact, and here the fact it claims is an address.
+ */
+const printable = (line: string | null | undefined): line is string => {
+  if (!line) return false
+  const trimmed = line.trim()
+  return trimmed !== '' && trimmed !== '0'
+}
+
 export function remitToFor(input: {
   company: RemitCompany
   invoiceFactor?: RemitParty | null
@@ -248,7 +276,8 @@ export function remitToFor(input: {
         factor.contactName,
         factor.email,
         factor.phone,
-      ].filter((line): line is string => Boolean(line)),
+        factor.noticeOfAssignment,
+      ].filter(printable),
     }
   }
 
@@ -263,6 +292,6 @@ export function remitToFor(input: {
       company.addressLine2,
       cityLine || null,
       company.phone,
-    ].filter((line): line is string => Boolean(line)),
+    ].filter(printable),
   }
 }

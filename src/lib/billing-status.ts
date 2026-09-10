@@ -47,7 +47,25 @@ import type { TxClient } from './tenancy'
  * two are decisions somebody made, and the module leaves them exactly alone —
  * both when writing and when checking for drift.
  */
-const DECIDED: readonly LoadBillingStatus[] = [
+/**
+ * The statuses `billingStatusFor` can RETURN.
+ *
+ * The complement of `DECIDED`, written out rather than derived — a derivation
+ * from the Prisma enum would silently absorb a new member into whichever set
+ * it was subtracted from, and `tests/billing-status.test.ts` asserts the two
+ * sets together cover the enum exactly. A status that is neither computed nor
+ * decided fails there by name, which is the point: somebody has to say which
+ * it is.
+ */
+export const COMPUTED_STATUSES: readonly LoadBillingStatus[] = [
+  'UNINVOICED',
+  'READY_TO_INVOICE',
+  'INVOICED',
+  'PARTIALLY_PAID',
+  'PAID',
+]
+
+export const DECIDED_STATUSES: readonly LoadBillingStatus[] = [
   'DISPUTED',
   'WRITTEN_OFF',
   // ADDED 2026-09-09 WITH THE DATATRUCK HISTORY IMPORT. 14,345 loads were
@@ -62,6 +80,13 @@ const DECIDED: readonly LoadBillingStatus[] = [
   // freight, and without this line the drift check would then reclassify a
   // year of settled loads as READY_TO_INVOICE.
   'CLOSED_IN_DATATRUCK',
+  // ADDED 2026-09-10 WITH THE FACTORING PACKET. Filing is somebody pressing a
+  // button and handing a packet to a factor; no arithmetic over invoices and
+  // payments can produce it, and `billingStatusFor` would compute INVOICED and
+  // quietly undo it on the next drift sweep. It ends when a person clicks
+  // PAID — factoring money stays out of this system by ruling, so nothing
+  // arrives that could move it on its own.
+  'FILED_WITH_FACTOR',
 ]
 
 /**
@@ -297,7 +322,7 @@ export async function refreshBillingStatus(
   for (const load of current) {
     // A dispute or a write-off is a decision, not arithmetic. Recomputing over
     // it would erase the only record that the argument is still open.
-    if (DECIDED.includes(load.billingStatus)) continue
+    if (DECIDED_STATUSES.includes(load.billingStatus)) continue
 
     const fact = facts.get(load.id)
     if (!fact) continue
@@ -350,10 +375,29 @@ export interface BillingStatusDrift {
 export async function findBillingStatusDrift(
   tx: TxClient,
 ): Promise<BillingStatusDrift[]> {
+  // ── FILTERED BY WHAT THE RULE CAN PRODUCE, NOT BY WHAT IT CANNOT ──────
+  //
+  // This asked for `billingStatus: { notIn: [...DECIDED_STATUSES] }` until 2026-09-10,
+  // which sends every DECIDED name to the database. The moment
+  // `FILED_WITH_FACTOR` joined that set in code, `check:drift` — which reads
+  // PRODUCTION by design — failed on every machine:
+  //
+  //   invalid input value for enum "LoadBillingStatus": "FILED_WITH_FACTOR"
+  //
+  // A new enum member is unusable in a query until its migration has reached
+  // production, and the window between writing the code and shipping the
+  // migration is exactly when `npm run check` runs most.
+  //
+  // The positive filter has no such window. `COMPUTED_STATUSES` are the values
+  // `billingStatusFor` can RETURN, so they exist wherever this rule has ever
+  // run; a status the database has not heard of is not among them and cannot
+  // be sent. Filtering in TypeScript instead was the other candidate and it
+  // cost the 5s transaction budget — 14,451 rows fetched to discard almost all
+  // of them.
   const loads = await tx.load.findMany({
     where: {
       deletedAt: null,
-      billingStatus: { notIn: [...DECIDED] },
+      billingStatus: { in: [...COMPUTED_STATUSES] },
     },
     select: { id: true, loadNumber: true, billingStatus: true },
   })

@@ -1159,6 +1159,16 @@ model FactoringCompany {
   remitState        String?
   remitPostalCode   String?
 
+  /// The notice of assignment, printed under the remit-to block.
+  ///
+  /// TEXT ON THE RECORD, NOT A STRING IN THE RENDERER, and that is the whole
+  /// point: every factor words this differently, RTS has not yet said what it
+  /// requires, and the day they do it must be a field somebody edits rather
+  /// than a deploy. `DT-015981` prints no notice at all — Datatruck's invoice
+  /// carries the factor's NAME and nothing else — so this starts null and the
+  /// block simply omits it until somebody fills it in.
+  noticeOfAssignment String?
+
   advanceRateBps Int? // e.g. 9700 = 97% advance
   feeBps         Int? // e.g. 300 = 3%
   notes          String?
@@ -1331,6 +1341,19 @@ enum LoadBillingStatus {
   PAID
   DISPUTED
   WRITTEN_OFF
+
+  /// Filed with the factor, awaiting their payment.
+  ///
+  /// One of the DECIDED statuses in `billing-status.ts`, for the reason the
+  /// set exists: somebody pressed a button and handed a packet over. No
+  /// arithmetic over invoices and payments can produce that fact or take it
+  /// back, and `billingStatusFor` would compute INVOICED and undo it on the
+  /// next drift sweep.
+  ///
+  /// It ends when a PERSON clicks PAID. Factoring money — the funded amount,
+  /// the fee, the reserve — stays out of this system by ruling, so nothing
+  /// arrives to move the status on its own.
+  FILED_WITH_FACTOR
 
   /// Billed, or not billed, in Datatruck — before this system existed.
   ///

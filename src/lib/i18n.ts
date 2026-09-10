@@ -295,6 +295,7 @@ const en = {
   'billing.PAID': 'Paid',
   'billing.DISPUTED': 'Disputed',
   'billing.WRITTEN_OFF': 'Written off',
+  'billing.FILED_WITH_FACTOR': 'Filed with factor',
   'billing.CLOSED_IN_DATATRUCK': 'Closed in Datatruck',
 
   'ref.save': 'Save',
@@ -2138,6 +2139,7 @@ const ru: Dictionary = {
   'billing.PAID': 'Оплачен',
   'billing.DISPUTED': 'Оспаривается',
   'billing.WRITTEN_OFF': 'Списан',
+  'billing.FILED_WITH_FACTOR': 'Передан фактору',
   'billing.CLOSED_IN_DATATRUCK': 'Закрыт в Datatruck',
 
   'ref.save': 'Сохранить',
@@ -3973,6 +3975,7 @@ const fa: Dictionary = {
   'billing.PAID': 'پرداخت شده',
   'billing.DISPUTED': 'مورد اختلاف',
   'billing.WRITTEN_OFF': 'سوخت‌شده',
+  'billing.FILED_WITH_FACTOR': 'ارسال‌شده به فاکتور',
   'billing.CLOSED_IN_DATATRUCK': 'بسته‌شده در Datatruck',
 
   'ref.save': 'ذخیره',
