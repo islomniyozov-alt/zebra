@@ -374,6 +374,46 @@ export async function seedOrganization(
     }),
   )
 
+  record(
+    'recurringDeduction',
+    await db.recurringDeduction.create({
+      data: {
+        organizationId,
+        driverId: driver.id,
+        type: 'Insurance',
+        description: 'Insurance (GL, AL, Cargo, TI) for {month} {split}',
+        amountCents: 45000,
+        cadence: 'MONTHLY_SPLIT_WEEKLY',
+        monthlyTotalCents: 180000,
+        effectiveFrom: new Date('2026-08-01'),
+      },
+    }),
+  )
+  record(
+    'settlementCharge',
+    await db.settlementCharge.create({
+      data: {
+        organizationId,
+        driverId: driver.id,
+        type: 'Other',
+        description: 'Charge for late Del',
+        amountCents: -25000,
+        appliesOn: new Date('2026-08-18'),
+      },
+    }),
+  )
+  record(
+    'driverEscrowEntry',
+    await db.driverEscrowEntry.create({
+      data: {
+        organizationId,
+        driverId: driver.id,
+        amountCents: 25000,
+        occurredAt: new Date('2026-08-18'),
+      },
+    }),
+  )
+
   const settlement = record(
     'settlement',
     await db.settlement.create({

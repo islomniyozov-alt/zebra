@@ -143,44 +143,47 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  companies       Company[]
-  inboundEmails   InboundEmail[]
-  assetHistory    AssetAssignment[]
-  customers       Customer[]
-  locations       Location[]
-  factors         FactoringCompany[]
-  auditLogs       AuditLog[]
-  calendarEvents  CalendarEvent[]
-  claims          Claim[]
-  communications  Communication[]
-  complianceItems ComplianceItem[]
-  inspections     RoadsideInspection[]
-  violations      InspectionViolation[]
-  dataQs          DataQsChallenge[]
-  claimParties    ClaimParty[]
-  claimNotes      ClaimNote[]
-  customerAliases CustomerAlias[]
-  corrections     ExtractionCorrection[]
-  extractionUsage ExtractionUsage[]
-  counters        Counter[]
-  documents       Document[]
-  drivers         Driver[]
-  expenses        Expense[]
-  fuelTxns        FuelTransaction[]
-  iftaMileage     IftaMileage[]
-  integrations    Integration[]
-  invoices        Invoice[]
-  loads           Load[]
-  maintenance     MaintenanceRecord[]
-  memberships     Membership[]
-  notifications   Notification[]
-  payments        Payment[]
-  pendingUploads  PendingUpload[]
-  settlements     Settlement[]
-  openingBalances DriverOpeningBalance[]
-  trailers        Trailer[]
-  trucks          Truck[]
-  preferences     UserPreference[]
+  companies           Company[]
+  inboundEmails       InboundEmail[]
+  assetHistory        AssetAssignment[]
+  customers           Customer[]
+  locations           Location[]
+  factors             FactoringCompany[]
+  auditLogs           AuditLog[]
+  calendarEvents      CalendarEvent[]
+  claims              Claim[]
+  communications      Communication[]
+  complianceItems     ComplianceItem[]
+  inspections         RoadsideInspection[]
+  violations          InspectionViolation[]
+  dataQs              DataQsChallenge[]
+  claimParties        ClaimParty[]
+  claimNotes          ClaimNote[]
+  customerAliases     CustomerAlias[]
+  corrections         ExtractionCorrection[]
+  extractionUsage     ExtractionUsage[]
+  counters            Counter[]
+  documents           Document[]
+  drivers             Driver[]
+  expenses            Expense[]
+  fuelTxns            FuelTransaction[]
+  iftaMileage         IftaMileage[]
+  integrations        Integration[]
+  invoices            Invoice[]
+  loads               Load[]
+  maintenance         MaintenanceRecord[]
+  memberships         Membership[]
+  notifications       Notification[]
+  payments            Payment[]
+  pendingUploads      PendingUpload[]
+  settlements         Settlement[]
+  openingBalances     DriverOpeningBalance[]
+  recurringDeductions RecurringDeduction[]
+  settlementCharges   SettlementCharge[]
+  escrowEntries       DriverEscrowEntry[]
+  trailers            Trailer[]
+  trucks              Truck[]
+  preferences         UserPreference[]
 }
 
 enum PlanTier {
@@ -784,19 +787,22 @@ model Driver {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  payRules        DriverPayRule[]
-  loads           Load[]
-  assignments     LoadAssignment[]
-  assetHistory    AssetAssignment[]
-  settlements     Settlement[]
-  openingBalances DriverOpeningBalance[]
-  documents       Document[]
-  expenses        Expense[]
-  fuelTxns        FuelTransaction[]
-  complianceItems ComplianceItem[]
-  inspections     RoadsideInspection[]
-  claims          Claim[]
-  communications  Communication[]
+  payRules            DriverPayRule[]
+  loads               Load[]
+  assignments         LoadAssignment[]
+  assetHistory        AssetAssignment[]
+  settlements         Settlement[]
+  openingBalances     DriverOpeningBalance[]
+  recurringDeductions RecurringDeduction[]
+  settlementCharges   SettlementCharge[]
+  escrowEntries       DriverEscrowEntry[]
+  documents           Document[]
+  expenses            Expense[]
+  fuelTxns            FuelTransaction[]
+  complianceItems     ComplianceItem[]
+  inspections         RoadsideInspection[]
+  claims              Claim[]
+  communications      Communication[]
 
   @@unique([organizationId, externalId])
   @@index([companyId, status])
@@ -1289,6 +1295,7 @@ model Load {
   // Money paid against the LOAD rather than against an invoice. Only ever
   // populated for direct-settled freight — see PaymentLoadApplication.
   paymentApplications PaymentLoadApplication[]
+  settlementCharges   SettlementCharge[]
   corrections         ExtractionCorrection[]
   inboundEmails       InboundEmail[]
 
@@ -3173,4 +3180,154 @@ model DriverOpeningBalance {
   @@unique([driverId, year, category])
   @@index([organizationId, year])
   @@index([driverId, year])
+}
+
+// ---------------------------------------------------------------------------
+// STANDING DEDUCTIONS, AND THE ONE-OFFS BESIDE THEM.
+//
+// Every field below is measured off the six statements in `corpus/datatruck`.
+// The acceptance is that the engine reproduces each description they print,
+// verbatim, from a stored rule — so this table has to hold whatever those
+// strings need and nothing it merely wishes it had.
+//
+// ── `type` IS A STRING, NOT AN ENUM, AND THAT IS THE RULING ──────────────
+//
+// Datatruck prints a type column: Fuel, Insurance, Ifta, Admin Fee, Tolls,
+// Other, Escrow. It is a LABEL with `Other` as the escape hatch — adding a new
+// kind of charge is choosing a label and typing a description, never a
+// migration. A closed Prisma enum would make next year's charge a schema
+// change, which is exactly what the original "no deduction type enum" ruling
+// was protecting. `deduction-types.ts` holds the known list for the UI and for
+// the two behaviours that branch; the column accepts anything.
+//
+// ── SUPERSEDED, NEVER EDITED ─────────────────────────────────────────────
+//
+// Same posture as `DriverPayRule` and the same reason: these land on
+// statements that have already been handed to a person. Changing $450 to $500
+// in place would silently restate last month's paperwork. A change closes the
+// old row with `effectiveTo` and opens a new one.
+// ---------------------------------------------------------------------------
+
+enum DeductionCadence {
+  /// A flat amount every settlement period. Ifta, Admin Fee, Escrow.
+  WEEKLY
+
+  /// A monthly total collected in weekly instalments — `$1800/$450`. The last
+  /// week of a partial month trues up to the day count; see `deductions.ts`.
+  MONTHLY_SPLIT_WEEKLY
+}
+
+model RecurringDeduction {
+  id       String @id @default(cuid())
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  organizationId String // denormalized from Driver — convention 9
+
+  /// The printed label. A string on purpose — see the header.
+  type String
+
+  /// What prints in the Description column, or null.
+  ///
+  /// NULL IS A REAL ANSWER AND NOT A MISSING VALUE: `Ifta` and `Admin Fee`
+  /// print no description at all on the real statements. A blank there is a
+  /// fact about the charge.
+  ///
+  /// Where a description varies by period it is stored as a TEMPLATE and
+  /// `deductions.ts` fills it — `Insurance (GL, AL, Cargo, TI) for {month}
+  /// {split}` produced both `for August $1800/$450` and `for August 24days`
+  /// from one stored rule, which is what the acceptance test demands.
+  description String?
+
+  /// The instalment taken each period, in cents. Always positive here; the
+  /// engine applies the sign, because a deduction and a reimbursement are the
+  /// same object with opposite signs.
+  amountCents Int
+
+  cadence DeductionCadence
+
+  /// The month's total for MONTHLY_SPLIT_WEEKLY — the `$1800` of `$1800/$450`.
+  /// Null for WEEKLY, where the instalment is the whole story.
+  monthlyTotalCents Int?
+
+  /// Escrow's target. When the held balance reaches it the rule stops itself
+  /// and says so — the one thing Datatruck does not do.
+  targetCents Int?
+
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  notes         String?
+
+  createdAt    DateTime     @default(now())
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([driverId, effectiveFrom])
+  @@index([organizationId])
+}
+
+/// A one-off charge or credit on one settlement.
+///
+/// "Charge for late Del Load#111VS62GS" and a truck-wash reimbursement are THE
+/// SAME OBJECT WITH OPPOSITE SIGNS. Two tables would be two sets of rules
+/// about a number that only differs by which way it points.
+model SettlementCharge {
+  id       String @id @default(cuid())
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  organizationId String // denormalized from Driver — convention 9
+
+  /// The printed label, same vocabulary as a recurring deduction's.
+  type String
+
+  description String
+
+  /// SIGNED. Negative is money off the driver, positive is money to them.
+  amountCents Int
+
+  /// The load it concerns, when it concerns one.
+  loadId String?
+  load   Load?   @relation(fields: [loadId], references: [id], onDelete: SetNull)
+
+  /// The day this belongs to. The engine picks charges inside the period.
+  appliesOn DateTime
+
+  /// Set when a settlement has taken it, so it is never taken twice.
+  settledAt DateTime?
+
+  createdAt    DateTime     @default(now())
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([driverId, appliesOn])
+  @@index([loadId])
+  @@index([organizationId])
+}
+
+/// The escrow ledger — the one deduction that is a balance rather than a line.
+///
+/// Incremented on each FINAL settlement (item 3), refundable on termination.
+/// A running total is what lets the rule stop itself at its target, and a
+/// ledger rather than a column is what makes "why is the balance this" a
+/// question with an answer.
+model DriverEscrowEntry {
+  id       String @id @default(cuid())
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  organizationId String // denormalized from Driver — convention 9
+
+  /// Positive is held from the driver, negative is refunded to them.
+  amountCents Int
+
+  /// Which settlement moved it, when a settlement did.
+  settlementId String?
+
+  occurredAt DateTime
+  notes      String?
+
+  createdAt    DateTime     @default(now())
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([driverId, occurredAt])
+  @@index([organizationId])
 }
