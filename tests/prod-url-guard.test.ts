@@ -182,6 +182,21 @@ const MAINTENANCE_READERS = [
   // It REFUSES if a duplicate carries a document, since soft-deleting the row
   // would hide the document with it. Dry run by default.
   'migrate-insurance-to-company.ts',
+  // ADDED 2026-09-10. Datatruck left loads open that nobody here will ever
+  // settle — pickups back to 2024-12-01, still BOOKED or DISPATCHED, and the
+  // current export still calls every one of them open, so the forward-only
+  // sync will never advance them. An open load is a load this system can be
+  // asked to settle, so they blocked the drivers seed outright.
+  //
+  // IT TOUCHES THE BILLING AXIS AND NOTHING ELSE. operationalStatus is never
+  // written: a load that was DISPATCHED and never delivered stays DISPATCHED,
+  // which is the honest record of what happened to it.
+  //
+  // Every id is NAMED — there is no query that decides what to close — and
+  // each row is checked against BOTH sides before it is touched: still open
+  // here, and still open in the export. A row Datatruck has since delivered is
+  // refused so the sync can advance it properly. Dry run by default.
+  'close-stale-datatruck-loads.ts',
 ]
 
 /**

@@ -537,6 +537,55 @@ if (early.settleable > 0) {
     [PAY_RULES_FROM],
   )
 
+  // ── THE THREE-WAY SPLIT THE OWNER RULED ON, 2026-09-10 ──────────────
+  //
+  //   rate $0.00                    no exposure; close with the rest
+  //   has a driver and a rate       HOLD — somebody may be owed for this
+  //   a rate but no driver          close, and NAME them, because nobody can
+  //                                 be owed for freight with no one attached
+  //
+  // The middle bucket is the only one that can cost a person money, which is
+  // why it is the only one that is not a write.
+  const zeroRate = liveRows.filter((row) => row.totalRevenueCents === 0)
+  const held = liveRows.filter(
+    (row) => row.totalRevenueCents > 0 && row.firstName,
+  )
+  const noDriver = liveRows.filter(
+    (row) => row.totalRevenueCents > 0 && !row.firstName,
+  )
+
+  const sum = (list) =>
+    list.reduce((total, row) => total + row.totalRevenueCents, 0)
+
+  console.log('')
+  console.log('  THE THREE-WAY SPLIT:')
+  console.log(
+    `    rate $0.00, close:            ${String(zeroRate.length).padStart(2)}  ${money(0)}`,
+  )
+  console.log(
+    `    driver + rate, HOLD:          ${String(held.length).padStart(2)}  ${money(sum(held))}`,
+  )
+  console.log(
+    `    rate but no driver, close:    ${String(noDriver.length).padStart(2)}  ${money(sum(noDriver))}`,
+  )
+
+  const show = (label, list) => {
+    if (list.length === 0) return
+    console.log('')
+    console.log(`  ${label}`)
+    for (const row of list) {
+      console.log(
+        `    ${String(row.externalId).padEnd(10)} ${row.scheduledAt.toISOString().slice(0, 10)}  ` +
+          `${row.status.padEnd(11)} ${money(row.totalRevenueCents).padStart(11)}  ` +
+          `driver=${row.firstName ? `${row.firstName} ${row.lastName}` : 'NONE'}  ` +
+          `truck=${row.unitNumber ?? 'NONE'}  ${row.carrier} / ${row.customer}`,
+      )
+    }
+  }
+  show('ZERO RATE — close with the rest:', zeroRate)
+  show('RATE BUT NO DRIVER — close, and named here:', noDriver)
+  show('DRIVER AND A RATE — HELD, not written:', held)
+
   if (liveRows.length > 0) {
     console.log('')
     console.log('  LIVE AUTHORITY — every one, for the owner to read:')
