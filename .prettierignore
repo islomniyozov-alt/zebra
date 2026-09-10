@@ -17,6 +17,14 @@ prisma/migrations
 # was written.
 PHASE-6-SPEC.md
 
+# A DRAFT WRITTEN FOR THE OWNER TO READ, not source this repository owns yet.
+# Same reasoning as the line above: prettier reflows markdown, and reflowing a
+# document somebody is being asked to review would quietly edit the thing under
+# review — including the tables of real settlement dates it asks to be checked
+# against the printed packets. Left exactly as written until it is either
+# adopted or thrown away.
+MONEY-DESIGN.md
+
 # Raw model responses. See .gitignore — evidence, not source.
 .extractions
 
