@@ -355,6 +355,25 @@ export async function seedOrganization(
     }),
   )
 
+  // ONE OPENING BALANCE, so the isolation proof has a row to hide. Stated and
+  // dated like a real one — the figure is transcribed from a statement and the
+  // source names which, because a balance nobody can recompute has to be
+  // checkable against the paper it came from.
+  record(
+    'driverOpeningBalance',
+    await db.driverOpeningBalance.create({
+      data: {
+        organizationId,
+        driverId: driver.id,
+        year: 2026,
+        category: 'EARNINGS',
+        amountCents: 14672164,
+        asOf: new Date('2026-08-15'),
+        source: `ST-${tag}`,
+      },
+    }),
+  )
+
   const settlement = record(
     'settlement',
     await db.settlement.create({

@@ -177,6 +177,7 @@ model Organization {
   payments        Payment[]
   pendingUploads  PendingUpload[]
   settlements     Settlement[]
+  openingBalances DriverOpeningBalance[]
   trailers        Trailer[]
   trucks          Truck[]
   preferences     UserPreference[]
@@ -338,6 +339,7 @@ model User {
   accessorialsOk    LoadAccessorial[]
   paymentsRecorded  Payment[]
   settlementsOk     Settlement[]
+  openingBalances   DriverOpeningBalance[]
   expensesCreated   Expense[]
   communications    Communication[]
   notifications     Notification[]
@@ -787,6 +789,7 @@ model Driver {
   assignments     LoadAssignment[]
   assetHistory    AssetAssignment[]
   settlements     Settlement[]
+  openingBalances DriverOpeningBalance[]
   documents       Document[]
   expenses        Expense[]
   fuelTxns        FuelTransaction[]
@@ -1426,6 +1429,18 @@ model LoadAccessorial {
   isBillable  Boolean           @default(true)
   status      AccessorialStatus @default(PENDING)
 
+  /// THE IDEMPOTENCY KEY FOR AN IMPORTED CHARGE, when a file produced it.
+  ///
+  /// `<invoice number>:<trip or load id>:<item type>:<column>` — MONEY-DESIGN
+  /// §2's key, written down. Re-uploading the same remittance must write
+  /// nothing, and this is the constraint that makes that true in the database
+  /// rather than in the importer's memory.
+  ///
+  /// NULL FOR EVERY HAND-ENTERED CHARGE, which is why the uniqueness is
+  /// partial: Postgres does not collide nulls, so nothing existing is
+  /// constrained by a column it does not use.
+  sourceKey String?
+
   approvedByUserId String?
   approvedBy       User?     @relation(fields: [approvedByUserId], references: [id])
   approvedAt       DateTime?
@@ -1435,6 +1450,7 @@ model LoadAccessorial {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([loadId, sourceKey])
   @@index([loadId])
   @@index([status])
   @@index([organizationId])
@@ -2336,11 +2352,21 @@ model Payment {
 
   method          PaymentMethod
   referenceNumber String? // check number, ACH trace, wire ref
-  receivedAt      DateTime
-  amountCents     Int
+
+  /// The remittance this payment came from, when a file produced it.
+  ///
+  /// `<invoice number>` — Amazon's own, which is also the workbook's filename.
+  /// Unique per organization so a second upload of one week finds the payment
+  /// already there instead of creating a duplicate ACH.
+  ///
+  /// NULL FOR EVERY HAND-ENTERED PAYMENT. Nothing about the existing payment
+  /// flows changes.
+  remittanceKey  String?
+  receivedAt     DateTime
+  amountCents    Int
   // Amount not yet applied to an invoice — a real state, not an error.
-  unappliedCents  Int           @default(0)
-  notes           String?
+  unappliedCents Int      @default(0)
+  notes          String?
 
   recordedByUserId String?
   recordedBy       User?   @relation(fields: [recordedByUserId], references: [id])
@@ -2352,6 +2378,7 @@ model Payment {
   applications     PaymentApplication[]
   loadApplications PaymentLoadApplication[]
 
+  @@unique([organizationId, remittanceKey])
   @@index([companyId, receivedAt])
   @@index([companyId, customerId])
 }
@@ -3055,4 +3082,95 @@ enum InboundEmailState {
   CONFIRMED
   /// A dispatcher said it was not freight.
   DISMISSED
+}
+
+// ---------------------------------------------------------------------------
+// WHAT A DRIVER HAD EARNED BEFORE ZEBRA WAS THE BOOK OF RECORD.
+//
+// ── WHY THIS EXISTS AT ALL ────────────────────────────────────────────────
+//
+// Zebra's revenue starts at the books cutover (MONEY-DESIGN §0a): pre-cutover
+// Amazon money never becomes a `Payment` here, because it was received and
+// disbursed through Datatruck and the ST-005xxx statements prove the drivers
+// were paid. That ruling is right and it breaks exactly one thing — YTD.
+//
+// YTD is a query over FINAL settlements in the calendar year (§6), so on the
+// first Zebra statement it would restart at zero. Hassan Ali Hirsi's Datatruck
+// statement of 2026-08-19 prints `YTD Earnings: $146,721.64`; a Zebra
+// statement the following week showing a few thousand would be read, correctly,
+// as the system having lost his year.
+//
+// ── AN OPENING BALANCE, NOT AN IMPORT ────────────────────────────────────
+//
+// The fix is one stated figure per category, not a back-import of the money.
+// Importing would create cash entries this system never processed and payments
+// applied to loads `SETTLEABLE_LOAD` excludes — money in with no way out.
+// A balance adds to a query and claims nothing about what Zebra did.
+//
+// ── STATED AND DATED, NEVER DERIVED ──────────────────────────────────────
+//
+// Every figure is transcribed from a printed statement by a person, and the
+// row records WHICH statement. Deriving it — summing imported loads, applying
+// a pay rule to closed history — would reconstruct a number Datatruck already
+// computed under rules this system does not hold, and any drift between the
+// two would surface as a driver's year quietly disagreeing with their pay
+// stubs. `source` is not decoration: it is how a disputed figure is checked.
+//
+// ── ONE ROW PER CATEGORY, MIRRORING THE STATEMENT ────────────────────────
+//
+// The six categories are the ones Datatruck's own summary block prints, so a
+// person seeding this reads across a statement and types what is there. A
+// single `openingNetPay` column would have been smaller and would not survive
+// the first question anybody asks, which is why the number is what it is.
+//
+// NET PAY IS STORED, NOT COMPUTED, for the same reason: Datatruck prints it,
+// and a computed one that disagreed with the printed one would make this table
+// an opinion. If they disagree, that is a finding about the statement.
+// ---------------------------------------------------------------------------
+enum OpeningBalanceCategory {
+  EARNINGS
+  ADVANCES
+  REIMBURSEMENTS
+  DEDUCTIONS
+  OTHER_PAY
+  NET_PAY
+}
+
+model DriverOpeningBalance {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  /// The calendar year this balance opens. YTD is per year, so this is too.
+  year     Int
+  category OpeningBalanceCategory
+
+  /// Integer cents, sign as the statement prints it. Deductions are negative.
+  amountCents Int
+
+  /// The day the balance is taken as at — the period end of the last
+  /// Datatruck statement, never the day somebody typed it.
+  asOf DateTime
+
+  /// Which statement this was read off: `ST-005284`. Not optional by accident.
+  source String
+
+  /// Who transcribed it, for a figure nobody can recompute.
+  enteredById String?
+  enteredBy   User?   @relation(fields: [enteredById], references: [id])
+
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// ONE FIGURE PER DRIVER PER YEAR PER CATEGORY. A second row for the same
+  /// three would be two answers to one question, and nothing downstream could
+  /// choose between them — so the database refuses rather than the code.
+  @@unique([driverId, year, category])
+  @@index([organizationId, year])
+  @@index([driverId, year])
 }

@@ -143,6 +143,13 @@ const INSPECTION_READERS = [
   // referenceNumber. It writes no Payment, no application, no accessorial and
   // no status — none of that is built yet.
   'preview-amazon-remittance.ts',
+  // ADDED 2026-09-10, read-only. The owner ruled that Zebra's revenue starts
+  // at the cutover and pre-cutover Amazon money stays out of the books. That
+  // is safe only if no pre-cutover load ALREADY carries Zebra money — an
+  // invoice line, a settlement line, a payment application or an accessorial —
+  // because excluding the remittance for a load that has half a figure on it
+  // is worse than either whole answer. Counts the four separately.
+  'inspect-amazon-money.mjs',
 ]
 
 /**

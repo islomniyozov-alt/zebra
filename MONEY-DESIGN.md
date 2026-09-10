@@ -10,6 +10,36 @@ Zebra's money job in one sentence: **know what was earned, know what was actuall
 
 ---
 
+## 0a. "Cutover" is three dates, and only one of them has happened
+
+Written down 2026-09-10, because the word was carrying three meanings at once and every sentence using it was ambiguous:
+
+| | date | happened? |
+|---|---|---|
+| **The pay-rule date** — where every seeded `DriverPayRule` begins, and before which no settleable load may pick up | **2026-08-01** | **yes**, ruled and enforced in `DATATRUCK_CUTOVER` and the drivers seed |
+| **The operational cutover** — the day dispatchers stop working in Datatruck | not set | **no.** The standing ruling is that they stay on Datatruck until Zebra is finished |
+| **The books cutover** — the first period Zebra is the system of record for money | not set | **no**, and it cannot precede the operational one |
+
+**Zebra's revenue starts at the books cutover** (owner's ruling, 2026-09-10). Pre-cutover Amazon money does not enter as `Payment` rows: it was received and disbursed through Datatruck, and the six `ST-005xxx` statements are the evidence that drivers were already paid for it.
+
+**The exclusion needs no new mechanism.** A pre-cutover load is `CLOSED_IN_DATATRUCK`, so `SETTLEABLE_LOAD` already excludes it and the importer's fifth outcome already counts it. That is the rule; there is no date comparison anywhere in the write path.
+
+Asked of production before this was accepted — *does any pre-cutover Amazon load already carry Zebra money?* If one did, excluding its remittance would leave half a figure behind:
+
+```
+Pre-cutover direct-settled loads:  10,337   ($10,611,195.70)
+  payment applications  0
+  invoice lines         0
+  settlement lines      0
+  accessorials        600  — all on imported loads, none on loads Zebra created
+```
+
+Zero on all three ledger relations. The 600 accessorials were written by the loads import from Datatruck's `Total other pay`; they are transcribed history, not money this system moved.
+
+**What this means for the importer:** every remittance now in the corpus is entirely pre-books-cutover. 847 of 881 payable units across six weeks are closed history. The importer has no live week to be tested against yet, and that gap cannot be closed by more reading.
+
+---
+
 ## 0. A correction that has to come first: the week boundary
 
 The period was recorded earlier as Saturday→Friday. It is **Sunday→Saturday** *(confirmed off the page)*: every statement prints a Period Start that is a Sunday and a Period End that is the Saturday six days later.
@@ -234,6 +264,10 @@ No statement date or check date derived from the period (§0). No unit number re
 4. Fuel and toll imports.
 5. Werner packet button.
 6. Money → This week.
+
+**Which date this order hangs off, since the word was doing three jobs — see §0a.** Items 1–5 can be built and proved before the operational cutover; none of them needs Datatruck to have stopped. What they cannot be *exercised* on is live money, because until dispatchers move, every remittance week is closed history and the importer's live path stays a path no artefact has run.
+
+So item 1 ships in two halves and they have different bars. The reader and preview were proved against six real workbooks. The writer can only be proved against the handful of live units those weeks happen to contain — five, totalling $7,446.35 — plus its refusal to touch the 847 closed-history units beside them. That is a small acceptance set and it is the whole of what exists; the first real week is the first week after the operational cutover.
 
 **Prerequisite that is not code:** every load a settlement touches needs a driver and a truck.
 
