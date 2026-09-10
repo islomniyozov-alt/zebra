@@ -39,7 +39,8 @@
     "20260910180000_driver_opening_balance",
     "20260910190000_remittance_idempotency",
     "20260910200000_deduction_engine",
-    "20260910210000_factoring_packet"
+    "20260910210000_factoring_packet",
+    "20260910230000_fix_org_isolation_setting_name"
   ],
   "recordedAt": "2026-09-10",
   "verified": true
