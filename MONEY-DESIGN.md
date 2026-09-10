@@ -1,6 +1,10 @@
 # ZEBRA — MONEY DESIGN
 
-Status: draft for the user's review. Nothing here is built. Written against the eight real Datatruck settlements, the DT-015981 Werner packet, and the Sep 9 Amazon remittance.
+Status: draft for the user's review. Nothing here is built. Written against the real Datatruck settlements, the DT-015981 Werner packet, and the Sep 9 Amazon remittance.
+
+Amended 2026-09-10 after profiling the source documents read-only. **Six** settlement statements are in `corpus/datatruck`, not eight — ST-005284, ST-005301, ST-005310, ST-005317, ST-005336, ST-005352. Everything below marked *(confirmed off the page)* was checked against them; §0, §4, §6 and §7 changed as a result.
+
+A defect in the statements themselves, worth knowing before anything reads them: their ToUnicode maps ligature glyphs to **Private Use Area** codepoints — `U+E007` for ff, `U+E009` for tt. The files do not literally contain the strings `Payment tariff:`, `Settlement`, or `Muzaffarov`. Anything matching on those labels or on driver names has to map the PUA codes first.
 
 Zebra's money job in one sentence: **know what was earned, know what was actually paid, and pay each driver their share of what was actually paid — weekly, per authority, without anyone retyping a number.**
 
@@ -8,16 +12,24 @@ Zebra's money job in one sentence: **know what was earned, know what was actuall
 
 ## 0. A correction that has to come first: the week boundary
 
-The period was recorded earlier as Saturday→Friday. Checked against the real dates, it is **Sunday→Saturday**:
+The period was recorded earlier as Saturday→Friday. It is **Sunday→Saturday** *(confirmed off the page)*: every statement prints a Period Start that is a Sunday and a Period End that is the Saturday six days later.
 
-| Document | Period | Statement / invoice | Money |
+A period boundary off by one day puts every Saturday and Sunday delivery in the wrong week — a money error that looks like nothing. That is why it was worth confirming rather than deriving.
+
+**What did NOT survive contact with the documents: the Tue/Thu cadence.** It was generalised from one packet. All three weeks the statements cover:
+
+| Period | Statement date | Check date | Statements |
 |---|---|---|---|
-| Datatruck ST-0290 | Aug 16 (Sun) – Aug 22 (Sat) | Aug 25 (Tue) | Check Aug 27 (Thu) |
-| Amazon remittance | Aug 30 (Sun) – Sep 5 (Sat) | Sep 8 (Tue) | Paid Sep 9 (Wed) |
+| Aug 9 (Sun) – Aug 15 (Sat) | Aug 19 (**Wed**) | Aug 21 (**Fri**) | ST-005284 |
+| Aug 16 (Sun) – Aug 22 (Sat) | Aug 25 (Tue) | Aug 27 (Thu) | ST-005301, ST-005310, ST-005317 |
+| Aug 23 (Sun) – Aug 29 (Sat) | Sep 2 (**Wed**) | Sep 4 (**Fri**) | ST-005336, ST-005352 |
+| Amazon remittance | Aug 30 (Sun) – Sep 5 (Sat) | Sep 8 (Tue), paid Sep 9 (Wed) | — |
 
-A period boundary off by one day puts every Saturday and Sunday delivery in the wrong week — a money error that looks like nothing. **Confirm this off the printed documents before it is coded**, since it is derived from day-of-week arithmetic, not from a weekday printed on the page.
+Two of three weeks are Wednesday statement / Friday check. So:
 
-What the corrected calendar gives us: the period closes Saturday, Amazon's remittance is available Tuesday, Amazon's cash is in the bank Wednesday, and the driver cheque goes Thursday. **The money is in before the cheque is written.** Section 3 rests on this.
+**Statement date and check date are per-batch INPUTS, never derived from the period.** A rule that computed "period end + 3" would have been right one week in three and wrong silently the rest — the same class of error as the boundary itself, and harder to see because each individual statement would look plausible.
+
+§3's argument survives either shape, which is the point of writing this down rather than picking a cadence: the remittance lands Tuesday, the cash is in Wednesday, and the cheque goes Thursday **or Friday**. The money is in before the cheque is written under both observed patterns. Section 3 rests on that ordering, not on a weekday.
 
 ---
 
@@ -69,7 +81,7 @@ Every driver is paid a percentage of gross. Which gross?
 
 **Proposed ruling: for Amazon freight, drivers settle on REMITTED gross — what Amazon actually paid for that trip, including detention and TONU.** Booked rate is used only when the remittance hasn't arrived, and the line says so on the statement.
 
-Why it's available: §0 — the remittance lands Tuesday, the batch is cut Tuesday, the cash is in Wednesday, the cheque goes Thursday.
+Why it's available: §0 — the remittance lands Tuesday, the batch is cut Tuesday, the cash is in Wednesday, and the cheque goes Thursday or Friday. What the argument needs is the ORDER, not the weekdays; the observed cadence varies week to week and the dates are batch inputs.
 
 What it buys:
 - detention Amazon paid flows the driver's 88–90% automatically. Datatruck cannot do this without someone typing it.
@@ -78,7 +90,7 @@ What it buys:
 
 What it costs, and must be accepted:
 - **"Settle this week" warns loudly when the period's remittance has not been imported** and lists the loads that would settle on an estimate.
-- A FINAL settlement freezes gross alongside the pay rule and the PU/DEL dates already frozen.
+- A FINAL settlement freezes gross alongside the pay rule, the PU/DEL dates and the unit number already frozen (§6).
 - Any money that arrives after a settlement is FINAL lands as a **next-week line naming the old load** ("Amazon adjustment, load 1042"), never as a rewrite. That is the same object as a one-off charge, so it costs no new machinery.
 
 Werner is unaffected: gross = the invoice amount, settled on delivery, because the factor pays the next day.
@@ -89,7 +101,19 @@ Werner is unaffected: gross = the invoice amount, settled on delivery, because t
 
 ## 4. Deductions: one open-line engine
 
-Ruled: a deduction is a typed description plus an amount. The system need not know what a charge means, only add it up accurately. **No deduction type enum** — next year's new charge needs no code.
+Ruled: a deduction is a typed description plus an amount. The system need not know what a charge means, only add it up accurately. Islom's ruling holds where it mattered — **nobody writes code to add a charge.**
+
+**Softened, not reversed, 2026-09-10.** This section said "no deduction type enum". Datatruck's statements *do* print a type column with free text beside it *(confirmed off the page)*, and the values observed across six statements are:
+
+`Fuel` · `Insurance` · `Ifta` · `Admin Fee` · `Tolls` · `Other` · `Escrow`
+
+So the shape is:
+
+- **Type is a LABEL, with `Other` as the escape hatch.** It prints, it groups, and adding a new kind of charge means choosing `Other` and typing a description — not a migration. That is what the original ruling was protecting and it survives intact.
+- **Description stays free text**, and is **genuinely optional**: `Ifta` and `Admin Fee` print no description at all on the real statements. A blank there is a fact about the charge, not a missing value to prompt for.
+- **Code branches on type for exactly two, because only two carry behaviour**: `Fuel`, whose amount comes from the transaction import rather than a typed figure (§5), and `Escrow`, which has a target and a running balance and must stop itself. Every other type is a string that prints.
+
+A type that carried no behaviour and could not be extended without a migration would have been the enum this section was right to refuse. A label with an escape hatch is not that.
 
 **`RecurringDeduction`** (per driver): description, amount, cadence `WEEKLY | MONTHLY_SPLIT_WEEKLY`, optional target, optional proration, effective from/to. Created on the driver screen, dated, **superseded rather than edited** — same posture as `DriverPayRule` and for the same reason: these land on statements that have already been handed to a person.
 
@@ -103,6 +127,8 @@ Ruled: a deduction is a typed description plus an amount. The system need not kn
 Escrow is the only one needing a ledger rather than a line: a held balance per driver, incremented on each FINAL settlement, refundable on termination.
 
 No trailer rent — the operation is power only.
+
+**An empty section is omitted, never rendered at zero** *(confirmed off the page)*. The two Dolphins statements carry no Deductions block at all — the summary reads `Deductions: $0.00` and the section simply is not there. Only the RAM statements carry `Fuel Transactions`. A zero-row table claims that somebody looked and found nothing; an absent section claims nothing, which is the honest output when there is nothing to say. Same rule §5 already states for the fuel line, generalised.
 
 ---
 
@@ -130,13 +156,21 @@ One action, **"Settle this week"**, per company. It:
 - warns if the period's Amazon remittance is not imported (§3);
 - builds every statement and leaves the batch DRAFT for a person to read.
 
-`FINAL` freezes gross, pay rule, PU/DEL dates, deduction amounts and escrow balances. `PAID` records the payout date (Friday) and the method. Statement date and payout date are separate columns because they are separate events.
+`FINAL` freezes gross, pay rule, PU/DEL dates, **unit number**, deduction amounts and escrow balances. `PAID` records the payout date and the method. Statement date and payout date are separate columns because they are separate events — and both are **inputs**, not derived from the period (§0).
 
-Numbering: per company, forward-only, the existing `Counter` table. `ST-` statements, `SB-` batches.
+**The unit number is a per-settlement field, not a lookup** *(confirmed off the page)*. Muzaffarov settles on unit `0484` for Aug 16–22 and unit `8842` for Aug 23–29. Reading it from the driver's current truck link at render time would silently rewrite last month's statement the next time somebody reassigned a truck — a statement already handed to a person, changing under them. It belongs in the frozen set for the same reason gross and the pay rule do.
+
+**Numbering: statements share ONE sequence across carriers; invoices stay per-authority.**
+
+The real series is `ST-005xxx`, and it runs as one counter across both companies *(confirmed off the page)*: 5284 RAM, 5301 Dolphins, 5310 RAM, 5317 RAM, 5336 Dolphins, 5352 RAM. This section previously said per-company for both, which the artifact contradicts.
+
+Matching the artifact, and the distinction is real rather than a concession: **an invoice is an outward-facing document that carries the authority's MC and its own invoice series, so it must be per-authority. A statement is internal paperwork** — nobody outside the company ever sees one — so a shared counter costs nothing and matches what the drivers already recognise. `SB-` batch ids behave the same way (SB-000436 through SB-000440 across both carriers).
 
 **YTD is a query over FINAL settlements in the calendar year, never a stored accumulator.** A stored accumulator drifts the first time anything is voided; a query is one indexed round trip.
 
-The percentage is applied **per load line and rounded per line**, not once on the total — measured on ST-0290 (796.98 → 717.28). `money.ts` owns the rounding, half-up, integer cents. TONU flows through the same percentage ($175 → $157.50).
+The percentage is applied **per load line and rounded per line**, not once on the total. `money.ts` owns the rounding, half-up, integer cents. TONU flows through the same percentage ($175 → $157.50) — and ST-005284 prints exactly that: a $175.00 Murfreesboro-to-Murfreesboro line paying $154.00 at 88%.
+
+*(The earlier citation of "ST-0290 (796.98 → 717.28)" was a mis-transcription; no such statement exists. The per-line rounding claim still needs checking against a line whose per-line and on-total results actually differ — none of the six happens to be one, so it is unconfirmed rather than confirmed.)*
 
 ---
 
@@ -145,8 +179,12 @@ The percentage is applied **per load line and rounded per line**, not once on th
 **File with factor**, on the load.
 
 - Disabled until invoice + POD + BOL + rate confirmation all exist, and the tooltip **names the missing piece**. Zebra is stricter than Datatruck here by ruling.
-- Produces one PDF per load in packet order: invoice → POD → BOL → rate confirmation.
+- Produces one PDF per load in packet order: invoice → POD → BOL → rate confirmation. *(Confirmed off DT-015981: page 1 the invoice, pages 2–4 three 960×1280 scans, pages 5–8 the four-page Werner rate confirmation.)*
 - Invoice: Bill To the broker, **REMIT TO the factor**, `IN-<shipment id>`, terms 30, load number = `referenceNumber`, linehaul flat.
+- **`IN-` + the load's own six-digit Datatruck sequence** *(confirmed off the page)*: `IN-015981` against Shipment ID `DT-015981`. The invoice number is computed from the load, not allocated separately, and that is the join between the two.
+- The fields it prints, verbatim: `Invoice ID · Date · Due Date · Terms · Load Number · Customer ID`. Charges table: `Type · Description · Charges`, one row `Linehaul · FLAT`.
+- **The remit-to block on the real invoice is the factor's NAME and nothing else** — `RTS Financial`, no address, no account, no notice-of-assignment text. Worth deciding deliberately rather than inheriting: a factor's remittance instructions usually belong on the face of the invoice.
+- **Do not reproduce Datatruck's `, 0,` bug.** Its Bill To renders as `PO BOX 45308, 0, OMAHA, NE, 68145-0308` — an empty address line 2 printed as a literal zero. An absent line is omitted, not filled with a placeholder; the same rule as an omitted section in §4.
 - A yard drop's POD is **phone photos of the trailer**, so the packet must accept images as POD, not only documents.
 - After filing, a person clicks PAID.
 
@@ -166,7 +204,11 @@ Factoring money stays out of the software — funded amounts, fees, reserves and
 
 ## 9. What must not be built
 
-No factoring ledger. No trailer rent. No deduction type enum. No auto-created loads from a remittance. No editing a FINAL settlement. No stored YTD.
+No factoring ledger. No trailer rent. No auto-created loads from a remittance. No editing a FINAL settlement. No stored YTD.
+
+No **closed** deduction type enum — see §4. A type that could not be extended without a migration is still refused; a label with `Other` as its escape hatch is not that, and the statements print one.
+
+No statement date or check date derived from the period (§0). No unit number read from the driver's current truck link at render time (§6). No zero-row section standing in for an absent one (§4), and no placeholder standing in for an absent address line (§7).
 
 ---
 
@@ -178,7 +220,9 @@ No factoring ledger. No trailer rent. No deduction type enum. No auto-created lo
 4. **Escrow refund on termination** — back through a settlement as a negative deduction, or outside the system?
 5. **Non-people rows** (7 Star, TJK logistic, truck 3609 Said) — fee payees, or roster rows to be removed?
 6. **Month-end**: what the accountant actually needs. Asked twice, still unanswered. It decides the reports screen, not this design.
-7. **§0's week boundary** — confirm Sunday→Saturday off the printed documents.
+7. ~~**§0's week boundary** — confirm Sunday→Saturday off the printed documents.~~ **Answered 2026-09-10: Sunday→Saturday, confirmed.** The Tue/Thu cadence beside it did not survive and is now a batch input.
+8. **The remit-to block** (§7) — Datatruck prints the factor's name alone. Does RTS require an address or assignment notice on the invoice face?
+9. **Per-line rounding** (§6) — still unconfirmed; none of the six statements carries a line where per-line and on-total rounding differ.
 
 ---
 
@@ -191,6 +235,12 @@ No factoring ledger. No trailer rent. No deduction type enum. No auto-created lo
 5. Werner packet button.
 6. Money → This week.
 
-**Prerequisite that is not code:** every load needs a driver and a truck, and production has neither. The roster seed reaches production before any of this can be tested against real freight.
+**Prerequisite that is not code:** every load a settlement touches needs a driver and a truck.
+
+*Updated 2026-09-10 — the roster is on production now, so the prerequisite is narrower and measurable rather than blanket. What remains:*
+
+- **Three live loads carry no driver and no truck** ($312.87). Two more, 1015 and 1016 on truck 7072, carry a truck and no driver — $2,703.58 the Datatruck export names SHUHRAT SHARIPOV for. That gap is structural: the import's enrichment path writes five fields and driver is not one of them.
+- **17 active drivers have no truck link**, across 26 driver→truck pairs the freight itself evidences; 13 of them run under an authority that disagrees with the truck's.
+- **25 loads picked up before the pay rules start** (2026-08-01) and are still settleable, carrying $14,528.04 across 18 drivers. The drivers seed refuses to write while any of them exists — correctly. They are held pending a settlement-statement check that the six available statements cannot answer: they cover 2026-08-09 → 2026-08-29 and every one of the 25 picked up on or before 2026-07-10, so the honest verdict for all 25 is **"no statement for that week", never "unpaid"**.
 
 Standing rules that apply throughout: integer cents; `money.ts` owns rounding; third-party latency never inside a transaction; batched writes against the 200 ms statement and 5 s transaction ceiling; guards watched failing before they are trusted; retired authorities keep owning their history.
