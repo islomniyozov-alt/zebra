@@ -216,6 +216,85 @@ describe('row-level security', () => {
 
     expect(wrong).toEqual([])
   })
+
+  // ── AND THE POLICY MUST SAY THE RIGHT THING, NOT MERELY EXIST ──────────
+  //
+  // The test above counts policies. On 2026-09-10 that was not enough: four
+  // new money tables each had `org_isolation` — so the count was 1 and this
+  // file was green — while the expression read
+  //
+  //   current_setting('app.organization_id', true)
+  //
+  // a name NOTHING SETS. `current_setting` returns NULL for an unset name with
+  // `missing_ok`, and `"organizationId" = NULL` is NULL rather than true, so
+  // the policy denied every row including the tenant's own. Only the
+  // integration isolation suite caught it, and only because it reads through
+  // the app role.
+  //
+  // `withOrg` sets `app.current_org_id`. That is the one name, and this
+  // asserts every policy uses it — failing by TABLE NAME, because "a policy is
+  // wrong" sends somebody to read forty of them.
+  //
+  // WHY THIS BELONGS BESIDE THE COUNT RATHER THAN REPLACING IT: a table with
+  // no policy and a table with a policy that can never be true are different
+  // faults with different fixes, and the second is the one that looks fine.
+  it('writes every org_isolation policy against app.current_org_id', async () => {
+    const rows = await query<{ relname: string; qual: string | null }>(`
+      SELECT c.relname,
+             pg_get_expr(p.polqual, p.polrelid) AS qual
+        FROM pg_policy p
+        JOIN pg_class c ON c.oid = p.polrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'public'
+         AND p.polname = 'org_isolation'
+       ORDER BY c.relname
+    `)
+
+    // A query that found nothing would report perfect compliance.
+    expect(rows.length).toBeGreaterThan(30)
+
+    // NAMED, NOT COUNTED. Each offender carries the expression it actually
+    // has, so the fix is visible without opening the database.
+    const wrong = rows
+      .filter((row) => !(row.qual ?? '').includes('app.current_org_id'))
+      .map((row) => `${row.relname}: ${row.qual ?? '(no qualifier)'}`)
+
+    expect(wrong, `these policies do not read app.current_org_id`).toEqual([])
+  })
+
+  // THE OTHER HALF: no policy may read any OTHER session variable. The check
+  // above passes a policy that reads the right name and a wrong one beside it,
+  // which is exactly the shape a careless fix would leave behind.
+  it('reads no session variable other than app.current_org_id', async () => {
+    const rows = await query<{ relname: string; qual: string | null }>(`
+      SELECT c.relname,
+             pg_get_expr(p.polqual, p.polrelid) AS qual
+        FROM pg_policy p
+        JOIN pg_class c ON c.oid = p.polrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'public'
+         AND p.polname = 'org_isolation'
+       ORDER BY c.relname
+    `)
+
+    const settings = new Map<string, string[]>()
+    for (const row of rows) {
+      for (const found of (row.qual ?? '').matchAll(
+        /current_setting\(\s*'([^']+)'/g,
+      )) {
+        const name = found[1]!
+        if (name === 'app.current_org_id') continue
+        settings.set(name, [...(settings.get(name) ?? []), row.relname])
+      }
+    }
+
+    const offenders = [...settings].map(
+      ([name, tables]) => `${name} on ${tables.join(', ')}`,
+    )
+    expect(offenders, 'unexpected session variables in org_isolation').toEqual(
+      [],
+    )
+  })
 })
 
 describe('child-table triggers', () => {
