@@ -348,6 +348,91 @@ if (named.length > 0) {
   }
 }
 
+// ── FREIGHT THAT PREDATES THE PAY RULES ───────────────────────────────────
+//
+// `seed-datatruck-drivers.ts` refuses to write when a load picks up before its
+// pay rules start, because a settlement reaching back past every rule finds
+// nothing and either refuses or pays under a rule chosen by accident.
+//
+// THE POPULATION IS THE WHOLE QUESTION. Asked of every stop, the answer is the
+// archive — 14,000 loads from 2024 that were settled in Datatruck and will
+// never be settled here. Asked of SETTLEABLE loads, it is the number that
+// actually blocks anybody. Both are printed, because the gap between them is
+// the finding.
+const PAY_RULES_FROM = '2026-08-01'
+const [early] = await rows(
+  `
+  SELECT
+    COUNT(*)::int AS "allStops",
+    COUNT(*) FILTER (
+      WHERE l."billingStatus"::text <> 'CLOSED_IN_DATATRUCK'
+        AND l."deletedAt" IS NULL
+        AND l."isCancelled" = false
+    )::int AS settleable
+    FROM "LoadStop" s
+    JOIN "Load" l ON l.id = s."loadId"
+   WHERE s.type::text = 'PICKUP'
+     AND s."scheduledAt" < $1::timestamptz
+`,
+  [PAY_RULES_FROM],
+)
+
+heading(`PICKUPS BEFORE THE PAY RULES START (${PAY_RULES_FROM})`)
+console.log(`  every stop:                       ${early.allStops}`)
+console.log(`  on settleable loads:              ${early.settleable}`)
+
+if (early.settleable > 0) {
+  const worst = await rows(
+    `
+    SELECT l."loadNumber", l."externalId", l."billingStatus"::text AS billing,
+           l."operationalStatus"::text AS status, s."scheduledAt",
+           c.name AS carrier
+      FROM "LoadStop" s
+      JOIN "Load" l ON l.id = s."loadId"
+      JOIN "Company" c ON c.id = l."companyId"
+     WHERE s.type::text = 'PICKUP'
+       AND s."scheduledAt" < $1::timestamptz
+       AND l."billingStatus"::text <> 'CLOSED_IN_DATATRUCK'
+       AND l."deletedAt" IS NULL
+       AND l."isCancelled" = false
+     ORDER BY s."scheduledAt"
+     LIMIT 20
+  `,
+    [PAY_RULES_FROM],
+  )
+  console.log('')
+  for (const row of worst) {
+    console.log(
+      `  ${String(row.loadNumber).padEnd(10)} ${row.scheduledAt.toISOString().slice(0, 10)}  ` +
+        `${row.status.padEnd(13)} ${row.billing.padEnd(20)} ${row.carrier}  ` +
+        `externalId=${row.externalId ?? '—'}`,
+    )
+  }
+  // WHAT STATE ARE THEY IN? A load that never reached POD_RECEIVED cannot be
+  // settled today — `settleableWhere` asks for that status — so the breakdown
+  // says whether these 54 are a live problem or a dormant one.
+  const states = await rows(
+    `
+    SELECT l."operationalStatus"::text AS status, COUNT(*)::int AS n
+      FROM "LoadStop" s
+      JOIN "Load" l ON l.id = s."loadId"
+     WHERE s.type::text = 'PICKUP'
+       AND s."scheduledAt" < $1::timestamptz
+       AND l."billingStatus"::text <> 'CLOSED_IN_DATATRUCK'
+       AND l."deletedAt" IS NULL
+       AND l."isCancelled" = false
+     GROUP BY l."operationalStatus"
+     ORDER BY COUNT(*) DESC
+  `,
+    [PAY_RULES_FROM],
+  )
+  console.log('')
+  console.log('  by operational status:')
+  for (const row of states) {
+    console.log(`    ${row.status.padEnd(14)} ${row.n}`)
+  }
+}
+
 const [fleet] = await rows(`
   SELECT COUNT(*)::int AS total,
          COUNT(vin)::int AS "withVin"

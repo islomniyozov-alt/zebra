@@ -8,6 +8,7 @@ import type { TxClient } from './tenancy'
 import { lastFullWeekEnding } from './settings'
 import { allocateNumber } from './counters'
 import { sheetDates, type SheetDates, type SheetStop } from './stop-actuals'
+import { NOT_CLOSED_HISTORY } from './billing-status'
 import {
   amountFromSnapshot,
   payFor,
@@ -84,14 +85,51 @@ export function isDeduction(type: SettlementLineType): boolean {
  * question is "is this load already on a settlement", and only the relation
  * answers it.
  */
+/**
+ * What makes a load settleable AT ALL, before any driver or period is named.
+ *
+ * ── THE OWNER'S RULING OF 2026-09-10, AND WHY IT IS A DEFINITION ─────────
+ *
+ * "Refuse if any settleable load picks up before effectiveFrom — imported
+ * closed-in-Datatruck history is excluded."
+ *
+ * That could have been a clause in the seed's guard. It is here instead,
+ * because the guard and the settlement engine have to mean the SAME THING by
+ * "settleable" or the guard is checking a population the engine does not use.
+ * One rule, two callers — the argument this codebase keeps making about a rule
+ * living in one place.
+ *
+ * ── EXCLUDING CLOSED HISTORY IS A FIX, NOT ONLY A NARROWING ──────────────
+ *
+ * `settleableWhere` did not carry `NOT_CLOSED_HISTORY` before today, and the
+ * import's own ruling was "no historical driver pay, no historical
+ * settlements". So a load that Datatruck already settled — POD_RECEIVED,
+ * unsettled HERE because no settlement of ours has ever touched it — would
+ * have been picked up by the next settlement run and paid a second time.
+ * Production carries two of those on truck 7072 today (1015 and 1016).
+ *
+ * Nothing had gone wrong yet only because no settlement has been run against
+ * imported freight. That is a coincidence, not a rule, and a coincidence is
+ * not a thing to leave holding wages up.
+ *
+ * IT IS THE BILLING AXIS THAT SAYS SO, not a date and not an `externalId` —
+ * the reasoning `NOT_CLOSED_HISTORY` records in full. A load somebody
+ * legitimately reopens stops being closed and becomes settleable again, which
+ * is the correct behaviour and falls out of asking the status.
+ */
+export const SETTLEABLE_LOAD: Prisma.LoadWhereInput = {
+  deletedAt: null,
+  isCancelled: false,
+  ...NOT_CLOSED_HISTORY,
+}
+
 export function settleableWhere(
   driverId: string,
   periodStart: Date,
   periodEnd: Date,
 ): Prisma.LoadWhereInput {
   return {
-    deletedAt: null,
-    isCancelled: false,
+    ...SETTLEABLE_LOAD,
     driverId,
     operationalStatus: 'POD_RECEIVED',
     statusEvents: {

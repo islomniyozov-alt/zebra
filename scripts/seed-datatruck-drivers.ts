@@ -1,6 +1,7 @@
 import { neonConfig } from '@neondatabase/serverless'
 import { readFileSync } from 'node:fs'
 import { createPrismaClient } from '@/lib/db'
+import { SETTLEABLE_LOAD } from '@/lib/settlements'
 import { asRecords, readXlsx } from '@/lib/datatruck/xlsx'
 import {
   employmentFromColumn,
@@ -30,10 +31,16 @@ import type { PrismaClient } from '../src/generated/prisma/client'
 // dated by the clock would make every settlement before today unreproducible
 // and every one after it depend on when somebody typed a command.
 //
-// AND THE DATE IS ASSERTED, NOT ASSUMED. If any load in the database picked up
+// AND THE DATE IS ASSERTED, NOT ASSUMED. If any SETTLEABLE load picked up
 // before 2026-08-01, this refuses to write: that load would settle against a
 // pay rule that did not exist when it ran, which is the one failure a
 // date-versioned pay table is built to make impossible.
+//
+// SETTLEABLE, not "any load" — the owner's ruling of 2026-09-10. The Datatruck
+// import put an archive of 2024 freight in this database that was settled in
+// another system and never will be here, and counting it made the guard refuse
+// on 13,325 rows nobody could ever be paid for. `SETTLEABLE_LOAD` is the
+// settlement engine's own predicate, imported rather than restated.
 // ---------------------------------------------------------------------------
 
 neonConfig.webSocketConstructor ??= WebSocket
@@ -108,36 +115,73 @@ function heading(text: string): void {
  * not a warning: `driver-pay.ts` would either refuse it or pay it under a rule
  * chosen by accident, and both are wrong in a way that only shows up in
  * somebody's wages.
+ *
+ * ── IT ASKS ABOUT SETTLEABLE LOADS, NOT ABOUT EVERY STOP ─────────────────
+ *
+ * The owner's ruling of 2026-09-10: refuse if any SETTLEABLE load picks up
+ * before `effectiveFrom`; imported closed-in-Datatruck history is excluded.
+ *
+ * Before that this counted every pickup in the database, and once the load
+ * history landed the answer was 13,325 — an archive of freight from 2024 that
+ * Datatruck settled and this system never will. A guard that refuses on rows
+ * nobody could ever be paid for is a guard that gets skipped, and the number
+ * it reported said nothing about the risk it exists for. Excluding the archive
+ * leaves 54 on production, which is a list somebody can actually work.
+ *
+ * `SETTLEABLE_LOAD` IS IMPORTED RATHER THAN RESTATED. It is the settlement
+ * engine's own definition — `settleableWhere` spreads the same constant — so
+ * this guard cannot come to disagree with the thing it is guarding. A second
+ * copy of the predicate here would be two definitions of who gets paid.
+ *
+ * IT DOES NOT ASK FOR POD_RECEIVED, and that is deliberate. The engine does,
+ * because a driver is paid for freight that is finished. This question is
+ * prospective: a load booked in 2024 and still open would settle against no
+ * rule the day somebody marks it delivered. Measured on production on
+ * 2026-09-10, all 54 that remain are BOOKED, DISPATCHED or IN_TRANSIT — none
+ * settleable today, every one of them settleable tomorrow.
  */
 async function assertNoEarlierFreight(db: PrismaClient): Promise<void> {
+  const where = {
+    type: 'PICKUP' as const,
+    scheduledAt: { lt: EFFECTIVE_FROM },
+    load: SETTLEABLE_LOAD,
+  }
+
   const earliest = await db.loadStop.findFirst({
-    where: { type: 'PICKUP', scheduledAt: { lt: EFFECTIVE_FROM } },
+    where,
     orderBy: { scheduledAt: 'asc' },
     select: {
       scheduledAt: true,
-      load: { select: { loadNumber: true, referenceNumber: true } },
+      load: {
+        select: {
+          loadNumber: true,
+          referenceNumber: true,
+          operationalStatus: true,
+        },
+      },
     },
   })
 
   if (!earliest) {
     console.log(
-      `  OK — no load picks up before ${EFFECTIVE_FROM_DAY}, so every pay rule this`,
+      `  OK — no settleable load picks up before ${EFFECTIVE_FROM_DAY}, so every`,
     )
-    console.log('       seed writes covers the whole life of every load.')
+    console.log('       pay rule this seed writes covers the whole life of')
+    console.log('       every load it could ever be asked to settle.')
     return
   }
 
-  const count = await db.loadStop.count({
-    where: { type: 'PICKUP', scheduledAt: { lt: EFFECTIVE_FROM } },
-  })
+  const count = await db.loadStop.count({ where })
 
   throw new Error(
-    `REFUSING TO WRITE. ${count} load stop(s) pick up before ${EFFECTIVE_FROM_DAY}. ` +
-      `The earliest is load ${earliest.load.loadNumber} (${earliest.load.referenceNumber ?? 'no reference'}) ` +
-      `at ${earliest.scheduledAt?.toISOString() ?? '(no date)'}.\n\n` +
-      `Every pay rule this seed writes starts on ${EFFECTIVE_FROM_DAY}. A load that ran ` +
-      `before that would settle against no rule at all. Either the effective date is ` +
-      `wrong, or those loads are, and a seed is not the place to decide which.`,
+    `REFUSING TO WRITE. ${count} settleable load stop(s) pick up before ${EFFECTIVE_FROM_DAY}. ` +
+      `The earliest is load ${earliest.load.loadNumber} (${earliest.load.referenceNumber ?? 'no reference'}), ` +
+      `${earliest.load.operationalStatus}, at ${earliest.scheduledAt?.toISOString() ?? '(no date)'}.\n\n` +
+      `Imported closed-in-Datatruck history is ALREADY EXCLUDED from that count, so these ` +
+      `are loads this system could still be asked to settle. Every pay rule this seed ` +
+      `writes starts on ${EFFECTIVE_FROM_DAY}, and a load that ran before that would settle ` +
+      `against no rule at all. Either the effective date is wrong, or those loads are, and ` +
+      `a seed is not the place to decide which.`,
   )
 }
 

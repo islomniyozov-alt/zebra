@@ -1174,3 +1174,131 @@ describe('freight nobody drove', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// FREIGHT DATATRUCK ALREADY SETTLED MUST NEVER BE SETTLED AGAIN HERE.
+//
+// ── THE HOLE THIS CLOSES WAS OPEN, NOT THEORETICAL ───────────────────────
+//
+// `settleableWhere` asked for POD_RECEIVED, unsettled, in the period, and
+// nothing else. An imported load is POD_RECEIVED, and it is "unsettled" here
+// by construction — no settlement of ours has ever touched it — so the next
+// settlement run for that driver would have picked it up and paid a driver a
+// second time for freight another system already paid them for.
+//
+// Nothing had gone wrong only because no settlement has yet been run against
+// imported freight. That is a coincidence and not a rule, and the import's own
+// ruling was explicit: no historical driver pay, no historical settlements.
+//
+// The owner's ruling of 2026-09-10 made it a definition rather than a clause:
+// a settleable load excludes imported closed-in-Datatruck history, and
+// `SETTLEABLE_LOAD` is the single place that says so — spread by
+// `settleableWhere` here and imported by the drivers seed's date guard, so the
+// guard and the engine cannot come to disagree about who gets paid.
+//
+// ── BOTH BRANCHES ARE WATCHED ────────────────────────────────────────────
+//
+// The load is built IDENTICALLY to a settleable one and settled in the same
+// week — same driver, same POD date, same money — so the ONLY difference is
+// the billing status. Then the status is moved off CLOSED_IN_DATATRUCK and the
+// same query is asked again, and the load appears. A guard that has never been
+// watched failing is not known to work, and a test that only ever sees the
+// closed case would pass just as happily against a query that returns nothing.
+// ---------------------------------------------------------------------------
+describe('freight another system already settled', () => {
+  it('is invisible while it is closed, and visible the moment it is not', async () => {
+    const imported = await inOrg((tx) =>
+      createLoad(
+        tx,
+        organizationId,
+        {
+          companyId,
+          customerId: brokerId,
+          driverId,
+          stops: [
+            {
+              type: 'PICKUP',
+              city: 'Chicago',
+              state: 'IL',
+              scheduledAt: new Date(Date.UTC(2026, 6, 28)),
+            },
+            {
+              type: 'DELIVERY',
+              city: 'Dallas',
+              state: 'TX',
+              scheduledAt: new Date(Date.UTC(2026, 6, 29)),
+            },
+          ],
+          linehaulCents: 175_215,
+        },
+        { byUserId: userId },
+      ),
+    )
+
+    await inOrg((tx) =>
+      transitionOperational(tx, imported.id, 'POD_RECEIVED', {
+        source: 'AUTOMATIC',
+        userId,
+        // INSIDE THE WEEK, for the reason the test above records at length: a
+        // load excluded by DATE would pass this assertion without ever
+        // exercising the billing filter.
+        occurredAt: new Date(Date.UTC(2026, 6, 30)),
+      }),
+    )
+
+    // CLOSED IN DATATRUCK, written directly. `billingStatusFor` does not own
+    // this status — it is one of the DECIDED set — so the import sets it and
+    // neither the writer nor the drift check moves it.
+    await inOrg((tx) =>
+      tx.load.update({
+        where: { id: imported.id },
+        data: { billingStatus: 'CLOSED_IN_DATATRUCK', externalId: 'DT-016006' },
+      }),
+    )
+
+    const closed = await inOrg((tx) =>
+      settleableLoads(tx, driverId, WEEK_START, WEEK_END),
+    )
+    expect(closed.map((row) => row.id)).not.toContain(imported.id)
+
+    // And the week does not sweep it up either.
+    const outcome = await inOrg((tx) =>
+      generateSettlement(tx, organizationId, {
+        driverId,
+        periodStart: WEEK_START,
+        periodEnd: WEEK_END,
+        labels,
+      }),
+    )
+    if (outcome.ok) {
+      const lines = await inOrg((tx) =>
+        tx.settlementLine.findMany({
+          where: { settlementId: outcome.settlementId },
+          select: { loadId: true },
+        }),
+      )
+      expect(lines.map((line) => line.loadId)).not.toContain(imported.id)
+      // The settlement that was just generated must not hold this load, and it
+      // is removed so the second half of the test starts from where the first
+      // half did rather than from "already on a sheet".
+      await inOrg((tx) => voidSettlement(tx, outcome.settlementId))
+    }
+
+    // ── THE OTHER BRANCH ────────────────────────────────────────────────
+    //
+    // Reopened — which is exactly what the billing axis is for: a load
+    // somebody legitimately takes back off Datatruck's books becomes this
+    // system's responsibility again. Nothing else about the row changes.
+    await inOrg((tx) =>
+      tx.load.update({
+        where: { id: imported.id },
+        data: { billingStatus: 'UNINVOICED' },
+      }),
+    )
+
+    const reopened = await inOrg((tx) =>
+      settleableLoads(tx, driverId, WEEK_START, WEEK_END),
+    )
+    expect(reopened.map((row) => row.id)).toContain(imported.id)
+  }, 300_000)
+})
