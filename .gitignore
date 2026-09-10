@@ -117,3 +117,8 @@ next-env.d.ts
 # run on one machine, they belong beside the document they read, and neither
 # git nor prettier has any business touching them.
 /.extractions/
+
+# Exit codes captured by `scripts/run-status.mjs`, so a status can be read from
+# a file rather than from whatever the shell last happened to run. Evidence
+# about one machine at one moment, like the integration receipt above it.
+/.run-status/

@@ -19,3 +19,6 @@ PHASE-6-SPEC.md
 
 # Raw model responses. See .gitignore — evidence, not source.
 .extractions
+
+# Exit codes captured by run-status.mjs. See .gitignore — evidence, not source.
+.run-status

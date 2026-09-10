@@ -77,14 +77,37 @@ Rules about instruments, which are the ones that cost whole sessions:
   `check:drift` queries Cloudflare — and only then compute against it. On
   2026-08-20 production had moved three deploys past a reading carried forward
   from two days earlier, and every report in between repeated it.
-- **Read the exit code before anything touches the output.** `cmd | tail` gives
-  you `tail`'s exit code — a cheerful `0` over a failed command — and a filter
-  that trims to the last lines will trim away the banner explaining what went
-  wrong. Capture the status first, then filter for reading. The same session
-  produced three false readings this way: a proof that "passed" because `$?`
-  was `tail`'s, a `sed` that silently matched nothing after prettier reindented
-  its target, and a `grep` that turned a refused run into a four-second
-  mystery.
+- **Run anything whose failure matters under `scripts/run-status.mjs`, and read
+  the status from the file it writes. Not from the shell.**
+
+      node scripts/run-status.mjs deploy-dev -- npm run deploy:dev
+      node scripts/run-status.mjs --check deploy-dev
+
+  `cmd | tail` gives you `tail`'s exit code — a cheerful `0` over a failed
+  command — and a filter that trims to the last lines will trim away the banner
+  explaining what went wrong. One session produced three false readings that
+  way: a proof that "passed" because `$?` was `tail`'s, a `sed` that silently
+  matched nothing after prettier reindented its target, and a `grep` that
+  turned a refused run into a four-second mystery.
+
+  THIS RULE USED TO SAY "capture the status first, then filter for reading" AND
+  THAT WAS NOT ENOUGH. It asked for care, and on 2026-09-09 care failed twice
+  in one session on this exact hazard — both times
+  `npm run deploy:dev > log 2>&1; echo "exit=$?"; tail -6 log`, both times a
+  deploy that REFUSED because the integration suite was red, both times
+  reported as a completed deploy because the status belonged to `tail` and the
+  six lines it chose did not include the refusal. The second one was written by
+  somebody who had just quoted this rule.
+
+  So the rule names a mechanism rather than a disposition, which is flag 86's
+  lesson applied a second time: the wrapper writes the wrapped command's real
+  exit code to `.run-status/<name>.json` before it exits, `--check` reads that
+  file and nothing else, and it fails closed — a missing file, a run still in
+  flight, or a wrapper that was killed all report NOT OK rather than silence.
+  The verdict prints in capitals with the number repeated, so a `tail -1` of it
+  is still unambiguous. That is the one hostile reading the whole thing exists
+  to defeat.
+
 - **Edit source with the tool that refuses a missed anchor. Not `sed`.**
   `str.replace` returns the original string when it matches nothing, `sed`
   exits 0, and a filter that matches nothing prints nothing — so a silent
