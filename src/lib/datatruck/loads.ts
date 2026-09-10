@@ -194,6 +194,75 @@ export function readStatus(raw: string): StatusReading | null {
   }
 }
 
+/**
+ * THE DAY THIS FLEET'S RECORDED HISTORY STARTS.
+ *
+ * Datatruck ran the freight before this; Zebra owns it after. Two rules turn
+ * on the same day and they have to be the same day or they fight:
+ *
+ *   Every `DriverPayRule` this system seeds begins here, so no settlement can
+ *   reach back past a rule and find nothing.
+ *
+ *   An open Datatruck row that picked up before here is ABANDONED, not live —
+ *   see `closeIfStale` below — so the importer stops creating the freight the
+ *   first rule would refuse.
+ *
+ * `seed-datatruck-drivers.ts` asserts its own `EFFECTIVE_FROM` against this
+ * rather than importing it, because the pay date is a stated fact that belongs
+ * where somebody ruled on it. The assertion is what makes a drift between the
+ * two impossible: were the importer's cutover to move on its own, it would go
+ * on creating loads the seed's guard refuses, and each would look correct.
+ */
+export const DATATRUCK_CUTOVER = new Date('2026-08-01T00:00:00.000Z')
+
+/**
+ * An open row too old to be live is finished history, whatever it still says.
+ *
+ * ── THE MEASUREMENT THAT FORCED THIS, 2026-09-10 ─────────────────────────
+ *
+ * Production carried 54 imported loads sitting in BOOKED, DISPATCHED or
+ * IN_TRANSIT with pickups going back to 2024-12-01. The 2026-09-08 export
+ * still calls all 54 `booked`, `dispatched`, `assigned` or `in_transit` —
+ * NONE of them delivered — so the forward-only sync will never advance them
+ * and they would have sat open forever.
+ *
+ * They are not harmless. A load that is not closed is a load this system may
+ * be asked to settle, so all 54 counted against the drivers seed's date guard
+ * and blocked it — and clearing them by hand without this rule would simply
+ * mean finding sixty more after the next export.
+ *
+ * ── CLOSED, NOT CANCELLED, AND THE DIFFERENCE IS THE WHOLE POINT ─────────
+ *
+ * The owner's ruling: `CLOSED_IN_DATATRUCK`, because "not ours to settle" is
+ * what is actually true and it already has a rule and a test behind it.
+ * Cancelling would assert the freight did not happen, which is a claim about
+ * the world rather than about this system's responsibility — and several of
+ * these carry a driver, a truck and real revenue.
+ *
+ * SO THE OPERATIONAL STATUS IS LEFT EXACTLY AS READ. A load that was
+ * DISPATCHED and never delivered stays DISPATCHED; that is the honest record
+ * of what happened to it. Only the billing axis moves, and only in the
+ * direction that says nobody here will be paid for it.
+ *
+ * A ROW WITH NO PICKUP DATE IS LEFT ALONE. This cannot judge the age of
+ * something undated, and guessing would close live freight over a blank cell.
+ */
+export function closeIfStale(
+  reading: StatusReading,
+  pickupAt: Date | null,
+  cutover: Date = DATATRUCK_CUTOVER,
+): StatusReading {
+  if (reading.closed) return reading
+  if (!pickupAt || Number.isNaN(pickupAt.getTime())) return reading
+  if (pickupAt.getTime() >= cutover.getTime()) return reading
+
+  return {
+    ...reading,
+    billing: 'CLOSED_IN_DATATRUCK',
+    closed: true,
+  }
+}
+
 /** `dry_van` and `power_only` are the only two the export carries. */
 export function readEquipment(raw: string): EquipmentType | null {
   switch (raw.trim().toLowerCase()) {
@@ -421,14 +490,20 @@ export function planLoads(
       continue
     }
 
-    const status = readStatus(text(record, 'Load status'))
-    if (!status) {
+    const read = readStatus(text(record, 'Load status'))
+    if (!read) {
       held.push({
         externalId,
         reason: `load status ${JSON.stringify(text(record, 'Load status'))} has no counterpart on either Zebra axis`,
       })
       continue
     }
+
+    // THE PICKUP DATE IS READ BEFORE THE STATUS IS SETTLED, because an open
+    // row older than the cutover is finished history whatever it still says.
+    // See `closeIfStale` for the 54 production loads that forced it.
+    const pickupAt = parseDatatruckMoment(text(record, 'PU date'))
+    const status = closeIfStale(read, pickupAt)
 
     const corrections: string[] = []
 
@@ -512,7 +587,7 @@ export function planLoads(
         text(record, 'Pickup state'),
         text(record, 'Pickup company'),
       ),
-      pickupAt: parseDatatruckMoment(text(record, 'PU date')),
+      pickupAt,
       delivery: readPlace(
         text(record, 'Delivery location'),
         text(record, 'Delivery state'),

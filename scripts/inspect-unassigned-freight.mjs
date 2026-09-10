@@ -431,6 +431,128 @@ if (early.settleable > 0) {
   for (const row of states) {
     console.log(`    ${row.status.padEnd(14)} ${row.n}`)
   }
+
+  // ── THE SPLIT THE OWNER ASKED FOR: RETIRED CARRIER OR LIVE ONE ─────────
+  //
+  // A retired authority stopped hauling before this system existed, so an
+  // open 2024 load under one is unambiguously finished — it is not going to
+  // move, and nobody here will ever be paid for it. A load under RAM or
+  // Dolphins is a live carrier's open row, which is a different claim and
+  // wants somebody's eyes before a bulk status write.
+  //
+  // COUNTED AS LOADS AS WELL AS STOPS, because the guard counts PICKUP STOPS
+  // and a close happens per LOAD. Reporting 54 as though it were a number of
+  // loads would be the superset error this file already carries a note about,
+  // one level down.
+  const byCarrier = await rows(
+    `
+    SELECT c.name AS carrier, c.retired,
+           COUNT(*)::int AS stops,
+           COUNT(DISTINCT l.id)::int AS loads,
+           MIN(s."scheduledAt") AS earliest,
+           MAX(s."scheduledAt") AS latest,
+           COALESCE(SUM(DISTINCT l."totalRevenueCents"), 0)::bigint AS cents
+      FROM "LoadStop" s
+      JOIN "Load" l ON l.id = s."loadId"
+      JOIN "Company" c ON c.id = l."companyId"
+     WHERE s.type::text = 'PICKUP'
+       AND s."scheduledAt" < $1::timestamptz
+       AND l."billingStatus"::text <> 'CLOSED_IN_DATATRUCK'
+       AND l."deletedAt" IS NULL
+       AND l."isCancelled" = false
+     GROUP BY c.name, c.retired
+     ORDER BY c.retired DESC, COUNT(*) DESC
+  `,
+    [PAY_RULES_FROM],
+  )
+
+  console.log('')
+  console.log('  by authority:')
+  let retiredLoads = 0
+  let liveLoads = 0
+  for (const row of byCarrier) {
+    if (row.retired) retiredLoads += row.loads
+    else liveLoads += row.loads
+    console.log(
+      `    ${row.retired ? 'RETIRED' : 'LIVE   '} ${row.carrier.padEnd(32)} ` +
+        `${String(row.loads).padStart(3)} load(s), ${String(row.stops).padStart(3)} stop(s)  ` +
+        `${row.earliest.toISOString().slice(0, 10)} → ${row.latest.toISOString().slice(0, 10)}`,
+    )
+  }
+  console.log('')
+  console.log(`    retired authorities: ${retiredLoads} load(s)`)
+  console.log(`    live authorities:    ${liveLoads} load(s)`)
+
+  // EVERY ID, ON ONE LINE, so the set can be handed to another instrument
+  // whole rather than reconstructed from a printed table. Reconstructing it
+  // is how a set of 54 becomes a set of 52 without anybody noticing.
+  const allIds = await rows(
+    `
+    SELECT DISTINCT l."externalId", c.retired
+      FROM "LoadStop" s
+      JOIN "Load" l ON l.id = s."loadId"
+      JOIN "Company" c ON c.id = l."companyId"
+     WHERE s.type::text = 'PICKUP'
+       AND s."scheduledAt" < $1::timestamptz
+       AND l."billingStatus"::text <> 'CLOSED_IN_DATATRUCK'
+       AND l."deletedAt" IS NULL
+       AND l."isCancelled" = false
+     ORDER BY l."externalId"
+  `,
+    [PAY_RULES_FROM],
+  )
+  const retiredIds = allIds.filter((r) => r.retired).map((r) => r.externalId)
+  const liveIds = allIds.filter((r) => !r.retired).map((r) => r.externalId)
+  console.log('')
+  console.log(`  RETIRED (${retiredIds.length}): ${retiredIds.join(' ')}`)
+  console.log('')
+  console.log(`  LIVE (${liveIds.length}): ${liveIds.join(' ')}`)
+
+  // EVERY LIVE-AUTHORITY LOAD, NAMED IN FULL. These are the ones the owner
+  // asked to look at before anything is written, so the report has to carry
+  // enough to decide on each rather than a count to trust.
+  const liveRows = await rows(
+    `
+    SELECT DISTINCT l."loadNumber", l."externalId", l."referenceNumber",
+           l."operationalStatus"::text AS status,
+           l."billingStatus"::text AS billing,
+           l."totalRevenueCents",
+           c.name AS carrier, cu.name AS customer,
+           s."scheduledAt",
+           d."firstName", d."lastName", t."unitNumber"
+      FROM "LoadStop" s
+      JOIN "Load" l ON l.id = s."loadId"
+      JOIN "Company" c ON c.id = l."companyId"
+      JOIN "Customer" cu ON cu.id = l."customerId"
+      LEFT JOIN "Driver" d ON d.id = l."driverId"
+      LEFT JOIN "Truck" t ON t.id = l."truckId"
+     WHERE s.type::text = 'PICKUP'
+       AND s."scheduledAt" < $1::timestamptz
+       AND l."billingStatus"::text <> 'CLOSED_IN_DATATRUCK'
+       AND l."deletedAt" IS NULL
+       AND l."isCancelled" = false
+       AND c.retired = false
+     ORDER BY s."scheduledAt"
+  `,
+    [PAY_RULES_FROM],
+  )
+
+  if (liveRows.length > 0) {
+    console.log('')
+    console.log('  LIVE AUTHORITY — every one, for the owner to read:')
+    for (const row of liveRows) {
+      console.log(
+        `    ${String(row.loadNumber).padEnd(10)} ${row.scheduledAt.toISOString().slice(0, 10)}  ` +
+          `${row.status.padEnd(11)} ${money(row.totalRevenueCents).padStart(11)}  ` +
+          `${row.carrier} / ${row.customer}`,
+      )
+      console.log(
+        `    ${''.padEnd(10)} driver=${row.firstName ? `${row.firstName} ${row.lastName}` : 'NONE'}  ` +
+          `truck=${row.unitNumber ?? 'NONE'}  billing=${row.billing}  ` +
+          `externalId=${row.externalId ?? '—'}  ref=${row.referenceNumber ?? '—'}`,
+      )
+    }
+  }
 }
 
 const [fleet] = await rows(`

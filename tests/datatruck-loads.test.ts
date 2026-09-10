@@ -8,6 +8,8 @@ import {
   rateChangeFor,
   rateFreezeFor,
   readStatus,
+  closeIfStale,
+  DATATRUCK_CUTOVER,
   syncDecisionFor,
 } from '@/lib/datatruck/loads'
 
@@ -472,5 +474,77 @@ describe('what a restated rate looks like', () => {
       { linehaulCents: 100_000, accessorialCents: 5_000 },
     )
     expect(change?.totalRevenueCents).toBe(105_000)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AN OPEN ROW TOO OLD TO BE LIVE IS FINISHED HISTORY, WHATEVER IT SAYS.
+//
+// ── THE MEASUREMENT, 2026-09-10 ──────────────────────────────────────────
+//
+// Production carried 54 imported loads in BOOKED, DISPATCHED or IN_TRANSIT
+// with pickups back to 2024-12-01, and the 2026-09-08 export still calls every
+// one of them booked, dispatched, assigned or in_transit. None delivered — so
+// the forward-only sync would never advance them and they would sit open
+// forever, each one a load this system could be asked to settle and each one
+// blocking the drivers seed's date guard.
+//
+// Clearing them by hand without this rule means finding sixty more after the
+// next export, which is the owner's phrasing and the reason the fix ships in
+// the same batch as the clear-out.
+// ---------------------------------------------------------------------------
+describe('an open row older than the cutover', () => {
+  const before = new Date('2025-06-06T00:00:00.000Z')
+  const after = new Date('2026-08-02T00:00:00.000Z')
+
+  it('closes on the billing axis and leaves the operational one alone', () => {
+    const dispatched = readStatus('dispatched')!
+    const stale = closeIfStale(dispatched, before)
+
+    expect(stale.billing).toBe('CLOSED_IN_DATATRUCK')
+    expect(stale.closed).toBe(true)
+    // THE HONEST RECORD OF WHAT HAPPENED TO IT. A load that was dispatched and
+    // never delivered stays DISPATCHED; only responsibility for the money
+    // moves.
+    expect(stale.operational).toBe('DISPATCHED')
+    // AND IT IS NOT CANCELLED. Cancelling would assert the freight did not
+    // happen — a claim about the world rather than about whose books it is on,
+    // and several of these carry a driver, a truck and real revenue.
+    expect(stale.cancelled).toBe(false)
+  })
+
+  // THE OTHER BRANCH, WATCHED. A rule that closed everything would pass the
+  // assertion above just as happily.
+  it('leaves freight after the cutover exactly as it was read', () => {
+    const dispatched = readStatus('dispatched')!
+    expect(closeIfStale(dispatched, after)).toEqual(dispatched)
+    expect(closeIfStale(readStatus('booked')!, after).closed).toBe(false)
+  })
+
+  it('leaves an undated row alone rather than guessing at its age', () => {
+    const booked = readStatus('booked')!
+    expect(closeIfStale(booked, null)).toEqual(booked)
+    expect(closeIfStale(booked, new Date('nonsense'))).toEqual(booked)
+  })
+
+  // ALREADY CLOSED IS UNTOUCHED, including a cancelled row — whose `cancelled`
+  // flag must survive, since this rule must never be the thing that decides
+  // freight did not happen.
+  it('changes nothing about a row that is already finished', () => {
+    for (const word of ['delivered', 'invoiced', 'paid', 'canceled']) {
+      const reading = readStatus(word)!
+      expect(closeIfStale(reading, before)).toEqual(reading)
+    }
+    expect(closeIfStale(readStatus('canceled')!, before).cancelled).toBe(true)
+  })
+
+  // THE BOUNDARY ITSELF. A pickup exactly at the cutover is covered by the pay
+  // rules, so it is live — off-by-one here would close a day of real freight.
+  it('treats the cutover day itself as live', () => {
+    const booked = readStatus('booked')!
+    expect(closeIfStale(booked, DATATRUCK_CUTOVER).closed).toBe(false)
+    expect(
+      closeIfStale(booked, new Date(DATATRUCK_CUTOVER.getTime() - 1)).closed,
+    ).toBe(true)
   })
 })

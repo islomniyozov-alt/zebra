@@ -2,6 +2,7 @@ import { neonConfig } from '@neondatabase/serverless'
 import { readFileSync } from 'node:fs'
 import { createPrismaClient } from '@/lib/db'
 import { SETTLEABLE_LOAD } from '@/lib/settlements'
+import { DATATRUCK_CUTOVER } from '@/lib/datatruck/loads'
 import { asRecords, readXlsx } from '@/lib/datatruck/xlsx'
 import {
   employmentFromColumn,
@@ -97,6 +98,26 @@ function target() {
 /** The stated start of this fleet's recorded history. Never the run date. */
 const EFFECTIVE_FROM = new Date('2026-08-01T00:00:00.000Z')
 const EFFECTIVE_FROM_DAY = '2026-08-01'
+
+// ── AND IT MUST BE THE DAY THE IMPORTER STOPS CALLING FREIGHT LIVE ────────
+//
+// STATED HERE, ASSERTED AGAINST THERE. The pay date belongs in this file
+// because somebody ruled on it and a settlement reproduces it forever; the
+// importer's cutover belongs in `loads.ts` because that is where an open row
+// is judged too old to be live. They are the same day and they have to be.
+//
+// If they drifted, the importer would go on creating loads that picked up
+// before the pay rules and left them open — exactly the 54 rows this guard
+// refuses on — and every run would look correct from both sides. A mismatch is
+// not a warning, it is the two halves of one rule disagreeing.
+if (EFFECTIVE_FROM.getTime() !== DATATRUCK_CUTOVER.getTime()) {
+  throw new Error(
+    `The pay rules start ${EFFECTIVE_FROM.toISOString()} and the importer treats ` +
+      `${DATATRUCK_CUTOVER.toISOString()} as the cutover. They are two halves of one ` +
+      `rule and must name the same day: freight the importer leaves open before the ` +
+      `pay rules begin is freight this seed will refuse to write against.`,
+  )
+}
 
 /** Fields this seed owns on an existing Driver row. */
 const MANAGED = ['phone', 'email', 'cdlNumber', 'cdlState'] as const
