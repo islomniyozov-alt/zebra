@@ -132,6 +132,17 @@ const INSPECTION_READERS = [
   // the standing rule about building an instrument from the artefact. Where
   // the two disagree, that is a finding rather than a discrepancy to hide.
   'inspect-unassigned-freight.mjs',
+  // ADDED 2026-09-10, read-only. Before the Amazon remittance importer writes
+  // anything, this counts where its rows would land against real freight — the
+  // last read of the build. The design predicted four outcomes; the database
+  // says a fifth dominates, and a preview that could not count it would report
+  // a week as reconciled while pointing payments at loads the settlement
+  // engine deliberately cannot see.
+  //
+  // It reads the six workbooks in corpus/amazon and SELECTs loads by
+  // referenceNumber. It writes no Payment, no application, no accessorial and
+  // no status — none of that is built yet.
+  'preview-amazon-remittance.ts',
 ]
 
 /**
