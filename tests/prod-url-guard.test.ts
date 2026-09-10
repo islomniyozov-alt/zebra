@@ -119,6 +119,19 @@ const INSPECTION_READERS = [
   // after. Enumerates every referencing table by hand, the way `companies.ts`
   // counts what a cascade would destroy.
   'inspect-asset-refs.mjs',
+  // ADDED 2026-09-10, read-only. Settlements cannot be tested against real
+  // freight while delivered loads carry no driver: a settlement pays somebody
+  // for loads they hauled, and a load with nobody on it is money the engine
+  // cannot see. Asks three things that block it — the finished loads with no
+  // driver or truck, the drivers whose freight names a truck they are not
+  // linked to, and what the two trucks numbered 1024 actually hold.
+  //
+  // THE DRIVER QUESTION IS ASKED OF THE LOADS, not of the Datatruck export.
+  // `seed-datatruck-drivers.ts` counts the cross-authority pairs from a
+  // spreadsheet column; this counts them from the freight that ran, which is
+  // the standing rule about building an instrument from the artefact. Where
+  // the two disagree, that is a finding rather than a discrepancy to hide.
+  'inspect-unassigned-freight.mjs',
 ]
 
 /**
