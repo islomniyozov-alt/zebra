@@ -1,4 +1,5 @@
 import { assemblePacketPdf, jpegSize, type PacketPage } from './pdf'
+import { importPdfPages, type ImportRefusal } from './pdf-import'
 import type { DocumentType } from '@/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -148,6 +149,22 @@ export type PacketRefusal =
    * have caught it; only the assembler knows how many pages it actually got.
    */
   | { kind: 'no_pages_from'; type: DocumentType; filename: string }
+  /**
+   * A PDF this cannot copy, with the reason the importer gave.
+   *
+   * SEPARATE FROM `no_pages_from` ON PURPOSE. "Contributed no pages" meant one
+   * thing when the only reader was a stream splicer; now that pages are copied
+   * as objects, the cases that remain are specific and the person holding the
+   * file can act on each differently — an encrypted agreement needs the broker
+   * to send an unlocked one, a compressed-object one needs a re-save, and a
+   * file that is not a PDF at all was mis-attached.
+   */
+  | {
+      kind: 'unimportable'
+      type: DocumentType
+      filename: string
+      why: ImportRefusal['kind']
+    }
 
 export type PacketOutcome =
   | { ok: true; pdf: Uint8Array; pageCount: number; order: DocumentType[] }
@@ -198,11 +215,28 @@ export function buildFactoringPacket(input: {
   const pages: PacketPage[] = []
   const order: DocumentType[] = []
 
-  // THE INVOICE'S OWN PAGES, carried through as text rather than re-rendered.
-  // `renderInvoicePdf` produces a single page today; splicing its content
-  // stream keeps the packet honest if it ever produces more.
-  for (const content of contentStreamsOf(input.invoicePdf)) {
-    pages.push({ kind: 'text', content })
+  // THE INVOICE GOES THROUGH THE SAME IMPORTER AS EVERYTHING ELSE.
+  //
+  // It used to be spliced, because it is one of the documents this system
+  // writes and splicing could read those. Two readers for "a PDF becomes
+  // pages" is one reader too many: the one used on our own output is the one
+  // that gets exercised constantly, so it is the one that should be proving
+  // the copy path works. `renderInvoicePdf` emits a single page today and this
+  // carries however many it emits.
+  const invoice = importPdfPages(input.invoicePdf)
+  if (!invoice.ok) {
+    return {
+      ok: false,
+      reason: {
+        kind: 'unimportable',
+        type: 'INVOICE_PDF',
+        filename: 'invoice.pdf',
+        why: invoice.reason.kind,
+      },
+    }
+  }
+  for (let page = 0; page < invoice.document.pages.length; page++) {
+    pages.push({ kind: 'imported', document: invoice.document, page })
     order.push('INVOICE_PDF')
   }
 
@@ -219,21 +253,34 @@ export function buildFactoringPacket(input: {
         order.push(type)
         continue
       }
-      // A PDF part contributes its pages as text streams — and if it
-      // contributes none, the packet REFUSES rather than shipping without it.
-      const streams = contentStreamsOf(part.bytes)
-      if (streams.length === 0) {
+      // A PDF PART CONTRIBUTES ITS OWN PAGES, COPIED.
+      //
+      // It used to contribute the TEXT spliced out of its content streams,
+      // which worked only for documents this system wrote and silently worked
+      // for nothing else. `importPdfPages` copies each page's dictionary with
+      // everything it reaches, so a broker's agreement arrives as the broker's
+      // agreement — its fonts, its images, its layout.
+      const imported = importPdfPages(part.bytes)
+      if (!imported.ok) {
+        // `no_pages` KEEPS ITS OLD NAME. A document that was read and has no
+        // page in it is the same fact `no_pages_from` has always carried, and
+        // it is a different fault from a file that could not be read at all —
+        // which is what the other names are for.
         return {
           ok: false,
-          reason: {
-            kind: 'no_pages_from',
-            type,
-            filename: part.filename ?? '',
-          },
+          reason:
+            imported.reason.kind === 'no_pages'
+              ? { kind: 'no_pages_from', type, filename: part.filename ?? '' }
+              : {
+                  kind: 'unimportable',
+                  type,
+                  filename: part.filename ?? '',
+                  why: imported.reason.kind,
+                },
         }
       }
-      for (const content of streams) {
-        pages.push({ kind: 'text', content })
+      for (let page = 0; page < imported.document.pages.length; page++) {
+        pages.push({ kind: 'imported', document: imported.document, page })
         order.push(type)
       }
     }
@@ -245,40 +292,4 @@ export function buildFactoringPacket(input: {
     pageCount: pages.length,
     order,
   }
-}
-
-/**
- * The uncompressed content streams of a PDF this system wrote.
- *
- * NARROW ON PURPOSE. It reads the documents `pdf.ts` produces — uncompressed,
- * one stream per page — and nothing else. A general PDF importer would be a
- * parser for every file a broker ever emailed, which is a far larger promise
- * than a packet needs.
- *
- * ── AND ITS LIMIT IS A REFUSAL, NOT A SHORTFALL ─────────────────────────
- *
- * A part this cannot read contributes NO pages, and `buildFactoringPacket`
- * refuses on that rather than assembling a packet without it. The first
- * version let the page count carry the news, which meant a factor could
- * receive a packet whose rate confirmation was simply absent.
- *
- * EMBEDDING A FOREIGN PDF IS OWED — see MONEY-DESIGN.md §7. Until it is built,
- * a compressed or multi-stream rate confirmation cannot go in a packet at all,
- * and the refusal says so by name.
- */
-export function contentStreamsOf(bytes: Uint8Array): string[] {
-  const text = new TextDecoder('latin1').decode(bytes)
-  const found: string[] = []
-  const marker = /stream\r?\n/g
-  let match
-  while ((match = marker.exec(text)) !== null) {
-    const start = match.index + match[0].length
-    const end = text.indexOf('\nendstream', start)
-    if (end === -1) continue
-    const body = text.slice(start, end)
-    // Only the text streams. An image stream is binary and is carried as an
-    // image, never spliced into somebody else's page.
-    if (/\bTj\b|\bTd\b|\bTf\b/.test(body)) found.push(body)
-  }
-  return found
 }

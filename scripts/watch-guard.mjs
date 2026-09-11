@@ -153,7 +153,6 @@ for (const [index, entry] of spec.breaks.entries()) {
     if (hash(readFileSync(file, 'utf8')) !== before) {
       console.log(`   COULD NOT RESTORE ${file} — NOT OK. FIX THIS BY HAND.`)
       results.push({ label, ok: false, why: 'not-restored' })
-      // eslint-disable-next-line no-unsafe-finally
       continue
     }
   }

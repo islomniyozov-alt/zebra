@@ -218,13 +218,20 @@ The percentage is applied **per load line and rounded per line**, not once on th
 - A yard drop's POD is **phone photos of the trailer**, so the packet must accept images as POD, not only documents.
 - After filing, a person clicks PAID.
 
-**OWED, and named here because the packet is otherwise done: embedding a foreign PDF.**
+**Embedding a foreign PDF — built 2026-09-11, by the second of the two routes.**
 
-The assembler splices pages out of PDFs *this system wrote* — uncompressed, one content stream per page. A broker's rate confirmation is normally neither: compressed, multi-stream, sometimes scanned. Today such a part contributes no pages, so the packet **refuses to build** and names the file, which is correct but means a compressed rate confirmation cannot be filed at all.
+It was owed from the day the packet was built, and silent until 2026-09-10: the assembler spliced pages out of PDFs *this system wrote* — uncompressed, one content stream per page — so a broker's agreement contributed nothing and the packet assembled **without it**. Five pages where DT-015981 has eight, no error, and a factor holding a packet with nothing to check the rate against. The load looked ready the whole time, because the document *is* on it.
 
-It was silent until 2026-09-10 — the packet assembled without the agreement in it, five pages where DT-015981 has eight, no error, and a factor holding a packet with nothing to check the rate against. The load looked ready the whole time, because the document *is* on it; only the assembler knows how many pages it actually got.
+`src/lib/pdf-import.ts` now reads the source's object graph and **copies each page's dictionary with everything it reaches** — resources, fonts, embedded font programs, images, colour spaces — renumbering references. Streams are carried byte for byte with their `/Filter` untouched; nothing is inflated and nothing is re-encoded. That is the second of the two routes named here, and the reason is that a page's marks depend on its resource dictionary: a content stream pasted onto a page with different resources renders different marks, or none, and says nothing about it. A rate confirmation is a contract, and a version of it that renders differently from the one the broker sent is worse than no version.
 
-Until this is built, filing a Werner load needs its rate confirmation re-saved as something this system wrote. Two ways out when somebody picks it up: inflate and re-embed foreign content streams, or carry the original file's pages through as embedded objects the way the JPEGs already are. The second is closer to what the artefact does and does not require understanding the file.
+Graded against `corpus/werner-1..pdf`, which is **five scanned pages with no text operators in it at all** — the case the splicer could never have handled. The acceptance files it on a seeded load and reads eight pages back out of the produced file.
+
+Of the fifteen broker PDFs in `corpus/`, thirteen copy. Two refuse, by name:
+
+- **`encrypted`** — strings and streams are ciphertext; copying them produces a packet that opens and shows nothing. Decryption is a different promise, and so is the judgement about forwarding a document somebody locked.
+- **`compressed_objects`** — objects stored inside a Flate stream cannot be read without inflating, and `DecompressionStream` is async, so reaching them means making the whole assembly path async. That is a trade to make deliberately rather than in passing; one file in fifteen. **Still owed**, and worth picking up if a broker turns out to send them routinely.
+
+Both refuse the packet with them, and the route says which file and what to do about it. What must never happen again is the silent version.
 
 Factoring money stays out of the software — funded amounts, fees, reserves and disputes remain manual, by his ruling.
 

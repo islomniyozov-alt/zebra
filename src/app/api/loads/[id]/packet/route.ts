@@ -76,13 +76,27 @@ function packetDetail(reason: {
 }): string {
   const inner = reason.reason
   if (inner.kind === 'no_pages_from') {
-    // THE OWED PIECE, said out loud at the point it bites. A compressed
-    // broker rate confirmation contributes no pages today (§7), and the load
-    // looks ready the whole time because the document IS on it.
-    return `${inner.filename} contributed no pages. Re-save it as a PDF this system can read.`
+    return `${inner.filename} has no pages in it. The file is readable and empty — ask for it again.`
   }
   if (inner.kind === 'unreadable_image') {
     return `The ${inner.type} could not be read as an image.`
+  }
+  if (inner.kind === 'unimportable') {
+    // EACH OF THESE IS A DIFFERENT THING TO GO AND DO, which is the whole
+    // reason the importer's refusals are separate names rather than one.
+    // Saying "could not be assembled" sends somebody to guess.
+    const why: Record<typeof inner.why, string> = {
+      not_a_pdf: 'is not a PDF. Check what was attached.',
+      encrypted:
+        'is password-protected. A factor cannot open it either — ask the broker to send an unlocked copy.',
+      compressed_objects:
+        'stores its objects inside compressed streams, which this cannot read yet. Open it and re-save it, which rewrites it in a form that can be filed.',
+      no_catalog: 'is damaged or was only partly downloaded. Ask for it again.',
+      no_pages: 'has no pages in it.',
+      incomplete:
+        'is missing parts of itself — pages in it refer to objects that are not in the file. Ask for a complete copy.',
+    }
+    return `${inner.filename} ${why[inner.why]}`
   }
   return 'The packet could not be assembled.'
 }

@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from 'node:fs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
 import { withOrg } from '@/lib/tenancy'
@@ -221,6 +222,43 @@ afterAll(async () => {
   await owner.$disconnect()
 })
 
+/**
+ * A one-page PDF carrying a mark that can be found again.
+ *
+ * A WHOLE DOCUMENT, not a lone stream. These fixtures used to be a bare object
+ * with a content stream and no catalog, which was enough for the splicer that
+ * read them: it looked for `Tj` anywhere in the bytes. The importer reads the
+ * page tree, so a fixture without one is not a PDF — and being made to fix
+ * these is the reader saying so, which is the behaviour wanted.
+ */
+const onePagePdf = (mark: string): Uint8Array => {
+  const content = `BT /F1 10 Tf 56 700 Td (${mark}) Tj ET`
+  const text = [
+    '%PDF-1.4',
+    '1 0 obj',
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    'endobj',
+    '2 0 obj',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    'endobj',
+    '3 0 obj',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>',
+    'endobj',
+    '4 0 obj',
+    `<< /Length ${String(content.length)} >>`,
+    'stream',
+    content,
+    'endstream',
+    'endobj',
+    'trailer',
+    '<< /Size 5 /Root 1 0 R >>',
+    'startxref',
+    '0',
+    '%%EOF',
+  ].join('\n')
+  return new TextEncoder().encode(text)
+}
+
 /** The bytes the action would have fetched from R2, by key. */
 const bytesFor = (plan: { fetch: { key: string; mimeType: string }[] }) =>
   new Map(
@@ -228,10 +266,7 @@ const bytesFor = (plan: { fetch: { key: string; mimeType: string }[] }) =>
       want.key,
       want.mimeType.startsWith('image/')
         ? jpeg()
-        : // A rate confirmation this system wrote, so it contributes a page.
-          new TextEncoder().encode(
-            '%PDF-1.4\n1 0 obj\n<< /Length 40 >>\nstream\nBT /F1 10 Tf 56 700 Td (Route 2004467733) Tj ET\nendstream\nendobj\n',
-          ),
+        : onePagePdf('Route 2004467733'),
     ]),
   )
 
@@ -572,20 +607,7 @@ const bucketOf = (keys: readonly string[]) =>
   new Map(
     keys.map((key) => [
       key,
-      key.endsWith('-2')
-        ? new TextEncoder().encode(
-            [
-              '%PDF-1.4',
-              '1 0 obj',
-              '<< /Length 40 >>',
-              'stream',
-              'BT /F1 10 Tf 56 700 Td (Route 2004467999) Tj ET',
-              'endstream',
-              'endobj',
-              '',
-            ].join('\n'),
-          )
-        : jpeg(),
+      key.endsWith('-2') ? onePagePdf('Route 2004467999') : jpeg(),
     ]),
   )
 
@@ -692,3 +714,57 @@ describe('filePacketForLoad — the button, end to end', () => {
     expect(outcome.reason.kind).toBe('not_factored')
   }, 300_000)
 })
+
+// ---------------------------------------------------------------------------
+// THE REAL WERNER AGREEMENT, FILED ON A SEEDED LOAD.
+//
+// The acceptance for foreign-PDF embedding, and it is deliberately the whole
+// path rather than the importer alone: a load in the database, a document row,
+// the bytes of `corpus/werner-1..pdf` where R2 would have them, and the packet
+// read back out of the file it produced.
+//
+// THAT FILE IS FIVE SCANNED PAGES WITH NO TEXT IN IT. The splicer this
+// replaced found no text operators, contributed zero pages, and the packet
+// refused — so this load could not be filed at all until now. `corpus/` is
+// gitignored, so this skips where it is absent; `tests/pdf-import.test.ts`
+// carries the structural half by hand for exactly that reason.
+// ---------------------------------------------------------------------------
+
+const WERNER_RATECON = 'corpus/werner-1..pdf'
+
+describe.skipIf(!existsSync(WERNER_RATECON))(
+  'the real Werner rate confirmation goes into a packet',
+  () => {
+    it('files it, and the packet carries all five of its pages', async () => {
+      const seeded = await seedFiledCandidate('wr')
+      const werner = new Uint8Array(readFileSync(WERNER_RATECON))
+
+      // The rate confirmation's key is the third — `seedFiledCandidate` writes
+      // POD, BOL, then RATE_CONFIRMATION — so the bucket answers with the real
+      // file where the fixture PDF used to be.
+      const bucket = new Map(bucketOf(seeded.keys))
+      bucket.set(seeded.keys[2]!, werner)
+
+      const outcome = await filePacketForLoad(ioOver(bucket), seeded.id)
+      expect(outcome.ok).toBe(true)
+      if (!outcome.ok) return
+
+      // 1 invoice + 1 POD + 1 BOL + Werner's 5.
+      expect(outcome.pageCount).toBe(8)
+
+      // READ BACK OUT OF THE BYTES, not taken from the return value. The count
+      // the assembler reports and the count the file contains are two claims,
+      // and the one that matters to a factor is the second.
+      const text = new TextDecoder('latin1').decode(outcome.pdf)
+      expect((text.match(/\/Type\s*\/Page(?![s])/g) ?? []).length).toBe(8)
+
+      // The two scans are still JPEGs carried whole, and Werner's own pages
+      // brought their own compressed streams with them.
+      expect((text.match(/\/DCTDecode/g) ?? []).length).toBe(2)
+      expect((text.match(/\/FlateDecode/g) ?? []).length).toBeGreaterThan(10)
+
+      const after = await inOrg((tx) => filingStateFor(tx, seeded.id))
+      expect(after!.billingStatus).toBe('FILED_WITH_FACTOR')
+    }, 300_000)
+  },
+)

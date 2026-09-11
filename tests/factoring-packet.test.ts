@@ -276,19 +276,38 @@ describe('the packet, read back out of its own bytes', () => {
 
   // ── THE SILENT SHORTFALL, NOW LOUD ───────────────────────────────────
   //
-  // A broker's rate confirmation is compressed and multi-stream, which
-  // `contentStreamsOf` cannot read. It used to contribute zero pages and the
-  // packet shipped without it — five pages where the real artefact has eight,
-  // no error, and a factor holding a packet with no agreement in it.
+  // A broker's rate confirmation used to contribute zero pages and the packet
+  // shipped without it — five pages where the real artefact has eight, no
+  // error, and a factor holding a packet with no agreement in it.
   //
   // The load looked READY the whole time: the document is on it. Only the
   // assembler knows how many pages it actually got, so only the assembler can
-  // catch this.
-  it('refuses when a required PDF contributes no pages', () => {
-    // A PDF shaped like a broker's: one FlateDecode stream whose bytes carry
-    // no text operators this reader can find.
-    const foreign = new TextEncoder().encode(
-      [
+  // catch this. Compressed, multi-stream agreements are now COPIED rather than
+  // refused — `tests/pdf-import.test.ts` grades that against the real Werner
+  // file — so what these two hold is the refusal that remains, and that it
+  // still names the file.
+  const withRateCon = (bytes: Uint8Array) =>
+    buildFactoringPacket({
+      invoicePdf: invoice(),
+      parts: [
+        ...parts().filter((part) => part.type !== 'RATE_CONFIRMATION'),
+        {
+          type: 'RATE_CONFIRMATION',
+          mimeType: 'application/pdf',
+          bytes,
+          filename: 'werner-ratecon.pdf',
+        },
+      ],
+    })
+
+  const pdfBytes = (lines: string[]) =>
+    new TextEncoder().encode(lines.join(String.fromCharCode(10)))
+
+  it('refuses a PDF it cannot read, saying which file and why', () => {
+    // Headed like a PDF, with no catalog anywhere in it — a truncated
+    // attachment, which is what a half-finished download looks like.
+    const built = withRateCon(
+      pdfBytes([
         '%PDF-1.7',
         '1 0 obj',
         '<< /Filter /FlateDecode /Length 40 >>',
@@ -296,20 +315,35 @@ describe('the packet, read back out of its own bytes', () => {
         'compressed bytes nothing here can read',
         'endstream',
         'endobj',
-      ].join(String.fromCharCode(10)),
+      ]),
     )
-    const built = buildFactoringPacket({
-      invoicePdf: invoice(),
-      parts: [
-        ...parts().filter((part) => part.type !== 'RATE_CONFIRMATION'),
-        {
-          type: 'RATE_CONFIRMATION',
-          mimeType: 'application/pdf',
-          bytes: foreign,
-          filename: 'werner-ratecon.pdf',
-        },
-      ],
+    expect(built.ok).toBe(false)
+    if (built.ok) return
+    expect(built.reason).toEqual({
+      kind: 'unimportable',
+      type: 'RATE_CONFIRMATION',
+      filename: 'werner-ratecon.pdf',
+      why: 'no_catalog',
     })
+  })
+
+  // A READABLE DOCUMENT WITH NO PAGES keeps the old name, because it is the
+  // old fact: this part gave us nothing to put in the packet.
+  it('refuses a readable PDF that has no pages in it', () => {
+    const built = withRateCon(
+      pdfBytes([
+        '%PDF-1.4',
+        '1 0 obj',
+        '<< /Type /Catalog /Pages 2 0 R >>',
+        'endobj',
+        '2 0 obj',
+        '<< /Type /Pages /Kids [] /Count 0 >>',
+        'endobj',
+        'trailer',
+        '<< /Root 1 0 R >>',
+        '%%EOF',
+      ]),
+    )
     expect(built.ok).toBe(false)
     if (built.ok) return
     expect(built.reason).toEqual({

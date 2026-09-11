@@ -1,3 +1,5 @@
+import { serializeObject, type ImportedDocument } from './pdf-import'
+
 // ---------------------------------------------------------------------------
 // THE PDF MACHINERY BOTH DOCUMENTS SHARE.
 //
@@ -100,12 +102,31 @@ export function assemblePdf(content: string): Uint8Array {
 // and re-encoding it here would cost bundle, cost fidelity, and make the
 // packet a different document from the photograph somebody took — which for
 // a POD is the whole point of it.
+//
+// ── AND A FOREIGN PDF'S PAGE IS EMBEDDED THE SAME WAY ────────────────────
+//
+// `pdf-import.ts` reads a broker's document into an object graph; this writes
+// that graph out beside our own objects, renumbered. A page of somebody else's
+// PDF arrives here as its OWN dictionary with its own resources, not as marks
+// re-drawn onto a page of ours — the same principle as the JPEG one line up,
+// for the same reason: a rate confirmation that renders differently from the
+// one the broker sent is worse than no rate confirmation.
 // ---------------------------------------------------------------------------
 
-/** One page of a packet: rendered text, or a photograph. */
+/** One page of a packet: rendered text, a photograph, or a foreign page. */
 export type PacketPage =
   | { kind: 'text'; content: string }
   | { kind: 'image'; jpeg: Uint8Array }
+  /**
+   * One page of an imported document, carried through whole.
+   *
+   * `document` is shared by every page taken from the same file, BY IDENTITY:
+   * the emitter writes each document's objects once and points all of its
+   * pages at them. Copying them per page would multiply an embedded font by
+   * the number of pages that use it, which on a four-page agreement is most of
+   * the file.
+   */
+  | { kind: 'imported'; document: ImportedDocument; page: number }
 
 /**
  * A JPEG's pixel dimensions, from its own SOF marker.
@@ -161,22 +182,65 @@ export function assemblePacketPdf(pages: readonly PacketPage[]): Uint8Array {
     return bytes.length
   }
 
-  // Object numbering, decided up front so /Kids can name pages before they are
-  // written. 1 catalog, 2 pages, 3 and 4 the fonts, then three objects per
-  // page at most: the page, its content, and an image where there is one.
-  const FIRST_PAGE_OBJECT = 5
-  const perPage = pages.map((page, index) => {
-    const base = FIRST_PAGE_OBJECT + index * 3
-    return {
-      page,
-      pageObject: base,
-      contentObject: base + 1,
-      imageObject: page.kind === 'image' ? base + 2 : null,
-    }
-  })
-
+  // ── OBJECT NUMBERING IS NOW ALLOCATED, NOT ARITHMETIC ─────────────────
+  //
+  // It used to be `5 + index * 3`, which worked while every page cost the same
+  // three objects. An imported page costs as many objects as its own document
+  // reaches — a four-page agreement with an embedded font subset is dozens —
+  // so the numbers are handed out in order instead. 1 catalog, 2 pages, 3 and
+  // 4 the fonts, and everything after that is claimed as it is written.
   const bodies: string[] = []
   const binaries = new Map<number, Uint8Array>()
+  let nextObject = 5
+  const claim = () => nextObject++
+
+  // Each imported DOCUMENT is written once, however many of its pages are in
+  // the packet. `documentBase` maps a document to where its object 1 landed,
+  // so a reference `n` inside it becomes `base + n - 1` here.
+  const documentBase = new Map<ImportedDocument, number>()
+  const baseOf = (document: ImportedDocument): number => {
+    const already = documentBase.get(document)
+    if (already !== undefined) return already
+    // Numbers are claimed for every object the document has, INCLUDING the
+    // ones no page reaches: renumbering is positional, and skipping a hole
+    // would shift everything after it.
+    const base = nextObject
+    nextObject += document.objects.length - 1
+    documentBase.set(document, base)
+    const renumber = (num: number) => base + num - 1
+    for (let number = 1; number < document.objects.length; number++) {
+      const object = document.objects[number]
+      if (!object) {
+        bodies[renumber(number)] = 'null'
+        continue
+      }
+      const written = serializeObject(object.value, renumber)
+      bodies[renumber(number)] = written.body
+      if (written.stream) binaries.set(renumber(number), written.stream)
+    }
+    return base
+  }
+
+  const perPage = pages.map((page) => {
+    if (page.kind === 'imported') {
+      const base = baseOf(page.document)
+      const local = page.document.pages[page.page]
+      return {
+        page,
+        // The page dictionary is the source's own, already written by
+        // `baseOf`. Only its `/Parent` is added below.
+        pageObject: local === undefined ? claim() : base + local - 1,
+        contentObject: null,
+        imageObject: null,
+      }
+    }
+    return {
+      page,
+      pageObject: claim(),
+      contentObject: claim(),
+      imageObject: page.kind === 'image' ? claim() : null,
+    }
+  })
 
   bodies[1] = '<< /Type /Catalog /Pages 2 0 R >>'
   bodies[2] = `<< /Type /Pages /Kids [${perPage
@@ -188,12 +252,22 @@ export function assemblePacketPdf(pages: readonly PacketPage[]): Uint8Array {
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>'
 
   for (const entry of perPage) {
+    // AN IMPORTED PAGE'S DICTIONARY IS ALREADY WRITTEN, by `baseOf`, exactly as
+    // the source had it. The one thing it must be told is which page tree it
+    // now belongs to: `/Parent` was dropped on import precisely because the old
+    // one pointed at a tree that is not here.
+    if (entry.page.kind === 'imported') {
+      const existing = bodies[entry.pageObject] ?? '<< /Type /Page >>'
+      bodies[entry.pageObject] = existing.replace(/^<< /, '<< /Parent 2 0 R ')
+      continue
+    }
+
     if (entry.page.kind === 'text') {
       const content = entry.page.content
       bodies[entry.pageObject] =
         `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${String(PAGE_WIDTH)} ${String(PAGE_HEIGHT)}] ` +
-        `/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${String(entry.contentObject)} 0 R >>`
-      bodies[entry.contentObject] =
+        `/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${String(entry.contentObject!)} 0 R >>`
+      bodies[entry.contentObject!] =
         `<< /Length ${String(encoder.encode(content).length)} >>\nstream\n${content}\nendstream`
       continue
     }
@@ -215,8 +289,8 @@ export function assemblePacketPdf(pages: readonly PacketPage[]): Uint8Array {
     bodies[entry.pageObject] =
       `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${String(PAGE_WIDTH)} ${String(PAGE_HEIGHT)}] ` +
       `/Resources << /XObject << /Im0 ${String(entry.imageObject!)} 0 R >> >> ` +
-      `/Contents ${String(entry.contentObject)} 0 R >>`
-    bodies[entry.contentObject] =
+      `/Contents ${String(entry.contentObject!)} 0 R >>`
+    bodies[entry.contentObject!] =
       `<< /Length ${String(encoder.encode(content).length)} >>\nstream\n${content}\nendstream`
     bodies[entry.imageObject!] =
       `<< /Type /XObject /Subtype /Image /Width ${String(size.width)} /Height ${String(size.height)} ` +
@@ -224,7 +298,11 @@ export function assemblePacketPdf(pages: readonly PacketPage[]): Uint8Array {
     binaries.set(entry.imageObject!, jpeg)
   }
 
-  const count = bodies.length - 1
+  // THE COUNT IS THE HIGHEST NUMBER CLAIMED, not the array's length. An
+  // imported document whose trailing objects no page reached still had numbers
+  // claimed for them, because renumbering is positional and a hole skipped
+  // would shift everything after it.
+  const count = Math.max(bodies.length - 1, nextObject - 1)
   push('%PDF-1.4\n')
   const offsets: number[] = []
   for (let number = 1; number <= count; number++) {
