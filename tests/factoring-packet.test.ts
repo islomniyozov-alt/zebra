@@ -8,6 +8,7 @@ import {
 } from '@/lib/factoring-packet'
 import { renderInvoicePdf, remitToFor } from '@/lib/invoice-pdf'
 import { jpegSize } from '@/lib/pdf'
+import { LOCALES, isMessageKey, translator } from '@/lib/i18n'
 import type { DocumentType } from '@/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -148,7 +149,7 @@ describe('the button is disabled until all four pieces exist', () => {
   ]
 
   it('is ready when all four are there', () => {
-    const readiness = packetReadiness(all)
+    const readiness = packetReadiness({ documents: all, hasInvoice: true })
     expect(readiness.ready).toBe(true)
     expect(readiness.missing).toEqual([])
     expect(readiness.because).toBeNull()
@@ -160,7 +161,10 @@ describe('the button is disabled until all four pieces exist', () => {
   // disabled state has to NAME the piece — the one somebody has to go and get.
   for (const missing of REQUIRED_PACKET_DOCUMENTS) {
     it(`refuses, by name, when ${missing} is the only piece absent`, () => {
-      const readiness = packetReadiness(all.filter((d) => d.type !== missing))
+      const readiness = packetReadiness({
+        documents: all.filter((d) => d.type !== missing),
+        hasInvoice: missing !== 'INVOICE_PDF',
+      })
       expect(readiness.ready).toBe(false)
       expect(readiness.missing).toEqual([missing])
       expect(readiness.because).toContain(
@@ -176,7 +180,7 @@ describe('the button is disabled until all four pieces exist', () => {
   }
 
   it('names every missing piece when several are absent', () => {
-    const readiness = packetReadiness([doc('INVOICE_PDF')])
+    const readiness = packetReadiness({ documents: [], hasInvoice: true })
     expect(readiness.missing).toEqual(['POD', 'BOL', 'RATE_CONFIRMATION'])
     expect(readiness.because).toContain('the POD')
     expect(readiness.because).toContain('the BOL')
@@ -187,11 +191,15 @@ describe('the button is disabled until all four pieces exist', () => {
   // A YARD DROP'S POD IS PHOTOGRAPHS. A rule that wanted a PDF would refuse
   // the only proof that exists for a whole class of freight.
   it('accepts an image as the POD', () => {
-    expect(packetReadiness(all).ready).toBe(true)
+    expect(packetReadiness({ documents: all, hasInvoice: true }).ready).toBe(
+      true,
+    )
     const asPdf = all.map((d) =>
       d.type === 'POD' ? doc('POD', 'application/pdf') : d,
     )
-    expect(packetReadiness(asPdf).ready).toBe(true)
+    expect(packetReadiness({ documents: asPdf, hasInvoice: true }).ready).toBe(
+      true,
+    )
   })
 })
 
@@ -381,5 +389,40 @@ describe('a jpeg measures itself', () => {
   it('returns null for bytes that are not a JPEG', () => {
     expect(jpegSize(new Uint8Array([0, 1, 2, 3]))).toBeNull()
     expect(jpegSize(new Uint8Array([0xff, 0xd8]))).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE DISABLED BUTTON SAYS THE NAME, IN WHATEVER LANGUAGE IS ON THE SCREEN.
+//
+// `packetReadiness.because` is ENGLISH, deliberately: it goes into logs and
+// into the API's refusal detail, where a fixed language is the point. The
+// screen joins its own list from these keys, because "the POD and the rate
+// confirmation" is grammar and three locales do it three ways.
+//
+// SO A FIFTH REQUIRED PIECE MUST FAIL HERE. Adding one to
+// REQUIRED_PACKET_DOCUMENTS without a name for it would otherwise ship a
+// button that says a load is missing something and will not say what.
+// ---------------------------------------------------------------------------
+
+describe('every required piece has a name a person reads', () => {
+  it('has a message key per piece', () => {
+    for (const piece of REQUIRED_PACKET_DOCUMENTS) {
+      expect(isMessageKey(`packet.piece.${piece}`), piece).toBe(true)
+    }
+  })
+
+  // Not merely present: DIFFERENT. A locale that copied one label onto four
+  // keys passes a presence check and tells a dispatcher nothing.
+  it('names them distinctly in every locale', () => {
+    for (const locale of LOCALES) {
+      const t = translator(locale)
+      const names = REQUIRED_PACKET_DOCUMENTS.map((piece) =>
+        t(`packet.piece.${piece}` as Parameters<typeof t>[0]),
+      )
+      expect(new Set(names).size, `${locale}: ${names.join(' / ')}`).toBe(
+        REQUIRED_PACKET_DOCUMENTS.length,
+      )
+    }
   })
 })

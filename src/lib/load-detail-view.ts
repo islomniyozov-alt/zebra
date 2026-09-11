@@ -65,6 +65,18 @@ export interface LoadDetailView {
   flagMissingAddress: boolean
   /** Item 8 — notes as timeline entries rather than a panel of their own. */
   notesInTimeline: boolean
+  /**
+   * MONEY §7 — the File with factor button.
+   *
+   * SAME REASON AS `showDocuments`. Direct-settled freight is never invoiced
+   * and never sold to a factor, so a Factoring panel on it is a button that
+   * could only ever refuse. It is hidden rather than disabled: a disabled
+   * control says "not yet", and this one would mean "not ever".
+   *
+   * The action still refuses it, and must — this decides what a screen shows,
+   * never what a write allows.
+   */
+  showFactoring: boolean
 }
 
 /**
@@ -91,6 +103,7 @@ export function loadDetailView(load: {
     stopsAsTable: direct,
     flagMissingAddress: direct,
     notesInTimeline: direct,
+    showFactoring: !direct,
   })
 }
 

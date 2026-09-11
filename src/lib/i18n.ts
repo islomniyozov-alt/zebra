@@ -1819,6 +1819,32 @@ const en = {
   'rate.error.negative':
     'An amount cannot be negative. A credit belongs on an invoice line.',
   'rate.error.notFound': 'That load no longer exists.',
+
+  // §7 — Werner: one button, one packet. The piece names are the disabled
+  // state's whole content: a person who is told "3 of 4" has to go and find
+  // out which, and the one they are missing is the one they have to fetch.
+  'packet.title': 'Factoring',
+  'packet.file': 'File with factor',
+  'packet.filing': 'Filing…',
+  'packet.filed': 'Filed with factor',
+  'packet.markPaid': 'Mark paid',
+  'packet.marking': 'Marking…',
+  'packet.openPacket': 'Open packet',
+  'packet.missing': 'Still missing:',
+  'packet.piece.INVOICE_PDF': 'the invoice',
+  'packet.piece.POD': 'the POD',
+  'packet.piece.BOL': 'the BOL',
+  'packet.piece.RATE_CONFIRMATION': 'the rate confirmation',
+  'packet.error.notFound': 'That load no longer exists.',
+  'packet.error.notFactored':
+    'This customer settles directly. Its freight is never invoiced or factored.',
+  'packet.error.alreadyFiled': 'This load is already filed with the factor.',
+  'packet.error.notReady':
+    'The packet is not complete. Attach the missing piece and try again.',
+  'packet.error.packet':
+    'The packet could not be assembled. Open it to see which document the assembler could not read.',
+  'packet.error.notFiled':
+    'This load was never filed with the factor, so there is nothing to mark paid.',
   'users.title': 'Users',
   'users.add': 'Add user',
   'users.new': 'New user',
@@ -3664,6 +3690,29 @@ const ru: Dictionary = {
   'rate.error.negative':
     'Сумма не может быть отрицательной. Кредит оформляется строкой счёта.',
   'rate.error.notFound': 'Этот груз больше не существует.',
+
+  'packet.title': 'Факторинг',
+  'packet.file': 'Отправить фактору',
+  'packet.filing': 'Отправка…',
+  'packet.filed': 'Отправлено фактору',
+  'packet.markPaid': 'Отметить оплаченным',
+  'packet.marking': 'Отмечаем…',
+  'packet.openPacket': 'Открыть пакет',
+  'packet.missing': 'Не хватает:',
+  'packet.piece.INVOICE_PDF': 'счёт',
+  'packet.piece.POD': 'подтверждение доставки (POD)',
+  'packet.piece.BOL': 'товарно-транспортная накладная (BOL)',
+  'packet.piece.RATE_CONFIRMATION': 'подтверждение ставки',
+  'packet.error.notFound': 'Этот груз больше не существует.',
+  'packet.error.notFactored':
+    'Этот заказчик платит напрямую. На его грузы не выставляют счёт и не передают фактору.',
+  'packet.error.alreadyFiled': 'Этот груз уже отправлен фактору.',
+  'packet.error.notReady':
+    'Пакет неполный. Приложите недостающий документ и повторите.',
+  'packet.error.packet':
+    'Не удалось собрать пакет. Откройте его, чтобы увидеть, какой документ не читается.',
+  'packet.error.notFiled':
+    'Этот груз не отправляли фактору, поэтому отмечать оплату нечего.',
   'users.title': 'Пользователи',
   'users.add': 'Добавить пользователя',
   'users.new': 'Новый пользователь',
@@ -5484,6 +5533,29 @@ const fa: Dictionary = {
   'rate.error.negative':
     'مبلغ نمی‌تواند منفی باشد. بستانکاری در سطر صورت‌حساب می‌آید.',
   'rate.error.notFound': 'این بار دیگر وجود ندارد.',
+
+  'packet.title': 'فاکتورینگ',
+  'packet.file': 'ارسال به شرکت فاکتورینگ',
+  'packet.filing': 'در حال ارسال…',
+  'packet.filed': 'به شرکت فاکتورینگ ارسال شد',
+  'packet.markPaid': 'ثبت پرداخت',
+  'packet.marking': 'در حال ثبت…',
+  'packet.openPacket': 'باز کردن بسته',
+  'packet.missing': 'هنوز کم است:',
+  'packet.piece.INVOICE_PDF': 'صورتحساب',
+  'packet.piece.POD': 'رسید تحویل (POD)',
+  'packet.piece.BOL': 'بارنامه (BOL)',
+  'packet.piece.RATE_CONFIRMATION': 'تأیید نرخ',
+  'packet.error.notFound': 'این بار دیگر وجود ندارد.',
+  'packet.error.notFactored':
+    'این مشتری مستقیم تسویه می‌کند. برای بار او صورتحساب صادر نمی‌شود و به فاکتورینگ نمی‌رود.',
+  'packet.error.alreadyFiled': 'این بار قبلاً به شرکت فاکتورینگ ارسال شده است.',
+  'packet.error.notReady':
+    'بسته کامل نیست. مدرک کم را پیوست کنید و دوباره تلاش کنید.',
+  'packet.error.packet':
+    'بسته ساخته نشد. آن را باز کنید تا ببینید کدام مدرک خوانده نمی‌شود.',
+  'packet.error.notFiled':
+    'این بار هرگز به شرکت فاکتورینگ ارسال نشده، پس چیزی برای ثبت پرداخت وجود ندارد.',
   'users.title': 'کاربران',
   'users.add': 'افزودن کاربر',
   'users.new': 'کاربر تازه',

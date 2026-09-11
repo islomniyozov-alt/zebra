@@ -35,6 +35,9 @@ import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { RatePanel, type AccessorialRow } from './RatePanel'
+import { FactoringPanel } from './FactoringPanel'
+import { filePacketAction, markFactoredPaidAction } from './factoring-actions'
+import { filingStateFor } from '@/lib/factoring-filing'
 import { StatusTimeline, type TimelineEntry } from './StatusTimeline'
 import { LoadDocuments, type DocumentSlot } from './LoadDocuments'
 import { LoadActions, LoadNotes } from './LoadActions'
@@ -351,6 +354,21 @@ export default async function LoadDetailPage({
   // the response body rather than the rendered text.
   const maySeeRate = await currentUserCan('read', 'load.financials')
   const maySetRate = await currentUserCan('update', 'load.financials')
+
+  // MONEY §7 — the four-piece question, asked in its own read.
+  //
+  // NOT FOLDED INTO THE PAGE'S `data` QUERY. That one runs behind `load:read`,
+  // which a dispatcher holds; this is money, and a role without
+  // `load.financials` must never be sent the answer to hide it in CSS. It is
+  // also the LIGHT read — `packetPlanFor` renders the invoice PDF, and a page
+  // that called it would render one on every view of every load whose button
+  // stays grey.
+  const filing =
+    maySetRate && view.showFactoring
+      ? await withCurrentOrg('read', 'load.financials', (tx) =>
+          filingStateFor(tx, id),
+        )
+      : null
 
   // ITEM 8 — the audit log, filtered by what this reader may see.
   //
@@ -1121,6 +1139,46 @@ export default async function LoadDetailPage({
                 billable: t('rate.billable'),
                 remove: t('rate.remove'),
                 none: t('rate.none'),
+              }}
+            />
+          ) : null}
+
+          {/* MONEY §7 — ONE BUTTON, ONE PACKET.
+           *
+           * Under the rate, because it is the last thing that happens to the
+           * money on a load: the rate is entered, the invoice is raised, and
+           * then the whole thing is sold. Behind `load.financials:update` for
+           * the same reason the rate is — this sells a receivable.
+           *
+           * THE PIECE NAMES ARE TRANSLATED HERE. `readiness.because` is an
+           * English sentence for logs and API refusals; the screen joins its
+           * own list, because "the POD and the rate confirmation" is grammar
+           * rather than concatenation and three locales do it differently. */}
+          {filing ? (
+            <FactoringPanel
+              canFile={filing.canFile}
+              canMarkPaid={filing.canMarkPaid}
+              missing={filing.readiness.missing.map((piece) =>
+                t(`packet.piece.${piece}` as MessageKey),
+              )}
+              notFactored={
+                filing.notFactored === null
+                  ? null
+                  : t('packet.error.notFactored')
+              }
+              isFiled={filing.billingStatus === 'FILED_WITH_FACTOR'}
+              packetHref={`/api/loads/${id}/packet`}
+              file={filePacketAction.bind(null, id)}
+              markPaid={markFactoredPaidAction.bind(null, id)}
+              labels={{
+                title: t('packet.title'),
+                file: t('packet.file'),
+                filing: t('packet.filing'),
+                filed: t('packet.filed'),
+                markPaid: t('packet.markPaid'),
+                marking: t('packet.marking'),
+                openPacket: t('packet.openPacket'),
+                missing: t('packet.missing'),
               }}
             />
           ) : null}

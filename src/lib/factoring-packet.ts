@@ -84,10 +84,21 @@ export interface PacketReadiness {
  * Nothing here inspects a rate confirmation's bytes, because a rate
  * confirmation that arrived as a photograph is still the agreement.
  */
-export function packetReadiness(
-  documents: readonly PacketDocument[],
-): PacketReadiness {
-  const present = new Set(documents.map((document) => document.type))
+export function packetReadiness(input: {
+  documents: readonly PacketDocument[]
+  /**
+   * Whether an invoice covers this load.
+   *
+   * A ROW, NOT A STORED PDF, and that is the P3 rule rather than a shortcut.
+   * The invoice page is rendered from immutable rows every time the packet is
+   * asked for; a stored invoice PDF is a document that silently disagrees with
+   * its own invoice the first time anything is corrected. So three of the four
+   * pieces are documents and the fourth is an `Invoice`.
+   */
+  hasInvoice: boolean
+}): PacketReadiness {
+  const present = new Set<string>(input.documents.map((row) => row.type))
+  if (input.hasInvoice) present.add('INVOICE_PDF')
   const missing = REQUIRED_PACKET_DOCUMENTS.filter(
     (required) => !present.has(required),
   )
@@ -174,14 +185,9 @@ export function buildFactoringPacket(input: {
     filename: '',
     mimeType: part.mimeType,
   }))
-  documents.push({
-    id: 'invoice',
-    type: 'INVOICE_PDF',
-    filename: '',
-    mimeType: 'application/pdf',
-  })
-
-  const readiness = packetReadiness(documents)
+  // The invoice always exists here: the caller rendered it. `hasInvoice` says
+  // so rather than a synthetic document row pretending to be one.
+  const readiness = packetReadiness({ documents, hasInvoice: true })
   if (!readiness.ready) {
     return {
       ok: false,

@@ -33,6 +33,7 @@ describe('the screen a load gets', () => {
     stopsAsTable: true,
     flagMissingAddress: true,
     notesInTimeline: true,
+    showFactoring: false,
   }
 
   const broker: LoadDetailView = {
@@ -45,6 +46,7 @@ describe('the screen a load gets', () => {
     stopsAsTable: false,
     flagMissingAddress: false,
     notesInTimeline: false,
+    showFactoring: true,
   }
 
   it('strips the panels Relay freight does not use', () => {
@@ -61,6 +63,14 @@ describe('the screen a load gets', () => {
   // payable and invoiceable, and losing it would be silent.
   it('never takes the documents panel off freight that needs it', () => {
     expect(loadDetailView({ directSettled: false }).showDocuments).toBe(true)
+  })
+
+  // MONEY §7. Broker freight is the only freight that is ever factored, and a
+  // Factoring panel on a Relay load is a button whose only possible outcome is
+  // a refusal — the customer settles directly and no invoice exists to sell.
+  it('offers factoring only on freight that can be invoiced', () => {
+    expect(loadDetailView({ directSettled: false }).showFactoring).toBe(true)
+    expect(loadDetailView({ directSettled: true }).showFactoring).toBe(false)
   })
 
   // Every decision comes from the one flag, so the two answers must differ on
