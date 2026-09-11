@@ -127,8 +127,14 @@ beforeAll(async () => {
       companyId,
       firstName: 'JERRY ROBERT',
       lastName: 'MCKANE',
-      // The ruling: MCKANE is 1. The statement's Check Date is the batch's
-      // check date plus a week for him and not for the driver beside him.
+      // A SYNTHETIC LAG, TO EXERCISE THE FIELD — not a fact about this driver.
+      //
+      // The real MCKANE's lag is 0, like everyone's: the company pays two
+      // weeks behind uniformly, and that lives in the batch's typed check date
+      // (MONEY-DESIGN §0, Islom 2026-09-11). An earlier reading of the ruling
+      // put a 1 here as if it were his property, and this comment is the
+      // correction rather than a deletion — the arithmetic still has to work
+      // the day one driver genuinely is paid on a different schedule.
       payoutLagWeeks: 1,
     },
   })
@@ -305,8 +311,9 @@ describe('a week of freight becomes a batch', () => {
     expect(settlements[0]!.settlementNumber).toMatch(/^ST-\d{6}$/)
     expect(settlements[0]!.payTariffLabel).toBe('30% from gross')
 
-    // THE PAYOUT DATE CARRIES THE DRIVER'S LAG. MCKANE is 1, so his cheque
-    // date is the batch's 8/27 plus a week.
+    // THE PAYOUT DATE CARRIES WHATEVER LAG THE DRIVER HAS, frozen at FINAL.
+    // This fixture's is 1 to prove the arithmetic; in production every driver
+    // is 0 and this equals the batch's own check date.
     expect(settlements[0]!.payoutDate?.toISOString().slice(0, 10)).toBe(
       '2026-09-03',
     )

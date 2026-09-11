@@ -61,6 +61,28 @@ Two of three weeks are Wednesday statement / Friday check. So:
 
 §3's argument survives either shape, which is the point of writing this down rather than picking a cadence: the remittance lands Tuesday, the cash is in Wednesday, and the cheque goes Thursday **or Friday**. The money is in before the cheque is written under both observed patterns. Section 3 rests on that ordering, not on a weekday.
 
+### The payout cadence: two weeks behind, everyone (Islom's ruling, 2026-09-11)
+
+**A period ending Saturday is paid the Friday thirteen days later.** Aug 23–29 was paid **9/11**; Aug 30–Sep 5 pays **9/18**. It is a uniform company cadence, not a per-driver arrangement.
+
+**Datatruck's printed Check Date is NOT the day the money moved, and must not be copied.** ST-005352 covers Aug 23–29 and prints `9/4`; the money moved `9/11`. Checked against all six statements — `period end + 13` lands on a Friday every time, and the printed date is early every time:
+
+| statement | period end | printed Check Date | money actually moved | printed is early by |
+|---|---|---|---|---|
+| ST-005284 | Sat 8/15 | Fri 8/21 | Fri 8/28 | 7 days |
+| ST-005301 / ST-005310 / ST-005317 | Sat 8/22 | **Thu** 8/27 | Fri 9/4 | **8 days** |
+| ST-005336 / ST-005352 | Sat 8/29 | Fri 9/4 | Fri 9/11 | 7 days |
+
+The eight-day row is not a second rule. It is the Aug 16–22 week printing a Thursday where the others print a Friday — the same wobble the table above already records — so the printed date is unreliable in weekday as well as in magnitude. Anyone reading these statements later will hit that row and should not conclude the lag varies.
+
+**So the check date Zebra types is the REAL pay date**, and nothing derives it. This is the third reason §0 gives for the two dates being inputs, and the strongest: the source documents are not merely inconsistent about the cadence, they are *wrong* about it in a consistent direction.
+
+**Consequences, none of which is code:**
+
+- `Driver.payoutLagWeeks` stays **0 for everyone**. The field stays — see its comment in `schema.prisma` for why a per-driver lag remains expressible — but nothing sets it, and `payoutDate` therefore equals the batch's check date for every driver.
+- **"Settle this week" (item 6) means the period that ended two Saturdays ago**, not the one that ended yesterday. A batch screen defaulting to the most recent closed week would offer to settle freight two weeks before it is paid for.
+- This supersedes the earlier note that MCKANE's lag was 1. That was inferred from the ruling as given; the artefact never showed a per-driver lag, which was reported at the time as a discrepancy and is now explained — there is no per-driver lag to see.
+
 ---
 
 ## 1. Two payer shapes. Never merge them.

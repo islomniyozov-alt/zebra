@@ -246,11 +246,11 @@ function inputFor(fixture: StatementFixture): DriverSettlementInput {
     escrowHeldCents: setup.escrowHeldCents,
     fuelCents: setup.fuelCents,
     collectedThisMonthCents: setup.collectedThisMonthCents,
-    // THE ARTEFACT SHOWS NO LAG. MCKANE's `payoutLagWeeks` is 1 by ruling, but
-    // ST-005317 and ST-005352 print the same Check Date as the driver beside
-    // him in batch SB-000438 — so the lag was not in force when these were
-    // produced, and a fixture that applied it would fail on a field the
-    // statement is not disputing. `payoutDateFor` is tested on its own below.
+    // THE ARTEFACT SHOWS NO LAG, and 2026-09-11 explained why: there is no
+    // per-driver lag to see. The company pays two weeks behind uniformly, so
+    // every driver's `payoutLagWeeks` is 0 and the cadence lives in the check
+    // date somebody types (§0). Reported at the time as a discrepancy between
+    // the ruling and the six statements; the statements were right.
     payoutLagWeeks: 0,
     checkDate: new Date(fixture.checkDate),
     openingBalances: {},
@@ -558,8 +558,10 @@ describe('the driver payout lag', () => {
     )
   })
 
-  // MCKANE is 1 by ruling. A week, not a day — and the statement prints THIS
-  // as its Check Date, not the batch's.
+  // A WEEK, NOT A DAY, and the statement prints THIS as its Check Date rather
+  // than the batch's. No driver carries a lag today — the company pays two
+  // weeks behind uniformly and that lives in the typed check date (§0) — so
+  // what this holds is the arithmetic, against the day one of them does.
   it('adds a whole week per stated lag', () => {
     expect(payoutDateFor(checkDate, 1).toISOString().slice(0, 10)).toBe(
       '2026-09-03',

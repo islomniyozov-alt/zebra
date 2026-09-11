@@ -788,13 +788,20 @@ model Driver {
 
   /// How many whole weeks after the batch's check date this driver is paid.
   ///
+  /// ZERO FOR EVERYONE, BY RULING (Islom, 2026-09-11). The company pays two
+  /// weeks behind for ALL drivers — a uniform cadence, not a per-driver
+  /// property — so the lag lives in the batch's typed check date and not here.
+  /// See MONEY-DESIGN §0.
+  ///
+  /// THE FIELD STAYS, deliberately. It was built for a per-driver lag that
+  /// turned out not to exist, and it is kept because the day one driver IS
+  /// paid on a different schedule, the alternative is a migration in the
+  /// middle of a payroll week. It is not dead: `payoutDate` is still batch
+  /// check date plus this, still frozen at FINAL, and the arithmetic is
+  /// tested — it simply evaluates to the check date for every driver today.
+  ///
   /// A STATED PROPERTY, LIKE THE PAY RULE — superseded rather than edited, so
   /// a settlement frozen at FINAL keeps the lag that applied when it was cut.
-  /// Zero for almost everybody; MCKANE is 1. The settlement's `payoutDate` is
-  /// the batch check date plus this, and THAT is what the statement's Check
-  /// Date field prints — two drivers in one batch can be paid on different
-  /// days, and printing the batch's date on both tells one of them the wrong
-  /// one.
   payoutLagWeeks Int @default(0)
 
   assignedTruckId String?
