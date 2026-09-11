@@ -388,3 +388,73 @@ export function totalsAgree(reading: RemittanceReading): boolean {
   if (bodyCents !== headerCents) return false
   return footerCents === null || footerCents === bodyCents
 }
+
+// ---------------------------------------------------------------------------
+// THE WORK PERIOD, AS A PAIR OF DAYS.
+//
+// Amazon prints it in the Payment Summary as one string. All six weeks in
+// `corpus/amazon`, verbatim:
+//
+//   "Jul 26 - Aug 1, 2026"    "Aug 2 - Aug 8, 2026"     "Aug 9 - Aug 15, 2026"
+//   "Aug 16 - Aug 22, 2026"   "Aug 23 - Aug 29, 2026"   "Aug 30 - Sep 5, 2026"
+//
+// THE YEAR IS STATED ONCE, AT THE END, and that is the whole difficulty. It
+// belongs to the SECOND date; the first inherits it unless the period crosses
+// a new year, where "Dec 27 - Jan 2, 2027" means December of 2026. Two of the
+// six cross a month already, so this is not a hypothetical shape — the year
+// crossing is the same shape one week further on.
+//
+// AND IT IS CHECKED AGAINST THE WEEK RULE. All six parse to Sunday-Saturday,
+// which is what MONEY-DESIGN §0 says a period is. A string that parses to
+// anything else is not a work period this system understands, and returning
+// null sends the caller to the fallback rather than storing a wrong week.
+// ---------------------------------------------------------------------------
+
+const MONTH_NAMES = [
+  'jan',
+  'feb',
+  'mar',
+  'apr',
+  'may',
+  'jun',
+  'jul',
+  'aug',
+  'sep',
+  'oct',
+  'nov',
+  'dec',
+]
+
+export function parseWorkPeriod(
+  raw: string | null,
+): { start: Date; end: Date } | null {
+  if (!raw) return null
+
+  const match =
+    /^\s*([A-Za-z]{3,})\.?\s+(\d{1,2})\s*[-–—]\s*([A-Za-z]{3,})\.?\s+(\d{1,2}),\s*(\d{4})\s*$/.exec(
+      raw,
+    )
+  if (!match) return null
+
+  const startMonth = MONTH_NAMES.indexOf(match[1]!.slice(0, 3).toLowerCase())
+  const endMonth = MONTH_NAMES.indexOf(match[3]!.slice(0, 3).toLowerCase())
+  if (startMonth === -1 || endMonth === -1) return null
+
+  const endYear = Number(match[5])
+  // THE ONLY PLACE THE YEAR IS INFERRED. A period whose first month is LATER
+  // than its last has crossed into January, so the start belongs to the year
+  // before the one printed.
+  const startYear = startMonth > endMonth ? endYear - 1 : endYear
+
+  const start = new Date(Date.UTC(startYear, startMonth, Number(match[2])))
+  const end = new Date(Date.UTC(endYear, endMonth, Number(match[4])))
+
+  // SUNDAY TO SATURDAY OR NOTHING. Six days apart, opening on a Sunday — the
+  // same rule `isSettlementWeek` holds settlements to. Anything else is a
+  // string this does not understand, and a null is better than a stored week
+  // that quietly disagrees with every period beside it.
+  if (start.getUTCDay() !== 0) return null
+  if (end.getTime() - start.getTime() !== 6 * 86_400_000) return null
+
+  return { start, end }
+}

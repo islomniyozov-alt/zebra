@@ -1316,14 +1316,27 @@ model Load {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  stops                     LoadStop[]
-  accessorials              LoadAccessorial[]
-  statusEvents              LoadStatusEvent[]
-  assignments               LoadAssignment[]
-  documents                 Document[]
-  invoiceLines              InvoiceLine[]
-  settlementLines           SettlementLine[]
-  settlementLoadLines       SettlementLoadLine[]
+  stops               LoadStop[]
+  accessorials        LoadAccessorial[]
+  statusEvents        LoadStatusEvent[]
+  assignments         LoadAssignment[]
+  documents           Document[]
+  invoiceLines        InvoiceLine[]
+  settlementLines     SettlementLine[]
+  settlementLoadLines SettlementLoadLine[]
+
+  /// When this load's packet was filed with the factor, and when a person
+  /// marked it paid.
+  ///
+  /// WRITTEN BY THE TWO ACTIONS THAT CAUSE THEM, and by nothing else. Before
+  /// these existed the money screen answered "the oldest unpaid filing" with
+  /// `updatedAt`, which is right on the day a load is filed and drifts every
+  /// time anything else touches the row — so a packet filed a fortnight ago
+  /// could look filed this morning because somebody fixed a city name. A
+  /// status with no timestamp cannot answer a question about age.
+  filedAt DateTime?
+  paidAt  DateTime?
+
   /// Dispatch's ruling on what this load actually settles on (MONEY-DESIGN §3).
   ///
   /// ONLY EVER SET BY A PERSON. Amazon freight settles on the REMITTED figure,
@@ -1337,7 +1350,7 @@ model Load {
   settledGrossCents         Int?
   settledGrossConfirmedAt   DateTime?
   settledGrossConfirmedById String?
-  settledGrossConfirmedBy   User?                @relation("LoadSettledGrossConfirmedBy", fields: [settledGrossConfirmedById], references: [id])
+  settledGrossConfirmedBy   User?     @relation("LoadSettledGrossConfirmedBy", fields: [settledGrossConfirmedById], references: [id])
 
   expenses       Expense[]
   fuelTxns       FuelTransaction[]
@@ -2433,7 +2446,22 @@ model Payment {
   ///
   /// NULL FOR EVERY HAND-ENTERED PAYMENT. Nothing about the existing payment
   /// flows changes.
-  remittanceKey  String?
+  remittanceKey String?
+
+  /// The work period this remittance covers, parsed from the Payment Summary.
+  ///
+  /// `"Aug 30 - Sep 5, 2026"` is what Amazon prints, once, as a string —
+  /// `parseWorkPeriod` turns it into these two days and refuses anything that
+  /// is not a Sunday-to-Saturday week.
+  ///
+  /// NULLABLE, AND THE NULL IS A REAL STATE. Every payment entered by hand has
+  /// no work period, and so does a remittance whose label this could not read.
+  /// The money screen asks by these columns and falls back to asking what the
+  /// payment actually paid for — a worse answer than the label, never a wrong
+  /// one.
+  periodStart DateTime?
+  periodEnd   DateTime?
+
   receivedAt     DateTime
   amountCents    Int
   // Amount not yet applied to an invoice — a real state, not an error.
@@ -2451,6 +2479,7 @@ model Payment {
   loadApplications PaymentLoadApplication[]
 
   @@unique([organizationId, remittanceKey])
+  @@index([companyId, periodStart])
   @@index([companyId, receivedAt])
   @@index([companyId, customerId])
 }

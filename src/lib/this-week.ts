@@ -132,6 +132,7 @@ export async function thisWeekFor(
   tx: TxClient,
   input: { period: Week; payDay: Date },
 ): Promise<ThisWeek> {
+  const openedAt = Date.now()
   const timings: Record<string, number> = {}
   const timed = async <T>(name: string, run: () => Promise<T>): Promise<T> => {
     const started = Date.now()
@@ -148,6 +149,19 @@ export async function thisWeekFor(
     }),
   )
   if (companies.length === 0) {
+    // LOGGED ON THIS PATH TOO. A page that costs nothing because it found
+    // nothing is a fact worth seeing in the same graph as one that found five
+    // authorities — an organization that silently stops having companies looks
+    // exactly like a fast page otherwise.
+    console.log(
+      '[zebra.money.thisWeek]',
+      JSON.stringify({
+        periodStart: input.period.start.toISOString().slice(0, 10),
+        companies: 0,
+        totalMs: Date.now() - openedAt,
+        sections: timings,
+      }),
+    )
     return {
       period: input.period,
       payDay: input.payDay,
@@ -228,38 +242,65 @@ export async function thisWeekFor(
 
   // ── §4 the remittance for this period ──────────────────────────────────
   //
-  // ASKED THROUGH WHAT IT PAID FOR, because a `Payment` carries no period. The
-  // remittance for a period is the one whose applications land on loads
-  // delivered in it — a relationship that exists, rather than a date field that
-  // would have to be trusted.
+  // ASKED BY THE PERIOD IT DECLARES, with the old question as the fallback.
+  //
+  // `periodStart` is parsed from what Amazon prints in the Payment Summary —
+  // "Aug 30 - Sep 5, 2026" — so the first arm asks the remittance what week it
+  // is FOR. The second arm asks what it actually paid for, which is how this
+  // worked before the column existed: a payment whose applications land on
+  // loads delivered in the period.
+  //
+  // BOTH ARMS, NOT ONE. The label is the better answer and the lookup is the
+  // one that always works — every payment entered by hand has no period, and so
+  // does a remittance imported before this column existed or whose label
+  // `parseWorkPeriod` refused. Dropping the fallback would make this week's
+  // remittance invisible for every row already in the database.
   const payments = await timed('remittance', () =>
     tx.payment.findMany({
       where: {
         companyId: { in: companyIds },
         deletedAt: null,
         remittanceKey: { not: null },
-        loadApplications: {
-          some: {
-            load: {
-              stops: {
-                some: {
-                  type: 'DELIVERY',
-                  scheduledAt: {
-                    gte: input.period.start,
-                    lte: periodEndOfDay,
+        OR: [
+          { periodStart: input.period.start },
+          {
+            periodStart: null,
+            loadApplications: {
+              some: {
+                load: {
+                  stops: {
+                    some: {
+                      type: 'DELIVERY',
+                      scheduledAt: {
+                        gte: input.period.start,
+                        lte: periodEndOfDay,
+                      },
+                    },
                   },
                 },
               },
             },
           },
-        },
+        ],
       },
-      orderBy: { receivedAt: 'desc' },
+      // THE DECLARED PERIOD WINS where a company has both kinds. A payment that
+      // says which week it is for is a better answer than one inferred from
+      // what it touched, so it sorts first and the map below keeps the first.
+      //
+      // `nulls: 'last'` IS LOAD-BEARING AND WAS MISSING. Postgres sorts NULLs
+      // FIRST on a DESC ordering, so the plain version did the exact opposite
+      // of what this comment claimed: a hand-entered payment with no period beat
+      // the remittance that declared one. Caught by the acceptance.
+      orderBy: [
+        { periodStart: { sort: 'desc', nulls: 'last' } },
+        { receivedAt: 'desc' },
+      ],
       select: {
         companyId: true,
         remittanceKey: true,
         amountCents: true,
         createdAt: true,
+        periodStart: true,
       },
     }),
   )
@@ -274,13 +315,14 @@ export async function thisWeekFor(
     filingStatesForCompanies(tx, companyIds),
   )
   // THE OLDEST FILING COMES BACK WITH THE FILING READ, not from a second query
-  // over the same rows. It is `updatedAt` — filing records no timestamp of its
-  // own, which is a gap worth closing and is named where the field is read.
+  // over the same rows. `filedAt` is written by `fileWithFactor` and by nothing
+  // else; a load filed before that column existed has none, and is skipped
+  // rather than counted as filed today.
   const oldestFiledOf = new Map<string, Date>()
   for (const [companyId, states] of filing) {
     for (const row of states) {
       if (row.billingStatus !== 'FILED_WITH_FACTOR') continue
-      const at = row.lastChangedAt
+      const at = row.filedAt
       if (!at) continue
       const current = oldestFiledOf.get(companyId)
       if (!current || at < current) oldestFiledOf.set(companyId, at)
@@ -419,6 +461,27 @@ export async function thisWeekFor(
       recent: recentOf.get(company.id) ?? [],
     }
   })
+
+  // ── WHAT IT COST, ON EVERY OPEN, IN PRODUCTION ─────────────────────────
+  //
+  // Fixed tag and a structured payload, the same shape the audit log uses, so
+  // Workers observability can graph it and an alert can be built on it.
+  //
+  // LOGGED RATHER THAN ASSERTED, and logged from the REAL page rather than from
+  // a probe. The measurement that shaped this file was taken from a development
+  // machine roughly 200ms from us-east-2; a Worker sits far closer, and the only
+  // way to know what this actually costs the people opening it on a Tuesday is
+  // to record what it cost them. `loads` and `companies` are here because the
+  // number is meaningless without the size of the thing it read.
+  console.log(
+    '[zebra.money.thisWeek]',
+    JSON.stringify({
+      periodStart: input.period.start.toISOString().slice(0, 10),
+      companies: out.length,
+      totalMs: Date.now() - openedAt,
+      sections: timings,
+    }),
+  )
 
   return { period: input.period, payDay: input.payDay, companies: out, timings }
 }

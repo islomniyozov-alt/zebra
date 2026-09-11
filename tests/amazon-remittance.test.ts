@@ -12,6 +12,7 @@ import {
   readRemittance,
   remittanceCents,
   totalsAgree,
+  parseWorkPeriod,
 } from '@/lib/amazon/remittance'
 import { keyFor, previewRemittance } from '@/lib/amazon/remittance-preview'
 
@@ -429,5 +430,53 @@ describe('a self-closing empty cell', () => {
     const [row] = parseSheet(xml, shared, { trim: false })
     expect(row).not.toContain('0')
     expect(row).not.toContain('1')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE WORK PERIOD, PARSED — all six strings the corpus actually contains.
+//
+// Transcribed rather than read from `corpus/amazon`, which is gitignored: a
+// guard that only exists where somebody's corpus happens to be is a guard for
+// one laptop. `tests/trips-csv.test.ts` records why.
+// ---------------------------------------------------------------------------
+
+describe('the work period Amazon prints', () => {
+  const ALL = [
+    ['Jul 26 - Aug 1, 2026', '2026-07-26', '2026-08-01'],
+    ['Aug 2 - Aug 8, 2026', '2026-08-02', '2026-08-08'],
+    ['Aug 9 - Aug 15, 2026', '2026-08-09', '2026-08-15'],
+    ['Aug 16 - Aug 22, 2026', '2026-08-16', '2026-08-22'],
+    ['Aug 23 - Aug 29, 2026', '2026-08-23', '2026-08-29'],
+    ['Aug 30 - Sep 5, 2026', '2026-08-30', '2026-09-05'],
+  ] as const
+
+  for (const [raw, start, end] of ALL) {
+    it(`reads ${raw}`, () => {
+      const period = parseWorkPeriod(raw)
+      expect(period).not.toBeNull()
+      expect(period!.start.toISOString().slice(0, 10)).toBe(start)
+      expect(period!.end.toISOString().slice(0, 10)).toBe(end)
+    })
+  }
+
+  // THE YEAR IS PRINTED ONCE AND BELONGS TO THE SECOND DATE. Two of the six
+  // already cross a month; crossing a year is the same shape one week on, and
+  // getting it wrong would file a December week under the following January.
+  it('puts December in the year before the January it is printed with', () => {
+    const period = parseWorkPeriod('Dec 27 - Jan 2, 2027')
+    expect(period!.start.toISOString().slice(0, 10)).toBe('2026-12-27')
+    expect(period!.end.toISOString().slice(0, 10)).toBe('2027-01-02')
+  })
+
+  // A STRING IT DOES NOT UNDERSTAND IS NULL, NOT A GUESS. The caller then
+  // falls back to asking what the payment actually paid for, which is a worse
+  // answer than the label but never a wrong one.
+  it('refuses anything that is not a Sunday-to-Saturday week', () => {
+    expect(parseWorkPeriod('Aug 17 - Aug 23, 2026')).toBeNull()
+    expect(parseWorkPeriod('Aug 2 - Aug 15, 2026')).toBeNull()
+    expect(parseWorkPeriod('week of August 2')).toBeNull()
+    expect(parseWorkPeriod('')).toBeNull()
+    expect(parseWorkPeriod(null)).toBeNull()
   })
 })

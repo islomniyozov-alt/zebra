@@ -400,9 +400,13 @@ export async function fileWithFactor(
     }
   }
 
+  // THE TIMESTAMP GOES ON WITH THE STATUS, in the same write. The money screen
+  // asks how old the oldest unpaid filing is, and before this column existed it
+  // had to ask `updatedAt` — which is right today and drifts every time
+  // anything else touches the row.
   await tx.load.update({
     where: { id: loadId },
-    data: { billingStatus: 'FILED_WITH_FACTOR' },
+    data: { billingStatus: 'FILED_WITH_FACTOR', filedAt: new Date() },
   })
   return { ok: true }
 }
@@ -418,8 +422,9 @@ export async function fileWithFactor(
 
 export interface FilingState {
   loadId: string
-  /** When the row last changed — the closest thing to "when it was filed". */
-  lastChangedAt?: Date
+  /** When the packet was filed with the factor. Null before that, or if it
+   * was filed before the column existed. */
+  filedAt?: Date | null
   billingStatus: string
   readiness: PacketReadiness
   /** Set when this load is not a factoring load at all. */
@@ -515,12 +520,14 @@ export async function filingStatesForCompanies(
       id: true,
       companyId: true,
       billingStatus: true,
-      // A PROXY, AND NAMED AS ONE. Filing a packet writes `billingStatus` and
-      // records NO timestamp of its own, so "the oldest unpaid filing" can only
-      // be asked of the row's last change. It is right the day a load is filed
-      // and drifts every time anything else touches the row. Reported as a gap
-      // rather than papered over: a `filedAt` column would answer it properly.
-      updatedAt: true,
+      // THE REAL ONE NOW. This was `updatedAt` — a proxy that was right on the
+      // day a load was filed and drifted every time anything else touched the
+      // row. `filedAt` is written by `fileWithFactor` and by nothing else.
+      //
+      // NULL ON EVERY LOAD FILED BEFORE THE COLUMN EXISTED, and left null
+      // rather than backfilled: `updatedAt` would have manufactured a history
+      // that reads like a record.
+      filedAt: true,
       documents: {
         where: { deletedAt: null },
         select: { id: true, type: true, filename: true, mimeType: true },
@@ -541,7 +548,7 @@ export async function filingStatesForCompanies(
     const filed = load.billingStatus === 'FILED_WITH_FACTOR'
     byCompany.get(load.companyId)?.push({
       loadId: load.id,
-      lastChangedAt: load.updatedAt,
+      filedAt: load.filedAt,
       billingStatus: load.billingStatus,
       readiness,
       notFactored: null,
@@ -660,7 +667,7 @@ export async function markFactoredPaid(
 
   await tx.load.update({
     where: { id: loadId },
-    data: { billingStatus: 'PAID' },
+    data: { billingStatus: 'PAID', paidAt: new Date() },
   })
   return { ok: true }
 }

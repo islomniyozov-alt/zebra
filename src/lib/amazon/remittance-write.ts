@@ -1,5 +1,5 @@
 import type { Prisma } from '@/generated/prisma/client'
-import type { RemittanceReading } from './remittance'
+import { parseWorkPeriod, type RemittanceReading } from './remittance'
 import { MONEY_COLUMNS } from './remittance-shape'
 import {
   keyFor,
@@ -144,6 +144,8 @@ export async function writeRemittance(
   const appliedCents = live.reduce((sum, line) => sum + line.remittedCents, 0)
   const headerCents = reading.totals.headerCents
 
+  const period = parseWorkPeriod(reading.summary.workPeriod)
+
   const payment = await tx.payment.create({
     data: {
       organizationId: input.organizationId,
@@ -157,6 +159,14 @@ export async function writeRemittance(
       unappliedCents: headerCents - appliedCents,
       recordedByUserId: input.recordedByUserId ?? null,
       notes: `Amazon remittance ${reading.summary.workPeriod ?? ''}`.trim(),
+      // THE WORK PERIOD AS DAYS, not only as the sentence in `notes`. The money
+      // screen asks "is this week's remittance in" and had to ask it sideways —
+      // through the loads the payment applied to — because the period existed
+      // only inside a string. `parseWorkPeriod` refuses anything that is not a
+      // Sunday-to-Saturday week, so a label this cannot read leaves these null
+      // and the screen falls back to the sideways question rather than storing
+      // a week it guessed.
+      ...(period ? { periodStart: period.start, periodEnd: period.end } : {}),
     },
     select: { id: true },
   })

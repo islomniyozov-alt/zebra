@@ -293,7 +293,13 @@ beforeAll(async () => {
   filedLoadId = filed.id
   await owner.load.update({
     where: { id: filedLoadId },
-    data: { billingStatus: 'FILED_WITH_FACTOR' },
+    data: {
+      billingStatus: 'FILED_WITH_FACTOR',
+      // AS THE ACTION WOULD HAVE WRITTEN IT. `fileWithFactor` sets both in one
+      // write; seeding only the status would be seeding a state the application
+      // cannot produce.
+      filedAt: new Date(Date.UTC(2026, 8, 1, 12)),
+    },
   })
 
   // NOT READY, MISSING ITS BOL — it has the other three pieces.
@@ -424,6 +430,107 @@ describe('the broker authority', () => {
   it('has no Amazon remittance section', async () => {
     const company = companyIn(await readWeek(), wernerCompanyId)
     expect(company.remittance).toBeNull()
+  }, 300_000)
+})
+
+describe('the declared work period, and the fallback under it', () => {
+  // THE LABEL IS THE BETTER ANSWER. Amazon prints the period in the Payment
+  // Summary and `parseWorkPeriod` stores it, so the screen asks the remittance
+  // what week it is FOR rather than inferring it from what it touched.
+  it('finds a remittance by the period it declares', async () => {
+    const payment = await owner.payment.create({
+      data: {
+        organizationId,
+        companyId: amazonCompanyId,
+        customerId: relayId,
+        method: 'ACH',
+        remittanceKey: `DECLARED-${nonce}`,
+        receivedAt: new Date(PERIOD.end.getTime() + 3 * 86_400_000),
+        amountCents: 42_000,
+        periodStart: PERIOD.start,
+        periodEnd: PERIOD.end,
+      },
+    })
+
+    // NOT ONE APPLICATION ON IT. Under the old question this payment was
+    // invisible — which is the gap the columns close: a remittance that paid
+    // nothing in the period is still that period's remittance.
+    const company = companyIn(await readWeek(), amazonCompanyId)
+    expect(company.remittance?.found).toBe(true)
+    expect(company.remittance?.invoiceNumber).toBe(`DECLARED-${nonce}`)
+
+    await owner.payment.delete({ where: { id: payment.id } })
+  }, 300_000)
+
+  // AND THE FALLBACK STILL WORKS, which is what makes the columns safe to add:
+  // every payment already in the database has no period, and dropping the old
+  // question would have made this week's remittance vanish for all of them.
+  it('still finds one with no declared period, through what it paid for', async () => {
+    const company = companyIn(await readWeek(), amazonCompanyId)
+    expect(company.remittance?.found).toBe(true)
+    expect(company.remittance?.invoiceNumber).toBe(`INV-${nonce}`)
+  }, 300_000)
+
+  it('ignores a remittance that declares a different week', async () => {
+    const other = await owner.payment.create({
+      data: {
+        organizationId,
+        companyId: amazonCompanyId,
+        customerId: relayId,
+        method: 'ACH',
+        remittanceKey: `OTHERWEEK-${nonce}`,
+        receivedAt: new Date(PERIOD.end.getTime() + 3 * 86_400_000),
+        amountCents: 9_900,
+        periodStart: new Date(PERIOD.start.getTime() - 7 * 86_400_000),
+        periodEnd: new Date(PERIOD.end.getTime() - 7 * 86_400_000),
+      },
+    })
+
+    const company = companyIn(await readWeek(), amazonCompanyId)
+    expect(company.remittance?.invoiceNumber).not.toBe(`OTHERWEEK-${nonce}`)
+
+    await owner.payment.delete({ where: { id: other.id } })
+  }, 300_000)
+})
+
+describe('when a packet was filed', () => {
+  // `filedAt` IS WRITTEN BY THE ACTION, and the screen reads it rather than
+  // `updatedAt` — which was right on the day a load was filed and drifted every
+  // time anything else touched the row.
+  it('reports the date the action recorded, not the row last change', async () => {
+    const filedOn = new Date(Date.UTC(2026, 8, 1, 12))
+    await owner.load.update({
+      where: { id: filedLoadId },
+      data: { filedAt: filedOn },
+    })
+
+    const company = companyIn(await readWeek(), wernerCompanyId)
+    expect(company.werner!.oldestFiledAt?.toISOString()).toBe(
+      filedOn.toISOString(),
+    )
+
+    // Touching the row for an unrelated reason must not age the filing.
+    await owner.load.update({
+      where: { id: filedLoadId },
+      data: { internalNotes: `touched ${nonce}` },
+    })
+    const again = companyIn(await readWeek(), wernerCompanyId)
+    expect(again.werner!.oldestFiledAt?.toISOString()).toBe(
+      filedOn.toISOString(),
+    )
+  }, 300_000)
+
+  // A LOAD FILED BEFORE THE COLUMN EXISTED HAS NONE, and is skipped rather
+  // than counted as filed today. Backfilling from `updatedAt` would have
+  // manufactured a history that reads like a record.
+  it('skips a filing with no recorded date rather than dating it now', async () => {
+    await owner.load.update({
+      where: { id: filedLoadId },
+      data: { filedAt: null },
+    })
+    const company = companyIn(await readWeek(), wernerCompanyId)
+    expect(company.werner!.filedUnpaid).toBe(1)
+    expect(company.werner!.oldestFiledAt).toBeNull()
   }, 300_000)
 })
 
