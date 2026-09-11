@@ -147,7 +147,27 @@ Rules about instruments, which are the ones that cost whole sessions:
   to test — the aggregate the archive's date, the corpus the sweep's end, the
   test the parser's column name. Build the instrument from the artefact, not
   from what the code believes about it.
-- **A guard that has never been watched failing is not known to work.** Break
-  the thing on purpose, see the guard fire, put it back. Flag 47's lesson, and
-  the reason `singleLoadRateCents`, the money-arithmetic patterns and the
-  template freshness check each have both branches observed.
+- **A guard that has never been watched failing is not known to work. Break it
+  under `scripts/watch-guard.mjs`, which treats zero failures as a failure.**
+
+      node scripts/watch-guard.mjs breaks.json
+
+  Break the thing on purpose, see the guard fire, put it back. Flag 47's
+  lesson, and the reason `singleLoadRateCents`, the money-arithmetic patterns
+  and the template freshness check each have both branches observed.
+
+  THIS RULE USED TO END AT "put it back" AND THAT WAS NOT ENOUGH. On
+  2026-09-10 four guards were broken in a shell loop that counted failing test
+  lines. The third reported ZERO failures, and zero was read as a finding
+  about the guard. The guard was fine; the loop's edit helper had silently not
+  applied the break, so the suite ran against unmodified source and passed —
+  and a passing suite is exactly what a working guard looks like when nobody
+  checks that the break landed. Run directly, it fired on the first try.
+
+  That is the same silent no-op as the `sed` trap and the `tail` trap, which
+  is why the answer is the same one for the third time: a mechanism, not more
+  care. The wrapper requires the anchor to occur exactly once, requires the
+  bytes on disk to change, requires the command to FAIL, optionally requires
+  the named test to be among the failures, and restores the file on every path
+  including a throw — verifying the restoration by hash. Zero failures prints
+  THE BREAK DID NOT FIRE — NOT OK.
