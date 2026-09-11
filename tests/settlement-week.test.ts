@@ -7,6 +7,7 @@ import {
   payoutDateFor,
   tariffLabel,
   weekOf,
+  __rounding,
   type DriverSettlementInput,
   type SettleableLoad,
 } from '@/lib/settlement-week'
@@ -342,6 +343,54 @@ describe('the six Datatruck statements, reproduced line by line', () => {
   }
 })
 
+// ---------------------------------------------------------------------------
+// PER LINE, NOT ON THE TOTAL — AND FOUR OF THE SIX SETTLE IT.
+//
+// MONEY-DESIGN §6 recorded this as UNCONFIRMED: "the per-line rounding claim
+// still needs checking against a line whose per-line and on-total results
+// actually differ — none of the six happens to be one".
+//
+// Four of them are. Rounding the whole gross at once gives a DIFFERENT cent
+// from summing the rounded lines on ST-005310, ST-005317, ST-005336 and
+// ST-005352, and in every case the statement prints the per-line answer:
+//
+//   ST-005310   $9,210.76 x 88%  -> on-total $8,105.47   printed $8,105.46
+//   ST-005317  $10,839.15 x 30%  -> on-total $3,251.75   printed $3,251.74
+//   ST-005336   $9,490.80 x 32%  -> on-total $3,037.06   printed $3,037.05
+//   ST-005352   $5,556.01 x 30%  -> on-total $1,666.80   printed $1,666.81
+//
+// A cent a week per driver is not the point; being unable to say which rule
+// the software follows is. This is the assertion that says it.
+// ---------------------------------------------------------------------------
+
+describe('rounding happens per line and not once on the total', () => {
+  const onTotal = (fixture: StatementFixture) =>
+    __rounding.percentOfCents(fixture.totals.grossCents, fixture.percentBps)
+
+  it('disagrees with the on-total answer on four of the six', () => {
+    const differing = DATATRUCK_STATEMENTS.filter(
+      (fixture) => onTotal(fixture) !== fixture.totals.amountCents,
+    ).map((fixture) => fixture.number)
+    expect(differing).toEqual([
+      'ST-005310',
+      'ST-005317',
+      'ST-005336',
+      'ST-005352',
+    ])
+  })
+
+  it('prints the per-line answer every time they differ', () => {
+    for (const fixture of DATATRUCK_STATEMENTS) {
+      const perLine = fixture.loads.reduce(
+        (sum, row) =>
+          sum + __rounding.percentOfCents(row.grossCents, fixture.percentBps),
+        0,
+      )
+      expect(perLine, fixture.number).toBe(fixture.totals.amountCents)
+    }
+  })
+})
+
 describe('the week boundary', () => {
   it('takes Sunday to Saturday, from any day inside it', () => {
     const week = weekOf(new Date(Date.UTC(2026, 7, 19)))
@@ -367,6 +416,17 @@ describe('the week boundary', () => {
       isSettlementWeek({
         start: new Date(Date.UTC(2026, 7, 17)),
         end: new Date(Date.UTC(2026, 7, 23)),
+      }),
+    ).toBe(false)
+  })
+
+  // The other half, and it needs its own case: a fortnight starts on a Sunday
+  // and ends on a Saturday, so only the SPAN tells it from a week.
+  it('refuses a fortnight, which passes every check but the length', () => {
+    expect(
+      isSettlementWeek({
+        start: new Date(Date.UTC(2026, 7, 16)),
+        end: new Date(Date.UTC(2026, 7, 29)),
       }),
     ).toBe(false)
   })
@@ -438,6 +498,57 @@ describe('which gross a load settles on', () => {
   })
 })
 
+describe('a held load contributes nothing to the statement', () => {
+  // `grossFor` deciding to hold is one thing; the SETTLEMENT leaving the line
+  // out is another, and only the second is what a driver is paid on. Watched
+  // failing by letting the loop settle a held decision anyway.
+  const base = inputFor(DATATRUCK_STATEMENTS[5]!)
+
+  const amazonLoad = (outcome: 'short' | 'none'): SettleableLoad => ({
+    id: 'held-1',
+    loadNumber: 'AMZ-HELD',
+    puPlace: 'A',
+    delPlace: 'B',
+    puDate: new Date(base.period.start),
+    delDate: new Date(base.period.end),
+    rateCents: 200_000,
+    milesHundredths: 10_000,
+    direct: {
+      outcome,
+      remittedCents: outcome === 'short' ? 175_000 : null,
+      confirmedCents: null,
+    },
+  })
+
+  for (const outcome of ['short', 'none'] as const) {
+    it(`leaves a ${outcome} load out of the lines and names it as held`, () => {
+      const settlement = computeDriverSettlement({
+        ...base,
+        loads: [amazonLoad(outcome)],
+      })
+      expect(settlement.lines).toHaveLength(0)
+      expect(settlement.earningsCents).toBe(0)
+      expect(settlement.held).toHaveLength(1)
+      expect(settlement.held[0]!.loadNumber).toBe('AMZ-HELD')
+    })
+  }
+
+  it('settles it once the confirmed figure is on it', () => {
+    const held = amazonLoad('short')
+    const settlement = computeDriverSettlement({
+      ...base,
+      loads: [
+        { ...held, direct: { ...held.direct!, confirmedCents: 175_000 } },
+      ],
+    })
+    expect(settlement.held).toHaveLength(0)
+    expect(settlement.lines).toHaveLength(1)
+    // 30% OF THE CONFIRMED FIGURE, never of the booked $2,000.
+    expect(settlement.lines[0]!.grossCents).toBe(175_000)
+    expect(settlement.lines[0]!.amountCents).toBe(52_500)
+  })
+})
+
 describe('the driver payout lag', () => {
   const checkDate = new Date(Date.UTC(2026, 7, 27))
 
@@ -506,6 +617,35 @@ describe('an idle owner-operator still gets a statement', () => {
     expect(settlement.netCents).toBeLessThan(0)
     // PRINTED AND FLAGGED, never clamped and never carried forward.
     expect(settlement.netIsNegative).toBe(true)
+  })
+})
+
+describe('YTD, when there is no opening balance', () => {
+  const base = inputFor(DATATRUCK_STATEMENTS[0]!)
+
+  // ON PRODUCTION THIS IS THE LIVE CASE, not an edge: `DriverOpeningBalance`
+  // held ZERO rows when this was built. A YTD label over a figure that counts
+  // one week of Zebra's own settlements is a claim about a year that is not
+  // true, so the statement says which period it counts from instead.
+  it('says which period it counts from rather than claiming a year', () => {
+    const settlement = computeDriverSettlement(base)
+    expect(settlement.ytdFromPeriodStart).not.toBeNull()
+    expect(settlement.ytdFromPeriodStart!.getTime()).toBe(
+      base.period.start.getTime(),
+    )
+    // And with nothing prior, the YTD figure IS this week's figure.
+    expect(settlement.ytd.netCents).toBe(settlement.netCents)
+  })
+
+  it('calls it YTD once an opening balance exists', () => {
+    const settlement = computeDriverSettlement({
+      ...base,
+      openingBalances: { EARNINGS: 13_510_888, NET_PAY: 5_920_440 },
+    })
+    expect(settlement.ytdFromPeriodStart).toBeNull()
+    expect(settlement.ytd.earningsCents).toBe(
+      13_510_888 + settlement.earningsCents,
+    )
   })
 })
 

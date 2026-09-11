@@ -143,47 +143,51 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  companies           Company[]
-  inboundEmails       InboundEmail[]
-  assetHistory        AssetAssignment[]
-  customers           Customer[]
-  locations           Location[]
-  factors             FactoringCompany[]
-  auditLogs           AuditLog[]
-  calendarEvents      CalendarEvent[]
-  claims              Claim[]
-  communications      Communication[]
-  complianceItems     ComplianceItem[]
-  inspections         RoadsideInspection[]
-  violations          InspectionViolation[]
-  dataQs              DataQsChallenge[]
-  claimParties        ClaimParty[]
-  claimNotes          ClaimNote[]
-  customerAliases     CustomerAlias[]
-  corrections         ExtractionCorrection[]
-  extractionUsage     ExtractionUsage[]
-  counters            Counter[]
-  documents           Document[]
-  drivers             Driver[]
-  expenses            Expense[]
-  fuelTxns            FuelTransaction[]
-  iftaMileage         IftaMileage[]
-  integrations        Integration[]
-  invoices            Invoice[]
-  loads               Load[]
-  maintenance         MaintenanceRecord[]
-  memberships         Membership[]
-  notifications       Notification[]
-  payments            Payment[]
-  pendingUploads      PendingUpload[]
-  settlements         Settlement[]
-  openingBalances     DriverOpeningBalance[]
-  recurringDeductions RecurringDeduction[]
-  settlementCharges   SettlementCharge[]
-  escrowEntries       DriverEscrowEntry[]
-  trailers            Trailer[]
-  trucks              Truck[]
-  preferences         UserPreference[]
+  companies                Company[]
+  inboundEmails            InboundEmail[]
+  assetHistory             AssetAssignment[]
+  customers                Customer[]
+  locations                Location[]
+  factors                  FactoringCompany[]
+  auditLogs                AuditLog[]
+  calendarEvents           CalendarEvent[]
+  claims                   Claim[]
+  communications           Communication[]
+  complianceItems          ComplianceItem[]
+  inspections              RoadsideInspection[]
+  violations               InspectionViolation[]
+  dataQs                   DataQsChallenge[]
+  claimParties             ClaimParty[]
+  claimNotes               ClaimNote[]
+  customerAliases          CustomerAlias[]
+  corrections              ExtractionCorrection[]
+  extractionUsage          ExtractionUsage[]
+  counters                 Counter[]
+  documents                Document[]
+  drivers                  Driver[]
+  expenses                 Expense[]
+  fuelTxns                 FuelTransaction[]
+  iftaMileage              IftaMileage[]
+  integrations             Integration[]
+  invoices                 Invoice[]
+  loads                    Load[]
+  maintenance              MaintenanceRecord[]
+  memberships              Membership[]
+  notifications            Notification[]
+  payments                 Payment[]
+  pendingUploads           PendingUpload[]
+  settlements              Settlement[]
+  settlementBatches        SettlementBatch[]
+  seriesCounters           SeriesCounter[]
+  settlementLoadLines      SettlementLoadLine[]
+  settlementDeductionLines SettlementDeductionLine[]
+  openingBalances          DriverOpeningBalance[]
+  recurringDeductions      RecurringDeduction[]
+  settlementCharges        SettlementCharge[]
+  escrowEntries            DriverEscrowEntry[]
+  trailers                 Trailer[]
+  trucks                   Truck[]
+  preferences              UserPreference[]
 }
 
 enum PlanTier {
@@ -251,6 +255,7 @@ model Company {
   invoices           Invoice[]
   payments           Payment[]
   settlements        Settlement[]
+  settlementBatches  SettlementBatch[]
   expenses           Expense[]
   fuelTxns           FuelTransaction[]
   maintenance        MaintenanceRecord[]
@@ -331,26 +336,29 @@ model User {
   resetTokens    PasswordResetToken[]
   driverProfiles Driver[]
 
-  loadsBooked       Load[]
-  statusEvents      LoadStatusEvent[]
-  assignmentsMade   LoadAssignment[]
-  assetTransfers    AssetAssignment[]
-  documentsUploaded Document[]
-  claimNotes        ClaimNote[]
-  aliasesLearned    CustomerAlias[]
-  correctionsMade   ExtractionCorrection[]
-  accessorialsOk    LoadAccessorial[]
-  paymentsRecorded  Payment[]
-  settlementsOk     Settlement[]
-  openingBalances   DriverOpeningBalance[]
-  expensesCreated   Expense[]
-  communications    Communication[]
-  notifications     Notification[]
-  auditLogs         AuditLog[]
-  calendarEvents    CalendarEvent[]
-  pendingUploads    PendingUpload[]
-  inboundEmails     InboundEmail[]
-  preferences       UserPreference[]
+  loadsBooked        Load[]
+  statusEvents       LoadStatusEvent[]
+  assignmentsMade    LoadAssignment[]
+  assetTransfers     AssetAssignment[]
+  documentsUploaded  Document[]
+  claimNotes         ClaimNote[]
+  aliasesLearned     CustomerAlias[]
+  correctionsMade    ExtractionCorrection[]
+  accessorialsOk     LoadAccessorial[]
+  paymentsRecorded   Payment[]
+  settlementsOk      Settlement[]
+  batchesFinalized   SettlementBatch[]      @relation("SettlementBatchFinalizedBy")
+  batchesPaid        SettlementBatch[]      @relation("SettlementBatchPaidBy")
+  loadGrossConfirmed Load[]                 @relation("LoadSettledGrossConfirmedBy")
+  openingBalances    DriverOpeningBalance[]
+  expensesCreated    Expense[]
+  communications     Communication[]
+  notifications      Notification[]
+  auditLogs          AuditLog[]
+  calendarEvents     CalendarEvent[]
+  pendingUploads     PendingUpload[]
+  inboundEmails      InboundEmail[]
+  preferences        UserPreference[]
 
   @@index([isActive])
 }
@@ -777,6 +785,17 @@ model Driver {
   terminationDate DateTime?
   status          DriverStatus  @default(AVAILABLE)
   employmentType  OwnershipType @default(OWNED)
+
+  /// How many whole weeks after the batch's check date this driver is paid.
+  ///
+  /// A STATED PROPERTY, LIKE THE PAY RULE — superseded rather than edited, so
+  /// a settlement frozen at FINAL keeps the lag that applied when it was cut.
+  /// Zero for almost everybody; MCKANE is 1. The settlement's `payoutDate` is
+  /// the batch check date plus this, and THAT is what the statement's Check
+  /// Date field prints — two drivers in one batch can be paid on different
+  /// days, and printing the batch's date on both tells one of them the wrong
+  /// one.
+  payoutLagWeeks Int @default(0)
 
   assignedTruckId String?
   assignedTruck   Truck?  @relation(fields: [assignedTruckId], references: [id])
@@ -1290,17 +1309,33 @@ model Load {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  stops           LoadStop[]
-  accessorials    LoadAccessorial[]
-  statusEvents    LoadStatusEvent[]
-  assignments     LoadAssignment[]
-  documents       Document[]
-  invoiceLines    InvoiceLine[]
-  settlementLines SettlementLine[]
-  expenses        Expense[]
-  fuelTxns        FuelTransaction[]
-  communications  Communication[]
-  claims          Claim[]
+  stops                     LoadStop[]
+  accessorials              LoadAccessorial[]
+  statusEvents              LoadStatusEvent[]
+  assignments               LoadAssignment[]
+  documents                 Document[]
+  invoiceLines              InvoiceLine[]
+  settlementLines           SettlementLine[]
+  settlementLoadLines       SettlementLoadLine[]
+  /// Dispatch's ruling on what this load actually settles on (MONEY-DESIGN §3).
+  ///
+  /// ONLY EVER SET BY A PERSON. Amazon freight settles on the REMITTED figure,
+  /// and where the remittance matches the booked rate that is automatic. Where
+  /// it is short or over, the line is HELD out of every settlement until
+  /// somebody looks: short can mean a deduction we accept or a mistake we are
+  /// going to argue about, and those pay the driver different amounts.
+  ///
+  /// Null is not only "nobody has looked yet" — it is also the ordinary state
+  /// of every broker load, which settles on its rate and waits for nobody.
+  settledGrossCents         Int?
+  settledGrossConfirmedAt   DateTime?
+  settledGrossConfirmedById String?
+  settledGrossConfirmedBy   User?                @relation("LoadSettledGrossConfirmedBy", fields: [settledGrossConfirmedById], references: [id])
+
+  expenses       Expense[]
+  fuelTxns       FuelTransaction[]
+  communications Communication[]
+  claims         Claim[]
 
   // Money paid against the LOAD rather than against an invoice. Only ever
   // populated for direct-settled freight — see PaymentLoadApplication.
@@ -2492,6 +2527,101 @@ enum PaymentMethod {
 // DRIVER SETTLEMENTS
 // ============================================================================
 
+/// One company's Sunday-to-Saturday week, and every driver's statement under it.
+///
+/// ── WHY A BATCH EXISTS AT ALL ────────────────────────────────────────────
+///
+/// Because that is how the money actually moves. SB-000438 in
+/// `corpus/datatruck` carries both RAM drivers for 8/16-8/22; the statement
+/// date and the check date are typed once and every statement beneath it
+/// inherits them. A per-driver settlement with its own dates would let two
+/// drivers in one week be paid on days nobody chose.
+///
+/// ── THE TWO DATES ARE TYPED, NEVER DERIVED ───────────────────────────────
+///
+/// MONEY-DESIGN says so twice. On all six statements the check date happens to
+/// be the statement date plus two, and deriving it from that pattern would be
+/// inventing a rule out of a coincidence — the day a cheque is cut is an
+/// operational decision, not arithmetic.
+/// A number series that spans the whole organization rather than one authority.
+///
+/// ── WHY THIS IS NOT `Counter` ────────────────────────────────────────────
+///
+/// `Counter` is unique on `(companyId, key)` and that is correct for what it
+/// holds: a load number and an invoice number belong to ONE authority, and RAM
+/// and Dolphins each having their own series is the point of it.
+///
+/// Settlement batch and statement numbers are the opposite, and the artefact
+/// says so plainly — SB-000436 RAM, SB-000437 Dolphins, SB-000438 RAM,
+/// SB-000439 Dolphins, SB-000440 RAM. One ascending run, interleaved across
+/// both carriers. Reusing `Counter` would mean picking one company to hold the
+/// shared series in, which is a fact nothing in the schema could express and
+/// the next person would have to be told.
+///
+/// Two tables because there are two scopes, not by accident.
+model SeriesCounter {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  /// `SETTLEMENT_BATCH` or `SETTLEMENT_STATEMENT`.
+  key   String
+  value Int    @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, key])
+}
+
+model SettlementBatch {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId      String
+  company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  /// Inclusive UTC days. A Sunday and the Saturday after — MONEY-DESIGN §0.
+  periodStart DateTime
+  periodEnd   DateTime
+
+  statementDate DateTime
+  checkDate     DateTime
+
+  status SettlementBatchStatus @default(DRAFT)
+
+  /// `SB-000436`. Allocated at FINAL; a draft carries none, because a number
+  /// issued to something that may never exist is a gap in the series.
+  batchNumber String?
+
+  finalizedAt       DateTime?
+  finalizedByUserId String?
+  finalizedBy       User?     @relation("SettlementBatchFinalizedBy", fields: [finalizedByUserId], references: [id])
+  paidAt            DateTime?
+  paidByUserId      String?
+  paidBy            User?     @relation("SettlementBatchPaidBy", fields: [paidByUserId], references: [id])
+
+  notes String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  settlements Settlement[]
+
+  /// ONE SERIES ACROSS BOTH CARRIERS, so the unique is on the organization and
+  /// not the company. Confirmed off the artefact: 436 RAM, 437 Dolphins, 438
+  /// RAM, 439 Dolphins, 440 RAM — one ascending run, interleaved.
+  @@unique([organizationId, batchNumber])
+  @@index([companyId, periodStart])
+  @@index([organizationId, status])
+}
+
+enum SettlementBatchStatus {
+  DRAFT
+  FINAL
+  PAID
+}
+
 model Settlement {
   id             String       @id @default(cuid())
   organizationId String
@@ -2524,8 +2654,42 @@ model Settlement {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  lines     SettlementLine[]
-  documents Document[]
+  // ── THE BATCH FLOW (MONEY-DESIGN item 3) ──────────────────────────────
+  //
+  // NULLABLE, because the Phase 3 per-driver flow still creates settlements
+  // without a batch. Both were empty on production when this landed — zero
+  // rows, zero lines — so nothing here rewrites money somebody was paid.
+
+  batchId String?
+  batch   SettlementBatch? @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  /// PER-SETTLEMENT AND FROZEN AT FINAL. A driver changes truck mid-year and
+  /// the statement has to keep the unit that pulled THAT week's freight —
+  /// ST-005301 and ST-005336 are the same driver on units 0484 and 8842.
+  unitNumber String?
+
+  /// `88% from gross`, exactly as printed. Built from the rule at generation
+  /// and frozen, so a later rate change cannot restate an issued statement.
+  payTariffLabel  String?
+  payRuleSnapshot Json?
+
+  /// Batch check date plus the driver's own lag, frozen at FINAL. This is the
+  /// Check Date the statement prints — see `Driver.payoutLagWeeks`.
+  payoutDate DateTime?
+
+  /// The Earnings section's Total row. `grossCents` is what the percentage was
+  /// taken OF; `earningsCents` is the sum of the per-line rounded amounts, and
+  /// the two are not a fixed ratio of each other because rounding is per line.
+  earningsCents   Int @default(0)
+  advancesCents   Int @default(0)
+  otherPayCents   Int @default(0)
+  /// Hundredths — the statements print 3.75 and 465.85 miles.
+  milesHundredths Int @default(0)
+
+  lines          SettlementLine[]
+  loadLines      SettlementLoadLine[]
+  deductionLines SettlementDeductionLine[]
+  documents      Document[]
 
   @@unique([companyId, settlementNumber])
   @@index([companyId, driverId, periodEnd])
@@ -2571,6 +2735,93 @@ model SettlementLine {
 
   @@index([settlementId])
   @@index([loadId])
+  @@index([organizationId])
+}
+
+/// One load on one statement — the Earnings section, a row at a time.
+///
+/// SEPARATE FROM `SettlementLine` RATHER THAN REUSING IT. That table is one
+/// signed amount with a type; this one carries the columns the artefact prints
+/// — Load number, PU, DEL, PU date, DEL date, Load gross, Total miles, Total
+/// amount — and every one of them has to survive on the statement whatever
+/// happens to the load afterwards.
+model SettlementLoadLine {
+  id           String     @id @default(cuid())
+  settlementId String
+  settlement   Settlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+
+  organizationId String // denormalized from Settlement — convention 9
+
+  loadId String
+  load   Load   @relation(fields: [loadId], references: [id])
+
+  /// FROZEN COPIES, not joins. A statement is a document somebody was paid on:
+  /// re-reading the load next year to render it would let a corrected city or
+  /// a re-numbered load change what a cheque said.
+  loadNumber String
+  puPlace    String
+  delPlace   String
+  puDate     DateTime
+  delDate    DateTime
+
+  /// The gross the percentage was applied to. For Amazon freight this is the
+  /// REMITTED figure, never the booked rate — §3, and `settledBasis` says which.
+  grossCents      Int
+  milesHundredths Int
+  /// The Total amount column: gross times the rule, rounded on THIS line.
+  amountCents     Int
+
+  /// `rate` | `remitted` | `confirmed`. What the gross above came from, so a
+  /// driver querying a line can be told which figure was used and why.
+  settledBasis String
+
+  /// How the amount was reached — the rule, the basis, the result.
+  payRuleSnapshot Json?
+
+  sortOrder    Int          @default(0)
+  createdAt    DateTime     @default(now())
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  /// A LOAD SETTLES ONCE. The database refuses the second one rather than the
+  /// code remembering to check — a driver paid twice for one load is money out
+  /// of the door that reconciles against nothing.
+  @@unique([loadId])
+  @@index([settlementId])
+  @@index([organizationId])
+}
+
+/// One deduction or one credit. Signed, so both sections come from one table.
+///
+/// The statement prints them as Deductions and Other Pay, which are the same
+/// object pointing opposite ways — `SettlementCharge` is stored the same way
+/// for the same reason.
+model SettlementDeductionLine {
+  id           String     @id @default(cuid())
+  settlementId String
+  settlement   Settlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+
+  organizationId String // denormalized from Settlement — convention 9
+
+  /// The printed label: `Fuel`, `Insurance`, `Ifta`, `Escrow`, `Other`.
+  type        String
+  /// Exactly what goes in the Description column. Empty prints blank, which is
+  /// what `Ifta` and `Admin Fee` do on the real statements.
+  description String
+
+  quantity   Int @default(1)
+  rateCents  Int
+  /// SIGNED: negative is money off the driver, positive is Other Pay.
+  totalCents Int
+
+  /// Which rule or one-off produced it, so the line can be traced back.
+  recurringDeductionId String?
+  settlementChargeId   String?
+
+  sortOrder    Int          @default(0)
+  createdAt    DateTime     @default(now())
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([settlementId])
   @@index([organizationId])
 }
 

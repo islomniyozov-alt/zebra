@@ -179,6 +179,10 @@ Both are optional at settlement time. A driver with no fuel import that week get
 
 **`SettlementBatch`**: company + period + statement date + check date + status `DRAFT | FINAL | PAID`. One batch per company per week.
 
+**Built 2026-09-11.** `settlement-week.ts` is the arithmetic and is graded against all six statements; `settlement-batch.ts` reads and writes the rows. A DRAFT holds no truth — every refresh deletes its settlements and recomputes from the loads, rules and charges as they are now, which is what makes "add the missing pay rule and refresh" a thing a person can do. The delete happens BEFORE the read, and that order is load-bearing: `settleableForBatch` excludes any load already carrying a settlement line, so reading first makes a draft invisible to its own refresh. The live path caught it — three loads went in, one fell out of the batch entirely and turned up unsettled the following week.
+
+`SB-` and `ST-` draw from `SeriesCounter`, keyed on the ORGANIZATION rather than the company. `Counter` stays per-authority because a load number and an invoice number belong to one; holding a shared series there would mean nominating one company to keep it in, which nothing in the schema could express.
+
 One action, **"Settle this week"**, per company. It:
 - takes every driver with a load delivered in the period;
 - **refuses, naming them**, any driver with no pay rule in force at period end — never skips silently;
@@ -200,7 +204,16 @@ Matching the artifact, and the distinction is real rather than a concession: **a
 
 The percentage is applied **per load line and rounded per line**, not once on the total. `money.ts` owns the rounding, half-up, integer cents. TONU flows through the same percentage ($175 → $157.50) — and ST-005284 prints exactly that: a $175.00 Murfreesboro-to-Murfreesboro line paying $154.00 at 88%.
 
-*(The earlier citation of "ST-0290 (796.98 → 717.28)" was a mis-transcription; no such statement exists. The per-line rounding claim still needs checking against a line whose per-line and on-total results actually differ — none of the six happens to be one, so it is unconfirmed rather than confirmed.)*
+**CONFIRMED 2026-09-11, and four of the six settle it.** The earlier note here said none of the six had a line where per-line and on-total results differ, so the rule was unconfirmed. Reading the statements out of the PDFs rather than off a summary, four do — and every one prints the per-line answer:
+
+| statement | gross × rate | rounded on the total | printed |
+| --- | --- | --- | --- |
+| ST-005310 | $9,210.76 × 88% | $8,105.47 | **$8,105.46** |
+| ST-005317 | $10,839.15 × 30% | $3,251.75 | **$3,251.74** |
+| ST-005336 | $9,490.80 × 32% | $3,037.06 | **$3,037.05** |
+| ST-005352 | $5,556.01 × 30% | $1,666.80 | **$1,666.81** |
+
+*(The earlier citation of "ST-0290 (796.98 → 717.28)" was a mis-transcription; no such statement exists.)*
 
 ---
 

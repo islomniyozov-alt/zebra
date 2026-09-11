@@ -529,6 +529,11 @@ export const NAVIGATION: readonly NavGroup[] = [
       item('receivables', '/receivables', 'receivable'),
       item('payments', '/payments', 'payment'),
       item('settlements', '/settlements', 'settlement'),
+      // MONEY-DESIGN item 3. Its own entry rather than a tab under
+      // /settlements: the two are different documents with different rules —
+      // that one is a per-driver settlement showing its working, this one is a
+      // company's week in the layout drivers already read.
+      item('settlementBatches', '/settlements/batches', 'settlement'),
       // §2.6: Expenses, Fuel and IFTA move to Phase 5. Phase 4 is fleet and
       // safety, not the spend ledger — maintenance COSTS land in Phase 4
       // because they attach to a work order, but the general expense screens

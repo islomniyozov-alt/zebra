@@ -414,6 +414,35 @@ export async function seedOrganization(
     }),
   )
 
+  // The SB-/ST- series. ORGANIZATION-SCOPED, so isolation matters more here
+  // than on a per-company counter: two tenants sharing a series would let one
+  // infer the other's settlement volume from the gaps in its own numbers.
+  record(
+    'seriesCounter',
+    await db.seriesCounter.create({
+      data: { organizationId, key: `SETTLEMENT_BATCH-${tag}`, value: 5000 },
+    }),
+  )
+
+  // MONEY-DESIGN item 3 — the batch, and the two line tables under it.
+  //
+  // SEEDED HERE IN THE SAME COMMIT AS THE MIGRATION, because "sees no rows from
+  // the other organization" is trivially true of a table with nothing in it,
+  // which is the most comfortable way to be wrong.
+  const batch = record(
+    'settlementBatch',
+    await db.settlementBatch.create({
+      data: {
+        organizationId,
+        companyId,
+        periodStart: new Date('2026-07-01'),
+        periodEnd: new Date('2026-07-07'),
+        statementDate: new Date('2026-07-08'),
+        checkDate: new Date('2026-07-10'),
+      },
+    }),
+  )
+
   const settlement = record(
     'settlement',
     await db.settlement.create({
@@ -422,8 +451,41 @@ export async function seedOrganization(
         companyId,
         settlementNumber: `STL-${tag}`,
         driverId: driver.id,
+        batchId: batch.id,
         periodStart: new Date('2026-07-01'),
         periodEnd: new Date('2026-07-07'),
+      },
+    }),
+  )
+  record(
+    'settlementLoadLine',
+    await db.settlementLoadLine.create({
+      data: {
+        settlementId: settlement.id,
+        organizationId,
+        loadId: load.id,
+        loadNumber: `L-${tag}`,
+        puPlace: 'Whiteland,IN',
+        delPlace: 'Gastonia,NC',
+        puDate: new Date('2026-07-02'),
+        delDate: new Date('2026-07-03'),
+        grossCents: 100000,
+        milesHundredths: 25000,
+        amountCents: 30000,
+        settledBasis: 'rate',
+      },
+    }),
+  )
+  record(
+    'settlementDeductionLine',
+    await db.settlementDeductionLine.create({
+      data: {
+        settlementId: settlement.id,
+        organizationId,
+        type: 'Escrow',
+        description: 'Security Deposit $2500/$250',
+        rateCents: 25000,
+        totalCents: -25000,
       },
     }),
   )

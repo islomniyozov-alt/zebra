@@ -88,10 +88,13 @@ export function weekOf(day: Date): Week {
  * tell. The six statements all run Sunday to Saturday.
  */
 export function isSettlementWeek(week: Week): boolean {
+  // TWO CHECKS, NOT THREE, and the third was removed because it could not be
+  // watched failing. It also asked whether the END is a Saturday — which is
+  // implied: a Sunday plus exactly six days IS a Saturday, so no input existed
+  // that the other two accepted and it rejected. A check nothing can break is
+  // a comment with a runtime cost, and worse, it reads like protection.
   if (week.start.getUTCDay() !== 0) return false
-  if (week.end.getUTCDay() !== 6) return false
-  const span = week.end.getTime() - week.start.getTime()
-  return span === 6 * DAY
+  return week.end.getTime() - week.start.getTime() === 6 * DAY
 }
 
 // ── which gross a load settles on (§3) ────────────────────────────────────
