@@ -7,6 +7,7 @@ import {
   payoutDateFor,
   tariffLabel,
   weekOf,
+  payWeekFor,
   __rounding,
   type DriverSettlementInput,
   type SettleableLoad,
@@ -429,6 +430,72 @@ describe('the week boundary', () => {
         end: new Date(Date.UTC(2026, 7, 29)),
       }),
     ).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// "THIS WEEK" IS THE PERIOD PAID THIS FRIDAY, NOT THE ONE THAT JUST CLOSED.
+//
+// The company pays two weeks behind (§0). Pinned on three weekdays because the
+// boundary case is a Saturday — the first step of the arithmetic lands on TODAY
+// there, and a reading that treated the week ending today as "the most recent
+// closed week" would show freight nobody is paid for until a fortnight later.
+// ---------------------------------------------------------------------------
+
+describe('the period due this Friday', () => {
+  const pinned = [
+    ['Tuesday', Date.UTC(2026, 8, 15)],
+    ['Sunday', Date.UTC(2026, 8, 13)],
+    ['Saturday', Date.UTC(2026, 8, 12)],
+  ] as const
+
+  for (const [weekday, today] of pinned) {
+    it(`is Aug 30 - Sep 5, paying Fri 9/18, when today is a ${weekday}`, () => {
+      const { period, payDay } = payWeekFor(new Date(today))
+      expect(period.start.toISOString().slice(0, 10)).toBe('2026-08-30')
+      expect(period.end.toISOString().slice(0, 10)).toBe('2026-09-05')
+      expect(payDay.toISOString().slice(0, 10)).toBe('2026-09-18')
+    })
+  }
+
+  // THE ARTEFACT'S OWN ROW: Aug 23-29 was paid 9/11. On the Friday itself the
+  // screen shows the period being paid that day.
+  it('shows the period being paid today, when today is the pay Friday', () => {
+    const { period, payDay } = payWeekFor(new Date(Date.UTC(2026, 8, 11)))
+    expect(period.start.toISOString().slice(0, 10)).toBe('2026-08-23')
+    expect(period.end.toISOString().slice(0, 10)).toBe('2026-08-29')
+    expect(payDay.toISOString().slice(0, 10)).toBe('2026-09-11')
+  })
+
+  // NEVER THE MOST RECENT CLOSED WEEK, which is the whole point and the guard
+  // the brief names. On Tue 9/15 the week that just closed is Sep 6-12.
+  it('is never the week that just closed', () => {
+    const { period } = payWeekFor(new Date(Date.UTC(2026, 8, 15)))
+    const justClosed = weekOf(new Date(Date.UTC(2026, 8, 12)))
+    expect(period.start.getTime()).not.toBe(justClosed.start.getTime())
+    expect(justClosed.start.getTime() - period.start.getTime()).toBe(
+      7 * 86_400_000,
+    )
+  })
+
+  it('always yields a real Sunday-to-Saturday period, and a Friday', () => {
+    // Every day of one year, so no weekday is the untested one.
+    for (let day = 0; day < 365; day++) {
+      const today = new Date(Date.UTC(2026, 0, 1) + day * 86_400_000)
+      const { period, payDay } = payWeekFor(today)
+      expect(isSettlementWeek(period), today.toISOString()).toBe(true)
+      expect(payDay.getUTCDay(), today.toISOString()).toBe(5)
+      // And it is always the UPCOMING Friday, never one in the past.
+      expect(payDay.getTime()).toBeGreaterThanOrEqual(
+        Date.UTC(
+          today.getUTCFullYear(),
+          today.getUTCMonth(),
+          today.getUTCDate(),
+        ),
+      )
+      // Thirteen days, which is what §0 states.
+      expect(payDay.getTime() - period.end.getTime()).toBe(13 * 86_400_000)
+    }
   })
 })
 

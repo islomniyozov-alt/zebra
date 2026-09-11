@@ -113,12 +113,16 @@ export const statementNumberOf = (value: number) =>
  * halves are needed: the filter is the screen, the constraint is the promise.
  */
 export function settleableForBatch(
-  companyId: string,
+  companyId: string | readonly string[],
   period: Week,
 ): Prisma.LoadWhereInput {
   return {
     ...SETTLEABLE_LOAD,
-    companyId,
+    // ONE COMPANY OR SEVERAL, through the same definition. The money screen
+    // reads every authority at once and a per-company loop cost it five times
+    // the round trips — 16 seconds against 14,464 loads, over a 5s budget.
+    companyId:
+      typeof companyId === 'string' ? companyId : { in: [...companyId] },
     driverId: { not: null },
     // The DELIVERY is what puts a load in a week — the same date the pay rule
     // is looked up on, so a load cannot be paid under a rule from a week it
@@ -158,8 +162,44 @@ export async function batchInputFor(
     checkDate: Date
   },
 ): Promise<{ drivers: DriverSettlementInput[] }> {
+  const many = await batchInputForCompanies(tx, {
+    ...input,
+    companyIds: [input.companyId],
+  })
+  return { drivers: many.get(input.companyId) ?? [] }
+}
+
+/**
+ * The same read, for several authorities at once.
+ *
+ * ── WHY THIS EXISTS AND `batchInputFor` IS NOW A WRAPPER ─────────────────
+ *
+ * The money screen reads every company in the organization. Calling the
+ * single-company version in a loop made each of its eight queries eight times
+ * over — 16.2 seconds against the 14,464 loads on dev, against a five-second
+ * transaction budget. The queries were already `driverId: { in: [...] }`
+ * shaped; only the company filter and the grouping needed widening.
+ *
+ * ONE DEFINITION STILL. `settleableForBatch` decides what may settle, for one
+ * company or for five, and `batchInputFor` now goes through here — so the
+ * screen and the draft cannot drift apart, which was the point of sharing it.
+ */
+export async function batchInputForCompanies(
+  tx: TxClient,
+  input: {
+    organizationId: string
+    companyIds: readonly string[]
+    period: Week
+    statementDate: Date
+    checkDate: Date
+  },
+): Promise<Map<string, DriverSettlementInput[]>> {
+  const byCompany = new Map<string, DriverSettlementInput[]>()
+  for (const companyId of input.companyIds) byCompany.set(companyId, [])
+  if (input.companyIds.length === 0) return byCompany
+
   const loads = await tx.load.findMany({
-    where: settleableForBatch(input.companyId, input.period),
+    where: settleableForBatch(input.companyIds, input.period),
     select: {
       id: true,
       loadNumber: true,
@@ -184,30 +224,41 @@ export async function batchInputFor(
     ...new Set(loads.map((load) => load.driverId).filter((id) => id !== null)),
   ]
 
+  // ── STANDING DEDUCTIONS, IN ONE READ THAT SERVES TWO PURPOSES ─────────
+  //
   // Drivers with recurring deductions but NO loads still get a statement — an
   // idle owner-operator still owes escrow — so they are unioned in rather than
   // derived from the freight.
-  const withRules = await tx.recurringDeduction.findMany({
+  //
+  // THE `OR` IS WHAT MAKES IT ONE QUERY. By company finds the idle ones; by
+  // driver id catches a driver pulling another authority's freight, whose home
+  // company may not be in this list at all. Two reads of the same table cost a
+  // round trip that the money screen cannot spare, and the union is the same
+  // set either way.
+  const recurringAll = await tx.recurringDeduction.findMany({
     where: {
-      driver: { companyId: input.companyId, deletedAt: null },
-      effectiveFrom: { lte: input.period.end },
-      OR: [{ effectiveTo: null }, { effectiveTo: { gte: input.period.start } }],
+      OR: [
+        {
+          driver: { companyId: { in: [...input.companyIds] }, deletedAt: null },
+        },
+        { driverId: { in: driverIds } },
+      ],
     },
-    select: { driverId: true },
   })
-  for (const row of withRules) {
+  for (const row of recurringAll) {
     if (!driverIds.includes(row.driverId)) driverIds.push(row.driverId)
   }
 
-  if (driverIds.length === 0) return { drivers: [] }
+  if (driverIds.length === 0) return byCompany
 
   const year = input.period.start.getUTCFullYear()
-  const [drivers, payRules, recurring, charges, escrow, opening, prior] =
+  const [drivers, payRules, charges, escrow, opening, prior] =
     await Promise.all([
       tx.driver.findMany({
         where: { id: { in: driverIds } },
         select: {
           id: true,
+          companyId: true,
           firstName: true,
           lastName: true,
           payoutLagWeeks: true,
@@ -215,9 +266,6 @@ export async function batchInputFor(
         },
       }),
       tx.driverPayRule.findMany({ where: { driverId: { in: driverIds } } }),
-      tx.recurringDeduction.findMany({
-        where: { driverId: { in: driverIds } },
-      }),
       tx.settlementCharge.findMany({
         where: { driverId: { in: driverIds }, settledAt: null },
       }),
@@ -253,8 +301,8 @@ export async function batchInputFor(
     escrow.map((row) => [row.driverId, row._sum.amountCents ?? 0]),
   )
 
-  return {
-    drivers: drivers.map((driver) => {
+  for (const driver of drivers) {
+    const built = ((): DriverSettlementInput => {
       const mine = loads.filter((load) => load.driverId === driver.id)
       const priorMine = prior.filter((row) => row.driverId === driver.id)
       const openingMine: Partial<Record<YtdCategory, number>> = {}
@@ -308,7 +356,7 @@ export async function batchInputFor(
           }
         }),
         payRules: payRules.filter((rule) => rule.driverId === driver.id),
-        recurring: recurring.filter((rule) => rule.driverId === driver.id),
+        recurring: recurringAll.filter((rule) => rule.driverId === driver.id),
         charges: charges.filter((charge) => charge.driverId === driver.id),
         escrowHeldCents: escrowOf.get(driver.id) ?? 0,
         payoutLagWeeks: driver.payoutLagWeeks,
@@ -324,8 +372,60 @@ export async function batchInputFor(
                 priorMine[0]!.periodStart,
               ),
       }
-    }),
+    })()
+    byCompany.get(driver.companyId)?.push(built)
   }
+
+  return byCompany
+}
+
+/**
+ * Create a batch for one company and one week, and draft it immediately.
+ *
+ * ── ONE CREATE, TWO CALLERS ──────────────────────────────────────────────
+ *
+ * The batch screen's form and the money screen's "Open batch" button both land
+ * here. They differ only in where the four values come from — typed, or
+ * prefilled from the week that is due — and a second create would be a second
+ * place for the period to be got wrong.
+ *
+ * THE DATES ARRIVE ALREADY DECIDED. This function does not compute a statement
+ * date or a check date from the period, because §0 forbids deriving them; a
+ * caller may OFFER a default somebody can overwrite, which is a different
+ * thing, and `payWeekFor` is where that default comes from.
+ */
+export async function openBatch(
+  tx: TxClient,
+  input: {
+    organizationId: string
+    companyId: string
+    period: Week
+    statementDate: Date
+    checkDate: Date
+  },
+): Promise<
+  { ok: true; batchId: string } | { ok: false; reason: BatchRefusal }
+> {
+  if (!isSettlementWeek(input.period)) {
+    return { ok: false, reason: { kind: 'not_a_week' } }
+  }
+
+  const batch = await tx.settlementBatch.create({
+    data: {
+      organizationId: input.organizationId,
+      companyId: input.companyId,
+      periodStart: input.period.start,
+      periodEnd: input.period.end,
+      statementDate: input.statementDate,
+      checkDate: input.checkDate,
+    },
+    select: { id: true },
+  })
+
+  // DRAFTED ON CREATION, so the person who pressed the button lands on
+  // something to read rather than on an empty batch they have to refresh.
+  await refreshDraft(tx, batch.id)
+  return { ok: true, batchId: batch.id }
 }
 
 export type BatchRefusal =

@@ -6,6 +6,7 @@ import {
   type PacketReadiness,
   type PacketRefusal,
 } from './factoring-packet'
+import { NOT_CLOSED_HISTORY } from './billing-status'
 import type { DocumentType, Prisma } from '@/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -417,6 +418,8 @@ export async function fileWithFactor(
 
 export interface FilingState {
   loadId: string
+  /** When the row last changed — the closest thing to "when it was filed". */
+  lastChangedAt?: Date
   billingStatus: string
   readiness: PacketReadiness
   /** Set when this load is not a factoring load at all. */
@@ -468,6 +471,86 @@ export async function filingStateFor(
     canFile: notFactored === null && readiness.ready && !filed,
     canMarkPaid: filed,
   }
+}
+
+/**
+ * The same answer as `filingStateFor`, for every broker load of several
+ * companies — keyed by company.
+ *
+ * ── WHY A SECOND FUNCTION AND NOT A LOOP ─────────────────────────────────
+ *
+ * `filingStateFor` is one query per load. The money screen summarises every
+ * authority's filing position — filed-unpaid, ready, not-ready and why — and
+ * calling it per load is N+1 inside a five-second transaction budget, on a page
+ * somebody opens every Tuesday morning. Per COMPANY was not enough either: a
+ * loop over five authorities cost 4.7 seconds of the 16.2 that page's first
+ * version took.
+ *
+ * THE DEFINITION IS NOT DUPLICATED, WHICH IS THE POINT. Readiness still comes
+ * from `packetReadiness` and from nothing else; only the READ is batched. A
+ * screen that counted documents itself would be a second definition of ready,
+ * and the two would disagree the first time a fifth required piece was added.
+ *
+ * DIRECT-SETTLED FREIGHT IS EXCLUDED AT THE QUERY. Amazon loads are never
+ * invoiced and never factored, so counting them as "not ready" would report a
+ * problem that cannot be fixed.
+ */
+export async function filingStatesForCompanies(
+  tx: TxClient,
+  companyIds: readonly string[],
+): Promise<Map<string, FilingState[]>> {
+  const byCompany = new Map<string, FilingState[]>()
+  for (const companyId of companyIds) byCompany.set(companyId, [])
+  if (companyIds.length === 0) return byCompany
+
+  const loads = await tx.load.findMany({
+    where: {
+      companyId: { in: [...companyIds] },
+      deletedAt: null,
+      isCancelled: false,
+      customer: { settlesDirectly: false },
+      ...NOT_CLOSED_HISTORY,
+    },
+    select: {
+      id: true,
+      companyId: true,
+      billingStatus: true,
+      // A PROXY, AND NAMED AS ONE. Filing a packet writes `billingStatus` and
+      // records NO timestamp of its own, so "the oldest unpaid filing" can only
+      // be asked of the row's last change. It is right the day a load is filed
+      // and drifts every time anything else touches the row. Reported as a gap
+      // rather than papered over: a `filedAt` column would answer it properly.
+      updatedAt: true,
+      documents: {
+        where: { deletedAt: null },
+        select: { id: true, type: true, filename: true, mimeType: true },
+      },
+      invoiceLines: {
+        where: { invoice: { deletedAt: null, status: { not: 'VOID' } } },
+        select: { id: true },
+        take: 1,
+      },
+    },
+  })
+
+  for (const load of loads) {
+    const readiness = packetReadiness({
+      documents: load.documents,
+      hasInvoice: load.invoiceLines.length > 0,
+    })
+    const filed = load.billingStatus === 'FILED_WITH_FACTOR'
+    byCompany.get(load.companyId)?.push({
+      loadId: load.id,
+      lastChangedAt: load.updatedAt,
+      billingStatus: load.billingStatus,
+      readiness,
+      notFactored: null,
+      canFile: readiness.ready && !filed,
+      canMarkPaid: filed,
+    })
+  }
+
+  return byCompany
 }
 
 // ---------------------------------------------------------------------------

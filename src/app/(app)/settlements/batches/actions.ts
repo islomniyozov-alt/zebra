@@ -7,6 +7,7 @@ import { getLocaleContext } from '@/lib/locale'
 import {
   finaliseBatch,
   markBatchPaid,
+  openBatch,
   refreshDraft,
   SETTLEMENT_BATCH_TIMEOUT_MS,
   type BatchRefusal,
@@ -70,28 +71,28 @@ export async function createBatchAction(
     return { error: t('batch.error.notAWeek'), blocked: [] }
   }
 
+  // THE SAME `openBatch` THE MONEY SCREEN CALLS. Two entry points, one create
+  // — a second would be a second place for the period to be got wrong.
   const created = await withCurrentOrg(
     'create',
     'settlement',
-    async (tx, session) => {
-      const batch = await tx.settlementBatch.create({
-        data: {
-          organizationId: session.organizationId,
-          companyId,
-          periodStart: period.start,
-          periodEnd: period.end,
-          statementDate: new Date(`${statementDate}T00:00:00.000Z`),
-          checkDate: new Date(`${checkDate}T00:00:00.000Z`),
-        },
-        select: { id: true },
-      })
-      await refreshDraft(tx, batch.id)
-      return batch.id
-    },
+    (tx, session) =>
+      openBatch(tx, {
+        organizationId: session.organizationId,
+        companyId,
+        period,
+        statementDate: new Date(`${statementDate}T00:00:00.000Z`),
+        checkDate: new Date(`${checkDate}T00:00:00.000Z`),
+      }),
+    { timeoutMs: SETTLEMENT_BATCH_TIMEOUT_MS },
   )
 
+  if (!created.ok) {
+    return { error: t(REFUSAL[created.reason.kind]), blocked: [] }
+  }
+
   revalidatePath('/settlements/batches')
-  redirect(`/settlements/batches/${created}`)
+  redirect(`/settlements/batches/${created.batchId}`)
 }
 
 export async function refreshBatchAction(

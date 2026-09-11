@@ -97,6 +97,53 @@ export function isSettlementWeek(week: Week): boolean {
   return week.end.getTime() - week.start.getTime() === 6 * DAY
 }
 
+/**
+ * The period that is paid on the coming Friday — "this week" on the money screen.
+ *
+ * ── IT IS NOT THE WEEK THAT JUST CLOSED ──────────────────────────────────
+ *
+ * The company pays TWO WEEKS BEHIND, uniformly (Islom, 2026-09-11; MONEY-DESIGN
+ * §0). A period ending Saturday is paid the Friday thirteen days later — Aug
+ * 23-29 was paid 9/11, Aug 30-Sep 5 pays 9/18. So the period due this Friday is
+ * the one that ended TWO Saturdays ago, and a screen defaulting to the most
+ * recent closed week would offer to settle freight a fortnight before anybody
+ * is paid for it.
+ *
+ * ── THE ARITHMETIC, AND WHY IT IS TWO STEPS ──────────────────────────────
+ *
+ * Take the latest Saturday on or before today, then go back one more week. On
+ * a Saturday that first step lands on TODAY, which is correct: the week ending
+ * today has not been paid and is not the one due. Worked through:
+ *
+ *   today Tue 9/15  ->  latest Sat 9/12  ->  period ends 9/5  ->  pays Fri 9/18
+ *   today Sun 9/13  ->  latest Sat 9/12  ->  period ends 9/5  ->  pays Fri 9/18
+ *   today Sat 9/12  ->  latest Sat 9/12  ->  period ends 9/5  ->  pays Fri 9/18
+ *   today Fri 9/11  ->  latest Sat  9/5  ->  period ends 8/29 ->  pays Fri 9/11
+ *
+ * The last row is the artefact's own: Aug 23-29 paid 9/11. On the Friday itself
+ * the screen shows the period being paid that day, which is what somebody
+ * standing at the bank wants to see.
+ *
+ * `payDay` IS ALWAYS A FRIDAY because the period always ends on a Saturday and
+ * a Saturday plus thirteen days is a Friday. It is computed here and OFFERED as
+ * the batch's check-date default; §0 requires the date to be typed, and a
+ * default somebody can overwrite is not a derivation.
+ */
+export function payWeekFor(today: Date): { period: Week; payDay: Date } {
+  const midnight = Date.UTC(
+    today.getUTCFullYear(),
+    today.getUTCMonth(),
+    today.getUTCDate(),
+  )
+  const sinceSaturday = (new Date(midnight).getUTCDay() + 1) % 7
+  const latestSaturday = midnight - sinceSaturday * DAY
+  const end = new Date(latestSaturday - 7 * DAY)
+  return {
+    period: { start: new Date(end.getTime() - 6 * DAY), end },
+    payDay: new Date(end.getTime() + 13 * DAY),
+  }
+}
+
 // ── which gross a load settles on (§3) ────────────────────────────────────
 
 /**

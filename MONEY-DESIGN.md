@@ -274,7 +274,13 @@ Factoring money stays out of the software — funded amounts, fees, reserves and
 
 ## 8. Screens
 
-- **Money → This week** — the only screen anyone opens on Tuesday. Three columns: Amazon (expected / remitted / short), Werner (ready to file / filed / paid), Settlements (draft / final / paid). Every number links to its rows.
+- **Money → This week** — the only screen anyone opens on Tuesday. **Built 2026-09-11.** Per company, in order: the batch state for the period and the ONE action it allows; whether the Amazon remittance is in; held lines by name with remitted against booked; blocked drivers by name; the ready count that becomes the batch; the factoring position; the last four batches.
+
+  **It reads. It decides nothing.** Every figure comes from a definition that already exists — `SETTLEABLE_LOAD`, `computeBatch`, `packetReadiness` — so the screen cannot say "ready: 12" about a batch that would produce eleven.
+
+  **The period is the one paid this Friday**, which is the period that ended TWO Saturdays ago (§0). `payWeekFor` computes it from today and is pinned on a Tuesday, a Sunday, a Saturday and every day of a year. A screen defaulting to the week that just closed would offer to settle freight a fortnight before anybody is paid for it.
+
+  **Cost, measured rather than assumed.** The first version looped over companies and took **16.2 seconds** against 14,464 loads — five times over a 5s transaction budget, because each of six sections ran its queries once per authority. Rewritten to one org-scoped query per section: **13 queries, ~4.0s** from a development machine ~200ms from us-east-2, of which ~1.9s is the connection and the transaction open. A Worker sits far closer to Neon, so that figure is an upper bound; the query count is the number that transfers. `tests/this-week-timing.test.ts` prints both, in the `node` project — the integration project reads empty per-worker clones and would have measured nothing.
 - **Money → Remittances** — importer plus history.
 - **Money → Settlements** — batches by week and company, drilling to a driver's statement.
 - **Driver screen** — pay rule history, recurring deductions, escrow balance, statement history.

@@ -525,6 +525,10 @@ export const NAVIGATION: readonly NavGroup[] = [
     key: 'money',
     labelKey: 'nav.group.money',
     items: [
+      // MONEY → THIS WEEK (item 6) — FIRST IN THE GROUP, because it is the one
+      // screen anybody opens on a Tuesday and every other entry here is
+      // something it links to.
+      item('thisWeek', '/money/this-week', 'settlement'),
       item('invoices', '/invoices', 'invoice'),
       item('receivables', '/receivables', 'receivable'),
       item('payments', '/payments', 'payment'),
