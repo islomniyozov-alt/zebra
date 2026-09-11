@@ -150,6 +150,13 @@ const INSPECTION_READERS = [
   // because excluding the remittance for a load that has half a figure on it
   // is worse than either whole answer. Counts the four separately.
   'inspect-amazon-money.mjs',
+  // ADDED 2026-09-11, read-only. MONEY-DESIGN item 3 rebuilds `Settlement`
+  // into a batch, and `Settlement`/`SettlementLine` already exist from Phase 3
+  // with a screen and a PDF route behind them. Whether those tables hold rows
+  // somebody was PAID from decides what the migration is allowed to do, and
+  // reasoning about it from the code is how a schema change becomes a money
+  // incident. SELECT only.
+  'inspect-settlement-rows.mjs',
 ]
 
 /**
