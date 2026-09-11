@@ -3,7 +3,11 @@ import { withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { formatCents } from '@/lib/money'
 import { payWeekFor } from '@/lib/settlement-week'
-import { thisWeekFor, type CompanyWeek } from '@/lib/this-week'
+import {
+  thisWeekFor,
+  type CompanyWeek,
+  type NothingReadyReason,
+} from '@/lib/this-week'
 import { SETTLEMENT_BATCH_TIMEOUT_MS } from '@/lib/settlement-batch'
 import { WeekAction } from './WeekAction'
 import type { MessageKey } from '@/lib/i18n'
@@ -19,6 +23,14 @@ import type { MessageKey } from '@/lib/i18n'
 // section, applied to a screen.
 
 const day = (value: Date) => value.toISOString().slice(0, 10)
+
+/** One sentence per reason. Named, so a fifth reason fails to compile here. */
+const NOTHING_READY: Record<NothingReadyReason, MessageKey> = {
+  closed_history: 'money.nothing.closedHistory',
+  blocked: 'money.nothing.blocked',
+  held: 'money.nothing.held',
+  no_freight: 'money.nothing.noFreight',
+}
 
 export default async function ThisWeekPage() {
   const { t, locale } = await getLocaleContext()
@@ -136,18 +148,33 @@ function CompanySection({
         </p>
       ) : null}
 
-      {/* READY — the number that becomes the batch. */}
-      <p className="mt-z3 text-sm text-ink">
-        <span className="font-medium">{t('money.ready')}</span>{' '}
-        <span className="font-mono">{company.ready.loads}</span>{' '}
-        {t('money.loadsAcross')}{' '}
-        <span className="font-mono">{company.ready.drivers}</span>{' '}
-        {t('money.drivers')}
-        {' · '}
-        <span className="font-mono">
-          {formatCents(company.ready.grossCents, locale)}
-        </span>
-      </p>
+      {/* READY — the number that becomes the batch, or WHY THERE IS NONE.
+       *
+       * Never "$0.00". A zero is a measurement and an absence is not one, and
+       * the four reasons lead four different places: a blocked driver is
+       * somebody's afternoon, a held line is a phone call, closed history is
+       * nothing at all. During the cutover the last is the commonest answer —
+       * 62 of 62 Dolphins deliveries in the week of Aug 30 settled in
+       * Datatruck — and reading "$0.00" for that is how somebody concludes
+       * the software is broken. */}
+      {company.nothingReady === null ? (
+        <p className="mt-z3 text-sm text-ink">
+          <span className="font-medium">{t('money.ready')}</span>{' '}
+          <span className="font-mono">{company.ready.loads}</span>{' '}
+          {t('money.loadsAcross')}{' '}
+          <span className="font-mono">{company.ready.drivers}</span>{' '}
+          {t('money.drivers')}
+          {' · '}
+          <span className="font-mono">
+            {formatCents(company.ready.grossCents, locale)}
+          </span>
+        </p>
+      ) : (
+        <p className="mt-z3 text-sm text-ink-3">
+          <span className="font-medium text-ink-2">{t('money.ready')}</span>{' '}
+          {t(NOTHING_READY[company.nothingReady])}
+        </p>
+      )}
 
       {/* BLOCKED DRIVERS, BY NAME, ABOVE THE HELD LINES — a held line is a load
        * left out of a correct statement; a blocked driver is a person who gets

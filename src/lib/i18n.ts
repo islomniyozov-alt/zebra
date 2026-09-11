@@ -1843,6 +1843,14 @@ const en = {
   'money.remittanceMissingHint':
     'Broker freight and standing deductions still settle; the Amazon lines will hold.',
   'money.ready': 'Ready:',
+  'money.nothing.closedHistory':
+    'nothing — all freight in this period settled in Datatruck.',
+  'money.nothing.blocked':
+    'nothing yet — the drivers below need a pay rule before anything can settle.',
+  'money.nothing.held':
+    'nothing yet — every load in this period is held, below.',
+  'money.nothing.noFreight':
+    'nothing — no freight was delivered in this period.',
   'money.loadsAcross': 'loads across',
   'money.drivers': 'drivers',
   'money.werner': 'Factoring:',
@@ -3778,6 +3786,11 @@ const ru: Dictionary = {
   'money.remittanceMissingHint':
     'Брокерские грузы и постоянные удержания всё равно рассчитываются; строки Amazon будут отложены.',
   'money.ready': 'Готово:',
+  'money.nothing.closedHistory':
+    'ничего — все грузы за этот период рассчитаны в Datatruck.',
+  'money.nothing.blocked': 'пока ничего — водителям ниже нужно правило оплаты.',
+  'money.nothing.held': 'пока ничего — все грузы за период отложены, см. ниже.',
+  'money.nothing.noFreight': 'ничего — за этот период грузов не было.',
   'money.loadsAcross': 'грузов у',
   'money.drivers': 'водителей',
   'money.werner': 'Факторинг:',
@@ -5689,6 +5702,12 @@ const fa: Dictionary = {
   'money.remittanceMissingHint':
     'بار بروکری و کسورات ثابت همچنان تسویه می‌شوند؛ ردیف‌های آمازون نگه داشته می‌شوند.',
   'money.ready': 'آماده:',
+  'money.nothing.closedHistory':
+    'هیچ — همهٔ بارهای این دوره در Datatruck تسویه شده‌اند.',
+  'money.nothing.blocked':
+    'هنوز هیچ — رانندگان زیر باید قاعدهٔ پرداخت داشته باشند.',
+  'money.nothing.held': 'هنوز هیچ — همهٔ بارهای این دوره نگه داشته شده‌اند.',
+  'money.nothing.noFreight': 'هیچ — در این دوره باری تحویل نشده است.',
   'money.loadsAcross': 'بار برای',
   'money.drivers': 'راننده',
   'money.werner': 'فاکتورینگ:',

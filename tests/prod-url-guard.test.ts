@@ -157,6 +157,13 @@ const INSPECTION_READERS = [
   // reasoning about it from the code is how a schema change becomes a money
   // incident. SELECT only.
   'inspect-settlement-rows.mjs',
+  // ADDED 2026-09-11, read-only. Three readings off the money screen —
+  // 17 not-ready on a retired authority, a no-remittance warning on the wrong
+  // carrier, a ready count of zero — are each claims about what that page's
+  // queries RETURN. Asking the rows the same questions in SQL is how the
+  // answer and the screen get compared, instead of one being used to explain
+  // the other. SELECT only.
+  'inspect-money-screen.mjs',
 ]
 
 /**

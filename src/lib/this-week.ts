@@ -1,4 +1,5 @@
 import type { Prisma } from '@/generated/prisma/client'
+import { NOT_CLOSED_HISTORY } from './billing-status'
 import { batchInputForCompanies } from './settlement-batch'
 import { computeBatch, type Week } from './settlement-week'
 import { filingStatesForCompanies } from './factoring-filing'
@@ -95,6 +96,23 @@ export interface RecentBatch {
   statements: number
 }
 
+/**
+ * Why the ready set is empty, when it is. Null when it is not empty.
+ *
+ * A ZERO IS A MEASUREMENT AND AN ABSENCE IS NOT ONE. "$0.00" tells somebody
+ * that nothing settles and leaves them to find out why; these say which of the
+ * four reasons it is, all of which lead somewhere different.
+ */
+export type NothingReadyReason =
+  /** Every delivery in the period was settled in Datatruck before the cutover. */
+  | 'closed_history'
+  /** Freight is here, but no driver can be paid for it until a rule exists. */
+  | 'blocked'
+  /** Freight is here and every line of it is waiting on a confirmation. */
+  | 'held'
+  /** Nothing was delivered in this period at all. */
+  | 'no_freight'
+
 export interface CompanyWeek {
   companyId: string
   companyName: string
@@ -105,6 +123,8 @@ export interface CompanyWeek {
   heldSumCents: number
   blocked: BlockedDriver[]
   ready: { loads: number; drivers: number; grossCents: number }
+  /** Set only when `ready.loads` is zero. Never a reason for a non-empty set. */
+  nothingReady: NothingReadyReason | null
   /** Null for a company whose freight is entirely direct-settled. */
   werner: WernerState | null
   recent: RecentBatch[]
@@ -232,12 +252,55 @@ export async function thisWeekFor(
         companyId: { in: companyIds },
         deletedAt: null,
         customer: { settlesDirectly: true },
+        // CLOSED HISTORY DOES NOT COUNT AS HAVING AMAZON FREIGHT.
+        //
+        // Without this, a retired authority gets a remittance row and a
+        // no-remittance warning forever. Production on 2026-09-11: Midwest
+        // Global carries 2,108 direct-settled loads and ZERO that are not
+        // closed history; American Soldier, 424 and zero. Both would have been
+        // warned every Tuesday about a file that is never coming, for freight
+        // that was settled in Datatruck before Zebra existed.
+        //
+        // A warning nobody can clear is worse than no warning: it teaches the
+        // person reading this screen that the yellow box means nothing.
+        ...NOT_CLOSED_HISTORY,
       },
       _count: { _all: true },
     }),
   )
   const directOf = new Map(
     directMix.map((row) => [row.companyId, row._count._all]),
+  )
+
+  // ── §3b why the ready set is empty, when it is ─────────────────────────
+  //
+  // "$0.00" is a measurement and an absence is not one. A week with no
+  // settleable freight has a REASON, and the commonest by far on this data is
+  // that everything in the period was settled in Datatruck before the cutover
+  // — 62 of 62 Dolphins deliveries in the week of Aug 30 are closed history.
+  //
+  // ONE MORE QUERY, DELIBERATELY. It takes the page from 13 round trips to 14,
+  // and buys a sentence somebody can act on instead of a zero they have to
+  // investigate.
+  const closedInPeriod = await timed('closed', () =>
+    tx.load.groupBy({
+      by: ['companyId'],
+      where: {
+        companyId: { in: companyIds },
+        deletedAt: null,
+        billingStatus: 'CLOSED_IN_DATATRUCK',
+        stops: {
+          some: {
+            type: 'DELIVERY',
+            scheduledAt: { gte: input.period.start, lte: periodEndOfDay },
+          },
+        },
+      },
+      _count: { _all: true },
+    }),
+  )
+  const closedOf = new Map(
+    closedInPeriod.map((row) => [row.companyId, row._count._all]),
   )
 
   // ── §4 the remittance for this period ──────────────────────────────────
@@ -387,6 +450,13 @@ export async function thisWeekFor(
     const settling = (result?.settlements ?? []).filter(
       (settlement) => settlement.lines.length > 0,
     )
+    const readyLoads = settling.reduce(
+      (sum, settlement) => sum + settlement.lines.length,
+      0,
+    )
+    const blockedHere = (result?.blockers ?? []).filter(
+      (row) => row.blocker.kind === 'no_pay_rule',
+    )
 
     const direct = directOf.get(company.id) ?? 0
     const payment = paymentOf.get(company.id)
@@ -428,20 +498,31 @@ export async function thisWeekFor(
             },
       held,
       heldSumCents: held.reduce((sum, row) => sum + row.bookedCents, 0),
-      blocked: (result?.blockers ?? [])
-        .filter((row) => row.blocker.kind === 'no_pay_rule')
-        .map((row) => ({ driverId: row.driverId, driverName: row.driverName })),
+      blocked: blockedHere.map((row) => ({
+        driverId: row.driverId,
+        driverName: row.driverName,
+      })),
       ready: {
-        loads: settling.reduce(
-          (sum, settlement) => sum + settlement.lines.length,
-          0,
-        ),
+        loads: readyLoads,
         drivers: settling.length,
         grossCents: settling.reduce(
           (sum, settlement) => sum + settlement.grossCents,
           0,
         ),
       },
+      // ORDERED BY WHAT A PERSON WOULD DO ABOUT IT. A blocked driver is
+      // somebody's afternoon; a held line is a phone call; closed history is
+      // nothing at all, and is the commonest answer during the cutover.
+      nothingReady:
+        readyLoads > 0
+          ? null
+          : blockedHere.length > 0
+            ? 'blocked'
+            : held.length > 0
+              ? 'held'
+              : (closedOf.get(company.id) ?? 0) > 0
+                ? 'closed_history'
+                : 'no_freight',
       // NO FACTORING SECTION where the company has no broker freight at all.
       // `states` IS that freight — the filing read selects exactly the loads
       // that are not direct-settled — so an empty list is the answer, and no

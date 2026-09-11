@@ -643,6 +643,105 @@ describe('when the remittance is removed', () => {
   }, 300_000)
 })
 
+describe('a retired authority whose freight is all closed history', () => {
+  // BOTH FINDINGS OF 2026-09-11, ON ONE COMPANY. Production carries two such
+  // authorities: Midwest Global with 2,108 direct-settled loads and ZERO that
+  // are not closed history, and American Soldier with 424 and zero. Before
+  // this, each got a remittance row and a no-remittance warning every Tuesday
+  // for a file that is never coming — and a warning nobody can clear teaches
+  // the person reading this screen that the yellow box means nothing.
+  it('gets no remittance section, and says why nothing is ready', async () => {
+    const retired = await owner.company.create({
+      data: { organizationId, name: `Z Retired ${nonce}` },
+    })
+    const driver = await owner.driver.create({
+      data: {
+        organizationId,
+        companyId: retired.id,
+        firstName: 'RETIRED',
+        lastName: `DRIVER ${nonce}`,
+      },
+    })
+    await owner.driverPayRule.create({
+      data: {
+        organizationId,
+        driverId: driver.id,
+        type: 'PERCENT_GROSS',
+        percentBps: 3000,
+        effectiveFrom: new Date(Date.UTC(2026, 0, 1)),
+      },
+    })
+
+    // Amazon freight, delivered in the period, ALL of it closed in Datatruck.
+    for (let n = 0; n < 2; n++) {
+      const load = await seedLoad({
+        companyId: retired.id,
+        customerId: relayId,
+        driverId: driver.id,
+        rateCents: 80_000,
+        deliveredOn: new Date(PERIOD.start.getTime() + n * 86_400_000),
+      })
+      await owner.load.update({
+        where: { id: load.id },
+        data: { billingStatus: 'CLOSED_IN_DATATRUCK' },
+      })
+    }
+
+    const company = companyIn(await readWeek(), retired.id)
+
+    // NO REMITTANCE ROW AT ALL — not "no remittance found", which would be a
+    // warning about a file nobody is waiting for.
+    expect(company.remittance).toBeNull()
+
+    // AND THE READY SET SAYS WHY, rather than $0.00.
+    expect(company.ready.loads).toBe(0)
+    expect(company.nothingReady).toBe('closed_history')
+
+    await owner.load.deleteMany({ where: { companyId: retired.id } })
+    await owner.driver.delete({ where: { id: driver.id } })
+    await owner.company.delete({ where: { id: retired.id } })
+  }, 300_000)
+
+  // THE FACTORING COUNTS ALREADY EXCLUDED CLOSED HISTORY, and this holds them
+  // to it: the reading that prompted all this was 17 not-ready on a retired
+  // authority, and those seventeen turned out to be UNINVOICED rather than
+  // closed. The filter was doing its job; the data was the surprise.
+  it('never counts a closed-history load as not-ready to file', async () => {
+    const retired = await owner.company.create({
+      data: { organizationId, name: `Z Broker ${nonce}` },
+    })
+    const closed = await seedLoad({
+      companyId: retired.id,
+      customerId: brokerId,
+      driverId: null,
+      rateCents: 70_000,
+      deliveredOn: new Date(PERIOD.start.getTime() + 86_400_000),
+    })
+    await owner.load.update({
+      where: { id: closed.id },
+      data: { billingStatus: 'CLOSED_IN_DATATRUCK' },
+    })
+
+    const company = companyIn(await readWeek(), retired.id)
+    expect(company.werner).toBeNull()
+
+    // Give it ONE live broker load and the section appears, counting only that.
+    const live = await seedLoad({
+      companyId: retired.id,
+      customerId: brokerId,
+      driverId: null,
+      rateCents: 60_000,
+      deliveredOn: new Date(PERIOD.start.getTime() + 86_400_000),
+    })
+    const withLive = companyIn(await readWeek(), retired.id)
+    expect(withLive.werner!.notReady).toBe(1)
+    expect(withLive.werner!.filedUnpaid).toBe(0)
+
+    await owner.load.deleteMany({ where: { id: { in: [closed.id, live.id] } } })
+    await owner.company.delete({ where: { id: retired.id } })
+  }, 300_000)
+})
+
 describe('the page never renders a PDF', () => {
   // `filingStatesForCompany` is the light read: rows and `packetReadiness`.
   // A summary that rendered a packet per load to find out whether it was ready
