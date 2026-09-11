@@ -13,6 +13,8 @@ import {
   withDatabase,
   workerCount,
   workerDatabase,
+  terminateSessionsOn,
+  describeSession,
 } from './worker-db'
 
 // ---------------------------------------------------------------------------
@@ -291,6 +293,35 @@ async function buildWorkerDatabases(adminUrl: string): Promise<void> {
       )
     }
 
+    // ── CLEAR THE TEMPLATE BEFORE CLONING, NOT MERELY WAIT FOR IT ───────
+    //
+    // `awaitTemplateIdle` below terminates sessions carrying OUR
+    // application_name and waits for everything else, which was the right
+    // trade while 55006 was rare. It stopped being rare: on 2026-09-11 it
+    // refused three deploys in one day, and each time the gate never reached a
+    // test — so nothing was proven about the suite either way — and each time a
+    // retry minutes later passed.
+    //
+    // ANYTHING NOT OURS IS NAMED IN THE LOG. That is the whole of the trade: a
+    // session we cannot prove is ours now gets terminated, and the line saying
+    // whose it was is in the output of the run that did it. A silent kill would
+    // be worse than the wait it replaces.
+    const cleared = await terminateSessionsOn(admin, TEMPLATE_DB)
+    const foreign = cleared.filter(
+      (session) => session.application_name !== TEMPLATE_APPLICATION_NAME,
+    )
+    if (cleared.length > 0) {
+      console.log(
+        `[integration] cleared ${cleared.length} session(s) off ${TEMPLATE_DB}` +
+          ` before cloning (${cleared.length - foreign.length} ours)`,
+      )
+    }
+    for (const session of foreign) {
+      console.warn(
+        `[integration] terminated a session on ${TEMPLATE_DB} that was NOT ours: ${describeSession(session)}`,
+      )
+    }
+
     // NOTHING MAY BE CONNECTED TO THE SOURCE, and something always is.
     //
     // `CREATE DATABASE ... TEMPLATE` fails with 55006 — "There is 1 other
@@ -350,6 +381,17 @@ async function buildWorkerDatabases(adminUrl: string): Promise<void> {
         } catch (error) {
           lastError = error
           if ((error as { code?: string }).code !== '55006') throw error
+          // AND CLEAR IT AGAIN ON THE WAY ROUND. A session that arrived after
+          // the sweep above — a worker reconnecting, a migrate child winding
+          // down — is exactly what this retry exists for, and waiting for it
+          // is what took three deploys.
+          for (const session of await terminateSessionsOn(admin, TEMPLATE_DB)) {
+            if (session.application_name !== TEMPLATE_APPLICATION_NAME) {
+              console.warn(
+                `[integration] terminated a late session on ${TEMPLATE_DB} that was NOT ours: ${describeSession(session)}`,
+              )
+            }
+          }
           // THE SAME WAIT, not another blind sleep. A copy that loses this
           // race loses it to a session, and the way to stop losing it is to
           // watch that session leave.

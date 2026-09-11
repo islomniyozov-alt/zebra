@@ -134,3 +134,76 @@ export function workerCount(): number {
   const raw = Number(process.env.ZEBRA_TEST_WORKERS ?? '8')
   return Number.isInteger(raw) && raw > 0 ? raw : 8
 }
+
+/** One backend connected to a database, as `pg_stat_activity` describes it. */
+export interface TemplateSession {
+  pid: number
+  application_name: string
+  usename: string | null
+  client_addr: string | null
+  backend_start: string | null
+}
+
+/** How `terminateSessionsOn` names a session it killed, for the log. */
+export function describeSession(session: TemplateSession): string {
+  return (
+    `pid ${session.pid} (application_name ${session.application_name || '(none)'}, ` +
+    `user ${session.usename ?? '?'}, from ${session.client_addr ?? 'local'}, ` +
+    `since ${session.backend_start ?? '?'})`
+  )
+}
+
+/**
+ * Clear every session off a database so it can be used as a CREATE template.
+ *
+ * ── WHY THIS EXISTS, AND WHAT IT CHANGES ─────────────────────────────────
+ *
+ * `CREATE DATABASE ... TEMPLATE` fails with 55006 — "source database is being
+ * accessed by other users" — if ONE connection remains. `awaitTemplateIdle`
+ * already terminated sessions carrying our own `application_name` and WAITED,
+ * by design, for anything else: the reasoning was that another runner's session
+ * is not ours to take.
+ *
+ * That reasoning held while the failures were rare. On 2026-09-11 the same
+ * 55006 refused three deploys in one day — each time the gate never reached a
+ * test, so nothing was proven about the suite either way, and each time a
+ * retry minutes later passed. A wait that loses this often is not protecting
+ * another run; it is costing this one.
+ *
+ * ── SO IT TERMINATES, AND SAYS WHAT IT TERMINATED ────────────────────────
+ *
+ * Every session on the template, ours or not, and the ones that were NOT ours
+ * are named in the log with their application_name, user and address. That is
+ * the trade this makes: if it ever kills a colleague's run, the line saying so
+ * is in the output of the run that did it. A silent kill would be worse than
+ * the wait it replaces.
+ *
+ * THE TEMPLATE IS NOT PRECIOUS. It is rebuilt from migrations whenever it is
+ * stale and is read by nothing but this suite — which is exactly why it can be
+ * cleared, and why the same treatment would be wrong on any other database.
+ * The `database` parameter is here so a test can prove this against a scratch
+ * one rather than against the template the test itself is running from.
+ */
+export async function terminateSessionsOn(
+  admin: { query: (text: string, values?: unknown[]) => Promise<unknown> },
+  database: string,
+): Promise<TemplateSession[]> {
+  const before = (await admin.query(
+    `select pid, application_name, usename::text as usename,
+            client_addr::text as client_addr,
+            backend_start::text as backend_start
+       from pg_stat_activity
+      where datname = $1 and pid <> pg_backend_pid()`,
+    [database],
+  )) as { rows: TemplateSession[] }
+
+  if (before.rows.length === 0) return []
+
+  await admin.query(
+    `select pg_terminate_backend(pid) from pg_stat_activity
+      where datname = $1 and pid <> pg_backend_pid()`,
+    [database],
+  )
+
+  return before.rows
+}
