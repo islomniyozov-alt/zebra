@@ -434,7 +434,6 @@ export async function seedOrganization(
     await db.settlementBatch.create({
       data: {
         organizationId,
-        companyId,
         periodStart: new Date('2026-07-01'),
         periodEnd: new Date('2026-07-07'),
         statementDate: new Date('2026-07-08'),
@@ -465,6 +464,8 @@ export async function seedOrganization(
         organizationId,
         loadId: load.id,
         loadNumber: `L-${tag}`,
+        companyId,
+        companyName: `Co ${tag}`,
         puPlace: 'Whiteland,IN',
         delPlace: 'Gastonia,NC',
         puDate: new Date('2026-07-02'),

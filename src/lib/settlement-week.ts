@@ -173,6 +173,9 @@ export interface SettleableLoad {
   id: string
   /** As printed in the Load number column. */
   loadNumber: string
+  /** Which authority's freight this is. One statement can now carry several. */
+  companyId: string
+  companyName: string
   /** "PONTIAC,MI" — printed exactly as stored. */
   puPlace: string
   delPlace: string
@@ -254,6 +257,8 @@ export function grossFor(load: SettleableLoad): GrossDecision {
 export interface LoadLine {
   loadId: string
   loadNumber: string
+  companyId: string
+  companyName: string
   puPlace: string
   delPlace: string
   puDate: Date
@@ -272,6 +277,10 @@ export interface LoadLine {
 export interface HeldLine {
   loadId: string
   loadNumber: string
+  /** Whose freight it is. One batch now spans authorities, so a held list
+   * without this would name a load and not say whose week it holds up. */
+  companyId: string
+  companyName: string
   rateCents: number
   reason: HeldReason
 }
@@ -287,6 +296,15 @@ export interface DriverSettlementInput {
   driverName: string
   /** Frozen onto the settlement at FINAL — see the header on `unitNumber`. */
   unitNumber: string | null
+  /**
+   * THE LETTERHEAD: the authority that owns the truck above.
+   *
+   * By ruling, and resolved once at generation rather than read at render —
+   * the same argument as the unit number itself. A driver pulling two
+   * authorities' freight gets ONE statement, and it goes out under the
+   * authority whose truck he drove.
+   */
+  letterheadCompanyId: string
   period: Week
   loads: readonly SettleableLoad[]
   payRules: readonly PayRule[]
@@ -333,6 +351,7 @@ export interface DriverSettlement extends YtdTotals {
   driverId: string
   driverName: string
   unitNumber: string | null
+  letterheadCompanyId: string
   period: Week
   /** Batch check date plus the driver's lag. This is what prints. */
   payoutDate: Date
@@ -418,6 +437,8 @@ export function computeDriverSettlement(
       held.push({
         loadId: load.id,
         loadNumber: load.loadNumber,
+        companyId: load.companyId,
+        companyName: load.companyName,
         rateCents: load.rateCents,
         reason: decision.reason,
       })
@@ -466,6 +487,8 @@ export function computeDriverSettlement(
     lines.push({
       loadId: load.id,
       loadNumber: load.loadNumber,
+      companyId: load.companyId,
+      companyName: load.companyName,
       puPlace: load.puPlace,
       delPlace: load.delPlace,
       puDate: load.puDate,
@@ -558,6 +581,7 @@ export function computeDriverSettlement(
     driverId: input.driverId,
     driverName: input.driverName,
     unitNumber: input.unitNumber,
+    letterheadCompanyId: input.letterheadCompanyId,
     period: input.period,
     payoutDate: payoutDateFor(input.checkDate, input.payoutLagWeeks),
     payTariffLabel,
@@ -616,7 +640,11 @@ export function addYtd(
 // ── the batch ─────────────────────────────────────────────────────────────
 
 export interface BatchInput {
-  companyId: string
+  /**
+   * NO COMPANY. Settlement is org-wide by ruling (2026-09-11): the sister
+   * companies are one operation, so a batch covers the whole organization and
+   * a driver gets one statement whatever authority he pulled for.
+   */
   period: Week
   statementDate: Date
   checkDate: Date
@@ -626,7 +654,13 @@ export interface BatchInput {
 export interface BatchResult {
   settlements: DriverSettlement[]
   /** Every blocker across every driver, named. A batch with any cannot FINAL. */
-  blockers: { driverId: string; driverName: string; blocker: DriverBlocker }[]
+  blockers: {
+    driverId: string
+    driverName: string
+    /** Whose driver — one batch spans authorities now. */
+    companyId: string
+    blocker: DriverBlocker
+  }[]
   /** Every held line across every driver, named. */
   held: { driverId: string; driverName: string; line: HeldLine }[]
   /** Drivers whose net pay is below zero. Printed and flagged. */
@@ -643,6 +677,11 @@ export function computeBatch(input: BatchInput): BatchResult {
     settlement.blockers.map((blocker) => ({
       driverId: settlement.driverId,
       driverName: settlement.driverName,
+      // WHOSE DRIVER THIS IS. One batch spans authorities now, so a blocked
+      // list without a company names a person and leaves somebody to work out
+      // which office has to fix it. The letterhead company — the authority
+      // that owns his truck — is the same answer the statement would print.
+      companyId: settlement.letterheadCompanyId,
       blocker,
     })),
   )

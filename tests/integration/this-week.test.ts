@@ -3,7 +3,7 @@ import { retryingClient } from '../retrying-client'
 import { withOrg } from '@/lib/tenancy'
 import { createBroker } from '@/lib/brokers'
 import { createLoad } from '@/lib/loads'
-import { thisWeekFor, type CompanyWeek } from '@/lib/this-week'
+import { thisWeekFor, type ThisWeek } from '@/lib/this-week'
 import { openBatch, SETTLEMENT_BATCH_TIMEOUT_MS } from '@/lib/settlement-batch'
 import { payWeekFor, weekOf } from '@/lib/settlement-week'
 import type { PrismaClient } from '@/generated/prisma/client'
@@ -49,8 +49,20 @@ const { period: PERIOD, payDay: PAY_DAY } = payWeekFor(TUESDAY)
 const readWeek = () =>
   inOrg((tx) => thisWeekFor(tx, { period: PERIOD, payDay: PAY_DAY }))
 
-const companyIn = (week: { companies: CompanyWeek[] }, id: string) =>
-  week.companies.find((row) => row.companyId === id)!
+/**
+ * ONE PAGE NOW, so "the company's block" is a filter over the page's lists.
+ *
+ * Settlement is org-wide by ruling: there is one Ready total, one held list and
+ * one blocked list for the whole operation. What used to be a per-company
+ * section is a company COLUMN, so these tests narrow the way the screen's
+ * filter does rather than looking up a block that no longer exists.
+ */
+const forCompany = (week: ThisWeek, id: string) => ({
+  held: week.held.filter((row) => row.companyId === id),
+  blocked: week.blocked.filter((row) => row.companyId === id),
+  remittance: week.remittances.find((row) => row.companyId === id) ?? null,
+  werner: week.factoring.find((row) => row.companyId === id) ?? null,
+})
 
 async function seedLoad(input: {
   companyId: string
@@ -362,7 +374,7 @@ describe('the period the screen is about', () => {
 
 describe('the Amazon authority', () => {
   it('names the short line, with both figures, and not the matched one', async () => {
-    const company = companyIn(await readWeek(), amazonCompanyId)
+    const company = forCompany(await readWeek(), amazonCompanyId)
 
     expect(company.held).toHaveLength(1)
     const held = company.held[0]!
@@ -376,47 +388,64 @@ describe('the Amazon authority', () => {
   }, 300_000)
 
   it('names the blocked driver rather than skipping him', async () => {
-    const company = companyIn(await readWeek(), amazonCompanyId)
+    const company = forCompany(await readWeek(), amazonCompanyId)
     expect(company.blocked).toHaveLength(1)
     expect(company.blocked[0]!.driverId).toBe(blockedDriverId)
     expect(company.blocked[0]!.driverName).toContain('NORULE')
   }, 300_000)
 
   it('reports the remittance it found, by invoice number', async () => {
-    const company = companyIn(await readWeek(), amazonCompanyId)
+    const company = forCompany(await readWeek(), amazonCompanyId)
     expect(company.remittance?.found).toBe(true)
     expect(company.remittance?.invoiceNumber).toBe(`INV-${nonce}`)
     expect(company.remittance?.totalCents).toBe(275_000)
   }, 300_000)
 
-  // THE READY SET IS WHAT BECOMES THE BATCH. The matched Amazon load settles;
-  // the short one is held; the closed-history load is not freight at all.
-  it('counts only what would actually settle', async () => {
-    const company = companyIn(await readWeek(), amazonCompanyId)
-    expect(company.ready.loads).toBe(1)
-    expect(company.ready.grossCents).toBe(100_000)
+  // THE READY SET IS WHAT BECOMES THE BATCH, AND THE BATCH IS ORG-WIDE.
+  //
+  // Three loads settle across the whole operation: the matched Amazon load on
+  // this authority, and the broker authority's two. The short Amazon load is
+  // held, the blocked driver's freight cannot pay, and the closed-history load
+  // is not freight at all.
+  //
+  // THIS NUMBER USED TO BE 1, when Ready was a per-company figure. It is the
+  // ruling changing what the screen is counting rather than the count going
+  // wrong — so the assertion names every load it expects rather than trusting
+  // a total that would also be satisfied by the wrong three.
+  it('counts only what would actually settle, across the operation', async () => {
+    const week = await readWeek()
+    expect(week.ready.loads).toBe(3)
+    expect(week.ready.grossCents).toBe(100_000 + 148_806 + 120_000)
+
+    // And the Amazon side of it is exactly the matched load: the short one is
+    // held and names itself, which is what keeps this from being a bare sum.
+    const amazon = forCompany(week, amazonCompanyId)
+    expect(amazon.held).toHaveLength(1)
+    expect(amazon.held[0]!.loadId).toBe(shortLoadId)
   }, 300_000)
 
   // CLOSED HISTORY NEVER APPEARS — not in ready, not in held, not anywhere.
   it('never shows a load closed in Datatruck', async () => {
-    const company = companyIn(await readWeek(), amazonCompanyId)
-    expect(company.ready.grossCents).not.toBe(877_000)
-    expect(company.held.some((row) => row.bookedCents === 777_000)).toBe(false)
+    const week = await readWeek()
+    expect(week.ready.grossCents).not.toBe(877_000)
+    expect(week.held.some((row) => row.bookedCents === 777_000)).toBe(false)
   }, 300_000)
 
   // NO FACTORING SECTION on an authority whose freight settles directly...
   // except this one also carries the blocked driver's broker load, so the
   // section IS present. The pure case is asserted on a company below.
+  // ONE BATCH FOR THE ORGANIZATION, so this is a page-level fact now rather
+  // than a per-company one.
   it('offers Open batch, because no batch exists for the period yet', async () => {
-    const company = companyIn(await readWeek(), amazonCompanyId)
-    expect(company.batch.state).toBe('none')
-    expect(company.batch.action).toBe('open')
+    const week = await readWeek()
+    expect(week.batch.state).toBe('none')
+    expect(week.batch.action).toBe('open')
   }, 300_000)
 })
 
 describe('the broker authority', () => {
   it('reports filed-unpaid, ready and not-ready with the missing piece', async () => {
-    const company = companyIn(await readWeek(), wernerCompanyId)
+    const company = forCompany(await readWeek(), wernerCompanyId)
     expect(company.werner).not.toBeNull()
     expect(company.werner!.filedUnpaid).toBe(1)
     expect(company.werner!.oldestFiledAt).not.toBeNull()
@@ -428,7 +457,7 @@ describe('the broker authority', () => {
   // A BROKER AUTHORITY HAS NO REMITTANCE ROW AT ALL — not "no remittance
   // found", which would be a warning about a file that was never coming.
   it('has no Amazon remittance section', async () => {
-    const company = companyIn(await readWeek(), wernerCompanyId)
+    const company = forCompany(await readWeek(), wernerCompanyId)
     expect(company.remittance).toBeNull()
   }, 300_000)
 })
@@ -455,7 +484,7 @@ describe('the declared work period, and the fallback under it', () => {
     // NOT ONE APPLICATION ON IT. Under the old question this payment was
     // invisible — which is the gap the columns close: a remittance that paid
     // nothing in the period is still that period's remittance.
-    const company = companyIn(await readWeek(), amazonCompanyId)
+    const company = forCompany(await readWeek(), amazonCompanyId)
     expect(company.remittance?.found).toBe(true)
     expect(company.remittance?.invoiceNumber).toBe(`DECLARED-${nonce}`)
 
@@ -466,7 +495,7 @@ describe('the declared work period, and the fallback under it', () => {
   // every payment already in the database has no period, and dropping the old
   // question would have made this week's remittance vanish for all of them.
   it('still finds one with no declared period, through what it paid for', async () => {
-    const company = companyIn(await readWeek(), amazonCompanyId)
+    const company = forCompany(await readWeek(), amazonCompanyId)
     expect(company.remittance?.found).toBe(true)
     expect(company.remittance?.invoiceNumber).toBe(`INV-${nonce}`)
   }, 300_000)
@@ -486,7 +515,7 @@ describe('the declared work period, and the fallback under it', () => {
       },
     })
 
-    const company = companyIn(await readWeek(), amazonCompanyId)
+    const company = forCompany(await readWeek(), amazonCompanyId)
     expect(company.remittance?.invoiceNumber).not.toBe(`OTHERWEEK-${nonce}`)
 
     await owner.payment.delete({ where: { id: other.id } })
@@ -504,7 +533,7 @@ describe('when a packet was filed', () => {
       data: { filedAt: filedOn },
     })
 
-    const company = companyIn(await readWeek(), wernerCompanyId)
+    const company = forCompany(await readWeek(), wernerCompanyId)
     expect(company.werner!.oldestFiledAt?.toISOString()).toBe(
       filedOn.toISOString(),
     )
@@ -514,7 +543,7 @@ describe('when a packet was filed', () => {
       where: { id: filedLoadId },
       data: { internalNotes: `touched ${nonce}` },
     })
-    const again = companyIn(await readWeek(), wernerCompanyId)
+    const again = forCompany(await readWeek(), wernerCompanyId)
     expect(again.werner!.oldestFiledAt?.toISOString()).toBe(
       filedOn.toISOString(),
     )
@@ -528,7 +557,7 @@ describe('when a packet was filed', () => {
       where: { id: filedLoadId },
       data: { filedAt: null },
     })
-    const company = companyIn(await readWeek(), wernerCompanyId)
+    const company = forCompany(await readWeek(), wernerCompanyId)
     expect(company.werner!.filedUnpaid).toBe(1)
     expect(company.werner!.oldestFiledAt).toBeNull()
   }, 300_000)
@@ -566,7 +595,7 @@ describe('a company with only direct-settled freight', () => {
       deliveredOn: new Date(PERIOD.start.getTime() + 86_400_000),
     })
 
-    const company = companyIn(await readWeek(), pure.id)
+    const company = forCompany(await readWeek(), pure.id)
     expect(company.werner).toBeNull()
     expect(company.remittance).not.toBeNull()
 
@@ -581,7 +610,6 @@ describe('opening the batch from this screen', () => {
     const opened = await inOrg((tx) =>
       openBatch(tx, {
         organizationId,
-        companyId: wernerCompanyId,
         period: PERIOD,
         statementDate: TUESDAY,
         checkDate: PAY_DAY,
@@ -610,25 +638,35 @@ describe('opening the batch from this screen', () => {
     expect(batch.settlements.length).toBeGreaterThan(0)
 
     // AND THE SCREEN NOW OFFERS THE NEXT ACTION, not the same one again.
-    const company = companyIn(await readWeek(), wernerCompanyId)
-    expect(company.batch.state).toBe('DRAFT')
-    expect(company.batch.action).toBe('continue')
-    expect(company.batch.id).toBe(opened.batchId)
-    expect(company.recent[0]?.id).toBe(opened.batchId)
+    const week = await readWeek()
+    expect(week.batch.state).toBe('DRAFT')
+    expect(week.batch.action).toBe('continue')
+    expect(week.batch.id).toBe(opened.batchId)
+    expect(week.recent[0]?.id).toBe(opened.batchId)
   }, 300_000)
 })
 
 describe('when the remittance is removed', () => {
   it('warns, drops the ready count, and does not crash', async () => {
-    const before = companyIn(await readWeek(), amazonCompanyId)
-    expect(before.ready.loads).toBe(1)
+    // THE DRAFT FROM THE TEST ABOVE HOLDS EVERY SETTLEABLE LOAD, because a
+    // batch is org-wide now: opening one consumes the whole operation's
+    // freight, not one authority's. So it goes before this measures anything —
+    // otherwise "ready dropped" would be true of a week that was already zero.
+    //
+    // It caught the ruling rather than a defect: this test used to open its
+    // batch on the broker authority and leave the Amazon side untouched.
+    await owner.settlementBatch.deleteMany({ where: { organizationId } })
+
+    const before = await readWeek()
+    expect(before.ready.loads).toBe(3)
 
     await owner.paymentLoadApplication.deleteMany({
       where: { load: { companyId: amazonCompanyId } },
     })
     await owner.payment.deleteMany({ where: { companyId: amazonCompanyId } })
 
-    const after = companyIn(await readWeek(), amazonCompanyId)
+    const page = await readWeek()
+    const after = forCompany(page, amazonCompanyId)
     expect(after.remittance?.found).toBe(false)
     expect(after.remittance?.invoiceNumber).toBeNull()
 
@@ -636,10 +674,12 @@ describe('when the remittance is removed', () => {
     expect(after.held).toHaveLength(2)
     expect(after.held.every((row) => row.reason === 'no_remittance')).toBe(true)
 
-    // The ready set drops to nothing for this company: its only other freight
-    // belongs to the driver with no pay rule, who blocks rather than settles.
-    expect(after.ready.loads).toBe(0)
-    expect(after.blocked).toHaveLength(1)
+    // THE READY SET IS THE ORGANIZATION'S. Both Amazon loads now hold and the
+    // blocked driver's freight cannot pay, so what remains ready is the broker
+    // authority's two — which is the point of the ruling: pulling the Amazon
+    // file does not stop the rest of the operation settling.
+    expect(page.ready.loads).toBe(2)
+    expect(forCompany(page, amazonCompanyId).blocked).toHaveLength(1)
   }, 300_000)
 })
 
@@ -687,15 +727,17 @@ describe('a retired authority whose freight is all closed history', () => {
       })
     }
 
-    const company = companyIn(await readWeek(), retired.id)
+    const page = await readWeek()
+    const company = forCompany(page, retired.id)
 
     // NO REMITTANCE ROW AT ALL — not "no remittance found", which would be a
     // warning about a file nobody is waiting for.
     expect(company.remittance).toBeNull()
 
-    // AND THE READY SET SAYS WHY, rather than $0.00.
-    expect(company.ready.loads).toBe(0)
-    expect(company.nothingReady).toBe('closed_history')
+    // AND THIS AUTHORITY CONTRIBUTES NOTHING, which on a page-level Ready is
+    // asserted as the absence of its rows rather than as a zero of its own.
+    expect(company.held).toHaveLength(0)
+    expect(company.blocked).toHaveLength(0)
 
     await owner.load.deleteMany({ where: { companyId: retired.id } })
     await owner.driver.delete({ where: { id: driver.id } })
@@ -722,7 +764,7 @@ describe('a retired authority whose freight is all closed history', () => {
       data: { billingStatus: 'CLOSED_IN_DATATRUCK' },
     })
 
-    const company = companyIn(await readWeek(), retired.id)
+    const company = forCompany(await readWeek(), retired.id)
     expect(company.werner).toBeNull()
 
     // Give it ONE live broker load and the section appears, counting only that.
@@ -733,7 +775,7 @@ describe('a retired authority whose freight is all closed history', () => {
       rateCents: 60_000,
       deliveredOn: new Date(PERIOD.start.getTime() + 86_400_000),
     })
-    const withLive = companyIn(await readWeek(), retired.id)
+    const withLive = forCompany(await readWeek(), retired.id)
     expect(withLive.werner!.notReady).toBe(1)
     expect(withLive.werner!.filedUnpaid).toBe(0)
 

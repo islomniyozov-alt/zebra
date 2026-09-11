@@ -64,6 +64,12 @@ const loadsOf = (fixture: StatementFixture): SettleableLoad[] =>
   fixture.loads.map((row, index) => ({
     id: `load-${String(index)}`,
     loadNumber: row.loadNumber,
+    // ONE AUTHORITY PER STATEMENT IN THE ARTEFACT. Settlement is org-wide now
+    // and a statement CAN span companies, but none of the six does — each of
+    // these drivers pulled for one authority that week, which is why all six
+    // still reproduce unchanged.
+    companyId: 'co-1',
+    companyName: fixture.company,
     puPlace: 'PU',
     delPlace: 'DEL',
     puDate: new Date(row.puDate),
@@ -253,6 +259,7 @@ function inputFor(fixture: StatementFixture): DriverSettlementInput {
     // date somebody types (§0). Reported at the time as a discrepancy between
     // the ruling and the six statements; the statements were right.
     payoutLagWeeks: 0,
+    letterheadCompanyId: 'co-1',
     checkDate: new Date(fixture.checkDate),
     openingBalances: {},
     priorThisYear: [],
@@ -507,6 +514,8 @@ describe('which gross a load settles on', () => {
   ): SettleableLoad => ({
     id: 'l1',
     loadNumber: 'AMZ1',
+    companyId: 'co-1',
+    companyName: 'Amazon Co',
     puPlace: 'A',
     delPlace: 'B',
     puDate: new Date(Date.UTC(2026, 7, 17)),
@@ -574,6 +583,8 @@ describe('a held load contributes nothing to the statement', () => {
   const amazonLoad = (outcome: 'short' | 'none'): SettleableLoad => ({
     id: 'held-1',
     loadNumber: 'AMZ-HELD',
+    companyId: 'co-1',
+    companyName: 'Held Co',
     puPlace: 'A',
     delPlace: 'B',
     puDate: new Date(base.period.start),
@@ -652,7 +663,6 @@ describe('a driver with no pay rule', () => {
     expect(settlement.blockers[0]!.kind).toBe('no_pay_rule')
 
     const batch = computeBatch({
-      companyId: 'c1',
       period: base.period,
       statementDate: base.checkDate,
       checkDate: base.checkDate,
@@ -664,7 +674,6 @@ describe('a driver with no pay rule', () => {
 
   it('lets a batch with only held lines finalise, because those are not wrong', () => {
     const batch = computeBatch({
-      companyId: 'c1',
       period: base.period,
       statementDate: base.checkDate,
       checkDate: base.checkDate,

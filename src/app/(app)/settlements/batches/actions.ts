@@ -38,6 +38,7 @@ const REFUSAL: Record<BatchRefusal['kind'], MessageKey> = {
   not_found: 'batch.error.notFound',
   not_draft: 'batch.error.notDraft',
   blocked: 'batch.error.blocked',
+  period_taken: 'money.error.periodTaken',
 }
 
 /**
@@ -79,7 +80,6 @@ export async function createBatchAction(
     (tx, session) =>
       openBatch(tx, {
         organizationId: session.organizationId,
-        companyId,
         period,
         statementDate: new Date(`${statementDate}T00:00:00.000Z`),
         checkDate: new Date(`${checkDate}T00:00:00.000Z`),

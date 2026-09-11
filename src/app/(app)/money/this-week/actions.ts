@@ -36,7 +36,6 @@ export interface MoneyWeekState {
  * is exactly the kind of quiet error this screen exists to prevent.
  */
 export async function openBatchForWeekAction(
-  companyId: string,
   _previous: MoneyWeekState,
 ): Promise<MoneyWeekState> {
   const { t } = await getLocaleContext()
@@ -48,7 +47,6 @@ export async function openBatchForWeekAction(
     (tx, session) =>
       openBatch(tx, {
         organizationId: session.organizationId,
-        companyId,
         period,
         // Today, per the brief. The batch screen can change it.
         statementDate: new Date(
@@ -64,7 +62,17 @@ export async function openBatchForWeekAction(
     { timeoutMs: SETTLEMENT_BATCH_TIMEOUT_MS },
   )
 
-  if (!outcome.ok) return { error: t('money.error.couldNotOpen') }
+  if (!outcome.ok) {
+    // A BATCH ALREADY COVERS THIS WEEK, which is the ruling's one-per-period
+    // rule refusing rather than the database colliding. Says so, and says
+    // which — the screen's Continue draft link goes to the same place.
+    return {
+      error:
+        outcome.reason.kind === 'period_taken'
+          ? t('money.error.periodTaken')
+          : t('money.error.couldNotOpen'),
+    }
+  }
 
   revalidatePath('/money/this-week')
   redirect(`/settlements/batches/${outcome.batchId}`)

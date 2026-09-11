@@ -12,7 +12,6 @@ import {
 const INITIAL: MoneyWeekState = { error: null }
 
 interface Props {
-  companyId: string
   batchId: string | null
   action: 'open' | 'continue' | 'markPaid' | 'none'
   labels: {
@@ -34,9 +33,11 @@ interface Props {
  * `Continue draft` is a LINK, not an action — the draft already exists and the
  * work is on the batch screen.
  */
-export function WeekAction({ companyId, batchId, action, labels }: Props) {
+export function WeekAction({ batchId, action, labels }: Props) {
+  // NO COMPANY. Settlement is org-wide by ruling: one batch for the period,
+  // covering every authority, so there is nothing to scope the button to.
   const [openState, open, opening] = useActionState(
-    openBatchForWeekAction.bind(null, companyId),
+    openBatchForWeekAction,
     INITIAL,
   )
   const [paidState, markPaid, marking] = useActionState(

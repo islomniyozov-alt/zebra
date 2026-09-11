@@ -3,24 +3,30 @@ import { withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { formatCents } from '@/lib/money'
 import { payWeekFor } from '@/lib/settlement-week'
-import {
-  thisWeekFor,
-  type CompanyWeek,
-  type NothingReadyReason,
-} from '@/lib/this-week'
+import { thisWeekFor, type NothingReadyReason } from '@/lib/this-week'
 import { SETTLEMENT_BATCH_TIMEOUT_MS } from '@/lib/settlement-batch'
 import { WeekAction } from './WeekAction'
+import { CompanyFilter } from './CompanyFilter'
 import type { MessageKey } from '@/lib/i18n'
 
-// MONEY → THIS WEEK. The Tuesday screen.
+// MONEY → THIS WEEK. The Tuesday screen, ONE PAGE for the whole operation.
+//
+// Reshaped by Islom's ruling of 2026-09-11: the sister companies are one
+// operation and settlement is org-wide. One period header, one Ready total,
+// one held list and one blocked list with a company COLUMN, one Open batch.
+//
+// THE FILTER NARROWS THE LISTS AND NOT THE TOTALS. Ready is the number that
+// becomes the batch, and the batch covers the organization — a Ready that
+// changed when somebody picked an authority would be a figure that does not
+// correspond to anything anybody can press a button on. The company filter is
+// a reading aid, and is documented as one.
 //
 // ── EMPTY STATES SAY WHAT IS ABSENT ──────────────────────────────────────
 //
 // "No remittance for Aug 30 – Sep 5", never "$0.00". A zero is a measurement
 // and an absence is not one; printing the first where the second is true is how
 // somebody concludes Amazon paid nothing that week rather than that nobody has
-// imported the file yet. The same rule the statement follows for an empty
-// section, applied to a screen.
+// imported the file yet.
 
 const day = (value: Date) => value.toISOString().slice(0, 10)
 
@@ -32,8 +38,20 @@ const NOTHING_READY: Record<NothingReadyReason, MessageKey> = {
   no_freight: 'money.nothing.noFreight',
 }
 
-export default async function ThisWeekPage() {
+const HELD_REASON = (kind: string): MessageKey =>
+  kind === 'no_remittance'
+    ? 'batch.held.noRemittance'
+    : kind === 'over'
+      ? 'batch.held.over'
+      : 'batch.held.short'
+
+export default async function ThisWeekPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ company?: string }>
+}) {
   const { t, locale } = await getLocaleContext()
+  const { company: picked } = await searchParams
 
   // COMPUTED FROM TODAY, SERVER-SIDE. The period is not a URL parameter: a
   // stale tab left open over a weekend would otherwise offer to settle a
@@ -47,6 +65,19 @@ export default async function ThisWeekPage() {
     { timeoutMs: SETTLEMENT_BATCH_TIMEOUT_MS },
   )
 
+  // AN UNKNOWN COMPANY IN THE URL IS IGNORED, not an error and not an empty
+  // page: a stale bookmark from before an authority was renamed should show
+  // the week, not nothing.
+  const filter = week.companies.some((company) => company.id === picked)
+    ? picked
+    : undefined
+  const mine = <T extends { companyId: string }>(rows: readonly T[]) =>
+    filter ? rows.filter((row) => row.companyId === filter) : [...rows]
+
+  const held = mine(week.held)
+  const blocked = mine(week.blocked)
+  const remittances = mine(week.remittances)
+  const factoring = mine(week.factoring)
   const periodLabel = `${day(period.start)} — ${day(period.end)}`
 
   return (
@@ -64,49 +95,15 @@ export default async function ThisWeekPage() {
         <p className="text-xs text-ink-3">{t('money.periodHint')}</p>
       </header>
 
-      {week.companies.map((company) => (
-        <CompanySection
-          key={company.companyId}
-          company={company}
-          periodLabel={periodLabel}
-          locale={locale}
-          t={t}
+      <div className="flex flex-wrap items-center justify-between gap-z3">
+        <CompanyFilter
+          companies={week.companies}
+          selected={filter ?? null}
+          labels={{ all: t('money.allCompanies'), label: t('batch.company') }}
         />
-      ))}
-
-      {week.companies.length === 0 ? (
-        <p className="text-sm text-ink-3">{t('money.noCompanies')}</p>
-      ) : null}
-    </div>
-  )
-}
-
-function CompanySection({
-  company,
-  periodLabel,
-  locale,
-  t,
-}: {
-  company: CompanyWeek
-  periodLabel: string
-  locale: string
-  t: (key: MessageKey) => string
-}) {
-  const heldReason = (kind: string): MessageKey =>
-    kind === 'no_remittance'
-      ? 'batch.held.noRemittance'
-      : kind === 'over'
-        ? 'batch.held.over'
-        : 'batch.held.short'
-
-  return (
-    <section className="rounded-card border border-border bg-surface p-z4">
-      <div className="flex flex-wrap items-baseline justify-between gap-z3">
-        <h2 className="text-md font-medium text-ink">{company.companyName}</h2>
         <WeekAction
-          companyId={company.companyId}
-          batchId={company.batch.id}
-          action={company.batch.action}
+          batchId={week.batch.id}
+          action={week.batch.action}
           labels={{
             open: t('money.openBatch'),
             continueDraft: t('money.continueDraft'),
@@ -116,161 +113,185 @@ function CompanySection({
         />
       </div>
 
-      {/* THE REMITTANCE WARNING IS AT THE TOP AND IS NOT A BLOCKER. Werner
-       * freight and idle-driver deductions still settle; the Amazon lines hold
-       * themselves with "no remittance", which is the held list below. */}
-      {company.remittance && !company.remittance.found ? (
-        <p className="mt-z3 rounded-card border border-warning bg-warning-soft px-z3 py-z2 text-sm text-warning">
-          <span className="font-medium">{t('money.remittanceMissing')}</span>{' '}
-          <span className="font-mono">{periodLabel}</span>
-          {' — '}
-          {t('money.remittanceMissingHint')}
-        </p>
-      ) : null}
-
-      {company.remittance?.found ? (
-        <p className="mt-z3 text-sm text-ink-2">
-          {t('money.remittance')}{' '}
-          <span className="font-mono">{company.remittance.invoiceNumber}</span>
-          {' · '}
-          <span className="font-mono">
-            {formatCents(company.remittance.totalCents ?? 0, locale)}
-          </span>
-          {company.remittance.importedAt ? (
-            <>
-              {' · '}
-              {t('money.importedOn')}{' '}
-              <span className="font-mono">
-                {day(company.remittance.importedAt)}
-              </span>
-            </>
-          ) : null}
-        </p>
-      ) : null}
-
       {/* READY — the number that becomes the batch, or WHY THERE IS NONE.
        *
-       * Never "$0.00". A zero is a measurement and an absence is not one, and
-       * the four reasons lead four different places: a blocked driver is
-       * somebody's afternoon, a held line is a phone call, closed history is
-       * nothing at all. During the cutover the last is the commonest answer —
-       * 62 of 62 Dolphins deliveries in the week of Aug 30 settled in
-       * Datatruck — and reading "$0.00" for that is how somebody concludes
-       * the software is broken. */}
-      {company.nothingReady === null ? (
-        <p className="mt-z3 text-sm text-ink">
+       * ONE TOTAL FOR THE ORGANIZATION, and it does not move when the filter
+       * does: the batch is org-wide, so a Ready that narrowed with a reading
+       * aid would be a figure nobody can press a button on. */}
+      {week.nothingReady === null ? (
+        <p className="text-sm text-ink">
           <span className="font-medium">{t('money.ready')}</span>{' '}
-          <span className="font-mono">{company.ready.loads}</span>{' '}
+          <span className="font-mono">{week.ready.loads}</span>{' '}
           {t('money.loadsAcross')}{' '}
-          <span className="font-mono">{company.ready.drivers}</span>{' '}
+          <span className="font-mono">{week.ready.drivers}</span>{' '}
           {t('money.drivers')}
           {' · '}
           <span className="font-mono">
-            {formatCents(company.ready.grossCents, locale)}
+            {formatCents(week.ready.grossCents, locale)}
           </span>
         </p>
       ) : (
-        <p className="mt-z3 text-sm text-ink-3">
+        <p className="text-sm text-ink-3">
           <span className="font-medium text-ink-2">{t('money.ready')}</span>{' '}
-          {t(NOTHING_READY[company.nothingReady])}
+          {t(NOTHING_READY[week.nothingReady])}
         </p>
       )}
 
-      {/* BLOCKED DRIVERS, BY NAME, ABOVE THE HELD LINES — a held line is a load
-       * left out of a correct statement; a blocked driver is a person who gets
-       * no statement at all. */}
-      {company.blocked.length > 0 ? (
-        <div className="mt-z4">
-          <h3 className="text-sm font-medium text-danger">
+      {/* REMITTANCES, PER AUTHORITY — each is paid separately, so these cannot
+       * be summed into the one total above. A missing one is a warning and
+       * never a blocker: broker freight and standing deductions still settle,
+       * and the Amazon lines hold themselves in the list below. */}
+      {remittances.map((row) =>
+        row.found ? (
+          <p key={row.companyId} className="text-sm text-ink-2">
+            <span className="font-medium text-ink">{row.companyName}</span>
+            {' · '}
+            {t('money.remittance')}{' '}
+            <span className="font-mono">{row.invoiceNumber}</span>
+            {' · '}
+            <span className="font-mono">
+              {formatCents(row.totalCents ?? 0, locale)}
+            </span>
+          </p>
+        ) : (
+          <p
+            key={row.companyId}
+            className="rounded-card border border-warning bg-warning-soft px-z3 py-z2 text-sm text-warning"
+          >
+            <span className="font-medium">{row.companyName}</span>
+            {' — '}
+            {t('money.remittanceMissing')}{' '}
+            <span className="font-mono">{periodLabel}</span>
+            {'. '}
+            {t('money.remittanceMissingHint')}
+          </p>
+        ),
+      )}
+
+      {/* BLOCKED DRIVERS ABOVE HELD LINES — a held line is a load left out of
+       * a correct statement; a blocked driver is a person who gets no
+       * statement at all. */}
+      {blocked.length > 0 ? (
+        <section className="rounded-card border border-danger bg-surface p-z4">
+          <h2 className="text-md font-medium text-danger">
             {t('batch.blockers')}
-          </h3>
-          <ul className="mt-z2 flex flex-col gap-z1 text-sm">
-            {company.blocked.map((driver) => (
-              <li key={driver.driverId}>
-                <Link
-                  href={`/drivers/${driver.driverId}`}
-                  className="underline underline-offset-2 hover:text-accent"
-                >
-                  {driver.driverName}
-                </Link>{' '}
-                <span className="text-ink-3">
-                  {t('batch.blocker.noPayRule')}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
+          </h2>
+          <table className="mt-z2 w-full text-sm">
+            <thead className="text-xs uppercase text-ink-2">
+              <tr>
+                <th className="py-z1 text-start">{t('batch.driver')}</th>
+                <th className="py-z1 text-start">{t('batch.company')}</th>
+                <th className="py-z1 text-start">{t('money.reason')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {blocked.map((driver) => (
+                <tr key={driver.driverId} className="border-t border-border">
+                  <td className="py-z1">
+                    <Link
+                      href={`/drivers/${driver.driverId}`}
+                      className="underline underline-offset-2 hover:text-accent"
+                    >
+                      {driver.driverName}
+                    </Link>
+                  </td>
+                  <td className="py-z1 text-ink-2">{driver.companyName}</td>
+                  <td className="py-z1 text-ink-3">
+                    {t('batch.blocker.noPayRule')}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
       ) : null}
 
-      {company.held.length > 0 ? (
-        <div className="mt-z4">
-          <h3 className="text-sm font-medium text-ink">
+      {held.length > 0 ? (
+        <section className="rounded-card border border-border bg-surface p-z4">
+          <h2 className="text-md font-medium text-ink">
             {t('batch.held')}{' '}
             <span className="font-mono text-ink-3">
-              {company.held.length} ·{' '}
-              {formatCents(company.heldSumCents, locale)}
+              {held.length} ·{' '}
+              {formatCents(
+                held.reduce((sum, row) => sum + row.bookedCents, 0),
+                locale,
+              )}
             </span>
-          </h3>
-          <ul className="mt-z2 flex flex-col gap-z1 text-sm">
-            {company.held.map((row) => (
-              <li key={row.loadId} className="flex flex-wrap gap-z2">
-                <Link
-                  href={`/loads/${row.loadId}`}
-                  className="font-mono underline underline-offset-2 hover:text-accent"
-                >
-                  {row.loadNumber}
-                </Link>
-                <span className="text-ink-2">{row.driverName}</span>
-                <span className="text-ink-3">{t(heldReason(row.reason))}</span>
-                {row.remittedCents !== null ? (
-                  <span className="font-mono text-xs text-ink-3">
-                    {formatCents(row.remittedCents, locale)} /{' '}
-                    {formatCents(row.bookedCents, locale)}
-                  </span>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </div>
+          </h2>
+          <table className="mt-z2 w-full text-sm">
+            <thead className="text-xs uppercase text-ink-2">
+              <tr>
+                <th className="py-z1 text-start">{t('batch.loads')}</th>
+                <th className="py-z1 text-start">{t('batch.company')}</th>
+                <th className="py-z1 text-start">{t('batch.driver')}</th>
+                <th className="py-z1 text-start">{t('money.reason')}</th>
+                <th className="py-z1 text-end">{t('money.remittedBooked')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {held.map((row) => (
+                <tr key={row.loadId} className="border-t border-border">
+                  <td className="py-z1">
+                    <Link
+                      href={`/loads/${row.loadId}`}
+                      className="font-mono underline underline-offset-2 hover:text-accent"
+                    >
+                      {row.loadNumber}
+                    </Link>
+                  </td>
+                  <td className="py-z1 text-ink-2">{row.companyName}</td>
+                  <td className="py-z1 text-ink-2">{row.driverName}</td>
+                  <td className="py-z1 text-ink-3">
+                    {t(HELD_REASON(row.reason))}
+                  </td>
+                  <td className="py-z1 text-end font-mono text-xs text-ink-3">
+                    {row.remittedCents === null
+                      ? '—'
+                      : `${formatCents(row.remittedCents, locale)} / ${formatCents(row.bookedCents, locale)}`}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
       ) : null}
 
-      {/* WERNER — absent entirely on a company whose freight is all
-       * direct-settled, because nothing there is ever invoiced or factored. */}
-      {company.werner ? (
-        <p className="mt-z4 text-sm text-ink-2">
-          <span className="font-medium text-ink">{t('money.werner')}</span>{' '}
-          <span className="font-mono">{company.werner.filedUnpaid}</span>{' '}
+      {/* FACTORING, PER AUTHORITY — an invoice carries one authority's MC and
+       * goes outside, so this stays a per-company fact even though settlement
+       * no longer is. */}
+      {factoring.map((row) => (
+        <p key={row.companyId} className="text-sm text-ink-2">
+          <span className="font-medium text-ink">{row.companyName}</span>
+          {' · '}
+          {t('money.werner')}{' '}
+          <span className="font-mono">{row.filedUnpaid}</span>{' '}
           {t('money.filedUnpaid')}
-          {company.werner.oldestFiledAt ? (
+          {row.oldestFiledAt ? (
             <>
               {' ('}
               {t('money.oldest')}{' '}
-              <span className="font-mono">
-                {day(company.werner.oldestFiledAt)}
-              </span>
+              <span className="font-mono">{day(row.oldestFiledAt)}</span>
               {')'}
             </>
           ) : null}
           {' · '}
-          <span className="font-mono">{company.werner.readyToFile}</span>{' '}
+          <span className="font-mono">{row.readyToFile}</span>{' '}
           {t('money.readyToFile')}
           {' · '}
-          <span className="font-mono">{company.werner.notReady}</span>{' '}
+          <span className="font-mono">{row.notReady}</span>{' '}
           {t('money.notReady')}
-          {company.werner.commonestMissing ? (
+          {row.commonestMissing ? (
             <>
               {' — '}
               {t('money.mostOftenMissing')}{' '}
-              <span className="text-ink">
-                {company.werner.commonestMissing}
-              </span>
+              <span className="text-ink">{row.commonestMissing}</span>
             </>
           ) : null}
         </p>
-      ) : null}
+      ))}
 
-      {company.recent.length > 0 ? (
-        <table className="mt-z4 w-full text-xs">
+      {week.recent.length > 0 ? (
+        <table className="w-full text-xs">
           <thead className="text-ink-2">
             <tr>
               <th className="py-z1 text-start">{t('batch.statement')}</th>
@@ -281,7 +302,7 @@ function CompanySection({
             </tr>
           </thead>
           <tbody>
-            {company.recent.map((batch) => (
+            {week.recent.map((batch) => (
               <tr key={batch.id} className="border-t border-border">
                 <td className="py-z1">
                   <Link
@@ -304,6 +325,6 @@ function CompanySection({
           </tbody>
         </table>
       ) : null}
-    </section>
+    </div>
   )
 }

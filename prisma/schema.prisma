@@ -241,34 +241,34 @@ model Company {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  settings           CompanySettings?
-  memberScopes       MembershipCompany[]
-  assetHistory       AssetAssignment[]
-  counters           Counter[]
-  integrations       Integration[]
-  factoringCompanies FactoringCompany[]
-  trucks             Truck[]
-  trailers           Trailer[]
-  drivers            Driver[]
-  loads              Load[]
-  documents          Document[]
-  invoices           Invoice[]
-  payments           Payment[]
-  settlements        Settlement[]
-  settlementBatches  SettlementBatch[]
-  expenses           Expense[]
-  fuelTxns           FuelTransaction[]
-  maintenance        MaintenanceRecord[]
-  iftaMileage        IftaMileage[]
-  complianceItems    ComplianceItem[]
-  inspections        RoadsideInspection[]
-  dataQs             DataQsChallenge[]
-  communications     Communication[]
-  notifications      Notification[]
-  calendarEvents     CalendarEvent[]
-  auditLogs          AuditLog[]
-  claims             Claim[]
-  pendingUploads     PendingUpload[]
+  settings            CompanySettings?
+  memberScopes        MembershipCompany[]
+  assetHistory        AssetAssignment[]
+  counters            Counter[]
+  integrations        Integration[]
+  factoringCompanies  FactoringCompany[]
+  trucks              Truck[]
+  trailers            Trailer[]
+  drivers             Driver[]
+  loads               Load[]
+  documents           Document[]
+  invoices            Invoice[]
+  payments            Payment[]
+  settlements         Settlement[]
+  expenses            Expense[]
+  fuelTxns            FuelTransaction[]
+  maintenance         MaintenanceRecord[]
+  iftaMileage         IftaMileage[]
+  complianceItems     ComplianceItem[]
+  inspections         RoadsideInspection[]
+  dataQs              DataQsChallenge[]
+  communications      Communication[]
+  notifications       Notification[]
+  calendarEvents      CalendarEvent[]
+  auditLogs           AuditLog[]
+  claims              Claim[]
+  pendingUploads      PendingUpload[]
+  settlementLoadLines SettlementLoadLine[]
 
   @@unique([organizationId, dotNumber])
   @@index([organizationId, isActive])
@@ -2613,8 +2613,20 @@ model SettlementBatch {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  companyId      String
-  company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // NO COMPANY. Islom's ruling of 2026-09-11: the sister companies are ONE
+  // operation and settlement is org-wide. One batch per period for the whole
+  // organization, one SB- number for the week, one statement per driver
+  // whatever authority the freight was pulled under.
+  //
+  // THIS SUPERSEDES item 3's "batch per company per week", which came from the
+  // artefact — SB-000438 covers both RAM drivers, and RAM and Dolphins had
+  // separate batches. Datatruck's shape is not the argument; how the business
+  // actually runs is, and it runs as one.
+  //
+  // INVOICES STAY PER AUTHORITY and so does `Counter`. An invoice carries an
+  // authority's MC and goes outside; a statement is internal paperwork. The
+  // two scopes now differ on purpose rather than by accident.
 
   /// Inclusive UTC days. A Sunday and the Saturday after — MONEY-DESIGN §0.
   periodStart DateTime
@@ -2648,7 +2660,8 @@ model SettlementBatch {
   /// not the company. Confirmed off the artefact: 436 RAM, 437 Dolphins, 438
   /// RAM, 439 Dolphins, 440 RAM — one ascending run, interleaved.
   @@unique([organizationId, batchNumber])
-  @@index([companyId, periodStart])
+  /// The money screen's lookup: is there a batch for this period yet.
+  @@index([organizationId, periodStart])
   @@index([organizationId, status])
 }
 
@@ -2662,6 +2675,17 @@ model Settlement {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  /// THE LETTERHEAD. Whose name and address this statement prints.
+  ///
+  /// It used to be the batch's company, and the batch no longer has one. By
+  /// ruling it is now THE AUTHORITY THAT OWNS THE TRUCK the settlement is
+  /// frozen on — the same truck as `unitNumber`, resolved once at generation
+  /// and frozen with it. A driver who pulls RAM and Dolphins freight in one
+  /// week gets one statement, and it goes out under the authority whose truck
+  /// he drove.
+  ///
+  /// Falls back to the driver's own company when no truck is assigned, because
+  /// a statement with no letterhead is not a document.
   companyId      String
   company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
@@ -2727,7 +2751,10 @@ model Settlement {
   deductionLines SettlementDeductionLine[]
   documents      Document[]
 
-  @@unique([companyId, settlementNumber])
+  /// ST- IS ONE SERIES ACROSS THE ORGANIZATION, so the unique is too. Keyed on
+  /// the company it would have permitted two ST-000441s in different
+  /// authorities — which is exactly what a shared counter must not allow.
+  @@unique([organizationId, settlementNumber])
   @@index([companyId, driverId, periodEnd])
   @@index([companyId, status])
 }
@@ -2790,6 +2817,16 @@ model SettlementLoadLine {
 
   loadId String
   load   Load   @relation(fields: [loadId], references: [id])
+
+  /// Which authority's freight this line is, frozen like everything else here.
+  ///
+  /// A statement can now carry lines from more than one company, and groups
+  /// them under sub-headings when it does. Read through the load at render
+  /// time it would silently regroup an issued statement the day somebody moved
+  /// a load between authorities.
+  companyId   String
+  company     Company @relation(fields: [companyId], references: [id])
+  companyName String
 
   /// FROZEN COPIES, not joins. A statement is a document somebody was paid on:
   /// re-reading the load next year to render it would let a corrected city or

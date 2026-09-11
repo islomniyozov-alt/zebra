@@ -106,7 +106,9 @@ describe('the Tuesday screen', () => {
     // anywhere in the file, which an unused import satisfies — so gutting the
     // call and leaving the import behind passed. Watched failing that way.
     expect(text).toMatch(/filingStatesForCompanies\(\s*tx/)
-    expect(text).toMatch(/batchInputForCompanies\(\s*tx/)
+    // ORG-WIDE SINCE 2026-09-11. The screen reads one batch input for the whole
+    // operation, not one per authority — `batchInputForCompanies` is gone.
+    expect(text).toMatch(/batchInputForOrg\(\s*tx/)
     expect(text).toMatch(/computeBatch\(\{/)
   })
 })

@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation'
 import { withCurrentOrg, currentUserCan } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { formatCents } from '@/lib/money'
-import { batchInputFor } from '@/lib/settlement-batch'
+import { batchInputForOrg } from '@/lib/settlement-batch'
 import { computeBatch } from '@/lib/settlement-week'
 import { BatchActions } from './BatchActions'
 import type { MessageKey } from '@/lib/i18n'
@@ -41,8 +41,6 @@ export default async function BatchPage({
         statementDate: true,
         checkDate: true,
         organizationId: true,
-        companyId: true,
-        company: { select: { name: true } },
         settlements: {
           orderBy: { createdAt: 'asc' },
           select: {
@@ -71,15 +69,13 @@ export default async function BatchPage({
       return { batch, held: [], blockers: [], negative: [] }
     }
 
-    const { drivers } = await batchInputFor(tx, {
+    const drivers = await batchInputForOrg(tx, {
       organizationId: batch.organizationId,
-      companyId: batch.companyId,
       period: { start: batch.periodStart, end: batch.periodEnd },
       statementDate: batch.statementDate,
       checkDate: batch.checkDate,
     })
     const computed = computeBatch({
-      companyId: batch.companyId,
       period: { start: batch.periodStart, end: batch.periodEnd },
       statementDate: batch.statementDate,
       checkDate: batch.checkDate,
@@ -111,7 +107,8 @@ export default async function BatchPage({
         <h1 className="font-mono text-lg font-medium text-ink">
           {batch.batchNumber ?? batch.status}
         </h1>
-        <p className="text-sm text-ink-2">{batch.company.name}</p>
+        {/* NO COMPANY IN THE HEADER. The batch is the organization's by
+         * ruling; the authority lives on each load line instead. */}
         <p className="font-mono text-xs text-ink-3">
           {day(batch.periodStart)} — {day(batch.periodEnd)}
         </p>

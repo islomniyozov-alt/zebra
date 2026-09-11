@@ -72,6 +72,9 @@ export function statementMiles(hundredths: number): string {
 
 export interface StatementLoadRow {
   loadNumber: string
+  /** Whose freight this line is. Printed only when a statement has more than
+   * one — see `renderStatementPdf`. */
+  companyName: string
   puPlace: string
   delPlace: string
   puDate: Date
@@ -256,7 +259,30 @@ export function renderStatementPdf(input: StatementPdfInput): Uint8Array {
   rule()
   y -= 11
 
+  // ── SUB-HEADINGS ONLY WHEN THERE IS SOMETHING TO DISTINGUISH ────────
+  //
+  // A DELIBERATE DEPARTURE FROM THE ARTEFACT, and the first one this document
+  // makes. Datatruck's Earnings table is a flat list, because a statement there
+  // could only ever hold one authority's freight. Settlement is org-wide now
+  // (Islom, 2026-09-11), so a driver who pulled RAM and Dolphins loads in one
+  // week gets ONE statement — and an unlabelled flat list would tell him the
+  // total without telling him which authority owed which half of it.
+  //
+  // THE SINGLE-COMPANY STATEMENT IS UNCHANGED, which is the other half of the
+  // ruling and the reason this is a branch rather than a new layout. Almost
+  // every statement has one company, and those must stay byte-identical in
+  // shape to the document drivers have been reading for years.
+  const companies = [...new Set(input.loads.map((load) => load.companyName))]
+  const grouped = companies.length > 1
+
+  let currentCompany: string | null = null
   for (const load of input.loads) {
+    if (grouped && load.companyName !== currentCompany) {
+      currentCompany = load.companyName
+      y -= 2
+      text(load.companyName, EARN_X[0]!, 8, true)
+      y -= 11
+    }
     text(load.loadNumber, EARN_X[0]!, 7)
     text(load.puPlace, EARN_X[1]!, 7)
     text(load.delPlace, EARN_X[2]!, 7)

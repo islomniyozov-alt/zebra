@@ -25,7 +25,6 @@ export default async function BatchesPage() {
           status: true,
           periodStart: true,
           periodEnd: true,
-          company: { select: { name: true } },
           settlements: { select: { netCents: true } },
         },
       }),
@@ -63,7 +62,6 @@ export default async function BatchesPage() {
           <thead className="bg-surface-2 text-xs uppercase text-ink-2">
             <tr>
               <th className="p-z3 text-start">{t('batch.statement')}</th>
-              <th className="p-z3 text-start">{t('batch.company')}</th>
               <th className="p-z3 text-start">{t('batch.week')}</th>
               <th className="p-z3 text-end">{t('batch.net')}</th>
             </tr>
@@ -79,7 +77,6 @@ export default async function BatchesPage() {
                     {batch.batchNumber ?? batch.status}
                   </Link>
                 </td>
-                <td className="p-z3">{batch.company.name}</td>
                 <td className="p-z3 font-mono text-xs">
                   {day(batch.periodStart)} — {day(batch.periodEnd)}
                 </td>
@@ -93,7 +90,7 @@ export default async function BatchesPage() {
             ))}
             {batches.length === 0 ? (
               <tr>
-                <td className="p-z4 text-ink-3" colSpan={4}>
+                <td className="p-z4 text-ink-3" colSpan={3}>
                   {t('batch.none')}
                 </td>
               </tr>

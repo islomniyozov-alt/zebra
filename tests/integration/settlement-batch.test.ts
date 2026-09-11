@@ -4,13 +4,14 @@ import { withOrg } from '@/lib/tenancy'
 import { createBroker } from '@/lib/brokers'
 import { createLoad } from '@/lib/loads'
 import {
-  batchInputFor,
+  batchInputForOrg,
   batchNumberOf,
   finaliseBatch,
   markBatchPaid,
   refreshDraft,
   statementNumberOf,
   SETTLEMENT_BATCH_TIMEOUT_MS,
+  openBatch,
 } from '@/lib/settlement-batch'
 import { weekOf } from '@/lib/settlement-week'
 import { renderStatementPdf } from '@/lib/statement-pdf'
@@ -54,13 +55,20 @@ async function seedLoad(input: {
   rateCents: number
   customerId: string
   delDay: number
+  /** Defaults to the suite's own authority. Set for cross-authority freight. */
+  companyId?: string
 }) {
   const load = await inOrg((tx) =>
     createLoad(
       tx,
       organizationId,
       {
-        companyId,
+        // CREATED ON THE RIGHT AUTHORITY rather than moved onto it: a lint rule
+        // forbids reassigning `companyId` by column, because an asset's
+        // authority is a period and `transferAsset` is what opens and closes
+        // those. A load seeded in the wrong place and corrected is exactly the
+        // shape that rule exists to stop.
+        companyId: input.companyId ?? companyId,
         customerId: input.customerId,
         referenceNumber: `${input.number}-${nonce}`,
         stops: [
@@ -232,7 +240,6 @@ describe('a week of freight becomes a batch', () => {
     const batch = await owner.settlementBatch.create({
       data: {
         organizationId,
-        companyId,
         periodStart: PERIOD.start,
         periodEnd: PERIOD.end,
         statementDate: new Date(Date.UTC(2026, 7, 25)),
@@ -408,7 +415,6 @@ describe('a week of freight becomes a batch', () => {
     const second = await owner.settlementBatch.create({
       data: {
         organizationId,
-        companyId,
         periodStart: PERIOD.start,
         periodEnd: PERIOD.end,
         statementDate: new Date(Date.UTC(2026, 7, 25)),
@@ -474,7 +480,6 @@ describe('what a batch refuses to do', () => {
     const batch = await owner.settlementBatch.create({
       data: {
         organizationId,
-        companyId,
         periodStart: period.start,
         periodEnd: period.end,
         statementDate: new Date(Date.UTC(2026, 8, 2)),
@@ -521,10 +526,9 @@ describe('what a batch refuses to do', () => {
     })
 
     const period = weekOf(new Date(Date.UTC(2026, 7, 12)))
-    const { drivers } = await inOrg((tx) =>
-      batchInputFor(tx, {
+    const drivers = await inOrg((tx) =>
+      batchInputForOrg(tx, {
         organizationId,
-        companyId,
         period,
         statementDate: new Date(Date.UTC(2026, 7, 18)),
         checkDate: new Date(Date.UTC(2026, 7, 20)),
@@ -554,6 +558,8 @@ describe('what a batch refuses to do', () => {
           organizationId,
           loadId,
           loadNumber: 'DUPLICATE',
+          companyId,
+          companyName: 'Duplicate Co',
           puPlace: 'A',
           delPlace: 'B',
           puDate: new Date(),
@@ -604,7 +610,6 @@ describe('escrow moves at FINAL and only at FINAL', () => {
     const batch = await owner.settlementBatch.create({
       data: {
         organizationId,
-        companyId,
         periodStart: period.start,
         periodEnd: period.end,
         statementDate: new Date(Date.UTC(2026, 8, 16)),
@@ -639,6 +644,142 @@ describe('escrow moves at FINAL and only at FINAL', () => {
   }, 300_000)
 })
 
+describe('one batch per period, for the whole operation', () => {
+  // THE RULING, ENFORCED BY THE ACTION AND NOT BY THE DATABASE.
+  //
+  // There is deliberately no unique on (organizationId, periodStart): a held
+  // line confirmed after FINAL has to land somewhere, and post-FINAL money is a
+  // next-week line by a ruling that still stands. A constraint would make the
+  // recovery path impossible rather than merely discouraged — so `openBatch`
+  // refuses, by name, and hands back the batch that already covers the week.
+  it('refuses a second batch and names the one that exists', async () => {
+    const period = weekOf(new Date(Date.UTC(2026, 10, 4)))
+    const first = await inOrg((tx) =>
+      openBatch(tx, {
+        organizationId,
+        period,
+        statementDate: new Date(Date.UTC(2026, 10, 10)),
+        checkDate: new Date(Date.UTC(2026, 10, 13)),
+      }),
+    )
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+
+    const second = await inOrg((tx) =>
+      openBatch(tx, {
+        organizationId,
+        period,
+        statementDate: new Date(Date.UTC(2026, 10, 10)),
+        checkDate: new Date(Date.UTC(2026, 10, 13)),
+      }),
+    )
+    expect(second.ok).toBe(false)
+    if (second.ok) return
+    expect(second.reason.kind).toBe('period_taken')
+    // IT HANDS BACK THE ONE THAT EXISTS, so the screen links rather than
+    // reporting a collision somebody has to go and find.
+    if (second.reason.kind !== 'period_taken') return
+    expect(second.reason.batchId).toBe(first.batchId)
+    expect(second.reason.status).toBe('DRAFT')
+
+    // AND THE DATABASE STILL ALLOWS ONE, which is what keeps the recovery path
+    // open. Watched by inserting directly rather than through the action.
+    const direct = await owner.settlementBatch.create({
+      data: {
+        organizationId,
+        periodStart: period.start,
+        periodEnd: period.end,
+        statementDate: new Date(Date.UTC(2026, 10, 10)),
+        checkDate: new Date(Date.UTC(2026, 10, 13)),
+      },
+      select: { id: true },
+    })
+    expect(direct.id).toBeTruthy()
+
+    await owner.settlementBatch.deleteMany({
+      where: { id: { in: [first.batchId, direct.id] } },
+    })
+  }, 300_000)
+
+  // ONE BATCH COVERS EVERY AUTHORITY. The sister companies are one operation,
+  // so a driver of either gets a statement under the same SB- number.
+  it('settles both authorities under one batch and one number', async () => {
+    const second = await owner.company.create({
+      data: { organizationId, name: `Sister ${nonce}` },
+    })
+    const driver = await owner.driver.create({
+      data: {
+        organizationId,
+        companyId: second.id,
+        firstName: 'SISTER',
+        lastName: `DRIVER ${nonce}`,
+      },
+    })
+    await owner.driverPayRule.create({
+      data: {
+        organizationId,
+        driverId: driver.id,
+        type: 'PERCENT_GROSS',
+        percentBps: 5000,
+        effectiveFrom: new Date(Date.UTC(2026, 0, 1)),
+      },
+    })
+    const period = weekOf(new Date(Date.UTC(2026, 10, 18)))
+    const load = await seedLoad({
+      number: 'SISTER',
+      rateCents: 200_000,
+      customerId: brokerId,
+      delDay: 18,
+      companyId: second.id,
+    })
+    await owner.load.update({
+      where: { id: load.id },
+      data: { driverId: driver.id },
+    })
+    await owner.loadStop.updateMany({
+      where: { loadId: load.id },
+      data: { scheduledAt: new Date(period.start.getTime() + 86_400_000) },
+    })
+
+    const opened = await inOrg((tx) =>
+      openBatch(tx, {
+        organizationId,
+        period,
+        statementDate: new Date(Date.UTC(2026, 10, 24)),
+        checkDate: new Date(Date.UTC(2026, 10, 27)),
+      }),
+    )
+    expect(opened.ok).toBe(true)
+    if (!opened.ok) return
+
+    const outcome = await inOrg((tx) =>
+      finaliseBatch(tx, opened.batchId, userId),
+    )
+    expect(outcome.ok).toBe(true)
+
+    const settlements = await owner.settlement.findMany({
+      where: { batchId: opened.batchId },
+      select: { companyId: true, settlementNumber: true },
+    })
+    // The sister authority's driver is in the same batch as everyone else.
+    expect(settlements.some((row) => row.companyId === second.id)).toBe(true)
+    // ONE SB- NUMBER for all of them, which is the ruling.
+    const batch = await owner.settlementBatch.findUniqueOrThrow({
+      where: { id: opened.batchId },
+      select: { batchNumber: true },
+    })
+    expect(batch.batchNumber).toMatch(/^SB-\d{6}$/)
+
+    // THE BATCH GOES FIRST. `SettlementLoadLine_loadId_fkey` is RESTRICT, so a
+    // settled load cannot be deleted while its line exists — which is the
+    // constraint working, and is why this teardown cascades through the batch
+    // rather than reaching for the load.
+    await owner.settlementBatch.delete({ where: { id: opened.batchId } })
+    await owner.load.delete({ where: { id: load.id } })
+    await owner.driver.delete({ where: { id: driver.id } })
+  }, 300_000)
+})
+
 describe('the number series', () => {
   it('runs across both carriers rather than per carrier', async () => {
     const second = await owner.company.create({
@@ -650,7 +791,6 @@ describe('the number series', () => {
       const created = await owner.settlementBatch.create({
         data: {
           organizationId,
-          companyId: companyIdFor,
           periodStart: period.start,
           periodEnd: period.end,
           statementDate: new Date(Date.UTC(2026, 9, weekDay + 6)),

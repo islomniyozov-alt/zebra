@@ -199,13 +199,24 @@ Both are optional at settlement time. A driver with no fuel import that week get
 
 ## 6. The weekly batch
 
-**`SettlementBatch`**: company + period + statement date + check date + status `DRAFT | FINAL | PAID`. One batch per company per week.
+**`SettlementBatch`**: period + statement date + check date + status `DRAFT | FINAL | PAID`. **One batch per week for the whole organization.**
+
+### Settlement is org-wide (Islom's ruling, 2026-09-11, superseding "one batch per company per week")
+
+The sister companies are ONE operation, and the batch follows the operation rather than the authority. What that changes, and what it deliberately does not:
+
+- **The batch has no company.** `SettlementBatch.companyId` is gone; one `SB-` number covers the week for everybody. The authority lives on each load line, which already carried it.
+- **One statement per driver per batch**, whatever he pulled. A driver who ran RAM freight on Monday and Dolphins freight on Thursday gets ONE statement, and **deductions are taken once** — the old shape would have taken an escrow contribution twice from a man who happened to cross authorities mid-week.
+- **The letterhead is the company that owns the truck the settlement is frozen on.** The unit number is already a frozen per-settlement field (below), so the letterhead is frozen with it rather than looked up — the same reason, and the same failure avoided.
+- **Load lines are grouped under company sub-headings, and ONLY when a statement has more than one.** A single-company statement keeps the shape drivers have been reading for years, byte for byte in layout. **Named here as a deliberate departure from the artifact**: Datatruck's Earnings table is a flat list because a Datatruck statement could only ever hold one authority's freight. It is the first place Zebra's statement prints something the original could not.
+- **Invoices stay per-authority.** An invoice carries the authority's MC and goes outside; §7's `IN-` series is untouched.
+- **One batch per period by convention, not by constraint.** `openBatch` refuses a second batch for a period and hands back the one that exists, by name, so the screen links to it rather than reporting a collision. There is deliberately **no DB unique on (organizationId, periodStart)**: post-FINAL money is a next-week line by a ruling that still stands, and a constraint would make the recovery path impossible rather than merely discouraged. An integration guard proves both halves — the action refuses, and a direct insert still succeeds.
 
 **Built 2026-09-11.** `settlement-week.ts` is the arithmetic and is graded against all six statements; `settlement-batch.ts` reads and writes the rows. A DRAFT holds no truth — every refresh deletes its settlements and recomputes from the loads, rules and charges as they are now, which is what makes "add the missing pay rule and refresh" a thing a person can do. The delete happens BEFORE the read, and that order is load-bearing: `settleableForBatch` excludes any load already carrying a settlement line, so reading first makes a draft invisible to its own refresh. The live path caught it — three loads went in, one fell out of the batch entirely and turned up unsettled the following week.
 
 `SB-` and `ST-` draw from `SeriesCounter`, keyed on the ORGANIZATION rather than the company. `Counter` stays per-authority because a load number and an invoice number belong to one; holding a shared series there would mean nominating one company to keep it in, which nothing in the schema could express.
 
-One action, **"Settle this week"**, per company. It:
+One action, **"Settle this week"**, for the organization. It:
 - takes every driver with a load delivered in the period;
 - **refuses, naming them**, any driver with no pay rule in force at period end — never skips silently;
 - excludes the non-people rows (7 Star, TJK logistic, truck 3609 Said) — they need a decision, not a settlement;
@@ -274,7 +285,9 @@ Factoring money stays out of the software — funded amounts, fees, reserves and
 
 ## 8. Screens
 
-- **Money → This week** — the only screen anyone opens on Tuesday. **Built 2026-09-11.** Per company, in order: the batch state for the period and the ONE action it allows; whether the Amazon remittance is in; held lines by name with remitted against booked; blocked drivers by name; the ready count that becomes the batch; the factoring position; the last four batches.
+- **Money → This week** — the only screen anyone opens on Tuesday. **Built 2026-09-11, reshaped the same day by the org-wide ruling (§6).** ONE page for the whole operation, in order: one period header; the ONE open batch and the ONE action it allows; whether each authority's Amazon remittance is in; blocked drivers by name with a company column; held lines by name with a company column and remitted against booked; the ready count that becomes the batch; the factoring position per authority; the last four batches.
+
+  **The company filter narrows the lists and not the totals, and is documented as a reading aid.** It defaults to All. Ready is the number that becomes the batch and the batch covers the organization, so a Ready that moved when somebody picked an authority would be a figure nobody can press a button on. Remittances and factoring stay per-authority because each is paid and filed separately (§7) — those are facts about a company, not a scope on the week.
 
   **It reads. It decides nothing.** Every figure comes from a definition that already exists — `SETTLEABLE_LOAD`, `computeBatch`, `packetReadiness` — so the screen cannot say "ready: 12" about a batch that would produce eleven.
 
@@ -282,7 +295,7 @@ Factoring money stays out of the software — funded amounts, fees, reserves and
 
   **Cost, measured rather than assumed.** The first version looped over companies and took **16.2 seconds** against 14,464 loads — five times over a 5s transaction budget, because each of six sections ran its queries once per authority. Rewritten to one org-scoped query per section: **13 queries, ~4.0s** from a development machine ~200ms from us-east-2, of which ~1.9s is the connection and the transaction open. A Worker sits far closer to Neon, so that figure is an upper bound; the query count is the number that transfers. `tests/this-week-timing.test.ts` prints both, in the `node` project — the integration project reads empty per-worker clones and would have measured nothing.
 - **Money → Remittances** — importer plus history.
-- **Money → Settlements** — batches by week and company, drilling to a driver's statement.
+- **Money → Settlements** — batches by week, drilling to a driver's statement. Not by company: there is one batch a week for the operation (§6).
 - **Driver screen** — pay rule history, recurring deductions, escrow balance, statement history.
 - **Invoices / Receivables** — scoped to broker freight only. They read $0 today and look broken; scoped, they will read correctly.
 

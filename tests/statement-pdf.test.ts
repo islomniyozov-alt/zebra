@@ -42,6 +42,7 @@ const inputFor = (
   checkDate: new Date(FIXTURE.checkDate),
   loads: FIXTURE.loads.map((row) => ({
     loadNumber: row.loadNumber,
+    companyName: 'RAM Haulage LLC',
     puPlace: 'Greenfield,IN',
     delPlace: 'Fort Wayne,IN',
     puDate: new Date(row.puDate),
@@ -221,5 +222,67 @@ describe('the YTD label', () => {
     )
     expect(text).not.toContain('YTD Net Pay:')
     expect(text).toContain('Net Pay since 8/16/2026:')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// A STATEMENT THAT SPANS TWO AUTHORITIES.
+//
+// Settlement is org-wide by ruling (Islom, 2026-09-11), so a driver who pulled
+// RAM and Dolphins freight in one week gets ONE statement. The Earnings table
+// then groups its lines under company sub-headings — A DELIBERATE DEPARTURE
+// from the artefact, which has a flat list because a Datatruck statement could
+// only ever hold one authority's freight.
+//
+// THE SINGLE-COMPANY CASE STAYS IDENTICAL, which is the other half of the
+// ruling and the reason this is a branch rather than a new layout. Almost every
+// statement has one company, and those must keep the shape drivers have been
+// reading for years.
+// ---------------------------------------------------------------------------
+
+describe('a statement carrying more than one authority', () => {
+  const twoCompanies = inputFor({
+    loads: FIXTURE.loads.map((row, index) => ({
+      loadNumber: row.loadNumber,
+      companyName: index < 3 ? 'RAM Haulage LLC' : 'Dolphin Transport inc',
+      puPlace: 'Greenfield,IN',
+      delPlace: 'Fort Wayne,IN',
+      puDate: new Date(row.puDate),
+      delDate: new Date(row.delDate),
+      grossCents: row.grossCents,
+      milesHundredths: row.milesHundredths,
+      amountCents: row.amountCents,
+    })),
+  })
+
+  it('prints a sub-heading for each authority', () => {
+    const text = drawn(renderStatementPdf(twoCompanies))
+    expect(text).toContain('RAM Haulage LLC')
+    expect(text).toContain('Dolphin Transport inc')
+  })
+
+  it('still prints every load line and the one Total row', () => {
+    const text = drawn(renderStatementPdf(twoCompanies))
+    for (const load of FIXTURE.loads) {
+      expect(text, load.loadNumber).toContain(load.loadNumber)
+    }
+    // ONE TOTAL, not one per group. The statement's Earnings total is what the
+    // driver is paid; a per-company subtotal would be a second figure nobody
+    // rules on.
+    expect(
+      text.filter((line) => line === 'Total:').length,
+      'one Earnings total, whatever the grouping',
+    ).toBeGreaterThanOrEqual(1)
+    expect(text).toContain(statementMoney(FIXTURE.totals.amountCents))
+  })
+
+  // WATCHED FAILING by removing the `grouped` branch: a single-company
+  // statement must print NO company heading, because that is the shape the
+  // artefact has and the one almost every driver receives.
+  it('prints no sub-heading when there is only one authority', () => {
+    const text = drawn(renderStatementPdf(inputFor()))
+    const headings = text.filter((line) => line === 'RAM Haulage LLC')
+    // The letterhead line only — never a second one over the Earnings table.
+    expect(headings).toHaveLength(1)
   })
 })

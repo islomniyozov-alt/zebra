@@ -1843,6 +1843,11 @@ const en = {
   'money.remittanceMissingHint':
     'Broker freight and standing deductions still settle; the Amazon lines will hold.',
   'money.ready': 'Ready:',
+  'money.allCompanies': 'All authorities',
+  'money.reason': 'Reason',
+  'money.remittedBooked': 'Remitted / booked',
+  'money.error.periodTaken':
+    'A batch already covers this period. One batch per week, for the whole operation — open that one instead.',
   'money.nothing.closedHistory':
     'nothing — all freight in this period settled in Datatruck.',
   'money.nothing.blocked':
@@ -3786,6 +3791,11 @@ const ru: Dictionary = {
   'money.remittanceMissingHint':
     'Брокерские грузы и постоянные удержания всё равно рассчитываются; строки Amazon будут отложены.',
   'money.ready': 'Готово:',
+  'money.allCompanies': 'Все перевозчики',
+  'money.reason': 'Причина',
+  'money.remittedBooked': 'Выплачено / по ставке',
+  'money.error.periodTaken':
+    'На этот период уже есть партия. Одна партия в неделю на всю компанию — откройте её.',
   'money.nothing.closedHistory':
     'ничего — все грузы за этот период рассчитаны в Datatruck.',
   'money.nothing.blocked': 'пока ничего — водителям ниже нужно правило оплаты.',
@@ -5702,6 +5712,11 @@ const fa: Dictionary = {
   'money.remittanceMissingHint':
     'بار بروکری و کسورات ثابت همچنان تسویه می‌شوند؛ ردیف‌های آمازون نگه داشته می‌شوند.',
   'money.ready': 'آماده:',
+  'money.allCompanies': 'همهٔ شرکت‌ها',
+  'money.reason': 'دلیل',
+  'money.remittedBooked': 'پرداخت‌شده / طبق نرخ',
+  'money.error.periodTaken':
+    'برای این دوره از قبل یک دسته وجود دارد. هفته‌ای یک دسته برای کل مجموعه — همان را باز کنید.',
   'money.nothing.closedHistory':
     'هیچ — همهٔ بارهای این دوره در Datatruck تسویه شده‌اند.',
   'money.nothing.blocked':

@@ -113,16 +113,22 @@ export const statementNumberOf = (value: number) =>
  * halves are needed: the filter is the screen, the constraint is the promise.
  */
 export function settleableForBatch(
-  companyId: string | readonly string[],
+  companyId: string | readonly string[] | null,
   period: Week,
 ): Prisma.LoadWhereInput {
   return {
     ...SETTLEABLE_LOAD,
-    // ONE COMPANY OR SEVERAL, through the same definition. The money screen
-    // reads every authority at once and a per-company loop cost it five times
-    // the round trips — 16 seconds against 14,464 loads, over a 5s budget.
-    companyId:
-      typeof companyId === 'string' ? companyId : { in: [...companyId] },
+    // ONE COMPANY, SEVERAL, OR THE WHOLE ORGANIZATION through the same
+    // definition. Settlement is org-wide by ruling, so `null` is now the
+    // normal case and the company filter is what a scoped VIEW uses — row-level
+    // security already fences the organization, so no filter is needed to stay
+    // inside it.
+    ...(companyId === null
+      ? {}
+      : {
+          companyId:
+            typeof companyId === 'string' ? companyId : { in: [...companyId] },
+        }),
     driverId: { not: null },
     // The DELIVERY is what puts a load in a week — the same date the pay rule
     // is looked up on, so a load cannot be paid under a rule from a week it
@@ -146,60 +152,27 @@ const placeOf = (
 ) => (stop ? `${stop.city ?? ''},${stop.state ?? ''}` : '')
 
 /**
- * Everything one company's week needs, per driver, ready for the engine.
+ * Everything the organization's week needs, per driver, ready for the engine.
  *
- * ONE READ, NOT ONE PER DRIVER. A batch of fifteen drivers reading pay rules,
- * recurring deductions, charges, escrow and opening balances separately is
- * seventy-five round trips inside a five-second transaction budget.
+ * ONE READ FOR EVERYTHING, which is both the ruling and the performance fix.
+ * Settlement is org-wide, so there is no company to loop over — and the loop
+ * that used to be here cost the money screen five times its round trips.
+ *
+ * `batchInputFor`, the single-company wrapper, is GONE rather than deprecated.
+ * Nothing may settle one authority at a time any more, and leaving the door
+ * open would be leaving the old rule reachable.
  */
-export async function batchInputFor(
+export async function batchInputForOrg(
   tx: TxClient,
   input: {
     organizationId: string
-    companyId: string
     period: Week
     statementDate: Date
     checkDate: Date
   },
-): Promise<{ drivers: DriverSettlementInput[] }> {
-  const many = await batchInputForCompanies(tx, {
-    ...input,
-    companyIds: [input.companyId],
-  })
-  return { drivers: many.get(input.companyId) ?? [] }
-}
-
-/**
- * The same read, for several authorities at once.
- *
- * ── WHY THIS EXISTS AND `batchInputFor` IS NOW A WRAPPER ─────────────────
- *
- * The money screen reads every company in the organization. Calling the
- * single-company version in a loop made each of its eight queries eight times
- * over — 16.2 seconds against the 14,464 loads on dev, against a five-second
- * transaction budget. The queries were already `driverId: { in: [...] }`
- * shaped; only the company filter and the grouping needed widening.
- *
- * ONE DEFINITION STILL. `settleableForBatch` decides what may settle, for one
- * company or for five, and `batchInputFor` now goes through here — so the
- * screen and the draft cannot drift apart, which was the point of sharing it.
- */
-export async function batchInputForCompanies(
-  tx: TxClient,
-  input: {
-    organizationId: string
-    companyIds: readonly string[]
-    period: Week
-    statementDate: Date
-    checkDate: Date
-  },
-): Promise<Map<string, DriverSettlementInput[]>> {
-  const byCompany = new Map<string, DriverSettlementInput[]>()
-  for (const companyId of input.companyIds) byCompany.set(companyId, [])
-  if (input.companyIds.length === 0) return byCompany
-
+): Promise<DriverSettlementInput[]> {
   const loads = await tx.load.findMany({
-    where: settleableForBatch(input.companyIds, input.period),
+    where: settleableForBatch(null, input.period),
     select: {
       id: true,
       loadNumber: true,
@@ -208,6 +181,8 @@ export async function batchInputForCompanies(
       actualMiles: true,
       dispatchedMiles: true,
       settledGrossCents: true,
+      companyId: true,
+      company: { select: { name: true } },
       customer: { select: { settlesDirectly: true } },
       stops: {
         orderBy: { sequence: 'asc' },
@@ -239,7 +214,9 @@ export async function batchInputForCompanies(
     where: {
       OR: [
         {
-          driver: { companyId: { in: [...input.companyIds] }, deletedAt: null },
+          // EVERY LIVE DRIVER IN THE ORGANIZATION. Row-level security is the
+          // tenant fence; there is no company to narrow to any more.
+          driver: { deletedAt: null },
         },
         { driverId: { in: driverIds } },
       ],
@@ -249,7 +226,7 @@ export async function batchInputForCompanies(
     if (!driverIds.includes(row.driverId)) driverIds.push(row.driverId)
   }
 
-  if (driverIds.length === 0) return byCompany
+  if (driverIds.length === 0) return []
 
   const year = input.period.start.getUTCFullYear()
   const [drivers, payRules, charges, escrow, opening, prior] =
@@ -262,7 +239,10 @@ export async function batchInputForCompanies(
           firstName: true,
           lastName: true,
           payoutLagWeeks: true,
-          assignedTruck: { select: { unitNumber: true } },
+          // THE LETTERHEAD COMES WITH THE UNIT. By ruling the statement goes
+          // out under the authority that owns the truck it is frozen on, so
+          // the truck's company is read in the same breath as its number.
+          assignedTruck: { select: { unitNumber: true, companyId: true } },
         },
       }),
       tx.driverPayRule.findMany({ where: { driverId: { in: driverIds } } }),
@@ -301,6 +281,7 @@ export async function batchInputForCompanies(
     escrow.map((row) => [row.driverId, row._sum.amountCents ?? 0]),
   )
 
+  const out: DriverSettlementInput[] = []
   for (const driver of drivers) {
     const built = ((): DriverSettlementInput => {
       const mine = loads.filter((load) => load.driverId === driver.id)
@@ -315,6 +296,10 @@ export async function batchInputForCompanies(
         // AS THE STATEMENT PRINTS IT. "JERRY ROBERT MCKANE", first then last.
         driverName: `${driver.firstName} ${driver.lastName}`.trim(),
         unitNumber: driver.assignedTruck?.unitNumber ?? null,
+        // Falls back to the driver's own authority when no truck is assigned:
+        // a statement with no letterhead is not a document.
+        letterheadCompanyId:
+          driver.assignedTruck?.companyId ?? driver.companyId,
         period: input.period,
         loads: mine.map((load): SettleableLoad => {
           const pickup = load.stops.find((stop) => stop.type === 'PICKUP')
@@ -329,6 +314,8 @@ export async function batchInputForCompanies(
           return {
             id: load.id,
             loadNumber: load.loadNumber,
+            companyId: load.companyId,
+            companyName: load.company.name,
             puPlace: placeOf(pickup),
             delPlace: placeOf(delivery),
             puDate: pickup?.scheduledAt ?? input.period.start,
@@ -373,10 +360,10 @@ export async function batchInputForCompanies(
               ),
       }
     })()
-    byCompany.get(driver.companyId)?.push(built)
+    out.push(built)
   }
 
-  return byCompany
+  return out
 }
 
 /**
@@ -398,7 +385,6 @@ export async function openBatch(
   tx: TxClient,
   input: {
     organizationId: string
-    companyId: string
     period: Week
     statementDate: Date
     checkDate: Date
@@ -410,10 +396,40 @@ export async function openBatch(
     return { ok: false, reason: { kind: 'not_a_week' } }
   }
 
+  // ── ONE BATCH PER PERIOD, ENFORCED HERE AND NOT BY THE DATABASE ───────
+  //
+  // The ruling is one batch per period for the organization, and this is where
+  // it lives. There is deliberately NO unique on (organizationId,
+  // periodStart): a held line confirmed after FINAL has to land somewhere, and
+  // post-FINAL money is a next-week line by a ruling that still stands — a
+  // constraint would make the recovery path impossible rather than merely
+  // discouraged.
+  //
+  // So the action refuses BY NAME and hands back the batch that already covers
+  // the week, so the screen can link to it instead of reporting a collision.
+  const existing = await tx.settlementBatch.findFirst({
+    where: {
+      organizationId: input.organizationId,
+      deletedAt: null,
+      periodStart: input.period.start,
+    },
+    select: { id: true, status: true, batchNumber: true },
+  })
+  if (existing) {
+    return {
+      ok: false,
+      reason: {
+        kind: 'period_taken',
+        batchId: existing.id,
+        status: existing.status,
+        batchNumber: existing.batchNumber,
+      },
+    }
+  }
+
   const batch = await tx.settlementBatch.create({
     data: {
       organizationId: input.organizationId,
-      companyId: input.companyId,
       periodStart: input.period.start,
       periodEnd: input.period.end,
       statementDate: input.statementDate,
@@ -433,6 +449,13 @@ export type BatchRefusal =
   | { kind: 'not_found' }
   | { kind: 'not_draft'; status: string }
   | { kind: 'blocked'; blockers: BatchResult['blockers'] }
+  /** A batch already covers this period. Carries it, so the screen can link. */
+  | {
+      kind: 'period_taken'
+      batchId: string
+      status: string
+      batchNumber: string | null
+    }
 
 /** Recompute a draft from the rows as they are now. Throws the old lines away. */
 export async function refreshDraft(
@@ -467,16 +490,14 @@ export async function refreshDraft(
   // draft absent, which is exactly what recomputing it means.
   await tx.settlement.deleteMany({ where: { batchId } })
 
-  const { drivers } = await batchInputFor(tx, {
+  const drivers = await batchInputForOrg(tx, {
     organizationId: batch.organizationId,
-    companyId: batch.companyId,
     period,
     statementDate: batch.statementDate,
     checkDate: batch.checkDate,
   })
 
   const result = computeBatch({
-    companyId: batch.companyId,
     period,
     statementDate: batch.statementDate,
     checkDate: batch.checkDate,
@@ -487,7 +508,10 @@ export async function refreshDraft(
     await tx.settlement.create({
       data: {
         organizationId: batch.organizationId,
-        companyId: batch.companyId,
+        // THE LETTERHEAD, not the batch's company — the batch has none. By
+        // ruling this is the authority that owns the truck the settlement is
+        // frozen on, resolved in `batchInputForOrg` beside the unit number.
+        companyId: settlement.letterheadCompanyId,
         batchId: batch.id,
         driverId: settlement.driverId,
         // NO NUMBER ON A DRAFT. A number issued to something that may never
@@ -511,6 +535,10 @@ export async function refreshDraft(
             organizationId: batch.organizationId,
             loadId: line.loadId,
             loadNumber: line.loadNumber,
+            // FROZEN, so a statement carrying two authorities keeps its
+            // grouping even if a load is later moved between them.
+            companyId: line.companyId,
+            companyName: line.companyName,
             puPlace: line.puPlace,
             delPlace: line.delPlace,
             puDate: line.puDate,
