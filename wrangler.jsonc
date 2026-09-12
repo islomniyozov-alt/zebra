@@ -76,9 +76,14 @@
     // does, one per column — always reaches that model's own host, so a
     // comparison cannot be silently answered by the other provider.
     //
-    // ON ANTHROPIC UNTIL THE NUMBERS SAY OTHERWISE (owner's ruling): no
-    // production switch before the CDL and medical accuracy runs are in.
-    "LLM_PROVIDER": "ANTHROPIC",
+    // UNSET, DELIBERATELY (owner's ruling, 2026-09-12). Unset resolves to
+    // ANTHROPIC, which is where every read already goes — so this ships the
+    // seam with nothing switched and nothing to un-switch.
+    //
+    // AND UNSET IS NOT THE SAME AS MISSPELLED, which is why leaving it out is
+    // safe rather than sloppy: an absent variable is a deployment nobody has
+    // told, and resolves to the floor; a wrong one REFUSES, naming itself.
+    // `tests/claude.test.ts` holds both halves.
 
     // ── AND IT IS CHOSEN PER DOCUMENT TYPE (owner's ruling, 2026-09-12) ──
     //
@@ -150,16 +155,15 @@
         "NEON_BRANCH": "production",
         "R2_BUCKET": "zebra-docs",
 
-        // STATED, NOT INHERITED. Bindings do not come down into a named
-        // environment — the comment above this block is about exactly that,
-        // and an omitted var is silently absent rather than an error. A
-        // production worker with no LLM_PROVIDER would default to ANTHROPIC,
-        // which is the right answer arrived at by accident; this makes it the
-        // right answer on purpose, and makes the switch a one-line diff that
-        // shows up in review.
-        "LLM_PROVIDER": "ANTHROPIC",
-        // Per-type overrides — `LLM_PROVIDER_<KIND>` — are absent here for the
-        // same reason as on dev: no production switch yet.
+        // NO PROVIDER VARIABLES HERE EITHER (owner's ruling, 2026-09-12).
+        //
+        // Bindings do not come down into a named environment, so this block
+        // would have needed its own copy of every one of them — and the point
+        // of this deploy is that NOTHING SWITCHES. Absent resolves to
+        // ANTHROPIC, which is where production already reads.
+        //
+        // When a switch is ruled, it is `LLM_PROVIDER_<KIND>` added here, one
+        // line naming one document type, visible in the diff.
         // NOT CREDENTIALS, AND THEREFORE NOT SECRETS. The account id is
         // printed by `wrangler whoami` and the endpoint is derived from it;
         // neither protects anything. Only R2_ACCESS_KEY_ID and
