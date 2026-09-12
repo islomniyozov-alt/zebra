@@ -44,8 +44,9 @@
     "20260911120000_settlement_batch",
     "20260911130000_settlement_series",
     "20260911140000_settled_gross",
-    "20260911190000_filed_paid_and_work_period"
+    "20260911190000_filed_paid_and_work_period",
+    "20260911230000_org_wide_batch"
   ],
-  "recordedAt": "2026-09-11",
+  "recordedAt": "2026-09-12",
   "verified": true
 }
