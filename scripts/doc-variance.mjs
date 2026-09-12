@@ -43,6 +43,26 @@ const KIND = process.argv[2]
 const CARD = process.argv[3]
 const RUNS = Number(process.argv[4] ?? 10)
 
+// WHICH ENGINE, defaulting to the worker's configured provider.
+//
+//   node -r dotenv/config scripts/doc-variance.mjs med <card> 5 //     --model deepseek-v4-flash-vision-exp
+//
+// Stability is a property of an ENGINE reading a document, not of the
+// document alone: the 2026-09-12 comparison had one engine right 5/5 on a
+// medical card and the other wrong 3/5 at high confidence, and a single read
+// cannot tell a bad engine from a bad read. Naming the model is what lets the
+// same card be measured twice and the two be compared.
+const MODEL = process.argv.includes('--model')
+  ? process.argv[process.argv.indexOf('--model') + 1]
+  : null
+
+// THE ROTATION-NORMALISATION STEP (owner's ruling, 2026-09-12), as quarter
+// turns clockwise — what a person does in `UprightCard` for a photo carrying
+// no EXIF. EXIF itself is applied whatever this says.
+const TURNS = process.argv.includes('--turns')
+  ? Number(process.argv[process.argv.indexOf('--turns') + 1])
+  : 0
+
 // ── --shape-only: MEASURE STABILITY WITHOUT DISCLOSING CONTENT ────────────
 //
 // A variance run tells you whether a field moved. It does NOT need to tell you
@@ -78,6 +98,8 @@ const bytes = readFileSync(CARD)
 console.log(`document ${type.label}`)
 console.log(`card     ${CARD} (${bytes.length} bytes as ${mimeTypeOf(CARD)})`)
 console.log(`target   ${BASE}${type.route}`)
+console.log(`model    ${MODEL ?? "(the worker's configured default)"}`)
+console.log(`upright  EXIF applied; ${TURNS} quarter-turn(s) by hand`)
 console.log(`runs     ${RUNS}
 `)
 
@@ -91,7 +113,14 @@ try {
 
   for (let run = 1; run <= RUNS; run++) {
     const started = Date.now()
-    const answer = await readDocument(page, type, bytes, basename(CARD))
+    const answer = await readDocument(
+      page,
+      type,
+      bytes,
+      basename(CARD),
+      MODEL,
+      TURNS,
+    )
     const ms = Date.now() - started
     let parsed = null
     try {
@@ -124,11 +153,11 @@ try {
 // cannot destroy the evidence — the rule `doc-accuracy.mjs` also follows.
 mkdirSync('corpus/.extractions', { recursive: true })
 const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-const out = `corpus/.extractions/variance-${basename(CARD).replace(/\W+/g, '-')}-${stamp}.json`
+const out = `corpus/.extractions/variance-${basename(CARD).replace(/\W+/g, '-')}-${(MODEL ?? 'default').replace(/\W+/g, '-')}-${stamp}.json`
 writeFileSync(
   out,
   JSON.stringify(
-    { kind: KIND, card: CARD, base: BASE, runs: results },
+    { kind: KIND, card: CARD, base: BASE, model: MODEL, runs: results },
     null,
     2,
   ),

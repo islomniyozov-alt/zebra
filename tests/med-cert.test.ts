@@ -39,6 +39,19 @@ const withField = (key: string, replacement: unknown) => {
   return JSON.stringify(parsed)
 }
 
+/**
+ * Several fields at once, which the dating rules need.
+ *
+ * `withField` changes one key; a rule about the RELATIONSHIP between the
+ * signed date and the expiry has to move both, and a test that moved one and
+ * left the other would be asserting against a card no examiner would issue.
+ */
+const withFields = (overrides: Record<string, unknown>) =>
+  JSON.stringify({
+    ...(JSON.parse(GOOD) as Record<string, unknown>),
+    ...overrides,
+  })
+
 const refusalOf = (text: string): string | null => {
   try {
     parseMedicalCertResponse(text)
@@ -49,6 +62,21 @@ const refusalOf = (text: string): string | null => {
   }
 }
 
+// ── EVERY REFUSAL CHECK NOW NEEDS THE DAY THE CARD ARRIVED ────────────────
+//
+// `refuseMedicalCert` gained a rule that a certificate cannot be signed after
+// it was uploaded (owner's ruling, 2026-09-12), so it takes the upload day
+// rather than reading a clock — a refusal whose verdict depends on when the
+// suite runs is not a rule, it is a mood.
+//
+// FIXED HERE, AND LATER THAN EVERY FIXTURE'S DATES, so the existing cases go
+// on testing what they were written to test.
+const UPLOADED = '2026-09-12'
+const refuse = (
+  card: Parameters<typeof refuseMedicalCert>[0],
+  uploadedOn = UPLOADED,
+) => refuseMedicalCert(card, uploadedOn)
+
 describe('a well-formed certificate', () => {
   it('parses the four stored fields and the compared one', () => {
     const card = parseMedicalCertResponse(GOOD)
@@ -57,7 +85,7 @@ describe('a well-formed certificate', () => {
     expect(card.examinerName?.value).toBe('DANA R OKONKWO, DO')
     expect(card.examinerRegistryNumber?.value).toBe('1234567890')
     expect(card.driverName?.value).toBe('ADNAN GASHI')
-    expect(refuseMedicalCert(card)).toBeNull()
+    expect(refuse(card)).toBeNull()
   })
 
   it('keeps the dates exactly as printed, unconverted', () => {
@@ -194,14 +222,14 @@ describe('dates, converted here rather than by the model', () => {
 
 describe('when a certificate was not read', () => {
   it('refuses without an expiry — the only field that feeds an alarm', () => {
-    expect(
-      refuseMedicalCert(parseMedicalCertResponse(withField('expiresAt', null))),
-    ).toBe('no_expiry')
+    expect(refuse(parseMedicalCertResponse(withField('expiresAt', null)))).toBe(
+      'no_expiry',
+    )
   })
 
   it('refuses a low-confidence expiry even though the value is there', () => {
     expect(
-      refuseMedicalCert(
+      refuse(
         parseMedicalCertResponse(
           withField('expiresAt', { value: '03/04/2027', confidence: 'low' }),
         ),
@@ -211,7 +239,7 @@ describe('when a certificate was not read', () => {
 
   it('refuses an expiry it cannot convert', () => {
     expect(
-      refuseMedicalCert(
+      refuse(
         parseMedicalCertResponse(
           withField('expiresAt', { value: 'next spring', confidence: 'high' }),
         ),
@@ -223,7 +251,7 @@ describe('when a certificate was not read', () => {
     // It is the only thing bounding the expiry, so losing it quietly would
     // remove the two checks below without anybody deciding to.
     expect(
-      refuseMedicalCert(
+      refuse(
         parseMedicalCertResponse(
           withField('issuedAt', { value: 'last year', confidence: 'high' }),
         ),
@@ -233,7 +261,7 @@ describe('when a certificate was not read', () => {
 
   it('refuses an expiry before its examination', () => {
     expect(
-      refuseMedicalCert(
+      refuse(
         parseMedicalCertResponse(
           withField('issuedAt', { value: '03/04/2029', confidence: 'high' }),
         ),
@@ -245,7 +273,7 @@ describe('when a certificate was not read', () => {
     // 49 CFR 391.43(f) caps it at two years, so a ten-year span is a misread
     // digit — most likely the year.
     expect(
-      refuseMedicalCert(
+      refuse(
         parseMedicalCertResponse(
           withField('expiresAt', { value: '03/04/2035', confidence: 'high' }),
         ),
@@ -260,7 +288,7 @@ describe('when a certificate was not read', () => {
     // is medical.
     for (const expiry of ['03/04/2027', '06/04/2025', '03/03/2027']) {
       expect(
-        refuseMedicalCert(
+        refuse(
           parseMedicalCertResponse(
             withField('expiresAt', { value: expiry, confidence: 'high' }),
           ),
@@ -270,11 +298,114 @@ describe('when a certificate was not read', () => {
     }
   })
 
+  // ── THE 24-MONTH CAP, TIGHTENED FROM 26 (owner's ruling, 2026-09-12) ───
+  //
+  // The slack was removed because of how these actually get read wrong. The
+  // provider comparison returned an expiry of 04/18/2026 against a signed date
+  // of 04/18/2025 — a plausible two-year span, both dates invented, both at
+  // high confidence, and internally consistent enough to pass every other rule
+  // in this file. The near misses land a month or two off the regulation,
+  // which is exactly the room 26 months left open.
+  it('refuses a span past the regulation, which 26 months used to allow', () => {
+    // 25 months. Legal under the old bound, refused under the ruling.
+    expect(
+      refuse(
+        parseMedicalCertResponse(
+          withField('expiresAt', { value: '04/04/2027', confidence: 'high' }),
+        ),
+      ),
+    ).toBe('implausible_validity')
+  })
+
+  it('accepts the anniversary day itself, which is still 24 months', () => {
+    // INCLUSIVE, and the boundary is worth an assertion of its own: a card
+    // signed 03/04/2025 and expiring 03/04/2027 is the ordinary certificate
+    // this system exists to read, and an off-by-one here would refuse the
+    // commonest document on the roster.
+    expect(
+      refuse(
+        parseMedicalCertResponse(
+          withField('expiresAt', { value: '03/04/2027', confidence: 'high' }),
+        ),
+      ),
+    ).toBeNull()
+  })
+
+  it('clamps a leap day rather than rolling into March', () => {
+    // ── THE ONLY DATE WHERE THE CLAMP CAN MATTER ───────────────────────
+    //
+    // Twenty-four months lands on the SAME month, which has the same number of
+    // days — so there is exactly one source date whose anniversary does not
+    // exist: 29 February. `Date.UTC(2024, 25, 29)` silently becomes 1 March
+    // 2026 and would hand two extra days of validity to a card whose dates are
+    // already suspect.
+    //
+    // WATCHED FAILING, AND THE FIRST VERSION OF THIS TEST COULD NOT BE. It
+    // used 31 August, whose anniversary is also 31 August — a month that never
+    // rolls — so it passed with the clamp removed. The break harness said so;
+    // reading the assertion alone would not have.
+    const onTheClamp = withFields({
+      issuedAt: { value: '02/29/2024', confidence: 'high' },
+      expiresAt: { value: '02/28/2026', confidence: 'high' },
+    })
+    expect(refuse(parseMedicalCertResponse(onTheClamp))).toBeNull()
+
+    const rolled = withFields({
+      issuedAt: { value: '02/29/2024', confidence: 'high' },
+      expiresAt: { value: '03/01/2026', confidence: 'high' },
+    })
+    expect(refuse(parseMedicalCertResponse(rolled))).toBe(
+      'implausible_validity',
+    )
+  })
+
+  // -- SIGNED IN THE FUTURE (owner's ruling, 2026-09-12) ------------------
+  //
+  // An examination happens before the paperwork describing it arrives. A
+  // signed date after the upload day is a year read wrong, and it is the
+  // specific error the comparison run produced: an engine dated a 2026 card to
+  // 2025, and would have dated it forward just as readily.
+  it('refuses a certificate signed after the day it arrived', () => {
+    const future = withFields({
+      issuedAt: { value: '03/04/2027', confidence: 'high' },
+      expiresAt: { value: '03/04/2028', confidence: 'high' },
+    })
+    expect(refuse(parseMedicalCertResponse(future), '2026-09-12')).toBe(
+      'signed_in_future',
+    )
+  })
+
+  it('accepts one signed on the upload day itself', () => {
+    // A card photographed in the examiner's car park is the ordinary case, not
+    // an edge one. The bound is AFTER, not on.
+    const today = withFields({
+      issuedAt: { value: '09/12/2026', confidence: 'high' },
+      expiresAt: { value: '09/12/2028', confidence: 'high' },
+    })
+    expect(refuse(parseMedicalCertResponse(today), '2026-09-12')).toBeNull()
+  })
+
+  it('judges the signed date against the UPLOAD, never against today', () => {
+    // The same card re-read next year must reach the same verdict. A rule
+    // keyed to the moment of execution would quietly reclassify old documents
+    // as they age — and would make this suite's result depend on the calendar.
+    const card = parseMedicalCertResponse(
+      withFields({
+        issuedAt: { value: '03/04/2025', confidence: 'high' },
+        expiresAt: { value: '03/04/2027', confidence: 'high' },
+      }),
+    )
+    expect(refuse(card, '2025-03-04')).toBeNull()
+    expect(refuse(card, '2030-01-01')).toBeNull()
+    // And arriving BEFORE it was signed is still refused, whenever that was.
+    expect(refuse(card, '2025-03-03')).toBe('signed_in_future')
+  })
+
   it('does not consult the driver name at all', () => {
     // A disagreement WARNS; it never refuses. The card may be right and the
     // page wrong, and deciding which is a person's job.
     expect(
-      refuseMedicalCert(
+      refuse(
         parseMedicalCertResponse(
           withField('driverName', {
             value: 'SOMEBODY ELSE',
@@ -284,9 +415,7 @@ describe('when a certificate was not read', () => {
       ),
     ).toBeNull()
     expect(
-      refuseMedicalCert(
-        parseMedicalCertResponse(withField('driverName', null)),
-      ),
+      refuse(parseMedicalCertResponse(withField('driverName', null))),
     ).toBeNull()
   })
 })

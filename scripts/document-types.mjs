@@ -99,14 +99,58 @@ export function documentType(name) {
  * drop zone takes, which is what makes this a reading of the deployed route
  * rather than of something assembled for the test.
  */
-export async function readDocument(page, type, bytes, name, model = null) {
+export async function readDocument(
+  page,
+  type,
+  bytes,
+  name,
+  model = null,
+  quarterTurns = 0,
+) {
   return page.evaluate(
-    async ({ b64, filename, mime, route, extras }) => {
+    async ({ b64, filename, mime, route, extras, turns }) => {
       const binary = atob(b64)
       const array = new Uint8Array(binary.length)
       for (let i = 0; i < binary.length; i++) array[i] = binary.charCodeAt(i)
+      let file = new File([array], filename, { type: mime })
+
+      // ── THE ROTATION-NORMALISATION STEP, IN THE BROWSER THAT SHIPS IT ───
+      //
+      // `imageOrientation: 'from-image'` is the EXIF half and is always
+      // applied, exactly as `downscale.ts` does — passed explicitly because
+      // the spec default changed and a browser that ignores EXIF and one that
+      // honours it would both be "correct".
+      //
+      // `turns` is the other half: what a PERSON does in `UprightCard` when
+      // the file carries no EXIF. Supplied by the caller here, since a script
+      // has nobody to ask.
+      //
+      // THIS REPRODUCES THE PIPELINE'S PRIMITIVES; IT DOES NOT DRIVE THE UI.
+      // Said plainly because it matters when reading a number that came out of
+      // it: the same `createImageBitmap` and the same canvas rotation, but not
+      // the same React component, and not the 1600px downscale — these cards
+      // are already under that edge.
+      if (mime.startsWith('image/')) {
+        const bitmap = await createImageBitmap(file, {
+          imageOrientation: 'from-image',
+        })
+        const sideways = turns === 1 || turns === 3
+        const canvas = document.createElement('canvas')
+        canvas.width = sideways ? bitmap.height : bitmap.width
+        canvas.height = sideways ? bitmap.width : bitmap.height
+        const context = canvas.getContext('2d')
+        context.translate(canvas.width / 2, canvas.height / 2)
+        context.rotate((turns * Math.PI) / 2)
+        context.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2)
+        bitmap.close()
+        const blob = await new Promise((resolve) =>
+          canvas.toBlob(resolve, 'image/jpeg', 0.85),
+        )
+        file = new File([blob], filename, { type: 'image/jpeg' })
+      }
+
       const body = new FormData()
-      body.append('file', new File([array], filename, { type: mime }))
+      body.append('file', file)
       for (const [key, value] of Object.entries(extras)) body.append(key, value)
       const response = await fetch(route, { method: 'POST', body })
       return { status: response.status, text: await response.text() }
@@ -120,6 +164,7 @@ export async function readDocument(page, type, bytes, name, model = null) {
       // is never defaulted away: a comparison whose column could quietly be
       // answered by the other provider measures nothing.
       extras: { ...type.extras(), ...(model ? { model } : {}) },
+      turns: ((quarterTurns % 4) + 4) % 4,
     },
   )
 }

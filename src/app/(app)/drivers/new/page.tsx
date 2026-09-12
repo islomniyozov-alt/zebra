@@ -65,6 +65,14 @@ export default async function NewDriverPage() {
           defaultAuthority={defaultAuthority}
           fields={driverFields(t, authorities, 'create', truckOptions)}
           labels={{
+            upright: {
+              title: t('upright.title'),
+              hint: t('upright.hint'),
+              rotateLeft: t('upright.rotateLeft'),
+              rotateRight: t('upright.rotateRight'),
+              read: t('upright.read'),
+              cancel: t('upright.cancel'),
+            },
             authority: t('ref.authority'),
             dropTitle: t('drivers.cdl.dropTitle'),
             dropBody: t('drivers.cdl.dropBody'),

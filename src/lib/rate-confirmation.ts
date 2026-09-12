@@ -310,6 +310,9 @@ export async function askForExtraction(
       mimeType: input.mimeType,
       system: EXTRACTION_SYSTEM_WITH_SCHEMA,
       prompt: extractionPrompt(),
+      // WHAT THIS IS, so the provider can be chosen per document type
+      // (owner's ruling, 2026-09-12). The reader still picks no engine.
+      kind: 'rate_confirmation',
       ...(input.model ? { model: input.model } : {}),
       ...(input.cache ? { cache: true } : {}),
       ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),

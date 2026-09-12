@@ -395,9 +395,28 @@ describe('the provider seam', () => {
     expect(providerOf('deepseek-v4-flash-vision-exp')).toBe('DEEPSEEK')
     expect(providerOf('deepseek-v4-pro')).toBe('DEEPSEEK')
     expect(providerOf('claude-sonnet-5')).toBe('ANTHROPIC')
-    // AN UNKNOWN NAME GOES TO ANTHROPIC — a 404 from a real host beats a
-    // silent send to the wrong company.
-    expect(providerOf('something-nobody-added')).toBe('ANTHROPIC')
+  })
+
+  // ── AN UNKNOWN NAME REFUSES, NAMING ITSELF (owner's ruling, 2026-09-12) ─
+  //
+  // THIS TEST ASSERTED THE OPPOSITE UNTIL TODAY. It expected an unrecognised
+  // model to resolve to ANTHROPIC, on the argument that a 404 from a real host
+  // beats a silent send to the wrong one. The ruling is that neither is
+  // acceptable — and writing the old behaviour down is what showed why: a typo
+  // in a DeepSeek model name was a real request BILLED TO ANTHROPIC for a
+  // model nobody chose, answered by a 404 that named the wrong company.
+  it('refuses an unknown model rather than falling back to Anthropic', () => {
+    expect(() => providerOf('something-nobody-added')).toThrowError(ClaudeError)
+    // NAMES THE VALUE. A refusal that says "unknown model" without saying
+    // which one sends somebody to grep a config they cannot see from the log.
+    expect(() => providerOf('depseek-v4-pro')).toThrowError(/"depseek-v4-pro"/)
+    try {
+      providerOf('depseek-v4-pro')
+    } catch (error) {
+      expect((error as ClaudeError).reason).toBe('unknown_model')
+      // And says what WOULD have been accepted.
+      expect((error as ClaudeError).message).toContain('deepseek-v4-pro')
+    }
   })
 
   it('posts to the host the model belongs to, with that host’s key name', async () => {
@@ -456,24 +475,101 @@ describe('the provider seam', () => {
   })
 
   it('reads the provider from config, and refuses to guess at a typo', () => {
-    expect(configuredProvider({})).toBe('ANTHROPIC')
-    expect(configuredProvider({ LLM_PROVIDER: 'DEEPSEEK' })).toBe('DEEPSEEK')
-    expect(configuredProvider({ LLM_PROVIDER: ' deepseek ' })).toBe('DEEPSEEK')
-    // A TYPO IS ANTHROPIC, NOT DEEPSEEK. An unrecognised value must not move
-    // every document read to a different company.
-    expect(configuredProvider({ LLM_PROVIDER: 'DEEPSEK' })).toBe('ANTHROPIC')
+    expect(configuredProvider(null, {})).toBe('ANTHROPIC')
+    expect(configuredProvider(null, { LLM_PROVIDER: 'DEEPSEEK' })).toBe(
+      'DEEPSEEK',
+    )
+    expect(configuredProvider(null, { LLM_PROVIDER: ' deepseek ' })).toBe(
+      'DEEPSEEK',
+    )
+  })
+
+  // ── A MISSPELLED PROVIDER REFUSES TOO ──────────────────────────────────
+  //
+  // Also the reverse of what this file asserted this morning. `console.warn`
+  // on a Worker reaches a tail nobody is watching, so "warn and carry on as
+  // ANTHROPIC" was a silent fallback with a log line attached.
+  it('refuses a misspelled provider, and says what it was set to', () => {
+    expect(() =>
+      configuredProvider(null, { LLM_PROVIDER: 'DEEPSEK' }),
+    ).toThrowError(/"DEEPSEK"/)
+    try {
+      configuredProvider(null, { LLM_PROVIDER: 'anthropc' })
+    } catch (error) {
+      expect((error as ClaudeError).reason).toBe('unknown_provider')
+    }
+  })
+
+  // UNSET IS NOT MISSPELLED, and the difference is the whole reason this is
+  // two cases. An absent variable is a deployment that has not been told —
+  // which every environment was before the field existed. A wrong one is a
+  // deployment that has been told something nobody can act on.
+  it('still accepts an unset variable, which is not the same as a wrong one', () => {
+    expect(configuredProvider(null, {})).toBe('ANTHROPIC')
+    expect(configuredProvider(null, { LLM_PROVIDER: '' })).toBe('ANTHROPIC')
+    expect(configuredProvider(null, { LLM_PROVIDER: '   ' })).toBe('ANTHROPIC')
+  })
+
+  // ── PER DOCUMENT TYPE, WITH `LLM_PROVIDER` AS THE FLOOR ────────────────
+  //
+  // The evidence arrived per type and pointed opposite ways: on licences the
+  // engines tied 19/19 for half the money, on a medical card the cheaper one
+  // was wrong three times in five. A global switch would force one answer to
+  // two questions.
+  it('lets one document type differ from the rest', () => {
+    const env = { LLM_PROVIDER: 'ANTHROPIC', LLM_PROVIDER_CDL: 'DEEPSEEK' }
+    expect(configuredProvider('cdl', env)).toBe('DEEPSEEK')
+    expect(configuredProvider('medical', env)).toBe('ANTHROPIC')
+    expect(configuredProvider('rate_confirmation', env)).toBe('ANTHROPIC')
+    // And the floor still answers when nothing names a type.
+    expect(configuredProvider(null, env)).toBe('ANTHROPIC')
+  })
+
+  it('falls through to the floor for a type nobody named', () => {
+    // AN ENVIRONMENT THAT NAMES NONE BEHAVES AS IT DID BEFORE THE RULING,
+    // which is what makes this safe to ship without touching every worker.
+    const env = { LLM_PROVIDER: 'DEEPSEEK' }
+    for (const kind of [
+      'cdl',
+      'medical',
+      'coi',
+      'rate_confirmation',
+      'classify',
+    ] as const) {
+      expect(configuredProvider(kind, env), kind).toBe('DEEPSEEK')
+    }
+  })
+
+  it('refuses a misspelled per-type value, naming THAT variable', () => {
+    // The message must name `LLM_PROVIDER_MEDICAL`, not `LLM_PROVIDER` — a
+    // refusal pointing at the wrong variable is a refusal somebody debugs by
+    // editing a setting that was already correct.
+    expect(() =>
+      configuredProvider('medical', {
+        LLM_PROVIDER: 'ANTHROPIC',
+        LLM_PROVIDER_MEDICAL: 'DEEPSEKE',
+      }),
+    ).toThrowError(/LLM_PROVIDER_MEDICAL is "DEEPSEKE"/)
+  })
+
+  it('routes the model the same way, per type', () => {
+    const env = { LLM_PROVIDER: 'ANTHROPIC', LLM_PROVIDER_MEDICAL: 'DEEPSEEK' }
+    expect(defaultModelFor('image/jpeg', 'medical', env)).toBe(
+      'deepseek-v4-flash-vision-exp',
+    )
+    expect(defaultModelFor('image/jpeg', 'cdl', env)).toBe('claude-sonnet-5')
   })
 
   it('sends a PDF to the vision model and a paste to the text one', () => {
     const env = { LLM_PROVIDER: 'DEEPSEEK' }
     // A PDF IS A PAGE, NOT TEXT. On DeepSeek the text model cannot see one.
-    expect(defaultModelFor('application/pdf', env)).toBe(
+    expect(defaultModelFor('application/pdf', null, env)).toBe(
       'deepseek-v4-flash-vision-exp',
     )
-    expect(defaultModelFor('image/jpeg', env)).toBe(
+    expect(defaultModelFor('image/jpeg', null, env)).toBe(
       'deepseek-v4-flash-vision-exp',
     )
-    expect(defaultModelFor('text/plain', env)).toBe('deepseek-v4-pro')
+    expect(defaultModelFor('text/plain', null, env)).toBe('deepseek-v4-pro')
   })
 })
 

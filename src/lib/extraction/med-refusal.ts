@@ -25,38 +25,73 @@ export type MedicalCertRefusal =
   | 'unreadable_issue'
   | 'expiry_before_issue'
   | 'implausible_validity'
+  | 'signed_in_future'
 
 /** The bar the spine must clear. Anything below is treated as not read. */
 const SPINE_CONFIDENCE: readonly Confidence[] = ['high', 'medium']
 
 /**
- * The longest a medical certificate can run, plus room to be wrong about it.
+ * The longest a medical certificate can run.
  *
- * 49 CFR 391.43(f) caps a certificate at TWO YEARS. A span longer than that is
- * a misread digit somewhere — most likely a year — rather than a certificate
- * somebody issued.
+ * 49 CFR 391.43(f) caps a certificate at TWO YEARS, and this is now that cap
+ * exactly: 24 months from the signed date, inclusive of the anniversary day.
  *
- * DELIBERATELY GENEROUS AT 26 MONTHS. The point is to catch `2027` read as
- * `2037`, not to adjudicate the edge of the regulation: a certificate issued a
- * few days before its stated start, or a form filled in loosely, must not be
- * refused by this system's arithmetic. A rule that refuses valid documents to
- * be strict about invalid ones costs more than it saves.
+ * ── TIGHTENED FROM 26 MONTHS (owner's ruling, 2026-09-12) ────────────────
+ *
+ * This used to allow 26 months of slack, on the argument that the point was to
+ * catch `2027` read as `2037` rather than to adjudicate the edge of the
+ * regulation, and that refusing valid documents to be strict about invalid
+ * ones costs more than it saves.
+ *
+ * What changed is evidence about how these get read WRONG. The provider
+ * comparison of 2026-09-12 had an engine return an expiry of `04/18/2026`
+ * against a signed date of `04/18/2025` — a two-year span it invented, both
+ * dates wrong, both at HIGH confidence, and internally consistent enough that
+ * every rule above this one passed it. The near misses are not wild: they are
+ * plausible spans a month or two off the regulation, and 26 months of slack is
+ * exactly the room they land in.
+ *
+ * MONTHS, NOT DAYS, so the rule says what the regulation says. The old
+ * `26 * 31` was 806 days, which is neither 26 months nor anything a person
+ * would recognise; a February-to-February certificate and an August-to-August
+ * one are both 24 months and differ by two days.
  */
-const MAX_VALIDITY_DAYS = 26 * 31
+const MAX_VALIDITY_MONTHS = 24
 
-/** Two ISO days apart, compared without a timezone anywhere in it. */
-function daysBetween(fromIso: string, toIso: string): number {
-  const [fy, fm, fd] = fromIso.split('-').map(Number) as [
+/**
+ * The last day a certificate signed on `issuedIso` may legally expire.
+ *
+ * CLAMPED TO THE MONTH'S LAST DAY, because 24 months after the 31st of a month
+ * is not the 31st of every month. `Date.UTC(2026, 1, 31)` silently becomes
+ * 3 March, which would hand two extra days of validity to exactly the cards
+ * whose dates are most likely to have been misread.
+ */
+function latestExpiry(issuedIso: string): string {
+  const [year, month, day] = issuedIso.split('-').map(Number) as [
     number,
     number,
     number,
   ]
-  const [ty, tm, td] = toIso.split('-').map(Number) as [number, number, number]
-  return (Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86_400_000
+  const targetMonth = month + MAX_VALIDITY_MONTHS
+  const lastOfMonth = new Date(Date.UTC(year, targetMonth, 0)).getUTCDate()
+  const at = new Date(
+    Date.UTC(year, targetMonth - 1, Math.min(day, lastOfMonth)),
+  )
+  return at.toISOString().slice(0, 10)
 }
 
+/**
+ * @param uploadedOnIso The day the card arrived, as an ISO day.
+ *
+ * PASSED IN, NEVER READ FROM THE CLOCK HERE. A refusal rule that calls
+ * `new Date()` is a rule whose behaviour depends on when the test runs, and
+ * this file is pure arithmetic over two dates precisely so that it can be
+ * reasoned about. The caller owns the clock — `readMedicalCert` — and says so
+ * at its own call site.
+ */
 export function refuseMedicalCert(
   fields: ExtractedMedicalCert,
+  uploadedOnIso: string,
 ): MedicalCertRefusal | null {
   const expiry = fields.expiresAt
   if (!expiry?.value?.trim()) return 'no_expiry'
@@ -87,7 +122,24 @@ export function refuseMedicalCert(
     // what a reader keyed on position rather than on the label does.
     if (expires.iso <= issued.iso) return 'expiry_before_issue'
 
-    if (daysBetween(issued.iso, expires.iso) > MAX_VALIDITY_DAYS) {
+    // A CERTIFICATE SIGNED IN THE FUTURE WAS MISREAD (owner's ruling,
+    // 2026-09-12).
+    //
+    // An examination happens before the paperwork describing it arrives, so a
+    // signed date after the day the card was uploaded is a year read wrong —
+    // and it is the SPECIFIC error the comparison run produced, where an
+    // engine dated a 2026 card to 2025 and another to a year that was not on
+    // the form at all.
+    //
+    // CHECKED AGAINST THE UPLOAD, NOT AGAINST TODAY. The same card re-read
+    // next year must reach the same verdict; a rule keyed to the moment of
+    // execution would quietly reclassify old documents as they age.
+    if (issued.iso > uploadedOnIso) return 'signed_in_future'
+
+    // AND NO LONGER THAN THE REGULATION ALLOWS — 24 months exactly, inclusive
+    // of the anniversary. See `MAX_VALIDITY_MONTHS` for why the old 26-month
+    // slack was removed rather than kept.
+    if (expires.iso > latestExpiry(issued.iso)) {
       return 'implausible_validity'
     }
   }

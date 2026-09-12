@@ -65,6 +65,16 @@ export async function readMedicalCert(input: {
   /** Named by an accuracy run, absent everywhere else. */
   model?: string
   apiKey?: string
+  /**
+   * The day this card arrived. Defaults to today.
+   *
+   * THE CLOCK IS READ HERE AND NOWHERE DEEPER. `refuseMedicalCert` is pure
+   * arithmetic over dates so that it can be reasoned about and tested without
+   * a fixed clock; one of its rules needs to know when the card turned up, and
+   * this is the one place allowed to answer that. Injectable because a test
+   * that has to wait for a real day to pass is not a test.
+   */
+  uploadedOn?: Date
 }): Promise<MedicalCertReadOutcome> {
   let answer: AskResult
   try {
@@ -74,6 +84,9 @@ export async function readMedicalCert(input: {
       system: MEDICAL_CERT_SYSTEM_WITH_SCHEMA,
       prompt:
         'Read this medical examiner’s certificate and return the JSON described.',
+      // WHAT THIS IS, so the provider can be chosen per document type
+      // (owner's ruling, 2026-09-12). The reader still picks no engine.
+      kind: 'medical',
       ...(input.model ? { model: input.model } : {}),
       ...(input.apiKey ? { apiKey: input.apiKey } : {}),
     })
@@ -99,7 +112,10 @@ export async function readMedicalCert(input: {
     return { ok: false, reason: 'unparsable', cost }
   }
 
-  const refusal = refuseMedicalCert(fields)
+  const refusal = refuseMedicalCert(
+    fields,
+    (input.uploadedOn ?? new Date()).toISOString().slice(0, 10),
+  )
   if (refusal) return { ok: false, reason: refusal, cost }
 
   return { ok: true, fields, cost }

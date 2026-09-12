@@ -9,6 +9,17 @@ import type { Translate } from '@/lib/i18n'
 // missing key waiting.
 export function medLabels(t: Translate) {
   return {
+    // The rotate step, shared with the CDL flow's own label block. Both
+    // screens send a photograph to the same kind of engine, and the step is
+    // the same question in both.
+    upright: {
+      title: t('upright.title'),
+      hint: t('upright.hint'),
+      rotateLeft: t('upright.rotateLeft'),
+      rotateRight: t('upright.rotateRight'),
+      read: t('upright.read'),
+      cancel: t('upright.cancel'),
+    },
     dropTitle: t('drivers.med.dropTitle'),
     dropBody: t('drivers.med.dropBody'),
     dropHint: t('drivers.med.dropHint'),

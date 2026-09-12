@@ -78,13 +78,59 @@ export const PROVIDERS: Record<LlmProvider, ProviderConfig> = {
 /**
  * Which model belongs to which host.
  *
- * BY PREFIX, and deliberately not by a lookup that a new model name could fall
- * out of. An unrecognised name goes to Anthropic, which is where every model
- * this transport spoke to before DeepSeek existed — the failure mode is a 404
- * from a real host, not a silent send to the wrong one.
+ * ── IT REFUSES. IT DOES NOT GUESS (owner's ruling, 2026-09-12) ───────────
+ *
+ * This used to send an unrecognised name to Anthropic, on the argument that a
+ * 404 from a real host beats a silent send to the wrong one. The ruling is
+ * that neither is acceptable: an unknown model name is a configuration error,
+ * and a configuration error must say the value it could not understand rather
+ * than resolving to somebody's default.
+ *
+ * The old behaviour had a cost that only showed up when written down. A typo
+ * in a DeepSeek model name would have been BILLED TO ANTHROPIC — a real
+ * request, to a real account, for a model nobody chose — and the 404 that came
+ * back would name Anthropic, sending whoever read it to the wrong dashboard.
+ *
+ * `ALLOWED_MODELS` IS THE LIST, and it is the same one the routes allowlist
+ * against, so a name that reaches here has already been accepted once. A
+ * failure here therefore means the two lists disagree, which is worth a loud
+ * error rather than a quiet fallback.
  */
 export function providerOf(model: string): LlmProvider {
-  return model.startsWith('deepseek') ? 'DEEPSEEK' : 'ANTHROPIC'
+  if (model.startsWith('deepseek')) return 'DEEPSEEK'
+  if (model.startsWith('claude')) return 'ANTHROPIC'
+  throw new ClaudeError(
+    'unknown_model',
+    `${JSON.stringify(model)} is not a model this system knows. Allowed: ${ALLOWED_MODELS.join(', ')}.`,
+  )
+}
+
+/**
+ * What is being read. The unit the provider is chosen per.
+ *
+ * ── PER DOCUMENT TYPE, NOT GLOBAL (owner's ruling, 2026-09-12) ───────────
+ *
+ * Because the evidence came out per document type and pointed opposite ways.
+ * On licences the two engines tied — 19 of 19 fields across two cards — at
+ * half the cost. On a medical certificate the cheaper engine was wrong three
+ * times in five, and the fix turned out to be orientation rather than the
+ * engine; but "we changed the photograph handling and it got better" is not
+ * the same claim as "this engine reads medical cards", and the two documents
+ * do not have to be answered together.
+ *
+ * A GLOBAL SWITCH WOULD FORCE ONE ANSWER for evidence that arrived in
+ * separate pieces. This is the unit the measurements are actually about.
+ */
+export type ReadKind =
+  | 'cdl'
+  | 'medical'
+  | 'coi'
+  | 'rate_confirmation'
+  | 'classify'
+
+/** The variable naming the provider for one kind of read. */
+export function providerVarFor(kind: ReadKind): string {
+  return `LLM_PROVIDER_${kind.toUpperCase()}`
 }
 
 /**
@@ -95,20 +141,37 @@ export function providerOf(model: string): LlmProvider {
  * the build machine had. It is also what makes the switch a redeploy of a
  * variable rather than of code.
  *
- * AN UNKNOWN VALUE IS ANTHROPIC AND SAYS SO. A typo in a Cloudflare variable
- * must not silently move every document read to a different company.
+ * AN UNKNOWN VALUE REFUSES, NAMING ITSELF (owner's ruling, 2026-09-12). This
+ * used to warn and carry on as ANTHROPIC, which is a silent fallback wearing a
+ * log line: `console.warn` on a Worker reaches a tail nobody is watching, and
+ * the reads that followed were billed to a provider nobody selected.
+ *
+ * UNSET IS STILL ANTHROPIC, and that is not the same thing. An absent variable
+ * is a deployment that has not been told, which every existing environment was
+ * before this field existed; a MISSPELLED one is a deployment that has been
+ * told something nobody can act on.
  */
 export function configuredProvider(
+  kind: ReadKind | null = null,
   env: Record<string, string | undefined> = process.env,
 ): LlmProvider {
-  const raw = (env.LLM_PROVIDER ?? '').trim().toUpperCase()
+  // THE SPECIFIC VARIABLE WINS, AND `LLM_PROVIDER` IS THE FLOOR. A deployment
+  // that names nothing per type behaves exactly as it did before the ruling,
+  // which is what makes this change safe to ship without touching every
+  // environment at once.
+  const named = kind === null ? undefined : env[providerVarFor(kind)]
+  const source =
+    named !== undefined && named.trim() !== ''
+      ? { name: providerVarFor(kind as ReadKind), value: named }
+      : { name: 'LLM_PROVIDER', value: env.LLM_PROVIDER }
+
+  const raw = (source.value ?? '').trim().toUpperCase()
+  if (raw === '' || raw === 'ANTHROPIC') return 'ANTHROPIC'
   if (raw === 'DEEPSEEK') return 'DEEPSEEK'
-  if (raw !== '' && raw !== 'ANTHROPIC') {
-    console.warn(
-      `[zebra.llm] LLM_PROVIDER is ${JSON.stringify(raw)}, which is not a provider. Using ANTHROPIC.`,
-    )
-  }
-  return 'ANTHROPIC'
+  throw new ClaudeError(
+    'unknown_provider',
+    `${source.name} is ${JSON.stringify(source.value)}, which is not a provider. Set ANTHROPIC or DEEPSEEK.`,
+  )
 }
 
 /**
@@ -120,9 +183,10 @@ export function configuredProvider(
  */
 export function defaultModelFor(
   mimeType: string,
+  kind: ReadKind | null = null,
   env: Record<string, string | undefined> = process.env,
 ): string {
-  const provider = PROVIDERS[configuredProvider(env)]
+  const provider = PROVIDERS[configuredProvider(kind, env)]
   return mimeType === 'text/plain' ? provider.textModel : provider.visionModel
 }
 
@@ -378,6 +442,10 @@ export function formatCostMilliCents(milliCents: number): string {
 
 export type ClaudeFailure =
   | 'no_api_key'
+  /** A model name nothing in `ALLOWED_MODELS` covers. Configuration, not luck. */
+  | 'unknown_model'
+  /** `LLM_PROVIDER` set to something that is not a provider. */
+  | 'unknown_provider'
   | 'document_too_large'
   | 'unsupported_media_type'
   | 'refused'
@@ -415,8 +483,16 @@ export interface AskInput {
   /** Injected in tests. The real one is `globalThis.fetch`. */
   fetchImpl?: typeof fetch
   apiKey?: string
-  /** Defaults to EXTRACTION_MODEL. Only a priced model is ever sent. */
+  /** Defaults to the configured provider's model. Always an allowed one. */
   model?: string
+  /**
+   * What is being read, so the provider can be chosen per document type.
+   *
+   * OMITTED MEANS `LLM_PROVIDER`, the org-wide floor. Every reader passes one;
+   * the field is optional so that a caller poking at the transport directly —
+   * a test, a script — is not forced to invent a document type.
+   */
+  kind?: ReadKind
   /**
    * Ask Anthropic to cache the system block and the schema.
    *
@@ -454,7 +530,8 @@ export async function askAboutDocument(input: AskInput): Promise<AskResult> {
   // THE MODEL DECIDES THE HOST, and the configured provider decides the model
   // when nobody named one. Resolved together, once, so the key, the URL and
   // the model in the body can never disagree about who is being called.
-  const model = input.model ?? defaultModelFor(input.mimeType)
+  const model =
+    input.model ?? defaultModelFor(input.mimeType, input.kind ?? null)
   const provider = PROVIDERS[providerOf(model)]
 
   const apiKey = input.apiKey ?? process.env[provider.keyEnv]

@@ -4,6 +4,7 @@ import {
   askAboutDocument,
   defaultModelFor,
   type AskInput,
+  type ReadKind,
   type AskResult,
 } from './claude'
 import { askGemini, isGeminiModel } from './gemini'
@@ -33,8 +34,11 @@ import { askGemini, isGeminiModel } from './gemini'
 export const FALLBACK_MODEL = 'claude-sonnet-5'
 
 /** The configured provider's model for this document, whatever the default was. */
-export function fallbackModelFor(mimeType: string): string {
-  return defaultModelFor(mimeType)
+export function fallbackModelFor(
+  mimeType: string,
+  kind: ReadKind | null = null,
+): string {
+  return defaultModelFor(mimeType, kind)
 }
 
 /**
@@ -85,7 +89,10 @@ export async function askModel(input: AskInput): Promise<AskResult> {
 
     const answer = await askAboutDocument({
       ...input,
-      model: fallbackModelFor(input.mimeType),
+      // THE FALLBACK FOLLOWS THE SAME PER-TYPE CONFIG as the default would
+      // have. A Gemini outage on a medical read must not reach for whatever
+      // the rate-confirmation column happens to be set to.
+      model: fallbackModelFor(input.mimeType, input.kind ?? null),
     })
     return {
       ...answer,

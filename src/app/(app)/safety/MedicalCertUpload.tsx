@@ -4,6 +4,8 @@ import { useActionState, useState } from 'react'
 import { DropZone } from '@/components/forms/DropZone'
 import { cx } from '@/lib/cx'
 import { fileMedicalCertAction } from './med-actions'
+import { downscaleImage } from '../drivers/new/downscale'
+import { UprightCard, needsUprightStep } from '@/components/UprightCard'
 import {
   FILE_MEDICAL_CERT_INITIAL,
   type FileMedicalCertState,
@@ -76,6 +78,15 @@ interface Props {
   /** Front-door sizing. See DropZone's note on why this is a real difference. */
   prominent?: boolean
   labels: {
+    /** The rotate step, shown only for a photo carrying no EXIF orientation. */
+    upright: {
+      title: string
+      hint: string
+      rotateLeft: string
+      rotateRight: string
+      read: string
+      cancel: string
+    }
     dropTitle: string
     dropBody: string
     dropHint: string
@@ -120,6 +131,8 @@ export function MedicalCertUpload({
   labels,
 }: Props) {
   const [reading, setReading] = useState(false)
+  /** A photo waiting on the rotate step. Null unless a person is being asked. */
+  const [awaitingUpright, setAwaitingUpright] = useState<File | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   // ── ALREADY READ, WHEN THE INTAKE READ IT ─────────────────────────────
   //
@@ -146,7 +159,23 @@ export function MedicalCertUpload({
     FILE_MEDICAL_CERT_INITIAL,
   )
 
-  const take = async (file: File) => {
+  const take = async (chosen: File) => {
+    // ORIENTATION IS SETTLED BEFORE THE READ (owner's ruling, 2026-09-12).
+    //
+    // THIS IS THE SCREEN THE MEASUREMENT WAS TAKEN ON. The corpus medical card
+    // photographed on its side made one engine return four different examiner
+    // names in four reads — one of them the driver's own surname — while its
+    // dates stayed correct, so nothing downstream would have caught it.
+    if (await needsUprightStep(chosen)) {
+      setAwaitingUpright(chosen)
+      return
+    }
+    await readCard(chosen, 0)
+  }
+
+  const readCard = async (chosen: File, quarterTurns: number) => {
+    setAwaitingUpright(null)
+    const file = await downscaleImage(chosen, { quarterTurns })
     setReading(true)
     setNotice(null)
     setProposal(null)
@@ -391,17 +420,30 @@ export function MedicalCertUpload({
           {labels.forDriver.replace('{driver}', driverLabel)}
         </p>
       ) : null}
-      <DropZone
-        labels={{
-          title: labels.dropTitle,
-          body: labels.dropBody,
-          hint: labels.dropHint,
-          busy: labels.reading,
-        }}
-        busy={reading}
-        prominent={prominent}
-        onFile={(file) => void take(file)}
-      />
+      {/* THE ROTATE STEP REPLACES THE DROP ZONE WHILE IT IS OPEN, and the
+          read waits on it. */}
+      {awaitingUpright ? (
+        <UprightCard
+          file={awaitingUpright}
+          labels={labels.upright}
+          onConfirm={(quarterTurns) => {
+            void readCard(awaitingUpright, quarterTurns)
+          }}
+          onCancel={() => setAwaitingUpright(null)}
+        />
+      ) : (
+        <DropZone
+          labels={{
+            title: labels.dropTitle,
+            body: labels.dropBody,
+            hint: labels.dropHint,
+            busy: labels.reading,
+          }}
+          busy={reading}
+          prominent={prominent}
+          onFile={(file) => void take(file)}
+        />
+      )}
     </div>
   )
 }

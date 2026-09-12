@@ -73,6 +73,9 @@ export async function classifyDocument(input: {
 JSON Schema:
 ${JSON.stringify(classifySchemaFor(types), null, 2)}`,
       prompt: 'Which of these documents is this? Return the JSON described.',
+      // WHAT THIS IS, so the provider can be chosen per document type
+      // (owner's ruling, 2026-09-12). The reader still picks no engine.
+      kind: 'classify',
       ...(input.model ? { model: input.model } : {}),
       ...(input.apiKey ? { apiKey: input.apiKey } : {}),
     })

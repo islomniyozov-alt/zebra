@@ -6,6 +6,7 @@ import { DropZone } from '@/components/forms/DropZone'
 import { Select, type SelectOption } from '@/components/ui/Select'
 import { cx } from '@/lib/cx'
 import { downscaleImage } from './downscale'
+import { UprightCard, needsUprightStep } from '@/components/UprightCard'
 import { createDriverAction } from '../actions'
 
 // ---------------------------------------------------------------------------
@@ -35,6 +36,15 @@ interface Props {
   defaultAuthority: string
   fields: FieldSpec[]
   labels: {
+    /** The rotate step, shown only for a photo carrying no EXIF orientation. */
+    upright: {
+      title: string
+      hint: string
+      rotateLeft: string
+      rotateRight: string
+      read: string
+      cancel: string
+    }
     authority: string
     dropTitle: string
     dropBody: string
@@ -92,6 +102,10 @@ export function NewDriverFlow({
   const [companyId, setCompanyId] = useState(defaultAuthority)
   const [manual, setManual] = useState(false)
   const [reading, setReading] = useState(false)
+  // A PHOTO WAITING ON THE ROTATE STEP. Non-null only while a person is being
+  // asked which way up it is — see `UprightCard` for what that step costs when
+  // it is skipped.
+  const [awaitingUpright, setAwaitingUpright] = useState<File | null>(null)
   const [read, setRead] = useState<{
     values: Record<string, string>
     notice: string | null
@@ -114,9 +128,20 @@ export function NewDriverFlow({
   // 4MB of phone camera is transfer time and model cost for no accuracy.
   const take = async (chosen: File | null | undefined) => {
     if (!chosen) return
+    // ORIENTATION IS SETTLED BEFORE THE READ, NEVER AFTER IT. A file with EXIF
+    // needs nobody; one without needs a person, and the read waits.
+    if (await needsUprightStep(chosen)) {
+      setAwaitingUpright(chosen)
+      return
+    }
+    await readCard(chosen, 0)
+  }
+
+  const readCard = async (chosen: File, quarterTurns: number) => {
+    setAwaitingUpright(null)
     setReading(true)
     try {
-      const file = await downscaleImage(chosen)
+      const file = await downscaleImage(chosen, { quarterTurns })
       const body = new FormData()
       body.append('file', file)
 
@@ -319,20 +344,37 @@ export function NewDriverFlow({
         options={authorities}
       />
 
-      {/* THE ZONE IS SHARED WITH THE MEDICAL CERTIFICATE UPLOAD. It was
+      {/* THE ROTATE STEP REPLACES THE DROP ZONE WHILE IT IS OPEN. Shown only
+          for a photo with no EXIF orientation, and the read does not start
+          until it is answered — a card read sideways comes back with invented
+          names, measured 2026-09-12. */}
+      {awaitingUpright ? (
+        <UprightCard
+          file={awaitingUpright}
+          labels={labels.upright}
+          onConfirm={(quarterTurns) => {
+            void readCard(awaitingUpright, quarterTurns)
+          }}
+          onCancel={() => setAwaitingUpright(null)}
+        />
+      ) : (
+        <>
+          {/* THE ZONE IS SHARED WITH THE MEDICAL CERTIFICATE UPLOAD. It was
           inline here until a second screen needed the same control; two drop
           zones is two places to fix the paste handler and the accept list.
           See components/forms/DropZone.tsx. */}
-      <DropZone
-        labels={{
-          title: labels.dropTitle,
-          body: labels.dropBody,
-          hint: labels.dropHint,
-          busy: labels.reading,
-        }}
-        busy={reading}
-        onFile={(file) => void take(file)}
-      />
+          <DropZone
+            labels={{
+              title: labels.dropTitle,
+              body: labels.dropBody,
+              hint: labels.dropHint,
+              busy: labels.reading,
+            }}
+            busy={reading}
+            onFile={(file) => void take(file)}
+          />
+        </>
+      )}
 
       <button
         type="button"

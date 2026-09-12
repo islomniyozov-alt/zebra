@@ -120,6 +120,9 @@ export async function readCdl(input: {
       mimeType: input.mimeType,
       system: CDL_EXTRACTION_SYSTEM_WITH_SCHEMA,
       prompt: 'Read this driver licence and return the JSON described.',
+      // WHAT THIS IS, so the provider can be chosen per document type
+      // (owner's ruling, 2026-09-12). The reader still picks no engine.
+      kind: 'cdl',
       ...(input.model ? { model: input.model } : {}),
       ...(input.apiKey ? { apiKey: input.apiKey } : {}),
     })

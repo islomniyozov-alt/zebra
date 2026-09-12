@@ -64,10 +64,12 @@
 
     // WHICH LLM PROVIDER THE ANTHROPIC-COMPATIBLE TRANSPORT TALKS TO.
     //
-    // ANTHROPIC or DEEPSEEK, and nothing else — `configuredProvider` warns and
-    // stays on ANTHROPIC for anything it does not recognise, because a typo in
-    // this string must not quietly move every document read to a different
-    // company. The key each one needs is a SECRET and lives nowhere near here:
+    // ANTHROPIC or DEEPSEEK, and nothing else — `configuredProvider` REFUSES
+    // anything it does not recognise, naming the value it was given. Unset is
+    // ANTHROPIC and is a different thing from misspelled: an absent variable
+    // is a deployment nobody has told, a wrong one is a deployment told
+    // something nobody can act on.
+    // The key each one needs is a SECRET and lives nowhere near here:
     // ANTHROPIC_API_KEY and DEEPSEEK_API_KEY, by `wrangler secret put`.
     //
     // IT DECIDES DEFAULTS ONLY. A caller that names a model — the accuracy run
@@ -77,6 +79,25 @@
     // ON ANTHROPIC UNTIL THE NUMBERS SAY OTHERWISE (owner's ruling): no
     // production switch before the CDL and medical accuracy runs are in.
     "LLM_PROVIDER": "ANTHROPIC",
+
+    // ── AND IT IS CHOSEN PER DOCUMENT TYPE (owner's ruling, 2026-09-12) ──
+    //
+    // `LLM_PROVIDER_<KIND>` overrides the floor above for one kind of read:
+    // CDL, MEDICAL, COI, RATE_CONFIRMATION, CLASSIFY. Absent means "use the
+    // floor", so an environment that names none behaves exactly as it did
+    // before the ruling.
+    //
+    // WHY PER TYPE: the evidence arrived per type and pointed opposite ways.
+    // On licences the two engines tied at 19 of 19 fields across two cards,
+    // for half the money. On a medical certificate the cheaper one was wrong
+    // three times in five — and the cause turned out to be orientation, not
+    // the engine, which is a different claim and does not have to be settled
+    // in the same breath. A global switch would force one answer to two
+    // questions.
+    //
+    // NONE ARE SET. Nothing switches until the owner says so; these exist so
+    // that when he does, it is one line for one document type and the diff
+    // says which.
 
     // Where password-reset links point. A deployment fact, not a request
     // fact: taken from the Host header, a worker reached through a preview
@@ -137,6 +158,8 @@
         // right answer on purpose, and makes the switch a one-line diff that
         // shows up in review.
         "LLM_PROVIDER": "ANTHROPIC",
+        // Per-type overrides — `LLM_PROVIDER_<KIND>` — are absent here for the
+        // same reason as on dev: no production switch yet.
         // NOT CREDENTIALS, AND THEREFORE NOT SECRETS. The account id is
         // printed by `wrangler whoami` and the endpoint is derived from it;
         // neither protects anything. Only R2_ACCESS_KEY_ID and

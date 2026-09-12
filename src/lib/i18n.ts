@@ -454,6 +454,13 @@ const en = {
   'drivers.cdl.unreadable':
     'Nothing could be read from that image. Enter the driver below, or try a clearer photo.',
   'drivers.cdl.wrongType': 'That file is not a photo or a PDF.',
+  'upright.title': 'Which way up is this card?',
+  'upright.hint':
+    'This photo carries no orientation, and a card read sideways comes back with invented names. Turn it upright, then read it.',
+  'upright.rotateLeft': 'Rotate left',
+  'upright.rotateRight': 'Rotate right',
+  'upright.read': 'It is upright — read it',
+  'upright.cancel': 'Choose another photo',
   'drivers.cdl.tooLarge': 'That file is too large to read.',
   'drivers.cdl.noFile': 'No file arrived.',
   'drivers.cdl.failed':
@@ -2406,6 +2413,13 @@ const ru: Dictionary = {
   'drivers.cdl.unreadable':
     'С этого изображения ничего не считано. Введите данные ниже.',
   'drivers.cdl.wrongType': 'Это не фото и не PDF.',
+  'upright.title': 'Как повёрнута эта карточка?',
+  'upright.hint':
+    'В этом снимке нет данных о повороте, а карточка, прочитанная боком, возвращает выдуманные имена. Поверните её правильно и читайте.',
+  'upright.rotateLeft': 'Повернуть влево',
+  'upright.rotateRight': 'Повернуть вправо',
+  'upright.read': 'Повёрнута правильно — читать',
+  'upright.cancel': 'Выбрать другое фото',
   'drivers.cdl.tooLarge': 'Файл слишком большой.',
   'drivers.cdl.noFile': 'Файл не получен.',
   'drivers.cdl.failed': 'Не удалось отправить права. Введите данные ниже.',
@@ -4343,6 +4357,13 @@ const fa: Dictionary = {
   'drivers.cdl.unreadable':
     'از این تصویر چیزی خوانده نشد. اطلاعات را پایین وارد کنید.',
   'drivers.cdl.wrongType': 'این فایل عکس یا PDF نیست.',
+  'upright.title': 'این کارت از کدام سمت بالا است؟',
+  'upright.hint':
+    'این عکس اطلاعات چرخش ندارد، و کارتی که کج خوانده شود نام‌های ساختگی برمی‌گرداند. آن را صاف کنید، سپس بخوانید.',
+  'upright.rotateLeft': 'چرخش به چپ',
+  'upright.rotateRight': 'چرخش به راست',
+  'upright.read': 'صاف است — بخوان',
+  'upright.cancel': 'انتخاب عکس دیگر',
   'drivers.cdl.tooLarge': 'این فایل بسیار بزرگ است.',
   'drivers.cdl.noFile': 'فایلی دریافت نشد.',
   'drivers.cdl.failed': 'ارسال کارت ممکن نشد. اطلاعات را پایین وارد کنید.',
