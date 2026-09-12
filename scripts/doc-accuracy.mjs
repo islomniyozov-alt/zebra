@@ -43,6 +43,20 @@ const PASSWORD = process.env.VERIFY_PASSWORD ?? process.env.SEED_OWNER_PASSWORD
 const KIND = process.argv[2]
 const CARD = process.argv[3]
 
+// WHICH ENGINE, defaulting to whatever the worker is configured for.
+//
+//   node -r dotenv/config scripts/doc-accuracy.mjs cdl <card> \
+//     --model deepseek-v4-flash-vision-exp
+//
+// The route allowlists it against ALLOWED_MODELS, so a typo is a 400 rather
+// than a column of a comparison table quietly answered by the default. That
+// matters more here than anywhere: the point of naming an engine is that the
+// number underneath it belongs to that engine.
+const argv = process.argv.slice(4)
+const MODEL = argv.includes('--model')
+  ? argv[argv.indexOf('--model') + 1]
+  : null
+
 if (!KIND || !CARD || !EMAIL || !PASSWORD) {
   console.error(
     'Usage: node -r dotenv/config scripts/doc-accuracy.mjs <cdl|med> <path>',
@@ -71,7 +85,8 @@ const bytes = readFileSync(CARD)
 console.log(`document ${type.label}`)
 console.log(`card     ${CARD} (${bytes.length} bytes as ${mimeTypeOf(CARD)})`)
 console.log(`truth    ${truthPath}, written ${_meta?.writtenAt ?? '(undated)'}`)
-console.log(`target   ${BASE}${type.route}\n`)
+console.log(`target   ${BASE}${type.route}`)
+console.log(`model    ${MODEL ?? "(the worker's configured default)"}\n`)
 
 const browser = await chromium.launch(
   process.env.SHOT_CHROME ? { executablePath: process.env.SHOT_CHROME } : {},
@@ -80,7 +95,7 @@ const browser = await chromium.launch(
 try {
   const page = await (await browser.newContext()).newPage()
   await signIn(page, BASE, EMAIL, PASSWORD)
-  const answer = await readDocument(page, type, bytes, basename(CARD))
+  const answer = await readDocument(page, type, bytes, basename(CARD), MODEL)
 
   mkdirSync('corpus/.extractions', { recursive: true })
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
@@ -93,6 +108,10 @@ try {
         base: BASE,
         kind: KIND,
         card: CARD,
+        // WHICH ENGINE PRODUCED THIS, in the dump rather than only in the
+        // terminal. A comparison read back next month from two files must not
+        // depend on somebody remembering which window was which.
+        model: MODEL,
         answer,
       },
       null,

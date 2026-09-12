@@ -2,6 +2,7 @@ import {
   ClaudeError,
   EXTRACTION_MODEL,
   askAboutDocument,
+  defaultModelFor,
   type AskInput,
   type AskResult,
 } from './claude'
@@ -21,8 +22,20 @@ import { askGemini, isGeminiModel } from './gemini'
 // Gemini model. Every default extraction 404'd.
 // ---------------------------------------------------------------------------
 
-/** Where a failed default lands. Named because it is a policy, not a detail. */
+/**
+ * Where a failed default lands. Named because it is a policy, not a detail.
+ *
+ * KEPT AS A CONSTANT AND NO LONGER USED DIRECTLY. `fallbackModelFor` resolves
+ * the fallback through the configured provider, because a Gemini outage on a
+ * worker configured for DeepSeek should not reach for Anthropic — that is a
+ * third company's bill arriving from a variable nobody changed.
+ */
 export const FALLBACK_MODEL = 'claude-sonnet-5'
+
+/** The configured provider's model for this document, whatever the default was. */
+export function fallbackModelFor(mimeType: string): string {
+  return defaultModelFor(mimeType)
+}
 
 /**
  * Whether a failure is an OUTAGE — the engine could not answer — rather than
@@ -70,7 +83,10 @@ export async function askModel(input: AskInput): Promise<AskResult> {
     // worse than a measurement that stops.
     if (input.model || !isOutage(error)) throw error
 
-    const answer = await askAboutDocument({ ...input, model: FALLBACK_MODEL })
+    const answer = await askAboutDocument({
+      ...input,
+      model: fallbackModelFor(input.mimeType),
+    })
     return {
       ...answer,
       fellBackFrom: {

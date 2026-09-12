@@ -1,7 +1,13 @@
 import { NextResponse } from 'next/server'
 import { requireSession, withCurrentOrg } from '@/lib/auth-context'
 import { can } from '@/lib/permissions'
-import { DOCUMENT_TYPES, IMAGE_TYPES, formatCostMilliCents } from '@/lib/claude'
+import {
+  ALLOWED_MODELS,
+  DOCUMENT_TYPES,
+  IMAGE_TYPES,
+  formatCostMilliCents,
+  isAllowedModel,
+} from '@/lib/claude'
 import {
   matchDriverByName,
   medicalCertProposal,
@@ -120,9 +126,31 @@ export async function POST(request: Request) {
     binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
   }
 
+  // THE ACCURACY RUN'S ONE KNOB, defaulting to what ships.
+  //
+  // Allowlisted against `ALLOWED_MODELS` rather than passed through: a typo
+  // must be a 400 here, not a 404 from somebody's API an hour later inside a
+  // column of a comparison table. Gated by the permission this route already
+  // asks for — choosing a model is choosing what to spend, and the reader is
+  // already spending it.
+  //
+  // ABSENT EVERYWHERE ELSE. The drop zone never sends one, so the configured
+  // provider decides for every real read.
+  const requestedModel = form.get('model')
+  if (typeof requestedModel === 'string' && !isAllowedModel(requestedModel)) {
+    return apiError(
+      400,
+      'unknown_model',
+      `${requestedModel} is not an allowed model. Allowed: ${ALLOWED_MODELS.join(', ')}.`,
+    )
+  }
+  const named =
+    typeof requestedModel === 'string' ? { model: requestedModel } : {}
+
   const outcome = await readMedicalCert({
     base64: btoa(binary),
     mimeType: file.type,
+    ...named,
   })
 
   if (!outcome.ok) {

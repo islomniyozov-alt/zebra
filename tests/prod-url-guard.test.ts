@@ -164,6 +164,13 @@ const INSPECTION_READERS = [
   // answer and the screen get compared, instead of one being used to explain
   // the other. SELECT only.
   'inspect-money-screen.mjs',
+  // ADDED 2026-09-12, read-only. The provider switch needs to know what one
+  // document read actually costs, per document type, and the code cannot say:
+  // the prompts are in the repository but the document is most of the input
+  // and the output is not knowable in advance. `ExtractionUsage` holds one row
+  // per engine call with the tokens as the engine reported them, which is the
+  // only measured half of the figure. SELECT only.
+  'inspect-extraction-usage.mjs',
 ]
 
 /**

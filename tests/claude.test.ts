@@ -6,9 +6,13 @@ import {
   MAX_DOCUMENT_BASE64_BYTES,
   MAX_OUTPUT_TOKENS,
   askAboutDocument,
+  configuredProvider,
   costCents,
   costMilliCents,
+  defaultModelFor,
   formatCostMilliCents,
+  pricesFor,
+  providerOf,
 } from '@/lib/claude'
 import { MAX_UPLOAD_BYTES } from '@/lib/documents'
 
@@ -56,11 +60,27 @@ describe('the request', () => {
   it('names the model constant, not a literal', async () => {
     // §1.2: "model string a named constant, not scattered". If this ever fails
     // it is because somebody typed a model name into the body.
+    //
+    // ── THE DEFAULT IS THE PROVIDER'S MODEL, NOT `EXTRACTION_MODEL` ───────
+    //
+    // CHANGED 2026-09-12 with the provider seam, and the old expectation was
+    // asserting a bug. `EXTRACTION_MODEL` has named a GEMINI model since the
+    // engine table, and this transport talks to Anthropic-compatible hosts —
+    // so a default-model call from here put `gemini-3.6-flash` in a body sent
+    // to api.anthropic.com, which is a 404 with a confusing message.
+    //
+    // `model-engine.ts` already carries a note about the same mistake at the
+    // routing layer ("Every default extraction 404'd") and fixed it there; the
+    // transport's own default was left pointing at Gemini, reachable by anyone
+    // calling `askAboutDocument` directly. `defaultModelFor` resolves it
+    // through the configured provider instead, which is a model this host can
+    // actually answer for.
     const { calls, impl } = spy()
     await askAboutDocument({ ...ask(), fetchImpl: impl })
 
     const body = JSON.parse(String(calls[0]!.init.body))
-    expect(body.model).toBe(EXTRACTION_MODEL)
+    expect(body.model).toBe(defaultModelFor('application/pdf'))
+    expect(body.model).not.toBe(EXTRACTION_MODEL)
     expect(body.max_tokens).toBe(MAX_OUTPUT_TOKENS)
   })
 
@@ -357,5 +377,135 @@ describe('the shipped default', () => {
       input: 300,
       output: 1_500,
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TWO HOSTS, ONE TRANSPORT (owner's ruling, 2026-09-12).
+//
+// The switch is a base URL, a key and a model name. What these guard is that
+// it is ONLY those three: a document, a system block, a cache breakpoint and
+// the answer's `usage` must come out identical, because the acceptance run
+// attributes any difference in the numbers to the ENGINES. Two adapters that
+// drifted would make that attribution false without making it look false.
+// ---------------------------------------------------------------------------
+
+describe('the provider seam', () => {
+  it('sends a DeepSeek model to DeepSeek and everything else to Anthropic', () => {
+    expect(providerOf('deepseek-v4-flash-vision-exp')).toBe('DEEPSEEK')
+    expect(providerOf('deepseek-v4-pro')).toBe('DEEPSEEK')
+    expect(providerOf('claude-sonnet-5')).toBe('ANTHROPIC')
+    // AN UNKNOWN NAME GOES TO ANTHROPIC — a 404 from a real host beats a
+    // silent send to the wrong company.
+    expect(providerOf('something-nobody-added')).toBe('ANTHROPIC')
+  })
+
+  it('posts to the host the model belongs to, with that host’s key name', async () => {
+    const deep = spy()
+    await askAboutDocument({
+      ...ask(),
+      model: 'deepseek-v4-flash-vision-exp',
+      fetchImpl: deep.impl,
+    })
+    expect(deep.calls[0]!.url).toBe(
+      'https://api.deepseek.com/anthropic/v1/messages',
+    )
+
+    const anthropic = spy()
+    await askAboutDocument({
+      ...ask(),
+      model: 'claude-sonnet-5',
+      fetchImpl: anthropic.impl,
+    })
+    expect(anthropic.calls[0]!.url).toBe(
+      'https://api.anthropic.com/v1/messages',
+    )
+  })
+
+  it('names the variable the CONFIGURED provider needs when the key is missing', async () => {
+    // A worker set to DeepSeek that says "ANTHROPIC_API_KEY is not set" sends
+    // somebody to check the wrong secret — the failure this message exists to
+    // prevent, and the reason it is built from the resolved provider.
+    await expect(
+      askAboutDocument({
+        ...ask(),
+        model: 'deepseek-v4-pro',
+        apiKey: undefined,
+      }),
+    ).rejects.toMatchObject({
+      reason: 'no_api_key',
+      message: 'DEEPSEEK_API_KEY is not set on this worker.',
+    })
+  })
+
+  it('sends the same body to both hosts, document block and all', async () => {
+    const bodies = []
+    for (const model of ['claude-sonnet-5', 'deepseek-v4-flash-vision-exp']) {
+      const { calls, impl } = spy()
+      await askAboutDocument({ ...ask(), model, cache: true, fetchImpl: impl })
+      const body = JSON.parse(String(calls[0]!.init.body))
+      // The model is the ONE field allowed to differ.
+      delete body.model
+      bodies.push(JSON.stringify(body))
+      // And the headers, which are the compatibility claim itself.
+      const headers = calls[0]!.init.headers as Record<string, string>
+      expect(headers['anthropic-version']).toBe('2023-06-01')
+      expect(headers['x-api-key']).toBe('test-key')
+    }
+    expect(bodies[0]).toBe(bodies[1])
+  })
+
+  it('reads the provider from config, and refuses to guess at a typo', () => {
+    expect(configuredProvider({})).toBe('ANTHROPIC')
+    expect(configuredProvider({ LLM_PROVIDER: 'DEEPSEEK' })).toBe('DEEPSEEK')
+    expect(configuredProvider({ LLM_PROVIDER: ' deepseek ' })).toBe('DEEPSEEK')
+    // A TYPO IS ANTHROPIC, NOT DEEPSEEK. An unrecognised value must not move
+    // every document read to a different company.
+    expect(configuredProvider({ LLM_PROVIDER: 'DEEPSEK' })).toBe('ANTHROPIC')
+  })
+
+  it('sends a PDF to the vision model and a paste to the text one', () => {
+    const env = { LLM_PROVIDER: 'DEEPSEEK' }
+    // A PDF IS A PAGE, NOT TEXT. On DeepSeek the text model cannot see one.
+    expect(defaultModelFor('application/pdf', env)).toBe(
+      'deepseek-v4-flash-vision-exp',
+    )
+    expect(defaultModelFor('image/jpeg', env)).toBe(
+      'deepseek-v4-flash-vision-exp',
+    )
+    expect(defaultModelFor('text/plain', env)).toBe('deepseek-v4-pro')
+  })
+})
+
+describe('what DeepSeek costs, at the rates the owner supplied', () => {
+  // Peak rates, 2026-09-12. OFF-PEAK IS HALF OF EVERY ONE OF THEM, so each
+  // figure here is an upper bound and is recorded as one.
+  it('prices the vision model at its own rate, not the dearest on file', () => {
+    //   2019 input x  44 =  88,836
+    //     97 output x 132 =  12,804
+    //                       -------
+    //                       101,640 millionths -> 0.102¢
+    expect(
+      costMilliCents(
+        { inputTokens: 2_019, outputTokens: 97 },
+        'deepseek-v4-flash-vision-exp',
+      ),
+    ).toBe(102)
+  })
+
+  it('does not derive a DeepSeek cache rate from Anthropic’s multiple', () => {
+    const flash = pricesFor('deepseek-v4-flash-vision-exp')
+    // A cache HIT is 3.2% of input, not 10% — deriving it would overstate by 3x.
+    expect(flash.cacheRead).toBe(1.4)
+    expect(flash.cacheRead).not.toBe(flash.input * 0.1)
+    // And an automatic cache has NO write premium.
+    expect(flash.cacheWrite).toBe(44)
+    expect(flash.cacheWrite).not.toBe(flash.input * 1.25)
+  })
+
+  it('leaves the derived rates alone for every row that does not say', () => {
+    const sonnet = pricesFor('claude-sonnet-5')
+    expect(sonnet.cacheWrite).toBe(375)
+    expect(sonnet.cacheRead).toBe(30)
   })
 })

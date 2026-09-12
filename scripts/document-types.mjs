@@ -99,7 +99,7 @@ export function documentType(name) {
  * drop zone takes, which is what makes this a reading of the deployed route
  * rather than of something assembled for the test.
  */
-export async function readDocument(page, type, bytes, name) {
+export async function readDocument(page, type, bytes, name, model = null) {
   return page.evaluate(
     async ({ b64, filename, mime, route, extras }) => {
       const binary = atob(b64)
@@ -116,7 +116,10 @@ export async function readDocument(page, type, bytes, name) {
       filename: name,
       mime: mimeTypeOf(name),
       route: type.route,
-      extras: type.extras(),
+      // THE MODEL RIDES IN THE FORM, allowlisted by the route. A named engine
+      // is never defaulted away: a comparison whose column could quietly be
+      // answered by the other provider measures nothing.
+      extras: { ...type.extras(), ...(model ? { model } : {}) },
     },
   )
 }

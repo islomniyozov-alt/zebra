@@ -62,6 +62,22 @@
     "NEON_BRANCH": "dev",
     "R2_BUCKET": "zebra-docs-dev",
 
+    // WHICH LLM PROVIDER THE ANTHROPIC-COMPATIBLE TRANSPORT TALKS TO.
+    //
+    // ANTHROPIC or DEEPSEEK, and nothing else — `configuredProvider` warns and
+    // stays on ANTHROPIC for anything it does not recognise, because a typo in
+    // this string must not quietly move every document read to a different
+    // company. The key each one needs is a SECRET and lives nowhere near here:
+    // ANTHROPIC_API_KEY and DEEPSEEK_API_KEY, by `wrangler secret put`.
+    //
+    // IT DECIDES DEFAULTS ONLY. A caller that names a model — the accuracy run
+    // does, one per column — always reaches that model's own host, so a
+    // comparison cannot be silently answered by the other provider.
+    //
+    // ON ANTHROPIC UNTIL THE NUMBERS SAY OTHERWISE (owner's ruling): no
+    // production switch before the CDL and medical accuracy runs are in.
+    "LLM_PROVIDER": "ANTHROPIC",
+
     // Where password-reset links point. A deployment fact, not a request
     // fact: taken from the Host header, a worker reached through a preview
     // URL would mint links back to the preview.
@@ -112,6 +128,15 @@
       "vars": {
         "NEON_BRANCH": "production",
         "R2_BUCKET": "zebra-docs",
+
+        // STATED, NOT INHERITED. Bindings do not come down into a named
+        // environment — the comment above this block is about exactly that,
+        // and an omitted var is silently absent rather than an error. A
+        // production worker with no LLM_PROVIDER would default to ANTHROPIC,
+        // which is the right answer arrived at by accident; this makes it the
+        // right answer on purpose, and makes the switch a one-line diff that
+        // shows up in review.
+        "LLM_PROVIDER": "ANTHROPIC",
         // NOT CREDENTIALS, AND THEREFORE NOT SECRETS. The account id is
         // printed by `wrangler whoami` and the endpoint is derived from it;
         // neither protects anything. Only R2_ACCESS_KEY_ID and

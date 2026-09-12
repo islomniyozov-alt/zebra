@@ -28,6 +28,104 @@
  */
 export const EXTRACTION_MODEL = 'gemini-3.6-flash'
 
+// ---------------------------------------------------------------------------
+// TWO HOSTS BEHIND ONE TRANSPORT (owner's ruling, 2026-09-12).
+//
+// DeepSeek publishes an ANTHROPIC-COMPATIBLE endpoint: the same POST, the same
+// `x-api-key` and `anthropic-version` headers, the same content blocks, the
+// same `usage` and `stop_reason` in the answer. So the switch is a base URL, a
+// key and a model name — NOT a second client. Everything below this line runs
+// identically on both, which is the property the acceptance is measuring: a
+// difference in the numbers is then a difference between the ENGINES, not
+// between two hand-written adapters that drifted.
+//
+// WHICH PROVIDER IS A CONFIG VALUE, `LLM_PROVIDER`, and it decides only what
+// the DEFAULTS resolve to. A named model always goes to its own host — the
+// accuracy run names one per column, and a run that could be silently answered
+// by the other provider would be a measurement reporting the wrong engine.
+// ---------------------------------------------------------------------------
+
+export type LlmProvider = 'ANTHROPIC' | 'DEEPSEEK'
+
+export interface ProviderConfig {
+  /** The Messages endpoint, in full. */
+  url: string
+  /** The environment variable holding the key. Named, never inlined. */
+  keyEnv: 'ANTHROPIC_API_KEY' | 'DEEPSEEK_API_KEY'
+  /** What reads a photograph or a PDF. */
+  visionModel: string
+  /** What reads a pasted email — words that are already language. */
+  textModel: string
+}
+
+export const PROVIDERS: Record<LlmProvider, ProviderConfig> = {
+  ANTHROPIC: {
+    url: 'https://api.anthropic.com/v1/messages',
+    keyEnv: 'ANTHROPIC_API_KEY',
+    // ONE MODEL FOR BOTH on Anthropic, because Sonnet reads either. The split
+    // exists for DeepSeek and is expressed here rather than branched on.
+    visionModel: 'claude-sonnet-5',
+    textModel: 'claude-sonnet-5',
+  },
+  DEEPSEEK: {
+    url: 'https://api.deepseek.com/anthropic/v1/messages',
+    keyEnv: 'DEEPSEEK_API_KEY',
+    visionModel: 'deepseek-v4-flash-vision-exp',
+    textModel: 'deepseek-v4-pro',
+  },
+}
+
+/**
+ * Which model belongs to which host.
+ *
+ * BY PREFIX, and deliberately not by a lookup that a new model name could fall
+ * out of. An unrecognised name goes to Anthropic, which is where every model
+ * this transport spoke to before DeepSeek existed — the failure mode is a 404
+ * from a real host, not a silent send to the wrong one.
+ */
+export function providerOf(model: string): LlmProvider {
+  return model.startsWith('deepseek') ? 'DEEPSEEK' : 'ANTHROPIC'
+}
+
+/**
+ * The configured provider, read at CALL TIME rather than at module load.
+ *
+ * A worker's environment is not there when a module is first evaluated on
+ * workerd, so a constant computed at the top of this file would be whatever
+ * the build machine had. It is also what makes the switch a redeploy of a
+ * variable rather than of code.
+ *
+ * AN UNKNOWN VALUE IS ANTHROPIC AND SAYS SO. A typo in a Cloudflare variable
+ * must not silently move every document read to a different company.
+ */
+export function configuredProvider(
+  env: Record<string, string | undefined> = process.env,
+): LlmProvider {
+  const raw = (env.LLM_PROVIDER ?? '').trim().toUpperCase()
+  if (raw === 'DEEPSEEK') return 'DEEPSEEK'
+  if (raw !== '' && raw !== 'ANTHROPIC') {
+    console.warn(
+      `[zebra.llm] LLM_PROVIDER is ${JSON.stringify(raw)}, which is not a provider. Using ANTHROPIC.`,
+    )
+  }
+  return 'ANTHROPIC'
+}
+
+/**
+ * What the configured provider sends this document to.
+ *
+ * A PDF GOES TO THE VISION MODEL. It is not text — it is a page, and on
+ * DeepSeek the text model cannot see one. Only a `text/plain` paste, which is
+ * already language, takes the text model.
+ */
+export function defaultModelFor(
+  mimeType: string,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const provider = PROVIDERS[configuredProvider(env)]
+  return mimeType === 'text/plain' ? provider.textModel : provider.visionModel
+}
+
 /** What the response may cost. Generous for a rate confirmation; finite. */
 // 8k, RAISED FROM 4k after the golden-set runs.
 //
@@ -75,11 +173,42 @@ export const PRICE_CENTS_PER_MTOK = { input: 300, output: 1_500 } as const
  *
  * Cache pricing is Anthropic's published multiple of the input rate — a write
  * costs 1.25x and a read 0.1x — computed here rather than typed, so the two
- * cannot drift apart.
+ * cannot drift apart. A row may OVERRIDE either where its provider does not
+ * follow that shape; DeepSeek does not, and the override is why its cache rate
+ * is not silently three times what it charges.
  */
 export const MODEL_PRICES = {
   'claude-sonnet-5': { input: 300, output: 1_500 },
   'claude-haiku-4-5-20251001': { input: 100, output: 500 },
+  // DeepSeek, same units. LIST RATES, supplied by the owner on 2026-09-12 and
+  // recorded at the PEAK price.
+  //
+  // ── TWO PLACES THIS ROW DOES NOT FIT THE TABLE, BOTH DELIBERATE ─────────
+  //
+  // 1. OFF-PEAK IS HALF OF EVERY FIGURE HERE. DeepSeek discounts by time of
+  //    day, which nothing else in this table does and which the ledger cannot
+  //    reconstruct from a stored row. Recording the peak rate makes every
+  //    DeepSeek cost an UPPER BOUND — the same posture as the unpriced
+  //    fallback, chosen on purpose: a bill that comes in under the estimate is
+  //    a good surprise, and the alternative is a comparison that flatters the
+  //    engine we are thinking of switching to.
+  //
+  // 2. THE CACHE RATES ARE TYPED, NOT DERIVED. A DeepSeek cache hit is about
+  //    3.2% of the input rate rather than Anthropic's 10%, and there is no
+  //    write premium at all — the cache is automatic, so a miss simply costs
+  //    the input rate. Deriving them would overstate a cache read by 3x.
+  'deepseek-v4-flash-vision-exp': {
+    input: 44,
+    output: 132,
+    cacheWrite: 44,
+    cacheRead: 1.4,
+  },
+  'deepseek-v4-pro': {
+    input: 132,
+    output: 396,
+    cacheWrite: 132,
+    cacheRead: 4.4,
+  },
   // Google, same units. LIST RATES, supplied by the owner on 2026-08-11 and
   // replacing the assumed ones the engine table was first computed with.
   //
@@ -95,11 +224,36 @@ export const MODEL_PRICES = {
 
 export type PricedModel = keyof typeof MODEL_PRICES
 
+/**
+ * Models this system may send to whose RATE NOBODY HAS SUPPLIED.
+ *
+ * EMPTY, AND THE MECHANISM STAYS. The DeepSeek pair lived here for the hour
+ * between the seam being built and the owner supplying the rates, which is the
+ * situation this list exists for: a model can be reachable before it is
+ * priceable, and the alternative to saying so is a guessed rate. The Gemini
+ * rows in `MODEL_PRICES` were once computed from assumed rates and understated
+ * by 3.7x — recorded in `EXTRACTION-CONTRACT.md`, and the reason every cost
+ * line in this codebase prints the measured tokens beside it.
+ *
+ * Anything listed here is charged at the dearest rate on file by `pricesFor`,
+ * which makes its cost an UPPER BOUND rather than a reading, and
+ * `isPricedModel` stays false so a report can say which column is which.
+ */
+export const UNPRICED_MODELS: readonly string[] = []
+
 /** The models this system will send a document to. Nothing else is accepted. */
-export const ALLOWED_MODELS = Object.keys(MODEL_PRICES) as PricedModel[]
+export const ALLOWED_MODELS: string[] = [
+  ...Object.keys(MODEL_PRICES),
+  ...UNPRICED_MODELS,
+]
 
 export function isPricedModel(value: string): value is PricedModel {
   return Object.hasOwn(MODEL_PRICES, value)
+}
+
+/** Whether this system will send to it at all — priced or bounded. */
+export function isAllowedModel(value: string): boolean {
+  return ALLOWED_MODELS.includes(value)
 }
 
 export interface Usage {
@@ -174,12 +328,22 @@ export function pricesFor(model: string): {
   const dearest = Object.values(MODEL_PRICES).reduce((worst, price) =>
     price.input + price.output > worst.input + worst.output ? price : worst,
   )
-  const base = isPricedModel(model) ? MODEL_PRICES[model] : dearest
+  const base: {
+    input: number
+    output: number
+    cacheWrite?: number
+    cacheRead?: number
+  } = isPricedModel(model) ? MODEL_PRICES[model] : dearest
   return {
     input: base.input,
     output: base.output,
-    cacheWrite: base.input * 1.25,
-    cacheRead: base.input * 0.1,
+    // DERIVED FROM THE INPUT RATE UNLESS THE ROW SAYS OTHERWISE. Anthropic's
+    // 1.25x/0.1x is the shape most of this table follows; DeepSeek's is not,
+    // and a provider whose cache is automatic has no write premium at all.
+    // `?? ` rather than a branch, so a row that says nothing keeps the
+    // behaviour every existing figure was computed with.
+    cacheWrite: base.cacheWrite ?? base.input * 1.25,
+    cacheRead: base.cacheRead ?? base.input * 0.1,
   }
 }
 
@@ -287,14 +451,24 @@ export interface AskResult {
  * said something".
  */
 export async function askAboutDocument(input: AskInput): Promise<AskResult> {
-  const apiKey = input.apiKey ?? process.env.ANTHROPIC_API_KEY
+  // THE MODEL DECIDES THE HOST, and the configured provider decides the model
+  // when nobody named one. Resolved together, once, so the key, the URL and
+  // the model in the body can never disagree about who is being called.
+  const model = input.model ?? defaultModelFor(input.mimeType)
+  const provider = PROVIDERS[providerOf(model)]
+
+  const apiKey = input.apiKey ?? process.env[provider.keyEnv]
   if (!apiKey) {
     // Named, not silent. A worker without the secret should say so once, in a
     // way that reaches a log, rather than returning empty extractions that
     // look like documents nothing could be read from.
+    //
+    // NAMES THE VARIABLE THE PROVIDER NEEDS, which is the whole value of this
+    // message: "ANTHROPIC_API_KEY is not set" on a worker configured for
+    // DeepSeek would send somebody to check the wrong secret.
     throw new ClaudeError(
       'no_api_key',
-      'ANTHROPIC_API_KEY is not set on this worker.',
+      `${provider.keyEnv} is not set on this worker.`,
     )
   }
 
@@ -321,7 +495,7 @@ export async function askAboutDocument(input: AskInput): Promise<AskResult> {
   }
 
   const call = input.fetchImpl ?? fetch
-  const response = await call('https://api.anthropic.com/v1/messages', {
+  const response = await call(provider.url, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -329,7 +503,7 @@ export async function askAboutDocument(input: AskInput): Promise<AskResult> {
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: input.model ?? EXTRACTION_MODEL,
+      model,
       max_tokens: MAX_OUTPUT_TOKENS,
       // CACHE THE INSTRUCTIONS, NEVER THE DOCUMENT — and the breakpoint goes
       // on the SYSTEM block only.
@@ -381,7 +555,9 @@ export async function askAboutDocument(input: AskInput): Promise<AskResult> {
     const body = await response.text().catch(() => '')
     throw new ClaudeError(
       'http_error',
-      `Claude returned ${response.status}: ${body.slice(0, 300)}`,
+      // THE HOST IS IN THE MESSAGE. A 404 reads identically from both, and
+      // "which provider refused" is the first question anybody asks of one.
+      `${provider.url} returned ${response.status} for ${model}: ${body.slice(0, 300)}`,
       response.status,
     )
   }
@@ -405,7 +581,7 @@ export async function askAboutDocument(input: AskInput): Promise<AskResult> {
     .trim()
 
   if (text === '') {
-    throw new ClaudeError('no_text', 'Claude returned no text block.')
+    throw new ClaudeError('no_text', `${model} returned no text block.`)
   }
 
   // TRUNCATION IS ITS OWN FAILURE, said in its own words.
@@ -431,7 +607,10 @@ export async function askAboutDocument(input: AskInput): Promise<AskResult> {
       cacheWriteTokens: payload.usage?.cache_creation_input_tokens ?? 0,
       cacheReadTokens: payload.usage?.cache_read_input_tokens ?? 0,
     },
-    model: payload.model ?? EXTRACTION_MODEL,
+    // WHO ANSWERED, as the answer itself reported it — falling back to the
+    // resolved model rather than to `EXTRACTION_MODEL`, which names a Gemini
+    // model this transport never calls.
+    model: payload.model ?? model,
   }
 }
 

@@ -9,8 +9,8 @@ import {
 } from '@/lib/rate-confirmation'
 import {
   ALLOWED_MODELS,
+  isAllowedModel,
   formatCostMilliCents,
-  isPricedModel,
 } from '@/lib/claude'
 import { withoutMoney } from '@/lib/extraction/parse'
 import {
@@ -76,7 +76,12 @@ export async function POST(
     cache?: unknown
   }
   const requested = typeof body.model === 'string' ? body.model : null
-  if (requested && !isPricedModel(requested)) {
+  // ALLOWED, NOT NECESSARILY PRICED. The DeepSeek models are allowed and have
+  // no supplied rate, so their cost is charged at the dearest rate on file and
+  // is an UPPER BOUND — see `UNPRICED_MODELS`. Refusing them here would make
+  // the provider comparison unrunnable; pricing them at a guess is what the
+  // Gemini correction already taught us not to do.
+  if (requested && !isAllowedModel(requested)) {
     return apiError(
       400,
       'unknown_model',
