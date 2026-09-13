@@ -561,4 +561,25 @@ export async function teardown(): Promise<void> {
   } finally {
     release = null
   }
+
+  // ── NO STRAY-SESSION ASSERTION HERE, AND THAT IS A FINDING ───────────
+  //
+  // One was written on 2026-09-13 and removed the same hour: "no session of
+  // ours survives a run" CANNOT FAIL, so it was testing nothing.
+  //
+  // Vitest destroys each worker PROCESS — and its sockets with it — before
+  // this teardown runs in the main process, and nothing in the main process
+  // ever connects to a worker database. Verified by deleting a `$disconnect`
+  // from `settings.test.ts` and watching the run still report every client
+  // closed.
+  //
+  // The other end is covered already: `buildWorkerDatabases` drops orphan
+  // worker databases `with (force)`, which evicts anything a previous run left
+  // behind, whatever killed it.
+  //
+  // AND THE READING THAT PROMPTED IT WAS WRONG. 112 sessions on the worker
+  // databases looked like a leak; every one carried `application_name =
+  // 'pgbouncer'` — Neon's pooler holding its own server connections, not ours
+  // to close, draining on its own schedule. The reading was taken while a run
+  // was in flight. A check counting those would have failed every healthy run.
 }
