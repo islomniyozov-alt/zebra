@@ -100,9 +100,26 @@
     // in the same breath. A global switch would force one answer to two
     // questions.
     //
-    // NONE ARE SET. Nothing switches until the owner says so; these exist so
-    // that when he does, it is one line for one document type and the diff
-    // says which.
+    // ── SWITCHED, ON DEV ONLY (Islom's decision, 2026-09-13) ────────────
+    //
+    // The licence and the medical card go to DeepSeek here. Nothing else does:
+    // the rate confirmation, the certificate of insurance and the classifier
+    // fall through to `LLM_PROVIDER`, which is unset and therefore ANTHROPIC —
+    // and `EXTRACTION_MODEL` still sends them to Gemini before that ever
+    // matters.
+    //
+    // WHAT THE NUMBERS SAID. On licences the two engines tied at 19 of 19
+    // fields across two cards, five reads each, for roughly half the money and
+    // a little faster. On the medical card DeepSeek was wrong three times in
+    // five UNTIL the card was turned upright, after which both engines were
+    // perfect across five reads and DeepSeek was 2.4s quicker. The rotation
+    // pipeline that made that true shipped first, deliberately: this switch
+    // depends on it.
+    //
+    // PRODUCTION STAYS ON GEMINI. Its block below names no provider at all,
+    // and the ten-card run is what would change that.
+    "LLM_PROVIDER_CDL": "DEEPSEEK",
+    "LLM_PROVIDER_MEDICAL": "DEEPSEEK",
 
     // Where password-reset links point. A deployment fact, not a request
     // fact: taken from the Host header, a worker reached through a preview

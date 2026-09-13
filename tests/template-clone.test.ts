@@ -51,6 +51,7 @@ afterAll(async () => {
     await admin
       .query(`drop database if exists "${COPY}" with (force)`)
       .catch(() => undefined)
+    await setConnectable(admin, SCRATCH, true).catch(() => undefined)
     await admin
       .query(`drop database if exists "${SCRATCH}" with (force)`)
       .catch(() => undefined)
@@ -125,9 +126,29 @@ describe.skipIf(!adminUrl)('clearing a template before cloning it', () => {
       'the stranger session must be gone, not merely reported',
     ).not.toContain('somebody-elses-run')
 
-    // Termination is asynchronous — the backend is asked to go away, and
-    // `pg_stat_activity` stops listing it slightly before the database stops
-    // counting it. The same bounded retry the real copy uses.
+    // ── AND THEN CLONE THE WAY THE SUITE ACTUALLY CLONES ───────────────
+    //
+    // LOCKED FIRST, and that does NOT weaken what this proves. `ALTER
+    // DATABASE ... allow_connections false` evicts nobody — it only stops the
+    // next arrival — so a squatter still sitting there would refuse this clone
+    // exactly as it refused the one above. The success is still attributable
+    // to the clearing.
+    //
+    // WHY IT CHANGED: this loop used to clone from a CONNECTABLE database, and
+    // on 2026-09-13 it failed a gate after 113 seconds of 55006. That is the
+    // mechanism measured the same day and written up in `setConnectable` — a
+    // managed background worker re-attaches between attempts, four sequential
+    // copies of a connectable source take 31.7s with five refusals against
+    // 1.0s with none — so the test was reproducing the defect the fix exists
+    // to remove, in the one configuration the suite no longer uses.
+    //
+    // A TEST THAT IS FLAKY FOR A REASON YOU HAVE ALREADY MEASURED is not a
+    // flaky test; it is a test pointed at the wrong configuration.
+    await setConnectable(admin, SCRATCH, false)
+
+    // The bounded retry stays, because termination is asynchronous: the
+    // backend is asked to go away, and `pg_stat_activity` stops listing it
+    // slightly before the database stops counting it.
     let created = false
     for (let attempt = 0; attempt < 12 && !created; attempt++) {
       try {
