@@ -226,7 +226,12 @@ describe('the routing seam', () => {
     })
     vi.stubEnv('LLM_PROVIDER_CDL', 'DEEPSEEK')
     try {
-      await askModel({ ...ask(), kind: 'cdl', fetchImpl: impl })
+      // AN IMAGE: a PDF bound for DeepSeek is refused before the call.
+      await askModel({
+        ...ask({ mimeType: 'image/jpeg' }),
+        kind: 'cdl',
+        fetchImpl: impl,
+      })
       expect(calls[0]!.url).toContain('api.deepseek.com')
     } finally {
       vi.unstubAllEnvs()

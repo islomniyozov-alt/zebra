@@ -1,6 +1,7 @@
 import { readCostOf, type AskResult, type ReadCost } from './claude'
 import type { Confidence } from './extraction/envelope'
 import { askModel } from './model-engine'
+import { readNothing } from './extraction/read-nothing'
 import { parseMedicalCertResponse } from './extraction/med-parse'
 import { MEDICAL_CERT_SYSTEM_WITH_SCHEMA } from './extraction/med-prompt'
 import { parseMedDate } from './extraction/med-dates'
@@ -38,6 +39,8 @@ export type MedicalCertReadOutcome =
         | 'unsupported_type'
         | 'call_failed'
         | 'unparsable'
+        /** The engine answered, in the right shape, with nothing in it. */
+        | 'read_nothing'
         | MedicalCertRefusal
       /**
        * What the attempt cost, or null when no engine was ever reached.
@@ -110,6 +113,16 @@ export async function readMedicalCert(input: {
     fields = parseMedicalCertResponse(answer.text)
   } catch {
     return { ok: false, reason: 'unparsable', cost }
+  }
+
+  // ── AN ANSWER THAT SAYS NOTHING IS NOT A READING ────────────────────
+  //
+  // Measured 2026-09-13: an engine returned valid, schema-conformant JSON with
+  // EVERY value null for thirteen documents in a row, and every defence in
+  // this pipeline was satisfied because there was nothing there to be wrong.
+  // See `read-nothing.ts`.
+  if (readNothing({ base64: input.base64, fields })) {
+    return { ok: false, reason: 'read_nothing', cost }
   }
 
   const refusal = refuseMedicalCert(

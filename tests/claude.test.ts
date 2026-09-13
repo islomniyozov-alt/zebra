@@ -421,8 +421,11 @@ describe('the provider seam', () => {
 
   it('posts to the host the model belongs to, with that host’s key name', async () => {
     const deep = spy()
+    // AN IMAGE, because a PDF bound for DeepSeek is refused before the call —
+    // it answers a PDF with a complete empty extraction rather than refusing,
+    // measured across thirteen documents. See `pdf_not_supported`.
     await askAboutDocument({
-      ...ask(),
+      ...ask({ mimeType: 'image/jpeg' }),
       model: 'deepseek-v4-flash-vision-exp',
       fetchImpl: deep.impl,
     })
@@ -461,7 +464,15 @@ describe('the provider seam', () => {
     const bodies = []
     for (const model of ['claude-sonnet-5', 'deepseek-v4-flash-vision-exp']) {
       const { calls, impl } = spy()
-      await askAboutDocument({ ...ask(), model, cache: true, fetchImpl: impl })
+      // AN IMAGE, so both hosts accept it: the PDF path to DeepSeek is refused
+      // before the call. The body comparison is the point, and an image block
+      // exercises it just as well as a document one.
+      await askAboutDocument({
+        ...ask({ mimeType: 'image/jpeg' }),
+        model,
+        cache: true,
+        fetchImpl: impl,
+      })
       const body = JSON.parse(String(calls[0]!.init.body))
       // The model is the ONE field allowed to differ.
       delete body.model
@@ -472,6 +483,52 @@ describe('the provider seam', () => {
       expect(headers['x-api-key']).toBe('test-key')
     }
     expect(bodies[0]).toBe(bodies[1])
+  })
+
+  // ── A PDF NEVER REACHES A PROVIDER THAT CANNOT READ ONE ──────────────
+  //
+  // MEASURED, 2026-09-13. Thirteen rate confirmations on
+  // `deepseek-v4-flash-vision-exp`: 0.0% on all 179 invoice-making fields, no
+  // refusal, no parse error — valid JSON with every value null, and ~491 input
+  // tokens per document against Gemini's 4,593. The document block was
+  // accepted and ignored.
+  //
+  // A confident empty answer passes every parser, schema check and refusal
+  // rule downstream, which is why this stops at the transport.
+  it('refuses a PDF bound for a provider that cannot read one', async () => {
+    const { calls, impl } = spy()
+    await expect(
+      askAboutDocument({
+        ...ask(),
+        model: 'deepseek-v4-flash-vision-exp',
+        fetchImpl: impl,
+      }),
+    ).rejects.toMatchObject({ reason: 'pdf_not_supported' })
+    // NOTHING IS BILLED for a reading that cannot happen.
+    expect(calls).toEqual([])
+  })
+
+  it('sends the same provider an IMAGE quite happily', async () => {
+    // NARROW ON PURPOSE. The same model reads photographs of licences and
+    // medical cards as well as Gemini does, measured the same week — it is the
+    // `document` block it ignores.
+    const { calls, impl } = spy()
+    await askAboutDocument({
+      ...ask({ mimeType: 'image/jpeg' }),
+      model: 'deepseek-v4-flash-vision-exp',
+      fetchImpl: impl,
+    })
+    expect(calls).toHaveLength(1)
+  })
+
+  it('still sends a PDF to a provider that reads them', async () => {
+    const { calls, impl } = spy()
+    await askAboutDocument({
+      ...ask(),
+      model: 'claude-sonnet-5',
+      fetchImpl: impl,
+    })
+    expect(calls).toHaveLength(1)
   })
 
   it('reads the provider from config, and refuses to guess at a typo', () => {

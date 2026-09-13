@@ -1,5 +1,6 @@
 import { costMilliCents, type Usage } from './claude'
 import { askModel } from './model-engine'
+import { readNothing } from './extraction/read-nothing'
 import type { AskResult } from './claude'
 import { EXTRACTION_SCHEMA } from './extraction/rate-con-shape'
 import {
@@ -166,6 +167,14 @@ export type ExtractionFailure =
   | 'not_readable'
   | 'call_failed'
   | 'unparsable'
+  /**
+   * The engine answered, in the right shape, with nothing in it.
+   *
+   * THIS IS THE READER THE MEASUREMENT CAUGHT. Thirteen rate confirmations
+   * came back valid, conformant and entirely null on 2026-09-13, and this
+   * function returned `ok: true` for every one of them.
+   */
+  | 'read_nothing'
 
 export interface ExtractionSuccess {
   ok: true
@@ -335,6 +344,20 @@ export async function askForExtraction(
 
   try {
     const extracted = parseExtraction(answer.text)
+    // ── AN ANSWER THAT SAYS NOTHING IS NOT AN EXTRACTION ────────────────
+    //
+    // The corpus run that found this reported "13 of 13 read" and 0.0% on
+    // every field. Nothing above this line objected, because a complete empty
+    // answer is well-formed — see `read-nothing.ts`.
+    if (readNothing({ base64: input.base64, fields: extracted })) {
+      return {
+        ok: false,
+        reason: 'read_nothing',
+        detail:
+          'the engine answered in the right shape with every field empty; the document was not read',
+        rawText: answer.text,
+      }
+    }
     return { ok: true, answer, extracted, money: moneyToCents(extracted) }
   } catch (error) {
     if (error instanceof ExtractionParseError) {

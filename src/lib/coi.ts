@@ -1,5 +1,6 @@
 import { readCostOf, type AskResult, type ReadCost } from './claude'
 import { askModel } from './model-engine'
+import { readNothing } from './extraction/read-nothing'
 import { parseCoiResponse } from './extraction/coi-parse'
 import { COI_EXTRACTION_SYSTEM_WITH_SCHEMA } from './extraction/coi-prompt'
 import { proposeCoverage } from './extraction/coi-coverages'
@@ -57,7 +58,13 @@ export type CoiReadOutcome =
   | { ok: true; fields: ExtractedCoi; cost: ReadCost }
   | {
       ok: false
-      reason: 'unsupported_type' | 'call_failed' | 'unparsable' | CoiRefusal
+      reason:
+        | 'unsupported_type'
+        | 'call_failed'
+        | 'unparsable'
+        /** The engine answered, in the right shape, with nothing in it. */
+        | 'read_nothing'
+        | CoiRefusal
       cost: ReadCost | null
     }
 
@@ -111,6 +118,16 @@ export async function readCoi(input: {
     fields = parseCoiResponse(answer.text)
   } catch {
     return { ok: false, reason: 'unparsable', cost }
+  }
+
+  // ── AN ANSWER THAT SAYS NOTHING IS NOT A READING ──────────────────
+  //
+  // Measured 2026-09-13: an engine returned valid, schema-conformant JSON
+  // with EVERY value null for thirteen documents in a row, and every
+  // defence in this pipeline was satisfied because there was nothing there
+  // to be wrong. See `read-nothing.ts`.
+  if (readNothing({ base64: input.base64, fields })) {
+    return { ok: false, reason: 'read_nothing', cost }
   }
 
   const refusal = refuseCoi(fields)

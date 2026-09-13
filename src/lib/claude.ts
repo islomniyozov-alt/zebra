@@ -56,6 +56,15 @@ export interface ProviderConfig {
   visionModel: string
   /** What reads a pasted email — words that are already language. */
   textModel: string
+  /**
+   * Whether this provider can read a PDF `document` block at all.
+   *
+   * NOT AN OPTIMISATION — a correctness flag. A provider that cannot read one
+   * and says so would need nothing here; DeepSeek accepts the block, ignores
+   * it, and returns a complete empty answer. This is what stops the PDF being
+   * sent in the first place.
+   */
+  readsPdf: boolean
 }
 
 export const PROVIDERS: Record<LlmProvider, ProviderConfig> = {
@@ -66,12 +75,16 @@ export const PROVIDERS: Record<LlmProvider, ProviderConfig> = {
     // exists for DeepSeek and is expressed here rather than branched on.
     visionModel: 'claude-sonnet-5',
     textModel: 'claude-sonnet-5',
+    readsPdf: true,
   },
   DEEPSEEK: {
     url: 'https://api.deepseek.com/anthropic/v1/messages',
     keyEnv: 'DEEPSEEK_API_KEY',
     visionModel: 'deepseek-v4-flash-vision-exp',
     textModel: 'deepseek-v4-pro',
+    // FALSE, MEASURED. 13 rate confirmations, 0.0% on every field, ~491 input
+    // tokens per document against Gemini's 4,593 — the prompt alone.
+    readsPdf: false,
   },
 }
 
@@ -476,6 +489,21 @@ export function formatCostMilliCents(milliCents: number): string {
 
 export type ClaudeFailure =
   | 'no_api_key'
+  /**
+   * A PDF sent to a provider that cannot read one.
+   *
+   * MEASURED, 2026-09-13. The 13-document rate-confirmation corpus was run on
+   * `deepseek-v4-flash-vision-exp` and scored 0.0% on every field — not by
+   * refusing, but by ANSWERING: valid JSON, schema-conformant, every value
+   * null, `stops: []`, thirteen of thirteen "read". The tokens gave it away —
+   * 491 input tokens per document against Gemini's 4,593, which is the prompt
+   * and the schema alone. The `document` block was accepted and ignored.
+   *
+   * A confident empty answer is the worst failure mode this system has: it
+   * passes every parser, every schema check and every refusal rule downstream.
+   * So the PDF never leaves.
+   */
+  | 'pdf_not_supported'
   /** A model name nothing in `ALLOWED_MODELS` covers. Configuration, not luck. */
   | 'unknown_model'
   /** `LLM_PROVIDER` set to something that is not a provider. */
@@ -580,6 +608,26 @@ export async function askAboutDocument(input: AskInput): Promise<AskResult> {
     throw new ClaudeError(
       'no_api_key',
       `${provider.keyEnv} is not set on this worker.`,
+    )
+  }
+
+  // ── A PDF NEVER GOES TO A PROVIDER THAT CANNOT READ ONE ───────────────
+  //
+  // Refused BEFORE the call, so nothing is billed for a reading that cannot
+  // happen. See `pdf_not_supported` for what the measurement looked like: the
+  // answer came back well-formed and completely empty, which is the one shape
+  // nothing downstream can catch.
+  //
+  // IMAGES ARE FINE and are the reason this is narrow. The same model reads
+  // photographs of licences and medical cards as well as Gemini does, measured
+  // the same week; it is the `document` block it ignores.
+  if (
+    DOCUMENT_TYPES.has(input.mimeType) &&
+    !PROVIDERS[providerOf(model)].readsPdf
+  ) {
+    throw new ClaudeError(
+      'pdf_not_supported',
+      `${model} does not read PDFs — it answers with an empty extraction rather than refusing. Send an image, or read this document on another provider.`,
     )
   }
 

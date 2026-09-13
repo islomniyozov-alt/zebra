@@ -118,8 +118,25 @@
     //
     // PRODUCTION STAYS ON GEMINI. Its block below names no provider at all,
     // and the ten-card run is what would change that.
-    "LLM_PROVIDER_CDL": "DEEPSEEK",
-    "LLM_PROVIDER_MEDICAL": "DEEPSEEK",
+    // ── FROZEN, AND THE VARIABLES ARE UNSET (Islom's decision, 2026-09-13)
+    //
+    // These read DEEPSEEK for about half an hour. What ended it was the
+    // 13-document rate-confirmation corpus: `deepseek-v4-flash-vision-exp`
+    // scored 0.0% on all 179 invoice-making fields by ANSWERING — valid JSON,
+    // conformant to the schema, every value null — at ~491 input tokens per
+    // document against Gemini's 4,593. It does not read PDF document blocks;
+    // it accepts them and ignores them.
+    //
+    // THAT IS NOT A REASON THE LICENCE READS WERE WRONG. Those are
+    // photographs, they go as image blocks, and DeepSeek tied with Gemini at
+    // 19 of 19 fields for half the money. The decision is to stay on one
+    // engine for every document type rather than run two, and it is a decision
+    // rather than a defect.
+    //
+    // THE SEAM STAYS. Two guards shipped with this freeze: a PDF bound for a
+    // provider that cannot read one is refused before it is billed, and an
+    // all-null extraction on a substantial document is reported as "read
+    // nothing" by every reader that can tell the difference.
 
     // Where password-reset links point. A deployment fact, not a request
     // fact: taken from the Host header, a worker reached through a preview

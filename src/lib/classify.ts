@@ -100,6 +100,19 @@ ${JSON.stringify(classifySchemaFor(types), null, 2)}`,
     return { ok: false, reason: 'unparsable', cost }
   }
 
+  // ── NO `read_nothing` CHECK HERE, AND THAT IS DELIBERATE ──────────────
+  //
+  // The other four readers refuse an answer that is entirely empty, because an
+  // empty rate confirmation or licence is an engine that did not read the
+  // document — measured 2026-09-13, thirteen documents, 0.0% on every field,
+  // all well-formed.
+  //
+  // THE CLASSIFIER'S EMPTY ANSWER IS A REAL ANSWER. `type: null` means "none of
+  // the types you offered", which is exactly what this is for and what a
+  // photograph of a lunch receipt should produce. It is indistinguishable from
+  // "I read nothing", so a check here would refuse correct answers to catch
+  // incorrect ones — and `actionable` below already stops a null type from
+  // being acted on, which is the protection that matters.
   return {
     ok: true,
     proposal,
