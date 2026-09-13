@@ -3,6 +3,7 @@ import {
   EXTRACTION_MODEL,
   askAboutDocument,
   defaultModelFor,
+  explicitProviderFor,
   type AskInput,
   type ReadKind,
   type AskResult,
@@ -71,7 +72,28 @@ export function isOutage(error: unknown): boolean {
 }
 
 export async function askModel(input: AskInput): Promise<AskResult> {
-  const model = input.model ?? EXTRACTION_MODEL
+  // ── THE CONFIGURED PROVIDER DECIDES, WHEN THERE IS ONE ────────────────
+  //
+  // `EXTRACTION_MODEL` is the default of last resort, not the first answer.
+  // It named a Gemini model, and this line used to read
+  // `input.model ?? EXTRACTION_MODEL` — so `LLM_PROVIDER_CDL=DEEPSEEK` was
+  // INERT: every default read went to Gemini and never reached the transport
+  // where the provider is resolved.
+  //
+  // That shipped to dev on 2026-09-13 and was caught by a real upload read
+  // back out of the ledger, not by a test. Every unit guard passed: they
+  // exercised `configuredProvider` and `askAboutDocument` directly, and
+  // nothing exercised THIS line with no model named.
+  //
+  // EXPLICIT ONLY. A deployment that has named no provider keeps
+  // `EXTRACTION_MODEL` — collapsing "unset" into "Anthropic" here would have
+  // moved every unconfigured read in the system onto Sonnet.
+  const configured = explicitProviderFor(input.kind ?? null)
+  const model =
+    input.model ??
+    (configured === null
+      ? EXTRACTION_MODEL
+      : defaultModelFor(input.mimeType, input.kind ?? null))
   const resolved = { ...input, model }
 
   if (!isGeminiModel(model)) return askAboutDocument(resolved)

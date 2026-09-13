@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   ClaudeError,
   EXTRACTION_MODEL,
@@ -203,6 +203,54 @@ describe('the routing seam', () => {
     // the default wherever the owner moves it.
     const { calls, impl } = spy()
     await askModel({ ...ask(), fetchImpl: impl })
+    const host = isGeminiModel(EXTRACTION_MODEL)
+      ? 'generativelanguage.googleapis.com'
+      : 'api.anthropic.com'
+    expect(calls[0]!.url).toContain(host)
+  })
+
+  // ── THE CONFIGURED PROVIDER ACTUALLY DECIDES ──────────────────────────
+  //
+  // THE DEFECT THIS EXISTS FOR, and it shipped. `LLM_PROVIDER_CDL=DEEPSEEK`
+  // was set on dev, deployed, and a real licence upload went to GEMINI —
+  // because this seam resolved `input.model ?? EXTRACTION_MODEL` and never
+  // consulted the provider at all. The variable was inert.
+  //
+  // Every unit guard passed at the time: they exercised `configuredProvider`
+  // and `askAboutDocument` directly, and NOTHING exercised this line with no
+  // model named. Only a real upload, read back out of the ledger, said so.
+  it('sends a configured document type to its provider, not to the default', async () => {
+    const { calls, impl } = spy({
+      content: [{ type: 'text', text: '{"ok":true}' }],
+      usage: { input_tokens: 10, output_tokens: 10 },
+    })
+    vi.stubEnv('LLM_PROVIDER_CDL', 'DEEPSEEK')
+    try {
+      await askModel({ ...ask(), kind: 'cdl', fetchImpl: impl })
+      expect(calls[0]!.url).toContain('api.deepseek.com')
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('leaves every other document type on the default', async () => {
+    // PER DOCUMENT TYPE. Setting the licence must not move the rate
+    // confirmation, which is the whole reason the variable is per kind.
+    const { calls, impl } = spy()
+    vi.stubEnv('LLM_PROVIDER_CDL', 'DEEPSEEK')
+    try {
+      await askModel({ ...ask(), kind: 'rate_confirmation', fetchImpl: impl })
+      expect(calls[0]!.url).toContain('generativelanguage.googleapis.com')
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('keeps EXTRACTION_MODEL when no provider is named at all', async () => {
+    // UNSET IS NOT ANTHROPIC HERE. Collapsing the two would have moved every
+    // unconfigured read in the system onto Sonnet the day this was written.
+    const { calls, impl } = spy()
+    await askModel({ ...ask(), kind: 'cdl', fetchImpl: impl })
     const host = isGeminiModel(EXTRACTION_MODEL)
       ? 'generativelanguage.googleapis.com'
       : 'api.anthropic.com'

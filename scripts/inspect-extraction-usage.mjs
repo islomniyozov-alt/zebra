@@ -140,6 +140,42 @@ try {
     ['type', 'model', 'calls', 'first', 'last', 'avg_in', 'avg_out'],
   )
 
+  // ── THE LAST FEW CALLS, ONE ROW EACH ────────────────────────────────
+  //
+  // Added 2026-09-13 to answer a question the aggregates cannot: did THIS
+  // upload go to the configured provider? A count of "12 DeepSeek CDL reads"
+  // includes every run that NAMED the model on the command line, so it says
+  // nothing about whether the worker's own configuration is in effect. One
+  // row, with its clock, does.
+  table(
+    'The last ten calls, newest first',
+    await rows(
+      `SELECT to_char("createdAt" AT TIME ZONE 'UTC', 'MM-DD HH24:MI:SS') AS at,
+              "documentType"  AS type,
+              "model",
+              "askedModel"    AS asked,
+              "inputTokens"   AS tok_in,
+              "outputTokens"  AS tok_out,
+              "cacheReadTokens" AS cache_r,
+              "milliCents"    AS millicents,
+              refused
+         FROM "ExtractionUsage"
+        ORDER BY "createdAt" DESC
+        LIMIT 10`,
+    ),
+    [
+      'at',
+      'type',
+      'model',
+      'asked',
+      'tok_in',
+      'tok_out',
+      'cache_r',
+      'millicents',
+      'refused',
+    ],
+  )
+
   table(
     'Fallbacks — asked one engine, answered by another',
     await rows(

@@ -151,6 +151,40 @@ export function providerVarFor(kind: ReadKind): string {
  * before this field existed; a MISSPELLED one is a deployment that has been
  * told something nobody can act on.
  */
+/**
+ * The provider a deployment has EXPLICITLY named for this kind of read, or
+ * null when it has named none.
+ *
+ * ── WHY NULL IS DIFFERENT FROM ANTHROPIC HERE ────────────────────────────
+ *
+ * `configuredProvider` answers "which Anthropic-compatible host", and unset
+ * means Anthropic because that is the only sensible default for a question
+ * that has already been decided to be about that transport.
+ *
+ * This answers a different question: has anybody CHOSEN a provider for this
+ * document type at all? The extraction default is `EXTRACTION_MODEL`, which
+ * names a Gemini model, and a deployment that has set nothing must keep
+ * getting it. Collapsing the two would have switched every unconfigured read
+ * in the system to Sonnet the moment this function existed.
+ *
+ * WRITTEN AFTER THE SWITCH DID NOTHING. On 2026-09-13 `LLM_PROVIDER_CDL` was
+ * set to DEEPSEEK on dev, deployed, and a real licence upload went to Gemini
+ * anyway — because `askModel` resolved `input.model ?? EXTRACTION_MODEL`
+ * before any of this was consulted. The variable was inert, the guards all
+ * passed, and only a real upload read back out of the ledger said so.
+ */
+export function explicitProviderFor(
+  kind: ReadKind | null,
+  env: Record<string, string | undefined> = process.env,
+): LlmProvider | null {
+  const named = kind === null ? undefined : env[providerVarFor(kind)]
+  const raw = (named ?? env.LLM_PROVIDER ?? '').trim()
+  if (raw === '') return null
+  // A TYPO STILL REFUSES, through the same path rather than a second copy of
+  // the rule — `configuredProvider` is where that lives.
+  return configuredProvider(kind, env)
+}
+
 export function configuredProvider(
   kind: ReadKind | null = null,
   env: Record<string, string | undefined> = process.env,
