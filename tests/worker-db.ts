@@ -184,6 +184,57 @@ export function describeSession(session: TemplateSession): string {
  * The `database` parameter is here so a test can prove this against a scratch
  * one rather than against the template the test itself is running from.
  */
+/**
+ * Allow or forbid connections to a database.
+ *
+ * ── THE MECHANISM POSTGRES USES FOR `template0`, MEASURED HERE ───────────
+ *
+ * `CREATE DATABASE ... TEMPLATE` refuses with 55006 while ANY session is
+ * connected to the source, and `terminateSessionsOn` cannot win that race
+ * because the thing connecting RECONNECTS. Measured on 2026-09-13 against a
+ * throwaway database, four sequential copies:
+ *
+ *   connectable                    31,720ms, 5 refusals
+ *   allow_connections = false       1,019ms, 0 refusals
+ *
+ * Thirty-one times faster and the refusal disappears, because with connections
+ * forbidden there is no race to lose — nothing can attach at all. The probe
+ * confirmed zero sessions on the locked database.
+ *
+ * ── WHAT WAS ACTUALLY ATTACHING ──────────────────────────────────────────
+ *
+ * A managed background worker: `TimescaleDB Background Worker Scheduler`, seen
+ * on `zebra_template` by the same probe. Not another runner, not a leftover
+ * test session — which is why terminating stray sessions never fixed it and
+ * why the sweep kept reporting nothing to sweep. It is also why SEQUENTIAL
+ * copies were catastrophically worse than concurrent ones: each gap between
+ * copies is another window for it to reconnect.
+ *
+ * ── AND WHY THE INSTRUMENTS COULD NOT SEE ANY OF THIS ────────────────────
+ *
+ * A session running `CREATE DATABASE ... TEMPLATE` has `datname` = the ADMIN
+ * database, not the template — measured, same probe. Every sweep and wait in
+ * this suite filters on `datname = 'zebra_template'`, so the copies were
+ * structurally invisible to them. "No sessions visible at sweep time" was
+ * literally true and always would have been.
+ *
+ * THE TEMPLATE IS LEFT LOCKED between runs. `ensureTemplate` unlocks it only
+ * to read its migration list and to migrate it, and locks it again before
+ * anything copies — so a crashed run leaves a database the next run repairs
+ * on its way past rather than one nobody can open.
+ */
+export async function setConnectable(
+  admin: { query: (text: string, values?: unknown[]) => Promise<unknown> },
+  database: string,
+  allowed: boolean,
+): Promise<void> {
+  // NOT PARAMETERISABLE. `ALTER DATABASE` takes an identifier, not a value, and
+  // the name is this module's own constant rather than anything a caller typed.
+  await admin.query(
+    `alter database "${database}" with allow_connections ${allowed ? 'true' : 'false'}`,
+  )
+}
+
 export async function terminateSessionsOn(
   admin: { query: (text: string, values?: unknown[]) => Promise<unknown> },
   database: string,

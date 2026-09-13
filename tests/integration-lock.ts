@@ -13,6 +13,7 @@ import {
   withDatabase,
   workerCount,
   workerDatabase,
+  setConnectable,
   terminateSessionsOn,
   describeSession,
 } from './worker-db'
@@ -84,6 +85,19 @@ async function ensureTemplate(adminUrl: string): Promise<void> {
     await admin.query(`create database "${TEMPLATE_DB}"`)
     console.log(`[integration] template ${TEMPLATE_DB} created`)
   }
+
+  // UNLOCKED TO BE READ, LOCKED AGAIN BEFORE IT IS COPIED.
+  //
+  // The template is left with `allow_connections = false` between runs — see
+  // `setConnectable` for the measurement that put it there. Reading its
+  // migration list and running `migrate deploy` against it both need a
+  // connection, so it is opened here and shut in `buildWorkerDatabases` before
+  // the first copy.
+  //
+  // SELF-HEALING BY CONSTRUCTION. A run that dies between the two leaves a
+  // connectable template, which is the state every run before today left it
+  // in — the next run unlocks what is already unlocked and carries on.
+  await setConnectable(admin, TEMPLATE_DB, true)
   await admin.end()
 
   const wanted = migrationsOnDisk()
@@ -321,6 +335,19 @@ async function buildWorkerDatabases(adminUrl: string): Promise<void> {
         `[integration] terminated a session on ${TEMPLATE_DB} that was NOT ours: ${describeSession(session)}`,
       )
     }
+
+    // ── AND THEN SHUT THE DOOR ──────────────────────────────────────────
+    //
+    // Measured 2026-09-13: with connections forbidden, four sequential copies
+    // took 1,019ms and no refusals; connectable, the same four took 31,720ms
+    // and five. Terminating sessions cannot win a race against a MANAGED
+    // background worker that reconnects — `TimescaleDB Background Worker
+    // Scheduler`, caught on this very database by the probe — and this does
+    // not have to win it, because with the door shut there is no race.
+    //
+    // AFTER the sweep above, which is what makes this legal: `ALTER DATABASE`
+    // does not evict anybody, it only stops the next arrival.
+    await setConnectable(admin, TEMPLATE_DB, false)
 
     // NOTHING MAY BE CONNECTED TO THE SOURCE, and something always is.
     //

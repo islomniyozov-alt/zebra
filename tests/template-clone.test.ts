@@ -2,6 +2,7 @@ import { Pool } from '@neondatabase/serverless'
 import { afterAll, describe, expect, it } from 'vitest'
 import {
   describeSession,
+  setConnectable,
   terminateSessionsOn,
   withApplicationName,
   withDatabase,
@@ -36,6 +37,8 @@ const adminUrl = process.env.DIRECT_DATABASE_URL
 const nonce = Math.random().toString(36).slice(2, 8)
 const SCRATCH = `zebra_clonetest_${nonce}`
 const COPY = `zebra_clonecopy_${nonce}`
+const LOCKED = `zebra_locked_${nonce}`
+const LOCKED_COPY = `zebra_lockedcopy_${nonce}`
 
 const admin = adminUrl ? new Pool({ connectionString: adminUrl, max: 4 }) : null
 
@@ -51,6 +54,15 @@ afterAll(async () => {
     await admin
       .query(`drop database if exists "${SCRATCH}" with (force)`)
       .catch(() => undefined)
+    for (const database of [LOCKED_COPY, LOCKED]) {
+      // UNLOCKED BEFORE DROPPING. `DROP DATABASE ... WITH (FORCE)` works on a
+      // locked one, but leaving the unlock out would mean a failed drop
+      // stranded a database nobody could open to find out why.
+      await setConnectable(admin, database, true).catch(() => undefined)
+      await admin
+        .query(`drop database if exists "${database}" with (force)`)
+        .catch(() => undefined)
+    }
     await admin.end()
   }
 })
@@ -130,6 +142,67 @@ describe.skipIf(!adminUrl)('clearing a template before cloning it', () => {
     expect(created, 'the clone must succeed once the session is cleared').toBe(
       true,
     )
+  }, 300_000)
+
+  // ── SHUTTING THE DOOR, WHICH IS THE ACTUAL FIX ────────────────────────
+  //
+  // Terminating sessions cannot win a race against something that RECONNECTS,
+  // and what was reconnecting is a managed background worker — `TimescaleDB
+  // Background Worker Scheduler`, caught on `zebra_template` itself by the
+  // probe that settled this on 2026-09-13. That is why every sweep reported
+  // nothing to sweep and the clone still failed.
+  //
+  // `allow_connections = false` removes the race rather than trying to win it:
+  // it is what Postgres does to `template0`, and `CREATE DATABASE ... TEMPLATE`
+  // works from a database nobody may connect to.
+  it('copies from a locked database, and nothing can attach to it', async () => {
+    if (!admin) return
+    await admin.query(`create database "${LOCKED}"`)
+    await setConnectable(admin, LOCKED, false)
+
+    // NOBODY MAY CONNECT — asserted by trying, not by reading the catalogue.
+    // `datallowconn` being false is what the ALTER wrote; being REFUSED is
+    // what the test is about.
+    const knocker = new Pool({
+      connectionString: withDatabase(adminUrl as string, LOCKED),
+      max: 1,
+    })
+    let refused = false
+    try {
+      await knocker.query('select 1')
+    } catch {
+      refused = true
+    } finally {
+      await knocker.end().catch(() => undefined)
+    }
+    expect(refused, 'a locked database must refuse a connection').toBe(true)
+
+    // AND IT IS STILL A TEMPLATE. The whole point: the copy does not need the
+    // door open, so shutting it costs nothing and removes the 55006 entirely.
+    await admin.query(`create database "${LOCKED_COPY}" template "${LOCKED}"`)
+    const copied = await admin.query(
+      'select 1 from pg_database where datname = $1',
+      [LOCKED_COPY],
+    )
+    expect(copied.rowCount, 'the copy must exist').toBe(1)
+
+    // THE COPY IS CONNECTABLE. `allow_connections` is copied from the template
+    // by CREATE DATABASE, so a worker database inheriting `false` would be a
+    // suite that cannot open any of its own clones — the one way this fix
+    // could quietly break everything.
+    const worker = new Pool({
+      connectionString: withDatabase(adminUrl as string, LOCKED_COPY),
+      max: 1,
+    })
+    try {
+      const alive = await worker.query('select 1 as ok')
+      expect(
+        (alive.rows[0] as { ok: number }).ok,
+        'a copy of a locked template must itself be connectable',
+      ).toBe(1)
+    } finally {
+      await worker.end().catch(() => undefined)
+    }
   }, 300_000)
 
   it('reports nothing when there is nothing to clear', async () => {
