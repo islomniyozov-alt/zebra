@@ -80,7 +80,20 @@ export async function compressImage(
 ): Promise<File> {
   if (!file.type.startsWith('image/')) return file
 
-  const bitmap = await createImageBitmap(file)
+  // EXIF ORIENTATION IS APPLIED HERE TOO, and was not until 2026-09-13.
+  //
+  // `downscale.ts` has passed this since the rotation ruling; this path — the
+  // one every compliance attachment and load document takes — did not, so a
+  // phone photograph carrying `orientation 6` was stored on its side. The
+  // corpus proves that is not cosmetic: a medical certificate read sideways
+  // produced four different examiner names in four reads.
+  //
+  // PASSED EXPLICITLY, because the specification default changed: a browser
+  // that ignores EXIF and one that honours it would both be "correct" and only
+  // one of them legible.
+  const bitmap = await createImageBitmap(file, {
+    imageOrientation: 'from-image',
+  })
   const scale = Math.min(
     1,
     options.maxDimension / Math.max(bitmap.width, bitmap.height),

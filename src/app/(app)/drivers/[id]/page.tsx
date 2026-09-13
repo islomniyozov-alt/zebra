@@ -263,10 +263,24 @@ export default async function EditDriverPage({
           <div className="mt-z4 max-w-[900px]">
             <DriverDocuments
               documents={documents}
+              driverId={id}
+              mayRead={mayRenewCompliance}
               labels={{
                 heading: t('documents.heading'),
                 none: t('documents.none'),
                 needsRotation: t('documents.needsRotation'),
+                rotateAndRead: t('documents.rotateAndRead'),
+                working: t('documents.working'),
+                readOk: t('documents.readOk'),
+                readFailed: t('documents.readFailed'),
+                upright: {
+                  title: t('upright.title'),
+                  hint: t('upright.hint'),
+                  rotateLeft: t('upright.rotateLeft'),
+                  rotateRight: t('upright.rotateRight'),
+                  read: t('upright.read'),
+                  cancel: t('upright.cancel'),
+                },
               }}
             />
           </div>

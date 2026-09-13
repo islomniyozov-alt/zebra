@@ -465,6 +465,11 @@ const en = {
     'Kept on the driver as “not read — needs rotation”. Nothing was read from it.',
   'drivers.med.parkFailed':
     'That card was not read and could not be kept either. It is still on your phone — try again.',
+  'documents.rotateAndRead': 'Rotate and read',
+  'documents.working': 'Reading…',
+  'documents.readOk':
+    'Read from a turned copy. Confirm it on the driver’s compliance panel; the original is untouched.',
+  'documents.readFailed': 'That card could not be read',
   'documents.needsRotation': 'not read — needs rotation',
   'documents.heading': 'Documents',
   'documents.none': 'No documents on this driver.',
@@ -2431,6 +2436,11 @@ const ru: Dictionary = {
     'Сохранено у водителя как «не прочитано — нужен поворот». Ничего не было прочитано.',
   'drivers.med.parkFailed':
     'Карточка не прочитана и не сохранена. Она осталась на телефоне — попробуйте снова.',
+  'documents.rotateAndRead': 'Повернуть и прочитать',
+  'documents.working': 'Чтение…',
+  'documents.readOk':
+    'Прочитано с повёрнутой копии. Подтвердите на панели соответствия; оригинал не изменён.',
+  'documents.readFailed': 'Эту карточку не удалось прочитать',
   'documents.needsRotation': 'не прочитано — нужен поворот',
   'documents.heading': 'Документы',
   'documents.none': 'У водителя нет документов.',
@@ -4382,6 +4392,11 @@ const fa: Dictionary = {
     'روی راننده ذخیره شد با عنوان «خوانده نشد — نیاز به چرخش». چیزی از آن خوانده نشد.',
   'drivers.med.parkFailed':
     'این کارت نه خوانده شد و نه ذخیره. هنوز روی گوشی شماست — دوباره تلاش کنید.',
+  'documents.rotateAndRead': 'چرخش و خواندن',
+  'documents.working': 'در حال خواندن…',
+  'documents.readOk':
+    'از نسخهٔ چرخانده‌شده خوانده شد. در پنل انطباق تأیید کنید؛ نسخهٔ اصلی دست‌نخورده است.',
+  'documents.readFailed': 'این کارت خوانده نشد',
   'documents.needsRotation': 'خوانده نشد — نیاز به چرخش',
   'documents.heading': 'مدارک',
   'documents.none': 'این راننده مدرکی ندارد.',
