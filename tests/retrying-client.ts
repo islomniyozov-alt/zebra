@@ -143,7 +143,30 @@ export function retryingClient(connectionString: string): PrismaClient {
             const options = (args[1] ?? {}) as Record<string, unknown>
             args[1] = { maxWait: 20_000, ...options }
           }
-          return original(...args)
+          // ── STILL NOT RETRIED, BUT NO LONGER NAMELESS ──────────────────
+          //
+          // A dropped socket inside a transaction arrives as an object whose
+          // `message` is EMPTY — the cause is only in `stack`, as
+          // `WebSocket.#onSocketClose`. Vitest's retry condition is a RegExp
+          // tested against `error.message` and nothing else, so the one error
+          // worth retrying on was the one error it could not match.
+          //
+          // So this renames it and rethrows. IT DOES NOT RETRY: replaying an
+          // interactive transaction that may already have committed is the
+          // whole reason `withSocketRetry` refuses to touch `$transaction`,
+          // and that has not changed. The retry happens a level up, where
+          // vitest re-runs the TEST and its fixtures are built again.
+          return Promise.resolve(original(...args)).catch((error: unknown) => {
+            if (!isDroppedSocket(error)) throw error
+            throw new Error(
+              `dropped Neon socket during $transaction: ${
+                error instanceof Error && error.message
+                  ? error.message
+                  : 'no message; see cause'
+              }`,
+              { cause: error },
+            )
+          })
         }
       }
       if (typeof property === 'string' && property.startsWith('$')) {

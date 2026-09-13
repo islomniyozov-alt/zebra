@@ -32,6 +32,32 @@ export default defineConfig({
     // only because nobody had changed one; a worker without its own database
     // silently shares slot 1's, and slot 1's cleanup then deletes its rows.
     maxWorkers: workerCount(),
+    // ── ONE RETRY, ON A DROPPED SOCKET AND NOTHING ELSE ─────────────────
+    //
+    // MEASURED BEFORE IT WAS BUILT (owner's ruling, 2026-09-13). Five runs
+    // lost sockets: two were the machine sleeping mid-run, 17 and 19 hours in,
+    // killing 47 and 196 tests at once. The other three were a SINGLE socket
+    // each — one test, one file, at t+39s, t+76s and t+481s — while the other
+    // seven workers carried on.
+    //
+    // The dev compute reported `pg_postmaster_start_time` spanning both recent
+    // drops, so no restart and therefore not autosuspend; one socket dying
+    // while seven lived rules out a total network loss; 129 of 901 connections
+    // rules out exhaustion. The cause is unidentified, which is why this is
+    // ONE retry on ONE error rather than a blanket `retry: 1`.
+    //
+    // WHY HERE AND NOT DEEPER. `withSocketRetry` already retries a dropped
+    // socket around ordinary queries and deliberately REFUSES to touch
+    // `$transaction` — replaying an interactive transaction that may already
+    // have committed can duplicate a write. Every drop catalogued was inside a
+    // transaction. Re-running the whole TEST is the retry that is safe there:
+    // the fixtures are built again from the start.
+    //
+    // THE CONDITION MATCHES `error.message` AND NOTHING ELSE, which is why
+    // `retrying-client.ts` renames these errors on the way out: a dropped
+    // socket arrives with an EMPTY message and the cause only in `stack`, so
+    // the one error worth retrying on was the one this could not match.
+    retry: { count: 1, condition: /dropped Neon socket/ },
     testTimeout: 120_000,
     hookTimeout: 180_000,
   },
