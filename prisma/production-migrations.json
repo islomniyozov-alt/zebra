@@ -46,7 +46,8 @@
     "20260911140000_settled_gross",
     "20260911190000_filed_paid_and_work_period",
     "20260911230000_org_wide_batch",
-    "20260913000000_needs_rotation"
+    "20260913000000_needs_rotation",
+    "20260913190000_document_supersession"
   ],
   "recordedAt": "2026-09-13",
   "verified": true
