@@ -1,0 +1,22 @@
+-- A document that arrived and was never read, because nobody turned it upright.
+-- Owner's ruling, 2026-09-12.
+--
+-- ── WHY A NAMED STATE AND NOT `FAILED` WITH A NOTE ───────────────────────
+--
+-- `FAILED` means an engine was asked and could not answer. This is the
+-- opposite: no engine was ever asked, because the person who uploaded the card
+-- cancelled the rotation step. The two need different things done about them —
+-- one is retried, the other is turned the right way up — and a document list
+-- that showed them under one word would tell a dispatcher nothing they could
+-- act on.
+--
+-- It is also the state the ruling names out loud: "not read — needs rotation".
+-- A status carrying that meaning in an error string would be a status nothing
+-- could filter on.
+--
+-- SAFE: ADDING A VALUE NEVER REWRITES A ROW. Every existing document keeps the
+-- status it has, and nothing reads this value until the code that writes it
+-- ships. `ALTER TYPE ... ADD VALUE` is allowed inside a transaction on
+-- PostgreSQL 12+ provided the new value is not USED in the same transaction,
+-- which it is not — Neon is well past that.
+ALTER TYPE "OcrStatus" ADD VALUE IF NOT EXISTS 'NEEDS_ROTATION';

@@ -7,6 +7,7 @@ import { currentAuthority } from '@/lib/fleet'
 import { CompliancePanel } from '../../_reference/CompliancePanel'
 import { compliancePanelData } from '../../_reference/compliance-view'
 import { InspectionPanel } from '../../_reference/InspectionPanel'
+import { DriverDocuments } from '../../_reference/DriverDocuments'
 import { inspectionPanelData } from '../../_reference/inspection-view'
 import { PAY_RULE_TYPES, payRulesFor } from '@/lib/driver-pay'
 import { bpsToInput, formatCents } from '@/lib/money'
@@ -74,6 +75,22 @@ export default async function EditDriverPage({
     const compliance = await compliancePanelData(tx, 'driver', id, t)
     const inspections = await inspectionPanelData(tx, 'driver', id, t)
 
+    // EVERY FILE ON THIS DRIVER, not only the ones under a compliance row.
+    // A cancelled rotation parks a document with no record to hang it under
+    // (owner's ruling, 2026-09-12), and a file on no screen is storage nobody
+    // will act on. Tenant-scoped by the transaction, like everything here.
+    const documents = await tx.document.findMany({
+      where: { driverId: id, deletedAt: null },
+      orderBy: { uploadedAt: 'desc' },
+      take: 50,
+      select: {
+        id: true,
+        filename: true,
+        uploadedAt: true,
+        ocrStatus: true,
+      },
+    })
+
     return {
       driver,
       companies,
@@ -82,11 +99,18 @@ export default async function EditDriverPage({
       payRules,
       compliance,
       inspections,
+      documents: documents.map((document) => ({
+        id: document.id,
+        filename: document.filename,
+        uploadedAt: document.uploadedAt,
+        needsRotation: document.ocrStatus === 'NEEDS_ROTATION',
+      })),
     }
   })
 
   if (!data) notFound()
   const {
+    documents,
     driver,
     companies,
     openCompany,
@@ -231,6 +255,23 @@ export default async function EditDriverPage({
         {/* PHASE 4 §5 STEP 2. A driver's CDL and medical card, on the screen
          * that already carries their licence details. Operational, so a
          * DISPATCHER sees it — unlike the pay panel below. */}
+        {/* THE DOCUMENT LIST, ABOVE THE COMPLIANCE PANEL. A card parked as
+         * "not read — needs rotation" has no compliance row to appear under,
+         * and it is the thing somebody has to act on — so it is not filed
+         * below the records that are already in order. */}
+        {maySeeCompliance ? (
+          <div className="mt-z4 max-w-[900px]">
+            <DriverDocuments
+              documents={documents}
+              labels={{
+                heading: t('documents.heading'),
+                none: t('documents.none'),
+                needsRotation: t('documents.needsRotation'),
+              }}
+            />
+          </div>
+        ) : null}
+
         {maySeeCompliance ? (
           <div className="mt-z4 max-w-[900px]">
             <CompliancePanel

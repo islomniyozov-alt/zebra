@@ -2332,6 +2332,18 @@ enum OcrStatus {
   PROCESSING
   COMPLETED
   FAILED
+
+  /// The card arrived and was never read, because nobody turned it upright.
+  ///
+  /// NOT `FAILED`, which means an engine was asked and could not answer. Here
+  /// no engine was ever asked: the person cancelled the rotation step that
+  /// precedes a read (owner's ruling, 2026-09-12), and the file was kept rather
+  /// than dropped so that it shows on the driver as work outstanding.
+  ///
+  /// The two need different things done about them — one is retried, the other
+  /// is turned the right way up — which is why this is a value and not an error
+  /// string on FAILED.
+  NEEDS_ROTATION
 }
 
 // ============================================================================

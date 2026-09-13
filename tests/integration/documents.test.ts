@@ -208,6 +208,53 @@ describe('the round trip', () => {
     expect(fetched.headers.get('content-disposition')).toContain('POD.pdf')
   })
 
+  // ── A CARD NOBODY READ IS KEPT, AND SAYS SO ──────────────────────────
+  //
+  // Owner's ruling, 2026-09-12. Cancelling the rotation step must not drop the
+  // file: that trades a wrong reading for a silent non-event, where somebody
+  // photographs a medical card, cancels, and the driver's compliance is as
+  // stale as before with nothing anywhere saying so.
+  //
+  // The state rides on the PENDING row and `confirmUpload` copies it, so this
+  // asserts the end of that chain rather than the middle of it.
+  it('parks a cancelled card as NEEDS_ROTATION, all the way to the Document', async () => {
+    const minted = await mint({ unread: 'NEEDS_ROTATION' })
+    expect((await put(minted.url, minted.headers, PDF)).status).toBe(200)
+
+    const confirmed = await confirmUpload(
+      confirmIn(orgA),
+      orgA,
+      minted.pendingUploadId,
+      { uploadedByUserId: userA },
+    )
+
+    const document = await owner.document.findUniqueOrThrow({
+      where: { id: confirmed.documentId },
+    })
+    expect(document.ocrStatus).toBe('NEEDS_ROTATION')
+    // AND IT IS A REAL DOCUMENT, not a marker. The bytes are in the bucket and
+    // the row points at them, so the card can be read once somebody turns it.
+    expect(document.r2Key).toBe(minted.key)
+    expect(document.sizeBytes).toBe(PDF.byteLength)
+  })
+
+  // NOT `FAILED`, which is a different thing done about it: one is retried,
+  // the other is turned the right way up.
+  it('leaves an ordinary upload alone, at NOT_QUEUED', async () => {
+    const minted = await mint()
+    expect((await put(minted.url, minted.headers, PDF)).status).toBe(200)
+    const confirmed = await confirmUpload(
+      confirmIn(orgA),
+      orgA,
+      minted.pendingUploadId,
+      { uploadedByUserId: userA },
+    )
+    const document = await owner.document.findUniqueOrThrow({
+      where: { id: confirmed.documentId },
+    })
+    expect(document.ocrStatus).toBe('NOT_QUEUED')
+  })
+
   it('does not serve the bucket without a signature', async () => {
     const minted = await mint()
     await put(minted.url, minted.headers, PDF)

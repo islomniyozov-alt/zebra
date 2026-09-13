@@ -52,6 +52,8 @@ export function medLabels(t: Translate) {
       'drivers.med.tooLarge': t('drivers.med.tooLarge'),
       'drivers.med.notAllowed': t('drivers.med.notAllowed'),
       'drivers.med.failed': t('drivers.med.failed'),
+      'drivers.med.parkedUnread': t('drivers.med.parkedUnread'),
+      'drivers.med.parkFailed': t('drivers.med.parkFailed'),
     },
   }
 }

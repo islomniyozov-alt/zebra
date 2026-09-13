@@ -182,6 +182,21 @@ export interface UploadRequest {
   /** Base64 SHA-256 of the exact bytes, computed by the client. */
   sha256Base64: string
   documentType: DocumentType
+  /**
+   * Park the finished Document as NOT READ, for a named reason.
+   *
+   * ── ONE VALUE, AND IT IS THE WEAKEST ONE ────────────────────────────────
+   *
+   * `NEEDS_ROTATION` only. A caller may say "nobody read this"; it may never
+   * say COMPLETED or hand over an extraction — that claim has to come from the
+   * pipeline that did the reading, and a client able to assert it could file a
+   * compliance document nothing had ever looked at.
+   *
+   * Set when somebody cancels the rotation step (owner's ruling, 2026-09-12):
+   * the file is KEPT rather than dropped, so it appears on the driver as work
+   * outstanding instead of vanishing between a phone and a dispatcher.
+   */
+  unread?: 'NEEDS_ROTATION'
 }
 
 function assertPolicy(request: UploadRequest): void {
@@ -333,6 +348,11 @@ export async function mintUpload(
       targetId: request.entityId ?? null,
       requestedByUserId: options.requestedByUserId ?? null,
       expiresAt: presigned.expiresAt,
+      // CARRIED ON THE PENDING ROW, not applied at confirm. `confirmUpload`
+      // already copies `ocrStatus` across, so parking a document is a fact
+      // recorded when the upload is asked for — which is when it is known —
+      // rather than a second thing confirm has to be told and could forget.
+      ...(request.unread ? { ocrStatus: request.unread } : {}),
     },
     select: { id: true },
   })

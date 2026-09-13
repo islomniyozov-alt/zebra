@@ -5,6 +5,7 @@ import { DropZone } from '@/components/forms/DropZone'
 import { cx } from '@/lib/cx'
 import { fileMedicalCertAction } from './med-actions'
 import { downscaleImage } from '../drivers/new/downscale'
+import { uploadDocument } from '@/lib/upload-client'
 import { UprightCard, needsUprightStep } from '@/components/UprightCard'
 import {
   FILE_MEDICAL_CERT_INITIAL,
@@ -171,6 +172,46 @@ export function MedicalCertUpload({
       return
     }
     await readCard(chosen, 0)
+  }
+
+  /**
+   * A CANCELLED ROTATION KEEPS THE FILE (owner's ruling, 2026-09-12).
+   *
+   * ── WHY CANCELLING MUST NOT MEAN "NOTHING HAPPENED" ────────────────────
+   *
+   * The rotation step correctly refuses to read a card nobody has turned
+   * upright — a sideways medical certificate made one engine invent four
+   * different examiner names in four reads. But the first version of that
+   * refusal dropped the file entirely, which trades a wrong reading for a
+   * SILENT NON-EVENT: a dispatcher photographs a card, hits cancel, and the
+   * driver's compliance is exactly as stale as before with nothing anywhere
+   * saying so.
+   *
+   * So the bytes are kept, parked against the driver as NEEDS_ROTATION, and
+   * the driver's document list shows them as work outstanding.
+   *
+   * WITHOUT A DRIVER THERE IS NOWHERE TO PARK IT. The intake screen reads a
+   * certificate before anybody has been named; there is no row to hang it on,
+   * so cancelling there still simply cancels. Named rather than hidden.
+   */
+  const parkUnread = async (chosen: File) => {
+    setAwaitingUpright(null)
+    if (!driverId) return
+    setNotice(null)
+    try {
+      await uploadDocument(chosen, {
+        entity: 'driver',
+        entityId: driverId,
+        documentType: 'MEDICAL_CARD',
+        unread: 'NEEDS_ROTATION',
+      })
+      setNotice('drivers.med.parkedUnread')
+    } catch {
+      // THE UPLOAD FAILING IS NOT THE END OF THE WORLD AND IS NOT SILENT. The
+      // card is still on the person's phone; what must not happen is a screen
+      // that claims it was kept when it was not.
+      setNotice('drivers.med.parkFailed')
+    }
   }
 
   const readCard = async (chosen: File, quarterTurns: number) => {
@@ -429,7 +470,9 @@ export function MedicalCertUpload({
           onConfirm={(quarterTurns) => {
             void readCard(awaitingUpright, quarterTurns)
           }}
-          onCancel={() => setAwaitingUpright(null)}
+          onCancel={() => {
+            void parkUnread(awaitingUpright)
+          }}
         />
       ) : (
         <DropZone

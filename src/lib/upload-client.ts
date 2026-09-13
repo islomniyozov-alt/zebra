@@ -39,6 +39,17 @@ export interface UploadTarget {
   entity: string
   entityId: string
   documentType: string
+  /**
+   * Park the document as NOT READ, for a named reason.
+   *
+   * `NEEDS_ROTATION` only, and the server ignores anything else — a client may
+   * say nobody read this, never that somebody did.
+   *
+   * The cancel path of the rotation step sets it (owner's ruling,
+   * 2026-09-12): the card is kept rather than dropped, so it lands on the
+   * driver as work outstanding instead of disappearing.
+   */
+  unread?: 'NEEDS_ROTATION'
 }
 
 export interface UploadResult {
@@ -159,6 +170,7 @@ export async function uploadDocument(
         sizeBytes: prepared.size,
         sha256,
         documentType: target.documentType,
+        ...(target.unread ? { unread: target.unread } : {}),
       }),
     })
 

@@ -461,6 +461,13 @@ const en = {
   'upright.rotateRight': 'Rotate right',
   'upright.read': 'It is upright — read it',
   'upright.cancel': 'Choose another photo',
+  'drivers.med.parkedUnread':
+    'Kept on the driver as “not read — needs rotation”. Nothing was read from it.',
+  'drivers.med.parkFailed':
+    'That card was not read and could not be kept either. It is still on your phone — try again.',
+  'documents.needsRotation': 'not read — needs rotation',
+  'documents.heading': 'Documents',
+  'documents.none': 'No documents on this driver.',
   'drivers.cdl.tooLarge': 'That file is too large to read.',
   'drivers.cdl.noFile': 'No file arrived.',
   'drivers.cdl.failed':
@@ -2420,6 +2427,13 @@ const ru: Dictionary = {
   'upright.rotateRight': 'Повернуть вправо',
   'upright.read': 'Повёрнута правильно — читать',
   'upright.cancel': 'Выбрать другое фото',
+  'drivers.med.parkedUnread':
+    'Сохранено у водителя как «не прочитано — нужен поворот». Ничего не было прочитано.',
+  'drivers.med.parkFailed':
+    'Карточка не прочитана и не сохранена. Она осталась на телефоне — попробуйте снова.',
+  'documents.needsRotation': 'не прочитано — нужен поворот',
+  'documents.heading': 'Документы',
+  'documents.none': 'У водителя нет документов.',
   'drivers.cdl.tooLarge': 'Файл слишком большой.',
   'drivers.cdl.noFile': 'Файл не получен.',
   'drivers.cdl.failed': 'Не удалось отправить права. Введите данные ниже.',
@@ -4364,6 +4378,13 @@ const fa: Dictionary = {
   'upright.rotateRight': 'چرخش به راست',
   'upright.read': 'صاف است — بخوان',
   'upright.cancel': 'انتخاب عکس دیگر',
+  'drivers.med.parkedUnread':
+    'روی راننده ذخیره شد با عنوان «خوانده نشد — نیاز به چرخش». چیزی از آن خوانده نشد.',
+  'drivers.med.parkFailed':
+    'این کارت نه خوانده شد و نه ذخیره. هنوز روی گوشی شماست — دوباره تلاش کنید.',
+  'documents.needsRotation': 'خوانده نشد — نیاز به چرخش',
+  'documents.heading': 'مدارک',
+  'documents.none': 'این راننده مدرکی ندارد.',
   'drivers.cdl.tooLarge': 'این فایل بسیار بزرگ است.',
   'drivers.cdl.noFile': 'فایلی دریافت نشد.',
   'drivers.cdl.failed': 'ارسال کارت ممکن نشد. اطلاعات را پایین وارد کنید.',

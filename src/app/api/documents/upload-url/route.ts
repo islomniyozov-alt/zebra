@@ -23,6 +23,7 @@ interface Body {
   sizeBytes?: unknown
   sha256?: unknown
   documentType?: unknown
+  unread?: unknown
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -38,6 +39,7 @@ export async function POST(request: Request): Promise<Response> {
     sizeBytes,
     sha256,
     documentType,
+    unread,
   } = parsed.value
 
   // ENTITY IS OPTIONAL SINCE PHASE 5. Upload-first create mints before the
@@ -92,6 +94,14 @@ export async function POST(request: Request): Promise<Response> {
           sizeBytes,
           sha256Base64: sha256,
           documentType: documentType as DocumentType,
+          // THE ONE VALUE A CLIENT MAY ASSERT, and it is the weakest one.
+          // Anything else is ignored rather than refused: a client claiming
+          // COMPLETED is not a request to honour and not an error worth
+          // failing an upload over — it is a claim about a reading that never
+          // happened, and dropping it on the floor is the whole answer.
+          ...(unread === 'NEEDS_ROTATION'
+            ? { unread: 'NEEDS_ROTATION' as const }
+            : {}),
         },
         {
           requestedByUserId: session.userId,
