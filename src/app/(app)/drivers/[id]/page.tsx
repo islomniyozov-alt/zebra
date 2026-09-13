@@ -88,6 +88,7 @@ export default async function EditDriverPage({
         filename: true,
         uploadedAt: true,
         ocrStatus: true,
+        supersededByDocumentId: true,
       },
     })
 
@@ -104,6 +105,7 @@ export default async function EditDriverPage({
         filename: document.filename,
         uploadedAt: document.uploadedAt,
         needsRotation: document.ocrStatus === 'NEEDS_ROTATION',
+        superseded: document.supersededByDocumentId !== null,
       })),
     }
   })
@@ -269,6 +271,7 @@ export default async function EditDriverPage({
                 heading: t('documents.heading'),
                 none: t('documents.none'),
                 needsRotation: t('documents.needsRotation'),
+                superseded: t('documents.superseded'),
                 rotateAndRead: t('documents.rotateAndRead'),
                 working: t('documents.working'),
                 readOk: t('documents.readOk'),

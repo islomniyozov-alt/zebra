@@ -2212,6 +2212,21 @@ model Document {
   extractedJson Json?
   ocrError      String?
 
+  /// A better copy of this same document, when one has been made.
+  ///
+  /// Set by rotate-and-read: the turned card is stored as a NEW object and the
+  /// original is left untouched — a document is evidence and retention is
+  /// statutory — so this is what stops the driver's list flagging a card
+  /// somebody has already dealt with.
+  ///
+  /// NOT A STATUS CHANGE, deliberately. Rewriting the original's `ocrStatus`
+  /// would assert something about a READING that never happened to those
+  /// bytes. What is true is narrower: there is now a better copy, and here it
+  /// is.
+  supersededByDocumentId String?
+  supersededBy           Document?  @relation("DocumentSupersession", fields: [supersededByDocumentId], references: [id], onDelete: SetNull)
+  supersedes             Document[] @relation("DocumentSupersession")
+
   uploadedByUserId String?
   uploadedBy       User?    @relation(fields: [uploadedByUserId], references: [id])
   uploadedAt       DateTime @default(now())
@@ -2238,6 +2253,8 @@ model Document {
   @@index([inspectionId])
   @@index([dataQsId])
   @@index([ocrStatus])
+  /// The question the driver's document list asks of every row it draws.
+  @@index([supersededByDocumentId])
   @@index([sha256])
 }
 

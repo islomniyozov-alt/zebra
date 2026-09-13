@@ -63,13 +63,72 @@ export interface RotateAndReadInput {
 }
 
 export type RotateAndReadOutcome =
-  | { ok: true; rotatedDocumentId: string; status: number; body: string }
+  | {
+      ok: true
+      rotatedDocumentId: string
+      status: number
+      body: string
+      /**
+       * Whether the original was marked as having a better copy.
+       *
+       * FALSE IS NOT A FAILURE OF THE READ. The card was turned, stored and
+       * read; all that is missing is the note on the old row saying so, and
+       * reporting that as a failed read would send somebody to do the whole
+       * thing again.
+       */
+      superseded: boolean
+    }
   | {
       ok: false
       /** Which step failed, so a notice can say something useful. */
       step: 'sign' | 'download' | 'upload' | 'read'
       status?: number
     }
+
+export type FetchedDocument =
+  | { ok: true; file: File }
+  | { ok: false; step: 'sign' | 'download'; status?: number }
+
+/**
+ * The stored bytes, through a signed GET.
+ *
+ * SPLIT OUT SO THE PERSON SEES THE REAL CARD. The rotate dialog used to open
+ * on a placeholder — somebody turning a blank frame is guessing from a
+ * filename, which is the same act of faith the whole rotation step exists to
+ * remove. The list now fetches first and hands the file onward, so the bytes
+ * travel once.
+ */
+export async function fetchDocumentFile(
+  documentId: string,
+  deps: { fetchImpl?: typeof fetch },
+): Promise<FetchedDocument> {
+  const call = deps.fetchImpl ?? fetch
+
+  // A SIGNED URL, NOT THE BUCKET. The bucket is never public; this is the only
+  // way in, and it is minted behind the same permission check the document
+  // browser makes.
+  const signedResponse = await call(`/api/documents/${documentId}/download-url`)
+  if (!signedResponse.ok) {
+    return { ok: false, step: 'sign', status: signedResponse.status }
+  }
+  const signed = (await signedResponse.json()) as {
+    url?: string
+    filename?: string
+  }
+  if (!signed.url) return { ok: false, step: 'sign' }
+
+  const objectResponse = await call(signed.url)
+  if (!objectResponse.ok) {
+    return { ok: false, step: 'download', status: objectResponse.status }
+  }
+  const blob = await objectResponse.blob()
+  return {
+    ok: true,
+    file: new File([blob], signed.filename ?? 'document.jpg', {
+      type: blob.type || 'image/jpeg',
+    }),
+  }
+}
 
 /**
  * Fetch, turn, store as new, read.
@@ -87,33 +146,23 @@ export async function rotateAndRead(
   input: RotateAndReadInput,
   deps: RotateAndReadDeps,
 ): Promise<RotateAndReadOutcome> {
+  const fetched = await fetchDocumentFile(input.documentId, deps)
+  if (!fetched.ok) return fetched
+  return storeRotatedAndRead(fetched.file, input, deps)
+}
+
+/**
+ * Turn bytes already in hand, store the turned copy, read it, and note it.
+ *
+ * TAKES THE FILE rather than fetching it, so the caller that showed the person
+ * their own card does not download it twice.
+ */
+export async function storeRotatedAndRead(
+  original: File,
+  input: RotateAndReadInput,
+  deps: RotateAndReadDeps,
+): Promise<RotateAndReadOutcome> {
   const call = deps.fetchImpl ?? fetch
-
-  // 1. A SIGNED URL, NOT THE BUCKET. The bucket is never public; this is the
-  //    only way in, and it is minted behind the same permission check the
-  //    document browser makes.
-  const signedResponse = await call(
-    `/api/documents/${input.documentId}/download-url`,
-  )
-  if (!signedResponse.ok) {
-    return { ok: false, step: 'sign', status: signedResponse.status }
-  }
-  const signed = (await signedResponse.json()) as {
-    url?: string
-    filename?: string
-  }
-  if (!signed.url) return { ok: false, step: 'sign' }
-
-  // 2. THE BYTES, from R2 directly. No worker in the path — the same shape the
-  //    download link already takes.
-  const objectResponse = await call(signed.url)
-  if (!objectResponse.ok) {
-    return { ok: false, step: 'download', status: objectResponse.status }
-  }
-  const blob = await objectResponse.blob()
-  const original = new File([blob], signed.filename ?? 'document.jpg', {
-    type: blob.type || 'image/jpeg',
-  })
 
   // 3. TURNED IN THE BROWSER.
   const rotated = await deps.rotate(original, input.quarterTurns)
@@ -139,10 +188,39 @@ export async function rotateAndRead(
     return { ok: false, step: 'read', status: readResponse.status }
   }
 
+  const body_text = await readResponse.text()
+
+  // 6. AND THE OLD ROW LEARNS THERE IS A BETTER COPY.
+  //
+  // LAST, AND ONLY AFTER A SUCCESSFUL READ. The original is flagged because
+  // nobody could read it; marking that resolved before knowing the turned copy
+  // reads would silence the list on the strength of a rotation that might have
+  // been the wrong way round.
+  //
+  // AND ITS FAILURE DOES NOT FAIL THE READ. The card was turned, stored and
+  // read — the note on the old row is bookkeeping, and losing it costs a
+  // stale label rather than a person's afternoon. Same asymmetry the usage
+  // ledger makes, and for the same reason.
+  let superseded = false
+  try {
+    const linked = await call(
+      `/api/documents/${input.documentId}/superseded-by`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ documentId: uploaded.documentId }),
+      },
+    )
+    superseded = linked.ok
+  } catch {
+    superseded = false
+  }
+
   return {
     ok: true,
     rotatedDocumentId: uploaded.documentId,
     status: readResponse.status,
-    body: await readResponse.text(),
+    body: body_text,
+    superseded,
   }
 }

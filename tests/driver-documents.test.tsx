@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { DriverDocuments } from '@/app/(app)/_reference/DriverDocuments'
@@ -24,6 +24,7 @@ const LABELS = {
   heading: 'Documents',
   none: 'No documents on this driver.',
   needsRotation: 'not read — needs rotation',
+  superseded: 'replaced by a turned copy',
   rotateAndRead: 'Rotate and read',
   working: 'Reading…',
   readOk: 'Read from a turned copy.',
@@ -62,6 +63,7 @@ describe('the driver document list', () => {
           id: 'a',
           filename: 'med-card.jpg',
           needsRotation: true,
+          superseded: false,
           uploadedAt: at('2026-09-12'),
         },
       ]),
@@ -79,6 +81,7 @@ describe('the driver document list', () => {
           id: 'b',
           filename: 'read-fine.jpg',
           needsRotation: false,
+          superseded: false,
           uploadedAt: at('2026-09-11'),
         },
       ]),
@@ -107,6 +110,7 @@ describe('the driver document list', () => {
           id: 'a',
           filename: 'parked.jpg',
           needsRotation: true,
+          superseded: false,
           uploadedAt: at('2026-09-12'),
         },
       ]),
@@ -123,6 +127,7 @@ describe('the driver document list', () => {
           id: 'b',
           filename: 'fine.jpg',
           needsRotation: false,
+          superseded: false,
           uploadedAt: at('2026-09-11'),
         },
       ]),
@@ -140,6 +145,7 @@ describe('the driver document list', () => {
             id: 'a',
             filename: 'parked.jpg',
             needsRotation: true,
+            superseded: false,
             uploadedAt: at('2026-09-12'),
           },
         ]}
@@ -154,23 +160,100 @@ describe('the driver document list', () => {
     expect(screen.queryByText(LABELS.rotateAndRead)).toBeNull()
   })
 
-  it('opens the rotate step rather than reading immediately', async () => {
-    // NOBODY IS ASKED TO TRUST A DEFAULT. The card is parked precisely because
-    // its orientation is unknown, so pressing the button must ask which way up
-    // it is — not guess and read.
+  it('opens the rotate step on the REAL card, rather than reading immediately', async () => {
+    // TWO THINGS AT ONCE, and both matter.
+    //
+    // Pressing the button must ASK which way up — the card is parked precisely
+    // because its orientation is unknown, so a button that guessed would be
+    // the original defect with an extra click.
+    //
+    // And what it shows must be the stored card. The dialog opened on a blank
+    // placeholder until 2026-09-13: turning that is guessing from a filename,
+    // which is the act of faith this step exists to remove. So the fetch is
+    // stubbed rather than stripped, and the dialog only appears if the bytes
+    // arrived.
+    const bytes = new Uint8Array([1, 2, 3])
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/download-url')) {
+        return new Response(
+          JSON.stringify({ url: 'https://r2.test/obj', filename: 'real.jpg' }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+      }
+      return new Response(bytes as unknown as BodyInit, {
+        status: 200,
+        headers: { 'content-type': 'image/jpeg' },
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    URL.createObjectURL = vi.fn(() => 'blob:stub')
+    URL.revokeObjectURL = vi.fn()
+    try {
+      // NOBODY IS ASKED TO TRUST A DEFAULT. The card is parked precisely because
+      // its orientation is unknown, so pressing the button must ask which way up
+      // it is — not guess and read.
+      render(
+        panel([
+          {
+            id: 'a',
+            filename: 'parked.jpg',
+            needsRotation: true,
+            superseded: false,
+            uploadedAt: at('2026-09-12'),
+          },
+        ]),
+      )
+      await userEvent.click(screen.getByText(LABELS.rotateAndRead))
+      expect(await screen.findByText(LABELS.upright.title)).toBeTruthy()
+      expect(screen.getByText(LABELS.upright.read)).toBeTruthy()
+
+      // THE SIGNED GET, not the bucket. The bucket is never public.
+      expect(String(fetchMock.mock.calls[0]![0])).toBe(
+        '/api/documents/a/download-url',
+      )
+      expect(String(fetchMock.mock.calls[1]![0])).toBe('https://r2.test/obj')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  // ── A CARD SOMEBODY HAS ALREADY TURNED ────────────────────────────────
+  //
+  // Both facts are true of it: nothing ever read THOSE bytes, and there is now
+  // a copy that was read. Showing the warning as well would be the list
+  // nagging about finished work, which is what the link exists to stop.
+  it('stops warning once a turned copy exists', () => {
     render(
       panel([
         {
           id: 'a',
           filename: 'parked.jpg',
           needsRotation: true,
+          superseded: true,
           uploadedAt: at('2026-09-12'),
         },
       ]),
     )
-    await userEvent.click(screen.getByText(LABELS.rotateAndRead))
-    expect(screen.getByText(LABELS.upright.title)).toBeTruthy()
-    expect(screen.getByText(LABELS.upright.read)).toBeTruthy()
+    expect(screen.getByText(LABELS.superseded)).toBeTruthy()
+    expect(screen.queryByText(LABELS.needsRotation)).toBeNull()
+  })
+
+  it('offers no second rotation on a card already replaced', () => {
+    // Turning it again would make a third object and a second reading of the
+    // same card, which is work nobody asked for.
+    render(
+      panel([
+        {
+          id: 'a',
+          filename: 'parked.jpg',
+          needsRotation: true,
+          superseded: true,
+          uploadedAt: at('2026-09-12'),
+        },
+      ]),
+    )
+    expect(screen.queryByText(LABELS.rotateAndRead)).toBeNull()
   })
 
   it('shows a parked card among read ones, not instead of them', () => {
@@ -180,12 +263,14 @@ describe('the driver document list', () => {
           id: 'a',
           filename: 'parked.jpg',
           needsRotation: true,
+          superseded: false,
           uploadedAt: at('2026-09-12'),
         },
         {
           id: 'b',
           filename: 'fine.jpg',
           needsRotation: false,
+          superseded: false,
           uploadedAt: at('2026-09-11'),
         },
       ]),

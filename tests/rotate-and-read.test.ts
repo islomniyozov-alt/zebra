@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { rotateAndRead } from '@/lib/rotate-and-read'
+import {
+  fetchDocumentFile,
+  rotateAndRead,
+  storeRotatedAndRead,
+} from '@/lib/rotate-and-read'
 import type { UploadTarget } from '@/lib/upload-client'
 
 // ---------------------------------------------------------------------------
@@ -33,6 +37,7 @@ function harness(
     signStatus?: number
     objectStatus?: number
     readStatus?: number
+    supersedeStatus?: number
   } = {},
 ) {
   const calls: Call[] = []
@@ -53,6 +58,11 @@ function harness(
       return new Response(ORIGINAL_BYTES as unknown as BodyInit, {
         status: over.objectStatus ?? 200,
         headers: { 'content-type': 'image/jpeg' },
+      })
+    }
+    if (url.includes('/superseded-by')) {
+      return new Response('{"ok":true}', {
+        status: over.supersedeStatus ?? 200,
       })
     }
     return new Response('{"proposal":{}}', { status: over.readStatus ?? 200 })
@@ -138,6 +148,100 @@ describe('turning a parked card and reading it', () => {
       entityId: 'driver-1',
       documentType: 'MEDICAL_CARD',
     })
+  })
+
+  // ── THE OLD ROW LEARNS THERE IS A BETTER COPY ─────────────────────────
+  //
+  // The original is flagged because nobody could read it. Left alone it would
+  // nag for ever about work somebody had already done — but the note is made
+  // LAST, because marking it resolved before knowing the turned copy reads
+  // would silence the list on the strength of a rotation that might have been
+  // the wrong way round.
+  it('marks the original superseded by the rotated copy, after the read', async () => {
+    const { calls, impl, rotate, upload } = harness()
+    const outcome = await rotateAndRead(input, {
+      fetchImpl: impl,
+      rotate,
+      upload,
+    })
+
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) return
+    expect(outcome.superseded).toBe(true)
+
+    const link = calls.find((call) => call.url.includes('/superseded-by'))
+    expect(link!.url).toBe('/api/documents/doc-parked/superseded-by')
+    expect(JSON.parse(String(link!.body))).toEqual({
+      documentId: 'doc-rotated',
+    })
+
+    // AFTER the read, not before. The order is the rule.
+    const readAt = calls.findIndex((call) => call.url === '/api/med/read')
+    const linkAt = calls.findIndex((call) =>
+      call.url.includes('/superseded-by'),
+    )
+    expect(linkAt).toBeGreaterThan(readAt)
+  })
+
+  it('does not mark it superseded when the read failed', async () => {
+    // A card that still cannot be read has NOT been dealt with, and a list
+    // that stopped saying so would be hiding the work rather than finishing it.
+    const { calls, impl, rotate, upload } = harness({ readStatus: 500 })
+    await rotateAndRead(input, { fetchImpl: impl, rotate, upload })
+    expect(calls.some((call) => call.url.includes('/superseded-by'))).toBe(
+      false,
+    )
+  })
+
+  it('still reports the read when only the note failed', async () => {
+    // THE ASYMMETRY IS DELIBERATE. The card was turned, stored and read; the
+    // note on the old row is bookkeeping, and losing it costs a stale label
+    // rather than a person's afternoon.
+    const { impl, rotate, upload } = harness({ supersedeStatus: 500 })
+    const outcome = await rotateAndRead(input, {
+      fetchImpl: impl,
+      rotate,
+      upload,
+    })
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) return
+    expect(outcome.superseded).toBe(false)
+  })
+
+  // ── FETCHED BEFORE THE DIALOG, SO THE PERSON SEES THEIR OWN CARD ──────
+  //
+  // The rotate dialog used to open on a placeholder. Turning a blank frame is
+  // guessing from a filename, which is the act of faith the whole rotation
+  // step exists to remove.
+  it('hands back the real bytes, through the signed URL', async () => {
+    const { calls, impl } = harness()
+    const fetched = await fetchDocumentFile('doc-parked', { fetchImpl: impl })
+
+    expect(fetched.ok).toBe(true)
+    if (!fetched.ok) return
+    const bytes = new Uint8Array(await fetched.file.arrayBuffer())
+    expect([...bytes]).toEqual([...ORIGINAL_BYTES])
+    expect(fetched.file.name).toBe('card.jpg')
+    expect(calls[0]!.url).toBe('/api/documents/doc-parked/download-url')
+    expect(calls[1]!.url).toBe(SIGNED_URL)
+  })
+
+  it('does not download again when the caller already has the file', async () => {
+    // ONE DOWNLOAD, not two. The list fetched it to show the person; asking R2
+    // for the same object a second time is a signed URL and a round trip spent
+    // to obtain bytes already in memory.
+    const { calls, impl, rotate, upload } = harness()
+    const original = new File([ORIGINAL_BYTES], 'card.jpg', {
+      type: 'image/jpeg',
+    })
+    await storeRotatedAndRead(original, input, {
+      fetchImpl: impl,
+      rotate,
+      upload,
+    })
+
+    expect(calls.some((call) => call.url.includes('/download-url'))).toBe(false)
+    expect(calls.some((call) => call.url === SIGNED_URL)).toBe(false)
   })
 
   it('stops at a failed download rather than uploading nothing', async () => {

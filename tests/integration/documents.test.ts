@@ -12,6 +12,7 @@ import {
   mintUpload,
   reconcileExpiredUploads,
 } from '@/lib/documents'
+import { supersedeDocument } from '@/lib/document-supersession'
 import type { PrismaClient } from '@/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -160,6 +161,183 @@ const confirmIn =
   (orgId: string) =>
   <T>(fn: (tx: TxClient) => Promise<T>): Promise<T> =>
     runInOrg(app, orgId, fn, { attribution })
+
+// ---------------------------------------------------------------------------
+// A BETTER COPY OF THE SAME CARD.
+//
+// Rotate-and-read stores the turned card as a NEW object and leaves the
+// original untouched, so the original was flagged "not read — needs rotation"
+// for ever. `supersedeDocument` is the narrow true statement that stops the
+// nagging: there is now a better copy, and here it is.
+//
+// THE REFUSALS ARE THE POINT, as everywhere else in this file. A link between
+// two unrelated documents would let somebody mark any card superseded by any
+// other, which is a way to silence a compliance warning without doing anything
+// about it.
+// ---------------------------------------------------------------------------
+describe('recording that a document has a better copy', () => {
+  const documentFor = async (driverId: string | null, tag: string) => {
+    const document = await owner.document.create({
+      data: {
+        organizationId: orgA,
+        companyId: companyA,
+        r2Key: `${orgA}/supersede/${tag}-${Date.now()}-${Math.random()}`,
+        filename: `${tag}.jpg`,
+        mimeType: 'image/jpeg',
+        sizeBytes: 10,
+        type: 'MEDICAL_CARD',
+        ...(driverId ? { driverId } : {}),
+      },
+      select: { id: true },
+    })
+    return document.id
+  }
+
+  const driverFor = async (organizationId: string, companyId: string) => {
+    const driver = await owner.driver.create({
+      data: {
+        organizationId,
+        companyId,
+        firstName: 'SUPERSEDE',
+        lastName: `SUBJECT ${Math.random().toString(36).slice(2, 8)}`,
+      },
+      select: { id: true },
+    })
+    return driver.id
+  }
+
+  it('links the original to the turned copy', async () => {
+    const driver = await driverFor(orgA, companyA)
+    const original = await documentFor(driver, 'original')
+    const rotated = await documentFor(driver, 'rotated')
+
+    const outcome = await runInOrg(
+      app,
+      orgA,
+      (tx) => supersedeDocument(tx, original, rotated),
+      { attribution },
+    )
+    expect(outcome).toEqual({ ok: true, alreadyLinked: false })
+
+    const row = await owner.document.findUniqueOrThrow({
+      where: { id: original },
+      select: { supersededByDocumentId: true, ocrStatus: true },
+    })
+    expect(row.supersededByDocumentId).toBe(rotated)
+    // THE ORIGINAL'S OWN HISTORY IS UNTOUCHED. `ocrStatus` says what happened
+    // when an engine read THOSE bytes, and nothing ever did.
+    expect(row.ocrStatus).toBe('NOT_QUEUED')
+  })
+
+  it('is idempotent, because the client may retry', async () => {
+    const driver = await driverFor(orgA, companyA)
+    const original = await documentFor(driver, 'original')
+    const rotated = await documentFor(driver, 'rotated')
+    const link = () =>
+      runInOrg(app, orgA, (tx) => supersedeDocument(tx, original, rotated), {
+        attribution,
+      })
+
+    expect(await link()).toEqual({ ok: true, alreadyLinked: false })
+    expect(await link()).toEqual({ ok: true, alreadyLinked: true })
+  })
+
+  it('refuses two documents about different drivers', async () => {
+    // THE REFUSAL THAT MATTERS. Without it, any card could be marked
+    // superseded by any other — a way to silence a compliance warning without
+    // doing anything about it.
+    const one = await driverFor(orgA, companyA)
+    const other = await driverFor(orgA, companyA)
+    const original = await documentFor(one, 'original')
+    const rotated = await documentFor(other, 'rotated')
+
+    expect(
+      await runInOrg(
+        app,
+        orgA,
+        (tx) => supersedeDocument(tx, original, rotated),
+        { attribution },
+      ),
+    ).toEqual({ ok: false, reason: 'different_subject' })
+  })
+
+  it('refuses when either document hangs off no driver at all', async () => {
+    // TWO NULLS ARE NOT AN AGREEMENT ABOUT A SUBJECT, they are two absences.
+    const driver = await driverFor(orgA, companyA)
+    const loose = await documentFor(null, 'loose')
+    const alsoLoose = await documentFor(null, 'also-loose')
+    const onDriver = await documentFor(driver, 'on-driver')
+
+    expect(
+      await runInOrg(
+        app,
+        orgA,
+        (tx) => supersedeDocument(tx, loose, onDriver),
+        {
+          attribution,
+        },
+      ),
+    ).toEqual({ ok: false, reason: 'different_subject' })
+    expect(
+      await runInOrg(
+        app,
+        orgA,
+        (tx) => supersedeDocument(tx, loose, alsoLoose),
+        { attribution },
+      ),
+    ).toEqual({ ok: false, reason: 'different_subject' })
+  })
+
+  it('refuses a document superseding itself', async () => {
+    const driver = await driverFor(orgA, companyA)
+    const document = await documentFor(driver, 'self')
+    expect(
+      await runInOrg(
+        app,
+        orgA,
+        (tx) => supersedeDocument(tx, document, document),
+        { attribution },
+      ),
+    ).toEqual({ ok: false, reason: 'self' })
+  })
+
+  it('cannot reach another organization’s document', async () => {
+    // Tenant-scoped, so the other org's row is NOT FOUND rather than
+    // forbidden — the same answer as one that never existed, which is the
+    // correct thing to say because distinguishing them confirms the row.
+    const driver = await driverFor(orgA, companyA)
+    const mine = await documentFor(driver, 'mine')
+
+    const theirs = await owner.document.create({
+      data: {
+        organizationId: orgB,
+        companyId: (
+          await owner.company.findFirstOrThrow({
+            where: { organizationId: orgB },
+            select: { id: true },
+          })
+        ).id,
+        r2Key: `${orgB}/supersede/theirs-${Date.now()}`,
+        filename: 'theirs.jpg',
+        mimeType: 'image/jpeg',
+        sizeBytes: 10,
+        type: 'MEDICAL_CARD',
+      },
+      select: { id: true },
+    })
+
+    expect(
+      await runInOrg(
+        app,
+        orgA,
+        (tx) => supersedeDocument(tx, mine, theirs.id),
+        {
+          attribution,
+        },
+      ),
+    ).toEqual({ ok: false, reason: 'replacement_not_found' })
+  })
+})
 
 describe('the round trip', () => {
   it('uploads direct to R2 and reads back through a signed GET', async () => {

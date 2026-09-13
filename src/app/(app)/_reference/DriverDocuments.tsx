@@ -27,7 +27,7 @@
 import { useState } from 'react'
 import { downscaleImage } from '../drivers/new/downscale'
 import { uploadDocument } from '@/lib/upload-client'
-import { rotateAndRead } from '@/lib/rotate-and-read'
+import { fetchDocumentFile, storeRotatedAndRead } from '@/lib/rotate-and-read'
 import { UprightCard } from '@/components/UprightCard'
 
 export interface DriverDocumentRow {
@@ -35,6 +35,14 @@ export interface DriverDocumentRow {
   filename: string
   /** The one state this panel exists to make visible. */
   needsRotation: boolean
+  /**
+   * Whether a better copy of this document now exists.
+   *
+   * A parked card that has been turned and read keeps its own `needsRotation`
+   * — nothing ever read THOSE bytes — so this is what stops the list nagging
+   * about work somebody has already done.
+   */
+  superseded: boolean
   uploadedAt: Date
 }
 
@@ -48,6 +56,7 @@ interface Props {
     heading: string
     none: string
     needsRotation: string
+    superseded: string
     rotateAndRead: string
     working: string
     readOk: string
@@ -71,8 +80,17 @@ export function DriverDocuments({
   mayRead,
   labels,
 }: Props) {
-  /** The parked document a person is currently turning. */
-  const [turning, setTurning] = useState<DriverDocumentRow | null>(null)
+  /**
+   * The parked document a person is currently turning, WITH ITS BYTES.
+   *
+   * Fetched before the dialog opens, so the preview is the card rather than a
+   * blank frame — turning a placeholder is guessing from a filename, which is
+   * the act of faith this whole step exists to remove.
+   */
+  const [turning, setTurning] = useState<{
+    row: DriverDocumentRow
+    file: File
+  } | null>(null)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
 
@@ -85,12 +103,35 @@ export function DriverDocuments({
    * and not worth blocking the read on. `rotateAndRead` downloads the real
    * bytes either way, so the TURNS are what the preview is for.
    */
-  const run = async (document: DriverDocumentRow, quarterTurns: number) => {
+  /** Fetch the card, then open the dialog on it. */
+  const open = async (row: DriverDocumentRow) => {
+    setBusy(true)
+    setNotice(null)
+    try {
+      const fetched = await fetchDocumentFile(row.id, {})
+      if (!fetched.ok) {
+        setNotice(`${labels.readFailed} (${fetched.step})`)
+        return
+      }
+      setTurning({ row, file: fetched.file })
+    } catch {
+      setNotice(labels.readFailed)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const run = async (
+    document: DriverDocumentRow,
+    file: File,
+    quarterTurns: number,
+  ) => {
     setTurning(null)
     setBusy(true)
     setNotice(null)
     try {
-      const outcome = await rotateAndRead(
+      const outcome = await storeRotatedAndRead(
+        file,
         {
           documentId: document.id,
           driverId,
@@ -99,9 +140,9 @@ export function DriverDocuments({
           readRoute: '/api/med/read',
         },
         {
-          rotate: (file, turns) =>
-            downscaleImage(file, { quarterTurns: turns }),
-          upload: (file, target) => uploadDocument(file, target),
+          rotate: (image, turns) =>
+            downscaleImage(image, { quarterTurns: turns }),
+          upload: (image, target) => uploadDocument(image, target),
         },
       )
       // NAMED BY STEP. "It did not work" sends somebody to photograph the card
@@ -119,13 +160,11 @@ export function DriverDocuments({
   if (turning) {
     return (
       <UprightCard
-        file={
-          new File([new Uint8Array()], turning.filename, {
-            type: 'image/jpeg',
-          })
-        }
+        file={turning.file}
         labels={labels.upright}
-        onConfirm={(quarterTurns) => void run(turning, quarterTurns)}
+        onConfirm={(quarterTurns) =>
+          void run(turning.row, turning.file, quarterTurns)
+        }
         onCancel={() => setTurning(null)}
       />
     )
@@ -158,7 +197,14 @@ export function DriverDocuments({
                * lacked a green tick would read as "fine" at a glance, and the
                * whole point of keeping this file is that somebody has to do
                * something about it. */}
-              {document.needsRotation ? (
+              {/* SUPERSEDED WINS OVER NEEDS-ROTATION. Both are true of a
+               * card somebody has already turned and read — it was never read
+               * itself, and there is now a copy that was — and showing the
+               * warning as well would be the list nagging about finished
+               * work. */}
+              {document.superseded ? (
+                <span className="text-xs text-ink-3">{labels.superseded}</span>
+              ) : document.needsRotation ? (
                 <span className="rounded-card border border-warning bg-warning-soft px-z2 py-px text-xs text-warning">
                   {labels.needsRotation}
                 </span>
@@ -166,11 +212,11 @@ export function DriverDocuments({
               {/* ONLY ON THE ROWS THAT NEED IT, and only for somebody who may
                * file compliance — reading a card to propose a record they
                * cannot create is work done for a refusal. */}
-              {document.needsRotation && mayRead ? (
+              {document.needsRotation && !document.superseded && mayRead ? (
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => setTurning(document)}
+                  onClick={() => void open(document)}
                   className="rounded-card border border-border px-z2 py-px text-xs text-ink-2 hover:text-ink disabled:text-ink-3"
                 >
                   {busy ? labels.working : labels.rotateAndRead}
