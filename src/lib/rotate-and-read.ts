@@ -49,12 +49,33 @@ export interface RotateAndReadDeps {
   upload: (file: File, target: UploadTarget) => Promise<UploadResult>
 }
 
+/**
+ * The document types a parked card can be turned and read as.
+ *
+ * ONE ENTRY, AND IT IS A LIST RATHER THAN AN `IF` ON PURPOSE. The medical
+ * certificate is the only document that can currently be parked — the CDL is
+ * read before a driver exists, so there is nobody to park it against — and
+ * this is where the second one arrives when that changes.
+ */
+export const READABLE_TYPES = new Set<string>(['MEDICAL_CARD'])
+
 export interface RotateAndReadInput {
   /** The parked document, which is read and never written. */
   documentId: string
   /** Whose page this is. The new object hangs off the same driver. */
   driverId: string
-  /** What kind of document the new object is. Copied from the original. */
+  /**
+   * What kind of document the new object is — TAKEN FROM THE ORIGINAL.
+   *
+   * Not a constant, and not a default. This was hard-coded `MEDICAL_CARD`
+   * because the only caller is the medical path, which is an assumption the
+   * code did not state: a parked CDL would have been stored under the wrong
+   * type and, worse, posted to the medical reader.
+   *
+   * ABSENT REFUSES. A rotated copy filed under a type nobody chose is a
+   * document that will be looked for where it is not, and guessing is how it
+   * would get there.
+   */
   documentType: string
   /** Clockwise quarter-turns the person chose. */
   quarterTurns: number
@@ -81,7 +102,7 @@ export type RotateAndReadOutcome =
   | {
       ok: false
       /** Which step failed, so a notice can say something useful. */
-      step: 'sign' | 'download' | 'upload' | 'read'
+      step: 'sign' | 'download' | 'upload' | 'read' | 'type'
       status?: number
     }
 
@@ -163,6 +184,26 @@ export async function storeRotatedAndRead(
   deps: RotateAndReadDeps,
 ): Promise<RotateAndReadOutcome> {
   const call = deps.fetchImpl ?? fetch
+
+  // 0. THE TYPE COMES FROM THE ORIGINAL, OR NOTHING HAPPENS.
+  //
+  // Checked BEFORE the rotation, the upload and the read — a refusal after any
+  // of those is a refusal that has already spent a signed URL, an object in
+  // the bucket and an engine call on a document it is about to decline to
+  // file.
+  //
+  // AND ONLY A TYPE THIS SYSTEM CAN READ. `readRoute` is the medical reader
+  // today; sending a licence to it would produce a confident answer about the
+  // wrong document. When the CDL path learns to park a card, that route joins
+  // the map below and this refusal narrows on its own.
+  // ONE CHECK, NOT TWO. An explicit `!documentType.trim()` sat here until the
+  // break harness proved it could not fail: the set membership below already
+  // rejects an empty string, a blank one and an unknown one alike. A line that
+  // cannot be broken is a line nothing is testing, so it is gone rather than
+  // left to look like a second safeguard.
+  if (!READABLE_TYPES.has(input.documentType.trim())) {
+    return { ok: false, step: 'type' }
+  }
 
   // 3. TURNED IN THE BROWSER.
   const rotated = await deps.rotate(original, input.quarterTurns)

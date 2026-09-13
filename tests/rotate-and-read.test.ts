@@ -244,6 +244,51 @@ describe('turning a parked card and reading it', () => {
     expect(calls.some((call) => call.url === SIGNED_URL)).toBe(false)
   })
 
+  // ── THE TYPE COMES FROM THE ORIGINAL ──────────────────────────────────
+  //
+  // This was hard-coded `MEDICAL_CARD` because the only caller is the medical
+  // path — an assumption the code did not state. A parked CDL would have been
+  // filed under the wrong type AND posted to the medical reader, which would
+  // have answered confidently about the wrong document.
+  it('refuses a missing type before spending anything', async () => {
+    const { calls, impl, rotate, upload } = harness()
+    const outcome = await storeRotatedAndRead(
+      new File([ORIGINAL_BYTES], 'card.jpg', { type: 'image/jpeg' }),
+      { ...input, documentType: '  ' },
+      { fetchImpl: impl, rotate, upload },
+    )
+
+    expect(outcome).toEqual({ ok: false, step: 'type' })
+    // BEFORE the rotation, the upload and the read. A refusal after any of
+    // those has already spent a signed URL, an object in the bucket and an
+    // engine call on a document it is about to decline to file.
+    expect(rotate).not.toHaveBeenCalled()
+    expect(upload).not.toHaveBeenCalled()
+    expect(calls).toEqual([])
+  })
+
+  it('refuses a type this system cannot read, rather than guessing a route', async () => {
+    const { calls, impl, rotate, upload } = harness()
+    const outcome = await storeRotatedAndRead(
+      new File([ORIGINAL_BYTES], 'card.jpg', { type: 'image/jpeg' }),
+      { ...input, documentType: 'CDL_COPY' },
+      { fetchImpl: impl, rotate, upload },
+    )
+    expect(outcome).toEqual({ ok: false, step: 'type' })
+    expect(upload).not.toHaveBeenCalled()
+    expect(calls).toEqual([])
+  })
+
+  // NOT TESTED HERE: that the upload carries `input.documentType` rather than
+  // the literal 'MEDICAL_CARD'. `READABLE_TYPES` has ONE member, so the two
+  // are the same value in every reachable case and the break harness proved
+  // the assertion could not fail — it looked like coverage and was not.
+  //
+  // What IS proved: an unreadable type refuses before anything is spent
+  // (above), and the list reads the type off the row rather than a constant
+  // (`driver-documents.test.tsx`). The day a second type becomes readable,
+  // this is the test to write, and it will be breakable then.
+
   it('stops at a failed download rather than uploading nothing', async () => {
     const { impl, rotate, upload } = harness({ objectStatus: 404 })
     const outcome = await rotateAndRead(input, {

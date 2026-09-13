@@ -27,12 +27,23 @@
 import { useState } from 'react'
 import { downscaleImage } from '../drivers/new/downscale'
 import { uploadDocument } from '@/lib/upload-client'
-import { fetchDocumentFile, storeRotatedAndRead } from '@/lib/rotate-and-read'
+import {
+  READABLE_TYPES,
+  fetchDocumentFile,
+  storeRotatedAndRead,
+} from '@/lib/rotate-and-read'
 import { UprightCard } from '@/components/UprightCard'
 
 export interface DriverDocumentRow {
   id: string
   filename: string
+  /**
+   * What the original is, so the turned copy can be filed as the same thing.
+   *
+   * CARRIED FROM THE SERVER, not restated by the browser: the page read it off
+   * the row it drew, which is the only place it is known.
+   */
+  type: string
   /** The one state this panel exists to make visible. */
   needsRotation: boolean
   /**
@@ -105,6 +116,15 @@ export function DriverDocuments({
    */
   /** Fetch the card, then open the dialog on it. */
   const open = async (row: DriverDocumentRow) => {
+    // REFUSED BEFORE THE PERSON IS ASKED TO TURN ANYTHING. `storeRotatedAndRead`
+    // refuses an unreadable type too, and this is not a duplicate of it: that
+    // one guards the money, this one guards somebody's time. Being asked to
+    // turn a card and only then told it cannot be read is a worse answer than
+    // being told first.
+    if (!READABLE_TYPES.has(row.type)) {
+      setNotice(`${labels.readFailed} (type)`)
+      return
+    }
     setBusy(true)
     setNotice(null)
     try {
@@ -135,7 +155,9 @@ export function DriverDocuments({
         {
           documentId: document.id,
           driverId,
-          documentType: 'MEDICAL_CARD',
+          // FROM THE ORIGINAL. Hard-coding this was an unstated assumption
+          // that only medical cards are ever parked.
+          documentType: document.type,
           quarterTurns,
           readRoute: '/api/med/read',
         },

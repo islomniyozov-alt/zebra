@@ -62,6 +62,7 @@ describe('the driver document list', () => {
         {
           id: 'a',
           filename: 'med-card.jpg',
+          type: 'MEDICAL_CARD',
           needsRotation: true,
           superseded: false,
           uploadedAt: at('2026-09-12'),
@@ -80,6 +81,7 @@ describe('the driver document list', () => {
         {
           id: 'b',
           filename: 'read-fine.jpg',
+          type: 'MEDICAL_CARD',
           needsRotation: false,
           superseded: false,
           uploadedAt: at('2026-09-11'),
@@ -109,6 +111,7 @@ describe('the driver document list', () => {
         {
           id: 'a',
           filename: 'parked.jpg',
+          type: 'MEDICAL_CARD',
           needsRotation: true,
           superseded: false,
           uploadedAt: at('2026-09-12'),
@@ -126,6 +129,7 @@ describe('the driver document list', () => {
         {
           id: 'b',
           filename: 'fine.jpg',
+          type: 'MEDICAL_CARD',
           needsRotation: false,
           superseded: false,
           uploadedAt: at('2026-09-11'),
@@ -144,6 +148,7 @@ describe('the driver document list', () => {
           {
             id: 'a',
             filename: 'parked.jpg',
+            type: 'MEDICAL_CARD',
             needsRotation: true,
             superseded: false,
             uploadedAt: at('2026-09-12'),
@@ -198,6 +203,7 @@ describe('the driver document list', () => {
           {
             id: 'a',
             filename: 'parked.jpg',
+            type: 'MEDICAL_CARD',
             needsRotation: true,
             superseded: false,
             uploadedAt: at('2026-09-12'),
@@ -229,6 +235,7 @@ describe('the driver document list', () => {
         {
           id: 'a',
           filename: 'parked.jpg',
+          type: 'MEDICAL_CARD',
           needsRotation: true,
           superseded: true,
           uploadedAt: at('2026-09-12'),
@@ -247,6 +254,7 @@ describe('the driver document list', () => {
         {
           id: 'a',
           filename: 'parked.jpg',
+          type: 'MEDICAL_CARD',
           needsRotation: true,
           superseded: true,
           uploadedAt: at('2026-09-12'),
@@ -256,12 +264,43 @@ describe('the driver document list', () => {
     expect(screen.queryByText(LABELS.rotateAndRead)).toBeNull()
   })
 
+  // ── THE TYPE COMES FROM THE ROW, NOT FROM A CONSTANT ──────────────────
+  //
+  // The turned copy is filed as whatever the original was. Hard-coding
+  // MEDICAL_CARD was an unstated assumption that only medical cards are ever
+  // parked — a parked licence would have been stored under the wrong type and
+  // posted to the medical reader, which would have answered confidently about
+  // the wrong document.
+  //
+  // REFUSED BEFORE THE PERSON IS ASKED TO TURN ANYTHING. Being asked to turn a
+  // card and only then told it cannot be read is a worse answer than being
+  // told first.
+  it('refuses a parked card it has no reader for, without opening the dialog', async () => {
+    render(
+      panel([
+        {
+          id: 'a',
+          filename: 'licence.jpg',
+          type: 'CDL_COPY',
+          needsRotation: true,
+          superseded: false,
+          uploadedAt: at('2026-09-12'),
+        },
+      ]),
+    )
+
+    await userEvent.click(screen.getByText(LABELS.rotateAndRead))
+    expect(screen.queryByText(LABELS.upright.title)).toBeNull()
+    expect(screen.getByText(`${LABELS.readFailed} (type)`)).toBeTruthy()
+  })
+
   it('shows a parked card among read ones, not instead of them', () => {
     render(
       panel([
         {
           id: 'a',
           filename: 'parked.jpg',
+          type: 'MEDICAL_CARD',
           needsRotation: true,
           superseded: false,
           uploadedAt: at('2026-09-12'),
@@ -269,6 +308,7 @@ describe('the driver document list', () => {
         {
           id: 'b',
           filename: 'fine.jpg',
+          type: 'MEDICAL_CARD',
           needsRotation: false,
           superseded: false,
           uploadedAt: at('2026-09-11'),

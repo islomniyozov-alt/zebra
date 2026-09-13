@@ -86,6 +86,7 @@ export default async function EditDriverPage({
       select: {
         id: true,
         filename: true,
+        type: true,
         uploadedAt: true,
         ocrStatus: true,
         supersededByDocumentId: true,
@@ -103,6 +104,7 @@ export default async function EditDriverPage({
       documents: documents.map((document) => ({
         id: document.id,
         filename: document.filename,
+        type: document.type,
         uploadedAt: document.uploadedAt,
         needsRotation: document.ocrStatus === 'NEEDS_ROTATION',
         superseded: document.supersededByDocumentId !== null,
