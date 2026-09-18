@@ -241,6 +241,9 @@ function inputFor(fixture: StatementFixture): DriverSettlementInput {
   return {
     driverId: 'driver-1',
     driverName: fixture.driver,
+    // The six reproduced Datatruck statements are all SOLO. Team driving
+    // starts 2026-09-04 and every load on these delivered long before it.
+    teamWith: [],
     unitNumber: fixture.unitNumber,
     period: {
       start: SUNDAY(fixture.periodStart),

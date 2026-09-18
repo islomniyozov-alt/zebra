@@ -556,6 +556,8 @@ describe('what a batch refuses to do', () => {
         data: {
           settlementId: settlement.id,
           organizationId,
+          // THE SAME DRIVER, which is what the unique still refuses.
+          driverId,
           loadId,
           loadNumber: 'DUPLICATE',
           companyId,

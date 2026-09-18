@@ -130,7 +130,10 @@ export function settleableWhere(
 ): Prisma.LoadWhereInput {
   return {
     ...SETTLEABLE_LOAD,
-    driverId,
+    // EITHER SEAT. A team load is this driver's load whichever half of the
+    // crew they are, and filtering on `driverId` alone is how the second crew
+    // member's freight disappears from their own settleable set.
+    OR: [{ driverId }, { coDriverId: driverId }],
     operationalStatus: 'POD_RECEIVED',
     statusEvents: {
       some: {
@@ -140,7 +143,20 @@ export function settleableWhere(
         occurredAt: { gte: periodStart, lte: periodEnd },
       },
     },
-    settlementLines: { none: {} },
+    // ── NOT SETTLED *FOR THIS DRIVER* ────────────────────────────────────
+    //
+    // THIS USED TO BE `{ none: {} }` — settled by anybody, for anybody — and
+    // on a team load that is a bug that pays one crew member and silently
+    // drops the other. The moment MCKANE's statement went FINAL the shared
+    // load would carry a settlement line, and HALL's settleable set would
+    // stop containing the load she had just driven.
+    //
+    // Scoped to the driver it now matches the database's own key,
+    // `@@unique([loadId, driverId])`: a load settles once PER DRIVER, and
+    // this is the screen in front of that promise.
+    // `SettlementLine` carries no driver of its own — it hangs off the
+    // settlement, and the settlement is whose it is.
+    settlementLines: { none: { settlement: { driverId } } },
   }
 }
 

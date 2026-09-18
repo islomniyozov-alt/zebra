@@ -815,7 +815,12 @@ model Driver {
   updatedAt DateTime  @updatedAt
 
   payRules            DriverPayRule[]
-  loads               Load[]
+  loads               Load[]                 @relation("LoadDriver")
+  /// Loads where this driver is the SECOND crew member. Named separately
+  /// because `loads` must keep meaning "loads I am the driver of" — a single
+  /// merged relation would quietly double every count that reads it.
+  coDriverLoads       Load[]                 @relation("LoadCoDriver")
+  settlementLoadLines SettlementLoadLine[]
   assignments         LoadAssignment[]
   assetHistory        AssetAssignment[]
   settlements         Settlement[]
@@ -1247,10 +1252,24 @@ model Load {
   customerId String
   customer   Customer @relation(fields: [customerId], references: [id])
 
-  truckId   String?
-  truck     Truck?   @relation(fields: [truckId], references: [id])
-  driverId  String?
-  driver    Driver?  @relation(fields: [driverId], references: [id])
+  truckId  String?
+  truck    Truck?  @relation(fields: [truckId], references: [id])
+  driverId String?
+  driver   Driver? @relation("LoadDriver", fields: [driverId], references: [id])
+
+  /// The second half of a TEAM: two drivers on one truck sharing the load,
+  /// each paid their own percentage of the same gross.
+  ///
+  /// TEAM IS DERIVED, NOT STORED. `coDriverId != null` is the whole of it —
+  /// no isTeam flag to disagree with the crew, no team table to go stale when
+  /// somebody reassigns. Nothing else about teaming lives on the load.
+  ///
+  /// The two must DIFFER, and a database CHECK says so rather than the code
+  /// remembering: one person listed twice on one load would settle as two crew
+  /// members and be paid twice for it, wearing a second hat the second time.
+  coDriverId String?
+  coDriver   Driver? @relation("LoadCoDriver", fields: [coDriverId], references: [id])
+
   trailerId String?
   trailer   Trailer? @relation(fields: [trailerId], references: [id])
 
@@ -1371,6 +1390,10 @@ model Load {
   @@index([companyId, billingStatus])
   @@index([companyId, customerId])
   @@index([companyId, driverId, bookedAt])
+  /// The batch asks "which loads is this person crew on", which is
+  /// `driverId = x OR coDriverId = x` — the first half rides the index above
+  /// and without this the second half is a scan of 14,464 rows per driver.
+  @@index([coDriverId])
   @@index([companyId, truckId, bookedAt])
   @@index([referenceNumber])
   @@index([organizationId, bolNumber])
@@ -2885,10 +2908,39 @@ model SettlementLoadLine {
   createdAt    DateTime     @default(now())
   organization Organization @relation(fields: [organizationId], references: [id])
 
-  /// A LOAD SETTLES ONCE. The database refuses the second one rather than the
-  /// code remembering to check — a driver paid twice for one load is money out
-  /// of the door that reconciles against nothing.
-  @@unique([loadId])
+  /// Which crew member this line pays, denormalized from the settlement —
+  /// convention 9, and here it carries the uniqueness below.
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id])
+
+  /// A LOAD SETTLES ONCE PER DRIVER.
+  ///
+  /// THIS USED TO BE `@@unique([loadId])` — "a load settles once" — and the
+  /// promise it was making is unchanged: a driver paid twice for one load is
+  /// money out of the door that reconciles against nothing. What changed is
+  /// that a TEAM load legitimately produces two lines, one for each crew
+  /// member, and the old constraint forbade the second one outright.
+  ///
+  /// So the key gains the driver rather than losing its teeth. A team load
+  /// pays two DIFFERENT drivers once each; the same driver still cannot be
+  /// paid twice for the same load, by a re-run, by a second batch, or by being
+  /// listed as both driver and co-driver — and that last one the `Load` CHECK
+  /// refuses first, so it cannot even be written.
+  ///
+  /// A narrower key would have been `[loadId, settlementId]`, and it is not
+  /// enough: two settlements for the SAME driver could each carry the load,
+  /// which is exactly the cheque-twice case the original was written against.
+  ///
+  /// WHAT THIS KEY NO LONGER PROMISES, said plainly: the old one also meant
+  /// "one line per load, full stop", so a SOLO load reassigned from one driver
+  /// to another could not be settled to both. This one permits that, because
+  /// the database cannot tell a legitimate second crew member from a second
+  /// driver without reading `Load.coDriverId` — and a CHECK cannot cross
+  /// tables. What holds the line instead is the engine, which builds a second
+  /// line only when `coDriverId` is set, and the guard named "solo load gains
+  /// a phantom line", watched failing. That is a weaker guarantee than a
+  /// constraint and it is recorded here rather than assumed away.
+  @@unique([loadId, driverId])
   @@index([settlementId])
   @@index([organizationId])
 }

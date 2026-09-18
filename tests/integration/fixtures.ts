@@ -462,6 +462,8 @@ export async function seedOrganization(
       data: {
         settlementId: settlement.id,
         organizationId,
+        // Whose line it is. Half the uniqueness key since team driving.
+        driverId: driver.id,
         loadId: load.id,
         loadNumber: `L-${tag}`,
         companyId,

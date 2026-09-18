@@ -305,6 +305,23 @@ export interface DriverSettlementInput {
    * authority whose truck he drove.
    */
   letterheadCompanyId: string
+  /**
+   * The other crew members this driver ran with, as the header prints them.
+   *
+   * ── WHY THE HEADER SAYS IT AT ALL ──────────────────────────────────────
+   *
+   * A team member is paid their OWN percentage of the shared gross — 20% each,
+   * not 40% split — so a statement carrying 20% lines from a driver whose rule
+   * everybody remembers as 30% reads as an error. "Team with JULIA HALL" is
+   * what makes the number legible, and it is the reason this field exists
+   * rather than the reader inferring teaming from the amounts.
+   *
+   * EMPTY FOR A SOLO PERIOD. Present when ANY line in the period is a team
+   * line, which is the ruling — a driver who ran three solo loads and one team
+   * load still gets the header, because that one line is the one that looks
+   * wrong without it.
+   */
+  teamWith: readonly string[]
   period: Week
   loads: readonly SettleableLoad[]
   payRules: readonly PayRule[]

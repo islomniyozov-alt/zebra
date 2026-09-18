@@ -142,6 +142,29 @@ export function settleableForBatch(
         },
       },
     },
+    // ── SETTLED BY ANYBODY, WHICH IS NOT QUITE RIGHT FOR A TEAM ─────────
+    //
+    // `settleableWhere` is scoped to `{ none: { driverId } }` because it
+    // answers "what does THIS driver still have coming". This one is
+    // org-wide: it asks what may enter a batch at all, and there is no driver
+    // to scope to.
+    //
+    // WHAT THAT COSTS, NAMED RATHER THAN DISCOVERED: if a team load were ever
+    // settled for one crew member and not the other, it would carry a line and
+    // this filter would refuse it forever after — the second crew member would
+    // never be paid for it, silently, and nothing would say so.
+    //
+    // It cannot arise today. Settlement is ORG-WIDE by ruling: every driver in
+    // the organization is in the same batch, so both crew are settled in one
+    // pass or neither is, and `settles both crew members in one batch` guards
+    // exactly that. It would arise the day somebody settles a subset of
+    // drivers — which is why this is written here and flagged, not left to be
+    // found in a cheque.
+    //
+    // Prisma cannot express the correct condition ("some crew member has no
+    // line yet"): it has no relation-count filter and no way to compare a
+    // relation's column to the parent row's. Fixing it properly means raw SQL
+    // here, and that is a deliberate decision rather than a silent one.
     settlementLoadLines: { none: {} },
     settlementLines: { none: {} },
   }
@@ -198,6 +221,11 @@ export async function batchInputForOrg(
       id: true,
       loadNumber: true,
       driverId: true,
+      // THE SECOND CREW MEMBER. A team load belongs to both of them and is
+      // read ONCE here — the split into two lines happens per driver below,
+      // so there is no second query and no chance of the two halves reading
+      // different grosses.
+      coDriverId: true,
       totalRevenueCents: true,
       actualMiles: true,
       dispatchedMiles: true,
@@ -216,8 +244,16 @@ export async function batchInputForOrg(
     },
   })
 
+  // BOTH SEATS. A co-driver who pulled nothing of their own all week still
+  // has a statement coming, so they must enter the batch by being crew on
+  // somebody else's load — taking only `driverId` here is how a team member
+  // silently goes unpaid.
   const driverIds = [
-    ...new Set(loads.map((load) => load.driverId).filter((id) => id !== null)),
+    ...new Set(
+      loads
+        .flatMap((load) => [load.driverId, load.coDriverId])
+        .filter((id) => id !== null),
+    ),
   ]
 
   // ── STANDING DEDUCTIONS, IN ONE READ THAT SERVES TWO PURPOSES ─────────
@@ -310,10 +346,25 @@ export async function batchInputForOrg(
     escrow.map((row) => [row.driverId, row._sum.amountCents ?? 0]),
   )
 
+  // Crew names for the "Team with" header, from the drivers already read.
+  const nameOf = new Map(
+    drivers.map((d) => [d.id, `${d.firstName} ${d.lastName}`.trim()]),
+  )
+
   const out: DriverSettlementInput[] = []
   for (const driver of drivers) {
     const built = ((): DriverSettlementInput => {
-      const mine = loads.filter((load) => load.driverId === driver.id)
+      // ── EITHER SEAT MAKES IT MINE ────────────────────────────────────
+      //
+      // A team load appears in BOTH crew members' lists, and that is the whole
+      // mechanism: the engine already computes pay per driver from that
+      // driver's own rule in force on the delivery date, so two lists
+      // containing the same load produce two lines at two percentages with one
+      // shared gross. Nothing is summed, nothing is split, and a solo load —
+      // `coDriverId` null — appears exactly once, as before.
+      const mine = loads.filter(
+        (load) => load.driverId === driver.id || load.coDriverId === driver.id,
+      )
       const priorMine = prior.filter((row) => row.driverId === driver.id)
       const openingMine: Partial<Record<YtdCategory, number>> = {}
       for (const row of opening.filter((r) => r.driverId === driver.id)) {
@@ -329,6 +380,20 @@ export async function batchInputForOrg(
         // a statement with no letterhead is not a document.
         letterheadCompanyId:
           driver.assignedTruck?.companyId ?? driver.companyId,
+        // WHO ELSE WAS IN THE CAB. Distinct, in the order they first appear,
+        // and read from the drivers already loaded above rather than a second
+        // query — every crew member is in `driverIds` by construction.
+        teamWith: [
+          ...new Set(
+            mine
+              .map((load) =>
+                load.driverId === driver.id ? load.coDriverId : load.driverId,
+              )
+              .filter((id): id is string => id !== null && id !== driver.id)
+              .map((id) => nameOf.get(id))
+              .filter((name) => name !== undefined),
+          ),
+        ],
         period: input.period,
         loads: mine.map((load): SettleableLoad => {
           const pickup = load.stops.find((stop) => stop.type === 'PICKUP')
@@ -562,6 +627,11 @@ export async function refreshDraft(
         loadLines: {
           create: settlement.lines.map((line, index) => ({
             organizationId: batch.organizationId,
+            // WHOSE LINE THIS IS, carried on the row rather than inferred
+            // through the settlement — it is half the uniqueness key that
+            // lets a team load pay two people and still refuses to pay
+            // either of them twice.
+            driverId: settlement.driverId,
             loadId: line.loadId,
             loadNumber: line.loadNumber,
             // FROZEN, so a statement carrying two authorities keeps its
