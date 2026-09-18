@@ -295,6 +295,64 @@ jobs:
           PROD_DIRECT_DATABASE_URL: ${{ secrets.PROD_DIRECT_DATABASE_URL_RO }}
         run: node scripts/check-migration-gap.mjs
 
+      # ── AND THE STORED BILLING STATUSES STILL AGREE WITH THE RULE ────
+      #
+      # `check:drift` runs this inside the gate, and in run 35310541290 the
+      # gate printed `billing drift  no PROD_DIRECT_DATABASE_URL — not
+      # checked`: the production credential is scoped to the steps that need
+      # it, which is the ruling, so the gate's copy of this check has nothing
+      # to connect with. The production deploy therefore shipped without it.
+      # This is that half of the ritual, given its own step beside the
+      # migration gap for the same reason and with the same secret.
+      #
+      # ── IT FAILS CLOSED, BECAUSE THE SCRIPT DOES NOT ─────────────────
+      #
+      # `check-billing-drift.ts` exits 0 on every path INCLUDING a missing
+      # credential, where it prints `not checked` and stops. That is right for
+      # a script that also runs on a developer's machine and wrong for a step
+      # whose whole purpose is to have checked — a green tick over "I did not
+      # look" is the `cmd | tail` failure wearing a fourth hat. So the secret
+      # is required here, and the `not checked` sentinel is treated as the
+      # failure it would otherwise silently be.
+      #
+      # DRIFT ITSELF DOES NOT BLOCK THE DEPLOY, deliberately. The column is
+      # STALE, not wrong: repair goes through `refreshBillingStatus`, which
+      # writes the status event recording the move, and the script says in
+      # capitals that it must never run unattended. Blocking here would mean a
+      # production fix cannot ship until somebody hand-repairs data the deploy
+      # may itself be the fix for. It is printed loudly instead, and if this
+      # should refuse instead, that is a one-line change and the owner's call.
+      #
+      # The log goes to RUNNER_TEMP, never the checkout: `the working tree is
+      # clean` runs after this step and a stray file would fail it.
+      - name: production billing statuses agree with the rule
+        env:
+          PROD_DIRECT_DATABASE_URL: ${{ secrets.PROD_DIRECT_DATABASE_URL_RO }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PROD_DIRECT_DATABASE_URL:-}" ]; then
+            echo "PROD_DIRECT_DATABASE_URL_RO is not set, so this step would"
+            echo "report success without having checked anything. Refusing."
+            exit 1
+          fi
+
+          log="${RUNNER_TEMP}/billing-drift.log"
+          if ! npx tsx -r dotenv/config scripts/check-billing-drift.ts > "$log" 2>&1; then
+            echo "The billing drift check did not complete:"
+            cat "$log"
+            exit 1
+          fi
+          cat "$log"
+
+          if grep -q "not checked" "$log"; then
+            echo "The check reported 'not checked'. It reached production with"
+            echo "no credential, which is a pass that proves nothing. Refusing."
+            exit 1
+          fi
+          if grep -q "BILLING STATUS DRIFT" "$log"; then
+            echo "::warning::Stored billing statuses have drifted from billingStatusFor. Repair with refreshBillingStatus, never SQL."
+          fi
+
       - name: measure the round trip to the branch
         env:
           PGURL: ${{ steps.branch.outputs.direct }}
