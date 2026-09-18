@@ -67,7 +67,12 @@ jobs:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
           NEON_PARENT_BRANCH: ${{ secrets.NEON_PARENT_BRANCH }}
-          DEV_DATABASE_URL: ${{ secrets.DEV_DATABASE_URL }}
+          # DEV_DATABASE_URL IS DELIBERATELY NOT HERE. It used to carry the
+          # application password to this step and it cost two runs doing it —
+          # 35307302962, where the whole `.env` line arrived and no URL came
+          # out of it, and 35308232556, where the password that did arrive was
+          # refused by Postgres. The branch mints its own below, so the secret
+          # has nothing left to do and is not wired in pretending otherwise.
         run: |
           set -euo pipefail
           response=$(curl -sS -X POST \
@@ -129,6 +134,63 @@ jobs:
           fi
           echo "::add-mask::$password"
 
+          # ── THE BRANCH GETS ITS OWN APPLICATION CREDENTIAL ───────────
+          #
+          # Run 35308232556 reached the gate — 1,915 of 1,939 tests passed —
+          # and then two failed with `password authentication failed for user
+          # zebra_app`. The application password was being carried from dev's
+          # own `.env`, and a password that travels through a secret box, a
+          # `%%@*`, a `new URL` and back can be wrong in ways none of those
+          # steps can see: a `#` or a `?` inside it is a fragment or a query to
+          # a URL parser, and a stale paste looks exactly like a correct one.
+          #
+          # None of that is worth diagnosing from here, because the branch does
+          # not need dev's password at all. It is a THROWAWAY COPY, deleted at
+          # the end of this job, so it gets a credential of its own and the
+          # question stops existing. Dev is untouched — branches are isolated
+          # and nothing in this job connects to dev.
+          #
+          # Hex, so the value crosses a shell, a URL and an SQL literal without
+          # an escape having to survive any of them.
+          app_role=zebra_app
+          app_password=$(openssl rand -hex 24)
+          echo "::add-mask::$app_password"
+
+          # FIRST THE CONTROL PLANE, which knows the roles it created itself.
+          reset="https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}"
+          reset="${reset}/branches/${branch_id}/roles/${app_role}/reset_password"
+          reset_body=$(curl -sS -X POST "$reset" -H "Authorization: Bearer ${NEON_API_KEY}")
+          granted=$(echo "$reset_body" | jq -r ".role.password // .password // empty")
+
+          if [ -n "$granted" ]; then
+            app_password="$granted"
+            echo "::add-mask::$app_password"
+            echo "Neon reset ${app_role} on the branch."
+          else
+            # AND OTHERWISE THE DATABASE ITSELF. A role created by a migration
+            # is an ordinary Postgres role the control plane has never heard
+            # of; `reset_password` 404s on those and ALTER ROLE does not care
+            # who created it.
+            #
+            # No connection string is composed here on purpose: PGPASSWORD and
+            # flags, so an `@` or a `/` in the OWNER's password cannot
+            # retarget the connection the way it could inside a URL.
+            if ! command -v psql > /dev/null 2>&1; then
+              echo "Neon would not reset ${app_role} and psql is not installed."
+              echo "Neon said: $(echo "$reset_body" | jq -rc "." | head -c 300)"
+              exit 1
+            fi
+            export PGPASSWORD="$password"
+            export PGSSLMODE=require
+            if ! psql -h "$host" -U "$role" -d "$database" --no-psqlrc -q -v ON_ERROR_STOP=1 -v pw="$app_password" -c "ALTER ROLE ${app_role} WITH LOGIN PASSWORD :'pw'"; then
+              echo "Could not set a password for ${app_role} on the branch."
+              echo "It may not exist there, or ${role} may not administer it."
+              exit 1
+            fi
+            unset PGPASSWORD
+            echo "Set the branch's own password for ${app_role} directly."
+          fi
+
           # ── THE TWO STRINGS ARE COMPOSED BY PARSING, NOT BY SPLICING ─
           #
           # This was six lines of shell and it cost run 35307302962. The
@@ -161,6 +223,7 @@ jobs:
           # eaten in transit four times in this repository, and a joined
           # continuation is still valid shell, which is how it gets through.
           export OWNER_ROLE="$role" OWNER_PASSWORD="$password"
+          export APP_ROLE="$app_role" APP_PASSWORD="$app_password"
           export ENDPOINT_HOST="$host" DATABASE_NAME="$database"
           node scripts/ci-compose-urls.mjs
           echo "Created branch ci-${GITHUB_RUN_ID} ($branch_id)"
