@@ -67,6 +67,7 @@ jobs:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
           NEON_PARENT_BRANCH: ${{ secrets.NEON_PARENT_BRANCH }}
+          DEV_DATABASE_URL: ${{ secrets.DEV_DATABASE_URL }}
         run: |
           set -euo pipefail
           response=$(curl -sS -X POST \
@@ -128,9 +129,35 @@ jobs:
           fi
           echo "::add-mask::$password"
 
+          # THE OWNER'S URL, for the admin work only: creating the eight worker
+          # databases from the template, and the template itself. Nothing the
+          # application does runs as this role.
           direct="postgresql://${role}:${password}@${host}/${database}?sslmode=require"
 
-          pooled=$(echo "$direct" | sed -E "s|@([^.]+)\.|@\1-pooler.|")
+          # -- AND THE APPLICATION CONNECTS AS `zebra_app`, NEVER THE OWNER --
+          #
+          # MEASURED THE HARD WAY, run 35301618293. Composing both URLs as the
+          # owner was refused twice over: `src/lib/db.ts` threw outright --
+          # "the owner bypasses row-level security, so every tenant boundary
+          # would silently disappear" -- and `structure.test.ts` caught it
+          # independently. Without either, CI would have run the entire suite
+          # with RLS OFF and every isolation test would have passed vacuously.
+          #
+          # So the app credential comes from DEV_DATABASE_URL and only its HOST
+          # is replaced. `zebra_app` and its password travel with the branch,
+          # being a copy of dev, so this is dev's own application role against
+          # dev's own data -- which is the point of branching from it.
+          if [ -z "${DEV_DATABASE_URL:-}" ]; then
+            echo "DEV_DATABASE_URL is not set; it carries the zebra_app credential."
+            exit 1
+          fi
+          if [ "${DEV_DATABASE_URL#*zebra_app}" = "$DEV_DATABASE_URL" ]; then
+            echo "DEV_DATABASE_URL does not authenticate as zebra_app."
+            echo "The application must never connect as the database owner."
+            exit 1
+          fi
+          credential=${DEV_DATABASE_URL%%@*}
+          pooled="${credential}@${host%%.*}-pooler.${host#*.}/${database}?sslmode=require"
 
           echo "::add-mask::$direct"
           echo "::add-mask::$pooled"
