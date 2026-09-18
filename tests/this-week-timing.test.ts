@@ -37,7 +37,7 @@ async function countQueries(
   organizationId: string,
   period: Parameters<typeof thisWeekFor>[1]['period'],
   payDay: Date,
-): Promise<number> {
+): Promise<{ page: number; raw: number }> {
   const { PrismaClient } = await import('@/generated/prisma/client')
   const { PrismaNeon } = await import('@prisma/adapter-neon')
   const client = new PrismaClient({
@@ -52,6 +52,25 @@ async function countQueries(
     count++
   })
 
+  // ── WARM THE COMPUTE BEFORE THE TRANSACTION OPENS ──────────────────────
+  //
+  // THIS IS WHERE THE FLAKE WAS. A fresh client's first statement pays for the
+  // connection and the handshake, and this one paid for it INSIDE the
+  // transaction — so the 5s interactive-transaction budget was spent on a cold
+  // start before any of the page's own work began. The failure said so
+  // exactly: "6111 ms passed since the start of the transaction".
+  //
+  // AND THE COMPUTE REALLY IS COLD. Measured 2026-09-18:
+  // `pg_postmaster_start_time` was 00:07:28 against a run that began at
+  // 00:07:05 — Neon's autosuspend had released it, and the run itself woke it
+  // up 23 seconds in. Every run pays that once.
+  //
+  // It cost five gates in one day, always the same way, and it was never a
+  // finding about the money screen — this function only COUNTS queries, and
+  // the count is latency-independent. One trivial statement outside the
+  // transaction moves the cold start where it belongs.
+  await client.$queryRaw`select 1`
+
   await client.$transaction(async (tx) => {
     await tx.$executeRawUnsafe(
       `SELECT set_config('app.current_org_id', $1, true)`,
@@ -61,8 +80,15 @@ async function countQueries(
   })
   await client.$disconnect()
 
-  // Minus the BEGIN/COMMIT pair and the `set_config` this harness added.
-  return Math.max(0, count - 3)
+  // Minus the BEGIN/COMMIT pair, the `set_config` this harness added, and the
+  // `select 1` that warmed the connection. FOUR, not three — the listener
+  // counts every statement this client sends, including the warm-up, and a
+  // warm-up left out of the subtraction would inflate the page's cost by one
+  // round trip for ever.
+  // BOTH NUMBERS TRAVEL. `page` is what the screen costs; `raw` is every
+  // statement this client sent, so the caller can assert that the harness's
+  // own four are accounted for rather than trusting the arithmetic here.
+  return { page: Math.max(0, count - 4), raw: count }
 }
 
 describe('the cost of the money screen', () => {
@@ -134,7 +160,27 @@ describe('the cost of the money screen', () => {
     // QUERY COUNT is latency-independent and is what the budget conversation
     // should actually be about — round trips are what a transaction spends.
     const queries = await countQueries(organizationId, period, payDay)
-    console.log(`[this-week]   ${'queries'.padEnd(12)} ${String(queries)}`)
+    console.log(`[this-week]   ${'queries'.padEnd(12)} ${String(queries.page)}`)
+
+    // ── THE HARNESS'S OWN STATEMENTS ARE ACCOUNTED FOR, EXACTLY ──────────
+    //
+    // Four: the `select 1` that warms the connection, `set_config`, BEGIN and
+    // COMMIT. None of them is the page's cost.
+    //
+    // ASSERTED BECAUSE THE WARM-UP IS EASY TO ADD AND EASY TO FORGET TO
+    // SUBTRACT. Getting that wrong would inflate the screen's measured cost by
+    // a round trip for ever, in the one number the brief says the budget
+    // conversation should be about — and it would look like a real regression.
+    expect(
+      queries.raw - queries.page,
+      'the warm-up, set_config, BEGIN and COMMIT — and nothing else',
+    ).toBe(4)
+    // NOT ASSERTED: that the warm-up statement is there at all. Its effect —
+    // no cold start inside the transaction — shows up only against a compute
+    // that is actually cold, which cannot be arranged on demand; remove it and
+    // this test still passes on a warm one. The break harness said so. What IS
+    // guarded is the arithmetic above, which is where getting it wrong would
+    // quietly inflate the screen's measured cost.
 
     const sections = Object.values(week.timings).reduce((a, b) => a + b, 0)
     console.log(`[this-week]   ${'sections'.padEnd(12)} ${String(sections)}ms`)

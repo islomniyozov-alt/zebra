@@ -88,7 +88,30 @@ export async function withSocketRetry<T>(
 
     // A fresh call, not a fresh client: the pool reconnects on demand, and
     // building a second client per retry leaks sockets over a long suite.
-    return operation()
+    //
+    // ── AND IF THE SECOND ATTEMPT DIES TOO, THE ERROR IS NAMED ───────────
+    //
+    // This used to rethrow the ORIGINAL, whose message is EMPTY — the cause
+    // lives only in `stack`. Vitest's retry condition reads `error.message`
+    // and nothing else, so a test that lost its socket twice produced an error
+    // the test-level retry could not match, and did not get its one re-run.
+    //
+    // MEASURED, TWICE, ON 2026-09-18. Two production deploys refused: 45 tests
+    // across five files in bursts of 36-in-2-seconds, then 18 more — and both
+    // runs reported `RETRIES 1`, the one being a simulated test. Every real
+    // drop went unretried. A burst is exactly when both attempts fail, so it
+    // is exactly when the rename was missing.
+    return operation().catch((second: unknown) => {
+      if (!isDroppedSocket(second)) throw second
+      throw new Error(
+        `dropped Neon socket in ${label}, twice: ${
+          second instanceof Error && second.message
+            ? second.message
+            : 'no message; see cause'
+        }`,
+        { cause: second },
+      )
+    })
   }
 }
 
