@@ -232,7 +232,9 @@ for (const environment of ENVIRONMENTS) {
     // the banner as `[33m▲ [43;33m[...`. A refusal nobody can read is most of
     // the way back to a refusal nobody notices.
     const why = (stderr.trim() || message)
-      // eslint-disable-next-line no-control-regex
+      // Wrangler emits these WITHOUT the escape byte when stderr is piped —
+      // measured, 0 of them in the output — so this is a literal-text strip
+      // and needs no control-character escape.
       .replace(/\[[0-9;]*m/g, '')
       .replace(/\s+/g, ' ')
       .trim()
