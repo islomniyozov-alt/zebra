@@ -111,6 +111,10 @@ describe('the connection strings CI composes for a branch', () => {
     ['wrapping single quotes', `'${CLEAN}'`],
     ['wrapping double quotes', `"${CLEAN}"`],
     ['the console psql snippet', `psql '${CLEAN}'`],
+    // RUN 35308066954, the real one: 190 characters starting `DATABASE_URL=p`,
+    // because copying a connection string out of `.env` copies its line.
+    ['the whole .env line, key and all', `DATABASE_URL=${CLEAN}`],
+    ['a .env line whose value is quoted', `DIRECT_DATABASE_URL="${CLEAN}"`],
   ])('survive %s in the secret', (_label, raw) => {
     const { status, outputs } = compose(raw)
     expect(status).toBe(0)
@@ -120,6 +124,17 @@ describe('the connection strings CI composes for a branch', () => {
         DIRECT_DATABASE_URL: outputs.direct,
       }).ok,
     ).toBe(true)
+  })
+
+  // ── TIDYING IS NOT THE SAME AS FORGIVING ────────────────────────────
+  //
+  // Stripping `DATABASE_URL=` must not become stripping any `SOMETHING=`. A
+  // secret holding a different key is a secret holding the wrong thing, and it
+  // should say so here rather than connect to somewhere unexamined.
+  it('refuse a key that is not one a connection string sits behind', () => {
+    const { status, out } = compose(`POSTGRES_PRISMA_URL=${CLEAN}`)
+    expect(status).toBe(1)
+    expect(out).toContain('IS NOT A URL')
   })
 
   it('say so, with the shape and not the password, when it is no URL at all', () => {

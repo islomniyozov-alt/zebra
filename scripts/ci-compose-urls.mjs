@@ -17,8 +17,10 @@ import { appendFileSync } from 'node:fs'
 //
 // `%%@*` is the same hazard as `sed` and as `cmd | tail`: a prefix strip
 // CANNOT FAIL. A wrapping quote, a `psql ` the console put in front, a stray
-// newline, an `@` inside the password — each produces a different wrong string
-// and none of them produce an error. What is left is a secret nobody can print
+// newline, an `@` inside the password, or — as run 35308066954 then found in
+// one line instead of a hundred and eight — the whole `.env` LINE with its
+// `DATABASE_URL=` still attached. Each produces a different wrong string and
+// none of them produce an error. What is left is a secret nobody can print
 // and a failure three steps downstream, which is where the last run spent
 // itself.
 //
@@ -62,6 +64,17 @@ function tidy(name, raw) {
   let value = raw.trim()
   const notes = []
   if (value !== raw) notes.push('surrounding whitespace')
+  // THE WHOLE `.env` LINE, KEY AND ALL. Run 35308066954: the secret was 190
+  // characters starting `DATABASE_URL=p`, because copying a connection string
+  // out of `.env` copies the line it lives on. Only the keys that could
+  // honestly sit in front of one are stripped — a blanket `^[A-Z_]+=` would
+  // quietly accept a secret holding something else entirely.
+  const keyed =
+    /^(DATABASE_URL|DIRECT_DATABASE_URL|DEV_DATABASE_URL)\s*=\s*/.exec(value)
+  if (keyed) {
+    value = value.slice(keyed[0].length)
+    notes.push(`a leading \`${keyed[1]}=\``)
+  }
   if (/^psql\s+/i.test(value)) {
     value = value.replace(/^psql\s+/i, '').trim()
     notes.push('a leading `psql`')
