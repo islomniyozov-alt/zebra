@@ -85,7 +85,26 @@ jobs:
           # id to delete even if the next command throws.
           echo "branch_id=$branch_id" >> "$GITHUB_OUTPUT"
 
-          direct=$(echo "$response" | jq -r ".connection_uris[0].connection_uri")
+          direct=$(echo "$response" | jq -r ".connection_uris[0].connection_uri // empty")
+
+          # ── A URL, OR STOP HERE ──────────────────────────────────────
+          #
+          # Run 35300867781 wrote an empty value into `.env` and only found out
+          # three steps later, when `tests/setup.ts` threw `Invalid URL` a
+          # hundred and eight times. A missing connection string is a fact this
+          # step knows and the suite does not, so it is said here.
+          #
+          # The response's KEYS are printed, never its values: they say which
+          # shape Neon actually returned, which is the one thing a guess cannot
+          # supply.
+          if [ -z "$direct" ] || [ "${direct#postgres}" = "$direct" ]; then
+            echo "Neon created branch $branch_id but returned no connection string."
+            echo "Response keys: $(echo "$response" | jq -rc "keys")"
+            echo "connection_uris: $(echo "$response" | jq -r ".connection_uris | length // 0")"
+            echo "endpoints: $(echo "$response" | jq -r ".endpoints | length // 0")"
+            echo "operations still running: $(echo "$response" | jq -rc "[.operations[]? | select(.status != \"finished\") | .action]")"
+            exit 1
+          fi
           # The pooled host is the direct one with -pooler on the endpoint —
           # the same relationship `endpointOf` normalises away, which is why
           # the gate accepts the pair as one endpoint.
