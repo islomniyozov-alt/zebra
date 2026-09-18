@@ -89,26 +89,46 @@ jobs:
           fi
           echo "branch_id=$branch_id" >> "$GITHUB_OUTPUT"
 
-          direct=$(echo "$response" | jq -r ".connection_uris[0].connection_uri // empty")
+          # ── COMPOSE THE CONNECTION STRING. NEON DOES NOT RETURN ONE ──
+          #
+          # MEASURED, run 35301176483. The create-branch response carries the
+          # keys ["branch","databases","endpoints","operations","roles"] and NO
+          # `connection_uris` — not an empty one, absent — while
+          # `start_compute` was still running. The first two attempts assumed
+          # that field existed and wrote an empty URL into `.env`, which the
+          # suite met three steps later as `Invalid URL`.
+          #
+          # So the parts are read and the string is built: role, database,
+          # endpoint host, and the password fetched with the one API call that
+          # exists for it. The branch INHERITS the parent's roles, so this is
+          # dev's own credential against a copy of dev.
+          role=$(echo "$response" | jq -r ".roles[0].name // empty")
+          host=$(echo "$response" | jq -r ".endpoints[0].host // empty")
+          # `neondb` BY NAME, not `databases[0]`. A branch copies every database
+          # in the project — `zebra_template` and `zebra_w1..8` come along — and
+          # which one lands first is not something to leave to an index.
+          database=$(echo "$response" | jq -r '[.databases[].name] | (index("neondb") // 0) as $i | .[$i] // empty')
 
-          # ── A URL, OR STOP HERE ──────────────────────────────────────
-          #
-          # Run 35300867781 wrote an empty value into `.env` and only found out
-          # three steps later, when `tests/setup.ts` threw `Invalid URL` a
-          # hundred and eight times. A missing connection string is a fact this
-          # step knows and the suite does not, so it is said here.
-          #
-          # The response's KEYS are printed, never its values: they say which
-          # shape Neon actually returned, which is the one thing a guess cannot
-          # supply.
-          if [ -z "$direct" ] || [ "${direct#postgres}" = "$direct" ]; then
-            echo "Neon created branch $branch_id but returned no connection string."
+          if [ -z "$role" ] || [ -z "$host" ] || [ -z "$database" ]; then
+            echo "Neon created branch $branch_id but the response is missing parts."
             echo "Response keys: $(echo "$response" | jq -rc "keys")"
-            echo "connection_uris: $(echo "$response" | jq -r ".connection_uris | length // 0")"
-            echo "endpoints: $(echo "$response" | jq -r ".endpoints | length // 0")"
-            echo "operations still running: $(echo "$response" | jq -rc "[.operations[]? | select(.status != \"finished\") | .action]")"
+            echo "roles: $(echo "$response" | jq -rc "[.roles[]?.name]")"
+            echo "databases: $(echo "$response" | jq -rc "[.databases[]?.name]")"
+            echo "endpoints: $(echo "$response" | jq -rc "[.endpoints[]?.host]")"
             exit 1
           fi
+
+          reveal="https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}"
+          reveal="${reveal}/branches/${branch_id}/roles/${role}/reveal_password"
+          password=$(curl -sS "$reveal" -H "Authorization: Bearer ${NEON_API_KEY}" | jq -r ".password // empty")
+          if [ -z "$password" ]; then
+            echo "Neon would not reveal the password for role ${role} on ${branch_id}."
+            exit 1
+          fi
+          echo "::add-mask::$password"
+
+          direct="postgresql://${role}:${password}@${host}/${database}?sslmode=require"
+
           pooled=$(echo "$direct" | sed -E "s|@([^.]+)\.|@\1-pooler.|")
           echo "::add-mask::$direct"
           echo "::add-mask::$pooled"
