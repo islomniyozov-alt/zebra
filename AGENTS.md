@@ -47,6 +47,26 @@ Rules that are cheap to state and expensive to rediscover:
   transactions, and the RLS session variable needs one per request.
 - Prisma 7 syntax. The datasource block has no `url` on purpose and
   `driverAdapters` is no longer a preview feature. Do not "fix" either back.
+- **`relationJoins` is ON, deliberately, and it is app-wide.** With that
+  preview enabled, every Postgres relation read in the application defaults to
+  a lateral join instead of one query per included relation. It was turned on
+  for the Tuesday screen on 2026-09-18 and the blast radius is the whole app,
+  so it is written here rather than left as a line in a schema file.
+
+  MEASURED BEFORE AND AFTER, on the money screen: 25 statements to 17, and
+  4427ms to 2822ms. `werner` fell from three statements to one, `recent` from
+  two to one, and the settlement engine's `Load` read from four to one.
+
+  THE EVIDENCE THAT IT IS SAFE IS THE SUITE, because there is no narrower
+  proof available for a change this wide: `npm run check` green at 1923, and
+  the full integration project at 564 of 565 — the single failure a dropped
+  Neon socket, which is the environment and not the strategy.
+
+  Reverting is one line in `prisma/schema.prisma` and costs eight statements
+  back on that page. Do not revert it casually, and do not widen it silently
+  either: a per-query `relationLoadStrategy` override is available if some
+  future query is better off with separate reads.
+
 - No singleton Prisma client. Per-request instantiation, React `cache()` plus a
   Proxy — Workers I/O objects cannot cross request boundaries.
 - Password hashing must run on workerd. Native bcrypt and `@node-rs/argon2` do
