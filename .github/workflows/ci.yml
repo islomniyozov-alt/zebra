@@ -1,0 +1,197 @@
+name: gate and deploy dev
+
+# ─────────────────────────────────────────────────────────────────────────
+# ON PUSH TO MAIN: prove the commit against a database, then ship dev.
+#
+# WHY A NEON BRANCH PER RUN (owner's ruling, 2026-09-17). The suite clones
+# `zebra_template` into eight worker databases and holds an advisory lock for
+# the whole run, so two runs against one database serialise — CI would queue
+# behind a local deploy and a local deploy behind CI. A branch per run removes
+# the contention rather than scheduling around it.
+#
+# It is branched FROM DEV WITH ITS DATA, which is the ruling and is what makes
+# the run meaningful: the template is already built, and the timing probe has
+# fourteen thousand loads to measure against instead of an empty schema.
+#
+# WHY `.env` IS WRITTEN RATHER THAN EXPORTED. `integration-gate.mjs` deletes
+# DATABASE_URL, DIRECT_DATABASE_URL and NEON_BRANCH from the child's
+# environment and reads `.env` itself — deliberately, because on 2026-08-14 a
+# ritual terminal's leftovers aimed a run at production. THE SCRUB STAYS. CI
+# writes the file the gate expects instead of loosening the gate.
+# ─────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# ONE RUN AT A TIME. Not for the database — each run has its own branch — but
+# because two runs deploying the same worker would race, and the later push is
+# the one worth shipping.
+concurrency:
+  group: gate-and-deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: install
+        run: npm ci
+
+      # ── THE PER-RUN DATABASE ─────────────────────────────────────────
+      #
+      # curl rather than a marketplace action: this is a private repository
+      # holding a production TMS, and a third party in the credential path is
+      # a decision nobody has made. Two API calls and jq cost less than that
+      # conversation.
+      - name: create a Neon branch for this run
+        id: branch
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+          NEON_PARENT_BRANCH: ${{ secrets.NEON_PARENT_BRANCH }}
+        run: |
+          set -euo pipefail
+          response=$(curl -sS -X POST \
+            "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches" \
+            -H "Authorization: Bearer ${NEON_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{\"branch\":{\"parent_id\":\"${NEON_PARENT_BRANCH}\",\"name\":\"ci-${GITHUB_RUN_ID}\"},\"endpoints\":[{\"type\":\"read_write\"}]}")
+
+          branch_id=$(echo "$response" | jq -r ".branch.id // empty")
+          if [ -z "$branch_id" ]; then
+            echo "Neon refused to create a branch:"
+            echo "$response" | jq -r ".message // ."
+            exit 1
+          fi
+          # RECORDED BEFORE ANYTHING ELSE CAN FAIL, so the cleanup step has an
+          # id to delete even if the next command throws.
+          echo "branch_id=$branch_id" >> "$GITHUB_OUTPUT"
+
+          direct=$(echo "$response" | jq -r ".connection_uris[0].connection_uri")
+          # The pooled host is the direct one with -pooler on the endpoint —
+          # the same relationship `endpointOf` normalises away, which is why
+          # the gate accepts the pair as one endpoint.
+          pooled=$(echo "$direct" | sed -E "s|@([^.]+)\.|@\1-pooler.|")
+
+          echo "::add-mask::$direct"
+          echo "::add-mask::$pooled"
+          echo "direct=$direct" >> "$GITHUB_OUTPUT"
+          echo "pooled=$pooled" >> "$GITHUB_OUTPUT"
+          echo "Created branch ci-${GITHUB_RUN_ID} ($branch_id)"
+
+      # ── HOW FAR AWAY IS IT? MEASURED, AND PRINTED (owner's ruling) ────
+      #
+      # Standard GitHub runners give no region choice, so this run's latency to
+      # us-east-2 is a fact to be read rather than arranged. Every number the
+      # suite prints — the money screen's 2.2 seconds most of all — sits on top
+      # of this figure, and a timing recorded without it is a measurement of an
+      # unknown place.
+      #
+      # NO PAID RUNNER UNLESS THIS NUMBER SAYS SO. That is the ruling, and this
+      # is the number it is about.
+      - name: measure the round trip to the branch
+        env:
+          PGURL: ${{ steps.branch.outputs.direct }}
+        run: node scripts/ci-round-trip.mjs
+
+      # ── THE FILE THE GATE READS ──────────────────────────────────────
+      #
+      # NEON_BRANCH names this run rather than being left out: the gate refuses
+      # a file that says `production`, and a value naming the run is more use
+      # in a log than an absence.
+      - name: write .env from secrets and the branch
+        env:
+          DIRECT: ${{ steps.branch.outputs.direct }}
+          POOLED: ${{ steps.branch.outputs.pooled }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          SEED_OWNER_EMAIL: ${{ secrets.SEED_OWNER_EMAIL }}
+          SEED_OWNER_PASSWORD: ${{ secrets.SEED_OWNER_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          {
+            echo "DATABASE_URL=${POOLED}"
+            echo "DIRECT_DATABASE_URL=${DIRECT}"
+            echo "NEON_BRANCH=ci-${GITHUB_RUN_ID}"
+            echo "AUTH_SECRET=${AUTH_SECRET}"
+            echo "R2_ACCOUNT_ID=${R2_ACCOUNT_ID}"
+            echo "R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}"
+            echo "R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}"
+            echo "R2_BUCKET=${R2_BUCKET}"
+            echo "R2_ENDPOINT=${R2_ENDPOINT}"
+            echo "SEED_OWNER_EMAIL=${SEED_OWNER_EMAIL}"
+            echo "SEED_OWNER_PASSWORD=${SEED_OWNER_PASSWORD}"
+          } > .env
+          echo "wrote .env with $(grep -c = .env) keys"
+
+      # ── AND THE TREE MUST BE CLEAN WHEN THE SUITE STARTS ─────────────
+      #
+      # `.env` is gitignored, so writing it leaves the tree clean — asserted
+      # rather than assumed, because the receipt refuses a dirty tree and a
+      # failure here is far cheaper than one twelve minutes in.
+      - name: the working tree is clean
+        run: |
+          set -euo pipefail
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "The tree is dirty before the suite has run:"
+            git status --porcelain
+            exit 1
+          fi
+          echo "clean at $(git rev-parse --short HEAD)"
+
+      - name: gate
+        run: npm run check
+
+      # EARNS THE RECEIPT. `deploy:dev` below accepts it rather than running
+      # the suite a second time — same commit, same endpoint, same run.
+      - name: integration suite
+        run: npm run test:integration
+
+      - name: deploy dev
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npm run deploy:dev
+
+      # ── THE FAILURE LOG SURVIVES THE RUNNER ──────────────────────────
+      #
+      # `tests/failure-log.ts` exists because a crash mid-run renders no
+      # summary. On a runner the whole machine disappears, so the file leaves
+      # with the run or the evidence dies with it.
+      - name: keep the failure log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-failures-${{ github.run_id }}
+          path: .integration-failures.log
+          if-no-files-found: ignore
+
+      # ── ALWAYS. A LEAKED BRANCH IS A BILL AND A MYSTERY ──────────────
+      - name: delete the Neon branch
+        if: always() && steps.branch.outputs.branch_id != ''
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+          BRANCH_ID: ${{ steps.branch.outputs.branch_id }}
+        run: |
+          set -euo pipefail
+          curl -sS -X DELETE \
+            "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches/${BRANCH_ID}" \
+            -H "Authorization: Bearer ${NEON_API_KEY}" > /dev/null
+          echo "deleted branch ${BRANCH_ID}"
