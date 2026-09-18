@@ -184,9 +184,25 @@ jobs:
               echo "Neon said: $(echo "$reset_body" | jq -rc "." | head -c 300)"
               exit 1
             fi
+            # HEX OR NOTHING, checked rather than assumed. The first attempt
+            # passed the password as a psql variable and wrote `:'pw'` in the
+            # statement — run 35309258353 answered `syntax error at or near
+            # ":"`, because psql does not interpolate variables into a `-c`
+            # string. Reaching for stdin instead would trade one guess about
+            # psql's semantics for another, so the value is simply required to
+            # be what `openssl rand -hex` produces, which has no quote, no
+            # backslash and nothing an SQL literal can misread. If some later
+            # edit sends something else through here, this stops rather than
+            # interpolating it.
+            case "$app_password" in
+              '' | *[!0-9a-f]*)
+                echo "The branch password is not hex; refusing to inline it."
+                exit 1
+                ;;
+            esac
             export PGPASSWORD="$password"
             export PGSSLMODE=require
-            if ! psql -h "$host" -U "$role" -d "$database" --no-psqlrc -q -v ON_ERROR_STOP=1 -v pw="$app_password" -c "ALTER ROLE ${app_role} WITH LOGIN PASSWORD :'pw'"; then
+            if ! psql -h "$host" -U "$role" -d "$database" --no-psqlrc -q -v ON_ERROR_STOP=1 -c "ALTER ROLE ${app_role} WITH LOGIN PASSWORD '${app_password}'"; then
               echo "Could not set a password for ${app_role} on the branch."
               echo "It may not exist there, or ${role} may not administer it."
               exit 1
