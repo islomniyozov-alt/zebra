@@ -64,3 +64,81 @@ export function classify({
     loud: label === 'production' && touchedSource,
   }
 }
+
+/**
+ * What an unreadable run is worth: nothing, loudly.
+ *
+ * ── WHY THIS IS A FUNCTION AND NOT FOUR LINES IN THE SCRIPT ──────────────
+ *
+ * The script cannot be tested without Cloudflare, and a check about what to
+ * do when Cloudflare is unreachable must not need Cloudflare to prove it
+ * works. So the decision lives here, where `tests/deploy-drift.test.ts`
+ * reaches it, and the script does what it says.
+ *
+ * ── THE RULE ─────────────────────────────────────────────────────────────
+ *
+ * On 2026-09-18 `check:drift` printed `could not be read` for both workers and
+ * `not reached (fetch failed)` for the artifact probe, and exited 0, two
+ * minutes after a production deploy. Both workers were fine; the machine could
+ * not reach Cloudflare. An exit code of 0 from a drift check is read as "no
+ * drift" by a person skimming, by `npm run check` and by CI, and nothing in
+ * that output stops it.
+ *
+ * "I could not look" and "I looked and it is fine" are different answers.
+ * Only the second may exit 0. Owner's ruling.
+ *
+ * @param {{ what: string, why: string }[]} unreadable
+ * @returns {{ ok: boolean, exitCode: number, lines: string[] }}
+ */
+export function unreadableRefusal(unreadable) {
+  if (unreadable.length === 0) {
+    return { ok: true, exitCode: 0, lines: [] }
+  }
+
+  return {
+    ok: false,
+    exitCode: 1,
+    lines: [
+      '',
+      '  ' + '='.repeat(70),
+      '  UNREADABLE. THIS IS NOT A REPORT OF NO DRIFT.',
+      ...unreadable.map(({ what, why }) => `    ${what}: ${why}`),
+      '',
+      '  Nothing above says either worker is wrong, and nothing above',
+      '  says either worker is right — this run could not look. Fix',
+      '  the connection and run it again before reading any verdict.',
+      '  ' + '='.repeat(70),
+    ],
+  }
+}
+
+/**
+ * Is this wrangler refusing for want of a credential, rather than failing?
+ *
+ * ── WHY THE ONE EXEMPTION EXISTS ─────────────────────────────────────────
+ *
+ * `npm run check` runs in CI, where `CLOUDFLARE_API_TOKEN` is deliberately
+ * scoped to the deploy step and nowhere else — so the gate has never been able
+ * to read either worker, and run 35310541290's gate printed `could not be
+ * read` for both while everything was in fact fine. Making unreadability fatal
+ * without this would fail every CI run on a condition that is configuration,
+ * not breakage.
+ *
+ * ── AND WHY IT IS THE ONLY ONE ───────────────────────────────────────────
+ *
+ * The polarity matters more than the list. Everything not recognised here is
+ * FATAL, so a novel transport failure fails closed and only this one known,
+ * named, self-describing condition is exempt. Written the other way round — a
+ * list of fatal errors, everything else benign — the next unfamiliar failure
+ * would exit 0 and the ruling would be back where it started.
+ *
+ * It is also not silence: the caller says `not checked` and says why, in words
+ * that cannot be read as a verdict.
+ *
+ * @param {string} text combined stderr and message from the failed call
+ */
+export function isMissingCredentials(text) {
+  return /necessary to set a CLOUDFLARE_API_TOKEN|CLOUDFLARE_API_TOKEN environment variable/i.test(
+    text ?? '',
+  )
+}

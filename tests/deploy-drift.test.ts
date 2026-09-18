@@ -1,7 +1,13 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 // Plain .mjs tooling, deliberately outside the app's build. Typed at the call
 // sites below rather than with a .d.ts nobody would keep in step.
-import { classify, looksLikeCommit } from '../scripts/deploy-drift-rules.mjs'
+import {
+  classify,
+  isMissingCredentials,
+  looksLikeCommit,
+  unreadableRefusal,
+} from '../scripts/deploy-drift-rules.mjs'
 import { credentialsFor, isProduction } from '../scripts/check-credentials.mjs'
 
 // ---------------------------------------------------------------------------
@@ -199,5 +205,157 @@ describe('telling a deploy from a config version', () => {
         changedSourceFiles: ['src/lib/inbound-email.ts'],
       }),
     ).toMatchObject({ state: 'behind-source', loud: true })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// "I COULD NOT LOOK" AND "I LOOKED AND IT IS FINE" ARE DIFFERENT ANSWERS.
+//
+// On 2026-09-18, two minutes after a production deploy, `check:drift` printed
+//
+//     dev         could not be read
+//     production  could not be read
+//     production  artifact   not reached (fetch failed)
+//
+// and exited 0. Both workers were fine; this machine could not reach
+// Cloudflare. But an exit code of 0 from a drift check is read as "no drift"
+// by a person skimming, by `npm run check`, and by CI — and nothing in that
+// output stops it being read that way. It is the `cmd | tail` failure for the
+// fifth time in this repository: a status that belongs to a different question
+// than the one asked.
+//
+// The rule is tested here rather than through the script, because a check
+// about what to do when Cloudflare is unreachable must not need Cloudflare to
+// prove it works. The WIRING is checked separately, below.
+// ---------------------------------------------------------------------------
+
+describe('a drift run that could not read Cloudflare', () => {
+  it('exits 1 rather than reporting no drift', () => {
+    const refusal = unreadableRefusal([
+      { what: 'production version', why: 'fetch failed' },
+    ])
+    expect(refusal.ok).toBe(false)
+    expect(refusal.exitCode).toBe(1)
+  })
+
+  it('says it is unreadable, in the words a skimmer would need', () => {
+    const text = unreadableRefusal([
+      { what: 'dev version', why: 'fetch failed' },
+    ]).lines.join('\n')
+
+    expect(text).toContain('UNREADABLE')
+    // THE SENTENCE THAT MATTERS. The old output said 'could not be read' too,
+    // and was still read as a clean bill of health, because nothing told the
+    // reader what the absence of a verdict meant.
+    expect(text).toContain('THIS IS NOT A REPORT OF NO DRIFT')
+  })
+
+  it('names every thing it could not read, and why', () => {
+    const text = unreadableRefusal([
+      { what: 'dev version', why: 'fetch failed' },
+      { what: 'production artifact probe', why: 'ETIMEDOUT' },
+    ]).lines.join('\n')
+
+    expect(text).toContain('dev version: fetch failed')
+    expect(text).toContain('production artifact probe: ETIMEDOUT')
+  })
+
+  it('stays silent and exits 0 when everything was read', () => {
+    // THE OTHER HALF OF THE RULING, and the reason this is not simply a
+    // stricter check: drift itself still does not gate. Being ahead of
+    // production is the normal state of development, and a gate that fails on
+    // the normal state is a gate people learn to skip.
+    const refusal = unreadableRefusal([])
+    expect(refusal.ok).toBe(true)
+    expect(refusal.exitCode).toBe(0)
+    expect(refusal.lines).toEqual([])
+  })
+})
+
+// ── AND THE SCRIPT ACTUALLY USES IT ────────────────────────────────────
+//
+// A rule nothing calls is a rule that passes its own tests forever. The three
+// places that matter are read out of the source, the same way
+// `net-pay-guard.test.ts` reads its fence: both unreadable paths must record,
+// and the exit code must come from the refusal rather than from a literal.
+// ── THE ONE EXEMPTION, AND ITS POLARITY ────────────────────────────────
+//
+// CI scopes CLOUDFLARE_API_TOKEN to the deploy step, so the gate has never
+// been able to read either worker — run 35310541290 printed `could not be
+// read` for both while nothing at all was wrong. Making unreadability fatal
+// without this exemption would fail every CI run on a condition that is
+// configuration rather than breakage.
+//
+// The polarity is the part worth guarding: everything NOT recognised here is
+// fatal. Written the other way round — a list of fatal errors, everything
+// else benign — the next unfamiliar failure would exit 0 and the ruling would
+// be back where it started.
+describe('wrangler failing for want of a credential', () => {
+  const recognise = isMissingCredentials as (text: string) => boolean
+
+  it('recognises what CI actually gets', () => {
+    // Captured from wrangler by running it with an empty home directory.
+    expect(
+      recognise(
+        'In a non-interactive environment, it is necessary to set a ' +
+          'CLOUDFLARE_API_TOKEN environment variable for wrangler to work.',
+      ),
+    ).toBe(true)
+  })
+
+  it('does NOT recognise the failure the ruling is about', () => {
+    // The 2026-09-18 output, verbatim from wrangler.
+    expect(
+      recognise(
+        'A fetch request failed, likely due to a connectivity issue. ' +
+          'Common causes: - No internet connection',
+      ),
+    ).toBe(false)
+  })
+
+  it.each([
+    ['fetch failed'],
+    ['getaddrinfo ENOTFOUND api.cloudflare.com'],
+    ['connect ETIMEDOUT'],
+    ['socket hang up'],
+    [''],
+  ])('treats %s as fatal, not as a missing credential', (text) => {
+    expect(recognise(text)).toBe(false)
+  })
+})
+
+describe('check-deploy-drift.mjs', () => {
+  const source = readFileSync('scripts/check-deploy-drift.mjs', 'utf8')
+
+  // EACH CALL SITE READ ON ITS OWN, because the first attempt did not and the
+  // break harness caught it. `unreadable.push({[\s\S]*?artifact probe` matched
+  // from the FIRST push forward to the second site's words, so breaking the
+  // artifact push changed nothing and the guard went on passing — an
+  // instrument satisfying itself from the thing next door, which is flag 88 in
+  // miniature. Split on the call, then read each one alone.
+  const pushes = source
+    .split('unreadable.push({')
+    .slice(1)
+    .map((chunk) => chunk.slice(0, 200))
+
+  it('records both unreadable paths and no others', () => {
+    expect(pushes).toHaveLength(2)
+  })
+
+  it('records the version read that threw', () => {
+    expect(pushes.filter((chunk) => /\} version`/.test(chunk))).toHaveLength(1)
+  })
+
+  it('records the artifact probe it could not reach', () => {
+    expect(
+      pushes.filter((chunk) => /artifact probe`/.test(chunk)),
+    ).toHaveLength(1)
+  })
+
+  it('takes its exit code from the refusal, not from a literal 0', () => {
+    expect(source).toContain('process.exit(refusal.exitCode)')
+    // The old `process.exit(0)` at the bottom is what this replaced. If one
+    // comes back, the refusal above it is decoration.
+    expect(source).not.toMatch(/\nprocess\.exit\(0\)/)
   })
 })

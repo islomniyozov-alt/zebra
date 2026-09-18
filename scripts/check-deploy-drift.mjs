@@ -1,6 +1,11 @@
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { classify, looksLikeCommit } from './deploy-drift-rules.mjs'
+import {
+  classify,
+  isMissingCredentials,
+  looksLikeCommit,
+  unreadableRefusal,
+} from './deploy-drift-rules.mjs'
 
 /** Wrangler's own entry, so nothing has to find a `.cmd`. A file path rather
  * than a package specifier — see the note in scripts/integration-gate.mjs. */
@@ -29,8 +34,34 @@ const WRANGLER_ENTRY = fileURLToPath(
 // loud when production trails a src/ change and quiet otherwise, and the
 // loudness is the whole mechanism.
 //
-// It is also quiet about NETWORK failure. No Cloudflare, no answer, no
-// opinion — `npm run check` must work on a plane.
+// ── BUT IT IS NOT QUIET ABOUT BEING UNABLE TO LOOK ───────────────────────
+//
+// THIS PARAGRAPH USED TO SAY the opposite: "quiet about NETWORK failure. No
+// Cloudflare, no answer, no opinion — `npm run check` must work on a plane."
+// That is overturned by the owner's ruling of 2026-09-18, and this is what
+// bought it. On that day the check printed
+//
+//     dev         could not be read
+//     production  could not be read
+//     production  artifact   not reached (fetch failed)
+//
+// and exited 0, two minutes after a production deploy. Nothing was wrong with
+// either worker; this machine could not reach Cloudflare. But an exit code of
+// 0 from a drift check is read as "no drift" by every reader there is — a
+// person skimming, `npm run check`, and CI — and NOTHING in that output stops
+// it being read that way.
+//
+// That is the `cmd | tail` failure for the fifth time in this repository: a
+// status that belongs to something other than the question asked. "I could
+// not look" and "I looked and it is fine" are different answers, and only one
+// of them may exit 0.
+//
+// So unreadability is now fatal and named, while DRIFT remains informational.
+// Those are not in tension: being ahead of production is the normal state of
+// development and gating on it produces a gate people learn to skip, whereas
+// being unable to read production is never normal and never a thing to carry
+// on past. The plane is the price, and it is the right price — a check that
+// answers when it cannot see is worth less than no check.
 // ---------------------------------------------------------------------------
 
 const ENVIRONMENTS = [
@@ -104,8 +135,13 @@ const wrangler = (args) => {
   const out = execFileSync(
     process.execPath,
     [WRANGLER_ENTRY, ...args, '--json'],
-    // Wrangler writes its banner to stderr; only stdout is parsed.
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    // Wrangler writes its banner to stderr; only stdout is parsed. stderr is
+    // CAPTURED rather than discarded, though — it used to be `'ignore'`, which
+    // meant a failure arrived as a bare "Command failed: node …" with the one
+    // sentence explaining why thrown away. Telling "no credentials configured"
+    // apart from "the network is down" is the whole of the exemption below,
+    // and it cannot be done from a message that was never kept.
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
   )
   return JSON.parse(out)
 }
@@ -115,6 +151,15 @@ console.log(`HEAD is ${head}`)
 
 let productionTrailsSource = false
 let artifactDisagrees = false
+
+/**
+ * Everything this run could not read, and why.
+ *
+ * Collected rather than thrown, so one unreachable worker does not hide the
+ * other's answer: the report is still printed in full, and the exit code at
+ * the bottom is what refuses.
+ */
+const unreadable = []
 
 for (const environment of ENVIRONMENTS) {
   let deployedMessage = null
@@ -165,7 +210,36 @@ for (const environment of ENVIRONMENTS) {
       configAtop = realDeploy ? messageOf(realDeploy) : null
       deployedMessage = configAtop
     }
-  } catch {
+  } catch (error) {
+    const stderr = typeof error?.stderr === 'string' ? error.stderr : ''
+    const message = error instanceof Error ? error.message : String(error)
+
+    // THE ONE EXEMPTION, and it is configuration rather than breakage: CI
+    // scopes CLOUDFLARE_API_TOKEN to the deploy step, so the gate has never
+    // been able to read either worker. Not a verdict, and worded so it cannot
+    // be mistaken for one — see `isMissingCredentials` for why this is the
+    // only thing exempt and everything else fails closed.
+    if (isMissingCredentials(`${stderr}\n${message}`)) {
+      console.log(
+        `  ${environment.label.padEnd(11)} not checked — no Cloudflare credentials here`,
+      )
+      continue
+    }
+
+    // NAMED, NOT COUNTED. The banner at the bottom repeats these, because the
+    // line that says why is fifty lines above the exit code that refuses.
+    // Wrangler colours its own stderr, and the escape codes came through into
+    // the banner as `[33m▲ [43;33m[...`. A refusal nobody can read is most of
+    // the way back to a refusal nobody notices.
+    const why = (stderr.trim() || message)
+      // eslint-disable-next-line no-control-regex
+      .replace(/\[[0-9;]*m/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+    unreadable.push({
+      what: `${environment.label} version`,
+      why: why.slice(0, 160),
+    })
     console.log(`  ${environment.label.padEnd(11)} could not be read`)
     continue
   }
@@ -259,8 +333,17 @@ for (const environment of ENVIRONMENTS) {
   const where = `  ${environment.label.padEnd(11)} artifact`
 
   if (probe.unreachable) {
-    // NOT A FAILURE. A laptop on a plane, a DNS hiccup and a wrong deploy are
-    // three different things, and only one of them is this check's business.
+    // THIS USED TO SAY "NOT A FAILURE. A laptop on a plane, a DNS hiccup and a
+    // wrong deploy are three different things, and only one of them is this
+    // check's business." It is still true that they are three different
+    // things. What was wrong was the conclusion: telling them apart is the
+    // READER's business, and the reader cannot, because an exit code of 0
+    // says the same word for "fine" as for "I never got an answer". Owner's
+    // ruling, 2026-09-18 — see the header.
+    unreadable.push({
+      what: `${environment.label} artifact probe`,
+      why: probe.unreachable,
+    })
     console.log(`${where}   not reached (${probe.unreachable})`)
     continue
   }
@@ -331,5 +414,16 @@ if (productionTrailsSource) {
   )
 }
 
-// Always 0. See the note at the top: this reports, it does not gate.
-process.exit(0)
+// ── THE ONE THING THIS REFUSES ON: NOT HAVING LOOKED ────────────────────
+//
+// Drift still exits 0 — being ahead of production is the normal state of
+// development, and a gate that fails on the normal state is a gate people
+// learn to skip. Being unable to READ production is not the normal state, and
+// an exit code of 0 over it is indistinguishable from "no drift" to every
+// reader there is. Owner's ruling, 2026-09-18.
+const refusal = unreadableRefusal(unreadable)
+for (const line of refusal.lines) console.log(line)
+
+// Otherwise 0, even when it shouts. See the note at the top: it reports drift,
+// it does not gate on it.
+process.exit(refusal.exitCode)
