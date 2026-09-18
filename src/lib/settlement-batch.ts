@@ -170,7 +170,28 @@ export async function batchInputForOrg(
     statementDate: Date
     checkDate: Date
   },
+  options: {
+    /**
+     * Read everything needed to compute NET pay. Default true.
+     *
+     * ── FALSE IS FOR A SCREEN THAT NEVER SHOWS NET ──────────────────────
+     *
+     * Four of this function's reads exist only to turn gross into net:
+     * recurring deductions, the escrow balance, the opening balance and the
+     * year's prior settlements. The Tuesday screen displays Ready (loads,
+     * drivers, GROSS), held lines and blocked drivers — and reads
+     * `netCents` nowhere. Measured 2026-09-18: those four cost four round
+     * trips out of a page that had grown to twenty-three.
+     *
+     * A BATCH MUST NEVER PASS FALSE. What it produces is a statement
+     * somebody is paid on, and a settlement computed without its deductions
+     * would overpay every driver who has any. The default is therefore the
+     * safe one, and the money screen is the single caller that opts out.
+     */
+    netPay?: boolean
+  } = {},
 ): Promise<DriverSettlementInput[]> {
+  const netPay = options.netPay !== false
   const loads = await tx.load.findMany({
     where: settleableForBatch(null, input.period),
     select: {
@@ -210,18 +231,20 @@ export async function batchInputForOrg(
   // company may not be in this list at all. Two reads of the same table cost a
   // round trip that the money screen cannot spare, and the union is the same
   // set either way.
-  const recurringAll = await tx.recurringDeduction.findMany({
-    where: {
-      OR: [
-        {
-          // EVERY LIVE DRIVER IN THE ORGANIZATION. Row-level security is the
-          // tenant fence; there is no company to narrow to any more.
-          driver: { deletedAt: null },
+  const recurringAll = netPay
+    ? await tx.recurringDeduction.findMany({
+        where: {
+          OR: [
+            {
+              // EVERY LIVE DRIVER IN THE ORGANIZATION. Row-level security is
+              // the tenant fence; there is no company to narrow to any more.
+              driver: { deletedAt: null },
+            },
+            { driverId: { in: driverIds } },
+          ],
         },
-        { driverId: { in: driverIds } },
-      ],
-    },
-  })
+      })
+    : []
   for (const row of recurringAll) {
     if (!driverIds.includes(row.driverId)) driverIds.push(row.driverId)
   }
@@ -249,32 +272,38 @@ export async function batchInputForOrg(
       tx.settlementCharge.findMany({
         where: { driverId: { in: driverIds }, settledAt: null },
       }),
-      tx.driverEscrowEntry.groupBy({
-        by: ['driverId'],
-        where: { driverId: { in: driverIds } },
-        _sum: { amountCents: true },
-      }),
-      tx.driverOpeningBalance.findMany({
-        where: { driverId: { in: driverIds }, year },
-      }),
-      tx.settlement.findMany({
-        where: {
-          driverId: { in: driverIds },
-          batch: { status: { in: ['FINAL', 'PAID'] } },
-          periodStart: { gte: new Date(Date.UTC(year, 0, 1)) },
-          periodEnd: { lt: input.period.start },
-        },
-        select: {
-          driverId: true,
-          periodStart: true,
-          earningsCents: true,
-          advancesCents: true,
-          reimbursementsCents: true,
-          deductionsCents: true,
-          otherPayCents: true,
-          netCents: true,
-        },
-      }),
+      netPay
+        ? tx.driverEscrowEntry.groupBy({
+            by: ['driverId'],
+            where: { driverId: { in: driverIds } },
+            _sum: { amountCents: true },
+          })
+        : [],
+      netPay
+        ? tx.driverOpeningBalance.findMany({
+            where: { driverId: { in: driverIds }, year },
+          })
+        : [],
+      netPay
+        ? tx.settlement.findMany({
+            where: {
+              driverId: { in: driverIds },
+              batch: { status: { in: ['FINAL', 'PAID'] } },
+              periodStart: { gte: new Date(Date.UTC(year, 0, 1)) },
+              periodEnd: { lt: input.period.start },
+            },
+            select: {
+              driverId: true,
+              periodStart: true,
+              earningsCents: true,
+              advancesCents: true,
+              reimbursementsCents: true,
+              deductionsCents: true,
+              otherPayCents: true,
+              netCents: true,
+            },
+          })
+        : [],
     ])
 
   const escrowOf = new Map(

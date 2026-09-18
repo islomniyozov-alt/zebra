@@ -68,8 +68,9 @@
 // for the other in the production bundle. Anything running on Node gets the
 // first; the deployed Worker gets the second.
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["relationJoins"]
 }
 
 generator workerd {

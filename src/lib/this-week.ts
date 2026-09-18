@@ -234,12 +234,27 @@ export async function thisWeekFor(
   // `computeBatch` is the same function the draft runs through, so the screen
   // cannot say "ready: 12" about a batch that would produce eleven.
   const computed = await timed('engine', async () => {
-    const drivers = await batchInputForOrg(tx, {
-      organizationId,
-      period: input.period,
-      statementDate: input.payDay,
-      checkDate: input.payDay,
-    })
+    const drivers = await batchInputForOrg(
+      tx,
+      {
+        organizationId,
+        period: input.period,
+        statementDate: input.payDay,
+        checkDate: input.payDay,
+      },
+      // ── NO NET-PAY READS. THIS SCREEN NEVER SHOWS NET ─────────────────
+      //
+      // Recurring deductions, the escrow balance, the opening balance and the
+      // year's prior settlements turn gross into net — and this page displays
+      // Ready (loads, drivers, GROSS), held lines and blocked drivers, and
+      // reads `netCents` nowhere. Four round trips for figures that never
+      // reach the screen, out of a page that had grown to twenty-three.
+      //
+      // THE HELD AND BLOCKED LISTS ARE UNAFFECTED: a held line is a load whose
+      // remittance disagrees with its booked rate, and a blocked driver is one
+      // with no pay rule. Neither is a deduction.
+      { netPay: false },
+    )
     return computeBatch({
       period: input.period,
       statementDate: input.payDay,

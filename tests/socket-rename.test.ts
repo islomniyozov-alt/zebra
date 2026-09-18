@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { withSocketRetry } from './retrying-client'
+import { isStartTransactionFailure } from '@/lib/retry-transaction'
+
+/** Named, because an escaped newline has been mangled in transit twice. */
+const NEWLINE = String.fromCharCode(10)
 
 // ---------------------------------------------------------------------------
 // WHEN BOTH ATTEMPTS LOSE THE SOCKET, THE ERROR SAYS SO.
@@ -41,6 +45,40 @@ describe('an operation that loses its socket twice', () => {
     // THE EVIDENCE SURVIVES THE RENAME. A message that replaced the stack
     // would trade one unreadable error for another.
     expect((thrown.cause as Error).stack).toContain('onSocketClose')
+  })
+
+  // ── THE RENAME MUST NOT BLIND THE APPLICATION'S OWN RETRY ────────────
+  //
+  // A REGRESSION THAT SHIPPED, caught by reading a failing deploy rather than
+  // by a test. `isStartTransactionFailure` recognises these by the frame
+  // `PrismaNeonAdapter.startTransaction` in the STACK, and a bare
+  // `new Error(...)` carries a new stack — so renaming turned a recognised
+  // start failure into an unrecognised one and disabled `retryOnStartFailure`
+  // entirely. Measured directly: original true, renamed false.
+  //
+  // The cause's stack is appended rather than replaced, so both readers get
+  // what they match on.
+  it('keeps the frame the application retry recognises', async () => {
+    const adapterDrop = () => {
+      const error = new Error('')
+      // Built by joining, so no escape sequence has to survive being typed.
+      error.stack = [
+        'Error: ',
+        '    at PrismaNeonAdapter.startTransaction (adapter-neon/dist/index.mjs:595:18)',
+        '    at WebSocket.#onSocketClose (node:internal)',
+      ].join(NEWLINE)
+      return error
+    }
+    expect(isStartTransactionFailure(adapterDrop())).toBe(true)
+
+    const thrown = await withSocketRetry('load.findMany', () =>
+      Promise.reject(adapterDrop()),
+    ).catch((error: unknown) => error as Error)
+
+    // Both at once: the message a vitest condition reads...
+    expect(thrown.message).toContain('dropped Neon socket')
+    // ...and the stack the application's retry reads.
+    expect(isStartTransactionFailure(thrown)).toBe(true)
   })
 
   it('still succeeds quietly when the second attempt works', async () => {

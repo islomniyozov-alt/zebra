@@ -60,6 +60,38 @@ export function resetRetryCount(): void {
 }
 
 /**
+ * Rename a dropped socket so a retry condition can match it — WITHOUT losing
+ * the stack that other code matches on.
+ *
+ * ── THE REGRESSION THIS EXISTS TO PREVENT, WHICH I SHIPPED ───────────────
+ *
+ * The first version threw a bare `new Error(...)`. A new Error carries a NEW
+ * stack, and `isStartTransactionFailure` in `retry-transaction.ts` recognises
+ * these by the frame `PrismaNeonAdapter.startTransaction` — so renaming turned
+ * a recognised start failure into an unrecognised one and DISABLED the
+ * application's own three-attempt retry. Measured directly: the original
+ * returns true, the renamed one returned false.
+ *
+ * So the cause's stack is appended rather than replaced. Both readers get what
+ * they match on: vitest reads `message`, `isStartTransactionFailure` reads
+ * message and stack together.
+ */
+function renamedDrop(label: string, error: unknown): Error {
+  const detail =
+    error instanceof Error && error.message
+      ? error.message
+      : 'no message; see cause'
+  const renamed = new Error(`dropped Neon socket in ${label}: ${detail}`, {
+    cause: error,
+  })
+  if (error instanceof Error && error.stack) {
+    renamed.stack = `${renamed.stack ?? ''}
+Caused by: ${error.stack}`
+  }
+  return renamed
+}
+
+/**
  * Run `operation`, and if the socket dropped, run it exactly once more.
  *
  * Anything that is not a dropped socket rethrows immediately — a retry that
@@ -103,14 +135,7 @@ export async function withSocketRetry<T>(
     // is exactly when the rename was missing.
     return operation().catch((second: unknown) => {
       if (!isDroppedSocket(second)) throw second
-      throw new Error(
-        `dropped Neon socket in ${label}, twice: ${
-          second instanceof Error && second.message
-            ? second.message
-            : 'no message; see cause'
-        }`,
-        { cause: second },
-      )
+      throw renamedDrop(`${label}, twice`, second)
     })
   }
 }
@@ -181,14 +206,7 @@ export function retryingClient(connectionString: string): PrismaClient {
           // vitest re-runs the TEST and its fixtures are built again.
           return Promise.resolve(original(...args)).catch((error: unknown) => {
             if (!isDroppedSocket(error)) throw error
-            throw new Error(
-              `dropped Neon socket during $transaction: ${
-                error instanceof Error && error.message
-                  ? error.message
-                  : 'no message; see cause'
-              }`,
-              { cause: error },
-            )
+            throw renamedDrop('$transaction', error)
           })
         }
       }
