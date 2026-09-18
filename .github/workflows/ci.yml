@@ -18,6 +18,14 @@ name: gate and deploy dev
 # environment and reads `.env` itself — deliberately, because on 2026-08-14 a
 # ritual terminal's leftovers aimed a run at production. THE SCRUB STAYS. CI
 # writes the file the gate expects instead of loosening the gate.
+#
+# ── THE STEP ORDER IS LOAD-BEARING, AND THE FIRST RUN PROVED IT ──────────
+#
+# `npm ci` runs `prisma generate` as a postinstall, and `prisma.config.ts`
+# REFUSES when NEON_BRANCH and DIRECT_DATABASE_URL are absent — by design: it
+# will not guess which database it points at. So the branch is created and
+# `.env` is written BEFORE the install, not after. Run 35300290050 failed in
+# 49 seconds on exactly that, which is the cheapest possible way to learn it.
 # ─────────────────────────────────────────────────────────────────────────
 
 on:
@@ -45,15 +53,14 @@ jobs:
           node-version: '22'
           cache: npm
 
-      - name: install
-        run: npm ci
-
       # ── THE PER-RUN DATABASE ─────────────────────────────────────────
       #
       # curl rather than a marketplace action: this is a private repository
       # holding a production TMS, and a third party in the credential path is
       # a decision nobody has made. Two API calls and jq cost less than that
       # conversation.
+      #
+      # FIRST, because the install needs a database to generate against.
       - name: create a Neon branch for this run
         id: branch
         env:
@@ -90,26 +97,11 @@ jobs:
           echo "pooled=$pooled" >> "$GITHUB_OUTPUT"
           echo "Created branch ci-${GITHUB_RUN_ID} ($branch_id)"
 
-      # ── HOW FAR AWAY IS IT? MEASURED, AND PRINTED (owner's ruling) ────
+      # ── THE FILE THE GATE READS, AND THE INSTALL NEEDS ───────────────
       #
-      # Standard GitHub runners give no region choice, so this run's latency to
-      # us-east-2 is a fact to be read rather than arranged. Every number the
-      # suite prints — the money screen's 2.2 seconds most of all — sits on top
-      # of this figure, and a timing recorded without it is a measurement of an
-      # unknown place.
-      #
-      # NO PAID RUNNER UNLESS THIS NUMBER SAYS SO. That is the ruling, and this
-      # is the number it is about.
-      - name: measure the round trip to the branch
-        env:
-          PGURL: ${{ steps.branch.outputs.direct }}
-        run: node scripts/ci-round-trip.mjs
-
-      # ── THE FILE THE GATE READS ──────────────────────────────────────
-      #
-      # NEON_BRANCH names this run rather than being left out: the gate refuses
-      # a file that says `production`, and a value naming the run is more use
-      # in a log than an absence.
+      # NEON_BRANCH names this run rather than being left out: `prisma.config`
+      # refuses a missing one, the gate refuses a file that says `production`,
+      # and a value naming the run is more use in a log than either.
       - name: write .env from secrets and the branch
         env:
           DIRECT: ${{ steps.branch.outputs.direct }}
@@ -140,11 +132,32 @@ jobs:
           } > .env
           echo "wrote .env with $(grep -c = .env) keys"
 
+      # `prisma generate` runs here, as a postinstall, and reads the file above.
+      - name: install
+        run: npm ci
+
+      # ── HOW FAR AWAY IS IT? MEASURED, AND PRINTED (owner's ruling) ────
+      #
+      # Standard GitHub runners give no region choice, so this run's latency to
+      # us-east-2 is a fact to be read rather than arranged. Every number the
+      # suite prints — the money screen's 2.2 seconds most of all — sits on top
+      # of this figure, and a timing recorded without it is a measurement of an
+      # unknown place.
+      #
+      # NO PAID RUNNER UNLESS THIS NUMBER SAYS SO. That is the ruling, and this
+      # is the number it is about. It needs `node_modules`, so it follows the
+      # install rather than leading the job.
+      - name: measure the round trip to the branch
+        env:
+          PGURL: ${{ steps.branch.outputs.direct }}
+        run: node scripts/ci-round-trip.mjs
+
       # ── AND THE TREE MUST BE CLEAN WHEN THE SUITE STARTS ─────────────
       #
-      # `.env` is gitignored, so writing it leaves the tree clean — asserted
-      # rather than assumed, because the receipt refuses a dirty tree and a
-      # failure here is far cheaper than one twelve minutes in.
+      # `.env` and `src/generated/` are both gitignored, so writing the first
+      # and generating the second leaves the tree clean — asserted rather than
+      # assumed, because the receipt refuses a dirty tree and a failure here is
+      # far cheaper than one twelve minutes in.
       - name: the working tree is clean
         run: |
           set -euo pipefail

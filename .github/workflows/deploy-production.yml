@@ -24,6 +24,11 @@ name: deploy production
 # against a real database. That run happens here on a per-run Neon branch from
 # DEV — production's own data is never a test fixture — which is the same
 # arrangement the local flow has always had.
+#
+# THE STEP ORDER MATCHES ci.yml, and for the same reason: `npm ci` runs
+# `prisma generate`, which refuses without a declared database, so the branch
+# and `.env` come first. Everything that needs `node_modules` — the migration
+# gap check included — follows the install.
 # ─────────────────────────────────────────────────────────────────────────
 
 on:
@@ -62,19 +67,6 @@ jobs:
           node-version: '22'
           cache: npm
 
-      - name: install
-        run: npm ci
-
-      # ── THE SCHEMA MUST ALREADY BE THERE ─────────────────────────────
-      #
-      # Asked FIRST, before a suite that costs a quarter of an hour. This is
-      # the same check `deploy.mjs` makes, made early so a forgotten ritual
-      # costs ten seconds rather than fifteen minutes.
-      - name: production schema is not behind
-        env:
-          PROD_DIRECT_DATABASE_URL: ${{ secrets.PROD_DIRECT_DATABASE_URL_RO }}
-        run: node scripts/check-migration-gap.mjs
-
       - name: create a Neon branch for this run
         id: branch
         env:
@@ -103,16 +95,12 @@ jobs:
           echo "::add-mask::$pooled"
           echo "direct=$direct" >> "$GITHUB_OUTPUT"
           echo "pooled=$pooled" >> "$GITHUB_OUTPUT"
-
-      - name: measure the round trip to the branch
-        env:
-          PGURL: ${{ steps.branch.outputs.direct }}
-        run: node scripts/ci-round-trip.mjs
+          echo "Created branch ci-prod-${GITHUB_RUN_ID} ($branch_id)"
 
       # THE DEV BRANCH'S URLS, NEVER PRODUCTION'S. `.env` is what the suite
       # reads and what the gate scrubs the environment down to; production's
       # credential reaches `deploy.mjs` through the environment instead, and
-      # only for the two SELECTs above.
+      # only for the two SELECTs this workflow's header names.
       - name: write .env from secrets and the branch
         env:
           DIRECT: ${{ steps.branch.outputs.direct }}
@@ -142,6 +130,25 @@ jobs:
             echo "SEED_OWNER_PASSWORD=${SEED_OWNER_PASSWORD}"
           } > .env
 
+      - name: install
+        run: npm ci
+
+      # ── THE SCHEMA MUST ALREADY BE THERE ─────────────────────────────
+      #
+      # As early as it can be — it needs `node_modules`, so it sits just after
+      # the install and well before a suite that costs a quarter of an hour.
+      # This is the same check `deploy.mjs` makes, made early so a forgotten
+      # ritual costs a minute rather than fifteen.
+      - name: production schema is not behind
+        env:
+          PROD_DIRECT_DATABASE_URL: ${{ secrets.PROD_DIRECT_DATABASE_URL_RO }}
+        run: node scripts/check-migration-gap.mjs
+
+      - name: measure the round trip to the branch
+        env:
+          PGURL: ${{ steps.branch.outputs.direct }}
+        run: node scripts/ci-round-trip.mjs
+
       - name: the working tree is clean
         run: |
           set -euo pipefail
@@ -150,6 +157,7 @@ jobs:
             git status --porcelain
             exit 1
           fi
+          echo "clean at $(git rev-parse --short HEAD)"
 
       - name: gate
         run: npm run check
