@@ -133,39 +133,40 @@ jobs:
           fi
           echo "::add-mask::$password"
 
-          # THE OWNER'S URL, for the admin work only: creating the eight worker
-          # databases from the template, and the template itself. Nothing the
-          # application does runs as this role.
-          direct="postgresql://${role}:${password}@${host}/${database}?sslmode=require"
-
-          # -- AND THE APPLICATION CONNECTS AS `zebra_app`, NEVER THE OWNER --
+          # ── THE TWO STRINGS ARE COMPOSED BY PARSING, NOT BY SPLICING ─
           #
-          # MEASURED THE HARD WAY, run 35301618293. Composing both URLs as the
-          # owner was refused twice over: `src/lib/db.ts` threw outright --
-          # "the owner bypasses row-level security, so every tenant boundary
-          # would silently disappear" -- and `structure.test.ts` caught it
-          # independently. Without either, CI would have run the entire suite
-          # with RLS OFF and every isolation test would have passed vacuously.
+          # This was six lines of shell and it cost run 35307302962. The
+          # application URL was built with
           #
-          # So the app credential comes from DEV_DATABASE_URL and only its HOST
-          # is replaced. `zebra_app` and its password travel with the branch,
-          # being a copy of dev, so this is dev's own application role against
-          # dev's own data -- which is the point of branching from it.
-          if [ -z "${DEV_DATABASE_URL:-}" ]; then
-            echo "DEV_DATABASE_URL is not set; it carries the zebra_app credential."
-            exit 1
-          fi
-          if [ "${DEV_DATABASE_URL#*zebra_app}" = "$DEV_DATABASE_URL" ]; then
-            echo "DEV_DATABASE_URL does not authenticate as zebra_app."
-            echo "The application must never connect as the database owner."
-            exit 1
-          fi
-          credential=${DEV_DATABASE_URL%%@*}
-          pooled="${credential}@${host%%.*}-pooler.${host#*.}/${database}?sslmode=require"
-          echo "::add-mask::$direct"
-          echo "::add-mask::$pooled"
-          echo "direct=$direct" >> "$GITHUB_OUTPUT"
-          echo "pooled=$pooled" >> "$GITHUB_OUTPUT"
+          #     credential=${DEV_DATABASE_URL%%@*}
+          #
+          # and a prefix strip CANNOT FAIL — the same hazard as `sed` and as
+          # `cmd | tail`, for the fourth time in this repository. A wrapping
+          # quote, a `psql ` the Neon console put in front, a stray newline, an
+          # `@` inside the password: each yields a different wrong string and
+          # none of them yield an error. The branch was created, the round trip
+          # measured at 16ms, the `.env` written — and then 108 test FILES
+          # failed to load saying `DATABASE_URL or DIRECT_DATABASE_URL is not a
+          # URL`, which is this step's fact arriving four minutes late and a
+          # hundred and eight times over.
+          #
+          # So the credential is PARSED. `scripts/ci-compose-urls.mjs` reads
+          # both strings, says which one is malformed and prints its shape
+          # WITHOUT its password, asserts the application role is `zebra_app`
+          # and never the branch owner — run 35301618293's mistake, where
+          # BYPASSRLS would have taken every tenant boundary with it — and
+          # writes the two outputs itself, masked before they are written.
+          #
+          # `tests/ci-urls.test.ts` runs its output past `checkDbTarget`, the
+          # very guard that refused the last attempt, rather than past a second
+          # opinion about what a good URL looks like. All five of its breaks
+          # have been watched failing.
+          # Exported on their own lines: a backslash continuation has been
+          # eaten in transit four times in this repository, and a joined
+          # continuation is still valid shell, which is how it gets through.
+          export OWNER_ROLE="$role" OWNER_PASSWORD="$password"
+          export ENDPOINT_HOST="$host" DATABASE_NAME="$database"
+          node scripts/ci-compose-urls.mjs
           echo "Created branch ci-prod-${GITHUB_RUN_ID} ($branch_id)"
 
       # THE DEV BRANCH'S URLS, NEVER PRODUCTION'S. `.env` is what the suite
