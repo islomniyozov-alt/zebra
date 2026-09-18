@@ -98,7 +98,12 @@ jobs:
           # endpoint host, and the password fetched with the one API call that
           # exists for it. The branch INHERITS the parent's roles, so this is
           # dev's own credential against a copy of dev.
-          role=$(echo "$response" | jq -r ".roles[0].name // empty")
+          # THE OWNER OF `neondb`, NOT `roles[0]`. Run 35301311106 composed the
+          # string with the first role in the list and the suite failed five
+          # times with `permission denied to create database` — the template
+          # clone needs CREATEDB, which only the owner has. The same mistake as
+          # `databases[0]`, one field over: an index is not an identity.
+          role=$(echo "$response" | jq -r '[.databases[] | select(.name == "neondb") | .owner_name][0] // empty')
           host=$(echo "$response" | jq -r ".endpoints[0].host // empty")
           # `neondb` BY NAME, not `databases[0]`. A branch copies every database
           # in the project — `zebra_template` and `zebra_w1..8` come along — and
