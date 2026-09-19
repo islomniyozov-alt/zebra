@@ -75,6 +75,17 @@ jobs:
           # has nothing left to do and is not wired in pretending otherwise.
         run: |
           set -euo pipefail
+          # ── FORK dev, OR NOTHING ─────────────────────────────────────
+          #
+          # NEON_PARENT_BRANCH is an opaque id. When it pointed two
+          # migrations behind dev, runs 35321964790 and 35415706396 went red
+          # four minutes later with missing migrations and an absent column,
+          # and neither log ever said which branch had been forked.
+          #
+          # An id cannot be eyeballed; a name can. This asks Neon for the
+          # name and refuses anything but dev, BEFORE a branch is created.
+          node scripts/ci-parent-branch.mjs
+
           response=$(curl -sS -X POST \
             "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches" \
             -H "Authorization: Bearer ${NEON_API_KEY}" \
