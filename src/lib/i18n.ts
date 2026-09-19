@@ -210,6 +210,7 @@ const en = {
   'loads.column.delivery': 'Delivery',
   'loads.column.truck': 'Truck',
   'loads.column.driver': 'Driver',
+  'loads.column.coDriver': 'Co-driver',
   'loads.column.status': 'Status',
   'loads.column.billing': 'Billing',
   'loads.column.rate': 'Rate',
@@ -335,6 +336,8 @@ const en = {
   'ref.error.invalidAuthority': 'Choose an authority you work under.',
   'ref.error.truckOtherAuthority':
     'That truck runs under a different authority. A driver and their truck must be under the same one — transfer the truck first, or pick another.',
+  'ref.error.sameDriverTwice':
+    'That is the same person in both seats. A team is two different drivers sharing one load — pick someone else as co-driver, or clear it.',
   'ref.error.codesUnconfirmed':
     'Confirm the endorsements and restrictions against the card before saving.',
   'drivers.cdl.confirmCodes':
@@ -2183,6 +2186,7 @@ const ru: Dictionary = {
   'loads.column.delivery': 'Выгрузка',
   'loads.column.truck': 'Тягач',
   'loads.column.driver': 'Водитель',
+  'loads.column.coDriver': 'Второй водитель',
   'loads.column.status': 'Статус',
   'loads.column.billing': 'Оплата',
   'loads.column.rate': 'Ставка',
@@ -2308,6 +2312,8 @@ const ru: Dictionary = {
   'ref.error.invalidAuthority': 'Выберите перевозчика, с которым вы работаете.',
   'ref.error.truckOtherAuthority':
     'Этот тягач числится за другим перевозчиком. Водитель и его тягач должны быть под одним — сначала переведите тягач или выберите другой.',
+  'ref.error.sameDriverTwice':
+    'Это один и тот же человек на обоих местах. Экипаж — это два разных водителя на одном грузе — выберите другого вторым водителем или очистите поле.',
   'ref.error.codesUnconfirmed':
     'Подтвердите допуски и ограничения по карточке перед сохранением.',
   'drivers.cdl.confirmCodes': 'Эти допуски и ограничения совпадают с карточкой',
@@ -4144,6 +4150,7 @@ const fa: Dictionary = {
   'loads.column.delivery': 'تحویل',
   'loads.column.truck': 'کامیون',
   'loads.column.driver': 'راننده',
+  'loads.column.coDriver': 'راننده دوم',
   'loads.column.status': 'وضعیت',
   'loads.column.billing': 'صورتحساب',
   'loads.column.rate': 'نرخ',
@@ -4265,6 +4272,8 @@ const fa: Dictionary = {
   'ref.error.invalidAuthority': 'شرکتی را انتخاب کنید که با آن کار می‌کنید.',
   'ref.error.truckOtherAuthority':
     'این کامیون زیر شرکت دیگری کار می‌کند. راننده و کامیونش باید زیر یک شرکت باشند — نخست کامیون را منتقل کنید یا کامیون دیگری برگزینید.',
+  'ref.error.sameDriverTwice':
+    'این یک نفر در هر دو جایگاه است. تیم یعنی دو راننده متفاوت در یک بار — راننده دوم دیگری برگزینید یا آن را خالی کنید.',
   'ref.error.codesUnconfirmed':
     'پیش از ذخیره، مجوزها و محدودیت‌ها را با کارت تطبیق دهید.',
   'drivers.cdl.confirmCodes': 'این مجوزها و محدودیت‌ها با کارت مطابقت دارند',

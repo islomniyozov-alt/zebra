@@ -26,12 +26,14 @@ interface Props {
   drivers: readonly SelectOption[]
   truckId: string | null
   driverId: string | null
+  coDriverId: string | null
   disabled: boolean
   assign: (previous: DetailState, formData: FormData) => Promise<DetailState>
   labels: {
     title: string
     truck: string
     driver: string
+    coDriver: string
     unassigned: string
     save: string
     saving: string
@@ -43,6 +45,7 @@ export function LoadAssignment({
   drivers,
   truckId,
   driverId,
+  coDriverId,
   disabled,
   assign,
   labels,
@@ -75,6 +78,24 @@ export function LoadAssignment({
             label={labels.driver}
             options={withBlank(drivers)}
             defaultValue={driverId ?? ''}
+            disabled={disabled || pending}
+          />
+        </div>
+
+        {/* ── THE SECOND SEAT ──────────────────────────────────────────
+         * Blank on almost every load, so it sits on its own row rather than
+         * making the truck-and-driver grid three columns wide: a team is the
+         * exception and should not reshape the form for everybody not
+         * running one.
+         *
+         * Setting it is what MAKES the load a team load. There is no separate
+         * switch to get out of step with the crew. */}
+        <div className="grid gap-z3 sm:grid-cols-2">
+          <Select
+            name="coDriverId"
+            label={labels.coDriver}
+            options={withBlank(drivers)}
+            defaultValue={coDriverId ?? ''}
             disabled={disabled || pending}
           />
         </div>

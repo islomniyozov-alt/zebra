@@ -159,6 +159,8 @@ export interface LoadInput {
   poNumber?: unknown
   truckId?: string | null
   driverId?: string | null
+  /** The second crew member. Setting it is what makes the load a team load. */
+  coDriverId?: string | null
   trailerId?: string | null
   equipmentType?: EquipmentType
   commodity?: unknown
@@ -542,6 +544,7 @@ export async function updateLoad(
       isCancelled: true,
       truckId: true,
       driverId: true,
+      coDriverId: true,
     },
   })
   if (!current) throw new ReferenceError('not_found')
@@ -557,6 +560,22 @@ export async function updateLoad(
     input.truckId === undefined ? current.truckId : (input.truckId ?? null)
   const driverId =
     input.driverId === undefined ? current.driverId : (input.driverId ?? null)
+  const coDriverId =
+    input.coDriverId === undefined
+      ? current.coDriverId
+      : (input.coDriverId ?? null)
+
+  // ── ONE PERSON CANNOT CREW A LOAD TWICE ──────────────────────────────
+  //
+  // The database CHECK refuses this too, and it must — but a constraint
+  // violation reaches a dispatcher as a five-hundred, and what they need is
+  // the sentence telling them which box to change. Checked against the state
+  // the load will HAVE after the edit, not the one it has now: assigning the
+  // co-driver into the driver seat is the same mistake arriving the other way
+  // round.
+  if (coDriverId !== null && coDriverId === driverId) {
+    throw new ReferenceError('same_driver_twice', { field: 'coDriverId' })
+  }
 
   // Re-check conflicts against the window the load will have AFTER the edit.
   if (input.stops) {
@@ -583,6 +602,7 @@ export async function updateLoad(
       : {}),
     ...(input.truckId !== undefined ? { truckId } : {}),
     ...(input.driverId !== undefined ? { driverId } : {}),
+    ...(input.coDriverId !== undefined ? { coDriverId } : {}),
     ...(input.trailerId !== undefined
       ? { trailerId: input.trailerId ?? null }
       : {}),

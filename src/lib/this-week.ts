@@ -406,10 +406,22 @@ export async function thisWeekFor(
   const settling = computed.settlements.filter(
     (settlement) => settlement.lines.length > 0,
   )
-  const readyLoads = settling.reduce(
-    (sum, settlement) => sum + settlement.lines.length,
-    0,
-  )
+  // ── THE LOAD ONCE, THE DRIVERS TWICE ─────────────────────────────────
+  //
+  // A team load produces a line on BOTH crew members' settlements, which is
+  // the point of it. Summing the line counts would therefore report two loads
+  // where one truck went out — and this figure sits next to "drivers" on the
+  // screen, where "2 loads, 2 drivers" reads as two separate jobs rather than
+  // one load with two people in the cab.
+  //
+  // DISTINCT LOADS, and the driver count below deliberately stays
+  // `settling.length`: both crew members really are being paid, so two is the
+  // honest number there. The two figures disagreeing is the team, not a bug.
+  const readyLoads = new Set(
+    settling.flatMap((settlement) =>
+      settlement.lines.map((line) => line.loadId),
+    ),
+  ).size
 
   return report({
     period: input.period,

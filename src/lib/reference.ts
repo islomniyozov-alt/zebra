@@ -25,6 +25,8 @@ export type ReferenceFailure =
   | 'number_taken_since'
   /** Pairing a driver with a truck that runs under a different authority. */
   | 'truck_other_authority'
+  /** One person named in both seats of a team load (item 8). */
+  | 'same_driver_twice'
   /** A stop whose arrival window ends before it starts (Phase 5). */
   | 'window_inverted'
   /**
@@ -69,6 +71,7 @@ export const REFERENCE_ERROR_KEYS: Record<ReferenceFailure, MessageKey> = {
   invalid_authority: 'ref.error.invalidAuthority',
   number_taken_since: 'ref.error.numberTakenSince',
   truck_other_authority: 'ref.error.truckOtherAuthority',
+  same_driver_twice: 'ref.error.sameDriverTwice',
   window_inverted: 'ref.error.windowInverted',
   codes_unconfirmed: 'ref.error.codesUnconfirmed',
 }

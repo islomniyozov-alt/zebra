@@ -2,15 +2,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
 import { withOrg } from '@/lib/tenancy'
 import { createBroker } from '@/lib/brokers'
-import { createLoad } from '@/lib/loads'
+import { createLoad, updateLoad } from '@/lib/loads'
 import {
   batchInputForOrg,
   SETTLEMENT_BATCH_TIMEOUT_MS,
 } from '@/lib/settlement-batch'
 import { settleableWhere } from '@/lib/settlements'
+import { thisWeekFor } from '@/lib/this-week'
 import { payFor, ruleInForce } from '@/lib/driver-pay'
 import type { SettleableLoad } from '@/lib/settlement-week'
-import { weekOf } from '@/lib/settlement-week'
+import { computeBatch, weekOf } from '@/lib/settlement-week'
 import type { PrismaClient } from '@/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -288,6 +289,45 @@ describe('a team load', () => {
     expect(mineOf(hallId)[0]!.rateCents).toBe(mineOf(mckaneId)[0]!.rateCents)
   })
 
+  // ── THE MONEY SCREEN'S READY COUNT ─────────────────────────────────
+  //
+  // `ready` prints loads and drivers side by side. A team load produces a line
+  // on BOTH statements, so summing the line counts would report two loads
+  // where one truck went out — and "2 loads, 2 drivers" reads as two separate
+  // jobs rather than one load with two people in the cab. The two figures
+  // disagreeing IS the team.
+  it('shows the load once and both drivers on the money screen', async () => {
+    const week = await inOrg((tx) =>
+      thisWeekFor(tx, { period: PERIOD, payDay: PERIOD.end }),
+    )
+
+    // THE NUMBER THE OLD CODE WOULD HAVE PRINTED. `readyLoads` used to sum
+    // the line counts, and a team load has a line on each crew member's
+    // statement — so this total is strictly larger than the number of loads
+    // the moment any team is running. Comparing against it is what makes the
+    // check about the double-count rather than about a fixture's shape:
+    // "drivers > loads" was the first attempt and it was simply wrong
+    // arithmetic, because two solo loads offset the extra crew member.
+    const inputs = await inOrg((tx) =>
+      batchInputForOrg(tx, {
+        organizationId,
+        period: PERIOD,
+        statementDate: PERIOD.end,
+        checkDate: PERIOD.end,
+      }),
+    )
+    const lineCount = inputs.reduce((n, i) => n + i.loads.length, 0)
+    const distinct = new Set(inputs.flatMap((i) => i.loads.map((l) => l.id)))
+
+    expect(distinct.size, 'no team load in the period').toBeLessThan(lineCount)
+    expect(week.ready.loads).toBe(distinct.size)
+    expect(week.ready.loads).toBeLessThan(lineCount)
+
+    // And both crew members really are being paid: the driver count is the
+    // one figure that SHOULD rise with the team.
+    expect(week.ready.drivers).toBe(inputs.filter((i) => i.loads.length).length)
+  })
+
   it('prints "Team with" on both statements, naming the other person', async () => {
     const inputs = await inOrg((tx) =>
       batchInputForOrg(tx, {
@@ -359,6 +399,74 @@ describe('a team load', () => {
     // TWO DRIVERS, ONE LOAD. The count of loads must not double because two
     // people drove it.
     expect(new Set(distinct.map((l) => l.id)).size).toBe(distinct.length)
+  })
+})
+
+// ── THE DISPATCHER GETS A SENTENCE, NOT A FIVE-HUNDRED ─────────────────
+//
+// The CHECK below refuses one person in both seats and must. But a constraint
+// violation reaches the load screen as a crash, and what a dispatcher needs
+// is the line telling them which box to change. `updateLoad` refuses first.
+describe('assigning a co-driver from the load screen', () => {
+  it('saves the second seat', async () => {
+    const load = await seedLoad({
+      number: 'ASSIGN',
+      rateCents: 100_000,
+      delDay: DAY_OF,
+      driverId: mckaneId,
+    })
+    await inOrg((tx) => updateLoad(tx, load.id, { coDriverId: hallId }))
+    const after = await owner.load.findUniqueOrThrow({
+      where: { id: load.id },
+      select: { driverId: true, coDriverId: true },
+    })
+    expect(after).toEqual({ driverId: mckaneId, coDriverId: hallId })
+  })
+
+  it('clears it back to solo', async () => {
+    // THE PAIR. Blank is a real choice on that form — a team that ends has to
+    // be endable, and a field that can only be set is a trap.
+    const load = await seedLoad({
+      number: 'UNASSIGN',
+      rateCents: 100_000,
+      delDay: DAY_OF,
+      driverId: mckaneId,
+      coDriverId: hallId,
+    })
+    await inOrg((tx) => updateLoad(tx, load.id, { coDriverId: null }))
+    const after = await owner.load.findUniqueOrThrow({
+      where: { id: load.id },
+      select: { coDriverId: true },
+    })
+    expect(after.coDriverId).toBeNull()
+  })
+
+  it('refuses the same person in both seats, by name of the failure', async () => {
+    const load = await seedLoad({
+      number: 'BOTH-SEATS',
+      rateCents: 100_000,
+      delDay: DAY_OF,
+      driverId: mckaneId,
+    })
+    await expect(
+      inOrg((tx) => updateLoad(tx, load.id, { coDriverId: mckaneId })),
+    ).rejects.toThrow(/same_driver_twice/)
+  })
+
+  it('refuses it the other way round too, against the state AFTER the edit', async () => {
+    // Moving the DRIVER onto the person already co-driving is the same
+    // mistake arriving backwards, and checking the row as it stands would
+    // miss it.
+    const load = await seedLoad({
+      number: 'SWAP-IN',
+      rateCents: 100_000,
+      delDay: DAY_OF,
+      driverId: mckaneId,
+      coDriverId: hallId,
+    })
+    await expect(
+      inOrg((tx) => updateLoad(tx, load.id, { driverId: hallId })),
+    ).rejects.toThrow(/same_driver_twice/)
   })
 })
 
@@ -435,6 +543,59 @@ describe('what the database refuses outright', () => {
     await owner.settlementLoadLine.create({
       data: { ...line, driverId: hallId, amountCents: 20_000 },
     })
+  })
+})
+
+// ── A BLOCKED CO-DRIVER BLOCKS BY NAME ─────────────────────────────────
+//
+// A driver with no pay rule blocks the batch. On a team load that driver can
+// be the SECOND one, and the person reading the money screen has to be told
+// WHO to go and fix — "a load is blocked" sends them to the load, where
+// nothing is wrong, and the primary driver's name sends them to the wrong
+// person entirely.
+describe('a co-driver with no pay rule', () => {
+  it('blocks the batch under their OWN name', async () => {
+    const stranger = await owner.driver.create({
+      data: { organizationId, companyId, firstName: 'NO', lastName: 'RULE' },
+    })
+    await seedLoad({
+      number: 'BLOCKED',
+      rateCents: 100_000,
+      delDay: DAY_OF,
+      driverId: mckaneId,
+      coDriverId: stranger.id,
+    })
+
+    const inputs = await inOrg((tx) =>
+      batchInputForOrg(tx, {
+        organizationId,
+        period: PERIOD,
+        statementDate: PERIOD.end,
+        checkDate: PERIOD.end,
+      }),
+    )
+    const result = computeBatch({
+      period: PERIOD,
+      statementDate: PERIOD.end,
+      checkDate: PERIOD.end,
+      drivers: inputs,
+    })
+
+    const named = result.blockers.filter(
+      (b) => b.blocker.kind === 'no_pay_rule' && b.driverId === stranger.id,
+    )
+    expect(named, 'the co-driver is not named as blocked').toHaveLength(1)
+    expect(named[0]!.driverName).toBe('NO RULE')
+
+    // AND NOT UNDER THE PRIMARY DRIVER'S NAME, which is the wrong person to
+    // go and see. MCKANE has a rule for this date and must not be blamed.
+    expect(
+      result.blockers.filter(
+        (b) => b.driverId === mckaneId && b.blocker.kind === 'no_pay_rule',
+      ),
+    ).toHaveLength(0)
+
+    expect(result.canFinalise).toBe(false)
   })
 })
 

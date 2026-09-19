@@ -202,6 +202,7 @@ export async function assignLoadAction(
           {
             truckId: optionalText(formData.get('truckId')),
             driverId: optionalText(formData.get('driverId')),
+            coDriverId: optionalText(formData.get('coDriverId')),
           },
           { byUserId: session.userId },
         ),

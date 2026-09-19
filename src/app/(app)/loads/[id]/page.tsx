@@ -773,12 +773,14 @@ export default async function LoadDetailPage({
               }))}
               truckId={load.truckId}
               driverId={load.driverId}
+              coDriverId={load.coDriverId}
               disabled={load.isCancelled}
               assign={assignLoadAction.bind(null, id)}
               labels={{
                 title: t('loads.assignment'),
                 truck: t('loads.column.truck'),
                 driver: t('loads.column.driver'),
+                coDriver: t('loads.column.coDriver'),
                 unassigned: t('loads.unassigned'),
                 save: t('loads.assignSave'),
                 saving: t('loads.assignSaving'),
