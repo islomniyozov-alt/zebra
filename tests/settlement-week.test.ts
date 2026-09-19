@@ -16,6 +16,7 @@ import type { RecurringRule, OneOffCharge } from '@/lib/deductions'
 import type { PayRule } from '@/lib/driver-pay'
 import {
   DATATRUCK_STATEMENTS,
+  DATATRUCK_STATEMENT_ST005395,
   type StatementFixture,
 } from './fixtures/datatruck-statements'
 
@@ -741,5 +742,87 @@ describe('the tariff label', () => {
     expect(tariffLabel(percentRule(3250, Date.UTC(2026, 7, 9)))).toBe(
       '32.5% from gross',
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE SEVENTH STATEMENT, CHECKED AS A TRANSCRIPTION RATHER THAN REPRODUCED.
+//
+// ST-005395 carries two rates — four lines at 30%, two at 20%, under a header
+// reading 20% — and the split is not by date: three loads delivered 9/2 and
+// one of them paid 30%. No rule keyed on the delivery date can produce it, so
+// it is deliberately NOT in `DATATRUCK_STATEMENTS` and the engine is not asked
+// to reproduce it until the owner says what those two lines are.
+//
+// What CAN be checked is the transcription, and it is worth checking: a figure
+// mistyped here would become a false fact about somebody's wages the moment
+// this fixture is wired into a reproduction.
+// ---------------------------------------------------------------------------
+describe('ST-005395 as transcribed', () => {
+  const s = DATATRUCK_STATEMENT_ST005395
+
+  it('has line amounts that sum to the printed Earnings total', () => {
+    const sum = s.loads.reduce((n, l) => n + l.amountCents, 0)
+    expect(sum).toBe(s.totals.amountCents)
+    expect(sum).toBe(s.summary.earningsCents)
+  })
+
+  it('has grosses and mileages that sum to the printed totals', () => {
+    expect(s.loads.reduce((n, l) => n + l.grossCents, 0)).toBe(
+      s.totals.grossCents,
+    )
+    expect(s.loads.reduce((n, l) => n + l.milesHundredths, 0)).toBe(
+      s.totals.milesHundredths,
+    )
+  })
+
+  it('nets out exactly as printed', () => {
+    const { earningsCents, deductionsCents, otherPayCents, netCents } =
+      s.summary
+    expect(earningsCents + deductionsCents + otherPayCents).toBe(netCents)
+    expect(s.deductions.reduce((n, d) => n + d.totalCents, 0)).toBe(
+      deductionsCents,
+    )
+  })
+
+  // ── IT CONTINUES ST-005352, WHICH IS THE REAL CHECK ─────────────────
+  //
+  // A transcription can agree with itself and still be wrong. The year-to-date
+  // figures are cumulative, so they tie this document to the one before it and
+  // catch a digit that the internal sums would happily accept.
+  it('continues the year-to-date of the statement before it', () => {
+    const previous = DATATRUCK_STATEMENTS.find((f) => f.number === 'ST-005352')!
+    expect(previous.ytd.earningsCents + s.summary.earningsCents).toBe(
+      s.ytd.earningsCents,
+    )
+    expect(previous.ytd.netCents + s.summary.netCents).toBe(s.ytd.netCents)
+    expect(previous.ytd.deductionsCents + s.summary.deductionsCents).toBe(
+      s.ytd.deductionsCents,
+    )
+  })
+
+  // ── THE FINDING ITSELF, ASSERTED SO IT CANNOT BE FORGOTTEN ──────────
+  it('pays TWO different rates, and not by delivery date', () => {
+    const rate = (n: string) =>
+      s.loads.find((l) => l.loadNumber === n)!.percentBps
+
+    expect(rate('113Y77KN3')).toBe(2000)
+    expect(rate('T-114QYL1J1')).toBe(2000)
+    expect(rate('111PP4X5W')).toBe(3000)
+
+    // All three delivered on 9/2. A date-effective rule cannot pay them
+    // differently, which is why this statement is not yet reproduced.
+    const sept2 = Date.UTC(2026, 8, 2)
+    for (const n of ['113Y77KN3', 'T-114QYL1J1', '111PP4X5W']) {
+      expect(s.loads.find((l) => l.loadNumber === n)!.delDate).toBe(sept2)
+    }
+
+    // And every line's amount is its own rate applied to its own gross.
+    for (const load of s.loads) {
+      expect(
+        Math.round((load.grossCents * load.percentBps!) / 10_000),
+        `${load.loadNumber} does not pay its stated rate`,
+      ).toBe(load.amountCents)
+    }
   })
 })

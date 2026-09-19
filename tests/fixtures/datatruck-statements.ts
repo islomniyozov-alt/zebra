@@ -23,6 +23,14 @@ export interface StatementLoadRow {
   milesHundredths: number
   /** The Total amount column — what the engine has to reproduce. */
   amountCents: number
+  /**
+   * The rate THIS LINE actually paid, in basis points.
+   *
+   * Only present where a statement mixes them, which ST-005395 does: four
+   * lines at 30% and two at 20%, under a header that reads 20%. Derived from
+   * the printed figures rather than assumed — see the note on that fixture.
+   */
+  percentBps?: number
 }
 
 export interface StatementChargeRow {
@@ -795,3 +803,151 @@ export const DATATRUCK_STATEMENTS: StatementFixture[] = [
     },
   },
 ]
+
+// ---------------------------------------------------------------------------
+// THE SEVENTH, AND IT DOES NOT AGREE WITH THE BRIEF.
+//
+// `corpus/datatruck/Settlement  0292.pdf`, read the same way as the six above.
+// It is ST-005395 — MCKANE, unit 2146, the week of 8/30 to 9/5.
+//
+// ── WHAT THE DOCUMENT SAYS ───────────────────────────────────────────────
+//
+// Item 8's acceptance says "ST-005395 still reproduces at 30% (every load
+// delivered <= 9/3)". The statement in front of me does not: it carries SIX
+// lines at TWO DIFFERENT RATES, under a header reading "20% from gross".
+//
+//   111D585DVR    DEL 9/3    $780.37  -> $234.11   30%
+//   111PP4X5W     DEL 9/2  $1,171.94  -> $351.58   30%
+//   113Y77KN3     DEL 9/2    $614.73  -> $122.95   20%
+//   T-114QYL1J1   DEL 9/2  $1,054.59  -> $210.92   20%
+//   T-116MDCJ5W   DEL 9/1  $2,845.45  -> $853.64   30%
+//   1151MYQGT     DEL 8/30   $666.22  -> $199.87   30%
+//
+// THE SPLIT IS NOT BY DATE. Three loads delivered 9/2 and two of them paid
+// 20% while the third paid 30%, so no rule keyed on the delivery date can
+// produce this statement — and "a driver's own rule in force on the delivery
+// date" is exactly what item 8 specifies. The 20% is also already running on
+// 9/2, which is before the 2026-09-04 the rules are meant to take effect.
+//
+// The obvious reading is that the two 20% lines are the TEAM loads and this
+// document is team driving already happening in Datatruck. That is a reading,
+// not a fact, and it is the owner's to confirm — which is why this fixture is
+// NOT in `DATATRUCK_STATEMENTS` above. Adding it there would either fail the
+// reproduction or force a rate model nobody has ruled on.
+//
+// ── WHY IT IS TRANSCRIBED ANYWAY ─────────────────────────────────────────
+//
+// Because the artefact is the thing, and because it ties: the six line
+// amounts sum to the printed $1,973.07, the grosses to $7,133.30, the mileage
+// to 2,216.93 — and the year-to-date figures continue ST-005352 exactly
+// ($28,437.14 + $1,973.07 = $30,410.21, and the same for net and deductions).
+// A transcription that agreed with itself but not with the statement before it
+// would be a transcription with a typo in it.
+export const DATATRUCK_STATEMENT_ST005395: StatementFixture = {
+  number: 'ST-005395',
+  batch: 'SB-000442',
+  company: 'RAM Haulage LLC',
+  driver: 'JERRY ROBERT MCKANE',
+  unitNumber: '2146',
+  tariff: '20% from gross',
+  // The HEADER's rate. Four of the six lines do not pay it.
+  percentBps: 2000,
+  periodStart: Date.UTC(2026, 7, 30),
+  periodEnd: Date.UTC(2026, 8, 5),
+  statementDate: Date.UTC(2026, 8, 8),
+  checkDate: Date.UTC(2026, 8, 10),
+  loads: [
+    {
+      loadNumber: '1151MYQGT',
+      puDate: Date.UTC(2026, 7, 30),
+      delDate: Date.UTC(2026, 7, 30),
+      grossCents: 66622,
+      milesHundredths: 19653,
+      amountCents: 19987,
+      percentBps: 3000,
+    },
+    {
+      loadNumber: 'T-116MDCJ5W',
+      puDate: Date.UTC(2026, 7, 31),
+      delDate: Date.UTC(2026, 8, 1),
+      grossCents: 284545,
+      milesHundredths: 105897,
+      amountCents: 85364,
+      percentBps: 3000,
+    },
+    {
+      loadNumber: 'T-114QYL1J1',
+      puDate: Date.UTC(2026, 7, 25),
+      delDate: Date.UTC(2026, 8, 2),
+      grossCents: 105459,
+      milesHundredths: 22577,
+      amountCents: 21092,
+      percentBps: 2000,
+    },
+    {
+      loadNumber: '113Y77KN3',
+      puDate: Date.UTC(2026, 8, 2),
+      delDate: Date.UTC(2026, 8, 2),
+      grossCents: 61473,
+      milesHundredths: 8161,
+      amountCents: 12295,
+      percentBps: 2000,
+    },
+    {
+      loadNumber: '111PP4X5W',
+      puDate: Date.UTC(2026, 8, 2),
+      delDate: Date.UTC(2026, 8, 2),
+      grossCents: 117194,
+      milesHundredths: 33137,
+      amountCents: 35158,
+      percentBps: 3000,
+    },
+    {
+      loadNumber: '111D585DVR',
+      puDate: Date.UTC(2026, 8, 3),
+      delDate: Date.UTC(2026, 8, 3),
+      grossCents: 78037,
+      milesHundredths: 32268,
+      amountCents: 23411,
+      percentBps: 3000,
+    },
+  ],
+  totals: {
+    grossCents: 713330,
+    milesHundredths: 221693,
+    amountCents: 197307,
+  },
+  deductions: [
+    {
+      type: 'Loan',
+      description: 'Cash Advance 09/14/2026',
+      quantity: 1,
+      rateCents: 20000,
+      totalCents: -20000,
+    },
+    {
+      type: 'Escrow',
+      description: 'Security Deposit $2500/$2500',
+      quantity: 1,
+      rateCents: 25000,
+      totalCents: -25000,
+    },
+  ],
+  otherPay: [],
+  summary: {
+    earningsCents: 197307,
+    advancesCents: 0,
+    reimbursementsCents: 0,
+    deductionsCents: -45000,
+    otherPayCents: 0,
+    netCents: 152307,
+  },
+  ytd: {
+    earningsCents: 3041021,
+    advancesCents: 0,
+    reimbursementsCents: 0,
+    deductionsCents: -545000,
+    otherPayCents: 161520,
+    netCents: 2657541,
+  },
+}
