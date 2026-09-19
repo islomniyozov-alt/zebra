@@ -100,6 +100,14 @@ export interface StatementPdfInput {
   company: { name: string; address: string }
   driverName: string
   unitNumber: string | null
+  /**
+   * The other crew members, printed under the driver as "Team with X".
+   *
+   * Empty on a solo period. Present when ANY line in the period is a team
+   * line — a driver who ran three solo loads and one team load still gets the
+   * header, because that one line is the one that looks wrong without it.
+   */
+  teamWith: readonly string[]
   /** `88% from gross`, verbatim. */
   payTariffLabel: string | null
   statementDate: Date
@@ -202,6 +210,22 @@ export function renderStatementPdf(input: StatementPdfInput): Uint8Array {
   }
   text('Pay to:', 306, 8, true)
   text(input.driverName, 306 + 32, 8)
+
+  // ── WHO ELSE WAS IN THE CAB ──────────────────────────────────────────
+  //
+  // Under the driver, and only when some line in the period is a team line.
+  //
+  // A team member is paid their OWN percentage of the shared gross — 20% each,
+  // not 40% split — so a statement carrying 20% lines from a driver everybody
+  // remembers at 30% reads as an error. This sentence is what makes the number
+  // legible, and it is the reason the field exists rather than the reader
+  // inferring teaming from the amounts.
+  if (input.teamWith.length > 0) {
+    y -= 11
+    text('Team with', LEFT, 8, true)
+    text(input.teamWith.join(' and '), LEFT + 44, 8)
+  }
+
   y -= 8
   rule()
   y -= 14

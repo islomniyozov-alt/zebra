@@ -35,6 +35,8 @@ const inputFor = (
   company: { name: 'RAM Haulage LLC', address: '5062 Free Pike, Dayton, OH' },
   driverName: FIXTURE.driver,
   unitNumber: FIXTURE.unitNumber,
+  // Solo, unless a case below overrides it.
+  teamWith: [],
   payTariffLabel: FIXTURE.tariff,
   statementDate: new Date(FIXTURE.statementDate),
   periodStart: new Date(FIXTURE.periodStart),
@@ -284,5 +286,38 @@ describe('a statement carrying more than one authority', () => {
     const headings = text.filter((line) => line === 'RAM Haulage LLC')
     // The letterhead line only — never a second one over the Earnings table.
     expect(headings).toHaveLength(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// "TEAM WITH", WHICH IS WHAT MAKES A 20% LINE LEGIBLE.
+//
+// A team member is paid their OWN percentage of the shared gross — 20% each,
+// not 40% split. Without this line a statement carrying 20% amounts from a
+// driver everybody remembers at 30% reads as an error, and the person reading
+// it is the person being paid.
+// ---------------------------------------------------------------------------
+describe('the team header', () => {
+  it('names the other crew member, under the driver', () => {
+    const drew = drawn(
+      renderStatementPdf(inputFor({ teamWith: ['JULIA HALL'] })),
+    )
+    expect(drew).toContain('Team with')
+    expect(drew).toContain('JULIA HALL')
+  })
+
+  it('says nothing at all on a solo statement', () => {
+    // THE PAIR. Without it "Team with" could be printed unconditionally and
+    // the test above would still pass — every solo statement would carry a
+    // header about a crew that does not exist.
+    const drew = drawn(renderStatementPdf(inputFor({ teamWith: [] })))
+    expect(drew).not.toContain('Team with')
+  })
+
+  it('names both when a week had two different partners', () => {
+    const drew = drawn(
+      renderStatementPdf(inputFor({ teamWith: ['JULIA HALL', 'A N OTHER'] })),
+    )
+    expect(drew).toContain('JULIA HALL and A N OTHER')
   })
 })

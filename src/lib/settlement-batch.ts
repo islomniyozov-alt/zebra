@@ -614,6 +614,8 @@ export async function refreshDraft(
         periodStart: period.start,
         periodEnd: period.end,
         unitNumber: settlement.unitNumber,
+        // Frozen beside the unit number, and for the same argument.
+        teamWith: [...settlement.teamWith],
         payTariffLabel: settlement.payTariffLabel,
         payoutDate: settlement.payoutDate,
         grossCents: settlement.grossCents,

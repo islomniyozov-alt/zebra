@@ -772,6 +772,9 @@ async function main(): Promise<void> {
           const driverIds = load.driverName
             ? (driverByName.get(nameKey(load.driverName)) ?? [])
             : []
+          const coDriverIds = load.coDriverName
+            ? (driverByName.get(nameKey(load.coDriverName)) ?? [])
+            : []
           return {
             organizationId: tenancy.organizationId,
             companyId,
@@ -795,6 +798,14 @@ async function main(): Promise<void> {
             // rather than a guessed one.
             ...(truck.id ? { truckId: truck.id } : {}),
             ...(driverIds.length === 1 ? { driverId: driverIds[0] } : {}),
+            // THE SAME RULE FOR THE SECOND SEAT, and one more besides: a
+            // person cannot crew a load twice. The database CHECK refuses it
+            // outright, so an export naming the same person in both columns
+            // would fail the whole insert rather than one row — it is dropped
+            // here, where it can be counted instead of crashing an import.
+            ...(coDriverIds.length === 1 && coDriverIds[0] !== driverIds[0]
+              ? { coDriverId: coDriverIds[0] }
+              : {}),
             linehaulCents: load.linehaulCents,
             accessorialsCents: load.accessorialCents,
             totalRevenueCents: load.totalRevenueCents,

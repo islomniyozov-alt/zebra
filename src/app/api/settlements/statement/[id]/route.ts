@@ -25,6 +25,7 @@ export async function GET(
         select: {
           settlementNumber: true,
           unitNumber: true,
+          teamWith: true,
           payTariffLabel: true,
           payoutDate: true,
           periodStart: true,
@@ -112,6 +113,7 @@ export async function GET(
         driverName:
           `${settlement.driver.firstName} ${settlement.driver.lastName}`.trim(),
         unitNumber: settlement.unitNumber,
+        teamWith: settlement.teamWith,
         payTariffLabel: settlement.payTariffLabel,
         statementDate: settlement.batch.statementDate,
         periodStart: settlement.periodStart,

@@ -2781,6 +2781,17 @@ model Settlement {
   /// ST-005301 and ST-005336 are the same driver on units 0484 and 8842.
   unitNumber String?
 
+  /// The other crew members, printed under the driver as "Team with X".
+  ///
+  /// FROZEN LIKE THE UNIT NUMBER, and for the same reason. It could be derived
+  /// at render time by reading `Load.coDriverId` back through the load lines —
+  /// and then reassigning a co-driver next year would silently restate a
+  /// statement somebody was already paid on. The load lines beside this row
+  /// freeze the city and the load number for exactly that argument.
+  ///
+  /// Empty on a solo period.
+  teamWith String[]
+
   /// `88% from gross`, exactly as printed. Built from the rule at generation
   /// and frozen, so a later rate change cannot restate an issued statement.
   payTariffLabel  String?

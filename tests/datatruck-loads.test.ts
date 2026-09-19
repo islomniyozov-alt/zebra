@@ -290,6 +290,31 @@ describe('planning a load', () => {
     expect(load?.driverName).toBe('Sebastian Zorzoli')
     expect(load?.truckUnit).toBe('1995')
   })
+
+  // ── THE SECOND SEAT ──────────────────────────────────────────────
+  //
+  // `Co-Driver` is column 7 of the export, right after `Driver/Carrier`.
+  // 1,136 of the 14,451 rows in loads-and-trips_2026_09_08 carry one.
+  it('keeps the raw co-driver too, when the export names one', () => {
+    const [load] = planLoads([row({ 'Co-Driver': 'JULIA HALL' })]).planned
+    expect(load?.coDriverName).toBe('JULIA HALL')
+  })
+
+  it('leaves it null on a solo load, not an empty string', () => {
+    // THE PAIR. Null is what makes `coDriverId != null` mean 'team'; an
+    // empty string resolved to nothing would still read as a second seat to
+    // anything checking presence rather than truthiness.
+    const [load] = planLoads([row()]).planned
+    expect(load?.coDriverName).toBeNull()
+  })
+
+  it('keeps a CARRIER in that column verbatim, for the seed to fail to resolve', () => {
+    // Many of the real values are not people: '7 Star', 'Said truck 3609'.
+    // Parsing does not judge — the seed resolves names to drivers and simply
+    // does not set a co-driver when the name lands on none.
+    const [load] = planLoads([row({ 'Co-Driver': '7 Star' })]).planned
+    expect(load?.coDriverName).toBe('7 Star')
+  })
 })
 
 // ---------------------------------------------------------------------------

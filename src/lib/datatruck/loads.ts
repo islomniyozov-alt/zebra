@@ -394,6 +394,8 @@ export interface PlannedLoad {
   authority: string
   customerName: string
   driverName: string | null
+  /** `Co-Driver`, verbatim. Often a carrier name rather than a person. */
+  coDriverName: string | null
   truckUnit: string | null
 
   operational: LoadOperationalStatus
@@ -572,6 +574,11 @@ export function planLoads(
       authority,
       customerName,
       driverName: text(record, 'Driver/Carrier') || null,
+      // THE SECOND SEAT. 1,136 of the 14,451 exported rows carry one, and
+      // many of them name a CARRIER rather than a person — '7 Star',
+      // 'Said truck 3609' — which is why it is resolved the same forgiving
+      // way as the primary and left null when it does not land on one driver.
+      coDriverName: text(record, 'Co-Driver') || null,
       truckUnit: text(record, 'Truck') || null,
       operational: status.operational,
       billing: status.billing,

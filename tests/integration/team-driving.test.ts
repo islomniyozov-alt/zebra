@@ -438,6 +438,47 @@ describe('what the database refuses outright', () => {
   })
 })
 
+// ── CLOSED HISTORY STAYS CLOSED, TEAM OR NOT ───────────────────────────
+//
+// Datatruck already settled this freight. The import's ruling is "no
+// historical driver pay, no historical settlements", and 1,136 of the 14,451
+// exported loads carry a co-driver — so the moment the importer starts
+// setting `coDriverId`, every one of those becomes a load with a second crew
+// member attached. If widening the batch to both seats also widened it past
+// `NOT_CLOSED_HISTORY`, the first org-wide batch would pay two people for
+// freight that was paid for last year.
+describe('closed history', () => {
+  it('never enters a batch, not even with a co-driver on it', async () => {
+    const load = await seedLoad({
+      number: 'CLOSED',
+      rateCents: 500_000,
+      delDay: DAY_OF,
+      driverId: mckaneId,
+      coDriverId: hallId,
+    })
+    await owner.load.update({
+      where: { id: load.id },
+      data: { billingStatus: 'CLOSED_IN_DATATRUCK' },
+    })
+
+    const inputs = await inOrg((tx) =>
+      batchInputForOrg(tx, {
+        organizationId,
+        period: PERIOD,
+        statementDate: PERIOD.end,
+        checkDate: PERIOD.end,
+      }),
+    )
+
+    for (const input of inputs) {
+      expect(
+        input.loads.map((l) => l.id),
+        `${input.driverName} was offered closed history`,
+      ).not.toContain(load.id)
+    }
+  })
+})
+
 describe('the effective date', () => {
   it('does NOT reach backwards: a 9/3 load is still 30%', async () => {
     // THE GUARD NAMED "rule effective date ignored". This is the property

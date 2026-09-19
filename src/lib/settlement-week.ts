@@ -368,6 +368,8 @@ export interface DriverSettlement extends YtdTotals {
   driverId: string
   driverName: string
   unitNumber: string | null
+  /** The other crew members, carried through to be frozen on the row. */
+  teamWith: readonly string[]
   letterheadCompanyId: string
   period: Week
   /** Batch check date plus the driver's lag. This is what prints. */
@@ -598,6 +600,7 @@ export function computeDriverSettlement(
     driverId: input.driverId,
     driverName: input.driverName,
     unitNumber: input.unitNumber,
+    teamWith: input.teamWith,
     letterheadCompanyId: input.letterheadCompanyId,
     period: input.period,
     payoutDate: payoutDateFor(input.checkDate, input.payoutLagWeeks),
