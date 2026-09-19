@@ -114,6 +114,39 @@ async function main() {
 
   const verdict = parentBranchVerdict(name)
   for (const line of verdict.lines) console.log(line)
+
+  // ── ON REFUSAL, NAME THE ALTERNATIVES ────────────────────────────────
+  //
+  // Twice now a secret has been reported as changed and had not been: the
+  // run just says "production" again and nothing distinguishes "the edit did
+  // not save" from "the id I pasted is the wrong branch". The id itself
+  // cannot be printed — GitHub masks the secret's exact value — but a SUFFIX
+  // is not the secret, and the other branches are not secret at all.
+  //
+  // So a refusal ends with the list to copy from, and the next attempt is a
+  // paste rather than another round trip.
+  if (!verdict.ok) {
+    console.log(`[ci] the id in the secret ends "...${parent.slice(-6)}"`)
+    try {
+      const all = await fetch(
+        `https://console.neon.tech/api/v2/projects/${project}/branches`,
+        { headers: { Authorization: `Bearer ${key}` } },
+      )
+      if (all.ok) {
+        const body = await all.json()
+        console.log('[ci] branches in this project:')
+        for (const branch of body?.branches ?? []) {
+          const mark = branch.name === REQUIRED_PARENT ? ' <- use this one' : ''
+          console.log(
+            `[ci]   ${String(branch.name).padEnd(24)} ...${String(branch.id).slice(-6)}${mark}`,
+          )
+        }
+      }
+    } catch {
+      // Diagnostics only. The refusal above already stands on its own.
+    }
+  }
+
   process.exit(verdict.ok ? 0 : 1)
 }
 
