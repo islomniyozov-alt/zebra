@@ -43,7 +43,7 @@ export default async function NewLoadPage({
           // `id`, not `companyId` — Company IS the authority. See tenancy.ts.
           where: { ...SELECTABLE_AUTHORITY, ...companyIdScope },
           orderBy: { name: 'asc' },
-          select: { id: true, name: true },
+          select: { id: true, name: true, isDefault: true },
         }),
         tx.customer.findMany({
           where: { deletedAt: null, status: { not: 'BLOCKED' } },
@@ -134,10 +134,24 @@ export default async function NewLoadPage({
     label: company.name,
   }))
   const remembered = await lastUsedAuthority()
+
+  // ── THE AUTHORITY A NEW LOAD LANDS ON ────────────────────────────────
+  //
+  // THIS USED TO FALL BACK TO `authorities[0]` — first alphabetical — which
+  // is how a draft opened from the Incoming queue (`?from=`) got booked
+  // under whichever carrier happened to sort first rather than the one the
+  // operation actually runs on. Nobody notices until a load is invoiced
+  // under the wrong MC.
+  //
+  // Order: what this person last used, then the declared default for the
+  // organization, then alphabetical. The last rung is unchanged and is what
+  // a fresh organization with no default still gets — at-least-one is not a
+  // promise an index can make.
+  const declaredDefault = data.companies.find((company) => company.isDefault)
   const defaultAuthority =
     remembered && authorities.some((option) => option.value === remembered)
       ? remembered
-      : (authorities[0]?.value ?? '')
+      : (declaredDefault?.id ?? authorities[0]?.value ?? '')
 
   return (
     <>

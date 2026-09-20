@@ -339,6 +339,8 @@ export interface PlannedDriver {
   authority: string
   phone: string | null
   email: string | null
+  /** Datatruck Pay to. Present as a column, empty in every row today. */
+  payToName: string | null
   cdlNumber: string | null
   cdlState: string | null
   /** ISO day, or null. Drives the CDL ComplianceItem. */
@@ -567,6 +569,13 @@ export function planDrivers(
       authority,
       phone,
       email: text(record, 'Email') || null,
+      // WHO THE CHEQUE IS MADE OUT TO, when it is not the driver.
+      //
+      // The column exists in drivers_2026_09_07 and is EMPTY in all 54
+      // rows, so this brings nothing across today. It is read anyway
+      // because the ruling says where present, and because a column that
+      // fills up later should not need a code change to be noticed.
+      payToName: text(record, 'Pay to') || null,
       cdlNumber: text(record, 'Driver license') || null,
       cdlState,
       cdlExpiresAt,

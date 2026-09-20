@@ -108,6 +108,14 @@ export interface StatementPdfInput {
    * header, because that one line is the one that looks wrong without it.
    */
   teamWith: readonly string[]
+  /**
+   * Who the cheque is made out to, when it is not the driver.
+   *
+   * An owner-operator invoices through their own LLC. Null prints the
+   * driver's own name, which is the normal case.
+   */
+  payToName: string | null
+  payToAddress: string | null
   /** `88% from gross`, verbatim. */
   payTariffLabel: string | null
   statementDate: Date
@@ -209,7 +217,15 @@ export function renderStatementPdf(input: StatementPdfInput): Uint8Array {
     text(input.payTariffLabel, LEFT + 62, 8)
   }
   text('Pay to:', 306, 8, true)
-  text(input.driverName, 306 + 32, 8)
+  // THE PAYEE, WHICH IS USUALLY BUT NOT ALWAYS THE DRIVER. An
+  // owner-operator is paid through their LLC and the statement has to say
+  // whose name is on the cheque — printing the driver there would be a
+  // document that disagrees with the payment it accompanies.
+  text(input.payToName ?? input.driverName, 306 + 32, 8)
+  if (input.payToAddress) {
+    y -= 11
+    text(input.payToAddress, 306 + 32, 8)
+  }
 
   // ── WHO ELSE WAS IN THE CAB ──────────────────────────────────────────
   //

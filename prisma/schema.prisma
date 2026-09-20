@@ -226,6 +226,20 @@ model Company {
   /// An authority this carrier group no longer operates under, kept because
   /// its freight is real.
   ///
+  /// THE ONE AUTHORITY A NEW LOAD LANDS ON.
+  ///
+  /// Create Load used to default to `authorities[0]` — first alphabetical —
+  /// which is how a draft opened from an inbound email got booked under
+  /// whichever carrier happened to sort first rather than the one the
+  /// operation actually runs on.
+  ///
+  /// AT MOST ONE PER ORGANIZATION, and the database says so: a partial
+  /// unique index over `organizationId WHERE "isDefault"`. At LEAST one is
+  /// not something an index can promise — a fresh organization has none
+  /// until somebody picks — so the form falls back to first-alphabetical,
+  /// which is the behaviour this replaces rather than a new hole.
+  isDefault Boolean @default(false)
+
   /// NOT `isActive`, AND THE DIFFERENCE IS THE POINT. Deactivating takes an
   /// authority we still own out of service: it leaves every picker AND the
   /// load list's authority filter, and one click in the interface brings it
@@ -794,6 +808,16 @@ model Driver {
   cdlState  String?
   cdlClass  String?
 
+  /// WHO THE CHEQUE IS MADE OUT TO, when it is not the driver.
+  ///
+  /// An owner-operator drives for us and invoices through their own LLC,
+  /// and the statement has to say so — Datatruck's driver export carries a
+  /// `Pay to` column for exactly this. Null is the normal case and means
+  /// the driver's own name, which is why this is optional rather than a
+  /// copy of the name kept in step.
+  payToName    String?
+  payToAddress String?
+
   hireDate        DateTime?
   terminationDate DateTime?
   status          DriverStatus  @default(AVAILABLE)
@@ -1037,10 +1061,12 @@ model Customer {
   email        String?
   billingEmail String?
 
-  paymentTermsDays       Int            @default(30)
+  paymentTermsDays       Int              @default(30)
   preferredPaymentMethod PaymentMethod?
+  /// What loads for this customer are booked as, unless somebody changes it.
+  defaultPaymentType     LoadPaymentType?
   creditLimitCents       Int?
-  isFactorable           Boolean        @default(true)
+  isFactorable           Boolean          @default(true)
 
   // The DEFAULT for loads booked under this customer. Amazon Relay settles by
   // weekly ACH statement rather than against invoices; the flag lives here so
@@ -1329,6 +1355,15 @@ model Load {
 
   estimatedFuelCents   Int @default(0)
   estimatedProfitCents Int @default(0)
+
+  /// The arrangement this load was booked under, stamped from the customer's
+  /// default and editable afterwards.
+  ///
+  /// A LABEL, NOT A SWITCH. `isFactored` below still drives AR behaviour and
+  /// is still what everything reads; this says what the desk agreed, which
+  /// is the thing a person needs on the receivables list and cannot infer
+  /// from a boolean.
+  paymentType LoadPaymentType?
 
   // Factoring materially changes AR behaviour — the factor collects, not you.
   isFactored         Boolean           @default(false)
@@ -2636,6 +2671,25 @@ model PaymentLoadApplication {
   @@index([organizationId])
 }
 
+/// HOW THIS FREIGHT IS BILLED AND PAID FOR — the arrangement, not the
+/// instrument.
+///
+/// `PaymentMethod` below is how money physically moves (cheque, wire,
+/// Zelle). This is the commercial arrangement the load was booked under,
+/// and the two overlap on ACH without meaning the same thing: a factored
+/// load may settle by ACH and is still FACTORED.
+///
+/// A CLOSED VOCABULARY rather than free text, which is a reading of "text
+/// label": the label is the point — it drives no behaviour, `isFactored`
+/// still does that — but a typo must not be able to invent a fifth
+/// category that quietly splits a receivables list in two.
+enum LoadPaymentType {
+  QUICKPAY
+  FACTORED
+  ACH
+  DIRECT
+}
+
 enum PaymentMethod {
   CHECK
   ACH
@@ -2827,6 +2881,18 @@ model Settlement {
   ///
   /// Empty on a solo period.
   teamWith String[]
+
+  /// The payee as the statement printed it, FROZEN LIKE THE UNIT NUMBER.
+  ///
+  /// A statement is a document somebody was paid on. Reading
+  /// `Driver.payToName` back at render time would let an owner-operator who
+  /// changed LLC in November restate every statement they were paid on in
+  /// March.
+  ///
+  /// Null means the statement printed the driver's own name — a fact about
+  /// that statement, not an absence to be filled in later.
+  payToName    String?
+  payToAddress String?
 
   /// `88% from gross`, exactly as printed. Built from the rule at generation
   /// and frozen, so a later rate change cannot restate an issued statement.

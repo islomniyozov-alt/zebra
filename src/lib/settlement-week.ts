@@ -345,6 +345,9 @@ export interface DriverSettlementInput {
    * wrong without it.
    */
   teamWith: readonly string[]
+  /** The payee, when it is not the driver. Frozen onto the settlement. */
+  payToName: string | null
+  payToAddress: string | null
   period: Week
   loads: readonly SettleableLoad[]
   payRules: readonly PayRule[]
@@ -393,6 +396,8 @@ export interface DriverSettlement extends YtdTotals {
   unitNumber: string | null
   /** The other crew members, carried through to be frozen on the row. */
   teamWith: readonly string[]
+  payToName: string | null
+  payToAddress: string | null
   letterheadCompanyId: string
   period: Week
   /** Batch check date plus the driver's lag. This is what prints. */
@@ -624,6 +629,8 @@ export function computeDriverSettlement(
     driverName: input.driverName,
     unitNumber: input.unitNumber,
     teamWith: input.teamWith,
+    payToName: input.payToName,
+    payToAddress: input.payToAddress,
     letterheadCompanyId: input.letterheadCompanyId,
     period: input.period,
     payoutDate: payoutDateFor(input.checkDate, input.payoutLagWeeks),

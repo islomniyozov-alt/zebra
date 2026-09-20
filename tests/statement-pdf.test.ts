@@ -37,6 +37,8 @@ const inputFor = (
   unitNumber: FIXTURE.unitNumber,
   // Solo, unless a case below overrides it.
   teamWith: [],
+  payToName: null,
+  payToAddress: null,
   payTariffLabel: FIXTURE.tariff,
   statementDate: new Date(FIXTURE.statementDate),
   periodStart: new Date(FIXTURE.periodStart),
@@ -319,5 +321,64 @@ describe('the team header', () => {
       renderStatementPdf(inputFor({ teamWith: ['JULIA HALL', 'A N OTHER'] })),
     )
     expect(drew).toContain('JULIA HALL and A N OTHER')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// WHOSE NAME IS ON THE CHEQUE.
+//
+// An owner-operator drives for us and invoices through their own LLC. The
+// statement accompanies a payment, so it has to name the payee — a document
+// that says one name while the cheque says another is a document somebody has
+// to explain.
+// ---------------------------------------------------------------------------
+describe('the Pay to line', () => {
+  it('prints the driver when there is no separate payee', () => {
+    const drew = drawn(renderStatementPdf(inputFor({ payToName: null })))
+    expect(drew).toContain('Pay to:')
+    expect(drew).toContain(FIXTURE.driver)
+  })
+
+  it('prints the PAYEE when there is one, and not the driver', () => {
+    // THE GUARD NAMED "statement prints driver when payTo exists". The driver
+    // name still appears in the header's Driver: field — what must not happen
+    // is the Pay to line naming them when somebody else is being paid.
+    const drew = drawn(
+      renderStatementPdf(inputFor({ payToName: 'MCKANE HAULING LLC' })),
+    )
+    const payToAt = drew.indexOf('Pay to:')
+    expect(payToAt).toBeGreaterThan(-1)
+    expect(drew[payToAt + 1]).toBe('MCKANE HAULING LLC')
+    expect(drew[payToAt + 1]).not.toBe(FIXTURE.driver)
+  })
+
+  it('prints the payee address underneath when there is one', () => {
+    const drew = drawn(
+      renderStatementPdf(
+        inputFor({
+          payToName: 'MCKANE HAULING LLC',
+          payToAddress: '12 Mill Road, Dayton, OH',
+        }),
+      ),
+    )
+    expect(drew).toContain('12 Mill Road, Dayton, OH')
+  })
+
+  it('prints no address line when there is no address', () => {
+    // The pair, counted rather than eyeballed: an address always printed
+    // would push the rule below it down on every statement in the system for
+    // the sake of the rare one. One extra drawn string, exactly.
+    const without = drawn(
+      renderStatementPdf(inputFor({ payToName: 'MCKANE HAULING LLC' })),
+    )
+    const withAddress = drawn(
+      renderStatementPdf(
+        inputFor({
+          payToName: 'MCKANE HAULING LLC',
+          payToAddress: '12 Mill Road, Dayton, OH',
+        }),
+      ),
+    )
+    expect(withAddress.length).toBe(without.length + 1)
   })
 })

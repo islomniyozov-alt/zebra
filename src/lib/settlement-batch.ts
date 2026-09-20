@@ -298,6 +298,8 @@ export async function batchInputForOrg(
           companyId: true,
           firstName: true,
           lastName: true,
+          payToName: true,
+          payToAddress: true,
           payoutLagWeeks: true,
           // THE LETTERHEAD COMES WITH THE UNIT. By ruling the statement goes
           // out under the authority that owns the truck it is frozen on, so
@@ -384,6 +386,9 @@ export async function batchInputForOrg(
         // WHO ELSE WAS IN THE CAB. Distinct, in the order they first appear,
         // and read from the drivers already loaded above rather than a second
         // query — every crew member is in `driverIds` by construction.
+        // THE PAYEE AS IT STANDS TODAY, frozen onto the row below.
+        payToName: driver.payToName,
+        payToAddress: driver.payToAddress,
         teamWith: [
           ...new Set(
             mine
@@ -614,6 +619,10 @@ export async function refreshDraft(
         unitNumber: settlement.unitNumber,
         // Frozen beside the unit number, and for the same argument.
         teamWith: [...settlement.teamWith],
+        // FROZEN BESIDE THE UNIT NUMBER. Reading the driver back next
+        // year would restate a statement somebody was already paid on.
+        payToName: settlement.payToName,
+        payToAddress: settlement.payToAddress,
         payTariffLabel: settlement.payTariffLabel,
         payoutDate: settlement.payoutDate,
         grossCents: settlement.grossCents,
