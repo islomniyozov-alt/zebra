@@ -808,6 +808,19 @@ model Driver {
   cdlState  String?
   cdlClass  String?
 
+  /// THE ONLY THING ITEM 11 STORES.
+  ///
+  /// Every other dispatch field — heading to, dispatch status, last
+  /// activity, on-time delivery — is derived from rows that already exist.
+  /// This one cannot be: a driver being on holiday leaves no trace in the
+  /// freight, so somebody has to say so.
+  ///
+  /// `offDutyUntil` is when they are expected back; null means indefinite.
+  /// A CHECK forbids a return date on a driver who is not off duty, so the
+  /// two cannot disagree — the pair is the one shape here that could.
+  isOffDuty    Boolean   @default(false)
+  offDutyUntil DateTime?
+
   /// WHO THE CHEQUE IS MADE OUT TO, when it is not the driver.
   ///
   /// An owner-operator drives for us and invoices through their own LLC,

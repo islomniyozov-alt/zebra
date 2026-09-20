@@ -49,7 +49,10 @@
     "20260913000000_needs_rotation",
     "20260913190000_document_supersession",
     "20260918070000_team_driving_co_driver",
-    "20260918200000_settlement_team_with"
+    "20260918200000_settlement_team_with",
+    "20260920150000_warnings_tags",
+    "20260920160000_pay_to_payment_type_default_authority",
+    "20260920170000_invoice_payment_type"
   ],
   "recordedAt": "2026-09-20",
   "verified": true
