@@ -105,6 +105,25 @@ async function main() {
     }
     const body = await response.json()
     name = body?.branch?.name ?? null
+
+    // ── ARCHIVED FOR INACTIVITY IS NORMAL, AND WORTH SAYING ────────────
+    //
+    // On 2026-09-20 both Neon branches had been archived for inactivity and
+    // connecting woke them. Nothing failed, but a fork of a cold branch is
+    // not a fork of a warm one: the first connection pays the wake, and a
+    // timeout here would look like a broken secret rather than a sleeping
+    // branch — which is exactly the confusion this whole file exists to end.
+    //
+    // Reported, never refused. An archived parent is still the right parent,
+    // and a check that failed on it would block CI for being unused.
+    const state = body?.branch?.current_state ?? body?.branch?.state ?? null
+    if (state !== null && state !== 'ready') {
+      console.log(`[ci] parent branch state is "${state}" — not ready.`)
+      console.log('[ci] Neon archives branches for inactivity and wakes them')
+      console.log('[ci] on connection, so the fork below pays that wake. A')
+      console.log('[ci] slow or timed-out branch step here is a cold branch,')
+      console.log('[ci] not a wrong one.')
+    }
   } catch (error) {
     console.log(
       `[ci] could not ask Neon which branch that is: ${error instanceof Error ? error.message : String(error)}`,

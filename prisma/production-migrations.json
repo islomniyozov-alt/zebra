@@ -47,8 +47,10 @@
     "20260911190000_filed_paid_and_work_period",
     "20260911230000_org_wide_batch",
     "20260913000000_needs_rotation",
-    "20260913190000_document_supersession"
+    "20260913190000_document_supersession",
+    "20260918070000_team_driving_co_driver",
+    "20260918200000_settlement_team_with"
   ],
-  "recordedAt": "2026-09-13",
+  "recordedAt": "2026-09-20",
   "verified": true
 }
