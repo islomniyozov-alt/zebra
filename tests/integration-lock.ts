@@ -1,7 +1,9 @@
 import 'dotenv/config'
 import { assertSocketCrashGuard } from './socket-crash-guard'
 import { hostname } from 'node:os'
-import { readdirSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { neonConfig, Pool } from '@neondatabase/serverless'
@@ -67,6 +69,19 @@ function migrationsOnDisk(): string[] {
 }
 
 /**
+ * What Prisma would record for a migration file as it stands today.
+ *
+ * SHA-256 OF THE BYTES, which is what `_prisma_migrations.checksum` holds.
+ * `tests/migration-checksums.test.ts` computes it the same way against the
+ * dev database; this is the template asking the same question of itself.
+ */
+function checksumOnDisk(name: string): string {
+  return createHash('sha256')
+    .update(readFileSync(join('prisma/migrations', name, 'migration.sql')))
+    .digest('hex')
+}
+
+/**
  * Bring the template up to date, or confirm it already is.
  *
  * SAYS WHICH BRANCH IT TOOK, always. A template is a cache of a schema, and a
@@ -115,17 +130,61 @@ async function ensureTemplate(adminUrl: string): Promise<void> {
     TEMPLATE_APPLICATION_NAME,
   )
   let applied: string[] = []
+  const recorded = new Map<string, string>()
   const probe = new Pool({ connectionString: templateUrl, max: 1 })
   try {
     const rows = await probe.query(
-      'select migration_name from _prisma_migrations where finished_at is not null',
+      'select migration_name, checksum from _prisma_migrations where finished_at is not null',
     )
     applied = rows.rows.map((row) => row.migration_name as string).sort()
+    for (const row of rows.rows) {
+      recorded.set(row.migration_name as string, row.checksum as string)
+    }
   } catch {
     // No `_prisma_migrations` at all — a fresh or half-built template.
     applied = []
   } finally {
     await probe.end()
+  }
+
+  // ── A MIGRATION WHOSE CONTENTS CHANGED ───────────────────────────────
+  //
+  // THIS USED TO COMPARE NAMES ONLY, and it cost a session. Migration 52
+  // was amended in place — a Postgres enum swapped for TEXT, before
+  // anything read it — and the template called itself current because the
+  // NAME was still there. The suite then ran against the enum the old file
+  // produced and failed with `invalid input value for enum
+  // "LoadPaymentType"`, a sentence about a type that no longer exists in
+  // any file. The template had to be dropped by hand to recover.
+  //
+  // `migrate deploy` CANNOT REPAIR IT. Prisma will not re-run a migration
+  // it has already recorded, so a changed file leaves the template
+  // permanently wrong. The only fix is to build it again from empty, which
+  // is what clearing `applied` below asks the existing path to do.
+  const changed = wanted.filter((name) => {
+    const was = recorded.get(name)
+    return was !== undefined && was !== checksumOnDisk(name)
+  })
+
+  if (changed.length > 0) {
+    console.log(
+      `[integration] template ${TEMPLATE_DB} is STALE: ${changed.length} migration(s) CHANGED on disk` +
+        ` (${changed.join(', ')})`,
+    )
+    const rebuild = new Pool({ connectionString: adminUrl, max: 1 })
+    try {
+      await rebuild.query(
+        'select pg_terminate_backend(pid) from pg_stat_activity where datname = $1',
+        [TEMPLATE_DB],
+      )
+      await rebuild.query(`drop database if exists "${TEMPLATE_DB}"`)
+      await rebuild.query(`create database "${TEMPLATE_DB}"`)
+    } finally {
+      await rebuild.end()
+    }
+    // Everything is pending again, so the path below builds from empty.
+    applied = []
+    recorded.clear()
   }
 
   const missing = wanted.filter((name) => !applied.includes(name))
