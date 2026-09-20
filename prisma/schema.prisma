@@ -638,6 +638,17 @@ model Truck {
   purchasePriceCents Int?
   notes              String?
 
+  /// FREE TEXT, ORG-SCOPED, FILTERABLE. Datatruck's trucks export carries a
+  /// `Tags` column and the history import brings it across where present.
+  ///
+  /// A STRING ARRAY RATHER THAN A TAG TABLE, deliberately. A join table would
+  /// buy a canonical vocabulary — rename once, renamed everywhere — and cost a
+  /// join on every list that filters. Nothing in the ruling asks for a
+  /// vocabulary: it asks for free text that can be filtered, and the array with
+  /// a GIN index is that, exactly. The day somebody wants to rename a tag
+  /// across a fleet, this becomes a table and the migration is a backfill.
+  tags String[] @default([])
+
   deletedAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -669,6 +680,7 @@ model Truck {
   @@index([companyId, unitNumber])
   @@index([companyId, status])
   @@index([vin])
+  @@index([tags], type: Gin)
 }
 
 enum TruckStatus {
@@ -810,6 +822,17 @@ model Driver {
 
   notes String?
 
+  /// FREE TEXT, ORG-SCOPED, FILTERABLE. Datatruck's drivers export carries a
+  /// `Tags` column and the history import brings it across where present.
+  ///
+  /// A STRING ARRAY RATHER THAN A TAG TABLE, deliberately. A join table would
+  /// buy a canonical vocabulary — rename once, renamed everywhere — and cost a
+  /// join on every list that filters. Nothing in the ruling asks for a
+  /// vocabulary: it asks for free text that can be filtered, and the array with
+  /// a GIN index is that, exactly. The day somebody wants to rename a tag
+  /// across a fleet, this becomes a table and the migration is a backfill.
+  tags String[] @default([])
+
   deletedAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -839,6 +862,7 @@ model Driver {
   @@unique([organizationId, externalId])
   @@index([companyId, status])
   @@index([companyId, lastName])
+  @@index([tags], type: Gin)
 }
 
 enum DriverStatus {
@@ -1332,6 +1356,17 @@ model Load {
   driverNotes     String?
   internalNotes   String?
 
+  /// FREE TEXT, ORG-SCOPED, FILTERABLE. Datatruck's loads export carries a
+  /// `Tags` column and the history import brings it across where present.
+  ///
+  /// A STRING ARRAY RATHER THAN A TAG TABLE, deliberately. A join table would
+  /// buy a canonical vocabulary — rename once, renamed everywhere — and cost a
+  /// join on every list that filters. Nothing in the ruling asks for a
+  /// vocabulary: it asks for free text that can be filtered, and the array with
+  /// a GIN index is that, exactly. The day somebody wants to rename a tag
+  /// across a fleet, this becomes a table and the migration is a backfill.
+  tags String[] @default([])
+
   deletedAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1398,6 +1433,7 @@ model Load {
   @@index([referenceNumber])
   @@index([organizationId, bolNumber])
   @@index([organizationId, poNumber])
+  @@index([tags], type: Gin)
 }
 
 enum LoadOperationalStatus {

@@ -806,6 +806,8 @@ async function main(): Promise<void> {
             ...(coDriverIds.length === 1 && coDriverIds[0] !== driverIds[0]
               ? { coDriverId: coDriverIds[0] }
               : {}),
+            // Datatruck's own Tags column, carried across verbatim.
+            tags: load.tags,
             linehaulCents: load.linehaulCents,
             accessorialsCents: load.accessorialCents,
             totalRevenueCents: load.totalRevenueCents,

@@ -2,6 +2,7 @@ import type { Prisma } from '@/generated/prisma/client'
 import { SETTLEABLE_LOAD } from './settlements'
 import {
   computeBatch,
+  remittanceOutcome,
   isSettlementWeek,
   type BatchResult,
   type DriverSettlementInput,
@@ -419,17 +420,14 @@ export async function batchInputForOrg(
               (load.actualMiles ?? load.dispatchedMiles ?? 0) * 100,
             direct: load.customer.settlesDirectly
               ? {
-                  // ONE DEFINITION OF SHORT, and it is this comparison. The
-                  // importer's preview computes the same thing for its own
-                  // report; a stored outcome column would be a second answer
-                  // that could drift from the figures it describes.
-                  outcome: !hasRemittance
-                    ? ('none' as const)
-                    : remitted === load.totalRevenueCents
-                      ? ('matched_exact' as const)
-                      : remitted < load.totalRevenueCents
-                        ? ('short' as const)
-                        : ('over' as const),
+                  // ONE DEFINITION OF SHORT, now actually shared rather
+                  // than asserted: `remittanceOutcome` is the comparison, and
+                  // item 9 calls it too instead of writing a third copy.
+                  outcome: remittanceOutcome(
+                    remitted,
+                    hasRemittance,
+                    load.totalRevenueCents,
+                  ),
                   remittedCents: hasRemittance ? remitted : null,
                   confirmedCents: load.settledGrossCents,
                 }

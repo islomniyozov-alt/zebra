@@ -573,3 +573,33 @@ describe('an open row older than the cutover', () => {
     ).toBe(true)
   })
 })
+
+// ── THE TAGS COLUMN ────────────────────────────────────────────────────
+//
+// Free text Datatruck writes comma-separated. Carried across so the fleet's
+// own vocabulary survives the cutover rather than being retyped.
+describe('tags', () => {
+  it('splits the column on commas and trims each one', () => {
+    const [load] = planLoads([row({ Tags: 'hazmat, reefer ,  team ' })]).planned
+    expect(load?.tags).toEqual(['hazmat', 'reefer', 'team'])
+  })
+
+  it('is an empty list when the column is blank', () => {
+    // NOT NULL, NOT UNDEFINED. The column is NOT NULL with an empty-array
+    // default, and a list that is sometimes absent is a list every caller has
+    // to defend against.
+    expect(planLoads([row()]).planned[0]?.tags).toEqual([])
+  })
+
+  it('collapses a tag written twice on one row', () => {
+    const [load] = planLoads([row({ Tags: 'team,team' })]).planned
+    expect(load?.tags).toEqual(['team'])
+  })
+
+  it('keeps a tag that is not comma-separated as one tag', () => {
+    // Guessing a second separator would split a tag that legitimately
+    // contains one.
+    const [load] = planLoads([row({ Tags: 'east coast / midwest' })]).planned
+    expect(load?.tags).toEqual(['east coast / midwest'])
+  })
+})

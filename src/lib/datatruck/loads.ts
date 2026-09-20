@@ -129,6 +129,24 @@ export function parseDatatruckMoment(raw: string): Date | null {
  * `UNINVOICED` is what `billingStatusFor` will agree with. Writing anything
  * else would make them drift the moment anything touched them.
  */
+/**
+ * Datatruck's `Tags` column, as a list.
+ *
+ * Comma-separated in every row that has one. Trimmed, empties dropped, and
+ * duplicates collapsed — a tag written twice on one row is one tag.
+ */
+export function tagsFrom(value: string | null | undefined): string[] {
+  if (!value) return []
+  return [
+    ...new Set(
+      value
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter((tag) => tag !== ''),
+    ),
+  ]
+}
+
 export interface StatusReading {
   operational: LoadOperationalStatus
   billing: LoadBillingStatus
@@ -396,6 +414,8 @@ export interface PlannedLoad {
   driverName: string | null
   /** `Co-Driver`, verbatim. Often a carrier name rather than a person. */
   coDriverName: string | null
+  /** `Tags`, split on commas. Empty when the column is blank or absent. */
+  tags: string[]
   truckUnit: string | null
 
   operational: LoadOperationalStatus
@@ -579,6 +599,11 @@ export function planLoads(
       // 'Said truck 3609' — which is why it is resolved the same forgiving
       // way as the primary and left null when it does not land on one driver.
       coDriverName: text(record, 'Co-Driver') || null,
+      // FREE TEXT, SPLIT ON COMMAS AND TRIMMED. Datatruck writes the column
+      // as a comma-separated list; anything else it writes stays one tag,
+      // because guessing a second separator would silently split a tag that
+      // legitimately contains one.
+      tags: tagsFrom(text(record, 'Tags')),
       truckUnit: text(record, 'Truck') || null,
       operational: status.operational,
       billing: status.billing,

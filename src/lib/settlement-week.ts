@@ -154,6 +154,29 @@ export function payWeekFor(today: Date): { period: Week; payDay: Date } {
  */
 export type RemittanceOutcome = 'matched_exact' | 'short' | 'over' | 'none'
 
+/**
+ * ONE DEFINITION OF SHORT, and this is it.
+ *
+ * It used to be written inline in `settlement-batch.ts`, under a comment
+ * saying it was the one definition — while the remittance importer's preview
+ * computed the same comparison separately, which the same comment admitted.
+ * Item 9's warnings would have made a THIRD, so it moved here instead and the
+ * callers now share it.
+ *
+ * @param remittedCents what the remittance applied, summed
+ * @param hasRemittance whether anything has been applied at all — distinct
+ *   from a zero, which is a remittance that paid nothing
+ */
+export function remittanceOutcome(
+  remittedCents: number,
+  hasRemittance: boolean,
+  rateCents: number,
+): RemittanceOutcome {
+  if (!hasRemittance) return 'none'
+  if (remittedCents === rateCents) return 'matched_exact'
+  return remittedCents < rateCents ? 'short' : 'over'
+}
+
 export interface DirectSettlement {
   outcome: RemittanceOutcome
   /** What Amazon actually paid, when it has paid. */
