@@ -352,6 +352,10 @@ const en = {
     'That truck runs under a different authority. A driver and their truck must be under the same one — transfer the truck first, or pick another.',
   'ref.error.sameDriverTwice':
     'That is the same person in both seats. A team is two different drivers sharing one load — pick someone else as co-driver, or clear it.',
+  'ref.error.closedHistoryPaymentType':
+    'This freight was billed and settled in Datatruck. A payment type cannot be set on it — that would be this system asserting terms it was not present for.',
+  'loads.column.paymentType': 'Payment type',
+  'loads.paymentType.none': 'Not set',
   'ref.error.codesUnconfirmed':
     'Confirm the endorsements and restrictions against the card before saving.',
   'drivers.cdl.confirmCodes':
@@ -2363,6 +2367,10 @@ const ru: Dictionary = {
     'Этот тягач числится за другим перевозчиком. Водитель и его тягач должны быть под одним — сначала переведите тягач или выберите другой.',
   'ref.error.sameDriverTwice':
     'Это один и тот же человек на обоих местах. Экипаж — это два разных водителя на одном грузе — выберите другого вторым водителем или очистите поле.',
+  'ref.error.closedHistoryPaymentType':
+    'Этот груз выставлен и рассчитан в Datatruck. Тип оплаты по нему задать нельзя — это была бы система, утверждающая условия, при которых её не было.',
+  'loads.column.paymentType': 'Тип оплаты',
+  'loads.paymentType.none': 'Не задан',
   'ref.error.codesUnconfirmed':
     'Подтвердите допуски и ограничения по карточке перед сохранением.',
   'drivers.cdl.confirmCodes': 'Эти допуски и ограничения совпадают с карточкой',
@@ -4357,6 +4365,10 @@ const fa: Dictionary = {
     'این کامیون زیر شرکت دیگری کار می‌کند. راننده و کامیونش باید زیر یک شرکت باشند — نخست کامیون را منتقل کنید یا کامیون دیگری برگزینید.',
   'ref.error.sameDriverTwice':
     'این یک نفر در هر دو جایگاه است. تیم یعنی دو راننده متفاوت در یک بار — راننده دوم دیگری برگزینید یا آن را خالی کنید.',
+  'ref.error.closedHistoryPaymentType':
+    'این بار در Datatruck صورتحساب و تسویه شده است. نوع پرداخت برای آن تعیین‌شدنی نیست — این یعنی سامانه شرطی را ادعا کند که در آن حضور نداشته.',
+  'loads.column.paymentType': 'نوع پرداخت',
+  'loads.paymentType.none': 'تعیین نشده',
   'ref.error.codesUnconfirmed':
     'پیش از ذخیره، مجوزها و محدودیت‌ها را با کارت تطبیق دهید.',
   'drivers.cdl.confirmCodes': 'این مجوزها و محدودیت‌ها با کارت مطابقت دارند',

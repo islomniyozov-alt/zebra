@@ -1061,12 +1061,12 @@ model Customer {
   email        String?
   billingEmail String?
 
-  paymentTermsDays       Int              @default(30)
+  paymentTermsDays       Int            @default(30)
   preferredPaymentMethod PaymentMethod?
   /// What loads for this customer are booked as, unless somebody changes it.
-  defaultPaymentType     LoadPaymentType?
+  defaultPaymentType     String?
   creditLimitCents       Int?
-  isFactorable           Boolean          @default(true)
+  isFactorable           Boolean        @default(true)
 
   // The DEFAULT for loads booked under this customer. Amazon Relay settles by
   // weekly ACH statement rather than against invoices; the flag lives here so
@@ -1363,7 +1363,10 @@ model Load {
   /// is still what everything reads; this says what the desk agreed, which
   /// is the thing a person needs on the receivables list and cannot infer
   /// from a boolean.
-  paymentType LoadPaymentType?
+  /// TEXT, VALIDATED IN CODE. Owner ruling, same reasoning as the
+  /// deduction type: the four codes live in `src/lib/payment-types.ts`, so
+  /// a fifth arrangement is an edit to a list rather than a migration.
+  paymentType String?
 
   // Factoring materially changes AR behaviour — the factor collects, not you.
   isFactored         Boolean           @default(false)
@@ -2669,25 +2672,6 @@ model PaymentLoadApplication {
   @@unique([paymentId, loadId])
   @@index([loadId])
   @@index([organizationId])
-}
-
-/// HOW THIS FREIGHT IS BILLED AND PAID FOR — the arrangement, not the
-/// instrument.
-///
-/// `PaymentMethod` below is how money physically moves (cheque, wire,
-/// Zelle). This is the commercial arrangement the load was booked under,
-/// and the two overlap on ACH without meaning the same thing: a factored
-/// load may settle by ACH and is still FACTORED.
-///
-/// A CLOSED VOCABULARY rather than free text, which is a reading of "text
-/// label": the label is the point — it drives no behaviour, `isFactored`
-/// still does that — but a typo must not be able to invent a fifth
-/// category that quietly splits a receivables list in two.
-enum LoadPaymentType {
-  QUICKPAY
-  FACTORED
-  ACH
-  DIRECT
 }
 
 enum PaymentMethod {

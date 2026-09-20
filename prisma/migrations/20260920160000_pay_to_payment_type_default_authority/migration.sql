@@ -20,12 +20,20 @@ ALTER TABLE "Settlement" ADD COLUMN "payToAddress" TEXT;
 
 -- ── 3. THE ARRANGEMENT A LOAD WAS BOOKED UNDER ───────────────────────────
 --
--- Not the instrument: `PaymentMethod` is how money physically moves, and the
--- two overlap on ACH without meaning the same thing.
-CREATE TYPE "LoadPaymentType" AS ENUM ('QUICKPAY', 'FACTORED', 'ACH', 'DIRECT');
-
-ALTER TABLE "Load" ADD COLUMN "paymentType" "LoadPaymentType";
-ALTER TABLE "Customer" ADD COLUMN "defaultPaymentType" "LoadPaymentType";
+-- TEXT, NOT A POSTGRES ENUM, and not a CHECK constraint either. Owner's
+-- ruling, and the same reasoning as the deduction type: the vocabulary lives
+-- in `src/lib/payment-types.ts`, so adding a fifth arrangement is an edit to a
+-- list somebody can read — never a migration, never a deploy, never a
+-- conversation about downtime.
+--
+-- The first draft of this migration created `LoadPaymentType` as an enum. It
+-- was changed here rather than corrected in a later migration because nothing
+-- had read it yet and production had never seen it; a fix stacked on top would
+-- have left the enum in production's history for no reason.
+--
+-- Validation is the writer's job and happens against that list.
+ALTER TABLE "Load" ADD COLUMN "paymentType" TEXT;
+ALTER TABLE "Customer" ADD COLUMN "defaultPaymentType" TEXT;
 
 -- ── 4. THE ONE AUTHORITY A NEW LOAD LANDS ON ─────────────────────────────
 --

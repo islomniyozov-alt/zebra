@@ -1,4 +1,5 @@
 import type { TxClient } from './tenancy'
+import { readPaymentType } from './payment-types'
 import type {
   EquipmentType,
   LoadOperationalStatus,
@@ -161,6 +162,8 @@ export interface LoadInput {
   driverId?: string | null
   /** The second crew member. Setting it is what makes the load a team load. */
   coDriverId?: string | null
+  /** One of `PAYMENT_TYPES`. Defaults to the customer at booking. */
+  paymentType?: string | null
   trailerId?: string | null
   equipmentType?: EquipmentType
   commodity?: unknown
@@ -320,10 +323,15 @@ async function assertCompanyInScope(
 async function assertBookableCustomer(
   tx: TxClient,
   customerId: string,
-): Promise<{ settlesDirectly: boolean }> {
+): Promise<{ settlesDirectly: boolean; defaultPaymentType: string | null }> {
   const customer = await tx.customer.findFirst({
     where: { id: customerId, deletedAt: null },
-    select: { status: true, name: true, settlesDirectly: true },
+    select: {
+      status: true,
+      name: true,
+      settlesDirectly: true,
+      defaultPaymentType: true,
+    },
   })
   if (!customer) {
     throw new ReferenceError('not_found', { field: 'customerId' })
@@ -333,7 +341,10 @@ async function assertBookableCustomer(
     // one is the exact thing blocking exists to stop.
     throw new ReferenceError('required', { field: 'customerId' })
   }
-  return { settlesDirectly: customer.settlesDirectly }
+  return {
+    settlesDirectly: customer.settlesDirectly,
+    defaultPaymentType: customer.defaultPaymentType,
+  }
 }
 
 export interface CreateLoadOptions {
@@ -356,7 +367,10 @@ export async function createLoad(
   const companyId = requiredText(input.companyId, 'companyId')
   await assertCompanyInScope(tx, companyId)
   const customerId = requiredText(input.customerId, 'customerId')
-  const { settlesDirectly } = await assertBookableCustomer(tx, customerId)
+  const { settlesDirectly, defaultPaymentType } = await assertBookableCustomer(
+    tx,
+    customerId,
+  )
 
   if (input.stops.length < 2) {
     throw new ReferenceError('required', { field: 'stops' })
@@ -418,6 +432,11 @@ export async function createLoad(
         // customer whose terms change next year must not rewrite the billing
         // history of freight that has already run.
         directSettled: settlesDirectly,
+        // STAMPED FROM THE CUSTOMER AT BOOKING, and editable afterwards.
+        // Copied rather than read through, for the same reason
+        // `directSettled` is: changing what a customer usually agrees to
+        // must not restate what was agreed on freight already moved.
+        paymentType: readPaymentType(input.paymentType ?? defaultPaymentType),
         bookedByUserId: options.byUserId ?? null,
         // NOT set here. BOOKED is the schema default and the first status
         // event is written below, so the log starts where the load does.
@@ -542,6 +561,7 @@ export async function updateLoad(
       organizationId: true,
       companyId: true,
       isCancelled: true,
+      billingStatus: true,
       truckId: true,
       driverId: true,
       coDriverId: true,
@@ -573,6 +593,21 @@ export async function updateLoad(
   // the load will HAVE after the edit, not the one it has now: assigning the
   // co-driver into the driver seat is the same mistake arriving the other way
   // round.
+  // ── CLOSED HISTORY TAKES NO PAYMENT TYPE ─────────────────────────────
+  //
+  // Datatruck billed and was paid for this freight under whatever it
+  // agreed at the time. Stamping an arrangement on it now would be this
+  // system asserting a commercial fact it was not present for, on 14,464
+  // rows, and it would land in the receivables column beside live freight
+  // as though somebody had decided it.
+  if (input.paymentType !== undefined && input.paymentType !== null) {
+    if (current.billingStatus === 'CLOSED_IN_DATATRUCK') {
+      throw new ReferenceError('closed_history_payment_type', {
+        field: 'paymentType',
+      })
+    }
+  }
+
   if (coDriverId !== null && coDriverId === driverId) {
     throw new ReferenceError('same_driver_twice', { field: 'coDriverId' })
   }
@@ -603,6 +638,9 @@ export async function updateLoad(
     ...(input.truckId !== undefined ? { truckId } : {}),
     ...(input.driverId !== undefined ? { driverId } : {}),
     ...(input.coDriverId !== undefined ? { coDriverId } : {}),
+    ...(input.paymentType !== undefined
+      ? { paymentType: readPaymentType(input.paymentType) }
+      : {}),
     ...(input.trailerId !== undefined
       ? { trailerId: input.trailerId ?? null }
       : {}),

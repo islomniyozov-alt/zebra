@@ -27,6 +27,8 @@ export type ReferenceFailure =
   | 'truck_other_authority'
   /** One person named in both seats of a team load (item 8). */
   | 'same_driver_twice'
+  /** A payment type stamped on freight Datatruck already settled (item 10). */
+  | 'closed_history_payment_type'
   /** A stop whose arrival window ends before it starts (Phase 5). */
   | 'window_inverted'
   /**
@@ -72,6 +74,7 @@ export const REFERENCE_ERROR_KEYS: Record<ReferenceFailure, MessageKey> = {
   number_taken_since: 'ref.error.numberTakenSince',
   truck_other_authority: 'ref.error.truckOtherAuthority',
   same_driver_twice: 'ref.error.sameDriverTwice',
+  closed_history_payment_type: 'ref.error.closedHistoryPaymentType',
   window_inverted: 'ref.error.windowInverted',
   codes_unconfirmed: 'ref.error.codesUnconfirmed',
 }

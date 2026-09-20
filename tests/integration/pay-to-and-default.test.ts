@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
+import { LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import type { PrismaClient } from '@/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -171,5 +172,119 @@ describe('the payee on a settlement', () => {
       },
     })
     expect(settlement.payToName).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// CLOSED HISTORY TAKES NO PAYMENT TYPE.
+//
+// Datatruck billed and was paid for that freight under whatever it agreed at
+// the time. Stamping an arrangement on it now is this system asserting a
+// commercial fact it was not present for — on 14,464 rows, landing in the
+// receivables column beside live freight as though somebody had decided it.
+// ---------------------------------------------------------------------------
+describe('payment type on closed history', () => {
+  it('is refused, by name', async () => {
+    const { withOrg } = await import('@/lib/tenancy')
+    const { createBroker } = await import('@/lib/brokers')
+    const { createLoad, updateLoad } = await import('@/lib/loads')
+
+    const user = await owner.user.create({
+      data: { email: `ch-${nonce}@example.test`, name: 'CH' },
+    })
+    await owner.membership.create({
+      data: { userId: user.id, organizationId, role: 'OWNER' },
+    })
+    const inOrg = <T>(fn: Parameters<typeof withOrg<T>>[1]) =>
+      withOrg(organizationId, fn, {
+        attribution: { userId: user.id, ip: null, userAgent: 'ch.test' },
+        timeoutMs: LOAD_WRITE_TIMEOUT_MS,
+      })
+
+    const broker = await inOrg((tx) =>
+      createBroker(tx, organizationId, { name: `BROKER ${nonce}` }),
+    )
+    const at = new Date(Date.UTC(2026, 2, 3))
+    const load = await inOrg((tx) =>
+      createLoad(
+        tx,
+        organizationId,
+        {
+          companyId,
+          customerId: broker.id,
+          referenceNumber: `CH-${nonce}`,
+          stops: [
+            { type: 'PICKUP', city: 'Whiteland', state: 'IN', scheduledAt: at },
+            {
+              type: 'DELIVERY',
+              city: 'Gastonia',
+              state: 'NC',
+              scheduledAt: at,
+            },
+          ],
+          linehaulCents: 100_000,
+        },
+        { byUserId: user.id },
+      ),
+    )
+    await owner.load.update({
+      where: { id: load.id },
+      data: { billingStatus: 'CLOSED_IN_DATATRUCK' },
+    })
+
+    await expect(
+      inOrg((tx) => updateLoad(tx, load.id, { paymentType: 'Factored' })),
+    ).rejects.toThrow(/closed_history_payment_type/)
+  })
+
+  it('still lets a LIVE load take one', async () => {
+    // The pair: the refusal must be about closed history, not about payment
+    // types. Without it the rule could refuse everything and still pass.
+    const { withOrg } = await import('@/lib/tenancy')
+    const { createBroker } = await import('@/lib/brokers')
+    const { createLoad, updateLoad } = await import('@/lib/loads')
+
+    const user = await owner.user.findFirstOrThrow({
+      where: { memberships: { some: { organizationId } } },
+    })
+    const inOrg = <T>(fn: Parameters<typeof withOrg<T>>[1]) =>
+      withOrg(organizationId, fn, {
+        attribution: { userId: user.id, ip: null, userAgent: 'ch.test' },
+        timeoutMs: LOAD_WRITE_TIMEOUT_MS,
+      })
+
+    const broker = await inOrg((tx) =>
+      createBroker(tx, organizationId, { name: `BROKER2 ${nonce}` }),
+    )
+    const at = new Date(Date.UTC(2026, 2, 4))
+    const load = await inOrg((tx) =>
+      createLoad(
+        tx,
+        organizationId,
+        {
+          companyId,
+          customerId: broker.id,
+          referenceNumber: `LIVE-${nonce}`,
+          stops: [
+            { type: 'PICKUP', city: 'Whiteland', state: 'IN', scheduledAt: at },
+            {
+              type: 'DELIVERY',
+              city: 'Gastonia',
+              state: 'NC',
+              scheduledAt: at,
+            },
+          ],
+          linehaulCents: 100_000,
+        },
+        { byUserId: user.id },
+      ),
+    )
+
+    await inOrg((tx) => updateLoad(tx, load.id, { paymentType: 'Factored' }))
+    const after = await owner.load.findUniqueOrThrow({
+      where: { id: load.id },
+      select: { paymentType: true },
+    })
+    expect(after.paymentType).toBe('Factored')
   })
 })
