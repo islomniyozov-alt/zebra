@@ -465,6 +465,8 @@ export interface AgingRow {
   balanceCents: number
   daysPastDue: number
   bucket: AgingBucket
+  /** Stamped on the invoice at raise. Read here, never re-derived. */
+  paymentType: string | null
 }
 
 export interface Aging {
@@ -500,6 +502,7 @@ export async function directAging(
       invoiceNumber: true,
       dueDate: true,
       balanceCents: true,
+      paymentType: true,
       customer: { select: { name: true } },
     },
   })
@@ -526,6 +529,7 @@ export async function directAging(
       customerName: invoice.customer.name,
       dueDate: invoice.dueDate,
       balanceCents: invoice.balanceCents,
+      paymentType: invoice.paymentType,
       daysPastDue,
       bucket,
     }

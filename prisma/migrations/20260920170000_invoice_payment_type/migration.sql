@@ -1,0 +1,16 @@
+-- THE ARRANGEMENT AN INVOICE IS RAISED UNDER.
+--
+-- Stamped from the loads it covers at the moment it is raised, and refused
+-- when they disagree: an invoice is a single demand under a single set of
+-- terms, so loads booked Quickpay and Factored on one document would have to
+-- be collected two different ways and whichever value was stamped would be
+-- wrong about half the freight it names.
+--
+-- TEXT against the code list in `src/lib/payment-types.ts`, like the load's
+-- own column — the vocabulary lives in code so a fifth arrangement is an edit
+-- rather than a migration.
+--
+-- Receivables reads THIS, not the loads: the invoice is the document somebody
+-- is chasing, and re-deriving from its loads at render time would let a load
+-- reassigned next month restate an invoice already sent.
+ALTER TABLE "Invoice" ADD COLUMN "paymentType" TEXT;

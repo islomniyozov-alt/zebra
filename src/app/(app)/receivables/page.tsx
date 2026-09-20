@@ -76,6 +76,14 @@ export default async function ReceivablesPage() {
       render: (row) => row.customerName,
     },
     {
+      key: 'paymentType',
+      header: t('invoices.column.paymentType'),
+      // READ, NEVER RE-DERIVED. The invoice is the document being chased;
+      // deriving from its loads at render time would let a load reassigned
+      // next month restate an invoice already sent.
+      render: (row) => row.paymentType ?? '—',
+    },
+    {
       key: 'due',
       header: t('invoices.due'),
       render: (row) => day(row.dueDate),

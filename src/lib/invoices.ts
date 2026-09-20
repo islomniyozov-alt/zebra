@@ -100,6 +100,7 @@ export type GenerateFailure =
   | 'no_loads'
   | 'not_ready'
   | 'mixed_customers'
+  | 'mixed_payment_types'
   | 'mixed_companies'
 
 export type GenerateOutcome =
@@ -217,6 +218,7 @@ export async function generateInvoice(
       loadNumber: true,
       companyId: true,
       customerId: true,
+      paymentType: true,
       linehaulCents: true,
       fuelSurchargeCents: true,
       accessorialsCents: true,
@@ -254,6 +256,26 @@ export async function generateInvoice(
   if (customers.size > 1) return { ok: false, reason: 'mixed_customers' }
   const companies = new Set(loads.map((load) => load.companyId))
   if (companies.size > 1) return { ok: false, reason: 'mixed_companies' }
+
+  // ── ONE ARRANGEMENT PER INVOICE ──────────────────────────────────
+  //
+  // An invoice is a single demand for payment under a single set of
+  // terms. Loads booked Quickpay and Factored on one document would have
+  // to be collected two different ways, and whichever value got stamped
+  // would be wrong about half the freight it covers.
+  //
+  // Loads with NO arrangement recorded do not make a mixture — they make
+  // an invoice with none, which is the state everything was in before
+  // this existed. Only two DIFFERENT stated arrangements refuse.
+  const arrangements = new Set(
+    loads
+      .map((load) => load.paymentType)
+      .filter((type): type is string => type !== null),
+  )
+  if (arrangements.size > 1) {
+    return { ok: false, reason: 'mixed_payment_types' }
+  }
+  const paymentType = [...arrangements][0] ?? null
 
   const companyId = loads[0]!.companyId
   const customerId = loads[0]!.customerId
@@ -295,6 +317,9 @@ export async function generateInvoice(
       companyId,
       invoiceNumber,
       customerId,
+      // STAMPED AT RAISE from the loads it covers, and refused above when
+      // they disagree. The invoice is what receivables reads.
+      paymentType,
       status: 'DRAFT',
       issueDate,
       dueDate,

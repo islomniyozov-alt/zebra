@@ -2478,9 +2478,14 @@ model Invoice {
 
   status InvoiceStatus @default(DRAFT)
 
-  issueDate DateTime?
-  dueDate   DateTime?
-  termsDays Int       @default(30)
+  issueDate   DateTime?
+  dueDate     DateTime?
+  /// The arrangement this demand is made under, stamped at raise from the
+  /// loads it covers. Refused when they disagree — one invoice is one set of
+  /// terms, and a mixture would be wrong about half the freight it names.
+  paymentType String?
+
+  termsDays Int @default(30)
 
   subtotalCents     Int @default(0)
   accessorialsCents Int @default(0)

@@ -356,6 +356,10 @@ const en = {
     'This freight was billed and settled in Datatruck. A payment type cannot be set on it — that would be this system asserting terms it was not present for.',
   'loads.column.paymentType': 'Payment type',
   'loads.paymentType.none': 'Not set',
+  'loads.paymentType.hint':
+    'How this load gets billed and paid for. Stamped from the customer at booking; the invoice takes it when it is raised.',
+  'loads.paymentType.saving': 'Saving…',
+  'loads.paymentType.saved': 'Saved',
   'ref.error.codesUnconfirmed':
     'Confirm the endorsements and restrictions against the card before saving.',
   'drivers.cdl.confirmCodes':
@@ -973,6 +977,9 @@ const en = {
     'One invoice covers one broker. Choose loads for a single broker.',
   'invoices.error.mixedCompanies':
     'One invoice covers one authority. Choose loads under a single one.',
+  'invoices.error.mixedPaymentTypes':
+    'These loads were booked under different payment arrangements. One invoice is one set of terms — raise them separately.',
+  'invoices.column.paymentType': 'Payment type',
   'invoices.error.alreadySent': 'That invoice is already recorded as sent.',
   'invoices.error.noChannel': 'Say how it was sent.',
   'invoices.error.notFound': 'That invoice no longer exists.',
@@ -2371,6 +2378,10 @@ const ru: Dictionary = {
     'Этот груз выставлен и рассчитан в Datatruck. Тип оплаты по нему задать нельзя — это была бы система, утверждающая условия, при которых её не было.',
   'loads.column.paymentType': 'Тип оплаты',
   'loads.paymentType.none': 'Не задан',
+  'loads.paymentType.hint':
+    'Как этот груз выставляется и оплачивается. Проставляется от клиента при бронировании; счёт берёт это при выставлении.',
+  'loads.paymentType.saving': 'Сохранение…',
+  'loads.paymentType.saved': 'Сохранено',
   'ref.error.codesUnconfirmed':
     'Подтвердите допуски и ограничения по карточке перед сохранением.',
   'drivers.cdl.confirmCodes': 'Эти допуски и ограничения совпадают с карточкой',
@@ -2990,6 +3001,9 @@ const ru: Dictionary = {
     'Один счёт — один брокер. Выберите грузы одного брокера.',
   'invoices.error.mixedCompanies':
     'Один счёт — один перевозчик. Выберите грузы одного перевозчика.',
+  'invoices.error.mixedPaymentTypes':
+    'Эти грузы оформлены на разных условиях оплаты. Один счёт — одни условия; выставьте их отдельно.',
+  'invoices.column.paymentType': 'Тип оплаты',
   'invoices.error.alreadySent': 'Этот счёт уже отмечен как отправленный.',
   'invoices.error.noChannel': 'Укажите способ отправки.',
   'invoices.error.notFound': 'Этот счёт больше не существует.',
@@ -4369,6 +4383,10 @@ const fa: Dictionary = {
     'این بار در Datatruck صورتحساب و تسویه شده است. نوع پرداخت برای آن تعیین‌شدنی نیست — این یعنی سامانه شرطی را ادعا کند که در آن حضور نداشته.',
   'loads.column.paymentType': 'نوع پرداخت',
   'loads.paymentType.none': 'تعیین نشده',
+  'loads.paymentType.hint':
+    'اینکه این بار چگونه صورتحساب و پرداخت می‌شود. هنگام ثبت از مشتری گرفته می‌شود؛ صورتحساب آن را هنگام صدور برمی‌دارد.',
+  'loads.paymentType.saving': 'در حال ذخیره…',
+  'loads.paymentType.saved': 'ذخیره شد',
   'ref.error.codesUnconfirmed':
     'پیش از ذخیره، مجوزها و محدودیت‌ها را با کارت تطبیق دهید.',
   'drivers.cdl.confirmCodes': 'این مجوزها و محدودیت‌ها با کارت مطابقت دارند',
@@ -4981,6 +4999,9 @@ const fa: Dictionary = {
     'هر صورت‌حساب برای یک کارگزار است. بارهای یک کارگزار را برگزینید.',
   'invoices.error.mixedCompanies':
     'هر صورت‌حساب برای یک شرکت است. بارهای یک شرکت را برگزینید.',
+  'invoices.error.mixedPaymentTypes':
+    'این بارها با شرایط پرداخت متفاوت ثبت شده‌اند. یک صورتحساب یعنی یک مجموعه شرایط — جداگانه صادر کنید.',
+  'invoices.column.paymentType': 'نوع پرداخت',
   'invoices.error.alreadySent': 'این صورت‌حساب پیش‌تر ارسال‌شده ثبت شده است.',
   'invoices.error.noChannel': 'شیوهٔ ارسال را بنویسید.',
   'invoices.error.notFound': 'این صورت‌حساب دیگر وجود ندارد.',

@@ -300,3 +300,91 @@ describe('what never reaches the queue', () => {
     expect(ready.map((row) => row.id)).not.toContain(load.id)
   }, 300_000)
 })
+
+// ---------------------------------------------------------------------------
+// ONE INVOICE IS ONE SET OF TERMS.
+//
+// An invoice is a single demand for payment. Loads booked Quickpay and
+// Factored on one document would have to be collected two different ways, and
+// whichever arrangement got stamped would be wrong about half the freight the
+// document names.
+// ---------------------------------------------------------------------------
+describe('the payment type on an invoice', () => {
+  it('is stamped from the loads it covers', async () => {
+    const first = await deliveredLoad(brokerId, '1000', '0', 41)
+    const second = await deliveredLoad(brokerId, '1200', '0', 43)
+    for (const load of [first, second]) {
+      await owner.load.update({
+        where: { id: load.id },
+        data: { paymentType: 'Factored' },
+      })
+    }
+
+    const outcome = await inOrg((tx) =>
+      generateInvoice(tx, organizationId, {
+        loadIds: [first.id, second.id],
+        labels,
+      }),
+    )
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) return
+
+    const invoice = await owner.invoice.findUniqueOrThrow({
+      where: { id: outcome.invoiceId },
+      select: { paymentType: true },
+    })
+    expect(invoice.paymentType).toBe('Factored')
+  })
+
+  it('REFUSES loads booked under different arrangements, by name', async () => {
+    // THE GUARD. The same shape as mixed_customers and mixed_companies, which
+    // this is modelled on.
+    const quickpay = await deliveredLoad(brokerId, '1000', '0', 45)
+    const factored = await deliveredLoad(brokerId, '1200', '0', 47)
+    await owner.load.update({
+      where: { id: quickpay.id },
+      data: { paymentType: 'Quickpay' },
+    })
+    await owner.load.update({
+      where: { id: factored.id },
+      data: { paymentType: 'Factored' },
+    })
+
+    const outcome = await inOrg((tx) =>
+      generateInvoice(tx, organizationId, {
+        loadIds: [quickpay.id, factored.id],
+        labels,
+      }),
+    )
+    expect(outcome.ok).toBe(false)
+    if (outcome.ok) return
+    expect(outcome.reason).toBe('mixed_payment_types')
+  })
+
+  it('does not treat an unstated arrangement as a mixture', async () => {
+    // THE PAIR. Loads with none recorded are the state everything was in
+    // before this existed; refusing them would make the whole back catalogue
+    // uninvoiceable the day this shipped.
+    const stated = await deliveredLoad(brokerId, '1000', '0', 49)
+    const silent = await deliveredLoad(brokerId, '1200', '0', 51)
+    await owner.load.update({
+      where: { id: stated.id },
+      data: { paymentType: 'ACH' },
+    })
+
+    const outcome = await inOrg((tx) =>
+      generateInvoice(tx, organizationId, {
+        loadIds: [stated.id, silent.id],
+        labels,
+      }),
+    )
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) return
+
+    const invoice = await owner.invoice.findUniqueOrThrow({
+      where: { id: outcome.invoiceId },
+      select: { paymentType: true },
+    })
+    expect(invoice.paymentType).toBe('ACH')
+  })
+})

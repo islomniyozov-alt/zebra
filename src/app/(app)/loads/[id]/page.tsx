@@ -36,6 +36,9 @@ import { Select } from '@/components/ui/Select'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { RatePanel, type AccessorialRow } from './RatePanel'
 import { FactoringPanel } from './FactoringPanel'
+import { PaymentTypePanel } from './PaymentTypePanel'
+import { setPaymentTypeAction } from './payment-type-actions'
+import { PAYMENT_TYPES } from '@/lib/payment-types'
 import { filePacketAction, markFactoredPaidAction } from './factoring-actions'
 import { filingStateFor } from '@/lib/factoring-filing'
 import { StatusTimeline, type TimelineEntry } from './StatusTimeline'
@@ -1156,6 +1159,21 @@ export default async function LoadDetailPage({
            * English sentence for logs and API refusals; the screen joins its
            * own list, because "the POD and the rate confirmation" is grammar
            * rather than concatenation and three locales do it differently. */}
+          <PaymentTypePanel
+            value={load.paymentType}
+            options={PAYMENT_TYPES}
+            disabled={load.isCancelled}
+            save={setPaymentTypeAction.bind(null, id)}
+            labels={{
+              title: t('loads.column.paymentType'),
+              hint: t('loads.paymentType.hint'),
+              none: t('loads.paymentType.none'),
+              save: t('ref.save'),
+              saving: t('loads.paymentType.saving'),
+              saved: t('loads.paymentType.saved'),
+            }}
+          />
+
           {filing ? (
             <FactoringPanel
               canFile={filing.canFile}

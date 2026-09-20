@@ -15,6 +15,7 @@ const CREATE_ERRORS: Record<string, MessageKey> = {
   no_loads: 'invoices.error.noLoads',
   not_ready: 'invoices.error.notReady',
   mixed_customers: 'invoices.error.mixedCustomers',
+  mixed_payment_types: 'invoices.error.mixedPaymentTypes',
   mixed_companies: 'invoices.error.mixedCompanies',
 }
 
