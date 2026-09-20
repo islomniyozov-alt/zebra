@@ -84,6 +84,7 @@ const en = {
   'nav.payments': 'Payments',
   'nav.settlements': 'Settlements',
   'nav.thisWeek': 'This week',
+  'nav.byCompany': 'By company',
   'nav.settlementBatches': 'Batches',
   'nav.expenses': 'Expenses',
   'nav.fuel': 'Fuel',
@@ -1877,6 +1878,26 @@ const en = {
     'nothing yet — the drivers below need a pay rule before anything can settle.',
   'money.nothing.held':
     'nothing yet — every load in this period is held, below.',
+  'money.byCompany.title': 'By company',
+  'money.byCompany.blurb':
+    'Settle together, report apart. Gross is what the freight billed; after driver pay is that minus every settlement line for it — not fuel, not tolls, not insurance.',
+  'money.byCompany.grouping': 'Grouping',
+  'money.byCompany.weeks': 'Weeks',
+  'money.byCompany.months': 'Months',
+  'money.byCompany.measure': 'Measure',
+  'money.byCompany.gross': 'Gross',
+  'money.byCompany.afterDriverPay': 'After driver pay',
+  'money.byCompany.company': 'Company',
+  'money.byCompany.all': 'All companies',
+  'money.byCompany.period': 'Period',
+  'money.byCompany.unknown': '—',
+  'money.byCompany.payFrom':
+    'Driver pay from {period}. Earlier periods show — because Datatruck paid those drivers and this system never saw it.',
+  'money.byCompany.payNever':
+    'No settlement batch has been finalised yet, so driver pay is unknown for every period here.',
+  'money.byCompany.atRate': 'at rate',
+  'money.byCompany.atRateHint':
+    'Some of this gross is a load rate because nothing has been invoiced yet.',
   'money.nothing.noFreight':
     'nothing — no freight was delivered in this period.',
   'money.loadsAcross': 'loads across',
@@ -2061,6 +2082,7 @@ const ru: Dictionary = {
   'nav.payments': 'Платежи',
   'nav.settlements': 'Расчёты с водителями',
   'nav.thisWeek': 'Эта неделя',
+  'nav.byCompany': 'По компаниям',
   'nav.settlementBatches': 'Партии',
   'nav.expenses': 'Расходы',
   'nav.fuel': 'Топливо',
@@ -3846,6 +3868,26 @@ const ru: Dictionary = {
     'ничего — все грузы за этот период рассчитаны в Datatruck.',
   'money.nothing.blocked': 'пока ничего — водителям ниже нужно правило оплаты.',
   'money.nothing.held': 'пока ничего — все грузы за период отложены, см. ниже.',
+  'money.byCompany.title': 'По компаниям',
+  'money.byCompany.blurb':
+    'Расчёт общий, отчёт раздельный. Валовая — это то, что груз выставил; после оплаты водителям — минус все строки расчётов по нему, без топлива, платных дорог и страховки.',
+  'money.byCompany.grouping': 'Группировка',
+  'money.byCompany.weeks': 'Недели',
+  'money.byCompany.months': 'Месяцы',
+  'money.byCompany.measure': 'Показатель',
+  'money.byCompany.gross': 'Валовая',
+  'money.byCompany.afterDriverPay': 'После оплаты водителям',
+  'money.byCompany.company': 'Компания',
+  'money.byCompany.all': 'Все компании',
+  'money.byCompany.period': 'Период',
+  'money.byCompany.unknown': '—',
+  'money.byCompany.payFrom':
+    'Оплата водителям с {period}. Более ранние периоды показывают —, потому что тех водителей платил Datatruck, и эта система этого не видела.',
+  'money.byCompany.payNever':
+    'Ни один расчёт ещё не закрыт, поэтому оплата водителям неизвестна за все периоды здесь.',
+  'money.byCompany.atRate': 'по ставке',
+  'money.byCompany.atRateHint':
+    'Часть этой валовой — ставка груза, потому что счёт ещё не выставлен.',
   'money.nothing.noFreight': 'ничего — за этот период грузов не было.',
   'money.loadsAcross': 'грузов у',
   'money.drivers': 'водителей',
@@ -4028,6 +4070,7 @@ const fa: Dictionary = {
   'nav.payments': 'پرداخت‌ها',
   'nav.settlements': 'تسویه رانندگان',
   'nav.thisWeek': 'این هفته',
+  'nav.byCompany': 'بر پایهٔ شرکت',
   'nav.settlementBatches': 'دسته‌ها',
   'nav.expenses': 'هزینه‌ها',
   'nav.fuel': 'سوخت',
@@ -5791,6 +5834,26 @@ const fa: Dictionary = {
   'money.nothing.blocked':
     'هنوز هیچ — رانندگان زیر باید قاعدهٔ پرداخت داشته باشند.',
   'money.nothing.held': 'هنوز هیچ — همهٔ بارهای این دوره نگه داشته شده‌اند.',
+  'money.byCompany.title': 'بر پایهٔ شرکت',
+  'money.byCompany.blurb':
+    'تسویه با هم، گزارش جدا. ناخالص یعنی آنچه بار صورتحساب کرد؛ پس از دستمزد راننده یعنی همان منهای همهٔ سطرهای تسویه — نه سوخت، نه عوارض، نه بیمه.',
+  'money.byCompany.grouping': 'گروه‌بندی',
+  'money.byCompany.weeks': 'هفته‌ها',
+  'money.byCompany.months': 'ماه‌ها',
+  'money.byCompany.measure': 'سنجه',
+  'money.byCompany.gross': 'ناخالص',
+  'money.byCompany.afterDriverPay': 'پس از دستمزد راننده',
+  'money.byCompany.company': 'شرکت',
+  'money.byCompany.all': 'همهٔ شرکت‌ها',
+  'money.byCompany.period': 'دوره',
+  'money.byCompany.unknown': '—',
+  'money.byCompany.payFrom':
+    'دستمزد راننده از {period}. دوره‌های پیش‌تر — نشان می‌دهند، چون آن رانندگان را Datatruck پرداخت کرد و این سامانه هرگز آن را ندید.',
+  'money.byCompany.payNever':
+    'هنوز هیچ دسته تسویه‌ای نهایی نشده، پس دستمزد راننده برای همهٔ دوره‌های اینجا نامعلوم است.',
+  'money.byCompany.atRate': 'به نرخ',
+  'money.byCompany.atRateHint':
+    'بخشی از این ناخالص نرخ بار است، چون هنوز صورتحسابی صادر نشده.',
   'money.nothing.noFreight': 'هیچ — در این دوره باری تحویل نشده است.',
   'money.loadsAcross': 'بار برای',
   'money.drivers': 'راننده',

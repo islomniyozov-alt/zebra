@@ -529,6 +529,10 @@ export const NAVIGATION: readonly NavGroup[] = [
       // screen anybody opens on a Tuesday and every other entry here is
       // something it links to.
       item('thisWeek', '/money/this-week', 'settlement'),
+      // MONEY → BY COMPANY (item 7). Settle together, report apart: the
+      // batch is org-wide, and this is where a person sees which authority
+      // the money belonged to. Read-only, so 'read' is the whole of it.
+      item('byCompany', '/money/by-company', 'settlement'),
       item('invoices', '/invoices', 'invoice'),
       item('receivables', '/receivables', 'receivable'),
       item('payments', '/payments', 'payment'),
