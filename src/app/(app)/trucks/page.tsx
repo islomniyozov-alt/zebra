@@ -3,6 +3,8 @@ import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyScopeFilter } from '@/lib/tenancy'
 import { Table, type Column } from '@/components/ui/Table'
+import { WarningCell, warningLabels } from '@/components/WarningCell'
+import { truckWarningFacts, truckWarnings, type Warning } from '@/lib/warnings'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
@@ -36,6 +38,7 @@ interface Row {
   odometer: string
   status: TruckStatus
   isRetired: boolean
+  warnings: readonly Warning[]
 }
 
 export default async function TrucksPage({
@@ -50,6 +53,12 @@ export default async function TrucksPage({
   const companyParam =
     typeof params['company'] === 'string' ? params['company'] : undefined
 
+  // Attention narrows the rows already fetched — warnings are computed and
+  // there is nothing stored to filter on. The tag filter is a real query
+  // filter: tags are stored and GIN-indexed.
+  const needsAttention = params['attention'] === '1'
+  const tagParam = typeof params['tag'] === 'string' ? params['tag'] : undefined
+
   const { rows, companyCount } = await withCurrentOrg(
     'read',
     'truck',
@@ -59,6 +68,7 @@ export default async function TrucksPage({
 
       const trucks = await tx.truck.findMany({
         where: {
+          ...(tagParam ? { tags: { has: tagParam } } : {}),
           ...scope,
           ...(companyParam ? { companyId: companyParam } : {}),
           ...(showRetired ? {} : { deletedAt: null }),
@@ -75,6 +85,7 @@ export default async function TrucksPage({
           currentOdometer: true,
           status: true,
           deletedAt: true,
+          tags: true,
           company: { select: { name: true } },
           // NOT selected: purchasePriceCents. It is money, and no role in this
           // phase has a resource that grants it — see the Step 2 report.
@@ -82,6 +93,13 @@ export default async function TrucksPage({
       })
 
       const miles = new Intl.NumberFormat(locale)
+
+      // ONE QUERY FOR THE PAGE, not one per row.
+      const facts = await truckWarningFacts(
+        tx,
+        trucks.map((truck) => truck.id),
+      )
+      const now = new Date()
 
       const rows: Row[] = trucks.map((truck) => ({
         id: truck.id,
@@ -97,6 +115,7 @@ export default async function TrucksPage({
             : miles.format(truck.currentOdometer),
         status: truck.status,
         isRetired: truck.deletedAt !== null,
+        warnings: truckWarnings(facts.get(truck.id) ?? { compliance: [] }, now),
       }))
 
       return { rows, companyCount }
@@ -105,6 +124,8 @@ export default async function TrucksPage({
 
   const mayCreate = await currentUserCan('create', 'truck')
   const showCompany = companyCount > 1
+
+  const warningNames = warningLabels(t)
 
   const columns: Column<Row>[] = [
     {
@@ -163,9 +184,49 @@ export default async function TrucksPage({
           />
         ),
     },
+    {
+      key: 'warnings',
+      header: t('warning.column'),
+      render: (row) => (
+        <WarningCell
+          warnings={row.warnings}
+          labels={{
+            count: t('warning.count'),
+            clear: t('warning.clear'),
+            names: warningNames,
+          }}
+        />
+      ),
+    },
   ]
 
-  const toggleHref = showRetired ? '/trucks' : '/trucks?removed=1'
+  const shown = needsAttention
+    ? rows.filter((row) => row.warnings.length > 0)
+    : rows
+
+  // ── EVERY TOGGLE KEEPS THE OTHERS ──────────────────────────────────
+  //
+  // This was `showRetired ? '/trucks' : '/trucks?removed=1'`, which dropped
+  // the company filter on every click and would now drop the attention and
+  // tag filters too — turning on "needs attention" and then "show retired"
+  // would quietly show everything again.
+  const withParams = (over: Record<string, string | undefined>) => {
+    const query = new URLSearchParams()
+    const all = {
+      company: companyParam,
+      removed: showRetired ? '1' : undefined,
+      attention: needsAttention ? '1' : undefined,
+      tag: tagParam,
+      ...over,
+    }
+    for (const [key, value] of Object.entries(all)) {
+      if (value !== undefined) query.set(key, value)
+    }
+    const text = query.toString()
+    return text ? `/trucks?${text}` : '/trucks'
+  }
+
+  const toggleHref = withParams({ removed: showRetired ? undefined : '1' })
 
   return (
     <>
@@ -185,6 +246,16 @@ export default async function TrucksPage({
 
       <div className="flex items-center gap-z3 border-b border-border bg-surface-2 px-gutter py-z2">
         <Link
+          href={withParams({ attention: needsAttention ? undefined : '1' })}
+          className={
+            needsAttention
+              ? 'text-sm font-medium text-accent'
+              : 'text-sm font-medium text-ink-2 hover:text-accent'
+          }
+        >
+          {needsAttention ? t('warning.all') : t('warning.attention')}
+        </Link>
+        <Link
           href={toggleHref}
           className="text-sm font-medium text-ink-2 hover:text-accent"
         >
@@ -195,7 +266,7 @@ export default async function TrucksPage({
       <Table
         caption={t('trucks.title')}
         columns={columns}
-        rows={rows}
+        rows={shown}
         rowKey={(row) => row.id}
         rowHref={(row) => `/trucks/${row.id}`}
         stripeTone={(row) => TRUCK_TONE[row.status]}

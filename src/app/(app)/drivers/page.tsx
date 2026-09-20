@@ -3,6 +3,12 @@ import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyScopeFilter } from '@/lib/tenancy'
 import { Table, type Column } from '@/components/ui/Table'
+import { WarningCell, warningLabels } from '@/components/WarningCell'
+import {
+  driverWarningFacts,
+  driverWarnings,
+  type Warning,
+} from '@/lib/warnings'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
@@ -30,6 +36,7 @@ interface Row {
   truck: string | null
   status: DriverStatus
   isRetired: boolean
+  warnings: readonly Warning[]
 }
 
 export default async function DriversPage({
@@ -57,6 +64,18 @@ export default async function DriversPage({
   const companyParam =
     typeof params['company'] === 'string' ? params['company'] : undefined
 
+  // ── NEEDS ATTENTION, AND A TAG ───────────────────────────────────────
+  //
+  // The attention filter narrows the rows this page ALREADY fetched rather
+  // than the query, because warnings are computed and there is nothing in
+  // the database to filter on. That is honest for a capped list — the page
+  // takes 200 — and it is written here rather than discovered later.
+  //
+  // The tag filter IS a query filter: tags are stored, indexed with GIN, and
+  // `has` is an index lookup rather than a scan.
+  const needsAttention = params['attention'] === '1'
+  const tagParam = typeof params['tag'] === 'string' ? params['tag'] : undefined
+
   const { rows, companyCount } = await withCurrentOrg(
     'read',
     'driver',
@@ -68,6 +87,7 @@ export default async function DriversPage({
           ...(companyParam ? { companyId: companyParam } : {}),
           ...(showRetired ? {} : { deletedAt: null }),
           ...(showInactive ? {} : { status: { not: 'INACTIVE' } }),
+          ...(tagParam ? { tags: { has: tagParam } } : {}),
         },
         orderBy: [{ company: { name: 'asc' } }, { lastName: 'asc' }],
         take: 200,
@@ -80,12 +100,22 @@ export default async function DriversPage({
           cdlState: true,
           status: true,
           deletedAt: true,
+          tags: true,
           company: { select: { name: true } },
           assignedTruck: { select: { unitNumber: true } },
           // NOT selected: payRules. Driver pay is its own resource (§7) and
           // this screen never asks for it, so it cannot leak from here.
         },
       })
+
+      // ONE QUERY FOR THE WHOLE PAGE, not one per row. `driverWarningFacts`
+      // takes every id at once; `tests/integration/warnings.test.ts` counts
+      // the statements and fails if the number moves with the list.
+      const facts = await driverWarningFacts(
+        tx,
+        drivers.map((driver) => driver.id),
+      )
+      const now = new Date()
 
       const rows: Row[] = drivers.map((driver) => ({
         id: driver.id,
@@ -97,6 +127,10 @@ export default async function DriversPage({
         truck: driver.assignedTruck?.unitNumber ?? null,
         status: driver.status,
         isRetired: driver.deletedAt !== null,
+        warnings: driverWarnings(
+          facts.get(driver.id) ?? { compliance: [], negativeNetCount: 0 },
+          now,
+        ),
       }))
 
       return { rows, companyCount }
@@ -105,6 +139,8 @@ export default async function DriversPage({
 
   const mayCreate = await currentUserCan('create', 'driver')
   const showCompany = companyCount > 1
+
+  const warningNames = warningLabels(t)
 
   const columns: Column<Row>[] = [
     {
@@ -172,7 +208,27 @@ export default async function DriversPage({
           />
         ),
     },
+    {
+      key: 'warnings',
+      header: t('warning.column'),
+      render: (row) => (
+        <WarningCell
+          warnings={row.warnings}
+          labels={{
+            count: t('warning.count'),
+            clear: t('warning.clear'),
+            names: warningNames,
+          }}
+        />
+      ),
+    },
   ]
+
+  // APPLIED AFTER THE WARNINGS ARE COMPUTED, because there is nothing in
+  // the database to filter on — see the note where the flag is read.
+  const shown = needsAttention
+    ? rows.filter((row) => row.warnings.length > 0)
+    : rows
 
   return (
     <>
@@ -195,6 +251,26 @@ export default async function DriversPage({
        * looking for a removed row should not lose the inactive ones to find
        * it. */}
       <div className="flex items-center gap-z4 border-b border-border bg-surface-2 px-gutter py-z2">
+        {/* NEEDS ATTENTION KEEPS EVERY OTHER TOGGLE, like the pair below:
+         * somebody narrowing to the rows that need work should not lose the
+         * company or the inactive view to do it. */}
+        <Link
+          href={`/drivers?${new URLSearchParams({
+            ...(companyParam ? { company: companyParam } : {}),
+            ...(showInactive ? { inactive: '1' } : {}),
+            ...(showRetired ? { removed: '1' } : {}),
+            ...(tagParam ? { tag: tagParam } : {}),
+            ...(needsAttention ? {} : { attention: '1' }),
+          }).toString()}`}
+          className={
+            needsAttention
+              ? 'text-sm font-medium text-accent'
+              : 'text-sm font-medium text-ink-2 hover:text-accent'
+          }
+        >
+          {needsAttention ? t('warning.all') : t('warning.attention')}
+        </Link>
+
         <Link
           href={`/drivers?${new URLSearchParams({
             ...(companyParam ? { company: companyParam } : {}),
@@ -220,7 +296,7 @@ export default async function DriversPage({
       <Table
         caption={t('drivers.title')}
         columns={columns}
-        rows={rows}
+        rows={shown}
         rowKey={(row) => row.id}
         rowHref={(row) => `/drivers/${row.id}`}
         stripeTone={(row) => DRIVER_TONE[row.status]}

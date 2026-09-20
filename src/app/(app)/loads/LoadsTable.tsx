@@ -1,4 +1,6 @@
 'use client'
+import type { Warning, WarningName } from '@/lib/warnings'
+import { WarningCell } from '@/components/WarningCell'
 
 import { useSearchParams } from 'next/navigation'
 import { Table, type Column } from '@/components/ui/Table'
@@ -31,12 +33,18 @@ export interface LoadRow {
   /** Pre-formatted in the request's locale. Money never crosses as a number. */
   rate: string
   isCancelled: boolean
+  warnings: readonly Warning[]
 }
 
 interface LoadsTableProps {
   rows: readonly LoadRow[]
   showCompanyColumn: boolean
   labels: {
+    /** The warnings column header, and the two strings inside a cell. */
+    warnings: string
+    warningCount: string
+    warningClear: string
+    warningNames: Record<WarningName, string>
     caption: string
     load: string
     reference: string
@@ -161,6 +169,20 @@ export function LoadsTable({
       align: 'end',
       // Money: right-aligned, tabular, mono, never truncated (§8).
       render: (row) => <span className="z-identifier">{row.rate}</span>,
+    },
+    {
+      key: 'warnings',
+      header: labels.warnings,
+      render: (row) => (
+        <WarningCell
+          warnings={row.warnings}
+          labels={{
+            count: labels.warningCount,
+            clear: labels.warningClear,
+            names: labels.warningNames,
+          }}
+        />
+      ),
     },
   ]
 

@@ -1,4 +1,6 @@
 import Link from 'next/link'
+import { loadWarningFacts, loadWarnings } from '@/lib/warnings'
+import { warningLabels } from '@/components/WarningCell'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { Button } from '@/components/ui/Button'
 import { getLocaleContext } from '@/lib/locale'
@@ -222,6 +224,15 @@ export default async function LoadsPage({
       return address || stop.name || '—'
     }
 
+    // ONE QUERY FOR THE PAGE. The loads list is the one that matters: a
+    // fan-out here would be PAGE_SIZE round trips on the screen a
+    // dispatcher reloads all morning.
+    const warningFacts = await loadWarningFacts(
+      tx,
+      loads.map((load) => load.id),
+    )
+    const now = new Date()
+
     const rows: LoadRow[] = loads.map((load) => ({
       id: load.id,
       loadNumber: load.loadNumber,
@@ -238,6 +249,9 @@ export default async function LoadsPage({
       // Money is an integer of cents everywhere until the moment it is read.
       rate: money.format(load.linehaulCents / 100),
       isCancelled: load.isCancelled,
+      warnings: warningFacts.has(load.id)
+        ? loadWarnings(warningFacts.get(load.id)!, now)
+        : [],
     }))
 
     // THE COUNTS, from the same predicate the chips filter by. Two
@@ -449,6 +463,10 @@ export default async function LoadsPage({
         )}
         labels={{
           caption: t('loads.title'),
+          warnings: t('warning.column'),
+          warningCount: t('warning.count'),
+          warningClear: t('warning.clear'),
+          warningNames: warningLabels(t),
           load: t('loads.column.load'),
           reference: t('loads.column.reference'),
           company: t('loads.column.company'),
