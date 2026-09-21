@@ -1,0 +1,53 @@
+name: neon storage
+
+# ─────────────────────────────────────────────────────────────────────────
+# WHAT THE PROJECT IS STORING, AND SWEEPING UP WHAT CI LEFT BEHIND.
+#
+# The free tier's storage limit was hit on 2026-09-21 and the project moved to
+# Launch. Every CI run forks a branch and deletes it in an `if: always()` step
+# — but a cancelled run, or a run killed between the fork and the delete,
+# leaves one behind, and a Neon branch bills for everything it diverges from
+# its parent by. Nothing in the system was counting them.
+#
+# THE NEON CREDENTIALS LIVE HERE AND NOWHERE ELSE. They are repository
+# secrets, deliberately not in anybody's `.env`, so this is the only place
+# that can ask the question at all.
+#
+# ── IT REFUSES TO DELETE ANYTHING IT WAS NOT ASKED FOR ───────────────────
+#
+# Only branches whose name starts `ci-` go, and the parent branch is checked
+# by id before anything is removed. A sweeper that could delete dev is a
+# sweeper nobody should run, and this one runs on a button.
+# ─────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_dispatch:
+    inputs:
+      delete:
+        description: 'Type delete to remove leftover ci-* branches. Anything else reports only.'
+        required: true
+        default: 'report'
+
+concurrency:
+  group: neon-storage
+  cancel-in-progress: false
+
+jobs:
+  storage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: list branches, and sweep the ci ones
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+          NEON_PARENT_BRANCH: ${{ secrets.NEON_PARENT_BRANCH }}
+          MODE: ${{ github.event.inputs.delete }}
+        run: node scripts/neon-storage.mjs
