@@ -53,7 +53,9 @@
     "20260920150000_warnings_tags",
     "20260920160000_pay_to_payment_type_default_authority",
     "20260920170000_invoice_payment_type",
-    "20260920180000_driver_off_duty"
+    "20260920180000_driver_off_duty",
+    "20260921190000_driver_roster_status",
+    "20260921210000_fleet_small_fields"
   ],
   "recordedAt": "2026-09-21",
   "verified": true
