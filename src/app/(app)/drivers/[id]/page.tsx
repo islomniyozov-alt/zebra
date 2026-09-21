@@ -10,6 +10,7 @@ import { InspectionPanel } from '../../_reference/InspectionPanel'
 import { DriverDocuments } from '../../_reference/DriverDocuments'
 import { inspectionPanelData } from '../../_reference/inspection-view'
 import { PAY_RULE_TYPES, payRulesFor } from '@/lib/driver-pay'
+import { onTimeRateForDriver } from '@/lib/dispatch-fields'
 import { bpsToInput, formatCents } from '@/lib/money'
 import { RecordForm } from '@/components/forms/RecordForm'
 import { AssetActions } from '../../_reference/AssetActions'
@@ -67,6 +68,11 @@ export default async function EditDriverPage({
     // round trip — this screen is one read.
     const payRules = await payRulesFor(tx, id)
 
+    // ONE STATEMENT, BOTH SEATS, FINISHED FREIGHT ONLY. Derived on every
+    // read: nothing on `Driver` stores a score, so there is no stale
+    // number to go wrong when a check-in is corrected.
+    const onTimeRate = await onTimeRateForDriver(tx, id)
+
     const open = await currentAuthority(tx, 'driver', id)
     const openCompany = open
       ? (companies.find((c) => c.id === open.companyId)?.name ?? null)
@@ -99,6 +105,7 @@ export default async function EditDriverPage({
       openCompany,
       trucks,
       payRules,
+      onTimeRate,
       compliance,
       inspections,
       documents: documents.map((document) => ({
@@ -120,6 +127,7 @@ export default async function EditDriverPage({
     openCompany,
     trucks,
     payRules,
+    onTimeRate,
     compliance,
     inspections,
   } = data
@@ -137,6 +145,20 @@ export default async function EditDriverPage({
 
   const day = (value: Date | null) =>
     value ? value.toISOString().slice(0, 10) : null
+
+  // ── NO DELIVERIES TO JUDGE IS NOT A SCORE OF ZERO ────────────────────
+  //
+  // A new driver, and a driver whose arrivals nobody recorded, both have
+  // `percent === null` — and "0%" would read as the worst record in the
+  // company. The sentence says what is missing instead, and the figure
+  // always carries the count it is over so a 100% over two loads cannot be
+  // mistaken for a season.
+  const onTimeLabel =
+    onTimeRate.percent === null
+      ? t('dispatch.onTimeRate.none')
+      : t('dispatch.onTimeRate.value')
+          .replace('{percent}', String(onTimeRate.percent))
+          .replace('{counted}', String(onTimeRate.counted))
 
   // The figure each rule turns on, rendered from its own integer column — bps
   // for percentages, cents for the other two. Never from a float.
@@ -184,6 +206,15 @@ export default async function EditDriverPage({
             {driver.firstName} {driver.lastName}
           </span>
         </h1>
+        {/* OPERATIONAL, SO IT IS UNGATED. A dispatcher deciding who to
+         * offer a load to needs this; it is a record of arrivals, not a
+         * figure from the pay panel below. */}
+        <p className="max-w-[420px] text-end text-xs text-ink-3">
+          <span className="uppercase tracking-[0.04em]">
+            {t('dispatch.onTimeRate')}
+          </span>{' '}
+          <span className="text-ink-2">{onTimeLabel}</span>
+        </p>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-surface-2 px-gutter py-z5">

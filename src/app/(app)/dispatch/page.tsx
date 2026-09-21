@@ -5,6 +5,7 @@ import { companyScopeFilter } from '@/lib/tenancy'
 import { operationalTone } from '@/lib/status'
 import { KpiCard } from '@/components/ui/KpiCard'
 import { Board, type BoardLoad, type BoardTruck } from './Board'
+import { headingToForTrucks } from '@/lib/dispatch-fields'
 
 // §11 — the dispatch board. Zebra's own, not the wall display.
 //
@@ -104,7 +105,21 @@ export default async function DispatchPage({
       }),
     ])
 
-    return { trucks, drivers, loads, available }
+    // ONE MORE STATEMENT FOR THE WHOLE BOARD, after the trucks are known.
+    // It cannot join the `Promise.all` above because it takes their ids,
+    // and it is not a per-row read: `headingToForTrucks` takes the array.
+    //
+    // The board already holds 300 loads, and they are still the wrong
+    // source — that take is ordered by booking and windowed to the week, so
+    // a truck on a load booked a month ago is heading nowhere according to
+    // it. Deriving from the set that happens to be on screen is how a
+    // derived field acquires the staleness it was meant to avoid.
+    const headingTo = await headingToForTrucks(
+      tx,
+      trucks.map((truck) => truck.id),
+    )
+
+    return { trucks, drivers, loads, available, headingTo }
   })
 
   const canAssign = await currentUserCan('update', 'dispatch')
@@ -169,6 +184,7 @@ export default async function DispatchPage({
       driverId: driver?.id ?? null,
       companyName: truck.company.name,
       loadsByDay,
+      headingTo: data.headingTo.get(truck.id) ?? null,
     }
   })
 
@@ -249,6 +265,7 @@ export default async function DispatchPage({
           cancel: t('ref.cancel'),
           empty: t('dispatch.empty'),
           noTrucks: t('dispatch.noTrucks'),
+          headingTo: t('dispatch.headingTo'),
         }}
       />
     </>

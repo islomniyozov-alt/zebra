@@ -40,6 +40,14 @@ export interface BoardTruck {
   companyName: string
   /** Loads already on this truck, by day column. */
   loadsByDay: Record<number, BoardLoad[]>
+  /**
+   * The last stop of the load this truck is on, DERIVED on every read.
+   *
+   * Null is a truck on nothing, and it renders as nothing rather than as
+   * an em dash: on a board row an empty fourth line is noise, and a
+   * dispatcher scanning for who is free reads the absence faster.
+   */
+  headingTo: string | null
 }
 
 export interface BoardDriver {
@@ -68,6 +76,7 @@ interface Props {
     cancel: string
     empty: string
     noTrucks: string
+    headingTo: string
   }
 }
 
@@ -178,6 +187,11 @@ export function Board({
                     <span className="block text-xs text-ink-3">
                       {truck.companyName}
                     </span>
+                    {truck.headingTo ? (
+                      <span className="block text-xs text-ink-2">
+                        {labels.headingTo}: {truck.headingTo}
+                      </span>
+                    ) : null}
                   </th>
 
                   {days.map((day, index) => {

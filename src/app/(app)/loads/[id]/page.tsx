@@ -10,10 +10,16 @@ import {
   operationalTone,
   TONE_STRIPE,
 } from '@/lib/status'
+import type { StatusTone } from '@/lib/status'
 import { formatAddress } from '@/lib/locations'
 import { newestFirst } from '@/lib/load-timeline'
 import { attributionLabel, stopAttribution } from '@/lib/stop-attribution'
 import { milesSummary } from '@/lib/load-miles'
+import {
+  deliveryFactsFromStops,
+  onTimeFrom,
+  type OnTime,
+} from '@/lib/dispatch-fields'
 import { pipelineStage } from '@/lib/load-pipeline'
 import { isAssigned } from '@/lib/load-readiness'
 import { activityEntries } from '@/lib/load-activity'
@@ -134,6 +140,19 @@ const bytes = (size: number) =>
     : size < 1024 * 1024
       ? `${Math.round(size / 1024)} KB`
       : `${(size / 1024 / 1024).toFixed(1)} MB`
+
+/**
+ * SUCCESS, DANGER, MUTED — and muted is the interesting one.
+ *
+ * `unknown` is not a mild failure. It is the absence of a measurement, and
+ * a warning tone would read as "nearly late" to somebody scanning the
+ * header. Muted says nobody recorded it, which is what happened.
+ */
+const ON_TIME_TONE: Record<OnTime, StatusTone> = {
+  on_time: 'success',
+  late: 'danger',
+  unknown: 'muted',
+}
 
 export default async function LoadDetailPage({
   params,
@@ -594,6 +613,21 @@ export default async function LoadDetailPage({
   // stops have been driven.
   const delivered = podRequired
 
+  // ── DID IT ARRIVE ON TIME ────────────────────────────────────────────
+  //
+  // NO QUERY. Every stop is already on this page, and `onTimeFrom` is the
+  // same function the list loader feeds — one rule, two sources.
+  //
+  // ONLY ONCE IT IS FINISHED. A load in transit has not failed to arrive,
+  // and a badge reading "No check-in recorded" on freight that is still
+  // moving would be a complaint about the future.
+  const onTime: OnTime | null = delivered
+    ? (() => {
+        const facts = deliveryFactsFromStops(load.stops)
+        return facts === null ? null : onTimeFrom(facts)
+      })()
+    : null
+
   const slotFor = (
     type: string,
     label: string,
@@ -681,6 +715,17 @@ export default async function LoadDetailPage({
             {load.isCancelled ? (
               <StatusBadge tone="muted" label={t('loads.cancelled')} />
             ) : null}
+            {/* THE THIRD BADGE, AND IT IS DERIVED. `unknown` shows rather
+             * than hides: a delivered load nobody checked in is a gap in
+             * the record somebody can still close, and it is the reason
+             * the driver rate below excludes it instead of guessing. */}
+            {onTime === null ? null : (
+              <StatusBadge
+                tone={ON_TIME_TONE[onTime]}
+                variant="outlined"
+                label={t(`dispatch.onTime.${onTime}` as MessageKey)}
+              />
+            )}
           </div>
 
           <div className="flex items-center gap-z3">

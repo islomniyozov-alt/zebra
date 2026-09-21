@@ -5,6 +5,12 @@ import { companyScopeFilter } from '@/lib/tenancy'
 import { Table, type Column } from '@/components/ui/Table'
 import { WarningCell, warningLabels } from '@/components/WarningCell'
 import {
+  dispatchFactsForDrivers,
+  dispatchStatusFrom,
+  lastActivityForDrivers,
+  type DispatchStatus,
+} from '@/lib/dispatch-fields'
+import {
   driverWarningFacts,
   driverWarnings,
   type Warning,
@@ -15,6 +21,7 @@ import { Button } from '@/components/ui/Button'
 import { orDash } from '../_reference/shared'
 import { driverStatusKey } from './fields'
 import type { StatusTone } from '@/lib/status'
+import type { MessageKey } from '@/lib/i18n'
 import type { DriverStatus } from '@/generated/prisma/client'
 
 const DRIVER_TONE: Record<DriverStatus, StatusTone> = {
@@ -25,6 +32,29 @@ const DRIVER_TONE: Record<DriverStatus, StatusTone> = {
   VACATION: 'warning',
   INACTIVE: 'muted',
 }
+
+// ── THE DERIVED AXIS, WHICH IS NOT `Driver.status` ─────────────────────
+//
+// `Driver.status` is a ROSTER fact somebody types on the form — hired,
+// on vacation, no longer with us. Nothing in the freight engine writes it,
+// which is checked: grep for a write and the only one is the edit action.
+//
+// Dispatch status is a FREIGHT fact and is derived on every read, so the
+// two never disagree the way a stored copy would. Both columns are here
+// because they answer different questions, and the column headers say so.
+const DISPATCH_TONE: Record<DispatchStatus, StatusTone> = {
+  available: 'neutral',
+  assigned: 'progress',
+  in_transit: 'progress',
+  off_duty: 'muted',
+}
+
+const DISPATCH_FILTERS = [
+  'available',
+  'assigned',
+  'in_transit',
+  'off_duty',
+] as const
 
 interface Row {
   id: string
@@ -37,6 +67,10 @@ interface Row {
   status: DriverStatus
   isRetired: boolean
   warnings: readonly Warning[]
+  /** Derived from the freight and the off-duty flag. Never stored. */
+  dispatch: DispatchStatus
+  /** Already formatted: the server holds the locale, the row holds text. */
+  lastActivity: string | null
 }
 
 export default async function DriversPage({
@@ -45,7 +79,7 @@ export default async function DriversPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const params = await searchParams
-  const { t } = await getLocaleContext()
+  const { t, locale } = await getLocaleContext()
 
   const showRetired = params['removed'] === '1'
   // ── ACTIVE BY DEFAULT, SINCE THE DATATRUCK IMPORT ──────────────────────
@@ -75,6 +109,15 @@ export default async function DriversPage({
   // `has` is an index lookup rather than a scan.
   const needsAttention = params['attention'] === '1'
   const tagParam = typeof params['tag'] === 'string' ? params['tag'] : undefined
+
+  // ── AND THE DISPATCH FILTER, WHICH IS ALSO POST-QUERY ────────────────
+  //
+  // For the same reason as the attention one: the status is computed, so
+  // there is no column to put in a WHERE. An unrecognised value narrows to
+  // nothing rather than being ignored — a filter that silently does not
+  // apply is a screen lying about what it is showing.
+  const dispatchParam =
+    typeof params['dispatch'] === 'string' ? params['dispatch'] : undefined
 
   const { rows, companyCount } = await withCurrentOrg(
     'read',
@@ -108,14 +151,19 @@ export default async function DriversPage({
         },
       })
 
-      // ONE QUERY FOR THE WHOLE PAGE, not one per row. `driverWarningFacts`
-      // takes every id at once; `tests/integration/warnings.test.ts` counts
-      // the statements and fails if the number moves with the list.
-      const facts = await driverWarningFacts(
-        tx,
-        drivers.map((driver) => driver.id),
-      )
+      // ONE QUERY EACH FOR THE WHOLE PAGE, not one per row. Each loader
+      // takes every id at once; `tests/integration/warnings.test.ts` and
+      // `tests/integration/dispatch-fields.test.ts` count the statements and
+      // fail if the number moves with the length of the list.
+      const ids = drivers.map((driver) => driver.id)
+      const [facts, dispatchFacts, lastActivity] = await Promise.all([
+        driverWarningFacts(tx, ids),
+        dispatchFactsForDrivers(tx, ids),
+        lastActivityForDrivers(tx, ids),
+      ])
       const now = new Date()
+      const day = new Intl.DateTimeFormat(locale, { dateStyle: 'medium' })
+      const activityOf = (at: Date | null) => (at ? day.format(at) : null)
 
       const rows: Row[] = drivers.map((driver) => ({
         id: driver.id,
@@ -131,6 +179,15 @@ export default async function DriversPage({
           facts.get(driver.id) ?? { compliance: [], negativeNetCount: 0 },
           now,
         ),
+        dispatch: dispatchStatusFrom(
+          dispatchFacts.get(driver.id) ?? {
+            isOffDuty: false,
+            offDutyUntil: null,
+            activeStatuses: [],
+          },
+          now,
+        ),
+        lastActivity: activityOf(lastActivity.get(driver.id) ?? null),
       }))
 
       return { rows, companyCount }
@@ -209,6 +266,27 @@ export default async function DriversPage({
         ),
     },
     {
+      key: 'dispatch',
+      header: t('dispatch.status'),
+      // DERIVED ON EVERY READ. An off-duty driver cannot read Available
+      // here however stale the roster column beside it has gone.
+      render: (row) => (
+        <StatusBadge
+          tone={DISPATCH_TONE[row.dispatch]}
+          variant="outlined"
+          label={t(`dispatch.status.${row.dispatch}` as MessageKey)}
+        />
+      ),
+    },
+    {
+      key: 'lastActivity',
+      header: t('dispatch.lastActivity'),
+      // NEVER IS A FACT, not a gap: a driver nobody has moved, filed a
+      // document for, or assigned anything to. An em dash would read as
+      // "not loaded".
+      render: (row) => row.lastActivity ?? t('dispatch.lastActivity.never'),
+    },
+    {
       key: 'warnings',
       header: t('warning.column'),
       render: (row) => (
@@ -226,9 +304,12 @@ export default async function DriversPage({
 
   // APPLIED AFTER THE WARNINGS ARE COMPUTED, because there is nothing in
   // the database to filter on — see the note where the flag is read.
-  const shown = needsAttention
+  const attended = needsAttention
     ? rows.filter((row) => row.warnings.length > 0)
     : rows
+  const shown = dispatchParam
+    ? attended.filter((row) => row.dispatch === dispatchParam)
+    : attended
 
   return (
     <>
@@ -270,6 +351,48 @@ export default async function DriversPage({
         >
           {needsAttention ? t('warning.all') : t('warning.attention')}
         </Link>
+
+        {/* THE DERIVED FILTER. Every link keeps every other toggle, like
+         * the pair below — narrowing to the available drivers should not
+         * silently widen the company or resurrect the inactive ones. */}
+        <span className="flex items-center gap-z2">
+          <Link
+            href={`/drivers?${new URLSearchParams({
+              ...(companyParam ? { company: companyParam } : {}),
+              ...(showInactive ? { inactive: '1' } : {}),
+              ...(showRetired ? { removed: '1' } : {}),
+              ...(tagParam ? { tag: tagParam } : {}),
+              ...(needsAttention ? { attention: '1' } : {}),
+            }).toString()}`}
+            className={
+              dispatchParam
+                ? 'text-sm text-ink-2 hover:text-accent'
+                : 'text-sm font-medium text-accent'
+            }
+          >
+            {t('dispatch.status.all')}
+          </Link>
+          {DISPATCH_FILTERS.map((name) => (
+            <Link
+              key={name}
+              href={`/drivers?${new URLSearchParams({
+                ...(companyParam ? { company: companyParam } : {}),
+                ...(showInactive ? { inactive: '1' } : {}),
+                ...(showRetired ? { removed: '1' } : {}),
+                ...(tagParam ? { tag: tagParam } : {}),
+                ...(needsAttention ? { attention: '1' } : {}),
+                dispatch: name,
+              }).toString()}`}
+              className={
+                dispatchParam === name
+                  ? 'text-sm font-medium text-accent'
+                  : 'text-sm text-ink-2 hover:text-accent'
+              }
+            >
+              {t(`dispatch.status.${name}` as MessageKey)}
+            </Link>
+          ))}
+        </span>
 
         <Link
           href={`/drivers?${new URLSearchParams({

@@ -10,6 +10,7 @@ import {
   headingToForTrucks,
   lastActivityForDrivers,
   onTimeFrom,
+  onTimeRateForDriver,
 } from '@/lib/dispatch-fields'
 import type { PrismaClient } from '@/generated/prisma/client'
 
@@ -107,6 +108,9 @@ async function seedLoad(over: {
   status?: string
   windowEnd?: Date | null
   arrivedAt?: Date | null
+  /** Defaults to the module-level driver. Item 8 made the second seat real. */
+  driver?: string
+  coDriver?: string
 }) {
   const load = await inOrg((tx) =>
     createLoad(
@@ -139,7 +143,10 @@ async function seedLoad(over: {
     where: { id: load.id },
     data: {
       truckId,
-      driverId,
+      driverId: over.coDriver
+        ? (over.driver ?? null)
+        : (over.driver ?? driverId),
+      ...(over.coDriver ? { coDriverId: over.coDriver } : {}),
       ...(over.status
         ? { operationalStatus: over.status as 'IN_TRANSIT' }
         : {}),
@@ -264,6 +271,77 @@ describe('on-time delivery', () => {
     })
     const facts = await inOrg((tx) => deliveryFactsForLoads(tx, [id]))
     expect(onTimeFrom(facts.get(id)!)).toBe('unknown')
+  })
+})
+
+describe('a driver on-time rate, over real rows', () => {
+  let ratedId = ''
+
+  beforeAll(async () => {
+    ratedId = (
+      await owner.driver.create({
+        data: { organizationId, companyId, firstName: 'RAY', lastName: 'TED' },
+      })
+    ).id
+
+    // ON TIME, AND IN THE SECOND SEAT. Item 8 made `coDriverId` a real
+    // assignment, so a rate that read `driverId` alone would show a team
+    // driver somebody else's record — or none at all.
+    await seedLoad({
+      pickupCity: 'Whiteland',
+      deliveryCity: 'Gastonia',
+      status: 'DELIVERED',
+      coDriver: ratedId,
+      windowEnd: hours(-6),
+      arrivedAt: hours(-8),
+    })
+
+    // Late, first seat.
+    await seedLoad({
+      pickupCity: 'Etna',
+      deliveryCity: 'Lexington',
+      status: 'POD_RECEIVED',
+      driver: ratedId,
+      windowEnd: hours(-6),
+      arrivedAt: hours(-1),
+    })
+
+    // STILL MOVING, and late by the clock — but it has not failed to
+    // arrive, it has not arrived. Counting it would punish a driver for
+    // freight that is still on the road.
+    await seedLoad({
+      pickupCity: 'Etna',
+      deliveryCity: 'Columbus',
+      status: 'IN_TRANSIT',
+      driver: ratedId,
+      windowEnd: hours(-6),
+      arrivedAt: hours(-1),
+    })
+
+    // THE GUARD NAMED "a load without actuals counted". Delivered, and
+    // nobody recorded the arrival.
+    await seedLoad({
+      pickupCity: 'Etna',
+      deliveryCity: 'Dayton',
+      status: 'DELIVERED',
+      driver: ratedId,
+      windowEnd: hours(-6),
+      arrivedAt: null,
+    })
+  })
+
+  it('counts both seats, finished freight only, and excludes the blanks', async () => {
+    const rate = await inOrg((tx) => onTimeRateForDriver(tx, ratedId))
+    // Four loads: one on time, one late, one still moving, one unrecorded.
+    expect(rate.counted).toBe(2)
+    expect(rate.onTime).toBe(1)
+    expect(rate.percent).toBe(50)
+  })
+
+  it('is null rather than zero for a driver with nothing to judge', async () => {
+    const rate = await inOrg((tx) => onTimeRateForDriver(tx, idleDriverId))
+    expect(rate.counted).toBe(0)
+    expect(rate.percent).toBeNull()
   })
 })
 

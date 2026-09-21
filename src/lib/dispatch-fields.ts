@@ -132,6 +132,38 @@ export function onTimeFrom(facts: DeliveryFacts): OnTime {
   return facts.arrivedAt.getTime() <= promised.getTime() ? 'on_time' : 'late'
 }
 
+/**
+ * The same delivery facts, from stops ALREADY IN MEMORY.
+ *
+ * The load detail page holds every stop it needs; asking the database
+ * again for a row it is rendering would be a round trip to learn nothing.
+ * `deliveryFactsForLoads` is the list form of this and the two agree by
+ * construction — the same last-DELIVERY-stop rule, written once here and
+ * once as an ORDER BY there, which is why both are tested against the same
+ * fixtures.
+ *
+ * NULL WHEN THERE IS NO DELIVERY STOP AT ALL. That is a malformed load
+ * rather than an early one, and it is not the same fact as `unknown`.
+ */
+export function deliveryFactsFromStops(
+  stops: readonly {
+    type: string
+    sequence: number
+    arrivedAt: Date | null
+    windowEnd: Date | null
+    scheduledAt: Date | null
+  }[],
+): DeliveryFacts | null {
+  const deliveries = stops.filter((stop) => stop.type === 'DELIVERY')
+  if (deliveries.length === 0) return null
+  const last = deliveries.reduce((a, b) => (b.sequence >= a.sequence ? b : a))
+  return {
+    arrivedAt: last.arrivedAt,
+    windowEnd: last.windowEnd,
+    scheduledAt: last.scheduledAt,
+  }
+}
+
 export interface OnTimeRate {
   /** Loads that could be judged — both times present. */
   counted: number
@@ -285,6 +317,58 @@ export async function lastActivityForDrivers(
 
   for (const row of rows) out.set(row.id, row.at)
   return out
+}
+
+/**
+ * One driver's on-time record, in ONE statement.
+ *
+ * BOTH SEATS COUNT. A team driver was on the load whichever seat they sat
+ * in, and item 8 made `coDriverId` a real assignment rather than a note —
+ * so a co-driver whose loads all arrived late has a late record, and a
+ * rate that read `driverId` alone would show them a record that isn't
+ * theirs.
+ *
+ * ONLY FINISHED FREIGHT IS JUDGED. A load still in transit has not failed
+ * to arrive; it has not arrived yet, and counting it as `unknown` would be
+ * harmless to the percentage but would inflate the count the screen prints
+ * beside it.
+ */
+export async function onTimeRateForDriver(
+  tx: TxClient,
+  driverId: string,
+): Promise<OnTimeRate> {
+  const rows = await tx.$queryRaw<
+    {
+      arrived_at: Date | null
+      window_end: Date | null
+      scheduled_at: Date | null
+    }[]
+  >`
+    SELECT s."arrivedAt" AS arrived_at,
+           s."windowEnd" AS window_end, s."scheduledAt" AS scheduled_at
+      FROM "Load" l
+      CROSS JOIN LATERAL (
+        SELECT st."arrivedAt", st."windowEnd", st."scheduledAt"
+          FROM "LoadStop" st
+         WHERE st."loadId" = l."id" AND st."type" = 'DELIVERY'
+         ORDER BY st."sequence" DESC
+         LIMIT 1
+      ) s
+     WHERE (l."driverId" = ${driverId} OR l."coDriverId" = ${driverId})
+       AND l."deletedAt" IS NULL
+       AND l."isCancelled" = false
+       AND l."operationalStatus" = ANY(${[...FINISHED]}::text[]::"LoadOperationalStatus"[])
+  `
+
+  return onTimeRateFrom(
+    rows.map((row) =>
+      onTimeFrom({
+        arrivedAt: row.arrived_at,
+        windowEnd: row.window_end,
+        scheduledAt: row.scheduled_at,
+      }),
+    ),
+  )
 }
 
 /** Delivery facts for many loads, in ONE statement. */

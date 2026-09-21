@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
+  deliveryFactsFromStops,
   dispatchStatusFrom,
   headingToFrom,
   onTimeFrom,
@@ -151,6 +152,58 @@ describe('on-time delivery', () => {
   })
 })
 
+describe('the delivery stop a load is judged on', () => {
+  const stop = (
+    sequence: number,
+    type: string,
+    arrivedAt: Date | null = null,
+  ) => ({ sequence, type, arrivedAt, windowEnd: NOW, scheduledAt: null })
+
+  it('is the LAST delivery, not the last stop', () => {
+    // A multi-drop trip ending at a pickup for the next run is not judged
+    // on that pickup.
+    const facts = deliveryFactsFromStops([
+      stop(1, 'PICKUP'),
+      stop(2, 'DELIVERY', hours(-3)),
+      stop(3, 'DELIVERY', hours(2)),
+    ])
+    expect(facts?.arrivedAt).toEqual(hours(2))
+    expect(onTimeFrom(facts!)).toBe('late')
+  })
+
+  it('does not depend on the order the rows arrive in', () => {
+    // `findUnique` orders by sequence, but nothing in the type says so,
+    // and a caller that forgets the orderBy must not silently judge the
+    // wrong stop.
+    const facts = deliveryFactsFromStops([
+      stop(3, 'DELIVERY', hours(2)),
+      stop(2, 'DELIVERY', hours(-3)),
+      stop(1, 'PICKUP'),
+    ])
+    expect(facts?.arrivedAt).toEqual(hours(2))
+  })
+
+  it('is NULL when the load has no delivery at all', () => {
+    // A malformed load, which is not the same fact as an unrecorded
+    // arrival — the screen renders nothing rather than "No check-in".
+    expect(deliveryFactsFromStops([stop(1, 'PICKUP')])).toBeNull()
+  })
+
+  it('agrees with the list loader about which stop it picked', () => {
+    // ONE RULE, TWO SOURCES. The loader expresses "last delivery by
+    // sequence" as an ORDER BY and this expresses it as a reduce; the way
+    // they drift apart is one of them being changed alone.
+    const loader = readFileSync('src/lib/dispatch-fields.ts', 'utf8')
+    expect(loader).toContain(
+      'st."type" = ' +
+        String.fromCharCode(39) +
+        'DELIVERY' +
+        String.fromCharCode(39),
+    )
+    expect(loader).toContain('ORDER BY st."sequence" DESC')
+  })
+})
+
 describe('a driver on-time rate', () => {
   const rate = (...outcomes: OnTime[]) => onTimeRateFrom(outcomes)
 
@@ -198,8 +251,14 @@ describe('what item 11 stores', () => {
   })
 
   it('reads each list in exactly one statement', () => {
-    // Four loaders, four statements — the number that must not grow with the
-    // length of any list. The costed form is in the integration suite.
-    expect(source.match(/\$queryRaw/g) ?? []).toHaveLength(4)
+    // FIVE LOADERS, FIVE STATEMENTS — the number that must not grow with
+    // the length of any list. Four take an array of ids; the fifth,
+    // `onTimeRateForDriver`, takes one driver and answers over their whole
+    // history in one statement rather than one per load.
+    //
+    // A count is a proxy for the thing that matters, which is that no
+    // statement sits inside a loop. The costed form is in the integration
+    // suite, where twenty drivers are asked for and the questions counted.
+    expect(source.match(/\$queryRaw/g) ?? []).toHaveLength(5)
   })
 })

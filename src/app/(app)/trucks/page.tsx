@@ -4,6 +4,7 @@ import { getLocaleContext } from '@/lib/locale'
 import { companyScopeFilter } from '@/lib/tenancy'
 import { Table, type Column } from '@/components/ui/Table'
 import { WarningCell, warningLabels } from '@/components/WarningCell'
+import { headingToForTrucks } from '@/lib/dispatch-fields'
 import { truckWarningFacts, truckWarnings, type Warning } from '@/lib/warnings'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -39,6 +40,8 @@ interface Row {
   status: TruckStatus
   isRetired: boolean
   warnings: readonly Warning[]
+  /** Derived: the last stop of the load this truck is on. Null when idle. */
+  headingTo: string | null
 }
 
 export default async function TrucksPage({
@@ -94,11 +97,12 @@ export default async function TrucksPage({
 
       const miles = new Intl.NumberFormat(locale)
 
-      // ONE QUERY FOR THE PAGE, not one per row.
-      const facts = await truckWarningFacts(
-        tx,
-        trucks.map((truck) => truck.id),
-      )
+      // ONE QUERY EACH FOR THE PAGE, not one per row.
+      const ids = trucks.map((truck) => truck.id)
+      const [facts, headingTo] = await Promise.all([
+        truckWarningFacts(tx, ids),
+        headingToForTrucks(tx, ids),
+      ])
       const now = new Date()
 
       const rows: Row[] = trucks.map((truck) => ({
@@ -116,6 +120,7 @@ export default async function TrucksPage({
         status: truck.status,
         isRetired: truck.deletedAt !== null,
         warnings: truckWarnings(facts.get(truck.id) ?? { compliance: [] }, now),
+        headingTo: headingTo.get(truck.id) ?? null,
       }))
 
       return { rows, companyCount }
@@ -183,6 +188,14 @@ export default async function TrucksPage({
             label={t(fleetStatusKey(row.status))}
           />
         ),
+    },
+    {
+      key: 'headingTo',
+      header: t('dispatch.headingTo'),
+      truncate: true,
+      // DERIVED, NEVER STORED. A blank cell is a truck on nothing, which
+      // is a fact rather than a gap — see dispatch-fields.ts.
+      render: (row) => row.headingTo ?? '—',
     },
     {
       key: 'warnings',
