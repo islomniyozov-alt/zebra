@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { ASSIGNABLE_DRIVER, ASSIGNABLE_TRUCK } from '@/lib/driver-availability'
+import { assignableDriver, ASSIGNABLE_TRUCK } from '@/lib/driver-availability'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import {
@@ -279,14 +279,43 @@ export default async function LoadDetailPage({
           take: ACTIVITY_WINDOW + 1,
           select: AUDIT_FIELDS,
         }),
+        // ── WHOEVER IS ALREADY ON IT STAYS IN THE LIST ──────────────────
+        //
+        // `defaultValue` on a select whose options do not contain it falls
+        // back to the first option — the blank one — and the next save
+        // UNASSIGNS the load without anybody touching that field. A driver
+        // going off duty mid-load makes that ordinary rather than rare,
+        // which is why it is fixed in the same change that made it likely.
+        //
+        // The predicate still answers "who may be given work": these two
+        // arms mean "assignable, or already here", and assigning somebody
+        // else is still refused by `assertAssignable`.
         tx.truck.findMany({
-          where: { ...ASSIGNABLE_TRUCK, companyId: load.companyId },
+          where: {
+            companyId: load.companyId,
+            OR: [
+              ASSIGNABLE_TRUCK,
+              ...(load.truckId ? [{ id: load.truckId }] : []),
+            ],
+          },
           orderBy: { unitNumber: 'asc' },
           take: 500,
           select: { id: true, unitNumber: true },
         }),
         tx.driver.findMany({
-          where: { ...ASSIGNABLE_DRIVER, companyId: load.companyId },
+          where: {
+            companyId: load.companyId,
+            OR: [
+              assignableDriver(),
+              {
+                id: {
+                  in: [load.driverId, load.coDriverId].filter(
+                    (id): id is string => id !== null,
+                  ),
+                },
+              },
+            ],
+          },
           orderBy: { lastName: 'asc' },
           take: 500,
           select: { id: true, firstName: true, lastName: true },

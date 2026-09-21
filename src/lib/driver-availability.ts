@@ -1,4 +1,5 @@
 import type { Prisma } from '@/generated/prisma/client'
+import { ACTIVE_ROSTER } from './driver-roster'
 
 // ---------------------------------------------------------------------------
 // WHICH DRIVERS MAY BE GIVEN WORK.
@@ -35,12 +36,34 @@ import type { Prisma } from '@/generated/prisma/client'
  *
  * Spread into a `where`, alongside whatever company scope the caller has:
  *
- *     where: { ...ASSIGNABLE_DRIVER, ...scope }
+ *     where: { ...assignableDriver(), ...scope }
+ *
+ * A CALLER THAT ALREADY HOLDS A DRIVER MUST KEEP THEM IN THE OPTIONS. This
+ * predicate answers "who may be GIVEN work", which is not the same question
+ * as "what may this select show" — a driver who goes off duty mid-load is
+ * still on that load, and a select that dropped them would unassign them on
+ * the next save. See the load detail page, which ORs the current pair back
+ * in.
  */
-export const ASSIGNABLE_DRIVER = {
-  deletedAt: null,
-  status: { not: 'INACTIVE' },
-} as const satisfies Prisma.DriverWhereInput
+export function assignableDriver(
+  now: Date = new Date(),
+): Prisma.DriverWhereInput {
+  return {
+    deletedAt: null,
+    // ON THE ROSTER AND WORKING. VACATION and INACTIVE are both people
+    // nobody can send anywhere this week; only one of them is permanent,
+    // and neither belongs in a picker that hands out freight.
+    status: ACTIVE_ROSTER,
+    // ── AND NOT OFF DUTY, AS OF NOW (owner's ruling, 2026-09-21) ──────
+    //
+    // A FUNCTION OF `now` RATHER THAN A CONSTANT, and that is the whole
+    // reason this stopped being one. `isOffDuty: false` alone would keep a
+    // driver out of every picker after their return date had passed —
+    // which is the stale-flag failure item 11 wrote `offDutyUntil` to
+    // prevent, reintroduced one layer down.
+    OR: [{ isOffDuty: false }, { offDutyUntil: { lte: now } }],
+  }
+}
 
 /**
  * A truck that can be given freight today.

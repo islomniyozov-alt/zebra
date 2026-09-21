@@ -43,6 +43,15 @@ export type ReferenceFailure =
    *
    * So the codes are never auto-accepted. A person says they match the card.
    */
+  /**
+   * A driver status the roster does not get to state (item 11, ruling).
+   *
+   * DISPATCHED and ON_ROUTE are derived from the freight and OFF_DUTY is a
+   * flag of its own. The three remain in the Postgres enum because dropping
+   * an enum value means rewriting the table; this is what stops them being
+   * written. See src/lib/driver-roster.ts.
+   */
+  | 'not_roster_status'
   | 'codes_unconfirmed'
 
 export class ReferenceError extends Error {
@@ -77,6 +86,7 @@ export const REFERENCE_ERROR_KEYS: Record<ReferenceFailure, MessageKey> = {
   closed_history_payment_type: 'ref.error.closedHistoryPaymentType',
   window_inverted: 'ref.error.windowInverted',
   codes_unconfirmed: 'ref.error.codesUnconfirmed',
+  not_roster_status: 'ref.error.notRosterStatus',
 }
 
 /**

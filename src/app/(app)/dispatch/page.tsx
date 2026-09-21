@@ -1,11 +1,11 @@
-import { ASSIGNABLE_DRIVER, ASSIGNABLE_TRUCK } from '@/lib/driver-availability'
+import { assignableDriver, ASSIGNABLE_TRUCK } from '@/lib/driver-availability'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyScopeFilter } from '@/lib/tenancy'
 import { operationalTone } from '@/lib/status'
 import { KpiCard } from '@/components/ui/KpiCard'
 import { Board, type BoardLoad, type BoardTruck } from './Board'
-import { headingToForTrucks } from '@/lib/dispatch-fields'
+import { ACTIVE_LOAD, headingToForTrucks } from '@/lib/dispatch-fields'
 
 // §11 — the dispatch board. Zebra's own, not the wall display.
 //
@@ -70,7 +70,7 @@ export default async function DispatchPage({
       // trucks that already have a driver would leave the load at Booked with
       // no way to say who is driving it — §7 needs both before it dispatches.
       tx.driver.findMany({
-        where: { ...where, ...ASSIGNABLE_DRIVER },
+        where: { ...where, ...assignableDriver(today) },
         orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
         take: 300,
         select: { id: true, firstName: true, lastName: true },
@@ -100,8 +100,23 @@ export default async function DispatchPage({
           },
         },
       }),
+      // ── COMPUTED FROM THE FREIGHT (owner's ruling, 2026-09-21) ────────
+      //
+      // This counted `Truck.status = AVAILABLE`, a word somebody typed on
+      // the truck page. A unit hauling to Gastonia stayed "available" until
+      // somebody went back and said otherwise, so the number a dispatcher
+      // plans the week from was the most confident thing on the screen and
+      // the least connected to what the trucks were doing.
+      //
+      // `ACTIVE_LOAD` is the same predicate `headingTo` derives from, so a
+      // truck counted here is exactly a truck whose Heading to cell is
+      // blank. Still one statement — a relation filter, not a fan-out.
       tx.truck.count({
-        where: { ...where, deletedAt: null, status: 'AVAILABLE' },
+        where: {
+          ...where,
+          ...ASSIGNABLE_TRUCK,
+          loads: { none: ACTIVE_LOAD },
+        },
       }),
     ])
 

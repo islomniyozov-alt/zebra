@@ -1,5 +1,6 @@
 import type { TxClient } from './tenancy'
 import type { MessageKey } from './i18n'
+import { isOffDutyNow } from './dispatch-fields'
 
 // ---------------------------------------------------------------------------
 // DISPATCH CONFLICT RULES (§8)
@@ -51,7 +52,10 @@ export class DispatchConflictError extends Error {
 }
 
 const UNAVAILABLE_TRUCK = new Set(['OUT_OF_SERVICE', 'SOLD', 'MAINTENANCE'])
-const UNAVAILABLE_DRIVER = new Set(['INACTIVE', 'OFF_DUTY', 'VACATION'])
+// OFF_DUTY IS NO LONGER A ROSTER VALUE — migration 55 moved those rows onto
+// `Driver.isOffDuty`, which expires. It is checked below rather than here,
+// because a set of strings cannot ask what day it is.
+const UNAVAILABLE_DRIVER = new Set(['INACTIVE', 'VACATION'])
 
 export interface AssignmentIntent {
   truckId?: string | null
@@ -176,6 +180,10 @@ export async function findAssignmentConflicts(
     }),
   ])
 
+  // ONE CLOCK FOR THE WHOLE CHECK. Reading `new Date()` per asset would let
+  // a return date fall between two drivers in the same assignment.
+  const now = new Date()
+
   const check = async (
     asset: 'truck' | 'driver',
     id: string,
@@ -193,6 +201,8 @@ export async function findAssignmentConflicts(
               firstName: true,
               lastName: true,
               status: true,
+              isOffDuty: true,
+              offDutyUntil: true,
             },
           })
 
@@ -222,6 +232,24 @@ export async function findAssignmentConflicts(
         asset,
         messageKey: 'dispatch.conflict.outOfService',
         values: { asset: label, status: row.status },
+      })
+    }
+
+    // ── 3b. OFF DUTY, AS OF NOW (owner's ruling, 2026-09-21) ───────────
+    //
+    // THE PICKER HIDING THEM IS NOT THE RULE. `assignableDriver` narrows
+    // three selects; this is what happens when something assigns anyway —
+    // an older form, a bookmarked page, a script. "Check the thing that
+    // acts", which in an assignment is this function.
+    //
+    // Expiry is honoured here for the same reason it is there: a driver
+    // back since Tuesday is not off duty, whatever the flag still says.
+    if (asset === 'driver' && 'isOffDuty' in row && isOffDutyNow(row, now)) {
+      conflicts.push({
+        kind: 'out_of_service',
+        asset,
+        messageKey: 'dispatch.conflict.offDuty',
+        values: { asset: label },
       })
     }
 

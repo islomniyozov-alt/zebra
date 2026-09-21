@@ -1,4 +1,5 @@
 import { parsePercentToBps } from './money'
+import { ACTIVE_ROSTER, assertRosterStatus } from './driver-roster'
 import type { TxClient } from './tenancy'
 import {
   closeOpenPeriod,
@@ -476,7 +477,10 @@ export async function createDriver(
       cdlState: stateCode(input.cdlState),
       cdlClass: optionalText(input.cdlClass),
       hireDate: dateOnly(input.hireDate, 'hireDate'),
-      status: input.status ?? 'AVAILABLE',
+      // THE GATE, not the select on the form. An import, a script or a
+      // second screen can all reach this function, and only one of them has
+      // a dropdown. See src/lib/driver-roster.ts.
+      status: assertRosterStatus(input.status) ?? ACTIVE_ROSTER,
       employmentType: input.employmentType ?? 'OWNED',
       notes: optionalText(input.notes),
       assignedTruckId: await pairedTruck(tx, companyId, input.assignedTruckId),
@@ -571,7 +575,7 @@ export async function updateDriver(
       cdlState: stateCode(input.cdlState),
       cdlClass: optionalText(input.cdlClass),
       hireDate: dateOnly(input.hireDate, 'hireDate'),
-      ...(input.status ? { status: input.status } : {}),
+      ...(input.status ? { status: assertRosterStatus(input.status) } : {}),
       ...(input.employmentType ? { employmentType: input.employmentType } : {}),
       notes: optionalText(input.notes),
       assignedTruckId,

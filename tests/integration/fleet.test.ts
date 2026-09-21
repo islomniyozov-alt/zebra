@@ -344,11 +344,27 @@ describe('trailers and drivers', () => {
       updateDriver(tx, driver.id, {
         firstName: 'Aziz',
         lastName: 'Karimova',
-        status: 'OFF_DUTY',
+        status: 'VACATION',
       }),
     )
     expect(edited.lastName).toBe('Karimova')
-    expect(edited.status).toBe('OFF_DUTY')
+    expect(edited.status).toBe('VACATION')
+
+    // ── AND OFF_DUTY IS NO LONGER A ROSTER VALUE ───────────────────────
+    //
+    // It used to be, and this test used to set it. Item 11 gave being off
+    // duty a column with a return date on it, and the owner's ruling of
+    // 2026-09-21 took the word off the roster — so writing it here is a
+    // refusal by name rather than a silent coercion to AVAILABLE.
+    await expect(
+      inOrg((tx) =>
+        updateDriver(tx, driver.id, {
+          firstName: 'Aziz',
+          lastName: 'Karimova',
+          status: 'OFF_DUTY',
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'not_roster_status', field: 'status' })
 
     await inOrg((tx) => retireAsset(tx, 'driver', driver.id))
     const after = await inOrg((tx) =>

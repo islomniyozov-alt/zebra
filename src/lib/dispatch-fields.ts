@@ -1,4 +1,5 @@
-import { Prisma } from '@/generated/prisma/client'
+import { Prisma, type DriverStatus } from '@/generated/prisma/client'
+import { ACTIVE_ROSTER } from './driver-roster'
 
 // ---------------------------------------------------------------------------
 // FOUR DISPATCH FIELDS, DERIVED. ONE FLAG, STORED.
@@ -30,6 +31,29 @@ const FINISHED = ['DELIVERED', 'POD_RECEIVED'] as const
 /** …and it is actually moving once it reaches one of these. */
 const MOVING = ['AT_PICKUP', 'LOADED', 'IN_TRANSIT', 'AT_DELIVERY'] as const
 
+/**
+ * Freight that is somebody's current work, as a Prisma filter.
+ *
+ * THE BOARD'S "AVAILABLE" COUNT IS COMPUTED FROM THIS (owner's ruling,
+ * 2026-09-21), never from `Truck.status`. That column is a word somebody
+ * typed: a truck hauling a load to Gastonia counted as available for as
+ * long as nobody went back to the truck page to say otherwise, and the KPI
+ * a dispatcher plans the week from was the most confident thing on the
+ * screen and the least connected to the freight.
+ *
+ * Spread into a relation filter:
+ *
+ *     where: { ...ASSIGNABLE_TRUCK, loads: { none: ACTIVE_LOAD } }
+ *
+ * One statement, and it cannot go stale between page loads because there is
+ * nothing to go stale.
+ */
+export const ACTIVE_LOAD = {
+  deletedAt: null,
+  isCancelled: false,
+  operationalStatus: { notIn: [...FINISHED] },
+} as const satisfies Prisma.LoadWhereInput
+
 // ── (1) heading to ───────────────────────────────────────────────────────
 
 /**
@@ -58,6 +82,14 @@ export type DispatchStatus =
   | 'off_duty'
 
 export interface DispatchFacts {
+  /**
+   * What the ROSTER says — on the books, on holiday, or gone.
+   *
+   * Required rather than optional on purpose: a caller that forgot it
+   * would report a driver on vacation as Available, and an optional field
+   * with a sensible default is exactly how that goes unnoticed.
+   */
+  rosterStatus: DriverStatus
   isOffDuty: boolean
   offDutyUntil: Date | null
   /** Operational statuses of every load this driver is crew on, unfinished. */
@@ -82,15 +114,35 @@ export interface DispatchFacts {
  * booked for Thursday is in transit, because that is what a dispatcher needs
  * to know before offering them anything.
  */
+/**
+ * Is this driver off duty AS OF NOW?
+ *
+ * EXPORTED BECAUSE TWO THINGS ASK IT. The list derives a status from it,
+ * and `assertAssignable` refuses an assignment because of it — and a
+ * picker that hides a driver the engine would still accept is half a rule.
+ *
+ * EXPIRED IS NOT OFF DUTY. The flag was true about last week; the return
+ * date is what stops anybody having to remember to clear it.
+ */
+export function isOffDutyNow(
+  facts: { isOffDuty: boolean; offDutyUntil: Date | null },
+  now: Date,
+): boolean {
+  if (!facts.isOffDuty) return false
+  const back = facts.offDutyUntil
+  return back === null || back.getTime() > now.getTime()
+}
+
 export function dispatchStatusFrom(
   facts: DispatchFacts,
   now: Date,
 ): DispatchStatus {
-  if (facts.isOffDuty) {
-    const back = facts.offDutyUntil
-    // EXPIRED IS NOT OFF DUTY. The flag was true about last week.
-    if (back === null || back.getTime() > now.getTime()) return 'off_duty'
-  }
+  // THE ROSTER FIRST, because a person on holiday or no longer employed is
+  // off duty whatever the freight says — and unlike the flag, nobody has to
+  // set two things to say so. The list shows the roster badge in this case,
+  // which is strictly more specific than "Off duty".
+  if (facts.rosterStatus !== ACTIVE_ROSTER) return 'off_duty'
+  if (isOffDutyNow(facts, now)) return 'off_duty'
 
   const moving = facts.activeStatuses.some((status) =>
     (MOVING as readonly string[]).includes(status),
@@ -247,12 +299,14 @@ export async function dispatchFactsForDrivers(
   const rows = await tx.$queryRaw<
     {
       id: string
+      roster_status: DriverStatus
       is_off_duty: boolean
       off_duty_until: Date | null
       statuses: string[] | null
     }[]
   >`
     SELECT d."id",
+           d."status" AS roster_status,
            d."isOffDuty" AS is_off_duty,
            d."offDutyUntil" AS off_duty_until,
            ARRAY(
@@ -269,6 +323,7 @@ export async function dispatchFactsForDrivers(
 
   for (const row of rows) {
     out.set(row.id, {
+      rosterStatus: row.roster_status,
       isOffDuty: row.is_off_duty,
       offDutyUntil: row.off_duty_until,
       activeStatuses: row.statuses ?? [],

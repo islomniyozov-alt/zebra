@@ -377,6 +377,8 @@ const en = {
     'How this load gets billed and paid for. Stamped from the customer at booking; the invoice takes it when it is raised.',
   'loads.paymentType.saving': 'Saving…',
   'loads.paymentType.saved': 'Saved',
+  'ref.error.notRosterStatus':
+    'That is not a roster status. Dispatched and On route are worked out from the freight, and Off duty is set on the driver.',
   'ref.error.codesUnconfirmed':
     'Confirm the endorsements and restrictions against the card before saving.',
   'drivers.cdl.confirmCodes':
@@ -543,7 +545,7 @@ const en = {
   'drivers.payPercent': 'Percent of linehaul',
   'drivers.payPercentHint':
     'What this driver is paid per load. Without it they cannot be paid.',
-  'drivers.status.AVAILABLE': 'Available',
+  'drivers.status.AVAILABLE': 'Active',
   'drivers.status.DISPATCHED': 'Dispatched',
   'drivers.status.ON_ROUTE': 'On route',
   'drivers.status.OFF_DUTY': 'Off duty',
@@ -592,6 +594,8 @@ const en = {
     '{asset} currently works under {authority}. Transfer it first, or book this load under {authority}.',
   'dispatch.conflict.outOfService':
     '{asset} is not available to dispatch right now.',
+  'dispatch.conflict.offDuty':
+    '{asset} is marked off duty. Clear it on their page, or send somebody else.',
   'dispatch.conflict.notFound': 'That truck or driver no longer exists.',
   'loads.cancel': 'Cancel load',
   'loads.cancelReason': 'Why',
@@ -2416,6 +2420,8 @@ const ru: Dictionary = {
     'Как этот груз выставляется и оплачивается. Проставляется от клиента при бронировании; счёт берёт это при выставлении.',
   'loads.paymentType.saving': 'Сохранение…',
   'loads.paymentType.saved': 'Сохранено',
+  'ref.error.notRosterStatus':
+    'Это не кадровый статус. «Назначен» и «В рейсе» вычисляются по грузам, а «Не на смене» ставится в карточке водителя.',
   'ref.error.codesUnconfirmed':
     'Подтвердите допуски и ограничения по карточке перед сохранением.',
   'drivers.cdl.confirmCodes': 'Эти допуски и ограничения совпадают с карточкой',
@@ -2580,7 +2586,7 @@ const ru: Dictionary = {
   'drivers.payPercent': 'Процент от фрахта',
   'drivers.payPercentHint':
     'Сколько получает водитель за груз. Без этого ему нельзя заплатить.',
-  'drivers.status.AVAILABLE': 'Свободен',
+  'drivers.status.AVAILABLE': 'Работает',
   'drivers.status.DISPATCHED': 'Назначен',
   'drivers.status.ON_ROUTE': 'В рейсе',
   'drivers.status.OFF_DUTY': 'Не на смене',
@@ -2629,6 +2635,8 @@ const ru: Dictionary = {
   'dispatch.conflict.otherAuthority':
     '{asset} сейчас работает под {authority}. Сначала передайте его или оформите груз под {authority}.',
   'dispatch.conflict.outOfService': '{asset} сейчас недоступен для назначения.',
+  'dispatch.conflict.offDuty':
+    '{asset} отмечен как не на смене. Снимите отметку в карточке или отправьте другого.',
   'dispatch.conflict.notFound': 'Этот тягач или водитель больше не существует.',
   'loads.cancel': 'Отменить груз',
   'loads.cancelReason': 'Причина',
@@ -4438,6 +4446,8 @@ const fa: Dictionary = {
     'اینکه این بار چگونه صورتحساب و پرداخت می‌شود. هنگام ثبت از مشتری گرفته می‌شود؛ صورتحساب آن را هنگام صدور برمی‌دارد.',
   'loads.paymentType.saving': 'در حال ذخیره…',
   'loads.paymentType.saved': 'ذخیره شد',
+  'ref.error.notRosterStatus':
+    'این وضعیت کارگزینی نیست. «اعزام‌شده» و «در مسیر» از بارها محاسبه می‌شوند و «خارج از شیفت» روی راننده تنظیم می‌شود.',
   'ref.error.codesUnconfirmed':
     'پیش از ذخیره، مجوزها و محدودیت‌ها را با کارت تطبیق دهید.',
   'drivers.cdl.confirmCodes': 'این مجوزها و محدودیت‌ها با کارت مطابقت دارند',
@@ -4602,7 +4612,7 @@ const fa: Dictionary = {
   'drivers.payPercent': 'درصد از کرایه',
   'drivers.payPercentHint':
     'آنچه این راننده بابت هر بار می‌گیرد. بدون آن قابل پرداخت نیست.',
-  'drivers.status.AVAILABLE': 'آزاد',
+  'drivers.status.AVAILABLE': 'شاغل',
   'drivers.status.DISPATCHED': 'اعزام‌شده',
   'drivers.status.ON_ROUTE': 'در مسیر',
   'drivers.status.OFF_DUTY': 'خارج از شیفت',
@@ -4650,6 +4660,8 @@ const fa: Dictionary = {
   'dispatch.conflict.otherAuthority':
     '{asset} هم‌اکنون زیر نظر {authority} کار می‌کند. نخست آن را منتقل کنید یا این بار را زیر نظر {authority} ثبت کنید.',
   'dispatch.conflict.outOfService': '{asset} اکنون برای اعزام در دسترس نیست.',
+  'dispatch.conflict.offDuty':
+    '{asset} خارج از شیفت علامت خورده است. در صفحه او بردارید یا شخص دیگری بفرستید.',
   'dispatch.conflict.notFound': 'این کامیون یا راننده دیگر وجود ندارد.',
   'loads.cancel': 'لغو بار',
   'loads.cancelReason': 'دلیل',

@@ -2,6 +2,7 @@ import type { FieldSpec } from '@/components/forms/RecordForm'
 import type { SelectOption } from '@/components/ui/Select'
 import type { MessageKey, Translate } from '@/lib/i18n'
 import type { DriverStatus, OwnershipType } from '@/generated/prisma/client'
+import { ROSTER_STATUSES } from '@/lib/driver-roster'
 import { OWNERSHIP_TYPES } from '../trucks/fields'
 
 // A DRIVER IS NOT OWNED. The enum is shared with trucks and trailers, where
@@ -12,14 +13,16 @@ import { OWNERSHIP_TYPES } from '../trucks/fields'
 const employmentKey = (type: OwnershipType): MessageKey =>
   `drivers.employment.${type}` as MessageKey
 
-export const DRIVER_STATUSES: DriverStatus[] = [
-  'AVAILABLE',
-  'DISPATCHED',
-  'ON_ROUTE',
-  'OFF_DUTY',
-  'VACATION',
-  'INACTIVE',
-]
+// ── THE FORM OFFERS ROSTER VALUES ONLY (owner's ruling, 2026-09-21) ──
+//
+// Dispatched and On route are worked out from the freight on every read,
+// and Off duty is a flag with a return date. Offering them here was how the
+// column came to disagree with the loads: somebody typed "Dispatched" once
+// and nothing ever typed it back.
+//
+// The list lives in src/lib/driver-roster.ts because `fleet.ts` refuses
+// anything outside it — a select is a courtesy, not a gate.
+export { ROSTER_STATUSES } from '@/lib/driver-roster'
 
 export const driverStatusKey = (status: DriverStatus): MessageKey =>
   `drivers.status.${status}` as MessageKey
@@ -160,7 +163,7 @@ export function driverFields(
             kind: 'select',
             name: 'status',
             label: t('ref.status'),
-            options: DRIVER_STATUSES.map((status) => ({
+            options: ROSTER_STATUSES.map((status) => ({
               value: status,
               label: t(driverStatusKey(status)),
             })),

@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation'
-import { ASSIGNABLE_DRIVER, ASSIGNABLE_TRUCK } from '@/lib/driver-availability'
+import { assignableDriver, ASSIGNABLE_TRUCK } from '@/lib/driver-availability'
 import { SELECTABLE_AUTHORITY } from '@/lib/companies'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
@@ -58,7 +58,7 @@ export default async function NewLoadPage({
           select: { id: true, unitNumber: true },
         }),
         tx.driver.findMany({
-          where: { ...ASSIGNABLE_DRIVER, ...scope },
+          where: { ...assignableDriver(), ...scope },
           orderBy: { lastName: 'asc' },
           take: 500,
           select: { id: true, firstName: true, lastName: true },

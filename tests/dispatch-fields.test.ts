@@ -50,7 +50,13 @@ describe('dispatch status', () => {
     over: Partial<Parameters<typeof dispatchStatusFrom>[0]> = {},
   ) =>
     dispatchStatusFrom(
-      { isOffDuty: false, offDutyUntil: null, activeStatuses: [], ...over },
+      {
+        rosterStatus: 'AVAILABLE',
+        isOffDuty: false,
+        offDutyUntil: null,
+        activeStatuses: [],
+        ...over,
+      },
       NOW,
     )
 

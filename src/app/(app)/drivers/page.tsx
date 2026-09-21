@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/Button'
 import { orDash } from '../_reference/shared'
 import { driverStatusKey } from './fields'
 import type { StatusTone } from '@/lib/status'
+import { rosterBadge, type RosterStatus } from '@/lib/driver-roster'
 import type { MessageKey } from '@/lib/i18n'
 import type { DriverStatus } from '@/generated/prisma/client'
 
@@ -65,6 +66,8 @@ interface Row {
   cdlState: string | null
   truck: string | null
   status: DriverStatus
+  /** The roster exception worth showing, or null when they simply work here. */
+  roster: RosterStatus | null
   isRetired: boolean
   warnings: readonly Warning[]
   /** Derived from the freight and the off-duty flag. Never stored. */
@@ -174,6 +177,7 @@ export default async function DriversPage({
         cdlState: driver.cdlState,
         truck: driver.assignedTruck?.unitNumber ?? null,
         status: driver.status,
+        roster: rosterBadge(driver.status),
         isRetired: driver.deletedAt !== null,
         warnings: driverWarnings(
           facts.get(driver.id) ?? { compliance: [], negativeNetCount: 0 },
@@ -181,6 +185,7 @@ export default async function DriversPage({
         ),
         dispatch: dispatchStatusFrom(
           dispatchFacts.get(driver.id) ?? {
+            rosterStatus: driver.status,
             isOffDuty: false,
             offDutyUntil: null,
             activeStatuses: [],
@@ -255,28 +260,29 @@ export default async function DriversPage({
     {
       key: 'status',
       header: t('ref.status'),
+      // ── ONE STATUS PER ROW (owner's ruling, 2026-09-21) ───────────────
+      //
+      // Two columns here meant two answers to one question, and the stored
+      // one was free to contradict the freight. What shows is the DERIVED
+      // dispatch status — except where the roster says something the
+      // freight cannot know: this person is on holiday, or gone. Those are
+      // strictly more specific than "Off duty", which is what the derived
+      // status reports for both of them.
       render: (row) =>
         row.isRetired ? (
           <span className="text-ink-3">{t('ref.retired')}</span>
+        ) : row.roster !== null ? (
+          <StatusBadge
+            tone={DRIVER_TONE[row.roster]}
+            label={t(driverStatusKey(row.roster))}
+          />
         ) : (
           <StatusBadge
-            tone={DRIVER_TONE[row.status]}
-            label={t(driverStatusKey(row.status))}
+            tone={DISPATCH_TONE[row.dispatch]}
+            variant="outlined"
+            label={t(`dispatch.status.${row.dispatch}` as MessageKey)}
           />
         ),
-    },
-    {
-      key: 'dispatch',
-      header: t('dispatch.status'),
-      // DERIVED ON EVERY READ. An off-duty driver cannot read Available
-      // here however stale the roster column beside it has gone.
-      render: (row) => (
-        <StatusBadge
-          tone={DISPATCH_TONE[row.dispatch]}
-          variant="outlined"
-          label={t(`dispatch.status.${row.dispatch}` as MessageKey)}
-        />
-      ),
     },
     {
       key: 'lastActivity',
@@ -422,7 +428,14 @@ export default async function DriversPage({
         rows={shown}
         rowKey={(row) => row.id}
         rowHref={(row) => `/drivers/${row.id}`}
-        stripeTone={(row) => DRIVER_TONE[row.status]}
+        // THE STRIPE FOLLOWS THE BADGE. A row reading "On vacation" beside
+        // a stripe coloured from a status nothing renders is the two-answer
+        // problem again, one pixel wide.
+        stripeTone={(row) =>
+          row.roster !== null
+            ? DRIVER_TONE[row.roster]
+            : DISPATCH_TONE[row.dispatch]
+        }
         isCancelled={(row) => row.isRetired}
         empty={
           <EmptyState

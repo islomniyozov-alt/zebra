@@ -11,7 +11,11 @@ import {
   lastActivityForDrivers,
   onTimeFrom,
   onTimeRateForDriver,
+  ACTIVE_LOAD,
 } from '@/lib/dispatch-fields'
+import { assignableDriver, ASSIGNABLE_TRUCK } from '@/lib/driver-availability'
+import { assertAssignable, DispatchConflictError } from '@/lib/dispatch'
+import { DERIVED_STATUSES } from '@/lib/driver-roster'
 import type { PrismaClient } from '@/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -342,6 +346,169 @@ describe('a driver on-time rate, over real rows', () => {
     const rate = await inOrg((tx) => onTimeRateForDriver(tx, idleDriverId))
     expect(rate.counted).toBe(0)
     expect(rate.percent).toBeNull()
+  })
+})
+
+describe('who a picker may offer', () => {
+  let restingId = ''
+  let backId = ''
+  let holidayId = ''
+
+  beforeAll(async () => {
+    restingId = (
+      await owner.driver.create({
+        data: {
+          organizationId,
+          companyId,
+          firstName: 'REST',
+          lastName: 'ING',
+          isOffDuty: true,
+          offDutyUntil: hours(72),
+        },
+      })
+    ).id
+
+    // OFF DUTY, AND THE DATE HAS PASSED. Nobody cleared the flag, which is
+    // the entire reason `offDutyUntil` exists — and a picker that read the
+    // boolean alone would keep this driver out of every list for ever.
+    backId = (
+      await owner.driver.create({
+        data: {
+          organizationId,
+          companyId,
+          firstName: 'BACK',
+          lastName: 'AGAIN',
+          isOffDuty: true,
+          offDutyUntil: hours(-72),
+        },
+      })
+    ).id
+
+    holidayId = (
+      await owner.driver.create({
+        data: {
+          organizationId,
+          companyId,
+          firstName: 'HOLI',
+          lastName: 'DAY',
+          status: 'VACATION',
+        },
+      })
+    ).id
+  })
+
+  it('leaves out an off-duty driver and a driver on holiday', async () => {
+    const offered = await inOrg((tx) =>
+      tx.driver.findMany({
+        where: { ...assignableDriver(NOW), companyId },
+        select: { id: true },
+      }),
+    )
+    const ids = offered.map((row) => row.id)
+    expect(ids).not.toContain(restingId)
+    expect(ids).not.toContain(holidayId)
+  })
+
+  it('offers a driver whose return date has passed', async () => {
+    const offered = await inOrg((tx) =>
+      tx.driver.findMany({
+        where: { ...assignableDriver(NOW), companyId },
+        select: { id: true },
+      }),
+    )
+    expect(offered.map((row) => row.id)).toContain(backId)
+  })
+
+  it('REFUSES the assignment too, not only the picker', async () => {
+    // The picker is a courtesy. This is the thing that acts.
+    let caught: unknown
+    try {
+      await inOrg((tx) =>
+        assertAssignable(
+          tx,
+          { driverId: restingId },
+          { companyId, from: hours(1), to: hours(6), loadId: null },
+        ),
+      )
+    } catch (error) {
+      caught = error
+    }
+    expect(caught).toBeInstanceOf(DispatchConflictError)
+    const conflicts = (caught as DispatchConflictError).conflicts
+    expect(conflicts.map((c) => c.messageKey)).toContain(
+      'dispatch.conflict.offDuty',
+    )
+  })
+
+  it('does not refuse the one whose date has passed', async () => {
+    await expect(
+      inOrg((tx) =>
+        assertAssignable(
+          tx,
+          { driverId: backId },
+          { companyId, from: hours(1), to: hours(6), loadId: null },
+        ),
+      ),
+    ).resolves.toBeUndefined()
+  })
+})
+
+describe('what migration 55 left behind', () => {
+  it('has no driver holding a status the freight answers for', async () => {
+    // THE INSTRUMENT IS BUILT FROM THE TABLE, not from what the code
+    // believes about it. A migration that ran is not a migration that
+    // worked, and the rows are the only thing that can say which.
+    const rows = await owner.driver.findMany({
+      where: { status: { in: [...DERIVED_STATUSES] } },
+      select: { id: true, status: true },
+    })
+    expect(rows).toEqual([])
+  })
+})
+
+describe(`the board's Available count`, () => {
+  it('counts a truck with nothing open and not one that is hauling', async () => {
+    const spare = await owner.truck.create({
+      data: {
+        organizationId,
+        companyId,
+        unitNumber: `K-${nonce}`,
+        vin: `VIN${nonce}22222222`,
+      },
+    })
+
+    const free = async () =>
+      inOrg((tx) =>
+        tx.truck.count({
+          where: {
+            companyId,
+            ...ASSIGNABLE_TRUCK,
+            loads: { none: ACTIVE_LOAD },
+          },
+        }),
+      )
+
+    const before = await free()
+
+    // Give it freight that has not finished. The count must drop by one
+    // WITHOUT anybody touching `Truck.status`, which is the whole ruling.
+    const id = await seedLoad({
+      pickupCity: 'Etna',
+      deliveryCity: 'Toledo',
+      status: 'IN_TRANSIT',
+    })
+    await owner.load.update({
+      where: { id },
+      data: { truckId: spare.id },
+    })
+
+    expect(await free()).toBe(before - 1)
+
+    const stored = await owner.truck.findUniqueOrThrow({
+      where: { id: spare.id },
+      select: { status: true },
+    })
+    expect(stored.status).toBe('AVAILABLE')
   })
 })
 
