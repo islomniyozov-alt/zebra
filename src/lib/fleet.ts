@@ -1,5 +1,6 @@
 import { parsePercentToBps } from './money'
 import { ACTIVE_ROSTER, assertRosterStatus } from './driver-roster'
+import { readFleetStatus, readFuelType } from './fleet-codes'
 import type { TxClient } from './tenancy'
 import {
   closeOpenPeriod,
@@ -55,6 +56,17 @@ export interface TruckInput {
   ownershipType?: OwnershipType
   currentOdometer?: unknown
   notes?: unknown
+  // ── ITEM 12, ALL OPTIONAL ───────────────────────────────────────────
+  //
+  // A yard acquires these over time. A required field here would mean a
+  // truck cannot be entered until somebody has gone and counted its axles.
+  /** In service / Out of service / In shop. See fleet-codes.ts. */
+  fleetStatus?: unknown
+  /** Blank means the carrier owns it. */
+  ownerName?: unknown
+  axles?: unknown
+  fuelType?: unknown
+  grossWeightLbs?: unknown
 }
 
 export interface TrailerInput {
@@ -102,6 +114,14 @@ export interface DriverInput {
   /** The truck this driver runs. Must be under the same authority. */
   assignedTruckId?: unknown
   /**
+   * The trailer this driver pulls. Same authority, and AT MOST ONE DRIVER.
+   *
+   * `driver_trailer_once` is the guarantee; `pairedTrailer` is the
+   * sentence. Same division of labour as the unit-number index and
+   * `assertUnitAvailable` above it.
+   */
+  assignedTrailerId?: unknown
+  /**
    * When the licence lapses. Becomes a `ComplianceItem`, never a Driver column.
    *
    * ONE HOME FOR A DATE THAT RAISES AN ALARM. `ComplianceItem` is what the
@@ -138,6 +158,66 @@ export interface DriverInput {
  *
  * Blank clears the pairing, and clearing is always allowed.
  */
+/**
+ * Resolve the trailer a driver pulls — same authority, and NOT ALREADY TAKEN.
+ *
+ * ── THE ONE WAY THIS DIFFERS FROM `pairedTruck` ──────────────────────────
+ *
+ * A truck carries a team, so several drivers may point at one and nothing
+ * above objects. A trailer is pulled by one: a trailer sitting against two
+ * drivers sends two people to the same box, and the one who gets there
+ * second has no way to tell whether the board or the yard is wrong.
+ *
+ * `driver_trailer_once` — a partial unique index, live rows only — is the
+ * guarantee. This is the SENTENCE, and it names the driver already holding
+ * it, because "that trailer is taken" without saying by whom is a message
+ * that sends somebody to ask around.
+ *
+ * A REMOVED driver does not hold a trailer, which is why the search
+ * carries `deletedAt: null` — the same predicate as the index, so the
+ * check and the guarantee cannot disagree about what counts.
+ */
+async function pairedTrailer(
+  tx: TxClient,
+  companyId: string,
+  value: unknown,
+  /** The driver being edited, who does not collide with themselves. */
+  driverId: string | null,
+): Promise<string | null> {
+  const trailerId = optionalText(value)
+  if (trailerId === null) return null
+
+  const trailer = await tx.trailer.findFirst({
+    where: { id: trailerId, deletedAt: null },
+    select: { id: true, companyId: true },
+  })
+  if (!trailer) {
+    throw new ReferenceError('not_found', { field: 'assignedTrailerId' })
+  }
+  if (trailer.companyId !== companyId) {
+    throw new ReferenceError('truck_other_authority', {
+      field: 'assignedTrailerId',
+    })
+  }
+
+  const holder = await tx.driver.findFirst({
+    where: {
+      assignedTrailerId: trailer.id,
+      deletedAt: null,
+      ...(driverId ? { id: { not: driverId } } : {}),
+    },
+    select: { id: true, firstName: true, lastName: true },
+  })
+  if (holder) {
+    throw new ReferenceError('trailer_already_paired', {
+      field: 'assignedTrailerId',
+      message: `${holder.lastName}, ${holder.firstName}`,
+    })
+  }
+
+  return trailer.id
+}
+
 async function pairedTruck(
   tx: TxClient,
   companyId: string,
@@ -159,6 +239,30 @@ async function pairedTruck(
     })
   }
   return truck.id
+}
+
+/**
+ * A small count or weight off a form.
+ *
+ * COMMAS ARE STRIPPED, because the fleet board this data arrives from
+ * writes `17,000` and a person typing a weight writes it the same way.
+ * Anything else that is not a whole number in range is a refusal rather
+ * than a silent `NaN` becoming null — the difference between "nobody said"
+ * and "somebody said something I could not read" is the whole point of the
+ * optional column.
+ */
+function wholeNumber(
+  value: unknown,
+  field: string,
+  max: number,
+): number | null {
+  const text = optionalText(value)
+  if (text === null) return null
+  const n = Number(text.replace(/[,\s]/g, ''))
+  if (!Number.isInteger(n) || n < 0 || n > max) {
+    throw new ReferenceError('invalid_year', { field })
+  }
+  return n
 }
 
 function odometer(value: unknown): number | null {
@@ -276,6 +380,7 @@ export async function createTruck(
         status: input.status ?? 'AVAILABLE',
         ownershipType: input.ownershipType ?? 'OWNED',
         notes: optionalText(input.notes),
+        ...itemTwelveFields(input),
       },
     })
   } catch (error) {
@@ -290,6 +395,33 @@ export async function createTruck(
     options.byUserId,
   )
   return created
+}
+
+/**
+ * Item 12's fields, read once for both writers.
+ *
+ * ONE PLACE, because two would be two chances for the code list to be
+ * enforced on create and not on edit — which is the shape of every
+ * validation hole in this codebase that has ever mattered.
+ *
+ * The code lists REFUSE rather than coerce. A `fleetStatus` of "in shop"
+ * arriving where "In shop" is expected means something upstream is not
+ * using `fleet-codes.ts`, and title-casing it hides exactly that.
+ */
+function itemTwelveFields(input: Omit<TruckInput, 'companyId'>) {
+  return {
+    fleetStatus: readFleetStatus(input.fleetStatus),
+    fuelType: readFuelType(input.fuelType),
+    ownerName: optionalText(input.ownerName),
+    axles: wholeNumber(input.axles, 'axles', 20),
+    // 200,000 lb is past any legal gross in the United States by a wide
+    // margin — a bound on a typo, not a rule about trucks.
+    grossWeightLbs: wholeNumber(
+      input.grossWeightLbs,
+      'grossWeightLbs',
+      200_000,
+    ),
+  }
 }
 
 export async function updateTruck(
@@ -323,6 +455,7 @@ export async function updateTruck(
         ...(input.status ? { status: input.status } : {}),
         ...(input.ownershipType ? { ownershipType: input.ownershipType } : {}),
         notes: optionalText(input.notes),
+        ...itemTwelveFields(input),
       },
     })
   } catch (error) {
@@ -484,6 +617,12 @@ export async function createDriver(
       employmentType: input.employmentType ?? 'OWNED',
       notes: optionalText(input.notes),
       assignedTruckId: await pairedTruck(tx, companyId, input.assignedTruckId),
+      assignedTrailerId: await pairedTrailer(
+        tx,
+        companyId,
+        input.assignedTrailerId,
+        null,
+      ),
     },
   })
 
@@ -554,6 +693,14 @@ export async function updateDriver(
     current.companyId,
     input.assignedTruckId,
   )
+  // `id` is passed so a driver keeping the trailer they already hold is not
+  // refused for colliding with themselves.
+  const assignedTrailerId = await pairedTrailer(
+    tx,
+    current.companyId,
+    input.assignedTrailerId,
+    id,
+  )
 
   return tx.driver.update({
     where: { id },
@@ -579,6 +726,7 @@ export async function updateDriver(
       ...(input.employmentType ? { employmentType: input.employmentType } : {}),
       notes: optionalText(input.notes),
       assignedTruckId,
+      assignedTrailerId,
     },
   })
 }

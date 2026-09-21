@@ -52,6 +52,15 @@ export type ReferenceFailure =
    * written. See src/lib/driver-roster.ts.
    */
   | 'not_roster_status'
+  /**
+   * A value outside a small code list — fleet status, fuel type (item 12).
+   *
+   * The list is TEXT rather than an enum by ruling, so the database will
+   * store anything. This is what makes the list mean something.
+   */
+  | 'not_in_code_list'
+  /** A trailer already pulled by somebody else (item 12). */
+  | 'trailer_already_paired'
   | 'codes_unconfirmed'
 
 export class ReferenceError extends Error {
@@ -87,6 +96,8 @@ export const REFERENCE_ERROR_KEYS: Record<ReferenceFailure, MessageKey> = {
   window_inverted: 'ref.error.windowInverted',
   codes_unconfirmed: 'ref.error.codesUnconfirmed',
   not_roster_status: 'ref.error.notRosterStatus',
+  not_in_code_list: 'ref.error.notInCodeList',
+  trailer_already_paired: 'ref.error.trailerAlreadyPaired',
 }
 
 /**

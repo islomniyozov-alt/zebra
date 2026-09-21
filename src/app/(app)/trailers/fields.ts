@@ -4,7 +4,7 @@ import type { Translate } from '@/lib/i18n'
 import {
   OWNERSHIP_TYPES,
   TRUCK_STATUSES,
-  fleetStatusKey,
+  truckStatusKey,
   ownershipKey,
 } from '../trucks/fields'
 
@@ -57,7 +57,7 @@ export function trailerFields(
       label: t('ref.status'),
       options: TRUCK_STATUSES.map((status) => ({
         value: status,
-        label: t(fleetStatusKey(status)),
+        label: t(truckStatusKey(status)),
       })),
     },
     {

@@ -29,6 +29,13 @@ function read(formData: FormData) {
       | OwnershipType
       | undefined,
     notes: formData.get('notes'),
+    // Item 12. Every one optional; the service layer refuses a code-list
+    // value it does not recognise rather than dropping it.
+    fleetStatus: formData.get('fleetStatus'),
+    fuelType: formData.get('fuelType'),
+    ownerName: formData.get('ownerName'),
+    axles: formData.get('axles'),
+    grossWeightLbs: formData.get('grossWeightLbs'),
   }
 }
 

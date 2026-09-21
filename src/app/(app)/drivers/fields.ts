@@ -46,6 +46,8 @@ export function driverFields(
    * each truck runs under — see `pairedTruck` in src/lib/fleet.ts.
    */
   trucks: readonly SelectOption[] = [],
+  /** Every trailer under this authority. Same reasoning as `trucks`. */
+  trailers: readonly SelectOption[] = [],
 ): FieldSpec[] {
   const authorityField: FieldSpec[] =
     mode === 'create' && authorities.length > 0
@@ -176,6 +178,20 @@ export function driverFields(
             options: [
               { value: '', label: t('drivers.assignedTruckNone') },
               ...trucks,
+            ],
+          },
+          // THE SAME SHAPE AS THE TRUCK ABOVE, WITH ONE DIFFERENCE THE
+          // HINT STATES: a truck carries a team, a trailer is pulled by
+          // one. The second driver to be given it is refused by name, and
+          // the name is the driver already holding it.
+          {
+            kind: 'select',
+            name: 'assignedTrailerId',
+            label: t('drivers.assignedTrailer'),
+            hint: t('drivers.assignedTrailerHint'),
+            options: [
+              { value: '', label: t('drivers.assignedTrailerNone') },
+              ...trailers,
             ],
           },
           { kind: 'textarea', name: 'notes', label: t('ref.notes') },

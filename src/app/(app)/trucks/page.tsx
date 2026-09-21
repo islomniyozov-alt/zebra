@@ -5,12 +5,13 @@ import { companyScopeFilter } from '@/lib/tenancy'
 import { Table, type Column } from '@/components/ui/Table'
 import { WarningCell, warningLabels } from '@/components/WarningCell'
 import { headingToForTrucks } from '@/lib/dispatch-fields'
+import { agingDaysFrom, fleetStatusChangedForTrucks } from '@/lib/fleet-codes'
 import { truckWarningFacts, truckWarnings, type Warning } from '@/lib/warnings'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
 import { orDash } from '../_reference/shared'
-import { fleetStatusKey } from './fields'
+import { truckStatusKey } from './fields'
 import type { StatusTone } from '@/lib/status'
 import type { TruckStatus } from '@/generated/prisma/client'
 
@@ -42,6 +43,10 @@ interface Row {
   warnings: readonly Warning[]
   /** Derived: the last stop of the load this truck is on. Null when idle. */
   headingTo: string | null
+  /** Item 12. Null until somebody classifies the unit. */
+  fleetStatus: string | null
+  /** Derived from the audit log. Null when nothing has ever changed it. */
+  agingDays: number | null
 }
 
 export default async function TrucksPage({
@@ -87,6 +92,7 @@ export default async function TrucksPage({
           plate: true,
           currentOdometer: true,
           status: true,
+          fleetStatus: true,
           deletedAt: true,
           tags: true,
           company: { select: { name: true } },
@@ -99,9 +105,10 @@ export default async function TrucksPage({
 
       // ONE QUERY EACH FOR THE PAGE, not one per row.
       const ids = trucks.map((truck) => truck.id)
-      const [facts, headingTo] = await Promise.all([
+      const [facts, headingTo, statusChanged] = await Promise.all([
         truckWarningFacts(tx, ids),
         headingToForTrucks(tx, ids),
+        fleetStatusChangedForTrucks(tx, ids),
       ])
       const now = new Date()
 
@@ -121,6 +128,8 @@ export default async function TrucksPage({
         isRetired: truck.deletedAt !== null,
         warnings: truckWarnings(facts.get(truck.id) ?? { compliance: [] }, now),
         headingTo: headingTo.get(truck.id) ?? null,
+        fleetStatus: truck.fleetStatus,
+        agingDays: agingDaysFrom(statusChanged.get(truck.id) ?? null, now),
       }))
 
       return { rows, companyCount }
@@ -185,9 +194,31 @@ export default async function TrucksPage({
         ) : (
           <StatusBadge
             tone={TRUCK_TONE[row.status]}
-            label={t(fleetStatusKey(row.status))}
+            label={t(truckStatusKey(row.status))}
           />
         ),
+    },
+    {
+      key: 'fleetStatus',
+      header: t('trucks.fleetStatus'),
+      // A SECOND AXIS, BESIDE the status column and not instead of it. One
+      // says where the freight has the unit, the other whether it can run —
+      // and the pair that disagrees is the row worth finding.
+      render: (row) => row.fleetStatus ?? '—',
+    },
+    {
+      key: 'aging',
+      header: t('trucks.aging'),
+      // DERIVED FROM THE AUDIT LOG, never stored. Datatruck ships an
+      // `Aging days` column that was true the day it was written.
+      //
+      // A BLANK IS NOT ZERO DAYS. Nothing has ever changed this unit's
+      // fleet status, so there is no date to count from — and "0 d" would
+      // read as "changed today", which is the one thing it cannot mean.
+      render: (row) =>
+        row.agingDays === null
+          ? '—'
+          : t('trucks.aging.days').replace('{days}', String(row.agingDays)),
     },
     {
       key: 'headingTo',

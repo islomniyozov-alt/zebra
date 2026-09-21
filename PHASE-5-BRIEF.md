@@ -480,6 +480,66 @@ Recorded rather than resolved, per Phase 1's discipline.
     An instrument whose only evidence is that the code looked right measures
     nothing twice.
 
+33. **Item 12 asked for `Truck.plateExpiresAt` and it was NOT added.** The
+    brief of 2026-09-21 lists it among the columns, and "plate expiry joins the
+    item 9 warnings" as the behaviour. The behaviour was already true and the
+    column would have been a second copy of the date that makes it true.
+
+    THE DATE ALREADY HAS A HOME THAT WARNS. Datatruck's trucks export carries
+    `Registration expiry date`; `src/lib/datatruck/trucks.ts` writes it as a
+    `ComplianceItem` of type `REGISTRATION`; `REQUIRED_TRUCK_DOCUMENTS` lists
+    REGISTRATION, so item 9 already raises `compliance_expired`,
+    `compliance_expiring` and `document_missing` against it. A plate and its
+    registration expire on one date — Datatruck has one column for the pair,
+    and so does the physical cab card.
+
+    THIS IS THE `Driver.cdlExpiresAt` DECISION, SECOND TIME. That field is on
+    the driver form and deliberately not on the driver row, and the comment
+    says why: "a second copy of the same date, free to disagree with the one
+    that raises the warning." AGENTS.md says the schema wins over a brief and
+    the contradiction gets flagged rather than silently resolved. This is the
+    flag.
+
+    WHAT WOULD CHANGE THE ANSWER: if a plate expiry and a registration expiry
+    are genuinely two dates in this fleet's paperwork — some states do issue
+    the tag and the cab card on different cycles — then they are two facts and
+    the column is right. Nobody has been asked. The corpus cannot settle it:
+    it has one date column, which is consistent with both answers.
+
+    Reversing this is a migration and one field spec; nothing has been built
+    that would have to be unbuilt.
+
+34. **`Truck.insurancePolicyNumber` was not added either, and this one is
+    weaker.** `ComplianceItem.identifier` is documented in the schema as
+    "policy number, permit number, CDL number", and `createDriver` already
+    writes the CDL number into it beside the CDL expiry. So the policy number
+    has a home.
+
+    WHAT MAKES IT WEAKER THAN FLAG 10: `ComplianceItem.expiresAt` is NOT NULL,
+    so a policy number cannot be recorded there without an expiry date. A
+    carrier who knows the policy number and not the renewal date has nowhere
+    to put it, and "enter a date you do not have" is how a column fills with
+    invented dates. Unlike the plate expiry, nothing here is being duplicated
+    and nothing raises an alarm off it.
+
+    NOT ADDED ANYWAY, for now, because adding it would make two homes for a
+    policy number rather than one — and the Datatruck export does not carry the
+    column, so nothing is waiting to be imported into it. The 33 policy numbers
+    that exist live on a customer-pasted fleet board, not a Datatruck export
+    (see the import report). If the owner wants it on the row, it is one
+    migration.
+
+35. **Datatruck's `Fleet Status` column is not this `fleetStatus` and must
+    not be imported into it.** The brief says "In service, Out of service, In
+    shop". The export's `Fleet Status` holds `available`, `inactive` and
+    `in_transit` — a dispatch-availability vocabulary, not a shop condition —
+    and it DISAGREES with the export's own `Status` column on 28 of 113 rows.
+
+    Mapping `available` to "In service" would be inventing a meaning the
+    artefact does not carry, on a column whose two copies already contradict
+    each other. Nothing was imported. The column ships empty and is filled by
+    whoever is looking at the truck.
+
 ---
 
 ## 8. How each acceptance box closed

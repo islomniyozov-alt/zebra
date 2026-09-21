@@ -3,6 +3,7 @@ import type { SelectOption } from '@/components/ui/Select'
 import type { Translate } from '@/lib/i18n'
 import type { MessageKey } from '@/lib/i18n'
 import type { OwnershipType, TruckStatus } from '@/generated/prisma/client'
+import { FLEET_STATUSES, FUEL_TYPES } from '@/lib/fleet-codes'
 
 export const TRUCK_STATUSES: TruckStatus[] = [
   'AVAILABLE',
@@ -19,7 +20,15 @@ export const OWNERSHIP_TYPES: OwnershipType[] = [
   'OWNER_OPERATOR',
 ]
 
-export const fleetStatusKey = (status: TruckStatus): MessageKey =>
+/**
+ * The label for a `TruckStatus`.
+ *
+ * RENAMED FROM `truckStatusKey` BY ITEM 12, which introduced a column
+ * actually called `fleetStatus` meaning something else. Two names one
+ * letter apart for two different axes is how a screen ends up showing the
+ * wrong one, and the compiler cannot catch it because both are strings.
+ */
+export const truckStatusKey = (status: TruckStatus): MessageKey =>
   `fleet.status.${status}` as MessageKey
 
 export const ownershipKey = (type: OwnershipType): MessageKey =>
@@ -75,13 +84,51 @@ export function truckFields(
       name: 'currentOdometer',
       label: t('trucks.odometer'),
     },
+    // ── ITEM 12, ALL OPTIONAL ───────────────────────────────────────
+    //
+    // A SECOND AXIS BESIDE `status`, which is the field below this one.
+    // That one says where the freight has the unit; this says whether the
+    // unit is fit to run. The blank option is first and is the default,
+    // because a truck nobody has classified is the normal state of a yard
+    // and a form that made somebody choose would fill the column with
+    // guesses.
+    {
+      kind: 'select',
+      name: 'fleetStatus',
+      label: t('trucks.fleetStatus'),
+      options: [
+        { value: '', label: '—' },
+        ...FLEET_STATUSES.map((value) => ({ value, label: value })),
+      ],
+    },
+    {
+      kind: 'select',
+      name: 'fuelType',
+      label: t('trucks.fuelType'),
+      options: [
+        { value: '', label: '—' },
+        ...FUEL_TYPES.map((value) => ({ value, label: value })),
+      ],
+    },
+    {
+      kind: 'text',
+      name: 'ownerName',
+      label: t('trucks.ownerName'),
+      hint: t('trucks.ownerNameHint'),
+    },
+    { kind: 'number', name: 'axles', label: t('trucks.axles') },
+    {
+      kind: 'number',
+      name: 'grossWeightLbs',
+      label: t('trucks.grossWeight'),
+    },
     {
       kind: 'select',
       name: 'status',
       label: t('ref.status'),
       options: TRUCK_STATUSES.map((status) => ({
         value: status,
-        label: t(fleetStatusKey(status)),
+        label: t(truckStatusKey(status)),
       })),
     },
     {

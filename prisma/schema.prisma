@@ -648,6 +648,37 @@ model Truck {
   status          TruckStatus   @default(AVAILABLE)
   ownershipType   OwnershipType @default(OWNED)
 
+  /// A SECOND AXIS BESIDE `status`, ANSWERING A DIFFERENT QUESTION.
+  ///
+  /// `status` is where the FREIGHT has the unit — AVAILABLE, DISPATCHED,
+  /// IN_TRANSIT. This is whether the unit is fit to run at all: In service,
+  /// Out of service, In shop. A tractor can be In shop and DISPATCHED on the
+  /// same afternoon, and that is a thing to SEE rather than a contradiction
+  /// to forbid — it is how a dispatcher finds the load that needs moving.
+  ///
+  /// TEXT AGAINST A CODE LIST, never a Postgres enum: the payment-type
+  /// ruling and the same reasoning. The vocabulary is in
+  /// `src/lib/fleet-codes.ts`, where a fourth value is an edit somebody can
+  /// review rather than a migration against a table the whole fleet points
+  /// at. There is no CHECK constraint, for the reason migration 52 records.
+  fleetStatus String?
+
+  /// Whose name is on the title. BLANK MEANS THE CARRIER OWNS IT.
+  ///
+  /// Null rather than the authority name repeated on 49 rows: "the carrier"
+  /// is already `companyId`, and copying it here would be a second answer to
+  /// a question the row already answers, free to disagree after a transfer.
+  ownerName String?
+
+  axles Int?
+
+  /// TEXT against a code list, like `fleetStatus`. See `fleet-codes.ts`.
+  fuelType String?
+
+  /// Gross vehicle weight rating, in POUNDS — the unit every US document
+  /// states it in, so there is nothing to convert and nothing to get wrong.
+  grossWeightLbs Int?
+
   purchaseDate       DateTime?
   purchasePriceCents Int?
   notes              String?
@@ -735,6 +766,7 @@ model Trailer {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
+  drivers         Driver[]
   loads           Load[]
   assignments     LoadAssignment[]
   assetHistory    AssetAssignment[]
@@ -857,6 +889,23 @@ model Driver {
   assignedTruckId String?
   assignedTruck   Truck?  @relation(fields: [assignedTruckId], references: [id])
 
+  /// THE SAME SHAPE AS `assignedTruckId`, WITH ONE DELIBERATE DIFFERENCE.
+  ///
+  /// A truck carries a team, so several drivers may point at one — there is
+  /// no unique index above and there should not be. A TRAILER IS PULLED BY
+  /// ONE, and a trailer sitting against two drivers is a data-entry error
+  /// that sends two people to the same box. So there is a partial unique
+  /// index, created by hand for the reason the truck-number one is:
+  ///
+  ///   CREATE UNIQUE INDEX driver_trailer_once ON "Driver"("assignedTrailerId")
+  ///     WHERE "assignedTrailerId" IS NOT NULL AND "deletedAt" IS NULL;
+  ///
+  /// A removed driver must not keep holding a trailer against a live one,
+  /// which is why the predicate carries `deletedAt` as well. `fleet.ts`
+  /// refuses the second assignment in a sentence before Postgres has to.
+  assignedTrailerId String?
+  assignedTrailer   Trailer? @relation(fields: [assignedTrailerId], references: [id])
+
   notes String?
 
   /// FREE TEXT, ORG-SCOPED, FILTERABLE. Datatruck's drivers export carries a
@@ -899,6 +948,7 @@ model Driver {
   @@unique([organizationId, externalId])
   @@index([companyId, status])
   @@index([companyId, lastName])
+  @@index([assignedTrailerId])
   @@index([tags], type: Gin)
 }
 

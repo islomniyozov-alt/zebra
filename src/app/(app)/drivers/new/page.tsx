@@ -15,7 +15,7 @@ export default async function NewDriverPage() {
 
   // Both in one transaction: two `withCurrentOrg` calls would be two round
   // trips to us-east-2 for one form.
-  const { companies, trucks } = await withCurrentOrg(
+  const { companies, trucks, trailers } = await withCurrentOrg(
     'read',
     'company',
     async (tx, session) => {
@@ -37,6 +37,19 @@ export default async function NewDriverPage() {
             company: { select: { name: true } },
           },
         }),
+        // Item 12, the same shape as the trucks above and for the same
+        // reasons — whole scope on create, authority in the label. A SOLD
+        // trailer is not offered; one in the shop still is, because it is
+        // coming back and a driver can be paired with it today.
+        trailers: await tx.trailer.findMany({
+          where: { ...scope, deletedAt: null, status: { not: 'SOLD' } },
+          orderBy: [{ company: { name: 'asc' } }, { unitNumber: 'asc' }],
+          select: {
+            id: true,
+            unitNumber: true,
+            company: { select: { name: true } },
+          },
+        }),
       }
     },
   )
@@ -47,6 +60,10 @@ export default async function NewDriverPage() {
   const truckOptions = trucks.map((truck) => ({
     value: truck.id,
     label: `${truck.unitNumber} · ${truck.company.name}`,
+  }))
+  const trailerOptions = trailers.map((trailer) => ({
+    value: trailer.id,
+    label: `${trailer.unitNumber} · ${trailer.company.name}`,
   }))
   const remembered = await lastUsedAuthority()
   const defaultAuthority =
@@ -63,7 +80,13 @@ export default async function NewDriverPage() {
         <NewDriverFlow
           authorities={authorities}
           defaultAuthority={defaultAuthority}
-          fields={driverFields(t, authorities, 'create', truckOptions)}
+          fields={driverFields(
+            t,
+            authorities,
+            'create',
+            truckOptions,
+            trailerOptions,
+          )}
           labels={{
             upright: {
               title: t('upright.title'),

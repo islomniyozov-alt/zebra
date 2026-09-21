@@ -7,7 +7,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
 import { orDash } from '../_reference/shared'
-import { fleetStatusKey } from '../trucks/fields'
+import { truckStatusKey } from '../trucks/fields'
 import type { StatusTone } from '@/lib/status'
 import type { TruckStatus } from '@/generated/prisma/client'
 
@@ -127,7 +127,7 @@ export default async function TrailersPage({
         ) : (
           <StatusBadge
             tone={TRAILER_TONE[row.status]}
-            label={t(fleetStatusKey(row.status))}
+            label={t(truckStatusKey(row.status))}
           />
         ),
     },

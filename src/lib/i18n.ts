@@ -377,6 +377,22 @@ const en = {
     'How this load gets billed and paid for. Stamped from the customer at booking; the invoice takes it when it is raised.',
   'loads.paymentType.saving': 'Saving…',
   'loads.paymentType.saved': 'Saved',
+  'ref.error.trailerAlreadyPaired':
+    'That trailer is already pulled by another driver.',
+  'trucks.fleetStatus': 'Fleet status',
+  'trucks.ownerName': 'Owner',
+  'trucks.ownerNameHint': 'Leave blank when the carrier owns it.',
+  'trucks.axles': 'Axles',
+  'trucks.fuelType': 'Fuel',
+  'trucks.grossWeight': 'Gross weight (lb)',
+  'trucks.aging': 'Aging',
+  'trucks.aging.days': '{days} d',
+  'trucks.aging.never': 'No change recorded',
+  'drivers.assignedTrailer': 'Trailer',
+  'drivers.assignedTrailerHint':
+    'One driver per trailer. A trailer somebody else pulls is refused by name.',
+  'drivers.assignedTrailerNone': 'No trailer',
+  'ref.error.notInCodeList': 'Choose one of the listed values.',
   'ref.error.notRosterStatus':
     'That is not a roster status. Dispatched and On route are worked out from the freight, and Off duty is set on the driver.',
   'ref.error.codesUnconfirmed':
@@ -2420,6 +2436,23 @@ const ru: Dictionary = {
     'Как этот груз выставляется и оплачивается. Проставляется от клиента при бронировании; счёт берёт это при выставлении.',
   'loads.paymentType.saving': 'Сохранение…',
   'loads.paymentType.saved': 'Сохранено',
+  'ref.error.trailerAlreadyPaired':
+    'Этот прицеп уже закреплён за другим водителем.',
+  'trucks.fleetStatus': 'Состояние парка',
+  'trucks.ownerName': 'Владелец',
+  'trucks.ownerNameHint':
+    'Оставьте пустым, если тягач принадлежит перевозчику.',
+  'trucks.axles': 'Осей',
+  'trucks.fuelType': 'Топливо',
+  'trucks.grossWeight': 'Полная масса (фунты)',
+  'trucks.aging': 'В статусе',
+  'trucks.aging.days': '{days} дн.',
+  'trucks.aging.never': 'Изменений не было',
+  'drivers.assignedTrailer': 'Прицеп',
+  'drivers.assignedTrailerHint':
+    'Один водитель на прицеп. Прицеп, закреплённый за другим, будет отклонён.',
+  'drivers.assignedTrailerNone': 'Без прицепа',
+  'ref.error.notInCodeList': 'Выберите одно из перечисленных значений.',
   'ref.error.notRosterStatus':
     'Это не кадровый статус. «Назначен» и «В рейсе» вычисляются по грузам, а «Не на смене» ставится в карточке водителя.',
   'ref.error.codesUnconfirmed':
@@ -4446,6 +4479,21 @@ const fa: Dictionary = {
     'اینکه این بار چگونه صورتحساب و پرداخت می‌شود. هنگام ثبت از مشتری گرفته می‌شود؛ صورتحساب آن را هنگام صدور برمی‌دارد.',
   'loads.paymentType.saving': 'در حال ذخیره…',
   'loads.paymentType.saved': 'ذخیره شد',
+  'ref.error.trailerAlreadyPaired': 'این تریلر را راننده دیگری می‌کشد.',
+  'trucks.fleetStatus': 'وضعیت ناوگان',
+  'trucks.ownerName': 'مالک',
+  'trucks.ownerNameHint': 'اگر متعلق به شرکت است، خالی بگذارید.',
+  'trucks.axles': 'تعداد محور',
+  'trucks.fuelType': 'سوخت',
+  'trucks.grossWeight': 'وزن ناخالص (پوند)',
+  'trucks.aging': 'مدت در وضعیت',
+  'trucks.aging.days': '{days} روز',
+  'trucks.aging.never': 'تغییری ثبت نشده',
+  'drivers.assignedTrailer': 'تریلر',
+  'drivers.assignedTrailerHint':
+    'هر تریلر یک راننده. تریلری که دیگری می‌کشد پذیرفته نمی‌شود.',
+  'drivers.assignedTrailerNone': 'بدون تریلر',
+  'ref.error.notInCodeList': 'یکی از مقادیر فهرست‌شده را انتخاب کنید.',
   'ref.error.notRosterStatus':
     'این وضعیت کارگزینی نیست. «اعزام‌شده» و «در مسیر» از بارها محاسبه می‌شوند و «خارج از شیفت» روی راننده تنظیم می‌شود.',
   'ref.error.codesUnconfirmed':

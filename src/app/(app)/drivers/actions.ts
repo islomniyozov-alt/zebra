@@ -33,6 +33,7 @@ function read(formData: FormData) {
       | undefined,
     notes: formData.get('notes'),
     assignedTruckId: formData.get('assignedTruckId'),
+    assignedTrailerId: formData.get('assignedTrailerId'),
     // Both create-only, and both null on an edit because the form does not
     // render them there: expiry belongs to a ComplianceItem that has its own
     // life once written, and pay belongs to the dated rules on the driver
