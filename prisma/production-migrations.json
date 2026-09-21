@@ -52,8 +52,9 @@
     "20260918200000_settlement_team_with",
     "20260920150000_warnings_tags",
     "20260920160000_pay_to_payment_type_default_authority",
-    "20260920170000_invoice_payment_type"
+    "20260920170000_invoice_payment_type",
+    "20260920180000_driver_off_duty"
   ],
-  "recordedAt": "2026-09-20",
+  "recordedAt": "2026-09-21",
   "verified": true
 }
