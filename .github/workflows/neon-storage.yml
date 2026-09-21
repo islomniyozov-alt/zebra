@@ -50,4 +50,7 @@ jobs:
           NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
           NEON_PARENT_BRANCH: ${{ secrets.NEON_PARENT_BRANCH }}
           MODE: ${{ github.event.inputs.delete }}
+          # Lets the sweeper ask whether a ci- branch's run is still going.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: node scripts/neon-storage.mjs

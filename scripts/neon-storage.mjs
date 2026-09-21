@@ -15,12 +15,65 @@
 //
 // A branch with children is left alone too. Deleting a parent out from under
 // a fork is not a thing to do on a schedule.
+//
+// ── AND THE RUN THAT OWNS IT MUST BE FINISHED ────────────────────────────
+//
+// THE FIRST REPORT CAUGHT THIS. The only `ci-` branch in the project was
+// `ci-35653672010` — the fork belonging to a run that was still going, from
+// the very push that added this file. A sweeper that treats every `ci-`
+// branch as rubbish would have deleted a live database out from under a job
+// mid-suite, and the failure would have arrived as an unrelated connection
+// error four minutes later.
+//
+// The run id is in the name, so it can simply be asked. When GitHub cannot
+// be asked at all, age is the fallback: a run takes about eight minutes, so
+// anything younger than two hours is assumed to be alive rather than
+// assumed to be rubbish. The safe assumption is the one that keeps a
+// branch.
 // ---------------------------------------------------------------------------
 
 const key = process.env.NEON_API_KEY
 const project = process.env.NEON_PROJECT_ID
 const parent = process.env.NEON_PARENT_BRANCH
 const sweeping = (process.env.MODE ?? '').trim().toLowerCase() === 'delete'
+
+/** Two hours. Longer than any run has ever taken, by a wide margin. */
+const ASSUME_ALIVE_MS = 2 * 60 * 60 * 1000
+
+/**
+ * Is the CI run that forked this branch still going?
+ *
+ * Unknown counts as ALIVE. The cost of keeping a dead branch is a few
+ * megabytes until the next sweep; the cost of deleting a live one is a
+ * broken run and a confusing error.
+ */
+async function runIsFinished(branch) {
+  const id = /^ci-(?:prod-)?(\d+)$/.exec(String(branch.name))?.[1]
+  const repo = process.env.GITHUB_REPOSITORY
+  const token = process.env.GITHUB_TOKEN
+
+  if (id && repo && token) {
+    try {
+      const response = await fetch(
+        `https://api.github.com/repos/${repo}/actions/runs/${id}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      )
+      if (response.ok) {
+        const run = await response.json()
+        return run.status === 'completed'
+      }
+      // A 404 means the run is long gone, which is the one case where the
+      // branch is definitely rubbish.
+      if (response.status === 404) return true
+    } catch {
+      // fall through to age
+    }
+  }
+
+  const created = Date.parse(String(branch.created_at))
+  if (Number.isNaN(created)) return false
+  return Date.now() - created > ASSUME_ALIVE_MS
+}
 
 if (!key || !project) {
   console.log('[neon] NEON_API_KEY and NEON_PROJECT_ID are both required.')
@@ -94,6 +147,12 @@ for (const branch of leftovers) {
   // one that cannot be undone.
   if (branch.id === parent || !/^ci-/.test(String(branch.name))) {
     console.log(`[neon] refusing to delete ${branch.name}`)
+    continue
+  }
+
+  // THE THIRD FENCE: the run that forked it has to be over.
+  if (!(await runIsFinished(branch))) {
+    console.log(`[neon] leaving ${branch.name} — its run has not finished`)
     continue
   }
   try {
