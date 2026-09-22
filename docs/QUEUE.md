@@ -80,11 +80,31 @@ no delete in the service layer; a reason is required, a second void is refused,
 and a CHECK forbids half a void. Retention is three years from the occurrence,
 derived, and nothing removes anything when it passes.
 
+**15 — Drug & alcohol random pool.** Landed 2026-09-22, migration 59. Four
+tables for 49 CFR 382.305, the programme at `/safety/random`, and its own
+`randomTesting` permission resource.
+
+**The rate is a row with a Federal Register citation, and a year nobody
+entered is a refusal.** The Administrator adjusts the minimum annual rate by
+notice; a constant would be correct until the morning it silently was not.
+
+**The draw ranks, it does not shuffle.** Each member is scored
+`SHA-256(seed:key)` and the lowest are selected, so the result does not depend
+on the order the recorded snapshot is read in — an auditor recomputing it gets
+the same names whatever order they read the rows. Seed, method and the pool as
+it stood are all stored, a CHECK refuses a draw missing any of them, and
+`verifyDraw` re-runs it reading nothing live.
+
+**Rate met counts tests CONDUCTED, not names drawn**, and the pool excludes
+anybody who has left or has no CDL on file.
+
+With it, the queue from the 2026-09-20 gap audit is empty. Items 13–15 were
+the compliance block; what remains is the deferred list below.
+
 ## Next
 
-| #   | Item                           | Shape                                                                         |
-| --- | ------------------------------ | ----------------------------------------------------------------------------- |
-| 15  | **Drug & alcohol random pool** | §382.305. Pool membership, selection rounds and the rate the year has to hit. |
+| #   | Item | Shape |
+| --- | ---- | ----- |
 
 ## Deferred
 

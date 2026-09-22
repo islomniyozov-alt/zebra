@@ -146,13 +146,24 @@ Rules about instruments, which are the ones that cost whole sessions:
   3. DISPATCH PRODUCTION and read the drift from Cloudflare.
   4. ONLY THEN push the next migration.
 
-  AND DO NOT APPLY A MIGRATION TO DEV BEFORE ITS FILE IS PUSHED. CI forks
-  its database from dev, so a migration applied to dev and absent from the
-  repository makes `tests/migration-checksums.test.ts` fail on every run —
-  "applied but MISSING from prisma/migrations" — including the production
-  dispatch, which then refuses before it reaches the deploy step. That is
-  what happened on 2026-09-21 and it is why production sat five commits
-  behind for an afternoon.
+  AND FROM THE MOMENT A MIGRATION IS APPLIED TO DEV, DEV AND `main`
+  DISAGREE — so nothing may run CI until its file is pushed. Not a push of
+  something else, not a production dispatch, nothing. CI forks its database
+  from dev, so a migration applied there and absent from the repository
+  makes `tests/migration-checksums.test.ts` fail on every run — "applied but
+  MISSING from prisma/migrations" — and the production dispatch refuses
+  before it reaches the deploy step. That is what happened on 2026-09-21
+  and it is why production sat five commits behind for an afternoon.
+
+  THE EARLIER VERSION OF THIS SAID "DO NOT APPLY TO DEV BEFORE THE FILE IS
+  PUSHED", WHICH IS NOT FOLLOWABLE. You cannot build against tables that do
+  not exist, so the apply has to come first; what must not happen is a CI
+  run in the window it opens. Written as a prohibition on the apply, the
+  rule gets broken the first time somebody needs the tables — which is what
+  happened on 2026-09-22, four minutes after it was written, by the person
+  who wrote it. The dispatch in flight had forked dev before the apply, so
+  nothing broke; that is luck, and a rule that depends on luck is not a
+  rule.
 
 - **Edit source with the tool that refuses a missed anchor. Not `sed`.**
   `str.replace` returns the original string when it matches nothing, `sed`

@@ -167,6 +167,15 @@ export interface LoadFacts {
 
 const DAY_MS = 86_400_000
 
+/**
+ * Compliance types that record an OCCURRENCE rather than a credential.
+ *
+ * Their `expiresAt` is the day the thing happened, because the column is NOT
+ * NULL and a future date would be invented. Nothing about them expires, so
+ * nothing about them warns.
+ */
+const EVENT_TYPES = new Set<string>(['DRUG_TEST'])
+
 function complianceWarnings(
   compliance: readonly ComplianceFact[],
   required: readonly string[],
@@ -176,6 +185,15 @@ function complianceWarnings(
 
   for (const item of compliance) {
     if (item.expiresAt === null) continue
+    // ── AN EVENT DOES NOT LAPSE (item 15) ──────────────────────────────
+    //
+    // A random drug test is a thing that HAPPENED, not a credential with a
+    // life. §382 sets no per-driver expiry for one, and `ComplianceItem.
+    // expiresAt` is NOT NULL — so `random-testing.ts` writes the test date
+    // rather than inventing a year, and this stops that honest value being
+    // read as “expired the same evening” for every driver tested this
+    // quarter.
+    if (EVENT_TYPES.has(item.type)) continue
     const days = Math.floor((item.expiresAt.getTime() - now.getTime()) / DAY_MS)
     if (days < 0) {
       found.push({ name: 'compliance_expired', detail: item.type })

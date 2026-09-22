@@ -729,6 +729,65 @@ export async function seedOrganization(
   // SAME COMMIT (AGENTS.md). `tests/isolation-coverage.test.ts` fails by name
   // otherwise, and “sees no rows from the other organization” is true of a
   // table with nothing in it — which is the most comfortable way to be wrong.
+  // ITEM 15. FOUR NEW TABLES, FOUR ROWS, SAME COMMIT (AGENTS.md). A policy
+  // over an empty table proves nothing — "sees no rows from the other
+  // organization" is true of a table with nothing in it.
+  record(
+    'randomTestingRate',
+    await db.randomTestingRate.create({
+      data: {
+        organizationId,
+        year: 2026,
+        // 50% and 10%, as basis points. The numbers are the fixture’s, and
+        // the citation is what makes them a recorded rate rather than a
+        // remembered one.
+        drugRateBps: 5000,
+        alcoholRateBps: 1000,
+        citation: 'Fixture — not a real notice',
+      },
+    }),
+  )
+  record(
+    'randomPoolEntry',
+    await db.randomPoolEntry.create({
+      data: {
+        organizationId,
+        companyId,
+        year: 2026,
+        driverId: driver.id,
+        name: 'Fixture, Driver',
+        consortiumName: 'Fixture Consortium',
+      },
+    }),
+  )
+  const fixtureDraw = await db.randomDraw.create({
+    data: {
+      organizationId,
+      companyId,
+      year: 2026,
+      quarter: 1,
+      source: 'DERIVED',
+      seed: `seed-${tag}`,
+      algorithm: 'sha256-rank-v1',
+      // The snapshot length and `poolSize` must agree — a CHECK says so.
+      poolSnapshot: [{ key: driver.id, driverId: driver.id, name: 'Fixture' }],
+      poolSize: 1,
+    },
+  })
+  record('randomDraw', fixtureDraw)
+  record(
+    'randomSelection',
+    await db.randomSelection.create({
+      data: {
+        organizationId,
+        drawId: fixtureDraw.id,
+        kind: 'DRUG',
+        memberKey: driver.id,
+        driverId: driver.id,
+        name: 'Fixture, Driver',
+      },
+    }),
+  )
   record(
     'accident',
     await db.accident.create({

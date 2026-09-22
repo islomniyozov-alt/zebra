@@ -49,6 +49,7 @@ export default async function SafetyPage({
   const maySeeInspections = await currentUserCan('read', 'inspection')
   const maySeeClaims = await currentUserCan('read', 'claim')
   const maySeeAccidents = await currentUserCan('read', 'accident')
+  const maySeeRandom = await currentUserCan('read', 'randomTesting')
 
   const params = await searchParams
   const { t } = await getLocaleContext()
@@ -303,6 +304,16 @@ export default async function SafetyPage({
            * Behind its OWN resource since the owner's ruling of
            * 2026-09-22 — /safety is `compliance`, and a link to a screen
            * the reader cannot open is worse than no link. */}
+          {/* ITEM 15. The 382.305 random testing programme. Its own
+           * resource, like the register beside it. */}
+          {maySeeRandom ? (
+            <Link
+              href="/safety/random"
+              className="whitespace-nowrap text-sm text-accent hover:underline"
+            >
+              {t('rt.title')}
+            </Link>
+          ) : null}
           {maySeeAccidents ? (
             <Link
               href="/safety/accidents"

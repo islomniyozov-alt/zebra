@@ -190,6 +190,10 @@ model Organization {
   trailers                 Trailer[]
   trucks                   Truck[]
   preferences              UserPreference[]
+  randomRates              RandomTestingRate[]
+  randomPoolEntries        RandomPoolEntry[]
+  randomDraws              RandomDraw[]
+  randomSelections         RandomSelection[]
 }
 
 enum PlanTier {
@@ -286,6 +290,8 @@ model Company {
   accidents           Accident[]
   pendingUploads      PendingUpload[]
   settlementLoadLines SettlementLoadLine[]
+  randomPoolEntries   RandomPoolEntry[]
+  randomDraws         RandomDraw[]
 
   @@unique([organizationId, dotNumber])
   @@index([organizationId, isActive])
@@ -376,6 +382,7 @@ model User {
   pendingUploads     PendingUpload[]
   inboundEmails      InboundEmail[]
   preferences        UserPreference[]
+  randomDraws        RandomDraw[]
 
   @@index([isActive])
 }
@@ -948,6 +955,8 @@ model Driver {
   claims              Claim[]
   accidents           Accident[]
   communications      Communication[]
+  randomPoolEntries   RandomPoolEntry[]
+  randomSelections    RandomSelection[]
 
   @@unique([organizationId, externalId])
   @@index([companyId, status])
@@ -1038,7 +1047,8 @@ model ComplianceItem {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  documents Document[]
+  documents        Document[]
+  randomSelections RandomSelection[]
 
   @@index([companyId, expiresAt])
   @@index([companyId, type, expiresAt])
@@ -4018,5 +4028,152 @@ model Accident {
   @@index([companyId, occurredAt])
   @@index([driverId])
   @@index([claimId])
+  @@index([organizationId])
+}
+
+/// 49 CFR 382.305(b)'s minimum annual percentage rate, AS DATA.
+///
+/// The Administrator adjusts this by notice in the Federal Register — it has
+/// moved between 25% and 50% for drugs and moved again for 2024. A constant in
+/// the source would be correct until the morning it silently was not, and the
+/// carrier would under-test for a year with nothing saying so. So a person
+/// reads the notice and enters the number, and `citation` is NOT NULL because
+/// a rate with no notice behind it is a number somebody remembered.
+///
+/// Basis points, like every percentage in this schema. 50% is 5000.
+model RandomTestingRate {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  year           Int
+  drugRateBps    Int
+  alcoholRateBps Int
+  /// e.g. "89 FR 1234 (Jan 2024)". Printed on the year-end summary.
+  citation       String
+  notes          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Created by hand in the migration, with a CHECK that both rates are
+  /// percentages. Two rows for one year is two answers to a question with one.
+  @@unique([organizationId, year])
+}
+
+/// The pool when it comes from a CONSORTIUM rather than from the roster.
+///
+/// Derived membership — active drivers with a CDL on file — needs no table.
+/// A carrier in a consortium or TPA is tested from the consortium's pool,
+/// which arrives from outside and is entered as data.
+///
+/// `driverId` IS NULLABLE BECAUSE THE LIST IS NOT OURS: a consortium pool
+/// contains drivers from other carriers, and inventing a Driver row for them
+/// would put strangers on the roster. The name is kept either way.
+model RandomPoolEntry {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId      String
+  company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  year           Int
+  driverId       String?
+  driver         Driver? @relation(fields: [driverId], references: [id])
+  name           String
+  consortiumName String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, year])
+  @@index([organizationId])
+}
+
+/// ONE QUARTER'S DRAW, AND THE WHOLE AUDIT.
+///
+/// "Random" to an auditor means "you cannot have chosen who got tested". A
+/// selection nobody can re-derive is indistinguishable from a list somebody
+/// typed, so three things are stored and the selection is a pure function of
+/// them: the SEED, the ALGORITHM by name, and THE POOL AS IT STOOD.
+///
+/// `poolSnapshot` is the pool in full at the moment of the draw — not a count,
+/// and not a reference to a query that would answer differently today. A
+/// driver hired in July changes the derived pool, and an April draw must still
+/// recompute to the same names in December.
+///
+/// A CHECK in the migration refuses a draw with no seed, no algorithm, or a
+/// snapshot whose length disagrees with `poolSize`.
+model RandomDraw {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId      String
+  company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  year    Int
+  quarter Int
+  /// DERIVED or CONSORTIUM. TEXT against a code list, per migration 52.
+  source  String
+
+  seed         String
+  /// Named and versioned, so changing the method is a new name rather than an
+  /// old draw quietly becoming unverifiable. See random-testing.ts.
+  algorithm    String
+  poolSnapshot Json
+  poolSize     Int
+
+  drawnAt       DateTime @default(now())
+  drawnByUserId String?
+  drawnBy       User?    @relation(fields: [drawnByUserId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  selections RandomSelection[]
+
+  @@unique([companyId, year, quarter])
+  @@index([organizationId])
+}
+
+/// One name out of one draw.
+///
+/// `memberKey` is what the draw actually selected and what ties this row back
+/// to the snapshot; `driverId` is a convenience for the screens and is null
+/// for a consortium line belonging to another carrier.
+///
+/// NOT_TESTED NEEDS A REASON, and a CHECK enforces it. §382.305(j)(3) allows a
+/// selected driver to be excused, but the carrier has to say why for each one
+/// — "not tested" with no reason is the line an auditor stops on.
+model RandomSelection {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  drawId String
+  draw   RandomDraw @relation(fields: [drawId], references: [id], onDelete: Cascade)
+
+  /// DRUG or ALCOHOL. Two programmes over one pool, drawn independently.
+  kind      String
+  memberKey String
+  driverId  String?
+  driver    Driver? @relation(fields: [driverId], references: [id])
+  name      String
+
+  /// PENDING, TESTED or NOT_TESTED.
+  outcome  String    @default("PENDING")
+  reason   String?
+  testedAt DateTime?
+
+  /// The DRUG_TEST compliance item a completed test produced, where it did.
+  complianceItemId String?
+  complianceItem   ComplianceItem? @relation(fields: [complianceItemId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([drawId, kind, memberKey])
+  @@index([drawId])
+  @@index([driverId])
   @@index([organizationId])
 }

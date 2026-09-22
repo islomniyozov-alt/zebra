@@ -68,6 +68,13 @@ export type ReferenceFailure =
    * of what actually happened — so it is refused rather than accepted.
    */
   | 'already_voided'
+  /**
+   * A testing year nobody has entered the FMCSA rate for (item 15).
+   *
+   * NOT A DEFAULT. §382.305(b)’s rate is adjusted by notice and a fallback
+   * would be a wrong number nobody questions. See random-testing.ts.
+   */
+  | 'rate_not_recorded'
   | 'codes_unconfirmed'
 
 export class ReferenceError extends Error {
@@ -106,6 +113,7 @@ export const REFERENCE_ERROR_KEYS: Record<ReferenceFailure, MessageKey> = {
   not_in_code_list: 'ref.error.notInCodeList',
   trailer_already_paired: 'ref.error.trailerAlreadyPaired',
   already_voided: 'ref.error.alreadyVoided',
+  rate_not_recorded: 'ref.error.rateNotRecorded',
 }
 
 /**

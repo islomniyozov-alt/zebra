@@ -89,6 +89,16 @@ export const RESOURCES = [
   // exists and is independent of it — most accidents on a register never
   // produce a claim, and a cargo claim never had an accident.
   'accident',
+  // The 49 CFR 382.305 random testing programme (item 15). Named for the
+  // same reason `accident` was on 2026-09-22 and `inspection` was before
+  // it: running a random draw is not renewing a registration, and welding
+  // them together answers the second question by accident.
+  //
+  // THE DRAW IS THE REASON IT MATTERS MORE HERE THAN ELSEWHERE. A person
+  // who can re-run a draw until they like the names has defeated the
+  // programme, and §382.305's whole subject is that nobody can. That is a
+  // narrower permission than "may edit safety records".
+  'randomTesting',
   // Claims and DataQs challenges. §2.5 gives them their own role line —
   // OWNER/ADMIN/MANAGER write, ACCOUNTING reads — which is neither FLEET_* nor
   // MONEY_*, so they are named here and granted explicitly below.
@@ -207,6 +217,9 @@ const FLEET_READ: Permission[] = [
   // out-of-service order: a driver who put a truck in a ditch last month
   // is context for what they are handed today.
   ...read('accident'),
+  // Read, so a dispatcher can see that a driver they are about to send out
+  // is sitting on an unresolved selection.
+  ...read('randomTesting'),
 ]
 
 const FLEET_WRITE: Permission[] = [
@@ -219,6 +232,7 @@ const FLEET_WRITE: Permission[] = [
   // Filing and voiding a register entry is the safety desk's act, and it
   // sits with the same people who record an inspection.
   ...crud('accident'),
+  ...crud('randomTesting'),
 ]
 
 /**
@@ -386,6 +400,9 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     // is the occurrence the claim is about. Filing one is the safety
     // desk's act.
     ...read('accident'),
+    // And the programme, read-only. Accounting is asked for the year-end
+    // summary at insurance renewal; running the draw is the safety desk.
+    ...read('randomTesting'),
     // Read and not write, straight from §2.5. Accounting reserves against an
     // open claim and reconciles what was paid on a settled one; filing and
     // moving one is the safety desk's act.
