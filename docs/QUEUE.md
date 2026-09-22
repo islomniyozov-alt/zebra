@@ -54,13 +54,23 @@ driver and loads exports and is empty in all three (0 of 113, 0 of 54, 0 of
 14,451). The one column that does carry data — `Registration expiry date`,
 88 of 113 — is already imported as a REGISTRATION compliance item.
 
+**13 — DQF completeness.** Landed 2026-09-21, migration 57. One
+definition of 49 CFR 391.51 in `src/lib/dqf.ts` — eight requirements, each
+marked at-hire or annual and mapped to the `ComplianceType` or `DocumentType`
+that evidences it. Item 9's `REQUIRED_DRIVER_DOCUMENTS` now derives from it, so
+there is one list rather than two. A computed checklist per driver
+(present / due / expired / missing, each with the date it turned due) on the
+driver page, a `dqf_incomplete` warning, and a roster view at `/safety/dqf`.
+Terminated drivers are silent: 391.51(c) keeps the file, it does not keep it
+current. Five enum values added and nothing else stored; the three DocumentType
+values are flag 13 in `PHASE-5-BRIEF.md` §7.
+
 ## Next
 
-| #   | Item                           | Shape                                                                                                                                              |
-| --- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 13  | **DQF completeness**           | The Driver Qualification File as a checklist §391.51 can be audited against, rather than a folder of documents that happens to contain some of it. |
-| 14  | **Accident register**          | §390.15(b). The register DOT asks for at an audit, with the three-year retention rule behind it.                                                   |
-| 15  | **Drug & alcohol random pool** | §382.305. Pool membership, selection rounds and the rate the year has to hit.                                                                      |
+| #   | Item                           | Shape                                                                                            |
+| --- | ------------------------------ | ------------------------------------------------------------------------------------------------ |
+| 14  | **Accident register**          | §390.15(b). The register DOT asks for at an audit, with the three-year retention rule behind it. |
+| 15  | **Drug & alcohol random pool** | §382.305. Pool membership, selection rounds and the rate the year has to hit.                    |
 
 ## Deferred
 

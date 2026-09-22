@@ -13,6 +13,7 @@ import {
 import {
   driverWarningFacts,
   driverWarnings,
+  NO_DRIVER_FACTS,
   type Warning,
 } from '@/lib/warnings'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -179,10 +180,7 @@ export default async function DriversPage({
         status: driver.status,
         roster: rosterBadge(driver.status),
         isRetired: driver.deletedAt !== null,
-        warnings: driverWarnings(
-          facts.get(driver.id) ?? { compliance: [], negativeNetCount: 0 },
-          now,
-        ),
+        warnings: driverWarnings(facts.get(driver.id) ?? NO_DRIVER_FACTS, now),
         dispatch: dispatchStatusFrom(
           dispatchFacts.get(driver.id) ?? {
             rosterStatus: driver.status,

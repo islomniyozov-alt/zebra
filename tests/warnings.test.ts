@@ -6,9 +6,13 @@ import {
   truckWarnings,
   EXPIRING_WITHIN_DAYS,
   PICKUP_SOON_HOURS,
+  NO_DRIVER_FACTS,
+  REQUIRED_DRIVER_DOCUMENTS,
+  type DriverFacts,
   type LoadFacts,
   type WarningName,
 } from '@/lib/warnings'
+import { DQF_DOCUMENT_TYPES } from '@/lib/dqf'
 
 // ---------------------------------------------------------------------------
 // EVERY WARNING HAS A FACT UNDER IT, AND NO WARNING IS STORED.
@@ -31,6 +35,53 @@ const hours = (n: number) => new Date(NOW.getTime() + n * 3_600_000)
 
 const names = (warnings: { name: WarningName }[]) => warnings.map((w) => w.name)
 
+/**
+ * A driver with nothing on file, plus whatever this test cares about.
+ *
+ * ITEM 13 ADDED TWO FIELDS to `DriverFacts` and every literal here was
+ * missing them. Filling from the exported empty rather than repeating the
+ * shape means the next field added lands in one place — which is this
+ * item's whole subject, applied to its own tests.
+ */
+/**
+ * Every DQF requirement on file and current.
+ *
+ * A TEST ABOUT ONE WARNING MUST NOT BE A TEST ABOUT THE OTHER SEVEN. Item
+ * 13 made the required list five compliance types and three documents, so
+ * a fixture holding only a CDL is now a driver missing most of their file
+ * — and every assertion here would be about that instead of its subject.
+ */
+const COMPLETE_FILE = {
+  hireDate: days(-400),
+  documents: [...DQF_DOCUMENT_TYPES] as string[],
+  // BUILT FROM THE REQUIRED LIST ITSELF, which is item 13 applied to its
+  // own fixtures: a requirement added to dqf.ts appears here without anybody
+  // remembering to add it, and a fixture that goes stale is a test that
+  // quietly stops testing.
+  compliance: REQUIRED_DRIVER_DOCUMENTS.map((type) => ({
+    type: type as string,
+    expiresAt: days(400) as Date | null,
+  })),
+}
+
+const driverFacts = (over: Partial<DriverFacts>): DriverFacts => ({
+  ...NO_DRIVER_FACTS,
+  ...COMPLETE_FILE,
+  ...over,
+})
+
+/** The complete file, with these entries replacing their own types. */
+const fileWith = (rows: { type: string; expiresAt: Date | null }[]) => [
+  ...rows,
+  ...COMPLETE_FILE.compliance.filter(
+    (row) => !rows.some((given) => given.type === row.type),
+  ),
+]
+
+/** The complete file, minus these types entirely. A deliberate gap. */
+const fileWithout = (types: string[]) =>
+  COMPLETE_FILE.compliance.filter((row) => !types.includes(row.type))
+
 const load = (over: Partial<LoadFacts> = {}): LoadFacts => ({
   pickupAt: days(30),
   hasDriver: true,
@@ -48,13 +99,13 @@ const load = (over: Partial<LoadFacts> = {}): LoadFacts => ({
 describe('compliance', () => {
   it('names a document that has expired', () => {
     const out = driverWarnings(
-      {
+      driverFacts({
         compliance: [
           { type: 'CDL', expiresAt: days(400) },
           { type: 'MEDICAL_CARD', expiresAt: days(-1) },
         ],
         negativeNetCount: 0,
-      },
+      }),
       NOW,
     )
     expect(names(out)).toContain('compliance_expired')
@@ -65,25 +116,21 @@ describe('compliance', () => {
 
   it('names one expiring inside the window, and not one outside it', () => {
     const inside = driverWarnings(
-      {
-        compliance: [
+      driverFacts({
+        compliance: fileWith([
           { type: 'CDL', expiresAt: days(EXPIRING_WITHIN_DAYS - 1) },
-          { type: 'MEDICAL_CARD', expiresAt: days(400) },
-        ],
-        negativeNetCount: 0,
-      },
+        ]),
+      }),
       NOW,
     )
     expect(names(inside)).toEqual(['compliance_expiring'])
 
     const outside = driverWarnings(
-      {
-        compliance: [
+      driverFacts({
+        compliance: fileWith([
           { type: 'CDL', expiresAt: days(EXPIRING_WITHIN_DAYS + 5) },
-          { type: 'MEDICAL_CARD', expiresAt: days(400) },
-        ],
-        negativeNetCount: 0,
-      },
+        ]),
+      }),
       NOW,
     )
     expect(outside).toEqual([])
@@ -93,14 +140,17 @@ describe('compliance', () => {
     // A lapsed card has something to renew. An absent one does not, and
     // somebody has to go and get it — different job, different warning.
     const out = driverWarnings(
-      {
-        compliance: [{ type: 'CDL', expiresAt: days(400) }],
-        negativeNetCount: 0,
-      },
+      driverFacts({ compliance: fileWithout(['MEDICAL_CARD']) }),
       NOW,
     )
-    expect(names(out)).toEqual(['document_missing'])
+    expect(names(out)).toEqual(['document_missing', 'dqf_incomplete'])
     expect(out[0]!.detail).toBe('MEDICAL_CARD')
+
+    // ITEM 13: THE SAME FACT FROM TWO ANGLES, and both are wanted. One
+    // names WHICH record is absent; the other says the file is not
+    // audit-ready and by how much — and it is the only one that can see
+    // the three requirements evidenced by documents rather than dates.
+    expect(out[1]!.detail).toBe('1')
   })
 
   it('asks a truck for its own documents, not a driver’s', () => {
@@ -132,13 +182,9 @@ describe('compliance', () => {
 describe('a driver whose settlement went below zero', () => {
   it('is warned about, once, however many times it happened', () => {
     const out = driverWarnings(
-      {
-        compliance: [
-          { type: 'CDL', expiresAt: days(400) },
-          { type: 'MEDICAL_CARD', expiresAt: days(400) },
-        ],
+      driverFacts({
         negativeNetCount: 3,
-      },
+      }),
       NOW,
     )
     expect(names(out)).toEqual(['settlement_net_negative'])

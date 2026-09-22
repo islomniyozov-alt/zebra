@@ -1,5 +1,13 @@
 import { Prisma } from '@/generated/prisma/client'
 import { remittanceOutcome } from './settlement-week'
+import {
+  isQualifiable,
+  dqfChecklist,
+  dqfFactsForDrivers,
+  dqfIncompleteCount,
+  DQF_COMPLIANCE_TYPES,
+  type DqfFacts,
+} from './dqf'
 
 // ---------------------------------------------------------------------------
 // WARNINGS ARE COMPUTED. THERE IS NO WARNING COLUMN AND THERE WILL NOT BE ONE.
@@ -44,6 +52,7 @@ export type WarningName =
   | 'settlement_line_held'
   | 'settlement_net_negative'
   | 'cancelled_but_assigned'
+  | 'dqf_incomplete'
 
 export interface Warning {
   name: WarningName
@@ -66,7 +75,28 @@ export const PICKUP_SOON_HOURS = 24
  * absences are worth interrupting somebody over, and they are the one part of
  * this file that is an opinion rather than a reading.
  */
-export const REQUIRED_DRIVER_DOCUMENTS = ['CDL', 'MEDICAL_CARD'] as const
+/**
+ * THE ONE DEFINITION, IMPORTED (item 13).
+ *
+ * This was `['CDL', 'MEDICAL_CARD']`, written by hand, and it was the
+ * second definition of "what a driver must have on file" — the first being
+ * whatever anybody remembered about 49 CFR 391.51. Adding a requirement
+ * meant remembering to add it twice, and the copy that would not get
+ * updated is the one nobody is looking at when the auditor arrives.
+ *
+ * `dqf.ts` is now the only place a requirement is stated. The guard is
+ * named "two definitions of required" and it fails if this file grows a
+ * literal list again.
+ *
+ * CDL STAYS, AND IT IS NOT A DQF ITEM. The licence's own expiry is watched
+ * by Phase 4; the DQF item is a COPY of it on file, which is a document.
+ * Two different facts about one licence, both required, neither standing
+ * in for the other.
+ */
+export const REQUIRED_DRIVER_DOCUMENTS = [
+  'CDL',
+  ...DQF_COMPLIANCE_TYPES,
+] as const
 export const REQUIRED_TRUCK_DOCUMENTS = [
   'REGISTRATION',
   'ANNUAL_INSPECTION',
@@ -82,6 +112,40 @@ export interface DriverFacts {
   compliance: readonly ComplianceFact[]
   /** How many of this driver's settlements ended below zero. */
   negativeNetCount: number
+  /** When they started. What an at-hire requirement is overdue FROM. */
+  hireDate: Date | null
+  /** Document types filed against this driver — the undated DQF items. */
+  documents: readonly string[]
+  /**
+   * Whether this driver's file has to be CURRENT. A terminated driver's
+   * file is KEPT for three years (§391.51(c)), not kept up to date.
+   */
+  qualifiable: boolean
+}
+
+/**
+ * These facts, as the DQF checklist reads them.
+ *
+ * A PROJECTION, NOT A COPY. `compliance` is the same array item 9 walks —
+ * the whole point of item 13 is that one set of rows answers both
+ * questions, so this hands the list over rather than fetching it twice.
+ */
+export function dqfFactsOf(facts: DriverFacts): DqfFacts {
+  return {
+    hireDate: facts.hireDate,
+    compliance: facts.compliance,
+    documents: facts.documents,
+  }
+}
+
+/** What a driver with nothing on file looks like. Exported so callers do
+ * not each invent their own empty. */
+export const NO_DRIVER_FACTS: DriverFacts = {
+  compliance: [],
+  negativeNetCount: 0,
+  hireDate: null,
+  documents: [],
+  qualifiable: true,
 }
 
 export interface TruckFacts {
@@ -146,6 +210,24 @@ export function driverWarnings(facts: DriverFacts, now: Date): Warning[] {
       name: 'settlement_net_negative',
       detail: String(facts.negativeNetCount),
     })
+  }
+
+  // ── THE FILE, AS ONE WARNING ─────────────────────────────────────────
+  //
+  // A COUNT RATHER THAN EIGHT WARNINGS. The per-item detail is on the
+  // driver page and on the roster view; a list row needs to know that the
+  // file is not audit-ready and how far off it is.
+  //
+  // A TERMINATED DRIVER IS SILENT, which is item 9's closed-history rule
+  // applied to people: §391.51(c) keeps the file for three years after
+  // they leave, it does not keep it current. 69 terminated drivers and 39
+  // applicants came over in the import, and warning on each would be 108
+  // alarms about nobody.
+  if (facts.qualifiable) {
+    const incomplete = dqfIncompleteCount(dqfChecklist(dqfFactsOf(facts), now))
+    if (incomplete > 0) {
+      found.push({ name: 'dqf_incomplete', detail: String(incomplete) })
+    }
   }
 
   return found
@@ -234,43 +316,51 @@ export async function driverWarningFacts(
   driverIds: readonly string[],
 ): Promise<Map<string, DriverFacts>> {
   const facts = new Map<string, DriverFacts>()
-  for (const id of driverIds) {
-    facts.set(id, { compliance: [], negativeNetCount: 0 })
-  }
+  for (const id of driverIds) facts.set(id, { ...NO_DRIVER_FACTS })
   if (driverIds.length === 0) return facts
 
   const ids = [...driverIds]
-  const rows = await tx.$queryRaw<
-    { id: string; kind: string; label: string | null; at: Date | null }[]
-  >`
-    SELECT ci."driverId" AS id, 'compliance' AS kind,
-           ci."type"::text AS label, ci."expiresAt" AS at
-      FROM "ComplianceItem" ci
-     WHERE ci."driverId" = ANY(${ids}) AND ci."deletedAt" IS NULL
-    UNION ALL
-    SELECT s."driverId" AS id, 'negative_net' AS kind,
-           NULL::text AS label, NULL::timestamp AS at
-      FROM "Settlement" s
-     WHERE s."driverId" = ANY(${ids}) AND s."netCents" < 0
-  `
+  const [rows, dqf, roster] = await Promise.all([
+    // ONLY THE SETTLEMENTS. The compliance rows used to be the other arm
+    // of a UNION here and are now read once, by the DQF loader below.
+    tx.$queryRaw<{ id: string }[]>`
+      SELECT s."driverId" AS id
+        FROM "Settlement" s
+       WHERE s."driverId" = ANY(${ids}) AND s."netCents" < 0
+    `,
+    // The DQF evidence, from `dqf.ts` — the one loader, so the drivers
+    // list and the roster view cannot disagree about what is on file.
+    dqfFactsForDrivers(tx, ids),
+    // And whether each driver is somebody whose file must be current.
+    tx.driver.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, status: true, deletedAt: true },
+    }),
+  ])
+
+  for (const driver of roster) {
+    const entry = facts.get(driver.id)
+    if (!entry) continue
+    const evidence = dqf.get(driver.id)
+    facts.set(driver.id, {
+      ...entry,
+      qualifiable: isQualifiable(driver),
+      hireDate: evidence?.hireDate ?? null,
+      documents: evidence?.documents ?? [],
+      // THE COMPLIANCE ROWS COME FROM THE DQF LOADER, not from a second
+      // query below. They are the same rows; fetching them twice is how
+      // two answers to one question start.
+      compliance: evidence?.compliance ?? [],
+    })
+  }
 
   for (const row of rows) {
     const entry = facts.get(row.id)
     if (!entry) continue
-    if (row.kind === 'compliance') {
-      facts.set(row.id, {
-        ...entry,
-        compliance: [
-          ...entry.compliance,
-          { type: row.label ?? '', expiresAt: row.at },
-        ],
-      })
-    } else {
-      facts.set(row.id, {
-        ...entry,
-        negativeNetCount: entry.negativeNetCount + 1,
-      })
-    }
+    facts.set(row.id, {
+      ...entry,
+      negativeNetCount: entry.negativeNetCount + 1,
+    })
   }
 
   return facts

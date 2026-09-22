@@ -540,6 +540,41 @@ Recorded rather than resolved, per Phase 1's discipline.
     each other. Nothing was imported. The column ships empty and is filled by
     whoever is looking at the truck.
 
+36. **Item 13 authorised new `ComplianceType` values; three new `DocumentType`
+    values were added as well.** The brief says "No new stored fields except
+    any ComplianceType the list needs and doesn’t exist". Five of the eight
+    391.51 requirements needed a word that did not exist, and only two of
+    those five fit `ComplianceType`.
+
+    WHY THE OTHER THREE COULD NOT. `ComplianceItem.expiresAt` is NOT NULL. An
+    employment application, a prior-employer inquiry and a road-test
+    certificate do not expire, so filing them as compliance records would mean
+    inventing an expiry for each — and an invented date eventually raises or
+    suppresses an alarm about nothing. They are documents, which is what they
+    are in the physical file too, so `EMPLOYMENT_APPLICATION`,
+    `EMPLOYMENT_VERIFICATION` and `ROAD_TEST_CERTIFICATE` were added to
+    `DocumentType`.
+
+    Without them, five of eight requirements have nowhere to point and the
+    definition cannot be written down at all — which is the one thing item 13
+    is for. Nothing else was widened: no column, no table, and the checklist
+    itself is computed on every read.
+
+37. **The `dqf_incomplete` warning and item 9’s `document_missing` overlap on
+    purpose, and it is worth a ruling.** With the required list now derived,
+    a driver missing an MVR gets `document_missing: MVR` AND
+    `dqf_incomplete: 1` on the same list row.
+
+    They are not redundant: one names WHICH record is absent, the other says
+    the file is not audit-ready and by how much — and only the second can see
+    the three requirements evidenced by documents rather than dates, because
+    `complianceWarnings` walks compliance records alone.
+
+    They are still two chips saying one thing on a narrow column. The
+    alternative is to stop emitting `document_missing` for drivers and let the
+    DQF warning speak for the whole file, which loses “which one” from the
+    list view. Left as it is, flagged rather than decided unilaterally.
+
 ---
 
 ## 8. How each acceptance box closed

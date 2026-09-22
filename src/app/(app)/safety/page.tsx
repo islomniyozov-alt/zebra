@@ -295,6 +295,15 @@ export default async function SafetyPage({
           {/* The queue's sibling. Inspections are not a queue — a clean one
            * needs nothing done and still belongs on file — so they get their
            * own screen rather than rows here, and this is the way in. */}
+          {/* ITEM 13. The roster-level view of every driver qualification
+           * file. Behind `compliance:read`, which is what this whole screen
+           * is behind, because the DQF is made of the same records. */}
+          <Link
+            href="/safety/dqf"
+            className="whitespace-nowrap text-sm text-accent hover:underline"
+          >
+            {t('dqf.roster.title')}
+          </Link>
           {maySeeInspections ? (
             <Link
               href="/safety/inspections"

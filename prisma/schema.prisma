@@ -1054,6 +1054,12 @@ enum ComplianceType {
   MEDICAL_CARD
   DRUG_TEST
   MVR
+  /// 391.25(b) — the carrier's recorded REVIEW of the MVR, which is a
+  /// separate obligation from obtaining it under 391.25(a). See dqf.ts.
+  ANNUAL_REVIEW
+  /// 382.701 — the FMCSA Drug & Alcohol Clearinghouse query. Not DRUG_TEST,
+  /// which is a test result and a different thing with the same subject.
+  CLEARINGHOUSE_QUERY
   OTHER
 }
 
@@ -2500,6 +2506,12 @@ enum DocumentType {
   CDL_COPY
   MEDICAL_CARD
   ACCIDENT_REPORT
+  /// The three DQF items that do not expire (item 13). Documents rather than
+  /// ComplianceItems because `expiresAt` is NOT NULL and an employment
+  /// application has no expiry to invent. See dqf.ts.
+  EMPLOYMENT_APPLICATION
+  EMPLOYMENT_VERIFICATION
+  ROAD_TEST_CERTIFICATE
   PHOTO
   OTHER
 }

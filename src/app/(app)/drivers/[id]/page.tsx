@@ -11,6 +11,14 @@ import { DriverDocuments } from '../../_reference/DriverDocuments'
 import { inspectionPanelData } from '../../_reference/inspection-view'
 import { PAY_RULE_TYPES, payRulesFor } from '@/lib/driver-pay'
 import { onTimeRateForDriver } from '@/lib/dispatch-fields'
+import {
+  dqfChecklist,
+  dqfFactsForDrivers,
+  dqfIncompleteCount,
+  DQF_REQUIREMENTS,
+  isQualifiable,
+} from '@/lib/dqf'
+import { DqfPanel, type DqfPanelRow } from '../../_reference/DqfPanel'
 import { bpsToInput, formatCents } from '@/lib/money'
 import { RecordForm } from '@/components/forms/RecordForm'
 import { AssetActions } from '../../_reference/AssetActions'
@@ -85,6 +93,15 @@ export default async function EditDriverPage({
     // number to go wrong when a check-in is corrected.
     const onTimeRate = await onTimeRateForDriver(tx, id)
 
+    // The DQF evidence, from the same loader the roster view and the
+    // warnings use. One definition of required, one loader for what is on
+    // file — see dqf.ts.
+    const dqf = (await dqfFactsForDrivers(tx, [id])).get(id) ?? {
+      hireDate: null,
+      compliance: [],
+      documents: [],
+    }
+
     const open = await currentAuthority(tx, 'driver', id)
     const openCompany = open
       ? (companies.find((c) => c.id === open.companyId)?.name ?? null)
@@ -119,6 +136,7 @@ export default async function EditDriverPage({
       trailers,
       payRules,
       onTimeRate,
+      dqf,
       compliance,
       inspections,
       documents: documents.map((document) => ({
@@ -142,6 +160,7 @@ export default async function EditDriverPage({
     trailers,
     payRules,
     onTimeRate,
+    dqf,
     compliance,
     inspections,
   } = data
@@ -167,6 +186,43 @@ export default async function EditDriverPage({
   // company. The sentence says what is missing instead, and the figure
   // always carries the count it is over so a 100% over two loads cannot be
   // mistaken for a season.
+  // ── THE FILE, COMPUTED ON EVERY READ ─────────────────────────────────
+  //
+  // Nothing about the checklist is stored. A "DQF complete" column would
+  // be true right up until the night a medical card lapses, with no event
+  // to tell it otherwise — which is item 9's argument, and this is the
+  // screen an auditor reads over somebody's shoulder.
+  const dqfNow = new Date()
+  const dqfEntries = dqfChecklist(dqf, dqfNow)
+  const dqfIncomplete = dqfIncompleteCount(dqfEntries)
+  const dqfQualifiable = isQualifiable(driver)
+
+  const dqfDay = new Intl.DateTimeFormat(locale, { dateStyle: 'medium' })
+  const dqfRows: DqfPanelRow[] = dqfEntries.map((entry) => ({
+    key: entry.key,
+    label: t(`dqf.key.${entry.key}` as MessageKey),
+    cfr: entry.cfr,
+    cadenceLabel: t(`dqf.cadence.${entry.cadence}` as MessageKey),
+    status: entry.status,
+    statusLabel: t(`dqf.status.${entry.status}` as MessageKey),
+    // NO DATE IS ITS OWN ANSWER. A missing item on a driver with no
+    // recorded hire date has been required since a day nobody wrote down,
+    // and "—" would read as "not required yet".
+    since:
+      entry.dueSince !== null
+        ? dqfDay.format(entry.dueSince)
+        : entry.status === 'missing'
+          ? t('dqf.since.unknown')
+          : null,
+  }))
+
+  const dqfSummary =
+    dqfIncomplete === 0
+      ? t('dqf.complete')
+      : t('dqf.incomplete')
+          .replace('{count}', String(dqfIncomplete))
+          .replace('{total}', String(DQF_REQUIREMENTS.length))
+
   const onTimeLabel =
     onTimeRate.percent === null
       ? t('dispatch.onTimeRate.none')
@@ -344,6 +400,27 @@ export default async function EditDriverPage({
                   read: t('upright.read'),
                   cancel: t('upright.cancel'),
                 },
+              }}
+            />
+          </div>
+        ) : null}
+
+        {/* ABOVE THE COMPLIANCE PANEL, because it is the question and that
+         * is half the answer: five of the eight requirements are the
+         * records listed below, and the other three are documents listed
+         * above. Reading the verdict first and the evidence after is the
+         * order an audit goes in. */}
+        {maySeeCompliance ? (
+          <div className="mt-z4 max-w-[900px]">
+            <DqfPanel
+              rows={dqfRows}
+              summary={dqfSummary}
+              qualifiable={dqfQualifiable}
+              labels={{
+                title: t('dqf.title'),
+                hint: t('dqf.hint'),
+                since: t('dqf.since'),
+                notQualifiable: t('dqf.notQualifiable'),
               }}
             />
           </div>
