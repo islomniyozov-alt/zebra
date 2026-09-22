@@ -123,6 +123,24 @@ export default async function DriversPage({
   const dispatchParam =
     typeof params['dispatch'] === 'string' ? params['dispatch'] : undefined
 
+  // ── THE DQF WARNING CARRIES KEYS; THIS TURNS THEM INTO WORDS ─────────
+  //
+  // `warnings.ts` has no translator and should not: it emits
+  // `application,mvr` and the interface renders it in the reader's
+  // language, which is the same division `DispatchConflict` uses. Every
+  // other warning's detail is already a bare fact — a document type, a
+  // count — so only this one needs mapping.
+  const namedGaps = (warning: Warning): Warning =>
+    warning.name !== 'dqf_incomplete'
+      ? warning
+      : {
+          ...warning,
+          detail: warning.detail
+            .split(',')
+            .map((key) => t(`dqf.key.${key}` as MessageKey))
+            .join(', '),
+        }
+
   const { rows, companyCount } = await withCurrentOrg(
     'read',
     'driver',
@@ -180,7 +198,10 @@ export default async function DriversPage({
         status: driver.status,
         roster: rosterBadge(driver.status),
         isRetired: driver.deletedAt !== null,
-        warnings: driverWarnings(facts.get(driver.id) ?? NO_DRIVER_FACTS, now),
+        warnings: driverWarnings(
+          facts.get(driver.id) ?? NO_DRIVER_FACTS,
+          now,
+        ).map(namedGaps),
         dispatch: dispatchStatusFrom(
           dispatchFacts.get(driver.id) ?? {
             rosterStatus: driver.status,

@@ -242,7 +242,12 @@ describe('the warning', () => {
     // firing, half the file is unwatched and nothing else says so.
     const out = driverWarnings(facts({ documents: [] }), NOW)
     expect(names(out)).toContain('dqf_incomplete')
-    expect(out.find((w) => w.name === 'dqf_incomplete')?.detail).toBe('4')
+    // NAMED, NOT COUNTED. A row reading "4" sends somebody to the driver
+    // page to find out which four; the names are the thing they were going
+    // to look up.
+    expect(out.find((w) => w.name === 'dqf_incomplete')?.detail).toBe(
+      'application,prior_employers,road_test,cdl_copy',
+    )
   })
 
   it('warns when a compliance-backed item has lapsed', () => {

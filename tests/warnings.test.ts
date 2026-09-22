@@ -143,14 +143,22 @@ describe('compliance', () => {
       driverFacts({ compliance: fileWithout(['MEDICAL_CARD']) }),
       NOW,
     )
-    expect(names(out)).toEqual(['document_missing', 'dqf_incomplete'])
-    expect(out[0]!.detail).toBe('MEDICAL_CARD')
+    // ONE CHIP ON A DRIVER, AND IT SAYS WHAT IS MISSING (flag 14, ruled
+    // 2026-09-22). `document_missing` used to fire here as well and said
+    // the same thing in a second chip.
+    expect(names(out)).toEqual(['dqf_incomplete'])
+    expect(out[0]!.detail).toBe('medical_certificate')
 
-    // ITEM 13: THE SAME FACT FROM TWO ANGLES, and both are wanted. One
-    // names WHICH record is absent; the other says the file is not
-    // audit-ready and by how much — and it is the only one that can see
-    // the three requirements evidenced by documents rather than dates.
-    expect(out[1]!.detail).toBe('1')
+    // AND THE LICENCE RECORD IS STILL WATCHED. `CDL` is the one required
+    // type the DQF does not cover — §391.51(b)(8) asks for a copy, which
+    // is a document — so its absence keeps its own warning rather than
+    // going silent.
+    const noLicence = driverWarnings(
+      driverFacts({ compliance: fileWithout(['CDL']) }),
+      NOW,
+    )
+    expect(names(noLicence)).toContain('document_missing')
+    expect(noLicence[0]!.detail).toBe('CDL')
   })
 
   it('asks a truck for its own documents, not a driver’s', () => {

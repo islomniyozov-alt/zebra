@@ -10,7 +10,9 @@ import {
   loadWarnings,
   truckWarningFacts,
   truckWarnings,
+  REQUIRED_DRIVER_DOCUMENTS,
 } from '@/lib/warnings'
+import { DQF_DOCUMENT_TYPES } from '@/lib/dqf'
 import { SETTLEMENT_BATCH_TIMEOUT_MS } from '@/lib/settlement-batch'
 import type { PrismaClient } from '@/generated/prisma/client'
 
@@ -136,8 +138,16 @@ beforeAll(async () => {
   goodDriverId = await makeDriver('CLEAN')
   badDriverId = await makeDriver('TROUBLE')
 
-  // The clean driver has both required documents, well in date.
-  for (const type of ['CDL', 'MEDICAL_CARD'] as const) {
+  // ── THE CLEAN DRIVER HAS EVERYTHING, AND "EVERYTHING" IS A LIST ──────
+  //
+  // Built from `REQUIRED_DRIVER_DOCUMENTS` rather than typed out, which is
+  // item 13 applied to its own fixtures: this used to be ['CDL',
+  // 'MEDICAL_CARD'] and stopped being complete the moment the definition
+  // grew. A fixture that goes stale is a test that quietly stops testing —
+  // and this one is the test that says a clean driver produces NO warnings,
+  // so a stale fixture here fails loudly rather than passing wrongly. It
+  // did: the gate caught it.
+  for (const type of REQUIRED_DRIVER_DOCUMENTS) {
     await owner.complianceItem.create({
       data: {
         organizationId,
@@ -145,6 +155,25 @@ beforeAll(async () => {
         driverId: goodDriverId,
         type,
         expiresAt: days(400),
+      },
+    })
+  }
+  // And the three DQF items evidenced by a DOCUMENT rather than a date.
+  // `complianceWarnings` cannot see these at all; `dqf_incomplete` can, and
+  // without them the clean driver is not clean.
+  let filed = 0
+  for (const type of DQF_DOCUMENT_TYPES) {
+    filed += 1
+    await owner.document.create({
+      data: {
+        organizationId,
+        companyId,
+        driverId: goodDriverId,
+        type,
+        r2Key: `${organizationId}/driver/${goodDriverId}/${nonce}-${filed}`,
+        filename: `${type}.pdf`,
+        mimeType: 'application/pdf',
+        sizeBytes: 1024,
       },
     })
   }

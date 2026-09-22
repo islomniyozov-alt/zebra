@@ -55,8 +55,9 @@
     "20260920170000_invoice_payment_type",
     "20260920180000_driver_off_duty",
     "20260921190000_driver_roster_status",
-    "20260921210000_fleet_small_fields"
+    "20260921210000_fleet_small_fields",
+    "20260921230000_dqf_types"
   ],
-  "recordedAt": "2026-09-21",
+  "recordedAt": "2026-09-22",
   "verified": true
 }

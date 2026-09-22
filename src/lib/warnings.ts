@@ -4,7 +4,6 @@ import {
   isQualifiable,
   dqfChecklist,
   dqfFactsForDrivers,
-  dqfIncompleteCount,
   DQF_COMPLIANCE_TYPES,
   type DqfFacts,
 } from './dqf'
@@ -198,12 +197,33 @@ function complianceWarnings(
   return found
 }
 
+/**
+ * What still raises `document_missing` on a DRIVER: the licence record,
+ * and nothing else (owner's ruling, 2026-09-22).
+ *
+ * ── WHY THE LIST IS SUBTRACTED RATHER THAN EMPTIED ───────────────────
+ *
+ * The ruling is that `dqf_incomplete` REPLACES `document_missing` on
+ * drivers, and for every requirement the DQF covers it does. `CDL` is the
+ * one required type that is NOT a DQF requirement — §391.51(b)(8) asks for
+ * a COPY of the licence, which is a document, while this record is the
+ * licence itself and its expiry.
+ *
+ * Emptying the list outright would make a driver with no licence record at
+ * all silent, which is a hole rather than a tidier row. So the subtraction
+ * is written as a subtraction: add a compliance-backed DQF requirement and
+ * it leaves here automatically, and nothing else does.
+ */
+const DRIVER_MISSING_TYPES = REQUIRED_DRIVER_DOCUMENTS.filter(
+  (type) => !(DQF_COMPLIANCE_TYPES as readonly string[]).includes(type),
+)
+
 export function driverWarnings(facts: DriverFacts, now: Date): Warning[] {
-  const found = complianceWarnings(
-    facts.compliance,
-    REQUIRED_DRIVER_DOCUMENTS,
-    now,
-  )
+  // EXPIRY STILL WARNS PER RECORD. A medical card that lapsed names
+  // itself; only the ABSENCE of a DQF-covered record is now carried by the
+  // one warning below, because five chips saying one thing is a column
+  // nobody reads. See PHASE-5-BRIEF §7 flag 14.
+  const found = complianceWarnings(facts.compliance, DRIVER_MISSING_TYPES, now)
 
   if (facts.negativeNetCount > 0) {
     found.push({
@@ -224,9 +244,18 @@ export function driverWarnings(facts: DriverFacts, now: Date): Warning[] {
   // applicants came over in the import, and warning on each would be 108
   // alarms about nobody.
   if (facts.qualifiable) {
-    const incomplete = dqfIncompleteCount(dqfChecklist(dqfFactsOf(facts), now))
-    if (incomplete > 0) {
-      found.push({ name: 'dqf_incomplete', detail: String(incomplete) })
+    // THE KEYS, NOT A COUNT AND NOT A SENTENCE. `Warning.detail` is the
+    // specific fact; turning these into words is the interface's job, the
+    // same division `DispatchConflict` uses for its `values`. The drivers
+    // list maps them through `dqf.key.*`.
+    const gaps = dqfChecklist(dqfFactsOf(facts), now).filter(
+      (entry) => entry.status === 'missing' || entry.status === 'expired',
+    )
+    if (gaps.length > 0) {
+      found.push({
+        name: 'dqf_incomplete',
+        detail: gaps.map((entry) => entry.key).join(','),
+      })
     }
   }
 
