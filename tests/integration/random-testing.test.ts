@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
 import { withOrg } from '@/lib/tenancy'
@@ -274,10 +275,18 @@ describe('the database refuses an unrecordable draw', () => {
 })
 
 describe('resolving a selection', () => {
-  it('writes a DRUG_TEST compliance item from a completed drug test', async () => {
+  it('records the test ON THE SELECTION and writes no compliance item', async () => {
+    // Owner's ruling, 2026-09-22: a random test outcome is an event on the
+    // selection, drug and alcohol alike. The selection already carries when
+    // it happened and whether it did; a second row in another table would
+    // be a copy free to disagree with the draw it came from.
     const selection = await owner.randomSelection.findFirstOrThrow({
       where: { draw: { companyId, year: 2026 }, kind: 'DRUG' },
       select: { id: true, driverId: true },
+    })
+
+    const before = await owner.complianceItem.count({
+      where: { driverId: selection.driverId, type: 'DRUG_TEST' },
     })
 
     const resolved = await inOrg((tx) =>
@@ -287,18 +296,34 @@ describe('resolving a selection', () => {
       }),
     )
     expect(resolved.outcome).toBe('TESTED')
-    expect(resolved.complianceItemId).not.toBeNull()
+    expect(resolved.testedAt).toEqual(new Date('2026-03-02'))
+    expect(resolved.complianceItemId).toBeNull()
 
-    const item = await owner.complianceItem.findUniqueOrThrow({
-      where: { id: resolved.complianceItemId! },
-      select: { type: true, driverId: true, issuedAt: true, expiresAt: true },
+    // AND NOTHING APPEARED IN ComplianceItem. Counting before and after is
+    // the check; asserting the null column alone would pass if the row had
+    // been written and simply not linked.
+    const after = await owner.complianceItem.count({
+      where: { driverId: selection.driverId, type: 'DRUG_TEST' },
     })
-    expect(item.type).toBe('DRUG_TEST')
-    expect(item.driverId).toBe(selection.driverId)
-    // AN EVENT, NOT A CREDENTIAL: the expiry is the test date rather than an
-    // invented year, and `warnings.ts` excludes the type from expiry
-    // warnings so it does not read as lapsed the same evening.
-    expect(item.expiresAt).toEqual(item.issuedAt)
+    expect(after).toBe(before)
+  })
+
+  it('leaves DRUG_TEST meaning the pre-employment credential', async () => {
+    // §382.301. It keeps a real expiry and warns like any other compliance
+    // record — which is only true because nothing writes a dateless one.
+    const item = await owner.complianceItem.create({
+      data: {
+        organizationId,
+        companyId,
+        type: 'DRUG_TEST',
+        expiresAt: new Date('2027-06-01'),
+      },
+      select: { expiresAt: true },
+    })
+    expect(item.expiresAt).toEqual(new Date('2027-06-01'))
+
+    const warnings = readFileSync('src/lib/warnings.ts', 'utf8')
+    expect(warnings).not.toContain('EVENT_TYPES')
   })
 
   it('refuses NOT_TESTED with no reason, in the database too', async () => {

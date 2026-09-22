@@ -274,6 +274,25 @@ describe('the year-end summary', () => {
   })
 })
 
+describe('a random test writes no compliance record', () => {
+  it('creates nothing in ComplianceItem, for either kind', () => {
+    // THE GUARD FOR THE RULING. The first version wrote a DRUG_TEST row
+    // whose only honest expiry was the test date, which then forced an
+    // exclusion in `warnings.ts` so it would not read as lapsed — two
+    // compensations for one thing being in the wrong place.
+    const lib = codeOf('src/lib/random-testing.ts')
+    expect(lib).not.toContain('complianceItem.create')
+    expect(lib).not.toContain("type: 'DRUG_TEST'")
+  })
+
+  it('and warnings.ts excludes no compliance type at all', () => {
+    // An exclusion list would be a second vocabulary of compliance types,
+    // divided into ones that mean something and ones that do not.
+    const warnings = codeOf('src/lib/warnings.ts')
+    expect(warnings).not.toContain('EVENT_TYPES')
+  })
+})
+
 describe('resolving a selection', () => {
   it('refuses NOT_TESTED with no reason', () => {
     // §382.305(j)(3) allows a selected driver to be excused, but the carrier

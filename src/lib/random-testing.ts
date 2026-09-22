@@ -514,17 +514,23 @@ export interface ResolveInput {
 /**
  * Record what happened to one selection.
  *
- * A COMPLETED DRUG TEST BECOMES A ComplianceItem, which is where the rest of
- * this system already looks for a driver's records. Alcohol does not, and that
- * is not an oversight: `ComplianceType` has `DRUG_TEST` and nothing for
- * alcohol, and inventing a type was not in this item's ruling. Flagged.
+ * ── THE OUTCOME IS AN EVENT ON THE SELECTION, AND NOTHING ELSE ───────────
  *
- * `expiresAt` IS THE TEST DATE, because a random test is an EVENT and not a
- * credential — nothing about it lapses, and §382 sets no per-driver expiry.
- * The column is NOT NULL, so the honest value is the day it happened rather
- * than a year invented to fill it. `warnings.ts` excludes DRUG_TEST from the
- * expiry warnings for the same reason; without that, every driver tested this
- * quarter would raise "compliance expired" the same evening.
+ * Owner’s ruling, 2026-09-22. A random test writes NO `ComplianceItem` —
+ * not for drugs and not for alcohol. The selection already carries when it
+ * happened, whether it happened, and why it did not; a second row saying
+ * the same thing in another table would be a copy that can disagree with
+ * the draw it came from.
+ *
+ * THE FIRST VERSION DID WRITE ONE, and the reason it was wrong is instructive:
+ * `ComplianceItem.expiresAt` is NOT NULL, so a random test—which expires
+ * never—forced an invented date, and the invented date then forced an
+ * exclusion in `warnings.ts` so it would not read as lapsed. Two
+ * compensations for one thing being in the wrong place.
+ *
+ * `DRUG_TEST` KEEPS ITS MEANING: the pre-employment credential under
+ * §382.301, which has a real expiry and warns like any other compliance
+ * record. It is not what a random selection produces.
  */
 export async function resolveSelection(
   tx: TxClient,
@@ -539,13 +545,7 @@ export async function resolveSelection(
 
   const selection = await tx.randomSelection.findUnique({
     where: { id },
-    select: {
-      id: true,
-      kind: true,
-      driverId: true,
-      organizationId: true,
-      draw: { select: { companyId: true } },
-    },
+    select: { id: true },
   })
   if (!selection) throw new ReferenceError('not_found')
 
@@ -556,35 +556,9 @@ export async function resolveSelection(
         : new Date()
       : null
 
-  let complianceItemId: string | null = null
-  if (
-    input.outcome === 'TESTED' &&
-    selection.kind === 'DRUG' &&
-    selection.driverId !== null &&
-    testedAt !== null
-  ) {
-    const item = await tx.complianceItem.create({
-      data: {
-        organizationId: selection.organizationId,
-        companyId: selection.draw.companyId,
-        driverId: selection.driverId,
-        type: 'DRUG_TEST',
-        issuedAt: testedAt,
-        expiresAt: testedAt,
-        notes: 'Random selection, 49 CFR 382.305',
-      },
-      select: { id: true },
-    })
-    complianceItemId = item.id
-  }
-
+  // THE WHOLE WRITE. No compliance item, either kind.
   return tx.randomSelection.update({
     where: { id },
-    data: {
-      outcome: input.outcome,
-      reason,
-      testedAt,
-      ...(complianceItemId ? { complianceItemId } : {}),
-    },
+    data: { outcome: input.outcome, reason, testedAt },
   })
 }

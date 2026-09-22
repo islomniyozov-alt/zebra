@@ -4165,7 +4165,14 @@ model RandomSelection {
   reason   String?
   testedAt DateTime?
 
-  /// The DRUG_TEST compliance item a completed test produced, where it did.
+  /// DEAD SINCE THE RULING OF 2026-09-22, AND KEPT ONLY BECAUSE DROPPING IT
+  /// IS A MIGRATION.
+  ///
+  /// A random test writes no `ComplianceItem` — the outcome is an event on
+  /// this row. Nothing reads or writes this column and nothing should; it
+  /// is null on every row in every environment. Removing it is one
+  /// migration whenever the next one is going out anyway, which is why it
+  /// was not bundled into a deploy that had to ship today.
   complianceItemId String?
   complianceItem   ComplianceItem? @relation(fields: [complianceItemId], references: [id])
 
