@@ -79,6 +79,16 @@ export const RESOURCES = [
   // dispatch fact. Naming it separately means the answer to "who may record an
   // inspection" is not welded to "who may renew a registration".
   'inspection',
+  // The 49 CFR 390.15 accident register (item 14, owner's ruling
+  // 2026-09-22). Named separately for the reason `inspection` is: who may
+  // file an accident on the register is not the same question as who may
+  // renew a registration, and welding them together answers the second
+  // question by accident.
+  //
+  // IT IS NOT `claim` EITHER. An accident is linked to a claim when one
+  // exists and is independent of it — most accidents on a register never
+  // produce a claim, and a cargo claim never had an accident.
+  'accident',
   // Claims and DataQs challenges. §2.5 gives them their own role line —
   // OWNER/ADMIN/MANAGER write, ACCOUNTING reads — which is neither FLEET_* nor
   // MONEY_*, so they are named here and granted explicitly below.
@@ -193,6 +203,10 @@ const FLEET_READ: Permission[] = [
   // dates (§2.5): a driver placed out of service at a scale house is the fact
   // that decides what happens to the load they are under.
   ...read('inspection'),
+  // A DISPATCHER reads the register for the same reason they read an
+  // out-of-service order: a driver who put a truck in a ditch last month
+  // is context for what they are handed today.
+  ...read('accident'),
 ]
 
 const FLEET_WRITE: Permission[] = [
@@ -202,6 +216,9 @@ const FLEET_WRITE: Permission[] = [
   ...crud('maintenance'),
   ...crud('compliance'),
   ...crud('inspection'),
+  // Filing and voiding a register entry is the safety desk's act, and it
+  // sits with the same people who record an inspection.
+  ...crud('accident'),
 ]
 
 /**
@@ -364,6 +381,11 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     // a roadside inspection/violation" (§1). Read on the challenge without read
     // on the thing it is written against would be a screen with a hole in it.
     ...read('inspection'),
+    // And the register, read-only, for the reason the claim line below
+    // gives: accounting reserves against an open claim, and the accident
+    // is the occurrence the claim is about. Filing one is the safety
+    // desk's act.
+    ...read('accident'),
     // Read and not write, straight from §2.5. Accounting reserves against an
     // open claim and reconciles what was paid on a settled one; filing and
     // moving one is the safety desk's act.

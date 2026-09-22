@@ -216,9 +216,42 @@ describe('driver facts', () => {
     const facts = await inOrg((tx) =>
       driverWarningFacts(tx, [goodDriverId, badDriverId]),
     )
-    const bad = driverWarnings(facts.get(badDriverId)!, NOW).map((w) => w.name)
+    const warnings = driverWarnings(facts.get(badDriverId)!, NOW)
+    const bad = warnings.map((w) => w.name)
+
+    // The expired CDL names itself, as it always did.
     expect(bad).toContain('compliance_expired')
-    expect(bad).toContain('document_missing')
+
+    // ── AND THE MISSING ONE IS NOW CARRIED BY THE DQF WARNING ──────────
+    //
+    // Flag 14, ruled 2026-09-22: on DRIVERS, `dqf_incomplete` names the
+    // missing requirements and replaces `document_missing`. This driver
+    // has no medical card, and the chip that says so is the DQF one.
+    expect(bad).toContain('dqf_incomplete')
+    expect(bad).not.toContain('document_missing')
+    expect(warnings.find((w) => w.name === 'dqf_incomplete')!.detail).toContain(
+      'medical_certificate',
+    )
+  })
+
+  it('still names a missing LICENCE record, which is not a DQF item', async () => {
+    // §391.51(b)(8) asks for a COPY of the licence — a document — so the
+    // `CDL` compliance record is the one required type the DQF does not
+    // cover. Emptying the driver list outright would have made a driver
+    // with no licence on file silent; the list is a subtraction instead.
+    const orphan = (
+      await owner.driver.create({
+        data: {
+          organizationId,
+          companyId,
+          firstName: 'NO',
+          lastName: 'LICENCE',
+        },
+      })
+    ).id
+    const facts = await inOrg((tx) => driverWarningFacts(tx, [orphan]))
+    const names = driverWarnings(facts.get(orphan)!, NOW).map((w) => w.name)
+    expect(names).toContain('document_missing')
   })
 
   it('leave a driver with everything in date alone', async () => {

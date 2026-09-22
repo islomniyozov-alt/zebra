@@ -65,12 +65,26 @@ Terminated drivers are silent: 391.51(c) keeps the file, it does not keep it
 current. Five enum values added and nothing else stored; the three DocumentType
 values are flag 13 in `PHASE-5-BRIEF.md` §7.
 
+**14 — Accident register.** Landed 2026-09-22, migration 58. One `Accident`
+table per company holding 49 CFR 390.15(b)(2)'s six columns plus the tow-away
+fact 390.5 needs, with the register at `/safety/accidents` — one authority at a
+time, printable, void controls and the form hidden from print.
+
+**DOT-recordable is derived and has no column.** 390.5's three-part test over
+fatalities, injuries and tow-away. A hazmat release is RECORDED by
+390.15(b)(2)(vi) and is not part of the test — the mistake a careful reader
+makes, so `isDotRecordable` takes no hazmat argument at all.
+
+**An entry is voided, never deleted.** There is no `deletedAt` on the table and
+no delete in the service layer; a reason is required, a second void is refused,
+and a CHECK forbids half a void. Retention is three years from the occurrence,
+derived, and nothing removes anything when it passes.
+
 ## Next
 
-| #   | Item                           | Shape                                                                                            |
-| --- | ------------------------------ | ------------------------------------------------------------------------------------------------ |
-| 14  | **Accident register**          | §390.15(b). The register DOT asks for at an audit, with the three-year retention rule behind it. |
-| 15  | **Drug & alcohol random pool** | §382.305. Pool membership, selection rounds and the rate the year has to hit.                    |
+| #   | Item                           | Shape                                                                         |
+| --- | ------------------------------ | ----------------------------------------------------------------------------- |
+| 15  | **Drug & alcohol random pool** | §382.305. Pool membership, selection rounds and the rate the year has to hit. |
 
 ## Deferred
 

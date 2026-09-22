@@ -153,6 +153,7 @@ model Organization {
   auditLogs                AuditLog[]
   calendarEvents           CalendarEvent[]
   claims                   Claim[]
+  accidents                Accident[]
   communications           Communication[]
   complianceItems          ComplianceItem[]
   inspections              RoadsideInspection[]
@@ -282,6 +283,7 @@ model Company {
   calendarEvents      CalendarEvent[]
   auditLogs           AuditLog[]
   claims              Claim[]
+  accidents           Accident[]
   pendingUploads      PendingUpload[]
   settlementLoadLines SettlementLoadLine[]
 
@@ -710,6 +712,7 @@ model Truck {
   complianceItems ComplianceItem[]
   inspections     RoadsideInspection[]
   claims          Claim[]
+  accidents       Accident[]
 
   // UNIQUENESS IS PARTIAL AND LIVES IN SQL. Prisma cannot express a `WHERE`
   // predicate on an index, so `truck_unit_per_company` is created by hand in
@@ -943,6 +946,7 @@ model Driver {
   complianceItems     ComplianceItem[]
   inspections         RoadsideInspection[]
   claims              Claim[]
+  accidents           Accident[]
   communications      Communication[]
 
   @@unique([organizationId, externalId])
@@ -2046,6 +2050,7 @@ model Claim {
   documents Document[]
   parties   ClaimParty[]
   notes_    ClaimNote[]
+  accidents Accident[]
 
   @@index([companyId, status])
   @@index([loadId])
@@ -3935,5 +3940,83 @@ model DriverEscrowEntry {
   organization Organization @relation(fields: [organizationId], references: [id])
 
   @@index([driverId, occurredAt])
+  @@index([organizationId])
+}
+
+/// THE ACCIDENT REGISTER — 49 CFR 390.15(b). One row per occurrence, per
+/// company, kept three years after the date of the accident.
+///
+/// TWO COLUMNS ARE DELIBERATELY ABSENT.
+///
+/// There is no `deletedAt`. Every other soft-deletable table in this schema
+/// has one; a register does not, because it is a document a regulator reads
+/// and a row that leaves it silently is the shape of falsification whatever
+/// the intent. A mistake is VOIDED — struck through, with a reason and a
+/// date, still on the register and still a row that exists.
+///
+/// There is no `isRecordable`. DOT-recordable is §390.5’s three-part test
+/// over `fatalities`, `injuries` and `towedAway`, derived on every read by
+/// `isDotRecordable`. A stored flag would be somebody’s opinion on the day
+/// they typed it, and if it disagreed with the three numbers beside it the
+/// flag would be the lie and the numbers would be the evidence.
+///
+/// HAZMAT IS RECORDED AND IS NOT PART OF THE TEST — §390.15(b)(2)(vi)
+/// requires the register to say whether hazardous materials were released;
+/// §390.5 does not count a release as making the occurrence an accident.
+model Accident {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  /// THE COMPANY IS THE REGISTER. §390.15 binds the motor carrier, so a group
+  /// running four authorities keeps four registers. Never inferred from the
+  /// driver or the truck, either of which may have transferred since.
+  companyId      String
+  company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  occurredAt DateTime
+  /// §390.15(b)(2)(ii): the city or nearest town, and the state.
+  city       String?
+  state      String?
+
+  /// Both nullable: a bobtail accident in the yard has a driver and no load,
+  /// and an accident to a parked trailer may name neither. A blank is a gap
+  /// an auditor can see; a required column would be filled with a guess.
+  driverId String?
+  driver   Driver? @relation(fields: [driverId], references: [id])
+  truckId  String?
+  truck    Truck?  @relation(fields: [truckId], references: [id])
+
+  /// §390.15(b)(2)(iv). COUNTS INJURIES MEETING §390.5 — a person who
+  /// immediately received medical treatment AWAY FROM THE SCENE — not
+  /// everybody who was shaken up. The form says so as well as this comment.
+  injuries       Int     @default(0)
+  /// §390.15(b)(2)(v).
+  fatalities     Int     @default(0)
+  /// §390.15(b)(2)(vi). Other than fuel spilled from the fuel tanks of the
+  /// vehicles involved, which the regulation excludes by name.
+  hazmatReleased Boolean @default(false)
+  /// §390.5(iii): disabling damage requiring tow-away. Not printed on the
+  /// register; needed to derive whether the occurrence belongs on it.
+  towedAway      Boolean @default(false)
+
+  /// LINKED WHEN ONE EXISTS, INDEPENDENT OF IT. Not every accident produces
+  /// a claim and not every claim comes from an accident — a cargo claim has
+  /// none. The register is complete without it.
+  claimId String?
+  claim   Claim?  @relation(fields: [claimId], references: [id])
+
+  notes String?
+
+  /// Struck through, not removed. A CHECK in the migration forbids one half
+  /// of this pair without the other.
+  voidedAt   DateTime?
+  voidReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, occurredAt])
+  @@index([driverId])
+  @@index([claimId])
   @@index([organizationId])
 }

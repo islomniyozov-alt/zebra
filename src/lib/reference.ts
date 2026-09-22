@@ -61,6 +61,13 @@ export type ReferenceFailure =
   | 'not_in_code_list'
   /** A trailer already pulled by somebody else (item 12). */
   | 'trailer_already_paired'
+  /**
+   * A register entry somebody tried to void twice (item 14).
+   *
+   * The second attempt would overwrite the first reason, which is the record
+   * of what actually happened — so it is refused rather than accepted.
+   */
+  | 'already_voided'
   | 'codes_unconfirmed'
 
 export class ReferenceError extends Error {
@@ -98,6 +105,7 @@ export const REFERENCE_ERROR_KEYS: Record<ReferenceFailure, MessageKey> = {
   not_roster_status: 'ref.error.notRosterStatus',
   not_in_code_list: 'ref.error.notInCodeList',
   trailer_already_paired: 'ref.error.trailerAlreadyPaired',
+  already_voided: 'ref.error.alreadyVoided',
 }
 
 /**

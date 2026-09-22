@@ -128,6 +128,32 @@ Rules about instruments, which are the ones that cost whole sessions:
   is still unambiguous. That is the one hostile reading the whole thing exists
   to defeat.
 
+- **The deploy order is: fix, dispatch production, THEN push the next
+  migration.** Owner’s ruling, 2026-09-22, and it replaces the shorter
+  version it grew out of ("dispatch production before pushing the next
+  migration to main"), which did not say what to do when the tree was
+  already broken.
+
+  Four steps, and each one is there because skipping it cost a run:
+  1. FIX whatever is red. A dispatch runs the same gate and the same
+     integration suite as CI, so a broken tree cannot deploy anywhere — it
+     can only fail twice.
+  2. RUN THE FULL INTEGRATION PROJECT LOCALLY, not the file you edited.
+     `npm run check` does not include it. On 2026-09-21 and again on
+     2026-09-22 a change to `driverWarnings` passed `check` and every node
+     test and broke a fixture in `tests/integration/warnings.test.ts` — the
+     second time AFTER saying the habit was fixed. Ten minutes; run it.
+  3. DISPATCH PRODUCTION and read the drift from Cloudflare.
+  4. ONLY THEN push the next migration.
+
+  AND DO NOT APPLY A MIGRATION TO DEV BEFORE ITS FILE IS PUSHED. CI forks
+  its database from dev, so a migration applied to dev and absent from the
+  repository makes `tests/migration-checksums.test.ts` fail on every run —
+  "applied but MISSING from prisma/migrations" — including the production
+  dispatch, which then refuses before it reaches the deploy step. That is
+  what happened on 2026-09-21 and it is why production sat five commits
+  behind for an afternoon.
+
 - **Edit source with the tool that refuses a missed anchor. Not `sed`.**
   `str.replace` returns the original string when it matches nothing, `sed`
   exits 0, and a filter that matches nothing prints nothing — so a silent

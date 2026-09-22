@@ -48,6 +48,7 @@ export default async function SafetyPage({
   if (!(await currentUserCan('read', 'compliance'))) notFound()
   const maySeeInspections = await currentUserCan('read', 'inspection')
   const maySeeClaims = await currentUserCan('read', 'claim')
+  const maySeeAccidents = await currentUserCan('read', 'accident')
 
   const params = await searchParams
   const { t } = await getLocaleContext()
@@ -298,6 +299,18 @@ export default async function SafetyPage({
           {/* ITEM 13. The roster-level view of every driver qualification
            * file. Behind `compliance:read`, which is what this whole screen
            * is behind, because the DQF is made of the same records. */}
+          {/* ITEM 14. The 390.15 register, per authority and printable.
+           * Behind its OWN resource since the owner's ruling of
+           * 2026-09-22 — /safety is `compliance`, and a link to a screen
+           * the reader cannot open is worse than no link. */}
+          {maySeeAccidents ? (
+            <Link
+              href="/safety/accidents"
+              className="whitespace-nowrap text-sm text-accent hover:underline"
+            >
+              {t('acc.title')}
+            </Link>
+          ) : null}
           <Link
             href="/safety/dqf"
             className="whitespace-nowrap text-sm text-accent hover:underline"

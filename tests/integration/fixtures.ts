@@ -725,6 +725,27 @@ export async function seedOrganization(
       },
     }),
   )
+  // ITEM 14. A NEW TABLE CARRYING `organizationId` NEEDS A ROW HERE IN THE
+  // SAME COMMIT (AGENTS.md). `tests/isolation-coverage.test.ts` fails by name
+  // otherwise, and “sees no rows from the other organization” is true of a
+  // table with nothing in it — which is the most comfortable way to be wrong.
+  record(
+    'accident',
+    await db.accident.create({
+      data: {
+        organizationId,
+        companyId,
+        occurredAt: new Date('2026-07-14'),
+        city: 'Dayton',
+        state: 'OH',
+        driverId: driver.id,
+        truckId: truck.id,
+        // Recordable by the tow-away limb alone, which is the limb a reader
+        // is most likely to forget. No injuries, no fatalities.
+        towedAway: true,
+      },
+    }),
+  )
   record(
     'auditLog',
     await db.auditLog.create({
