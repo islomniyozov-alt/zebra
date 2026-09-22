@@ -57,7 +57,8 @@
     "20260921190000_driver_roster_status",
     "20260921210000_fleet_small_fields",
     "20260921230000_dqf_types",
-    "20260922010000_accident_register"
+    "20260922010000_accident_register",
+    "20260922180000_random_testing_programme"
   ],
   "recordedAt": "2026-09-22",
   "verified": true
