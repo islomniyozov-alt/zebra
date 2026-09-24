@@ -162,6 +162,15 @@ Rules about instruments, which are the ones that cost whole sessions:
      2026-09-22 a change to `driverWarnings` passed `check` and every node
      test and broke a fixture in `tests/integration/warnings.test.ts` — the
      second time AFTER saying the habit was fixed. Ten minutes; run it.
+
+     COMMIT FIRST: the gate refuses a dirty tree, because its receipt is tied
+     to a commit and a receipt from a tree nobody can reconstruct would be
+     rejected anyway. So the order inside this step is commit, then run, then
+     amend or add a commit if it comes back red — not run, then commit. On
+     2026-09-24 this step was attempted on a dirty tree, refused in 0.44
+     seconds, and the refusal was nearly read as a pass because the wrapper
+     exited 0 around it.
+
   3. DISPATCH PRODUCTION and read the drift from Cloudflare.
   4. ONLY THEN push the next migration.
 
