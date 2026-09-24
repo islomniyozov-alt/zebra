@@ -284,6 +284,162 @@ async function main(): Promise<void> {
       }
     }
 
+    // ── WHO LOOKS LIKE A REFERRAL PAYEE RATHER THAN A PERSON ────────────
+    //
+    // Owner's ruling, 2026-09-24: PAYEE goes on "the known non-people rows".
+    // Which rows those are is a judgement with a safety edge — a payee is out
+    // of the Driver Qualification File and out of the compliance warnings, so
+    // marking a real driver as one silently removes them from the list an
+    // FMCSA audit walks. That is the direction that must not be guessed, so
+    // this LISTS and never sets.
+    //
+    // THE STRONGEST SIGNAL IS BEHAVIOURAL, NOT TEXTUAL. A referral payee earns
+    // by sitting in the second seat and never drives: `driverId` count zero,
+    // `coDriverId` count above zero. That is built from the freight that ran
+    // rather than from what a name looks like — the standing rule about
+    // building the instrument from the artefact. `7 Star` is only suspicious
+    // as a string; it is conclusive as a row that has never driven.
+    //
+    // The textual signals are listed beside it as corroboration, never on
+    // their own: a digit in the name, an equipment word, a single token, a
+    // company suffix. `Said truck 3609` trips three of them and `Hassan Ali`
+    // trips none, but a real driver called by one name would trip the third.
+    heading('REFERRAL PAYEE CANDIDATES — LISTED, NEVER SET')
+
+    // IS THE BEHAVIOURAL SIGNAL INFORMATIVE AT ALL? If production holds no
+    // load with a co-driver, then "2nd seat on 0" is true of everybody and
+    // says nothing — a zero that is a finding about the instrument rather
+    // than about the fleet. Printed first so the signal below cannot be read
+    // without it.
+    const withCoDriver = await db.load.count({
+      where: { deletedAt: null, coDriverId: { not: null } },
+    })
+    const totalLoads = await db.load.count({ where: { deletedAt: null } })
+    console.log(
+      `  loads with anybody in the second seat: ${withCoDriver} of ${totalLoads}`,
+    )
+    if (withCoDriver === 0) {
+      console.log(
+        [
+          '  SO THE BEHAVIOURAL SIGNAL IS VACUOUS on this database: nobody has',
+          '  ever been a co-driver, so "never drove, only 2nd seat" cannot fire',
+          '  for anyone, and its absence means nothing.',
+        ].join('\n'),
+      )
+    }
+
+    const asDriver = await db.load.groupBy({
+      by: ['driverId'],
+      where: { deletedAt: null },
+      _count: { _all: true },
+    })
+    const asCoDriver = await db.load.groupBy({
+      by: ['coDriverId'],
+      where: { deletedAt: null },
+      _count: { _all: true },
+    })
+    const droveCount = new Map(
+      asDriver
+        .filter((r) => r.driverId !== null)
+        .map((r) => [r.driverId!, r._count._all]),
+    )
+    const secondSeatCount = new Map(
+      asCoDriver
+        .filter((r) => r.coDriverId !== null)
+        .map((r) => [r.coDriverId!, r._count._all]),
+    )
+
+    const EQUIPMENT = /\b(truck|trailer|unit|tractor)\b/i
+    const COMPANY = /\b(llc|inc|corp|transport|logistics|carrier|express)\b/i
+
+    const rows = drivers
+      .filter((d) => d.deletedAt === null)
+      .map((d) => {
+        const name = full(d)
+        const drove = droveCount.get(d.id) ?? 0
+        const second = secondSeatCount.get(d.id) ?? 0
+        const signals: string[] = []
+        if (drove === 0 && second > 0)
+          signals.push('NEVER DROVE, only 2nd seat')
+        if (/\d/.test(name)) signals.push('digit in name')
+        if (EQUIPMENT.test(name)) signals.push('equipment word')
+        if (name.trim().split(/\s+/).length === 1) signals.push('single token')
+        if (COMPANY.test(name)) signals.push('company suffix')
+        return { name, id: d.id, drove, second, signals, status: d.status }
+      })
+      .filter((r) => r.signals.length > 0)
+      .sort((a, b) => b.signals.length - a.signals.length)
+
+    console.log(
+      `  ${rows.length} row(s) trip at least one signal, of ${drivers.filter((d) => d.deletedAt === null).length} live`,
+    )
+    for (const r of rows) {
+      console.log(
+        `\n  ${r.name}  ${r.id}  roster=${r.status}` +
+          `\n      drove ${r.drove} load(s), 2nd seat on ${r.second}` +
+          `\n      ${r.signals.join(' | ')}`,
+      )
+    }
+    // ── WHAT A PERSON HAS THAT A COMMISSION DOES NOT ────────────────────
+    //
+    // A CDL on file is the signal that actually discriminates: a referral payee
+    // has no licence because it is not somebody who drives. Read for each
+    // candidate rather than inferred from the name, and printed even when it
+    // contradicts the reading — which is the point of asking.
+    heading('WHAT EACH CANDIDATE HOLDS')
+
+    // THE BASELINE FIRST, OR "NO CDL" MEANS NOTHING. If most rows lack a
+    // licence, its absence is the fleet's normal state and not a signal about
+    // anybody — the same mistake as reading the vacuous second-seat count
+    // above as support. Printed before the candidates so it cannot be skipped.
+    const liveIds = drivers.filter((d) => d.deletedAt === null).map((d) => d.id)
+    const withCdlItem = await db.complianceItem.groupBy({
+      by: ['driverId'],
+      where: { driverId: { in: liveIds }, type: 'CDL', deletedAt: null },
+    })
+    const withCdlNumber = await db.driver.count({
+      where: { id: { in: liveIds }, cdlNumber: { not: null } },
+    })
+    console.log(
+      `  BASELINE: ${withCdlItem.length} of ${liveIds.length} live rows hold a CDL` +
+        ` compliance item; ${withCdlNumber} carry a cdlNumber.`,
+    )
+    console.log(
+      `  So a missing CDL is ${withCdlItem.length * 2 < liveIds.length ? 'the MAJORITY state and weak as a signal' : 'unusual and worth weighing'}.`,
+    )
+    for (const r of rows) {
+      const [ruleCount, cdl, driverRow] = await Promise.all([
+        db.driverPayRule.count({ where: { driverId: r.id } }),
+        db.complianceItem.findFirst({
+          where: { driverId: r.id, type: 'CDL', deletedAt: null },
+          select: { expiresAt: true },
+        }),
+        db.driver.findUnique({
+          where: { id: r.id },
+          select: { hireDate: true, cdlNumber: true, externalId: true },
+        }),
+      ])
+      console.log(
+        `  ${r.name}` +
+          `\n      pay rules      ${ruleCount}` +
+          `\n      CDL on file    ${cdl ? `yes, expires ${day(cdl.expiresAt)}` : 'NO'}` +
+          `\n      cdlNumber      ${driverRow?.cdlNumber ?? '(none)'}` +
+          `\n      hireDate       ${day(driverRow?.hireDate ?? null)}` +
+          `\n      Datatruck id   ${driverRow?.externalId ?? '(none)'}`,
+      )
+    }
+
+    console.log(
+      [
+        '',
+        '  NOTHING ABOVE HAS BEEN CLASSIFIED, and the signal this was built',
+        '  around turned out to be vacuous — so the textual ones are all that',
+        '  fired, and a name is not evidence about a person. Read the holdings',
+        '  above: a CDL on file argues the row IS somebody who drives, whatever',
+        '  the name looks like.',
+      ].join('\n'),
+    )
+
     console.log('\nEVERY STATEMENT ABOVE IS A READ. Nothing was changed.')
   } finally {
     await db.$disconnect()

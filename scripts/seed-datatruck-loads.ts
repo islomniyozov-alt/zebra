@@ -309,6 +309,30 @@ async function main(): Promise<void> {
       return { id: null, ambiguous: true }
     }
 
+    // ── `deletedAt` ONLY, AND ROSTER-INACTIVE RESOLVES. DO NOT NARROW. ──────
+    //
+    // Owner's ruling, 2026-09-24: "who drove it drove it". The exclusion of
+    // roster-INACTIVE drivers belongs to NEW DISPATCH — `assignableDriver` in
+    // `driver-availability.ts` — and not to importing freight that already ran.
+    //
+    // THIS IS WRITTEN DOWN BECAUSE THE OBVIOUS EDIT IS WRONG. A reader who
+    // finds the payee ruling of the same day, or `assignableDriver` two files
+    // over, will reasonably want to add `status: { not: 'INACTIVE' }` here for
+    // consistency. Measured against the 2026-09-13..19 export on production,
+    // that costs TEN DELIVERED LOADS AND $10,549.89:
+    //
+    //   CANER GUNAL             6 loads  $4,668.24   roster=INACTIVE
+    //   ROSARIO SANTOS RODOLFO  4 loads  $5,881.65   roster=INACTIVE
+    //
+    // Both hauled that week and were marked INACTIVE afterwards, which is what
+    // the roster is FOR — it says who can be sent somewhere now, not who was
+    // in the truck last Tuesday. Narrowing here would leave their freight with
+    // no driver in either seat, so `settleableWhere` would not see it, so the
+    // week's draft would BALANCE and be short by ten loads. The most expensive
+    // shape of wrong there is.
+    //
+    // What keeps a referral payee out of a seat is `Driver.kind`, not the
+    // roster status — that is the whole reason `kind` is a separate axis.
     const drivers = await db.driver.findMany({
       where: { organizationId: tenancy.organizationId, deletedAt: null },
       select: { id: true, firstName: true, lastName: true },
