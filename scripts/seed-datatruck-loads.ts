@@ -709,7 +709,13 @@ async function main(): Promise<void> {
             operational: row.operationalStatus,
             billing: row.billingStatus,
           },
-          { operational: load.operational, billing: load.billing },
+          {
+            operational: load.operational,
+            billing: load.billing,
+            // WHAT MAY REOPEN A CLOSED LOAD, and the only thing that may.
+            // `BOOKS_CUTOVER` decides it from the delivery date.
+            booksOwn: load.booksOwn,
+          },
         )
         // THE OPERATIONAL MOVE IS A TRANSITION, NOT A COLUMN WRITE — the
         // same ruling, on the path that advances a load an earlier run

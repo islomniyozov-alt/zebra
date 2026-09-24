@@ -70,13 +70,62 @@ describe('dates, which must not depend on where the process runs', () => {
 })
 
 describe('the two axes', () => {
-  it('files delivered, invoiced and paid as one closed billing state', () => {
+  /** A day before the books cutover, and a day after it. */
+  const beforeBooks = new Date('2026-09-12T23:59:59.000Z')
+  const afterBooks = new Date('2026-09-13T00:00:00.000Z')
+
+  // ── THE GUARD NAMED "pre-cutover never live" ────────────────────────
+  it('files a finished row delivered BEFORE the cutover as closed history', () => {
     for (const word of ['delivered', 'invoiced', 'paid']) {
-      const reading = readStatus(word)
+      const reading = readStatus(word, beforeBooks)
       expect(reading?.billing).toBe('CLOSED_IN_DATATRUCK')
       expect(reading?.operational).toBe('DELIVERED')
       expect(reading?.closed).toBe(true)
     }
+  })
+
+  // ── THE GUARD NAMED "post-cutover never closed" ─────────────────────
+  it('files a finished row delivered ON OR AFTER the cutover as LIVE', () => {
+    // POD_RECEIVED rather than DELIVERED, because `settleableWhere` selects
+    // on that status AND an event of it. UNINVOICED because Zebra is going
+    // to invoice it.
+    for (const word of ['delivered', 'invoiced', 'paid']) {
+      const reading = readStatus(word, afterBooks)
+      expect(reading?.billing).toBe('UNINVOICED')
+      expect(reading?.operational).toBe('POD_RECEIVED')
+      expect(reading?.closed).toBe(false)
+    }
+  })
+
+  it('is INCLUSIVE of the cutover day itself', () => {
+    // The constant is midnight UTC on the 13th, and the 13th is the first
+    // day of the week Zebra settles. An exclusive boundary would post that
+    // day's freight to nobody.
+    expect(readStatus('delivered', afterBooks)?.closed).toBe(false)
+    expect(
+      readStatus('delivered', new Date(afterBooks.getTime() - 1))?.closed,
+    ).toBe(true)
+  })
+
+  // ── GUARD (b) AGAIN, THROUGH THE OTHER DOOR ─────────────────────────
+  it('does not let closeIfStale close a load the books own', () => {
+    // A load picked up in July 2025 and delivered inside the settled week is
+    // Zebra’s. `closeIfStale` closes an OPEN row older than DATATRUCK_CUTOVER,
+    // and without `booksOwn` it would close this one as stale — “post-cutover
+    // never closed” failing by a route that has nothing to do with readStatus.
+    const live = readStatus('delivered', afterBooks)!
+    const stale = closeIfStale(live, new Date('2025-07-01T00:00:00.000Z'))
+    expect(stale.billing).toBe('UNINVOICED')
+    expect(stale.closed).toBe(false)
+    expect(stale.booksOwn).toBe(true)
+  })
+
+  it('files an UNDATED finished row as history', () => {
+    // Not a guess the other way: `importEventAt` refuses to stamp a POD
+    // without a date, so calling it live would produce a live load that can
+    // never settle and never says why.
+    expect(readStatus('delivered', null)?.closed).toBe(true)
+    expect(readStatus('delivered', null)?.billing).toBe('CLOSED_IN_DATATRUCK')
   })
 
   // THE HALF THAT MATTERS FOR DRIFT. A live load's billing status is owned by
@@ -90,23 +139,31 @@ describe('the two axes', () => {
       'in_transit',
       'offer',
     ]) {
-      const reading = readStatus(word)
+      // The date is irrelevant for a row that has not finished: the split
+      // only touches delivered, invoiced and paid.
+      const reading = readStatus(word, afterBooks)
       expect(reading?.billing).toBe('UNINVOICED')
       expect(reading?.closed).toBe(false)
+      const pre = readStatus(word, beforeBooks)
+      expect(pre?.billing).toBe('UNINVOICED')
+      expect(pre?.closed).toBe(false)
     }
   })
 
   it('marks a cancellation cancelled and closed', () => {
-    expect(readStatus('canceled')).toEqual({
+    expect(readStatus('canceled', afterBooks)).toEqual({
       operational: 'BOOKED',
       billing: 'CLOSED_IN_DATATRUCK',
       cancelled: true,
       closed: true,
+      // A CANCELLATION IS NEVER THE BOOKS’, whatever its delivery date says:
+      // nothing will be invoiced for freight that did not happen.
+      booksOwn: false,
     })
   })
 
   it('refuses a status it has no counterpart for', () => {
-    expect(readStatus('teleported')).toBeNull()
+    expect(readStatus('teleported', afterBooks)).toBeNull()
   })
 })
 
@@ -334,7 +391,8 @@ describe('what a later export may change', () => {
   const at = (
     operational: Parameters<typeof syncDecisionFor>[0]['operational'],
     billing: Parameters<typeof syncDecisionFor>[0]['billing'],
-  ) => ({ operational, billing })
+    booksOwn = false,
+  ) => ({ operational, billing, booksOwn })
 
   it('advances a load that has moved on', () => {
     const decision = syncDecisionFor(
@@ -366,14 +424,42 @@ describe('what a later export may change', () => {
     expect(decision.billing).toBe('CLOSED_IN_DATATRUCK')
   })
 
-  // CLOSED IS FINAL. Nothing in a later export reopens finished history —
-  // not a status, not a billing state, not a backward step.
-  it('leaves a closed load entirely alone', () => {
+  // CLOSED IS STILL FINAL FOR EVERYTHING BUT ONE CASE. An open export row
+  // does not reopen finished history — which is the bug the first version of
+  // the 2026-09-24 narrowing would have shipped, because it keyed on
+  // `closed === false` and an open row is also not closed.
+  it('leaves a closed load alone for any row the books do not own', () => {
     const decision = syncDecisionFor(
       at('DELIVERED', 'CLOSED_IN_DATATRUCK'),
       at('BOOKED', 'UNINVOICED'),
     )
     expect(decision).toEqual({ operational: null, billing: null, notes: [] })
+  })
+
+  // ── THE GUARD NAMED "re-run reclassifies idempotently" ──────────────
+  it('REOPENS a load the books now own, and only then', () => {
+    // Production holds loads closed by the pre-cutover rule, because that
+    // is all the old `readStatus` could say. Some are delivered on or after
+    // `BOOKS_CUTOVER`, and a re-import has to correct that or the first
+    // settled week is missing freight nobody can find.
+    const reopened = syncDecisionFor(
+      at('DELIVERED', 'CLOSED_IN_DATATRUCK'),
+      at('POD_RECEIVED', 'UNINVOICED', true),
+    )
+    expect(reopened.billing).toBe('UNINVOICED')
+    expect(reopened.operational).toBe('POD_RECEIVED')
+    expect(reopened.notes.join()).toContain('reopened')
+  })
+
+  it('and a SECOND run changes nothing — idempotent', () => {
+    // The reopened load is now live, so the next export finds it already
+    // where it belongs and the ranks do the rest. A reopen that fired twice
+    // would write an event per run for freight that had not moved.
+    const again = syncDecisionFor(
+      at('POD_RECEIVED', 'UNINVOICED'),
+      at('POD_RECEIVED', 'UNINVOICED', true),
+    )
+    expect(again).toEqual({ operational: null, billing: null, notes: [] })
   })
 
   it('does nothing at all when nothing moved', () => {
@@ -526,7 +612,7 @@ describe('an open row older than the cutover', () => {
   const after = new Date('2026-08-02T00:00:00.000Z')
 
   it('closes on the billing axis and leaves the operational one alone', () => {
-    const dispatched = readStatus('dispatched')!
+    const dispatched = readStatus('dispatched', null)!
     const stale = closeIfStale(dispatched, before)
 
     expect(stale.billing).toBe('CLOSED_IN_DATATRUCK')
@@ -544,13 +630,13 @@ describe('an open row older than the cutover', () => {
   // THE OTHER BRANCH, WATCHED. A rule that closed everything would pass the
   // assertion above just as happily.
   it('leaves freight after the cutover exactly as it was read', () => {
-    const dispatched = readStatus('dispatched')!
+    const dispatched = readStatus('dispatched', null)!
     expect(closeIfStale(dispatched, after)).toEqual(dispatched)
-    expect(closeIfStale(readStatus('booked')!, after).closed).toBe(false)
+    expect(closeIfStale(readStatus('booked', null)!, after).closed).toBe(false)
   })
 
   it('leaves an undated row alone rather than guessing at its age', () => {
-    const booked = readStatus('booked')!
+    const booked = readStatus('booked', null)!
     expect(closeIfStale(booked, null)).toEqual(booked)
     expect(closeIfStale(booked, new Date('nonsense'))).toEqual(booked)
   })
@@ -559,17 +645,23 @@ describe('an open row older than the cutover', () => {
   // flag must survive, since this rule must never be the thing that decides
   // freight did not happen.
   it('changes nothing about a row that is already finished', () => {
+    // NULL, so every one of these is on the history side of the books
+    // cutover — which is what "already finished" means here. The post-cutover
+    // case is the opposite claim and has its own test above: `closeIfStale`
+    // must leave a load the books own alone rather than close it as stale.
     for (const word of ['delivered', 'invoiced', 'paid', 'canceled']) {
-      const reading = readStatus(word)!
+      const reading = readStatus(word, null)!
       expect(closeIfStale(reading, before)).toEqual(reading)
     }
-    expect(closeIfStale(readStatus('canceled')!, before).cancelled).toBe(true)
+    expect(closeIfStale(readStatus('canceled', null)!, before).cancelled).toBe(
+      true,
+    )
   })
 
   // THE BOUNDARY ITSELF. A pickup exactly at the cutover is covered by the pay
   // rules, so it is live — off-by-one here would close a day of real freight.
   it('treats the cutover day itself as live', () => {
-    const booked = readStatus('booked')!
+    const booked = readStatus('booked', null)!
     expect(closeIfStale(booked, DATATRUCK_CUTOVER).closed).toBe(false)
     expect(
       closeIfStale(booked, new Date(DATATRUCK_CUTOVER.getTime() - 1)).closed,

@@ -153,19 +153,68 @@ export interface StatusReading {
   cancelled: boolean
   /** True when this row is finished history rather than freight in flight. */
   closed: boolean
+  /**
+   * ZEBRA'S BOOKS OWN THIS LOAD.
+   *
+   * True only for a finished row whose delivery date is on or after
+   * `BOOKS_CUTOVER`. It is the ONE thing that may reopen a load closed by the
+   * old rule, and it is a field of its own rather than `closed === false`
+   * because those are different claims: an OPEN row is also not closed, and
+   * an open row must not reopen finished history. Deriving one from the
+   * other would have widened the narrowing to every export row.
+   *
+   * `closeIfStale` respects it too. Otherwise a load delivered after the
+   * cutover but picked up before `DATATRUCK_CUTOVER` would be closed as
+   * stale, which is guard (b) — post-cutover never closed — failing by a
+   * different door.
+   */
+  booksOwn: boolean
 }
 
-export function readStatus(raw: string): StatusReading | null {
+/**
+ * A Datatruck status word on both of Zebra's axes.
+ *
+ * TAKES THE DELIVERY DATE, because `BOOKS_CUTOVER` splits the finished rows
+ * on it. Required rather than optional: an optional date would default the
+ * whole fleet to one side of the cutover and the omission would look like a
+ * reading rather than a mistake.
+ */
+export function readStatus(
+  raw: string,
+  deliveryAt: Date | null,
+): StatusReading | null {
   switch (raw.trim().toLowerCase()) {
     case 'delivered':
     case 'invoiced':
-    case 'paid':
-      return {
-        operational: 'DELIVERED',
-        billing: 'CLOSED_IN_DATATRUCK',
-        cancelled: false,
-        closed: true,
-      }
+    case 'paid': {
+      // ── THE BOOKS CUTOVER ───────────────────────────────────────────
+      //
+      // AN UNDATED FINISHED ROW IS HISTORY. Not a guess in the other
+      // direction: `importEventAt` refuses to stamp a POD without a date,
+      // so calling such a row live would produce a live load that can
+      // never settle and never says why. Closed is what the data supports.
+      const live =
+        deliveryAt !== null && deliveryAt.getTime() >= BOOKS_CUTOVER.getTime()
+
+      return live
+        ? {
+            // POD_RECEIVED, not DELIVERED: `settleableWhere` selects on
+            // that status AND an event of it, and the ruling says the POD
+            // event is stamped at delivery.
+            operational: 'POD_RECEIVED',
+            billing: 'UNINVOICED',
+            cancelled: false,
+            closed: false,
+            booksOwn: true,
+          }
+        : {
+            operational: 'DELIVERED',
+            billing: 'CLOSED_IN_DATATRUCK',
+            cancelled: false,
+            closed: true,
+            booksOwn: false,
+          }
+    }
     case 'canceled':
       // A cancelled load is closed too — nothing will ever be billed for it —
       // and `isCancelled` is the field that says why it stopped.
@@ -174,6 +223,7 @@ export function readStatus(raw: string): StatusReading | null {
         billing: 'CLOSED_IN_DATATRUCK',
         cancelled: true,
         closed: true,
+        booksOwn: false,
       }
     case 'in_transit':
       return {
@@ -181,6 +231,7 @@ export function readStatus(raw: string): StatusReading | null {
         billing: 'UNINVOICED',
         cancelled: false,
         closed: false,
+        booksOwn: false,
       }
     case 'dispatched':
       return {
@@ -188,6 +239,7 @@ export function readStatus(raw: string): StatusReading | null {
         billing: 'UNINVOICED',
         cancelled: false,
         closed: false,
+        booksOwn: false,
       }
     // `assigned` HAS NO COUNTERPART AND IS NOT INVENTED ONE. Zebra's axis goes
     // BOOKED -> DISPATCHED; Datatruck's "assigned" means a driver is attached
@@ -199,6 +251,7 @@ export function readStatus(raw: string): StatusReading | null {
         billing: 'UNINVOICED',
         cancelled: false,
         closed: false,
+        booksOwn: false,
       }
     case 'offer':
       return {
@@ -206,6 +259,7 @@ export function readStatus(raw: string): StatusReading | null {
         billing: 'UNINVOICED',
         cancelled: false,
         closed: false,
+        booksOwn: false,
       }
     default:
       return null
@@ -232,6 +286,33 @@ export function readStatus(raw: string): StatusReading | null {
  * on creating loads the seed's guard refuses, and each would look correct.
  */
 export const DATATRUCK_CUTOVER = new Date('2026-08-01T00:00:00.000Z')
+
+/**
+ * WHEN ZEBRA STARTED KEEPING THE BOOKS.
+ *
+ * Owner's ruling, 2026-09-24. `DATATRUCK_CUTOVER` above answers a different
+ * question — how old an OPEN row has to be before it is really finished
+ * history — and the two are deliberately separate dates for separate rules.
+ *
+ * ── WHAT THIS CHANGES ───────────────────────────────────────────────────
+ *
+ * Until this constant existed, `readStatus` mapped every finished Datatruck
+ * row — delivered, invoiced, paid — to CLOSED_IN_DATATRUCK, and
+ * `SETTLEABLE_LOAD` excludes that outright. That was right: the import was a
+ * HISTORY import, and its founding ruling was "no historical driver pay, no
+ * historical settlements". 14,345 of production's 14,346 eventless finished
+ * loads are that freight.
+ *
+ * It is wrong from the first week Zebra settles. Freight delivered on or
+ * after this date is Zebra's to invoice and to pay a driver for, so it
+ * arrives LIVE and carries its POD event at the delivery date.
+ *
+ * THE SPLIT IS ON THE DELIVERY DATE, not the pickup and not the import.
+ * Which week a load belongs to is decided by when it finished, and that is
+ * the same date the POD event carries — one date, two uses, no way for them
+ * to disagree.
+ */
+export const BOOKS_CUTOVER = new Date('2026-09-13T00:00:00.000Z')
 
 /**
  * An open row too old to be live is finished history, whatever it still says.
@@ -271,6 +352,11 @@ export function closeIfStale(
   cutover: Date = DATATRUCK_CUTOVER,
 ): StatusReading {
   if (reading.closed) return reading
+  // GUARD (b), HELD HERE TOO. A row delivered on or after `BOOKS_CUTOVER`
+  // is Zebra's whatever its pickup date says — otherwise freight picked up
+  // in July and delivered in the settled week would be closed as stale, and
+  // "post-cutover never closed" would fail by a different door.
+  if (reading.booksOwn) return reading
   if (!pickupAt || Number.isNaN(pickupAt.getTime())) return reading
   if (pickupAt.getTime() >= cutover.getTime()) return reading
 
@@ -278,6 +364,7 @@ export function closeIfStale(
     ...reading,
     billing: 'CLOSED_IN_DATATRUCK',
     closed: true,
+    booksOwn: false,
   }
 }
 
@@ -422,6 +509,8 @@ export interface PlannedLoad {
   billing: LoadBillingStatus
   cancelled: boolean
   closed: boolean
+  /** Zebra owns it: finished, delivered on or after `BOOKS_CUTOVER`. */
+  booksOwn: boolean
   equipment: EquipmentType | null
 
   linehaulCents: number
@@ -512,7 +601,15 @@ export function planLoads(
       continue
     }
 
-    const read = readStatus(text(record, 'Load status'))
+    // THE DELIVERY DATE IS READ BEFORE THE STATUS, because `BOOKS_CUTOVER`
+    // splits the finished rows on it. Read once here and carried into the
+    // planned load below, so the date that decides the side of the cutover
+    // and the date the POD event carries are the same value.
+    const deliveryAt =
+      parseDatatruckMoment(text(record, 'Delivery Appointment Time')) ??
+      parseDatatruckMoment(text(record, 'DEL date'))
+
+    const read = readStatus(text(record, 'Load status'), deliveryAt)
     if (!read) {
       held.push({
         externalId,
@@ -609,6 +706,7 @@ export function planLoads(
       billing: status.billing,
       cancelled: status.cancelled,
       closed: status.closed,
+      booksOwn: status.booksOwn,
       equipment,
       linehaulCents,
       accessorialCents,
@@ -625,9 +723,7 @@ export function planLoads(
         text(record, 'Delivery state'),
         text(record, 'Delivery company'),
       ),
-      deliveryAt:
-        parseDatatruckMoment(text(record, 'Delivery Appointment Time')) ??
-        parseDatatruckMoment(text(record, 'DEL date')),
+      deliveryAt,
       dispatchedMiles: wholeMiles(text(record, 'Total miles')),
       actualMiles: wholeMiles(text(record, 'Mile')),
       emptyMiles: wholeMiles(text(record, 'Empty mile')),
@@ -726,13 +822,54 @@ export interface SyncDecision {
  */
 export function syncDecisionFor(
   current: { operational: LoadOperationalStatus; billing: LoadBillingStatus },
-  incoming: { operational: LoadOperationalStatus; billing: LoadBillingStatus },
+  incoming: {
+    operational: LoadOperationalStatus
+    billing: LoadBillingStatus
+    /**
+     * Whether Zebra's books own this row — `StatusReading.booksOwn`.
+     *
+     * The ONLY thing that may reopen a closed load. Not `!closed`: an open
+     * row is also not closed, and an open row must not reopen finished
+     * history. The first version of this narrowing used `closed` and would
+     * have reopened a closed load from any live export row.
+     */
+    booksOwn: boolean
+  },
 ): SyncDecision {
   const notes: string[] = []
 
-  // CLOSED IS FINAL. Checked first, so no later clause can reopen it.
+  // ── CLOSED IS FINAL, WITH ONE NARROWING ─────────────────────────────
+  //
+  // THIS USED TO BE ABSOLUTE, and the comment said so: "no later clause can
+  // reopen it". The reason was good — the freight finished its life in the
+  // other system and this one will not take it back.
+  //
+  // Owner's ruling of 2026-09-24 narrows it, and guard (c) of that ruling is
+  // the reason: a re-run must reclassify idempotently. Production holds
+  // loads closed by the PRE-CUTOVER rule — every finished row was closed,
+  // because that is all the old `readStatus` could say — and some of those
+  // may be delivered on or after `BOOKS_CUTOVER`. They were closed by a
+  // rule that does not apply to their date, and a re-import has to be able
+  // to correct that or the first settled week is missing freight nobody can
+  // find.
+  //
+  // THE NARROWING IS EXACTLY AS WIDE AS THE RULING. Only the export saying
+  // "this is not history" reopens a load, and that is only ever said for a
+  // delivery date on or after the cutover. Everything before it is as final
+  // as it ever was.
   if (current.billing === 'CLOSED_IN_DATATRUCK') {
-    return { operational: null, billing: null, notes: [] }
+    if (!incoming.booksOwn) {
+      return { operational: null, billing: null, notes: [] }
+    }
+
+    return {
+      operational: incoming.operational,
+      billing: incoming.billing,
+      notes: [
+        `reopened: CLOSED_IN_DATATRUCK -> ${incoming.billing}, ` +
+          `delivered on or after the books cutover`,
+      ],
+    }
   }
 
   let operational: LoadOperationalStatus | null = null

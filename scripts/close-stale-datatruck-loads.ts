@@ -217,7 +217,18 @@ async function main(): Promise<void> {
         )
         continue
       }
-      const reading = readStatus(raw)
+      // NO DELIVERY DATE, DELIBERATELY. This script reads one thing off the
+      // reading — `closed` — and refuses every row the export calls
+      // finished, so the sync can advance it properly with its own events.
+      //
+      // `BOOKS_CUTOVER` splits the finished rows on their delivery date, and
+      // passing null puts every one of them on the history side. That is the
+      // CONSERVATIVE reading and it is the one this script wants: it makes
+      // the refusal above fire for every finished row on either side of the
+      // cutover. Passing a real date would let a post-cutover delivered load
+      // through to be marked CLOSED_IN_DATATRUCK — which is live freight
+      // Zebra has to settle, closed by the wrong hand.
+      const reading = readStatus(raw, null)
       if (!reading) {
         refused.push(
           `${externalId}  export says ${JSON.stringify(raw)}, which has no counterpart here`,

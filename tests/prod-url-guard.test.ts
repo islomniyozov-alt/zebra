@@ -191,7 +191,13 @@ const INSPECTION_READERS = [
   // the week’s freight: it connects as the owner role, so the thing that
   // keeps tenants apart everywhere else is absent, and a merged count is not
   // a finding anybody can act on.
-  'settlement-week-preflight.mjs',
+  //
+  // TYPESCRIPT SINCE 2026-09-24, and for `check-billing-drift.ts`’s reason: it
+  // classifies the remittance by IMPORTING `remittanceOutcome` rather than
+  // reimplementing three comparisons in SQL. A lookalike agrees with the
+  // engine until one of the two grows a tolerance, and then a preflight
+  // disagrees with the settlement it is a preflight for.
+  'settlement-week-preflight.ts',
 ]
 
 /**
