@@ -1,6 +1,7 @@
 import type { ComplianceType, DocumentType } from '@/generated/prisma/client'
 import type { TxClient } from './tenancy'
 import { daysUntil } from './compliance'
+import { isReferralPayee } from './driver-kind'
 
 // ---------------------------------------------------------------------------
 // THE DRIVER QUALIFICATION FILE — ONE DEFINITION, IN ONE PLACE.
@@ -293,7 +294,19 @@ export function dqfIncompleteCount(entries: readonly DqfEntry[]): number {
 export function isQualifiable(driver: {
   status: string
   deletedAt: Date | null
+  kind: string
 }): boolean {
+  // A REFERRAL PAYEE HAS NO QUALIFICATION FILE. `7 Star` is a commission, not
+  // somebody who will ever produce a medical certificate or a road test, so a
+  // DQF for it would be permanently incomplete and correctly so — and a
+  // checklist that can never reach complete is the kind of permanent red that
+  // teaches people to stop reading the reds that matter.
+  //
+  // HERE RATHER THAN IN THE ROSTER QUERY, because this is the one predicate
+  // that decides whose file is expected. The roster view, the driver page and
+  // the warning all ask it, and a payee excluded in only two of the three
+  // would show a clean driver page with a warning beside it.
+  if (isReferralPayee(driver)) return false
   return driver.deletedAt === null && driver.status !== 'INACTIVE'
 }
 

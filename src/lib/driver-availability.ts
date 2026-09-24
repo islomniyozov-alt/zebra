@@ -1,5 +1,6 @@
 import type { Prisma } from '@/generated/prisma/client'
 import { ACTIVE_ROSTER } from './driver-roster'
+import { PERSON_DRIVER } from './driver-kind'
 
 // ---------------------------------------------------------------------------
 // WHICH DRIVERS MAY BE GIVEN WORK.
@@ -62,6 +63,19 @@ export function assignableDriver(
     // which is the stale-flag failure item 11 wrote `offDutyUntil` to
     // prevent, reintroduced one layer down.
     OR: [{ isOffDuty: false }, { offDutyUntil: { lte: now } }],
+    // ── AND NOT A REFERRAL PAYEE (owner's ruling, 2026-09-24) ──────────
+    //
+    // `7 Star` and `Said truck 3609` are commissions on another driver's
+    // loads, carried as Driver rows so they can be paid. Nobody assigns
+    // freight to a commission, and the ruling is explicit that they must NOT
+    // be inactivated — so the roster status cannot be what keeps them out of
+    // the pickers, and this has to.
+    //
+    // ONE SPELLING OF THE EXCLUSION, imported. This predicate is the whole
+    // reason the dispatch board, the new-load form and the load page agree
+    // about who can be given a load; a fourth picker written tomorrow gets it
+    // by using this rather than by remembering.
+    ...PERSON_DRIVER,
   }
 }
 

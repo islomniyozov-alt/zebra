@@ -111,6 +111,49 @@ export async function seedOrganization(
       data: { organizationId, companyId, firstName: 'Test', lastName: label },
     }),
   )
+  // A REFERRAL PAYEE, SEEDED ON PURPOSE (owner's ruling, 2026-09-24).
+  //
+  // `kind: 'PAYEE'` is excluded from the DQF, the compliance warnings, the
+  // dispatch pickers and the roster counts — four queries, and "it returns no
+  // payees" is trivially true of a database with no payee in it. That is the
+  // most comfortable way to be wrong, which is the argument
+  // `tests/isolation-coverage.test.ts` was written on.
+  //
+  // AVAILABLE AND HOLDING A PAY RULE, because that is the whole point of the
+  // row: the ruling forbids inactivating these, since they still settle.
+  // RECORDED UNDER ITS REAL MODEL NAME. `record` appends to a list per model,
+  // and `tests/isolation-coverage.test.ts` refuses any key that is not a model
+  // — deliberately, because a made-up key files ids under a name nothing reads,
+  // so the row goes unproven while the count still looks right. The main driver
+  // is pushed first, so index 0 is unchanged.
+  //
+  // AND THE GUARD READS THIS FILE AS TEXT, so a descriptive key written inside
+  // a comment is picked up as if it were a call. It caught exactly that here.
+  const payee = record(
+    'driver',
+    await db.driver.create({
+      data: {
+        organizationId,
+        companyId,
+        firstName: '7',
+        lastName: `Star ${tag}`,
+        kind: 'PAYEE',
+        status: 'AVAILABLE',
+      },
+    }),
+  )
+  record(
+    'driverPayRule',
+    await db.driverPayRule.create({
+      data: {
+        driverId: payee.id,
+        organizationId,
+        type: 'PERCENT_LINEHAUL',
+        percentBps: 500,
+        effectiveFrom: new Date('2026-01-01'),
+      },
+    }),
+  )
   record(
     'driverPayRule',
     await db.driverPayRule.create({

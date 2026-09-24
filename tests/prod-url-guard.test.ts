@@ -240,6 +240,24 @@ const INSPECTION_READERS = [
  * it ever wrote anything.
  */
 const MAINTENANCE_READERS = [
+  // ADDED 2026-09-24, by ruling, and it WRITES on --apply. Four rows the
+  // application could have produced through its own screens, done as one
+  // reviewed act because they are one decision: a driver who hauled the first
+  // settled week and was never on the roster, her rate, and a rate change for
+  // JERRY ROBERT MCKANE from 30% to 20% on the same date.
+  //
+  // THE DRY RUN IS THE REAL PATH, ROLLED BACK. It opens a transaction, writes
+  // through `createDriver`, `closePayRule` and `saveDriverPayRule` — the same
+  // functions the screens use — reads the rows back, and throws to roll back
+  // unless --apply. A printed plan cannot exercise the overlap refusal in
+  // `saveDriverPayRule`, and that refusal is the entire hazard in a rate
+  // change: two rules in force on one day means the pay for that day depends
+  // on which row is read first.
+  //
+  // Idempotent by asking, per step, whether it has already happened. A
+  // half-finished money change that doubles on re-run is the failure being
+  // designed against.
+  'add-julia-and-rate-change.ts',
   'backfill-direct-pod.mjs',
   // Written 2026-09-06 and NOT RUN. `billingStatusFor` is a rule over a cached
   // column, so changing it drifts every untouched row; this repairs them

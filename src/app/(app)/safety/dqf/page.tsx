@@ -12,6 +12,7 @@ import {
   DQF_REQUIREMENTS,
   isQualifiable,
 } from '@/lib/dqf'
+import { PERSON_DRIVER } from '@/lib/driver-kind'
 import type { MessageKey } from '@/lib/i18n'
 
 // ITEM 13 — THE WHOLE ROSTER, IN ONE COLUMN OF NUMBERS.
@@ -83,6 +84,10 @@ export default async function DqfRosterPage({
           // `isQualifiable`, which is asserted below rather than trusted.
           deletedAt: null,
           status: { not: 'INACTIVE' },
+          // AND A REFERRAL PAYEE IS NOT A DRIVER WITH A FILE. One spelling of
+          // that exclusion, imported, so this page and the warnings cannot
+          // disagree about whose DQF is expected.
+          ...PERSON_DRIVER,
         },
         orderBy: [{ company: { name: 'asc' } }, { lastName: 'asc' }],
         take: 400,
@@ -92,6 +97,7 @@ export default async function DqfRosterPage({
           lastName: true,
           status: true,
           deletedAt: true,
+          kind: true,
           company: { select: { name: true } },
         },
       })

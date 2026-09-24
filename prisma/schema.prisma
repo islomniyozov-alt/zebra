@@ -878,6 +878,33 @@ model Driver {
   status          DriverStatus  @default(AVAILABLE)
   employmentType  OwnershipType @default(OWNED)
 
+  /// WHETHER THIS ROW IS A PERSON OR A REFERRAL PAYEE. `PERSON` | `PAYEE`.
+  ///
+  /// Owner's ruling, 2026-09-24. Rows like `7 Star` and `Said truck 3609` came
+  /// across from Datatruck as drivers and are not people: they are referral
+  /// payees, taking a commission on another driver's loads. They settle like
+  /// anyone else and they keep their pay rules — the ruling is explicit that
+  /// they are NOT to be inactivated, because inactivating them would stop
+  /// paying them.
+  ///
+  /// What it changes is everything a HUMAN driver implies: a payee is out of
+  /// the Driver Qualification File, out of the compliance warnings, out of the
+  /// dispatch pickers and out of the roster counts. A DQF for `7 Star` is a
+  /// medical certificate nobody will ever produce, and a compliance warning
+  /// that can never be cleared trains people to ignore the ones that can.
+  ///
+  /// TEXT AGAINST A CODE LIST, not an enum, following `Truck.fleetStatus`. The
+  /// list lives in `src/lib/driver-kind.ts` where the exclusions it drives are
+  /// written next to it, and a value outside the list is refused there by
+  /// name. An enum would put the two halves of one rule in two files.
+  ///
+  /// DEFAULT `PERSON`, so every existing row keeps meaning what it meant and
+  /// the exclusions are opt-in. The failure direction matters: a payee wrongly
+  /// left as a person produces a warning nobody can clear, while a person
+  /// wrongly marked a payee silently leaves the DQF — which is the one the DOT
+  /// asks about.
+  kind String @default("PERSON")
+
   /// How many whole weeks after the batch's check date this driver is paid.
   ///
   /// ZERO FOR EVERYONE, BY RULING (Islom, 2026-09-11). The company pays two
@@ -2960,6 +2987,21 @@ model Settlement {
   ///
   /// Empty on a solo period.
   teamWith String[]
+
+  /// The REFERRAL PAYEES in the second seat, printed as "Referral: X".
+  ///
+  /// Owner's ruling, 2026-09-24. A referral payee takes a commission on another
+  /// driver's loads and sits in `Load.coDriverId` to do it — so without this
+  /// the statement prints "Team with 7 Star" under the driver, which is a false
+  /// statement about who was in the truck on the one document that driver reads
+  /// to check their own pay.
+  ///
+  /// A SECOND COLUMN RATHER THAN A LABEL INSIDE `teamWith`, because both are
+  /// frozen and the freeze has to survive `Driver.kind` changing afterwards.
+  /// Deriving the label at render time by reading the driver's kind back would
+  /// restate an already-paid statement the day somebody reclassifies a row —
+  /// the exact argument the comment above makes for freezing `teamWith` at all.
+  referralWith String[]
 
   /// The payee as the statement printed it, FROZEN LIKE THE UNIT NUMBER.
   ///

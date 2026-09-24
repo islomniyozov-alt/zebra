@@ -37,6 +37,7 @@ const inputFor = (
   unitNumber: FIXTURE.unitNumber,
   // Solo, unless a case below overrides it.
   teamWith: [],
+  referralWith: [],
   payToName: null,
   payToAddress: null,
   payTariffLabel: FIXTURE.tariff,
@@ -321,6 +322,49 @@ describe('the team header', () => {
       renderStatementPdf(inputFor({ teamWith: ['JULIA HALL', 'A N OTHER'] })),
     )
     expect(drew).toContain('JULIA HALL and A N OTHER')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE REFERRAL LINE.
+//
+// Owner's ruling, 2026-09-24. A referral payee sits in `Load.coDriverId` to
+// earn a commission, so before this the statement printed "Team with 7 Star"
+// under the driver — a false claim about who was in the truck, on the document
+// that driver reads to check their own pay.
+// ---------------------------------------------------------------------------
+describe('the referral header', () => {
+  it('says Referral, not Team with', () => {
+    const drew = drawn(
+      renderStatementPdf(inputFor({ teamWith: [], referralWith: ['7 Star'] })),
+    )
+    expect(drew).toContain('Referral')
+    expect(drew).toContain('7 Star')
+    // THE POINT OF THE WHOLE CHANGE. A commission must not be described as
+    // somebody who was in the cab.
+    expect(drew).not.toContain('Team with')
+  })
+
+  it('says nothing at all when there is no referral', () => {
+    // The pair, for the reason the team header's pair exists: without it the
+    // line could be printed unconditionally and the test above would pass.
+    const drew = drawn(renderStatementPdf(inputFor({ referralWith: [] })))
+    expect(drew).not.toContain('Referral')
+  })
+
+  it('prints both headers when a week had a teammate AND a referral', () => {
+    // These are separate lines rather than one merged list, because a driver
+    // can have both in the same week and merging them would file a commission
+    // under a heading that says who was in the truck.
+    const drew = drawn(
+      renderStatementPdf(
+        inputFor({ teamWith: ['A N OTHER'], referralWith: ['7 Star'] }),
+      ),
+    )
+    expect(drew).toContain('Team with')
+    expect(drew).toContain('A N OTHER')
+    expect(drew).toContain('Referral')
+    expect(drew).toContain('7 Star')
   })
 })
 

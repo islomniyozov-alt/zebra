@@ -168,6 +168,18 @@ async function main(): Promise<void> {
       }
     }
 
+    // HOW THE FLEET'S OWN ROWS SPLIT A THREE-WORD NAME. A new row has to match
+    // it, because the seed resolves on `firstName + ' ' + lastName` and the
+    // convention is data, not a guess.
+    heading('HOW EXISTING THREE-WORD NAMES ARE SPLIT')
+    for (const d of drivers.filter(
+      (x) => `${x.firstName} ${x.lastName}`.trim().split(/\s+/).length === 3,
+    )) {
+      console.log(
+        `  first="${d.firstName}"  last="${d.lastName}"  ${companyName.get(d.companyId) ?? ''}`,
+      )
+    }
+
     report('THE DRIVER NAME THE PREVIEW COULD NOT RESOLVE', DRIVER_NAMES)
     report('THE CO-DRIVER NAMES, ALL SEVEN', CO_DRIVER_NAMES)
 
@@ -209,6 +221,64 @@ async function main(): Promise<void> {
                   : '(no amount)'
           console.log(
             `    ${r.type.padEnd(12)} ${amount.padEnd(22)} ${day(r.effectiveFrom)} -> ${day(r.effectiveTo)}${r.notes ? `  "${r.notes}"` : ''}`,
+          )
+        }
+      }
+    }
+
+    // ── WHAT NARROWING SEAT RESOLUTION WOULD COST ───────────────────────
+    //
+    // The seed resolves a name against `deletedAt: null` and nothing else, so
+    // it will seat a driver whose roster says INACTIVE. The ruling of
+    // 2026-09-24 narrows that to "excludes roster-INACTIVE only" — and 107 of
+    // production's 162 rows are INACTIVE, so the narrowing gets measured
+    // before it is written. A name that stops resolving is freight that
+    // silently loses its driver, which is the failure this whole week is
+    // about.
+    const EXPORT = process.argv.find((a) => a.endsWith('.xlsx'))
+    if (EXPORT) {
+      const { asRecords, readXlsx } = await import('@/lib/datatruck/xlsx')
+      const { planLoads } = await import('@/lib/datatruck/loads')
+      const { readFileSync } = await import('node:fs')
+      const plan = planLoads(
+        asRecords(await readXlsx(new Uint8Array(readFileSync(EXPORT)))),
+      )
+
+      const now = new Map<string, typeof drivers>()
+      const narrowed = new Map<string, typeof drivers>()
+      for (const d of drivers) {
+        const key = nameKey(full(d))
+        if (d.deletedAt === null) now.set(key, [...(now.get(key) ?? []), d])
+        if (d.deletedAt === null && d.status !== 'INACTIVE') {
+          narrowed.set(key, [...(narrowed.get(key) ?? []), d])
+        }
+      }
+
+      heading(`SEAT RESOLUTION UNDER BOTH RULES — ${EXPORT}`)
+      const picks = [
+        ['driver', (l: (typeof plan.planned)[number]) => l.driverName],
+        ['co-driver', (l: (typeof plan.planned)[number]) => l.coDriverName],
+      ] as const
+      for (const [label, pick] of picks) {
+        const named = plan.planned.map(pick).filter((n): n is string => !!n)
+        const resolves = (m: Map<string, typeof drivers>, n: string) =>
+          (m.get(nameKey(n)) ?? []).length === 1
+        const nowOk = named.filter((n) => resolves(now, n)).length
+        const narrowOk = named.filter((n) => resolves(narrowed, n)).length
+        console.log(
+          `  ${label.padEnd(10)} ${named.length} named    ` +
+            `deletedAt-only: ${nowOk}    excluding INACTIVE: ${narrowOk}`,
+        )
+        const lost = [
+          ...new Set(
+            named.filter((n) => resolves(now, n) && !resolves(narrowed, n)),
+          ),
+        ].sort()
+        for (const n of lost) {
+          const hit = (now.get(nameKey(n)) ?? [])[0]
+          const rows = named.filter((x) => nameKey(x) === nameKey(n)).length
+          console.log(
+            `      WOULD STOP RESOLVING: "${n}" on ${rows} load(s) — roster=${hit?.status}`,
           )
         }
       }

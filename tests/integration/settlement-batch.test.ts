@@ -349,6 +349,7 @@ describe('a week of freight becomes a batch', () => {
       company: { name: settlement.company.name, address: 'Dayton, OH' },
       driverName: `${settlement.driver.firstName} ${settlement.driver.lastName}`,
       teamWith: settlement.teamWith,
+      referralWith: settlement.referralWith,
       payToName: settlement.payToName,
       payToAddress: settlement.payToAddress,
       unitNumber: settlement.unitNumber,

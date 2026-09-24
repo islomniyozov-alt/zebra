@@ -345,6 +345,14 @@ export interface DriverSettlementInput {
    * wrong without it.
    */
   teamWith: readonly string[]
+  /**
+   * The referral payees in the second seat, printed as "Referral: X".
+   *
+   * A commission on this driver's loads, not somebody who was in the cab. Kept
+   * apart from `teamWith` all the way through so the statement cannot claim the
+   * wrong thing about who ran the load.
+   */
+  referralWith: readonly string[]
   /** The payee, when it is not the driver. Frozen onto the settlement. */
   payToName: string | null
   payToAddress: string | null
@@ -396,6 +404,8 @@ export interface DriverSettlement extends YtdTotals {
   unitNumber: string | null
   /** The other crew members, carried through to be frozen on the row. */
   teamWith: readonly string[]
+  /** The referral payees, carried through and frozen the same way. */
+  referralWith: readonly string[]
   payToName: string | null
   payToAddress: string | null
   letterheadCompanyId: string
@@ -629,6 +639,7 @@ export function computeDriverSettlement(
     driverName: input.driverName,
     unitNumber: input.unitNumber,
     teamWith: input.teamWith,
+    referralWith: input.referralWith,
     payToName: input.payToName,
     payToAddress: input.payToAddress,
     letterheadCompanyId: input.letterheadCompanyId,

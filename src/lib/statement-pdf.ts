@@ -109,6 +109,14 @@ export interface StatementPdfInput {
    */
   teamWith: readonly string[]
   /**
+   * The REFERRAL PAYEES in the second seat, printed as "Referral: X".
+   *
+   * Separate from `teamWith` because they are a different claim. A commission
+   * sitting in `coDriverId` printed as "Team with" tells the driver somebody
+   * was in the cab with them, on the document they read to check their own pay.
+   */
+  referralWith: readonly string[]
+  /**
    * Who the cheque is made out to, when it is not the driver.
    *
    * An owner-operator invoices through their own LLC. Null prints the
@@ -240,6 +248,14 @@ export function renderStatementPdf(input: StatementPdfInput): Uint8Array {
     y -= 11
     text('Team with', LEFT, 8, true)
     text(input.teamWith.join(' and '), LEFT + 44, 8)
+  }
+  // A SEPARATE LINE, NOT A SECOND NAME ON THE SAME ONE. A driver can have both
+  // — a team run and a referral on the same week — and merging them would put
+  // a commission under a heading that says who was in the truck.
+  if (input.referralWith.length > 0) {
+    y -= 11
+    text('Referral', LEFT, 8, true)
+    text(input.referralWith.join(' and '), LEFT + 44, 8)
   }
 
   y -= 8

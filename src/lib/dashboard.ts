@@ -5,6 +5,7 @@ import { complianceCount } from './compliance'
 import { NOT_CLOSED_HISTORY } from './billing-status'
 import type { AuthorizedSession, Resource } from './permissions'
 import { can } from './permissions'
+import { PERSON_DRIVER } from './driver-kind'
 
 // ---------------------------------------------------------------------------
 // THE DASHBOARD (Step B).
@@ -347,13 +348,23 @@ export async function fleetGlance(
     deletedAt: null,
     status: { not: 'SOLD' },
   } as const
+  // A REFERRAL PAYEE IS NOT ON THE ROSTER (owner's ruling, 2026-09-24).
+  // "How many drivers do we have" is a question about people — the answer is
+  // read for insurance and for CSA exposure — and a commission carried as a
+  // Driver row would inflate it. The ruling keeps those rows ACTIVE on purpose
+  // so they keep being paid, so the roster status cannot do this filtering.
   const liveDriver = {
     ...scope,
     deletedAt: null,
     status: { not: 'INACTIVE' },
+    ...PERSON_DRIVER,
   } as const
   /** A driver who still works here. Reused so both sides agree on "live". */
-  const pairedDriver = { deletedAt: null, status: { not: 'INACTIVE' } } as const
+  const pairedDriver = {
+    deletedAt: null,
+    status: { not: 'INACTIVE' },
+    ...PERSON_DRIVER,
+  } as const
 
   const [trucksPaired, trucksIdle, driversPaired, driversIdle, inTransit] =
     await Promise.all([

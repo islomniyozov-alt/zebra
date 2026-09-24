@@ -375,7 +375,10 @@ export async function driverWarningFacts(
     // And whether each driver is somebody whose file must be current.
     tx.driver.findMany({
       where: { id: { in: ids } },
-      select: { id: true, status: true, deletedAt: true },
+      // `kind` BECAUSE A PAYEE HAS NO FILE. `isQualifiable` reads it, and
+      // leaving it out of this select is a type error rather than a silent
+      // false — which is the whole reason the predicate takes the row.
+      select: { id: true, status: true, deletedAt: true, kind: true },
     }),
   ])
 

@@ -201,16 +201,51 @@ describe('the checklist', () => {
 })
 
 describe('who has to be qualified', () => {
+  /** A person, unless a case says otherwise. */
+  const person = { kind: 'PERSON' }
+
   it('is everybody on the roster, holiday included', () => {
-    expect(isQualifiable({ status: 'AVAILABLE', deletedAt: null })).toBe(true)
+    expect(
+      isQualifiable({ ...person, status: 'AVAILABLE', deletedAt: null }),
+    ).toBe(true)
     // Somebody on holiday comes back on Monday and their card must be valid.
-    expect(isQualifiable({ status: 'VACATION', deletedAt: null })).toBe(true)
+    expect(
+      isQualifiable({ ...person, status: 'VACATION', deletedAt: null }),
+    ).toBe(true)
   })
 
   it('is NOT somebody who no longer drives here', () => {
     // §391.51(c): the file is KEPT for three years, not kept current.
-    expect(isQualifiable({ status: 'INACTIVE', deletedAt: null })).toBe(false)
-    expect(isQualifiable({ status: 'AVAILABLE', deletedAt: NOW })).toBe(false)
+    expect(
+      isQualifiable({ ...person, status: 'INACTIVE', deletedAt: null }),
+    ).toBe(false)
+    expect(
+      isQualifiable({ ...person, status: 'AVAILABLE', deletedAt: NOW }),
+    ).toBe(false)
+  })
+
+  // ── A REFERRAL PAYEE HAS NO FILE (owner's ruling, 2026-09-24) ──────────
+  it('is NOT a referral payee, however active the row is', () => {
+    // `7 Star` is a commission on another driver's loads. It will never produce
+    // a medical certificate or a road test, so its DQF would be permanently
+    // incomplete — and a checklist that can never reach complete is what
+    // teaches people to scroll past the reds that matter.
+    //
+    // AVAILABLE ON PURPOSE. The ruling forbids inactivating these rows, because
+    // that would stop paying them, so the roster status cannot be what excludes
+    // them here.
+    expect(
+      isQualifiable({ kind: 'PAYEE', status: 'AVAILABLE', deletedAt: null }),
+    ).toBe(false)
+  })
+
+  it('is still a person when the kind is something nobody has defined yet', () => {
+    // `not: 'PAYEE'` rather than `equals: 'PERSON'`, and this is the reason: a
+    // future kind should keep appearing in the compliance lists until somebody
+    // decides otherwise. Appearing wrongly gets noticed; vanishing does not.
+    expect(
+      isQualifiable({ kind: 'AGENCY', status: 'AVAILABLE', deletedAt: null }),
+    ).toBe(true)
   })
 })
 

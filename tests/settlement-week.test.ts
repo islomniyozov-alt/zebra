@@ -245,6 +245,7 @@ function inputFor(fixture: StatementFixture): DriverSettlementInput {
     // The six reproduced Datatruck statements are all SOLO. Team driving
     // starts 2026-09-04 and every load on these delivered long before it.
     teamWith: [],
+    referralWith: [],
     // The six reproduced statements are all paid to the driver.
     payToName: null,
     payToAddress: null,

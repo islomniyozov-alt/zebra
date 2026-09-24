@@ -1,5 +1,6 @@
 import type { Prisma } from '@/generated/prisma/client'
 import { SETTLEABLE_LOAD } from './settlements'
+import { isReferralPayee } from './driver-kind'
 import {
   computeBatch,
   remittanceOutcome,
@@ -298,6 +299,10 @@ export async function batchInputForOrg(
           companyId: true,
           firstName: true,
           lastName: true,
+          // A PAYEE IN THE SECOND SEAT IS NOT A TEAMMATE. Read here so the
+          // split below needs no second query — every crew member is already
+          // in `driverIds` by construction.
+          kind: true,
           payToName: true,
           payToAddress: true,
           payoutLagWeeks: true,
@@ -345,6 +350,24 @@ export async function batchInputForOrg(
         : [],
     ])
 
+  /**
+   * The OTHER crew member on each of a driver's loads.
+   *
+   * Extracted because it is now asked twice — once for the teammates and once for
+   * the referral payees — and two copies of "whichever seat is not mine" is two
+   * chances to get the seat backwards in one of them.
+   */
+  function crewIdsFor(
+    loads: readonly { driverId: string | null; coDriverId: string | null }[],
+    driverId: string,
+  ): string[] {
+    return loads
+      .map((load) =>
+        load.driverId === driverId ? load.coDriverId : load.driverId,
+      )
+      .filter((id): id is string => id !== null && id !== driverId)
+  }
+
   const escrowOf = new Map(
     escrow.map((row) => [row.driverId, row._sum.amountCents ?? 0]),
   )
@@ -353,6 +376,8 @@ export async function batchInputForOrg(
   const nameOf = new Map(
     drivers.map((d) => [d.id, `${d.firstName} ${d.lastName}`.trim()]),
   )
+  // AND WHICH OF THEM ARE COMMISSIONS RATHER THAN PEOPLE.
+  const payee = new Map(drivers.map((d) => [d.id, isReferralPayee(d)]))
 
   const out: DriverSettlementInput[] = []
   for (const driver of drivers) {
@@ -389,13 +414,21 @@ export async function batchInputForOrg(
         // THE PAYEE AS IT STANDS TODAY, frozen onto the row below.
         payToName: driver.payToName,
         payToAddress: driver.payToAddress,
+        // SPLIT BY KIND, because "Team with 7 Star" is a false statement
+        // about who was in the truck, on the one document the driver reads to
+        // check their own pay. Same source, two lists, one pass.
         teamWith: [
           ...new Set(
-            mine
-              .map((load) =>
-                load.driverId === driver.id ? load.coDriverId : load.driverId,
-              )
-              .filter((id): id is string => id !== null && id !== driver.id)
+            crewIdsFor(mine, driver.id)
+              .filter((id) => !payee.get(id))
+              .map((id) => nameOf.get(id))
+              .filter((name) => name !== undefined),
+          ),
+        ],
+        referralWith: [
+          ...new Set(
+            crewIdsFor(mine, driver.id)
+              .filter((id) => payee.get(id) === true)
               .map((id) => nameOf.get(id))
               .filter((name) => name !== undefined),
           ),
@@ -619,6 +652,7 @@ export async function refreshDraft(
         unitNumber: settlement.unitNumber,
         // Frozen beside the unit number, and for the same argument.
         teamWith: [...settlement.teamWith],
+        referralWith: [...settlement.referralWith],
         // FROZEN BESIDE THE UNIT NUMBER. Reading the driver back next
         // year would restate a statement somebody was already paid on.
         payToName: settlement.payToName,
