@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   chooseExport,
+  coDriverSeat,
   crewFillFor,
   datatruckCents,
   importEventAt,
@@ -892,6 +893,99 @@ describe('tags', () => {
     // contains one.
     const [load] = planLoads([row({ Tags: 'east coast / midwest' })]).planned
     expect(load?.tags).toEqual(['east coast / midwest'])
+  })
+
+  // ── THE EXPORTER SPELLS IT BOTH WAYS ──────────────────────────────────
+  it('reads the column when it is spelled `Tag`', () => {
+    // The 2026-09-08 export says `Tags`; the 2026-09-24 re-export of the same
+    // view says `Tag`. Reading one name meant the column was present in the
+    // file and invisible to the importer — and a blank column and an unread
+    // column look identical afterwards, which is why this went unnoticed for
+    // a whole preview.
+    const [load] = planLoads([row({ Tag: 'hazmat, team' })]).planned
+    expect(load?.tags).toEqual(['hazmat', 'team'])
+  })
+
+  it('still reads it when it is spelled `Tags`', () => {
+    const [load] = planLoads([row({ Tags: 'reefer' })]).planned
+    expect(load?.tags).toEqual(['reefer'])
+  })
+
+  it('is empty when neither spelling is there', () => {
+    // NOT a fallback over near-miss spellings: two exact names this exporter
+    // has actually produced. A third stays invisible rather than guessed at.
+    const [load] = planLoads([row({ Tagz: 'hazmat' })]).planned
+    expect(load?.tags).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// WHO SITS IN THE SECOND SEAT.
+//
+// Every one of these used to be a silent drop: the write decided, the preview
+// never looked, and a co-driver who matched nobody left no trace.
+// ---------------------------------------------------------------------------
+
+describe('the second seat on an imported load', () => {
+  const DRIVER = 'drv_julia'
+  const CO = 'drv_haidar'
+
+  it('fills the seat when the name resolves to exactly one other person', () => {
+    expect(coDriverSeat('HAIDAR NIYOZOV', [CO], [DRIVER])).toEqual({
+      kind: 'fill',
+      driverId: CO,
+    })
+  })
+
+  it('is no-name when the column is blank, which is most loads', () => {
+    // Counted nowhere. A single-driver load is not a problem to report.
+    expect(coDriverSeat(null, [], [DRIVER])).toEqual({ kind: 'no-name' })
+  })
+
+  it('REFUSES a name that matches nobody, rather than leaving no trace', () => {
+    // `7 Star` and `Said truck 3609` are in the real column. It is free text
+    // and the fleet writes notes in it.
+    expect(coDriverSeat('7 Star', [], [DRIVER])).toEqual({ kind: 'unresolved' })
+  })
+
+  it('REFUSES a name that matches two people', () => {
+    expect(coDriverSeat('J SMITH', ['drv_a', 'drv_b'], [DRIVER])).toEqual({
+      kind: 'ambiguous',
+    })
+  })
+
+  // ── NOBODY CREWS A LOAD TWICE ───────────────────────────────────────────
+  it('REFUSES the driver in their own second seat, and says which case it is', () => {
+    // NOT deduplicated into one seat: `settleableWhere` matches EITHER seat,
+    // so a load carrying one person twice settles once and reads as a team run
+    // forever. The database CHECK refuses it too — but a CHECK failure kills
+    // the whole insert batch, so it is caught here where it can be counted.
+    expect(coDriverSeat('JULIA ROSE HALL', [DRIVER], [DRIVER])).toEqual({
+      kind: 'same-as-driver',
+    })
+  })
+
+  it('fills the seat when the load has no driver at all', () => {
+    // A co-driver with an empty first seat is odd but not contradictory, and
+    // refusing it would drop a name for a reason nobody stated.
+    expect(coDriverSeat('HAIDAR NIYOZOV', [CO], [])).toEqual({
+      kind: 'fill',
+      driverId: CO,
+    })
+  })
+
+  // ── AND BOTH PATHS CALL IT ──────────────────────────────────────────────
+  it('is what the seed uses for BOTH the preview and the write', () => {
+    // The defect this replaced was two definitions: the write decided with an
+    // inline condition and the preview did not look at all. One call site is
+    // not enough — there must be one in the counting and one in the create.
+    const seed = readFileSync('scripts/seed-datatruck-loads.ts', 'utf8')
+
+    expect((seed.match(/coDriverSeat\(/g) ?? []).length).toBe(2)
+    expect(seed).toContain('CO-DRIVER NAMES THAT RESOLVE TO NOTHING')
+    expect(seed).toContain('CO-DRIVER NAMES THAT ARE THE DRIVER')
+    // The inline condition must be gone, not merely bypassed.
+    expect(seed).not.toContain('coDriverIds[0] !== driverIds[0]')
   })
 })
 

@@ -4,6 +4,7 @@ import { createPrismaClient } from '@/lib/db'
 import { asRecords, readXlsx } from '@/lib/datatruck/xlsx'
 import {
   chooseExport,
+  coDriverSeat,
   crewFillFor,
   datatruckCents,
   importEventAt,
@@ -322,6 +323,20 @@ async function main(): Promise<void> {
     const ambiguousTrucks = new Map<string, number>()
     const unresolvedDrivers = new Map<string, number>()
     const ambiguousDrivers = new Map<string, number>()
+    // ── CO-DRIVERS ARE COUNTED TOO, AND WERE NOT ────────────────────────
+    //
+    // The create path resolves `coDriverName` and sets `coDriverId` only on
+    // exactly one hit, so a co-driver matching NOBODY or two people was
+    // dropped with nothing printed. On the 2026-09-19 week that hid seven
+    // names, of which `7 Star` and `Said truck 3609` are plainly not people:
+    // the column is free text and the fleet writes notes in it.
+    //
+    // A seat that silently stays empty is the whole reason this preview
+    // exists. `crewFillFor` reports its refusals on the enrichment path; this
+    // is the same account for the create path.
+    const unresolvedCoDrivers = new Map<string, number>()
+    const ambiguousCoDrivers = new Map<string, number>()
+    const sameAsDriver = new Map<string, number>()
     for (const load of plan.planned) {
       if (load.truckUnit) {
         const companyId = companyByName.get(load.authority) ?? ''
@@ -353,6 +368,24 @@ async function main(): Promise<void> {
           )
         }
       }
+      // SAME MAP, SAME KEY, SAME RULE THE WRITE USES. `coDriverSeat` is what
+      // the create path below calls to decide the seat, so every outcome
+      // counted here is the outcome that would actually happen.
+      const seat = coDriverSeat(
+        load.coDriverName,
+        load.coDriverName
+          ? (driverByName.get(nameKey(load.coDriverName)) ?? [])
+          : [],
+        load.driverName
+          ? (driverByName.get(nameKey(load.driverName)) ?? [])
+          : [],
+      )
+      const name = load.coDriverName ?? ''
+      const bump = (counts: Map<string, number>) =>
+        counts.set(name, (counts.get(name) ?? 0) + 1)
+      if (seat.kind === 'unresolved') bump(unresolvedCoDrivers)
+      else if (seat.kind === 'ambiguous') bump(ambiguousCoDrivers)
+      else if (seat.kind === 'same-as-driver') bump(sameAsDriver)
     }
 
     const table = (title: string, counts: Map<string, number>) => {
@@ -368,6 +401,12 @@ async function main(): Promise<void> {
     table('TRUCK UNITS THAT RESOLVE TO TWO ROWS — refused', ambiguousTrucks)
     table('DRIVER NAMES THAT RESOLVE TO NOTHING', unresolvedDrivers)
     table('DRIVER NAMES THAT RESOLVE TO TWO ROWS — refused', ambiguousDrivers)
+    table('CO-DRIVER NAMES THAT RESOLVE TO NOTHING', unresolvedCoDrivers)
+    table(
+      'CO-DRIVER NAMES THAT RESOLVE TO TWO ROWS — refused',
+      ambiguousCoDrivers,
+    )
+    table('CO-DRIVER NAMES THAT ARE THE DRIVER — refused', sameAsDriver)
 
     // ── CUSTOMERS ──────────────────────────────────────────────────────
     //
@@ -925,7 +964,13 @@ async function main(): Promise<void> {
             // outright, so an export naming the same person in both columns
             // would fail the whole insert rather than one row — it is dropped
             // here, where it can be counted instead of crashing an import.
-            ...(coDriverIds.length === 1 && coDriverIds[0] !== driverIds[0]
+            //
+            // `coDriverSeat` IS THE RULE, and the resolution tables above call
+            // the same function. This condition used to be written out here
+            // and nowhere else, which is why the preview could not report what
+            // the write would drop.
+            ...(coDriverSeat(load.coDriverName, coDriverIds, driverIds).kind ===
+            'fill'
               ? { coDriverId: coDriverIds[0] }
               : {}),
             // Datatruck's own Tags column, carried across verbatim.

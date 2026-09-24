@@ -501,7 +501,10 @@ export interface PlannedLoad {
   driverName: string | null
   /** `Co-Driver`, verbatim. Often a carrier name rather than a person. */
   coDriverName: string | null
-  /** `Tags`, split on commas. Empty when the column is blank or absent. */
+  /**
+   * `Tags` or `Tag`, split on commas — the exporter writes both spellings.
+   * Empty when the column is blank or absent under either name.
+   */
   tags: string[]
   truckUnit: string | null
 
@@ -700,7 +703,17 @@ export function planLoads(
       // as a comma-separated list; anything else it writes stays one tag,
       // because guessing a second separator would silently split a tag that
       // legitimately contains one.
-      tags: tagsFrom(text(record, 'Tags')),
+      //
+      // `Tag` OR `Tags`, BECAUSE DATATRUCK WRITES BOTH. The 2026-09-08 export
+      // spells it `Tags`; the 2026-09-24 re-export of the same view spells it
+      // `Tag`. Reading only one name meant the column was present in the file
+      // and invisible to the importer, which imports no tags and says nothing
+      // — a blank column and an unread column look identical downstream.
+      //
+      // NOT a general fallback over near-miss spellings. Two exact names that
+      // this exporter has actually produced, so a third spelling still shows
+      // up as no tags rather than being quietly guessed at.
+      tags: tagsFrom(text(record, 'Tags') || text(record, 'Tag')),
       truckUnit: text(record, 'Truck') || null,
       operational: status.operational,
       billing: status.billing,
@@ -1072,6 +1085,56 @@ export function importEventAt(load: {
   return load.deliveryAt === null
     ? { kind: 'no-date' }
     : { kind: 'at', at: load.deliveryAt }
+}
+
+/** What happens to the second seat, and why when nobody sits in it. */
+export type CoDriverSeat =
+  | { kind: 'fill'; driverId: string }
+  | { kind: 'no-name' }
+  | { kind: 'unresolved' }
+  | { kind: 'ambiguous' }
+  | { kind: 'same-as-driver' }
+
+/**
+ * WHO SITS IN THE SECOND SEAT ON AN IMPORTED LOAD.
+ *
+ * ── WHY THIS IS A FUNCTION AND NOT TWO CONDITIONS ─────────────────────────
+ *
+ * It used to be two. The create path decided with
+ * `coDriverIds.length === 1 && coDriverIds[0] !== driverIds[0]`, and the
+ * preview's resolution tables did not look at `coDriverName` at all — so the
+ * write dropped a co-driver that matched nobody, matched two people, or turned
+ * out to be the driver already, and the preview reported none of it.
+ *
+ * On the 2026-09-19 week that hid seven names on 39 rows, of which `7 Star` and
+ * `Said truck 3609` are plainly not people: the column is free text and the
+ * fleet writes notes in it. A seat that silently stays empty is the entire
+ * reason the preview exists, so the preview and the write now read one
+ * definition and cannot disagree about what would happen.
+ *
+ * ── THE FOUR OUTCOMES ─────────────────────────────────────────────────────
+ *
+ * `no-name` is not a problem and is counted nowhere: most loads are a single
+ * driver. The other three are all "the seat stays empty", reported apart
+ * because they need different answers — a missing person, a name collision,
+ * and a name that resolved fine to somebody already driving.
+ *
+ * SAME-AS-DRIVER IS REFUSED, not deduplicated into one seat.
+ * `settleableWhere` matches EITHER seat, so a load carrying one person twice
+ * settles once and reads as a team run for the rest of its life. Same rule as
+ * `crewFillFor`'s "nobody crews a load twice", which is the enrichment path's
+ * half of this.
+ */
+export function coDriverSeat(
+  coDriverName: string | null,
+  coDriverHits: readonly string[],
+  driverHits: readonly string[],
+): CoDriverSeat {
+  if (!coDriverName) return { kind: 'no-name' }
+  if (coDriverHits.length === 0) return { kind: 'unresolved' }
+  if (coDriverHits.length > 1) return { kind: 'ambiguous' }
+  if (coDriverHits[0] === driverHits[0]) return { kind: 'same-as-driver' }
+  return { kind: 'fill', driverId: coDriverHits[0]! }
 }
 
 /** Which workbook the loads importer will read, or why it will not run. */
