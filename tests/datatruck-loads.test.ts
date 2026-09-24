@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
+  chooseExport,
   crewFillFor,
   datatruckCents,
   importEventAt,
@@ -891,5 +892,79 @@ describe('tags', () => {
     // contains one.
     const [load] = planLoads([row({ Tags: 'east coast / midwest' })]).planned
     expect(load?.tags).toEqual(['east coast / midwest'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// WHICH FILE THE IMPORTER READS.
+//
+// The rule this replaced dropped an argument it could not use and read the
+// default export instead, which is a wrong answer wearing the right file's
+// name. These are its four cases.
+// ---------------------------------------------------------------------------
+
+describe('which export the importer will read', () => {
+  const DEFAULT = 'corpus/datatruck/loads-and-trips_2026_09_08_20_05_05.xlsx'
+
+  // ── THE 2026-09-24 NEAR-MISS, AS A TEST ─────────────────────────────────
+  it('REFUSES a CSV, and names it', () => {
+    // The real file, verbatim. A Relay trips export landed in the Datatruck
+    // folder for the first settled week, and the old predicate would have
+    // ignored it and previewed the September 8 workbook instead.
+    const csv = 'corpus/datatruck/Trips - 2026-09-24T090710.426.csv'
+    const choice = chooseExport(['--production', csv], DEFAULT)
+
+    expect(choice.kind).toBe('refuse')
+    // NAMING IT IS THE POINT. A refusal that does not say which file was
+    // rejected sends you looking at the flags.
+    if (choice.kind === 'refuse') expect(choice.rejected).toEqual([csv])
+  })
+
+  it('names EVERY rejected file, not just the first', () => {
+    const choice = chooseExport(['a.csv', 'b.xls', '--write'], DEFAULT)
+    expect(choice.kind === 'refuse' && choice.rejected).toEqual([
+      'a.csv',
+      'b.xls',
+    ])
+  })
+
+  it('reads the workbook it is given', () => {
+    const named = 'corpus/datatruck/loads-and-trips_2026_09_22_08_00_00.xlsx'
+    expect(chooseExport([named, '--production'], DEFAULT)).toEqual({
+      kind: 'read',
+      path: named,
+    })
+  })
+
+  it('falls back to the default when only flags are passed', () => {
+    // FLAGS ARE NOT FILES. `--production` and `--write` must be neither read
+    // nor rejected, or the ritual arguments would refuse every run.
+    expect(chooseExport(['--production', '--write'], DEFAULT)).toEqual({
+      kind: 'read',
+      path: DEFAULT,
+    })
+    expect(chooseExport([], DEFAULT)).toEqual({ kind: 'read', path: DEFAULT })
+  })
+
+  it('does not care how the extension is capitalised', () => {
+    // A workbook saved by hand off a Windows share arrives as .XLSX, and
+    // refusing it would be this rule failing in the unhelpful direction.
+    expect(chooseExport(['WEEK.XLSX'], DEFAULT)).toEqual({
+      kind: 'read',
+      path: 'WEEK.XLSX',
+    })
+  })
+
+  // ── AND THE SEED ACTUALLY CALLS IT ──────────────────────────────────────
+  it('is what the seed actually uses to pick its file', () => {
+    // The rule being right is worth nothing if the script still holds its own
+    // copy of the old predicate. This is the shape of guard that caught the
+    // undated POD event: assert against the source that calls it.
+    const seed = readFileSync('scripts/seed-datatruck-loads.ts', 'utf8')
+
+    expect(seed).toContain('chooseExport(process.argv.slice(2)')
+    expect(seed).toContain("if (CHOICE.kind === 'refuse')")
+    // The predicate it replaced must be gone, not merely unused.
+    expect(seed).not.toContain("argument.endsWith('.xlsx')")
   })
 })

@@ -1074,6 +1074,65 @@ export function importEventAt(load: {
     : { kind: 'at', at: load.deliveryAt }
 }
 
+/** Which workbook the loads importer will read, or why it will not run. */
+export type ExportChoice =
+  | { kind: 'read'; path: string }
+  | { kind: 'refuse'; rejected: string[] }
+
+/**
+ * WHICH FILE THE LOADS IMPORTER READS, AND WHAT IT REFUSES BY NAME.
+ *
+ * ── THE SHRUG THIS REPLACES ───────────────────────────────────────────────
+ *
+ * The importer used to pick its input with
+ * `process.argv.find((a) => a.endsWith('.xlsx')) ?? DEFAULT_EXPORT`. Name a
+ * `.csv` and the predicate matched nothing, so the file was DROPPED and the
+ * default export read in its place — then reported under the name you passed,
+ * with a row count, a cutover split and a refusal list that all looked right
+ * and described a different week.
+ *
+ * ON 2026-09-24 that was one command away. The file dropped in
+ * `corpus/datatruck/` for the first settled week was an Amazon Relay Trips CSV
+ * — Relay's columns, and the week AFTER the one being settled — and the
+ * instruction was to run the loads importer on it. Previewing the 2026-09-08
+ * export's numbers as that week's is the kind of wrong reading that gets
+ * believed, because nothing in the output contradicts it.
+ *
+ * Same family as the `sed` trap, the `tail` trap and the break that did not
+ * fire: a wrong input indistinguishable from a right one. The answer is the
+ * same as it was those three times — a mechanism, not more care.
+ *
+ * ── WHY IT IS A RULE HERE AND NOT A CHECK IN THE SCRIPT ───────────────────
+ *
+ * Because a check inside the script can only be tested by running the script,
+ * which means standing up a database connection to prove an argument was
+ * rejected — so it would ship on a reading instead. Pure, here, it is four
+ * cases in the node project.
+ *
+ * ── WHY NOT JUST ACCEPT A CSV ─────────────────────────────────────────────
+ *
+ * `readXlsx` reads a zip container, and `planLoads` reads Datatruck's columns:
+ * `Load status`, `Load pay`, `Driver/Carrier`, `DEL date`. A Relay trips CSV
+ * shares exactly two column names with it — `Load ID` and `Trip ID` — and
+ * carries none of the facts `readStatus`, `crewFillFor` or the gross come
+ * from. That file has its own importer, under its own rules.
+ *
+ * FLAGS ARE NOT FILES. Anything starting with `-` belongs to `--write`,
+ * `--production` and their kin, so it is neither read nor rejected.
+ */
+export function chooseExport(
+  argv: readonly string[],
+  fallback: string,
+): ExportChoice {
+  const positional = argv.filter((argument) => !argument.startsWith('-'))
+  const rejected = positional.filter(
+    (argument) => !argument.toLowerCase().endsWith('.xlsx'),
+  )
+
+  if (rejected.length > 0) return { kind: 'refuse', rejected }
+  return { kind: 'read', path: positional[0] ?? fallback }
+}
+
 export function rateFreezeFor(load: {
   billing: LoadBillingStatus
   settlementLines: number

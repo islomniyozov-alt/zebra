@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { createPrismaClient } from '@/lib/db'
 import { asRecords, readXlsx } from '@/lib/datatruck/xlsx'
 import {
+  chooseExport,
   crewFillFor,
   datatruckCents,
   importEventAt,
@@ -75,8 +76,25 @@ const DEFAULT_EXPORT =
 
 const WRITE = process.argv.includes('--write')
 const PRODUCTION = process.argv.includes('--production')
-const FILE =
-  process.argv.find((argument) => argument.endsWith('.xlsx')) ?? DEFAULT_EXPORT
+
+// WHICH WORKBOOK, DECIDED BY `chooseExport` AND NOT BY THIS FILE. It refuses a
+// file it cannot read by name rather than silently falling back to the default
+// export and reporting that one's numbers under the name you passed — see the
+// rule's own comment for the 2026-09-24 near-miss that put it there.
+const CHOICE = chooseExport(process.argv.slice(2), DEFAULT_EXPORT)
+if (CHOICE.kind === 'refuse') {
+  console.error(
+    `\nRefusing to run: not a Datatruck xlsx export — ${CHOICE.rejected.join(', ')}\n\n` +
+      `This importer reads a loads-and-trips .xlsx workbook: it needs Datatruck's\n` +
+      `columns — Load status, Load pay, Driver/Carrier, DEL date — none of which a\n` +
+      `Relay trips CSV carries. That file belongs to the trips importer.\n\n` +
+      `Naming a file this script cannot read used to be IGNORED, and the default\n` +
+      `export was read in its place.\n` +
+      `Default when no file is named: ${DEFAULT_EXPORT}\n`,
+  )
+  process.exit(1)
+}
+const FILE = CHOICE.path
 
 /**
  * Loads per transaction.
