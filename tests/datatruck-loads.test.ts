@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
+  crewFillFor,
   datatruckCents,
   parseDatatruckMoment,
   planLoads,
@@ -578,6 +580,110 @@ describe('an open row older than the cutover', () => {
 //
 // Free text Datatruck writes comma-separated. Carried across so the fleet's
 // own vocabulary survives the cutover rather than being retyped.
+// ── THE ADD-MISSING CREW FILL (ruling of 2026-09-24) ───────────────────
+describe('which seats a re-import may fill', () => {
+  /** A map with one Aziz, one Julia, and two people called John Smith. */
+  const resolve = (name: string) =>
+    ({
+      aziz: ['d-aziz'],
+      julia: ['d-julia'],
+      john: ['d-john-1', 'd-john-2'],
+      nobody: [],
+    })[name] ?? []
+
+  const empty = { driverId: null, coDriverId: null }
+
+  it('fills a null seat from a name that lands on exactly one driver', () => {
+    expect(
+      crewFillFor(empty, { driverName: 'aziz', coDriverName: null }, resolve),
+    ).toEqual({ driverId: 'd-aziz' })
+  })
+
+  it('NEVER replaces a seat that is already filled', () => {
+    // Either the first import resolved it or a dispatcher corrected it.
+    // Both are newer truths than this file.
+    expect(
+      crewFillFor(
+        { driverId: 'd-somebody', coDriverId: null },
+        { driverName: 'aziz', coDriverName: null },
+        resolve,
+      ),
+    ).toEqual({})
+  })
+
+  it('fills nothing from an AMBIGUOUS name, and names it', () => {
+    // Two people called John Smith. A guess here is a wage paid to the
+    // wrong person, so the load stays driverless and the report says why.
+    expect(
+      crewFillFor(empty, { driverName: 'john', coDriverName: null }, resolve),
+    ).toEqual({ unresolvedDriverName: 'john' })
+  })
+
+  it('fills nothing from a name that matches NOBODY, and names it too', () => {
+    expect(
+      crewFillFor(empty, { driverName: 'nobody', coDriverName: null }, resolve),
+    ).toEqual({ unresolvedDriverName: 'nobody' })
+  })
+
+  it('fills both seats when the export names two different people', () => {
+    expect(
+      crewFillFor(
+        empty,
+        { driverName: 'aziz', coDriverName: 'julia' },
+        resolve,
+      ),
+    ).toEqual({ driverId: 'd-aziz', coDriverId: 'd-julia' })
+  })
+
+  it('REFUSES to put one person in both seats, filling both at once', () => {
+    // THE CASE NO SOURCE GREP REACHES, and the whole reason this is one
+    // function rather than two if-statements. The second seat is compared
+    // against what the row WILL hold after the fill; two independent
+    // checks would each see a null beside them, fill both, and the
+    // database CHECK would fail the entire batch rather than one row.
+    expect(
+      crewFillFor(empty, { driverName: 'aziz', coDriverName: 'aziz' }, resolve),
+    ).toEqual({ driverId: 'd-aziz' })
+  })
+
+  it('refuses the same person against a seat already filled', () => {
+    expect(
+      crewFillFor(
+        { driverId: 'd-aziz', coDriverId: null },
+        { driverName: null, coDriverName: 'aziz' },
+        resolve,
+      ),
+    ).toEqual({})
+  })
+
+  it('is silent when the one hit is already the OTHER seat', () => {
+    // Not unresolved, either: the person is on the load and the export is
+    // describing the same crew the other way round. Reporting them as an
+    // unresolved name would send somebody looking for a problem.
+    expect(
+      crewFillFor(
+        { driverId: null, coDriverId: 'd-aziz' },
+        { driverName: 'aziz', coDriverName: null },
+        resolve,
+      ),
+    ).toEqual({})
+  })
+
+  it('does nothing at all when the export names nobody', () => {
+    expect(
+      crewFillFor(empty, { driverName: null, coDriverName: null }, resolve),
+    ).toEqual({})
+  })
+
+  it('is what the seed actually calls', () => {
+    // The rule is only closed if the writer uses it. The gap it closes was
+    // a decision nobody had written down anywhere.
+    const seed = readFileSync('scripts/seed-datatruck-loads.ts', 'utf8')
+    expect(seed).toContain('crewFillFor(')
+    expect(seed).toContain('driversFilled')
+  })
+})
+
 describe('tags', () => {
   it('splits the column on commas and trims each one', () => {
     const [load] = planLoads([row({ Tags: 'hazmat, reefer ,  team ' })]).planned

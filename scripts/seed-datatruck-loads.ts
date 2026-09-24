@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { createPrismaClient } from '@/lib/db'
 import { asRecords, readXlsx } from '@/lib/datatruck/xlsx'
 import {
+  crewFillFor,
   datatruckCents,
   planLoads,
   rateChangeFor,
@@ -575,6 +576,10 @@ async function main(): Promise<void> {
     let created = 0
     let skipped = 0
     let trucksFilled = 0
+    let driversFilled = 0
+    let coDriversFilled = 0
+    /** Names the export gave that still do not land on exactly one driver. */
+    const driverStillUnresolved = new Map<string, number>()
     let advanced = 0
     let ratesUpdated = 0
     const heldBackwards: string[] = []
@@ -594,6 +599,12 @@ async function main(): Promise<void> {
           id: true,
           externalId: true,
           truckId: true,
+          // BOTH SEATS, because the add-missing rule below is "only when
+          // NULL" and it cannot tell without reading them. They were not
+          // selected here until the gap was closed, which is part of why
+          // it stayed open: the loop had nothing to decide with.
+          driverId: true,
+          coDriverId: true,
           operationalStatus: true,
           billingStatus: true,
           linehaulCents: true,
@@ -636,6 +647,50 @@ async function main(): Promise<void> {
             data['truckId'] = truck.id
             trucksFilled++
           }
+        }
+
+        // ── ADD-MISSING: A DRIVER THAT NOW RESOLVES ───────────────────────
+        //
+        // THE GAP THIS CLOSES, and the owner's ruling of 2026-09-24 that
+        // closed it. MONEY-DESIGN §6 recorded it as "the import's
+        // enrichment path writes five fields and driver is not one of
+        // them" — it wrote six, and driver was still not one. So a load
+        // that existed before its driver did kept a null `driverId` for
+        // ever, through any number of re-imports.
+        //
+        // WHY THAT WAS NOT A COSMETIC GAP. `settleableWhere` selects on
+        // `OR: [{ driverId }, { coDriverId: driverId }]`, so a load with
+        // nobody on it is invisible to every settlement — the draft
+        // BALANCES and is short, with nothing on any screen naming the
+        // freight that fell out.
+        //
+        // THE SAME THREE RULES AS THE TRUCK ABOVE, deliberately identical:
+        // only when the column is NULL, only when the name lands on
+        // exactly one driver, and never replacing a value that is already
+        // there. A dispatcher who assigned somebody by hand is a newer
+        // truth than this file.
+        // THE RULE LIVES IN `crewFillFor`, not here. Both seats and the
+        // CHECK that nobody crews a load twice interact, so deciding them
+        // in one function is what makes the interaction testable — see the
+        // note on it in src/lib/datatruck/loads.ts.
+        const crew = crewFillFor(
+          { driverId: row.driverId, coDriverId: row.coDriverId },
+          { driverName: load.driverName, coDriverName: load.coDriverName },
+          (name) => driverByName.get(nameKey(name)) ?? [],
+        )
+        if (crew.driverId) {
+          data['driverId'] = crew.driverId
+          driversFilled++
+        }
+        if (crew.coDriverId) {
+          data['coDriverId'] = crew.coDriverId
+          coDriversFilled++
+        }
+        if (crew.unresolvedDriverName) {
+          driverStillUnresolved.set(
+            crew.unresolvedDriverName,
+            (driverStillUnresolved.get(crew.unresolvedDriverName) ?? 0) + 1,
+          )
         }
 
         // ── FORWARD ONLY: THE RECURRING SYNC ──────────────────────────────
@@ -938,6 +993,23 @@ async function main(): Promise<void> {
     console.log(
       `  ${trucksFilled} already-imported load(s) gained a truck that now resolves`,
     )
+    console.log(
+      `  ${driversFilled} already-imported load(s) gained a driver that now resolves` +
+        `${coDriversFilled > 0 ? `, ${coDriversFilled} a co-driver` : ''}`,
+    )
+    if (driverStillUnresolved.size > 0) {
+      // THE OTHER HALF OF THE ANSWER. These loads are still driverless and
+      // still invisible to a settlement; a run that printed only what it
+      // fixed would read as "done".
+      console.log(
+        `  ${driverStillUnresolved.size} driver name(s) on driverless loads still do not resolve to one person:`,
+      )
+      for (const [name, count] of [...driverStillUnresolved].sort(
+        (a, b) => b[1] - a[1],
+      )) {
+        console.log(`      ${name} — ${count} load(s)`)
+      }
+    }
     console.log(
       `  ${advanced} already-imported load(s) advanced by this export`,
     )

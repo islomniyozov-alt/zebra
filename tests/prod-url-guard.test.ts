@@ -171,6 +171,27 @@ const INSPECTION_READERS = [
   // per engine call with the tokens as the engine reported them, which is the
   // only measured half of the figure. SELECT only.
   'inspect-extraction-usage.mjs',
+  // ADDED 2026-09-24, read-only, by ruling. The first real settlement week
+  // after the operational cutover is about to be drafted on production, and
+  // three things make freight invisible to a settlement without making it
+  // look wrong: a load in nobody’s seat, a truck nobody is linked to, and a
+  // driver with no pay rule in force. Each one produces a draft that BALANCES
+  // and is short.
+  //
+  // The alternative to this script was reasoning from the code about what
+  // production probably holds, which is the instrument-from-belief failure
+  // AGENTS.md records twice. Asking the rows is the whole point.
+  //
+  // It asks the RULE question the way `settlements.ts` asks it — per load, on
+  // that load’s own POD date — rather than per week, because a rule starting
+  // mid-week would answer yes to the weekly question while the earlier loads
+  // went unpriced.
+  //
+  // SELECT only, and it refuses outright if more than one organization holds
+  // the week’s freight: it connects as the owner role, so the thing that
+  // keeps tenants apart everywhere else is absent, and a merged count is not
+  // a finding anybody can act on.
+  'settlement-week-preflight.mjs',
 ]
 
 /**

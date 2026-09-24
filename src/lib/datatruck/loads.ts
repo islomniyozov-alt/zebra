@@ -804,6 +804,77 @@ export type RateFreeze =
   | { frozen: false }
   | { frozen: true; why: 'closed' | 'settled' | 'paid' }
 
+/**
+ * WHICH SEATS A RE-IMPORT MAY FILL ON A LOAD THAT ALREADY EXISTS.
+ *
+ * Owner's ruling, 2026-09-24, closing the gap MONEY-DESIGN §6 recorded as
+ * "the import's enrichment path writes five fields and driver is not one of
+ * them". It wrote six by then. Driver was still not one, so a load that
+ * existed before its driver did kept a null `driverId` for ever — and
+ * `settleableWhere` selects on `OR: [{ driverId }, { coDriverId: driverId }]`,
+ * which makes such a load invisible to every settlement. The draft balances
+ * and is short.
+ *
+ * ── THREE RULES, THE SAME THREE THE TRUCK FILL USES ─────────────────────
+ *
+ *   1. ONLY A NULL SEAT. A load that names somebody keeps them: that is
+ *      either what the first import resolved or what a dispatcher has since
+ *      corrected, and both are newer truths than this file.
+ *   2. ONLY AN UNAMBIGUOUS NAME. Exactly one driver, or nobody — a guess
+ *      here is a wage paid to the wrong person.
+ *   3. NOBODY CREWS A LOAD TWICE. A database CHECK refuses it outright, so
+ *      an export naming one person in both columns would fail the whole
+ *      batch rather than one row.
+ *
+ * RULE 3 IS WHY THIS IS A FUNCTION AND NOT TWO IF-STATEMENTS. The second
+ * seat must be compared against what the row WILL hold after this fill, not
+ * against what it holds now: filling both seats from one export that names
+ * the same person twice is the case a pair of independent checks lets
+ * through, and no source grep would ever catch it.
+ *
+ * A name that does not resolve comes back NAMED rather than dropped. It is
+ * the reason a load stays driverless, and a run that reported only what it
+ * fixed would read as "done" while the freight was still missing.
+ */
+export interface CrewFill {
+  driverId?: string
+  coDriverId?: string
+  /** Set when the primary name still lands on nobody, or on two people. */
+  unresolvedDriverName?: string
+}
+
+export function crewFillFor(
+  current: { driverId: string | null; coDriverId: string | null },
+  names: { driverName: string | null; coDriverName: string | null },
+  /** Name → every driver id it matches. Ambiguity is the caller's map. */
+  resolve: (name: string) => readonly string[],
+): CrewFill {
+  const fill: CrewFill = {}
+
+  if (current.driverId === null && names.driverName) {
+    const hits = resolve(names.driverName)
+    if (hits.length === 1 && hits[0] !== current.coDriverId) {
+      fill.driverId = hits[0]
+    } else if (hits.length !== 1) {
+      fill.unresolvedDriverName = names.driverName
+    }
+    // A single hit that is ALREADY the co-driver is neither filled nor
+    // unresolved: the person is on the load, in the other seat, and the
+    // export is describing the same crew a different way round.
+  }
+
+  if (current.coDriverId === null && names.coDriverName) {
+    const hits = resolve(names.coDriverName)
+    // RULE 3, against the POST-FILL state.
+    const willBeDriver = fill.driverId ?? current.driverId
+    if (hits.length === 1 && hits[0] !== willBeDriver) {
+      fill.coDriverId = hits[0]
+    }
+  }
+
+  return fill
+}
+
 export function rateFreezeFor(load: {
   billing: LoadBillingStatus
   settlementLines: number
