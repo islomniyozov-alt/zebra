@@ -198,6 +198,34 @@ const INSPECTION_READERS = [
   // engine until one of the two grows a tolerance, and then a preflight
   // disagrees with the settlement it is a preflight for.
   'settlement-week-preflight.ts',
+  // ADDED 2026-09-24, read-only, by ruling. The loads preview reports names
+  // that resolve to NOTHING, and a zero in that table is a count of REFUSALS —
+  // not evidence that anybody resolved. Two readings on the settlement week
+  // turned on exactly that gap:
+  //
+  //   1. A driver was reported present on production and the preview still
+  //      resolved her to nothing on 7 loads. Absent, present under a different
+  //      spelling, and present but not live need different answers, and the
+  //      preview cannot tell them apart — it prints the same line for all
+  //      three.
+  //   2. All three co-driver tables came back zero on a week whose co-driver
+  //      column holds `7 Star` and `Said truck 3609`. Read as "everybody
+  //      resolves" that is a finding about the data; read honestly it is a
+  //      finding about nothing, and the difference decides whether 39 second
+  //      seats get filled from notes somebody typed in a text field.
+  //
+  // It also reports every pay rule VERSION with its effective window, because
+  // "the rule exists" and "a rule is in force on the day this load delivered"
+  // are different claims and only the second one pays anybody. Same reason
+  // `settlement-week-preflight.ts` asks per load rather than per week.
+  //
+  // It reads every driver and matches names IN MEMORY with the same `nameKey`
+  // the seed uses, rather than comparing names in SQL — a lookalike comparison
+  // would be a second definition of who counts as the same person, which is
+  // the defect `coDriverSeat` was extracted to stop.
+  //
+  // SELECT only.
+  'inspect-crew-and-rules.ts',
 ]
 
 /**
