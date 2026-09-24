@@ -128,6 +128,25 @@ Rules about instruments, which are the ones that cost whole sessions:
   is still unambiguous. That is the one hostile reading the whole thing exists
   to defeat.
 
+  AND THE WRAPPER'S OWN EXIT CODE IS NOT THE WRAPPED COMMAND'S, WHEREVER YOU
+  READ IT FROM. On 2026-09-24 the integration gate was run under the wrapper
+  and backgrounded:
+
+      node scripts/run-status.mjs integ-full -- npm run test:integration
+
+  The harness announced it "completed (exit code 0)". Meanwhile
+  `.run-status/integ-full.json` said EXIT CODE 1, 0.44 seconds in, because the
+  gate had REFUSED to start on a dirty tree. Both numbers were true about
+  different processes, and nothing was green.
+
+  That is `tail`'s exit code again, arriving through a channel this rule did
+  not name: not a pipe this time but a completion notice, which is harder to
+  distrust because it sounds like the answer. So the rule is not "don't pipe
+  to `tail`" — it is that ONE file is the verdict and everything else is
+  hearsay, including a notification, a zero from `$?`, and the wrapper's own
+  status. Run `--check` and read what it prints. A wrapper that cannot even
+  start its command still exits cleanly, having done its job.
+
 - **The deploy order is: fix, dispatch production, THEN push the next
   migration.** Owner’s ruling, 2026-09-22, and it replaces the shorter
   version it grew out of ("dispatch production before pushing the next
