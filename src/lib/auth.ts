@@ -47,6 +47,28 @@ export const RATE_LIMIT = {
   perIp: 30,
 } as const
 
+/**
+ * HOW LONG IT TAKES TO PROVE THE PER-IP LIMIT THROUGH THE REAL LOGIN PATH.
+ *
+ * Every attempt pays a full argon2 verification, including the ones against
+ * addresses that do not exist: `login` below feeds `dummyHash()` to
+ * `verifyPassword` when it finds no user, precisely so an unknown email costs
+ * the same as a known one and enumeration by timing gets nothing. That is
+ * correct and must stay, so the floor on proving `perIp` is `perIp + 2`
+ * sequential hashes plus their round trips to Neon.
+ *
+ * MEASURED, NOT GUESSED: 49.8s on a developer machine for the 32 attempts
+ * `perIp: 30` implies — about 1.5s each. CI is slower than that and ran past
+ * the integration project's 120s default on 2026-09-24, failing a production
+ * dispatch on a suite that had nothing to do with the commit in flight.
+ *
+ * DERIVED FROM `perIp` RATHER THAN WRITTEN AS A NUMBER. The comment above
+ * explains why an office might need a higher ceiling, so the day somebody
+ * raises it a literal budget would re-create this exact failure — a test that
+ * times out for a reason nobody connects to the line they changed.
+ */
+export const RATE_LIMIT_PROBE_BUDGET_MS = (RATE_LIMIT.perIp + 2) * 6_000
+
 export type LoginFailure =
   | { reason: 'invalid_credentials' }
   | { reason: 'rate_limited'; retryAfterMs: number }

@@ -3,6 +3,7 @@ import { FIXTURE_PASSWORD, FIXTURE_PASSWORD_HASH } from '../fixtures/password'
 import { retryingClient } from '../retrying-client'
 import {
   RATE_LIMIT,
+  RATE_LIMIT_PROBE_BUDGET_MS,
   changeOwnPassword,
   changePassword,
   clearLoginFailures,
@@ -294,40 +295,48 @@ describe('rate limiting', () => {
     }
   })
 
-  it('locks an address that is spraying many different emails', async () => {
-    const ip = `198.51.100.${Math.floor(Math.random() * 200) + 1}`
-    try {
-      for (let attempt = 0; attempt < RATE_LIMIT.perIp; attempt++) {
-        await login(app, {
-          email: `spray-${nonce}-${attempt}@example.test`,
-          password: 'wrong',
-          metadata: { ip },
-        })
-      }
+  it(
+    'locks an address that is spraying many different emails',
+    async () => {
+      const ip = `198.51.100.${Math.floor(Math.random() * 200) + 1}`
+      try {
+        for (let attempt = 0; attempt < RATE_LIMIT.perIp; attempt++) {
+          await login(app, {
+            email: `spray-${nonce}-${attempt}@example.test`,
+            password: 'wrong',
+            metadata: { ip },
+          })
+        }
 
-      // A different, valid account from the same address is now refused.
-      const blocked = await login(app, {
-        email,
-        password: PASSWORD,
-        metadata: { ip },
-      })
-      expect(blocked).toMatchObject({ ok: false, reason: 'rate_limited' })
-
-      // ...but the same account from elsewhere is fine.
-      expect(
-        await login(app, {
+        // A different, valid account from the same address is now refused.
+        const blocked = await login(app, {
           email,
           password: PASSWORD,
-          metadata: { ip: '203.0.113.9' },
-        }),
-      ).toMatchObject({ ok: true })
-    } finally {
-      await owner.loginAttempt.deleteMany({ where: { ip } })
-      await owner.loginAttempt.deleteMany({
-        where: { email: { startsWith: `spray-${nonce}` } },
-      })
-    }
-  })
+          metadata: { ip },
+        })
+        expect(blocked).toMatchObject({ ok: false, reason: 'rate_limited' })
+
+        // ...but the same account from elsewhere is fine.
+        expect(
+          await login(app, {
+            email,
+            password: PASSWORD,
+            metadata: { ip: '203.0.113.9' },
+          }),
+        ).toMatchObject({ ok: true })
+      } finally {
+        await owner.loginAttempt.deleteMany({ where: { ip } })
+        await owner.loginAttempt.deleteMany({
+          where: { email: { startsWith: `spray-${nonce}` } },
+        })
+      }
+      // THE ONE TEST IN THIS FILE THAT NEEDS ITS OWN BUDGET. It walks every one
+      // of `RATE_LIMIT.perIp` failures through the real login path, and each one
+      // pays a full argon2 verification by design. The constant carries that
+      // arithmetic and moves with the limit.
+    },
+    RATE_LIMIT_PROBE_BUDGET_MS,
+  )
 
   it('can be cleared by an operator', async () => {
     for (let attempt = 0; attempt < RATE_LIMIT.perEmail; attempt++) {
