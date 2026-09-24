@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   crewFillFor,
   datatruckCents,
+  importEventAt,
   parseDatatruckMoment,
   planLoads,
   readEquipment,
@@ -681,6 +682,97 @@ describe('which seats a re-import may fill', () => {
     const seed = readFileSync('scripts/seed-datatruck-loads.ts', 'utf8')
     expect(seed).toContain('crewFillFor(')
     expect(seed).toContain('driversFilled')
+  })
+})
+
+// ── THE POD EVENT RULING (2026-09-24) ──────────────────────────────────
+describe('when an imported load moved', () => {
+  it('is the export\u2019s delivery date', () => {
+    const at = new Date('2026-09-15T18:30:00.000Z')
+    expect(importEventAt({ deliveryAt: at })).toEqual({
+      kind: 'at',
+      at,
+    })
+  })
+
+  // ── THE GUARD NAMED "an event dated at import time" ──────────────────
+  it('is NOT a date when the export gives none', () => {
+    // AND THE TYPE IS WHY THIS MATTERS. `TransitionOptions.occurredAt` is
+    // optional and `LoadStatusEvent.occurredAt` carries `@default(now())`,
+    // so a null threaded through as `occurredAt: undefined` does not fail —
+    // it silently writes exactly the event the ruling forbids. A union
+    // cannot be passed by accident.
+    expect(importEventAt({ deliveryAt: null })).toEqual({ kind: 'no-date' })
+  })
+
+  it('never reaches for the clock', () => {
+    // The rule is three lines and has no way to invent a date. If it ever
+    // grows one, it will be here.
+    const lib = readFileSync('src/lib/datatruck/loads.ts', 'utf8')
+    const rule = lib.slice(
+      lib.indexOf('export function importEventAt'),
+      lib.indexOf('export function rateFreezeFor'),
+    )
+    expect(rule).not.toContain('new Date()')
+    expect(rule).not.toContain('Date.now')
+  })
+
+  // ── THE GUARD NAMED "a column write without an event" ────────────────
+  it('has the importer transition rather than write the column', () => {
+    // The failure this closes: `operationalStatus` set as a column value,
+    // no operational event, and `settleableWhere` selecting on the event.
+    // The load reads Delivered on every screen and appears in no pay week.
+    const seed = readFileSync('scripts/seed-datatruck-loads.ts', 'utf8')
+    // EVERY CALL, NOT ONE OF THEM. The first version of this asserted that a
+    // dated call existed SOMEWHERE — and there are two call sites, the create
+    // path and the sync path, so stripping the date from one left the
+    // assertion satisfied. `watch-guard.mjs` reported THE BREAK DID NOT FIRE,
+    // which is AGENTS.md’s “count the thing you are claiming, not a superset
+    // of it” caught by the mechanism written for it.
+    const calls = (seed.match(/transitionOperational\(/g) ?? []).length
+    const dated = (seed.match(/occurredAt: when\.at/g) ?? []).length
+    expect(calls).toBeGreaterThan(0)
+    expect(dated).toBe(calls)
+    expect(seed).toContain('DATATRUCK_EVENT_NOTE')
+
+    // A FRESH LOAD LANDS AT A FLOOR. Creating it at its real status and
+    // then asking for that status is the `unchanged` no-op that wrote
+    // nothing — the trap `backfill-direct-pod.mjs` documents.
+    expect(seed).not.toContain('operationalStatus: load.operational')
+    expect(seed).toContain("operationalStatus: 'BOOKED'")
+
+    // AND THE SYNC PATH TOO, which advanced a load an earlier run brought
+    // in by writing the column straight.
+    expect(seed).not.toContain(
+      "data['operationalStatus'] = decision.operational",
+    )
+  })
+
+  // ── THE GUARD NAMED "a repair on closed history" ─────────────────────
+  it('has the repair refuse closed history, and COUNT what it refused', () => {
+    const repair = readFileSync('scripts/repair-missing-pod-events.mjs', 'utf8')
+    expect(repair).toContain('CLOSED_IN_DATATRUCK')
+
+    // REFUSED IN JAVASCRIPT, NOT IN THE QUERY. A `WHERE` clause would make
+    // the refusal invisible, and "it did nothing" would be
+    // indistinguishable from "there was nothing to do" — on the one set
+    // this script most obviously looks like it is for.
+    expect(repair).toContain('const closed = candidates.filter')
+    expect(repair).toContain('REFUSED by ruling')
+
+    // And it never stamps a date it made up.
+    expect(repair).toContain('NO DELIVERY DATE')
+    expect(repair).not.toContain("now()', at")
+  })
+
+  it('keeps the repair dry by default', () => {
+    const repair = readFileSync('scripts/repair-missing-pod-events.mjs', 'utf8')
+    expect(repair).toContain('--apply')
+    expect(repair).toContain('Mode:')
+    // The write is behind the flag: the dry-run branch exits before it.
+    expect(repair.indexOf('if (!apply)')).toBeLessThan(
+      repair.indexOf('INSERT INTO "LoadStatusEvent"'),
+    )
   })
 })
 

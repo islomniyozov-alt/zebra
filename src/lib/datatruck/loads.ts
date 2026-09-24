@@ -875,6 +875,68 @@ export function crewFillFor(
   return fill
 }
 
+// ── WHEN AN IMPORTED LOAD MOVED, AND WHO SAYS SO ─────────────────────────
+//
+// Owner's ruling, 2026-09-24. Before it, this importer wrote
+// `operationalStatus` as a plain column value and no operational event at
+// all — and `settleableWhere` selects on an APPLIED POD_RECEIVED event
+// INSIDE the period. So an imported load read "POD Received" on every
+// screen and was in no driver's settleable set, in any week, for ever. The
+// draft came out EMPTY and balanced.
+//
+// `backfill-direct-pod.mjs` had already written that failure down for
+// Amazon freight: "a silent condition — the load reads Delivered on every
+// screen and simply never appears in a pay week".
+
+/**
+ * The note on every operational event this importer writes.
+ *
+ * `StatusSource` is a four-member enum — MANUAL, AUTOMATIC, DRIVER_PORTAL,
+ * INTEGRATION — and INTEGRATION is the truthful member: another system is
+ * telling us. WHICH other system is the note, because a fifth enum member
+ * would be a migration and a production ritual before this week could ship,
+ * and the ruling's substance is the DATE rather than the spelling.
+ *
+ * Shared with the repair script so one query finds events from either.
+ */
+export const DATATRUCK_EVENT_NOTE = 'datatruck-import'
+
+/** The same, from the script that repairs loads imported before the fix. */
+export const DATATRUCK_REPAIR_NOTE = 'datatruck-import repair'
+
+/**
+ * WHEN the event happened — and a caller that cannot know is made to say so.
+ *
+ * THE RULING: the export's delivery date, NEVER the import time. The date
+ * decides which pay week the money falls in, so an event stamped `now()` on
+ * a load delivered nine days ago puts a driver's freight in the wrong week —
+ * or in no week, once the statement for the real one has gone out.
+ *
+ * ── WHY THIS IS A UNION AND NOT `Date | null` ───────────────────────────
+ *
+ * `TransitionOptions.occurredAt` is optional, and `LoadStatusEvent.
+ * occurredAt` carries `@default(now())`. So a null threaded through as
+ * `occurredAt: undefined` does not fail — it silently produces exactly the
+ * event the ruling forbids, dated at the import. A discriminated union
+ * cannot be passed anywhere by accident: the no-date branch has to be
+ * handled, and the only correct handling is to leave the load alone and
+ * report it.
+ *
+ * A load whose export carries no delivery date therefore stays at its floor
+ * status — visibly Booked, which somebody can see and fix — rather than
+ * reading Delivered while being invisible to every settlement. Visible and
+ * wrong beats invisible and wrong.
+ */
+export type ImportEventDate = { kind: 'at'; at: Date } | { kind: 'no-date' }
+
+export function importEventAt(load: {
+  deliveryAt: Date | null
+}): ImportEventDate {
+  return load.deliveryAt === null
+    ? { kind: 'no-date' }
+    : { kind: 'at', at: load.deliveryAt }
+}
+
 export function rateFreezeFor(load: {
   billing: LoadBillingStatus
   settlementLines: number

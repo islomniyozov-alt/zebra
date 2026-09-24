@@ -257,6 +257,23 @@ const MAINTENANCE_READERS = [
   // here, and still open in the export. A row Datatruck has since delivered is
   // refused so the sync can advance it properly. Dry run by default.
   'close-stale-datatruck-loads.ts',
+  // ADDED 2026-09-24, by ruling. Until that day the Datatruck loads importer
+  // wrote `operationalStatus` as a column value and no operational event, and
+  // `settleableWhere` selects on an APPLIED POD_RECEIVED event inside the
+  // period — so an imported load read Delivered on every screen and was in no
+  // driver’s settleable set, in any week, for ever. The importer transitions
+  // properly now; this repairs the rows it already wrote.
+  //
+  // Same shape as `backfill-direct-pod.mjs`, widened past `directSettled`, and
+  // it REFUSES closed history by the owner’s guard — printing the refused
+  // count rather than filtering it away, because that set is itself the
+  // finding: `readStatus` maps every finished Datatruck row to
+  // CLOSED_IN_DATATRUCK, which `SETTLEABLE_LOAD` excludes outright.
+  //
+  // The date is the freight’s, never `now()`: the delivery stop’s actual
+  // arrival, else the scheduled time the import wrote from the export. A load
+  // with neither is skipped and named. Dry run by default.
+  'repair-missing-pod-events.mjs',
 ]
 
 /**

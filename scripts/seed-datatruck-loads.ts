@@ -5,13 +5,16 @@ import { asRecords, readXlsx } from '@/lib/datatruck/xlsx'
 import {
   crewFillFor,
   datatruckCents,
+  importEventAt,
   planLoads,
+  DATATRUCK_EVENT_NOTE,
   rateChangeFor,
   rateFreezeFor,
   syncDecisionFor,
   type PlannedLoad,
 } from '@/lib/datatruck/loads'
 import { formatCents } from '@/lib/money'
+import { transitionOperational } from '@/lib/load-status'
 import { assertTenancy } from './datatruck-tenancy'
 
 // ---------------------------------------------------------------------------
@@ -576,6 +579,9 @@ async function main(): Promise<void> {
     let created = 0
     let skipped = 0
     let trucksFilled = 0
+    let stamped = 0
+    /** Loads whose export gave no delivery date, so nothing may be stamped. */
+    const noDeliveryDate: string[] = []
     let driversFilled = 0
     let coDriversFilled = 0
     /** Names the export gave that still do not land on exactly one driver. */
@@ -705,10 +711,12 @@ async function main(): Promise<void> {
           },
           { operational: load.operational, billing: load.billing },
         )
-        if (decision.operational)
-          data['operationalStatus'] = decision.operational
+        // THE OPERATIONAL MOVE IS A TRANSITION, NOT A COLUMN WRITE — the
+        // same ruling, on the path that advances a load an earlier run
+        // already brought in. It happens after the update below, because
+        // `transitionOperational` writes the column itself.
         if (decision.billing) data['billingStatus'] = decision.billing
-        if (decision.operational || decision.billing) advanced++
+        if (decision.billing) advanced++
         for (const note of decision.notes) {
           if (note.startsWith('held:'))
             heldBackwards.push(`${load.externalId} ${note}`)
@@ -756,7 +764,31 @@ async function main(): Promise<void> {
         }
 
         if (Object.keys(data).length === 0) continue
-        await db.load.update({ where: { id: row.id }, data })
+        if (Object.keys(data).length > 0) {
+          await db.load.update({ where: { id: row.id }, data })
+        }
+
+        if (decision.operational) {
+          const when = importEventAt(load)
+          if (when.kind === 'no-date') {
+            noDeliveryDate.push(load.externalId)
+          } else {
+            const moved = await transitionOperational(
+              db,
+              row.id,
+              decision.operational,
+              {
+                source: 'INTEGRATION',
+                note: DATATRUCK_EVENT_NOTE,
+                occurredAt: when.at,
+              },
+            )
+            if (moved.result === 'moved') {
+              stamped++
+              advanced++
+            }
+          }
+        }
 
         if (rate) {
           // ── THE ACCESSORIAL ROW FOLLOWS THE COLUMN ────────────────────
@@ -844,7 +876,18 @@ async function main(): Promise<void> {
             internalNotes: load.tripId
               ? `Datatruck trip ${load.tripId}.`
               : null,
-            operationalStatus: load.operational,
+            // ── CREATED AT THE FLOOR, THEN TRANSITIONED ────────────────
+            //
+            // `transitionOperational` returns `unchanged` when from === to
+            // and writes NOTHING — the trap `backfill-direct-pod.mjs`
+            // documents. Landing a load directly on its real status and
+            // then asking for that status is the no-op that left every
+            // imported load without an operational event.
+            //
+            // So a fresh row lands at BOOKED and is moved up below, which
+            // writes one APPLIED event carrying the delivery date. A row
+            // whose mapped status IS BOOKED needs no move and gets none.
+            operationalStatus: 'BOOKED',
             billingStatus: load.billing,
             isCancelled: load.cancelled,
             ...(load.equipment ? { equipmentType: load.equipment } : {}),
@@ -933,6 +976,50 @@ async function main(): Promise<void> {
       if (accessorials.length > 0) {
         await db.loadAccessorial.createMany({ data: accessorials })
       }
+
+      // ── THE OPERATIONAL EVENT, DATED BY THE EXPORT ────────────────────
+      //
+      // Owner's ruling, 2026-09-24: `occurredAt` is the export's DELIVERY
+      // DATE, never the import time, and the source note says which system
+      // said so. The date decides which pay week the money lands in, so an
+      // event stamped `now()` on a load delivered nine days ago puts a
+      // driver's freight in a week whose statement has already gone out.
+      //
+      // ONE ROUND TRIP PER LOAD THAT MOVES, and that is the cost of the
+      // ruling: `transitionOperational` reads the load, writes the event and
+      // updates the column. A load already at its floor never moves, so a
+      // week of live freight pays this a few dozen times. A full historical
+      // re-import pays it 14,451 times, which is slower than the three
+      // statements per batch this file is otherwise built around — and
+      // correctness on the axis a settlement reads is worth more than the
+      // minutes.
+      for (const load of fresh) {
+        const loadId = idByExternalId.get(load.externalId)
+        if (!loadId || load.operational === 'BOOKED') continue
+
+        const when = importEventAt(load)
+        if (when.kind === 'no-date') {
+          // NOTHING IS STAMPED AND NOTHING IS INVENTED. The load stays at
+          // BOOKED — visibly wrong on every screen, which somebody can see
+          // and fix — rather than reading Delivered while being invisible
+          // to every settlement. Visible and wrong beats invisible and
+          // wrong.
+          noDeliveryDate.push(load.externalId)
+          continue
+        }
+
+        const moved = await transitionOperational(
+          db,
+          loadId,
+          load.operational,
+          {
+            source: 'INTEGRATION',
+            note: DATATRUCK_EVENT_NOTE,
+            occurredAt: when.at,
+          },
+        )
+        if (moved.result === 'moved') stamped++
+      }
       created += fresh.length
 
       if (batchIndex % 10 === 0 || batchIndex === 1) {
@@ -990,6 +1077,21 @@ async function main(): Promise<void> {
     const seconds = (Date.now() - startedAt) / 1000
     heading('WRITTEN')
     console.log(`  ${created} loads created, ${skipped} already present`)
+    console.log(
+      `  ${stamped} operational event(s) written, each dated by the export`,
+    )
+    if (noDeliveryDate.length > 0) {
+      // THE OTHER HALF. These loads did not move and will not settle until
+      // somebody dates them; a run printing only what it stamped would
+      // read as complete.
+      console.log(
+        `  ${noDeliveryDate.length} load(s) carry no delivery date, so nothing was stamped:`,
+      )
+      console.log(`      ${noDeliveryDate.slice(0, 20).join(', ')}`)
+      if (noDeliveryDate.length > 20) {
+        console.log(`      …and ${noDeliveryDate.length - 20} more`)
+      }
+    }
     console.log(
       `  ${trucksFilled} already-imported load(s) gained a truck that now resolves`,
     )
