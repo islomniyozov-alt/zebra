@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   chooseExport,
   coDriverSeat,
+  terminatedYieldsToTruck,
   crewFillFor,
   datatruckCents,
   importEventAt,
@@ -916,6 +917,152 @@ describe('tags', () => {
     // has actually produced. A third stays invisible rather than guessed at.
     const [load] = planLoads([row({ Tagz: 'hazmat' })]).planned
     expect(load?.tags).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// WHEN THE EXPORT NAMES SOMEBODY WHO HAD ALREADY LEFT.
+//
+// The 2026-09-13..19 export put six loads on a driver terminated in June and
+// four on one terminated in April, both on trucks linked to a different active
+// driver. $10,549.89 held under two people with no pay rule while the two who
+// hauled it got nothing.
+// ---------------------------------------------------------------------------
+
+describe('an export naming a terminated driver', () => {
+  const JUNE = new Date('2026-06-25T00:00:00.000Z')
+  const SEPT = new Date('2026-09-15T00:00:00.000Z')
+  const MAY = new Date('2026-05-01T00:00:00.000Z')
+
+  const gone = { id: 'drv_caner', name: 'CANER GUNAL', terminationDate: JUNE }
+  const active = {
+    id: 'drv_bener',
+    name: 'GUNAL BENER',
+    terminationDate: null,
+    status: 'AVAILABLE',
+    kind: 'PERSON',
+  }
+
+  it('YIELDS to the driver of the truck, and the note carries the original name', () => {
+    const out = terminatedYieldsToTruck({
+      named: gone,
+      truckDriver: active,
+      deliveredAt: SEPT,
+      unitNumber: '0006',
+    })
+    expect(out.kind).toBe('yield')
+    if (out.kind !== 'yield') return
+    // THE ORIGINAL NAME IS THE POINT. A reattribution that does not record what
+    // the export said leaves the load naming somebody the source never named.
+    expect(out.note).toContain('CANER GUNAL')
+    expect(out.note).toContain('GUNAL BENER')
+    expect(out.note).toContain('2026-06-25')
+    expect(out.note).toContain('0006')
+  })
+
+  // ── THE DATE IS WHAT MAKES IT A RULE AND NOT A SWEEP ──────────────────
+  it('KEEPS the name for freight delivered BEFORE the termination', () => {
+    // Freight they delivered in May is theirs. A rule that only asked "is this
+    // driver terminated" would reassign their entire history to whoever holds
+    // the truck now.
+    expect(
+      terminatedYieldsToTruck({
+        named: gone,
+        truckDriver: active,
+        deliveredAt: MAY,
+        unitNumber: '0006',
+      }),
+    ).toEqual({ kind: 'keep' })
+  })
+
+  it('KEEPS the name on the termination day itself', () => {
+    // Their last day is a day they worked.
+    expect(
+      terminatedYieldsToTruck({
+        named: gone,
+        truckDriver: active,
+        deliveredAt: JUNE,
+        unitNumber: '0006',
+      }),
+    ).toEqual({ kind: 'keep' })
+  })
+
+  it('KEEPS the name when the driver was never terminated', () => {
+    expect(
+      terminatedYieldsToTruck({
+        named: { ...gone, terminationDate: null },
+        truckDriver: active,
+        deliveredAt: SEPT,
+        unitNumber: '0006',
+      }),
+    ).toEqual({ kind: 'keep' })
+  })
+
+  it('KEEPS the name when the truck has nobody linked', () => {
+    // Nothing to yield to, and the preflight should still report the load.
+    expect(
+      terminatedYieldsToTruck({
+        named: gone,
+        truckDriver: null,
+        deliveredAt: SEPT,
+        unitNumber: '0006',
+      }),
+    ).toEqual({ kind: 'keep' })
+  })
+
+  it('KEEPS the name when the driver of the truck is ALSO gone', () => {
+    // Reassigning would move the problem rather than fix it.
+    expect(
+      terminatedYieldsToTruck({
+        named: gone,
+        truckDriver: { ...active, terminationDate: JUNE },
+        deliveredAt: SEPT,
+        unitNumber: '0006',
+      }),
+    ).toEqual({ kind: 'keep' })
+    expect(
+      terminatedYieldsToTruck({
+        named: gone,
+        truckDriver: { ...active, status: 'INACTIVE' },
+        deliveredAt: SEPT,
+        unitNumber: '0006',
+      }),
+    ).toEqual({ kind: 'keep' })
+  })
+
+  it('KEEPS the name when the truck is linked to a REFERRAL PAYEE', () => {
+    // A commission is not somebody who could have driven it.
+    expect(
+      terminatedYieldsToTruck({
+        named: gone,
+        truckDriver: { ...active, kind: 'PAYEE' },
+        deliveredAt: SEPT,
+        unitNumber: '0006',
+      }),
+    ).toEqual({ kind: 'keep' })
+  })
+
+  it('KEEPS the name when the export gave no delivery date', () => {
+    // With no date there is no fact making the attribution impossible.
+    expect(
+      terminatedYieldsToTruck({
+        named: gone,
+        truckDriver: active,
+        deliveredAt: null,
+        unitNumber: '0006',
+      }),
+    ).toEqual({ kind: 'keep' })
+  })
+
+  it('KEEPS the name when the truck names the same driver', () => {
+    expect(
+      terminatedYieldsToTruck({
+        named: gone,
+        truckDriver: { ...active, id: gone.id },
+        deliveredAt: SEPT,
+        unitNumber: '0006',
+      }),
+    ).toEqual({ kind: 'keep' })
   })
 })
 

@@ -1,5 +1,6 @@
 import { MoneyFormatError, parseMoneyToCents } from '../money'
 import { resolveState } from './states'
+import { isReferralPayee } from '../driver-kind'
 import type {
   EquipmentType,
   LoadBillingStatus,
@@ -1085,6 +1086,94 @@ export function importEventAt(load: {
   return load.deliveryAt === null
     ? { kind: 'no-date' }
     : { kind: 'at', at: load.deliveryAt }
+}
+
+/** Whether the export's named driver stands, or yields to the truck's. */
+export type SeatYield = { kind: 'keep' } | { kind: 'yield'; note: string }
+
+/**
+ * AN EXPORT NAMING A TERMINATED DRIVER YIELDS TO THE TRUCK'S ACTIVE ONE.
+ *
+ * Owner's ruling, 2026-09-25.
+ *
+ * ── WHAT WENT WRONG ───────────────────────────────────────────────────────
+ *
+ * The 2026-09-13..19 export attributed six loads on unit 0006 to `CANER GUNAL`,
+ * terminated 2026-06-25, and four on unit 216 to `ROSARIO SANTOS RODOLFO`,
+ * terminated 2026-04-24. Both trucks are linked to a different, active driver —
+ * `GUNAL BENER` (Datatruck 569, 90% rule, and the 9/6..12 statement for unit
+ * 0006 is his) and `Jesus Juan Castro Rentas` (161). The Datatruck ids are 470
+ * and 569, 163 and 161: two pairs of similarly-named people, and the export
+ * named the one who had left.
+ *
+ * $10,549.89 of freight would have been held under two drivers with no pay rule
+ * while the two who hauled it got nothing. The preflight found it as "drivers
+ * with settleable loads and no rule in force", which is the symptom; this is the
+ * cause.
+ *
+ * ── THE TERMINATION DATE MUST BE BEFORE THE DELIVERY ──────────────────────
+ *
+ * NOT part of the ruling as spoken, and it is the difference between a rule and
+ * a sweep. A driver terminated in June obviously did not drive in September —
+ * but freight they delivered in MAY is correctly theirs, and a rule that only
+ * asked "is this driver terminated" would reassign their whole history to
+ * whoever holds the truck now. So the yield needs the delivery to fall after the
+ * termination, which is the fact that makes the attribution impossible rather
+ * than merely odd.
+ *
+ * ── AND THE TRUCK'S DRIVER HAS TO BE SOMEBODY ELSE, AND ACTIVE ────────────
+ *
+ * If the truck has nobody linked there is nothing to yield to, and the load
+ * keeps the name it came with so the preflight can report it. If the truck's
+ * driver is also terminated, reassigning would move the problem rather than fix
+ * it. And a payee in the seat is not a driver at all.
+ *
+ * THE NOTE CARRIES THE ORIGINAL NAME, by ruling. A reattribution that does not
+ * record what the export said is unauditable: the load would name somebody the
+ * source system never named, with nothing to compare against.
+ */
+export function terminatedYieldsToTruck(input: {
+  /** The driver the export named, as resolved. */
+  named: {
+    id: string
+    name: string
+    terminationDate: Date | null
+  } | null
+  /** The driver Zebra links to the truck the export named. */
+  truckDriver: {
+    id: string
+    name: string
+    terminationDate: Date | null
+    status: string
+    kind: string
+  } | null
+  /** When the freight actually delivered. */
+  deliveredAt: Date | null
+  /** The unit, for the note. */
+  unitNumber: string | null
+}): SeatYield {
+  const { named, truckDriver, deliveredAt, unitNumber } = input
+  if (!named || !truckDriver) return { kind: 'keep' }
+  if (named.id === truckDriver.id) return { kind: 'keep' }
+  if (named.terminationDate === null) return { kind: 'keep' }
+  if (deliveredAt === null) return { kind: 'keep' }
+  // THE FACT THAT MAKES IT IMPOSSIBLE, not merely unusual.
+  if (deliveredAt.getTime() <= named.terminationDate.getTime()) {
+    return { kind: 'keep' }
+  }
+  // The truck's driver must be somebody who could have driven it.
+  if (truckDriver.terminationDate !== null) return { kind: 'keep' }
+  if (truckDriver.status === 'INACTIVE') return { kind: 'keep' }
+  if (isReferralPayee(truckDriver)) return { kind: 'keep' }
+
+  return {
+    kind: 'yield',
+    note:
+      `reattributed: export named ${named.name}, terminated ` +
+      `${named.terminationDate.toISOString().slice(0, 10)}, for freight ` +
+      `delivered ${deliveredAt.toISOString().slice(0, 10)}; ` +
+      `unit ${unitNumber ?? '(none)'} is linked to ${truckDriver.name}`,
+  }
 }
 
 /** What happens to the second seat, and why when nobody sits in it. */

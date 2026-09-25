@@ -39,7 +39,13 @@ const PRODUCTION = process.argv.includes('--production')
 const nameKey = (raw: string) => raw.trim().replace(/\s+/g, ' ').toUpperCase()
 
 /** The driver name the preview could not resolve. */
-const DRIVER_NAMES = ['JULIA ROSE HALL']
+const DRIVER_NAMES = [
+  'JULIA ROSE HALL',
+  'CANER GUNAL',
+  'GUNAL BENER',
+  'BENER GUNAL',
+  'ROSARIO SANTOS RODOLFO',
+]
 
 /** Every co-driver name in the 2026-09-13..19 export, verbatim. */
 const CO_DRIVER_NAMES = [
@@ -53,7 +59,16 @@ const CO_DRIVER_NAMES = [
 ]
 
 /** Pay rules reported in full for these two, by ruling. */
-const RULES_FOR = ['JULIA ROSE HALL', 'JERRY ROBERT MCKANE']
+const RULES_FOR = [
+  'JULIA ROSE HALL',
+  'JERRY ROBERT MCKANE',
+  'CANER GUNAL',
+  'GUNAL BENER',
+  'ROSARIO SANTOS RODOLFO',
+]
+
+/** Units whose freight is in question, to see who Zebra links to them. */
+const UNITS = ['0006', '216']
 
 function target() {
   const url = PRODUCTION
@@ -102,8 +117,20 @@ async function main(): Promise<void> {
       },
     })
     const companies = await db.company.findMany({
-      select: { id: true, name: true },
+      select: {
+        id: true,
+        name: true,
+        legalName: true,
+        mcNumber: true,
+        scac: true,
+      },
     })
+    heading('THE COMPANIES, AND WHAT THEY CAN BE MATCHED BY')
+    for (const c of companies) {
+      console.log(
+        `  ${c.name.padEnd(32)} mc=${c.mcNumber ?? '(none)'}  scac=${c.scac ?? '(none)'}  legal=${c.legalName ?? '(none)'}`,
+      )
+    }
     const companyName = new Map(companies.map((c) => [c.id, c.name]))
 
     const full = (d: (typeof drivers)[number]) =>
@@ -304,6 +331,49 @@ async function main(): Promise<void> {
     // their own: a digit in the name, an equipment word, a single token, a
     // company suffix. `Said truck 3609` trips three of them and `Hassan Ali`
     // trips none, but a real driver called by one name would trip the third.
+    heading('WHO IS LINKED TO THE UNITS IN QUESTION')
+    for (const unit of UNITS) {
+      const trucks = await db.truck.findMany({
+        // No org filter: this script reads one database, and it does not
+        // stand up a tenancy assertion of its own.
+        where: { unitNumber: unit },
+        select: {
+          id: true,
+          unitNumber: true,
+          deletedAt: true,
+          companyId: true,
+        },
+      })
+      if (trucks.length === 0) {
+        console.log(`  unit ${unit}: no truck row`)
+        continue
+      }
+      for (const truck of trucks) {
+        const linked = await db.driver.findMany({
+          where: { assignedTruckId: truck.id, deletedAt: null },
+          select: {
+            firstName: true,
+            lastName: true,
+            status: true,
+            externalId: true,
+          },
+        })
+        console.log(
+          `  unit ${unit}  ${companyName.get(truck.companyId) ?? ''}` +
+            (truck.deletedAt ? '  SOFT-GONE' : '') +
+            (linked.length === 0
+              ? '  — no driver linked'
+              : linked
+                  .map(
+                    (d) =>
+                      `
+      ${d.firstName} ${d.lastName}  roster=${d.status}  ext=${d.externalId ?? 'none'}`,
+                  )
+                  .join('')),
+        )
+      }
+    }
+
     heading('REFERRAL PAYEE CANDIDATES — LISTED, NEVER SET')
 
     // IS THE BEHAVIOURAL SIGNAL INFORMATIVE AT ALL? If production holds no

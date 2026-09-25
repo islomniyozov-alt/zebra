@@ -291,6 +291,24 @@ const MAINTENANCE_READERS = [
   // calls `isQualifiable` and REFUSES if it still returns true. Dry run rolls
   // back, same shape as the script above.
   'set-referral-payees.ts',
+  // ADDED 2026-09-25, by ruling, and it WRITES on --apply. Moves freight
+  // attributed to a TERMINATED driver onto the driver Zebra links to the truck,
+  // and writes a note event carrying the reason and the export's original name.
+  //
+  // The 2026-09-13..19 export named `CANER GUNAL` (terminated 2026-06-25) on six
+  // loads on unit 0006 and `ROSARIO SANTOS RODOLFO` (terminated 2026-04-24) on
+  // four on unit 216. Both trucks are linked to a different active driver.
+  // $10,549.89 would have been held under two people with no pay rule while the
+  // two who hauled it got nothing.
+  //
+  // THE DECISION IS `terminatedYieldsToTruck`, a pure function with its own
+  // tests, so the importer and this repair cannot disagree about who a load
+  // belongs to — and it requires the delivery to fall AFTER the termination, so
+  // a departed driver's earlier freight stays theirs.
+  //
+  // Dry run rolls back. A load whose truck has two drivers linked is left alone
+  // rather than guessed at, and the left-alone rows are printed.
+  'repair-terminated-attribution.ts',
   'backfill-direct-pod.mjs',
   // Written 2026-09-06 and NOT RUN. `billingStatusFor` is a rule over a cached
   // column, so changing it drifts every untouched row; this repairs them
