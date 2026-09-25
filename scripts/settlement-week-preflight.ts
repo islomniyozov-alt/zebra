@@ -1,5 +1,6 @@
 import { neonConfig, Pool } from '@neondatabase/serverless'
 import { remittanceOutcome } from '@/lib/settlement-week'
+import { utcTimestampParam } from '@/lib/sql-params'
 
 // ---------------------------------------------------------------------------
 // WHAT WOULD BE MISSING FROM A SETTLEMENT WEEK, ASKED BEFORE THE WEEK IS RUN.
@@ -86,6 +87,25 @@ if (Number.isNaN(periodStart.getTime())) {
 }
 const periodEnd = new Date(periodStart.getTime() + 7 * 86_400_000 - 1)
 
+/**
+ * THE WINDOW AS NAIVE UTC STRINGS, NEVER AS `Date` OBJECTS.
+ *
+ * `occurredAt` is `TIMESTAMP(3)` without a zone and Prisma writes UTC into it,
+ * but node-postgres serialises a JS `Date` in the PROCESS'S LOCAL ZONE. Passing
+ * the Dates made this script's window end four hours early on a UTC-4 machine.
+ *
+ * MEASURED: it reported 177 loads reaching POD_RECEIVED for 2026-09-13..19 when
+ * the real number was 181. The four it lost were delivered between 19:59:59.999
+ * and 23:59:59.999 UTC on the 19th — the last evening of the period, which is
+ * where a week's freight clusters. A gate that drops the end of its own window
+ * says CLEAR about loads it never looked at.
+ *
+ * And it was machine-dependent, which is worse than wrong: none would be lost
+ * running this in UTC, so it passes for whoever writes it.
+ */
+const periodStartParam = utcTimestampParam(periodStart)
+const periodEndParam = utcTimestampParam(periodEnd)
+
 neonConfig.webSocketConstructor ??= WebSocket
 neonConfig.poolQueryViaFetch = false
 const pool = new Pool({ connectionString, max: 1 })
@@ -135,7 +155,7 @@ const orgs = await rows<OrgRow>(
    GROUP BY o.id, o.name
    ORDER BY loads DESC
 `,
-  [periodStart, periodEnd],
+  [periodStartParam, periodEndParam],
 )
 
 if (orgs.length === 0) {
@@ -199,7 +219,7 @@ const driverless = await rows<DriverlessRow>(
             l."totalRevenueCents", t."unitNumber", c.name
    ORDER BY l."loadNumber"
 `,
-  [periodStart, periodEnd, org.id],
+  [periodStartParam, periodEndParam, org.id],
 )
 
 heading(`1. SETTLEABLE LOADS WITH NOBODY IN EITHER SEAT — ${driverless.length}`)
@@ -270,7 +290,7 @@ const orphanTrucks = await rows<OrphanTruckRow>(
    GROUP BY t.id, t."unitNumber", c.name
    ORDER BY revenue DESC
 `,
-  [periodStart, periodEnd, org.id],
+  [periodStartParam, periodEndParam, org.id],
 )
 
 heading(
@@ -350,7 +370,7 @@ const unpriced = await rows<UnpricedRow>(
    GROUP BY s."driverName"
    ORDER BY revenue DESC
 `,
-  [periodStart, periodEnd, org.id],
+  [periodStartParam, periodEndParam, org.id],
 )
 
 heading(
@@ -419,7 +439,7 @@ const remittances = await rows<RemittanceRow>(
             d."lastName", d."firstName", cd."lastName", cd."firstName"
    ORDER BY l."loadNumber"
 `,
-  [periodStart, periodEnd, org.id],
+  [periodStartParam, periodEndParam, org.id],
 )
 
 const direct = remittances.filter((row) => row.directSettled)

@@ -226,6 +226,22 @@ const INSPECTION_READERS = [
   //
   // SELECT only.
   'inspect-crew-and-rules.ts',
+  // ADDED 2026-09-25, read-only. The 2026-09-13..19 write reported 185 loads
+  // and 182 operational events; the preflight then counted 177 reaching
+  // POD_RECEIVED in the week; the export holds 181 rows the books own. Four
+  // numbers that should agree, and a gap of four loads is four drivers' pay.
+  //
+  // EACH NUMBER ANSWERS A DIFFERENT QUESTION — did the row land, did it get an
+  // event, should it have one, is that event dated inside the period — so
+  // reasoning from one to another is how a week gets declared clean while
+  // freight is missing. `settleableWhere` needs four conditions at once and a
+  // row can fail any one of them while looking ordinary on the load list.
+  //
+  // So this walks the EXPORT row by row against the database and names what
+  // fell out, with the reason. Built from the artefact rather than from the
+  // importer's report of its own writes, which is the instrument-from-belief
+  // failure AGENTS.md records twice. SELECT only.
+  'inspect-week-landing.ts',
 ]
 
 /**
@@ -258,6 +274,23 @@ const MAINTENANCE_READERS = [
   // half-finished money change that doubles on re-run is the failure being
   // designed against.
   'add-julia-and-rate-change.ts',
+  // ADDED 2026-09-24, by ruling, and it WRITES on --apply. Sets
+  // `Driver.kind = 'PAYEE'` on four rows named by DATATRUCK ID — 119, 136, 866
+  // and 803 — and touches nothing else: not the roster status, not the pay
+  // rules, not a load. The ruling is explicit that these rows stay active and
+  // keep being paid.
+  //
+  // KEYED ON `externalId` BECAUSE THE OWNER NAMED IDS. A name is something
+  // somebody typed and two rows could share it; an id identifies one row in the
+  // source system. It also makes the script unmistakably a list of four rather
+  // than a pattern — two of the four trip no heuristic at all, and are on it
+  // because the owner knows an arrangement the data does not record.
+  //
+  // THE READ-BACK ASSERTS THE EXCLUSION, not the column. A row saying PAYEE
+  // proves nothing about whether the DQF stopped expecting a file; the script
+  // calls `isQualifiable` and REFUSES if it still returns true. Dry run rolls
+  // back, same shape as the script above.
+  'set-referral-payees.ts',
   'backfill-direct-pod.mjs',
   // Written 2026-09-06 and NOT RUN. `billingStatusFor` is a rule over a cached
   // column, so changing it drifts every untouched row; this repairs them
