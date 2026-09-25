@@ -6,6 +6,7 @@ import {
   previewRemittance,
   type FreightRef,
   type Preview,
+  type RowKey,
 } from './remittance-preview'
 
 // ---------------------------------------------------------------------------
@@ -88,13 +89,52 @@ export interface RemittanceWriteResult {
  * it a row's fuel surcharge and its tolls would share one key and the second
  * would be refused as a duplicate of the first — one charge silently lost per
  * row that carries two.
+ *
+ * AND THE ROW'S OWN IDENTITY IS IN IT TOO, since 2026-09-25. The reference
+ * alone was not enough: for a load under a trip the reference IS the trip, so
+ * every load under one trip shared a key. See `rowIdentity`.
  */
 export const sourceKeyFor = (
   invoiceNumber: string,
-  reference: string,
+  key: RowKey,
   itemType: string,
   column: string,
-): string => `${invoiceNumber}:${reference}:${itemType}:${column}`
+): string => `${invoiceNumber}:${rowIdentity(key)}:${itemType}:${column}`
+
+/**
+ * What distinguishes ONE ROW from the others sharing its reference.
+ *
+ * ── THE COLLISION THIS FIXES ──────────────────────────────────────────────
+ *
+ * The key used to be built from the REFERENCE, which for a load under a trip is
+ * the TRIP — so every load under one trip produced the same key. On the
+ * 2026-09-13..19 remittance that is 38 collisions, all of them
+ * `T-<tripId>:LOAD - COMPLETED:Fuel Surcharge` and friends: several loads under
+ * one trip, each with its own fuel surcharge.
+ *
+ * The unique index refused the second one and the write threw, which is the
+ * right failure and is how this was found — but it means the week could not
+ * import at all, and an `upsert` or a `skipDuplicates` here would have dropped
+ * real charges silently instead.
+ *
+ * SO THE TRIP STAYS IN THE KEY AND THE LOAD JOINS IT. Keeping both means the
+ * key still says which trip the charge belongs to, which is what somebody
+ * reconciling a trip wants to grep for.
+ */
+function rowIdentity(key: RowKey): string {
+  switch (key.branch) {
+    case 'tour':
+      return key.tripId
+    case 'load_under_trip':
+      return `${key.tripId}/${key.loadId}`
+    case 'single_load':
+      return key.loadId
+    case 'unkeyable':
+      // Unreachable from the caller, which skips unkeyable rows — but returning
+      // a constant would make every unkeyable row collide with every other.
+      throw new Error('sourceKeyFor: an unkeyable row has no identity')
+  }
+}
 
 export async function writeRemittance(
   tx: TxClient,
@@ -226,7 +266,7 @@ export async function writeRemittance(
             notes: `${column} — Amazon ${row.itemType}`,
             sourceKey: sourceKeyFor(
               invoiceNumber,
-              rowReference,
+              rowKey,
               row.itemType,
               column,
             ),

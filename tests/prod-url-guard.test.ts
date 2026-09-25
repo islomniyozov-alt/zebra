@@ -309,6 +309,39 @@ const MAINTENANCE_READERS = [
   // Dry run rolls back. A load whose truck has two drivers linked is left alone
   // rather than guessed at, and the left-alone rows are printed.
   'repair-terminated-attribution.ts',
+  // ADDED 2026-09-25, by ruling, and it WRITES on --apply. The runner
+  // `writeRemittance` never had: that function has been built and tested since
+  // 2026-09-11 with NO CALLER, so a week could be counted and not imported.
+  //
+  // WHICH AUTHORITY THE CASH IS BOOKED TO is the decision it exists to make.
+  // `Payment` carries one `companyId` and the week's Amazon freight runs across
+  // two authorities. The ruling: the company whose identity matches the
+  // workbook's Carrier line, refuse unless exactly one.
+  //
+  // The ruling said MC and the workbook has none — checked the raw sheet. It
+  // carries a Carrier name and a SCAC, so the match is SCAC AND legalName, both
+  // exact, both picking the same single company. Stricter than either alone: a
+  // SCAC typed onto the wrong company cannot route a week's cash by itself.
+  //
+  // `--invoice` is REQUIRED. Six of the seven workbooks in the corpus are
+  // settled history and a directory sweep would be one keystroke from writing
+  // all of them. `writeRemittance` is idempotent and would refuse the repeats,
+  // which is precisely the net this declines to depend on.
+  'import-amazon-remittance.ts',
+  // ADDED 2026-09-25, by ruling, and it WRITES on --apply — but only ever a
+  // DRAFT. It opens the settlement week and refreshes it, and NEVER calls
+  // `finaliseBatch`: a draft holds no truth, every refresh throws its lines away
+  // and recomputes from the loads and rules as they are now, and FINAL is the
+  // only state that means somebody was paid.
+  //
+  // It prints every HELD line and every BLOCKED driver by name, because those
+  // are the two ways a draft balances and is wrong — money the engine could not
+  // price, and a driver who cannot be paid at all.
+  //
+  // A re-run refreshes the batch that already covers the week rather than
+  // opening a second one, which is what `openBatch`'s `period_taken` refusal
+  // hands back.
+  'open-settlement-batch.ts',
   'backfill-direct-pod.mjs',
   // Written 2026-09-06 and NOT RUN. `billingStatusFor` is a rule over a cached
   // column, so changing it drifts every untouched row; this repairs them
