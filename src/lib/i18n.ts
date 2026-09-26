@@ -2057,6 +2057,9 @@ const en = {
   'money.continueDraft': 'Continue draft',
   'money.alreadyPaid': 'Paid.',
   'money.remittance': 'Amazon remittance',
+  'money.appliedIntoPeriod': ' into this week',
+  'money.ofTotal': 'of',
+  'money.labelled': 'labelled',
   'money.importedOn': 'imported',
   'money.remittanceMissing': 'No Amazon remittance for',
   'money.remittanceMissingHint':
@@ -4246,6 +4249,9 @@ const ru: Dictionary = {
   'money.continueDraft': 'Продолжить черновик',
   'money.alreadyPaid': 'Выплачено.',
   'money.remittance': 'Выплата Amazon',
+  'money.appliedIntoPeriod': ' за эту неделю',
+  'money.ofTotal': 'из',
+  'money.labelled': 'период',
   'money.importedOn': 'загружено',
   'money.remittanceMissing': 'Нет выплаты Amazon за',
   'money.remittanceMissingHint':
@@ -6405,6 +6411,9 @@ const fa: Dictionary = {
   'money.continueDraft': 'ادامهٔ پیش‌نویس',
   'money.alreadyPaid': 'پرداخت شد.',
   'money.remittance': 'پرداختی آمازون',
+  'money.appliedIntoPeriod': ' برای این هفته',
+  'money.ofTotal': 'از',
+  'money.labelled': 'دوره',
   'money.importedOn': 'وارد شده در',
   'money.remittanceMissing': 'پرداختی آمازون برای این دوره نیست:',
   'money.remittanceMissingHint':

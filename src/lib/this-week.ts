@@ -54,13 +54,48 @@ export type BatchState = 'none' | 'DRAFT' | 'FINAL' | 'PAID'
 /** The one thing a person may do next, given where the batch is. */
 export type BatchAction = 'open' | 'continue' | 'markPaid' | 'none'
 
+/**
+ * ONE PAYMENT THAT PAID INTO THIS WEEK.
+ *
+ * Owner's ruling, 2026-09-26: the screen LISTS every payment that paid into the
+ * week, newest first, and shows each one's label and the amount it applied into
+ * the period. It used to show a single payment per authority, which could only
+ * ever be one of them.
+ */
+export interface RemittancePayment {
+  invoiceNumber: string | null
+  /**
+   * AMAZON'S OWN PAYMENT-PERIOD LABEL, as filed — not this week.
+   *
+   * It spans two of this carrier's settlement weeks, which is why it does not
+   * decide membership. Shown so a reader can see that the invoice clearing this
+   * week's held lines is labelled for another one. Null on a hand-entered
+   * payment and on every row written before the columns existed.
+   */
+  labelStart: Date | null
+  labelEnd: Date | null
+  /** The whole ACH, however many weeks it spans. */
+  totalCents: number
+  /**
+   * WHAT THIS PAYMENT APPLIED TO FREIGHT DELIVERED IN THIS PERIOD.
+   *
+   * The figure the week is owed, as distinct from `totalCents`. A payment that
+   * pays two weeks contributes part of itself to each, and showing only the ACH
+   * total would overstate every week it touches.
+   */
+  appliedIntoPeriodCents: number
+  receivedAt: Date
+  importedAt: Date
+}
+
 export interface RemittanceState {
   companyId: string
   companyName: string
   found: boolean
-  invoiceNumber: string | null
-  totalCents: number | null
-  importedAt: Date | null
+  /** Newest cash first. Empty when nothing paid into the week. */
+  payments: RemittancePayment[]
+  /** Summed across `payments` — what this authority received FOR this week. */
+  appliedIntoPeriodCents: number
 }
 
 export interface HeldRow {
@@ -367,15 +402,52 @@ export async function thisWeekFor(
         companyId: true,
         remittanceKey: true,
         amountCents: true,
+        receivedAt: true,
+        // THE LABEL, SHOWN AND NOT OBEYED. See `RemittancePayment`.
+        periodStart: true,
+        periodEnd: true,
         createdAt: true,
+        // THE SAME PREDICATE AS THE `where` ABOVE, so the figure is what this
+        // payment put into THIS week rather than its whole ACH. One lateral
+        // join under `relationJoins`, not a query per payment.
+        loadApplications: {
+          where: {
+            load: {
+              stops: {
+                some: {
+                  type: 'DELIVERY',
+                  scheduledAt: {
+                    gte: input.period.start,
+                    lte: periodEndOfDay,
+                  },
+                },
+              },
+            },
+          },
+          select: { amountCents: true },
+        },
       },
     }),
   )
-  const paymentOf = new Map<string, (typeof payments)[number]>()
+  // EVERY PAYMENT PER AUTHORITY, in the query's order — newest cash first.
+  const paymentsOf = new Map<string, RemittancePayment[]>()
   for (const payment of payments) {
-    if (!paymentOf.has(payment.companyId)) {
-      paymentOf.set(payment.companyId, payment)
-    }
+    const appliedIntoPeriodCents = payment.loadApplications.reduce(
+      (sum, row) => sum + row.amountCents,
+      0,
+    )
+    paymentsOf.set(payment.companyId, [
+      ...(paymentsOf.get(payment.companyId) ?? []),
+      {
+        invoiceNumber: payment.remittanceKey,
+        labelStart: payment.periodStart,
+        labelEnd: payment.periodEnd,
+        totalCents: payment.amountCents,
+        appliedIntoPeriodCents,
+        receivedAt: payment.receivedAt,
+        importedAt: payment.createdAt,
+      },
+    ])
   }
 
   // ── §5 the factoring position, per authority, from the light read ──────
@@ -477,14 +549,16 @@ export async function thisWeekFor(
     heldSumCents: held.reduce((sum, row) => sum + row.bookedCents, 0),
     blocked,
     remittances: directMix.map((row) => {
-      const payment = paymentOf.get(row.companyId)
+      const mine = paymentsOf.get(row.companyId) ?? []
       return {
         companyId: row.companyId,
         companyName: nameOf.get(row.companyId) ?? '',
-        found: payment !== undefined,
-        invoiceNumber: payment?.remittanceKey ?? null,
-        totalCents: payment?.amountCents ?? null,
-        importedAt: payment?.createdAt ?? null,
+        found: mine.length > 0,
+        payments: mine,
+        appliedIntoPeriodCents: mine.reduce(
+          (sum, payment) => sum + payment.appliedIntoPeriodCents,
+          0,
+        ),
       }
     }),
     factoring: [...filing]

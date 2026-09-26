@@ -397,8 +397,8 @@ describe('the Amazon authority', () => {
   it('reports the remittance it found, by invoice number', async () => {
     const company = forCompany(await readWeek(), amazonCompanyId)
     expect(company.remittance?.found).toBe(true)
-    expect(company.remittance?.invoiceNumber).toBe(`INV-${nonce}`)
-    expect(company.remittance?.totalCents).toBe(275_000)
+    expect(company.remittance?.payments[0]?.invoiceNumber).toBe(`INV-${nonce}`)
+    expect(company.remittance?.payments[0]?.totalCents).toBe(275_000)
   }, 300_000)
 
   // THE READY SET IS WHAT BECOMES THE BATCH, AND THE BATCH IS ORG-WIDE.
@@ -490,7 +490,9 @@ describe('the week a remittance belongs to is what it PAID FOR', () => {
     // landing on a load with a delivery date. Only the second can place a
     // payment in a week.
     const company = forCompany(await readWeek(), amazonCompanyId)
-    expect(company.remittance?.invoiceNumber).not.toBe(`DECLARED-${nonce}`)
+    expect(company.remittance?.payments[0]?.invoiceNumber).not.toBe(
+      `DECLARED-${nonce}`,
+    )
 
     await owner.payment.delete({ where: { id: payment.id } })
   }, 300_000)
@@ -540,7 +542,9 @@ describe('the week a remittance belongs to is what it PAID FOR', () => {
     expect(company.remittance?.found).toBe(true)
     // AND IT IS THE ONE SHOWN, because `receivedAt` leads the ordering: the most
     // recent cash is what "is the remittance in" is asking about.
-    expect(company.remittance?.invoiceNumber).toBe(`NEXTWEEK-${nonce}`)
+    expect(company.remittance?.payments[0]?.invoiceNumber).toBe(
+      `NEXTWEEK-${nonce}`,
+    )
 
     await owner.paymentLoadApplication.deleteMany({
       where: { paymentId: payment.id },
@@ -614,9 +618,125 @@ describe('the week a remittance belongs to is what it PAID FOR', () => {
     const company = forCompany(await readWeek(), amazonCompanyId)
     // `receivedAt` leads: the most recent cash is what "is the remittance in"
     // asks about. Leading on the label would name LATELABEL instead.
-    expect(company.remittance?.invoiceNumber).toBe(`LATECASH-${nonce}`)
+    expect(company.remittance?.payments[0]?.invoiceNumber).toBe(
+      `LATECASH-${nonce}`,
+    )
 
     for (const id of [lateLabel.id, lateCash.id]) {
+      await owner.paymentLoadApplication.deleteMany({
+        where: { paymentId: id },
+      })
+      await owner.payment.delete({ where: { id } })
+    }
+  }, 300_000)
+
+  // ── EVERY PAYMENT, NOT ONE ──────────────────────────────────────────────
+  //
+  // Owner's ruling, 2026-09-26. Two invoices pay into this week: the one for the
+  // week and the one for the following week that clears its held lines. The
+  // screen lists both, newest cash first, each with its label and the amount it
+  // put into THIS period — which is not its ACH total when it spans two weeks.
+  it('lists every payment that paid into the week, newest cash first', async () => {
+    const settled = await owner.load.findFirst({
+      where: {
+        companyId: amazonCompanyId,
+        stops: {
+          some: {
+            type: 'DELIVERY',
+            scheduledAt: { gte: PERIOD.start, lte: PERIOD.end },
+          },
+        },
+      },
+      select: { id: true },
+    })
+    expect(settled).not.toBeNull()
+
+    const older = await owner.payment.create({
+      data: {
+        organizationId,
+        companyId: amazonCompanyId,
+        customerId: relayId,
+        method: 'ACH',
+        remittanceKey: `OLDCASH-${nonce}`,
+        receivedAt: new Date(PERIOD.end.getTime() + 4 * 86_400_000),
+        amountCents: 5_000,
+        periodStart: PERIOD.start,
+        periodEnd: PERIOD.end,
+        loadApplications: {
+          create: { organizationId, loadId: settled!.id, amountCents: 5_000 },
+        },
+      },
+    })
+
+    // FREIGHT OUTSIDE THE PERIOD, so the payment below genuinely spans two
+    // weeks. Without this the in-period filter on the applications cannot be
+    // proven: a payment whose only application is inside the week sums the same
+    // whether the filter is there or not, and `watch-guard` said so —
+    // THE BREAK DID NOT FIRE.
+    const nextWeekLoad = await seedLoad({
+      companyId: amazonCompanyId,
+      customerId: relayId,
+      driverId: paidDriverId,
+      rateCents: 82_500,
+      deliveredOn: new Date(PERIOD.end.getTime() + 3 * 86_400_000),
+    })
+
+    // Labelled for the FOLLOWING week, cash newer, and only PART of its ACH
+    // lands in this period — the rest pays the load above.
+    const newer = await owner.payment.create({
+      data: {
+        organizationId,
+        companyId: amazonCompanyId,
+        customerId: relayId,
+        method: 'ACH',
+        remittanceKey: `NEWCASH-${nonce}`,
+        receivedAt: new Date(PERIOD.end.getTime() + 11 * 86_400_000),
+        amountCents: 90_000,
+        periodStart: new Date(PERIOD.start.getTime() + 7 * 86_400_000),
+        periodEnd: new Date(PERIOD.end.getTime() + 7 * 86_400_000),
+        loadApplications: {
+          create: [
+            { organizationId, loadId: settled!.id, amountCents: 7_500 },
+            {
+              organizationId,
+              loadId: nextWeekLoad.id,
+              amountCents: 82_500,
+            },
+          ],
+        },
+      },
+    })
+
+    const company = forCompany(await readWeek(), amazonCompanyId)
+    const keys = company.remittance!.payments.map((row) => row.invoiceNumber)
+
+    // BOTH ARE LISTED, and the newer cash is first.
+    expect(keys).toContain(`NEWCASH-${nonce}`)
+    expect(keys).toContain(`OLDCASH-${nonce}`)
+    expect(keys.indexOf(`NEWCASH-${nonce}`)).toBeLessThan(
+      keys.indexOf(`OLDCASH-${nonce}`),
+    )
+
+    const shown = company.remittance!.payments.find(
+      (row) => row.invoiceNumber === `NEWCASH-${nonce}`,
+    )!
+    // THE AMOUNT IS WHAT LANDED IN THIS WEEK, not the whole ACH and not the sum
+    // of every application it carries. $75.00 here, $825.00 on next week's load,
+    // $900.00 of cash — three different numbers, and only the first belongs to
+    // this week.
+    expect(shown.appliedIntoPeriodCents).toBe(7_500)
+    expect(shown.totalCents).toBe(90_000)
+    // AND THE LABEL IS SHOWN AS FILED — the following week, not this one.
+    expect(shown.labelStart?.getTime()).toBe(
+      PERIOD.start.getTime() + 7 * 86_400_000,
+    )
+
+    // The authority's figure for the week is the sum of what landed in it.
+    expect(company.remittance!.appliedIntoPeriodCents).toBeGreaterThanOrEqual(
+      12_500,
+    )
+
+    for (const id of [older.id, newer.id]) {
       await owner.paymentLoadApplication.deleteMany({
         where: { paymentId: id },
       })
@@ -628,7 +748,7 @@ describe('the week a remittance belongs to is what it PAID FOR', () => {
   it('still finds one with no declared period, through what it paid for', async () => {
     const company = forCompany(await readWeek(), amazonCompanyId)
     expect(company.remittance?.found).toBe(true)
-    expect(company.remittance?.invoiceNumber).toBe(`INV-${nonce}`)
+    expect(company.remittance?.payments[0]?.invoiceNumber).toBe(`INV-${nonce}`)
   }, 300_000)
 
   it('ignores a remittance that declares a different week', async () => {
@@ -647,7 +767,9 @@ describe('the week a remittance belongs to is what it PAID FOR', () => {
     })
 
     const company = forCompany(await readWeek(), amazonCompanyId)
-    expect(company.remittance?.invoiceNumber).not.toBe(`OTHERWEEK-${nonce}`)
+    expect(company.remittance?.payments[0]?.invoiceNumber).not.toBe(
+      `OTHERWEEK-${nonce}`,
+    )
 
     await owner.payment.delete({ where: { id: other.id } })
   }, 300_000)
@@ -799,7 +921,10 @@ describe('when the remittance is removed', () => {
     const page = await readWeek()
     const after = forCompany(page, amazonCompanyId)
     expect(after.remittance?.found).toBe(false)
-    expect(after.remittance?.invoiceNumber).toBeNull()
+    // AN EMPTY LIST, not a null invoice number. `found` and an empty `payments`
+    // are the same fact said twice, which is what the screen reads.
+    expect(after.remittance?.payments).toEqual([])
+    expect(after.remittance?.appliedIntoPeriodCents).toBe(0)
 
     // BOTH AMAZON LOADS NOW HOLD, with "no remittance" rather than vanishing.
     expect(after.held).toHaveLength(2)

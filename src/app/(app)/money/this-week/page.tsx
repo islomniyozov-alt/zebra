@@ -143,16 +143,63 @@ export default async function ThisWeekPage({
        * and the Amazon lines hold themselves in the list below. */}
       {remittances.map((row) =>
         row.found ? (
-          <p key={row.companyId} className="text-sm text-ink-2">
-            <span className="font-medium text-ink">{row.companyName}</span>
-            {' · '}
-            {t('money.remittance')}{' '}
-            <span className="font-mono">{row.invoiceNumber}</span>
-            {' · '}
-            <span className="font-mono">
-              {formatCents(row.totalCents ?? 0, locale)}
-            </span>
-          </p>
+          /* EVERY PAYMENT THAT PAID INTO THE WEEK, newest cash first — owner's
+           * ruling, 2026-09-26. One line each, because one invoice can pay two
+           * of our weeks and a single row could only ever name one of them.
+           *
+           * THE LABEL IS SHOWN BESIDE THE AMOUNT and they mean different
+           * things: the label is Amazon's payment period, the amount is what
+           * this payment applied to freight delivered in THIS period. A reader
+           * seeing `Sep 20 - Sep 26` against this week's total is seeing the
+           * invoice that cleared this week's held lines, which is the truth
+           * rather than a discrepancy. */
+          <div key={row.companyId} className="text-sm text-ink-2">
+            <p>
+              <span className="font-medium text-ink">{row.companyName}</span>
+              {' · '}
+              {t('money.remittance')}
+              {' · '}
+              <span className="font-mono">
+                {formatCents(row.appliedIntoPeriodCents, locale)}
+              </span>
+              {t('money.appliedIntoPeriod')}
+            </p>
+            <ul className="mt-z1 space-y-z1 ps-z3">
+              {row.payments.map((payment) => (
+                <li
+                  key={
+                    payment.invoiceNumber ?? payment.receivedAt.toISOString()
+                  }
+                >
+                  <span className="font-mono">{payment.invoiceNumber}</span>
+                  {' · '}
+                  <span className="font-mono">
+                    {formatCents(payment.appliedIntoPeriodCents, locale)}
+                  </span>
+                  {payment.appliedIntoPeriodCents !== payment.totalCents ? (
+                    <>
+                      {' '}
+                      <span className="text-ink-3">
+                        {t('money.ofTotal')}{' '}
+                        <span className="font-mono">
+                          {formatCents(payment.totalCents, locale)}
+                        </span>
+                      </span>
+                    </>
+                  ) : null}
+                  {payment.labelStart && payment.labelEnd ? (
+                    <>
+                      {' · '}
+                      <span className="text-ink-3">
+                        {t('money.labelled')} {day(payment.labelStart)}–
+                        {day(payment.labelEnd)}
+                      </span>
+                    </>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </div>
         ) : (
           <p
             key={row.companyId}
