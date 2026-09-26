@@ -366,14 +366,21 @@ describe('the six Datatruck statements, reproduced line by line', () => {
 // still needs checking against a line whose per-line and on-total results
 // actually differ — none of the six happens to be one".
 //
-// Four of them are. Rounding the whole gross at once gives a DIFFERENT cent
-// from summing the rounded lines on ST-005310, ST-005317, ST-005336 and
-// ST-005352, and in every case the statement prints the per-line answer:
+// FIVE of them are. Rounding the whole gross at once gives a DIFFERENT cent
+// from summing the rounded lines, and in every case the statement prints the
+// per-line answer:
 //
 //   ST-005310   $9,210.76 x 88%  -> on-total $8,105.47   printed $8,105.46
 //   ST-005317  $10,839.15 x 30%  -> on-total $3,251.75   printed $3,251.74
 //   ST-005336   $9,490.80 x 32%  -> on-total $3,037.06   printed $3,037.05
 //   ST-005352   $5,556.01 x 30%  -> on-total $1,666.80   printed $1,666.81
+//   ST-005533  $21,752.85 x 38%  -> on-total $8,266.08   printed $8,266.09
+//
+// THE FIFTH ARRIVED ON 2026-09-26 with the statement for the first week Zebra
+// drafted, and it is the useful kind of corroboration: a rate nothing else in
+// the corpus uses (38%), a gross twice the size of any other, and the same
+// answer. A characterisation test that had been trimmed to keep its old list
+// would have thrown that away.
 //
 // A cent a week per driver is not the point; being unable to say which rule
 // the software follows is. This is the assertion that says it.
@@ -383,7 +390,7 @@ describe('rounding happens per line and not once on the total', () => {
   const onTotal = (fixture: StatementFixture) =>
     __rounding.percentOfCents(fixture.totals.grossCents, fixture.percentBps)
 
-  it('disagrees with the on-total answer on four of the six', () => {
+  it('disagrees with the on-total answer on five of the seven', () => {
     const differing = DATATRUCK_STATEMENTS.filter(
       (fixture) => onTotal(fixture) !== fixture.totals.amountCents,
     ).map((fixture) => fixture.number)
@@ -392,6 +399,7 @@ describe('rounding happens per line and not once on the total', () => {
       'ST-005317',
       'ST-005336',
       'ST-005352',
+      'ST-005533',
     ])
   })
 

@@ -242,6 +242,21 @@ const INSPECTION_READERS = [
   // importer's report of its own writes, which is the instrument-from-belief
   // failure AGENTS.md records twice. SELECT only.
   'inspect-week-landing.ts',
+  // ADDED 2026-09-26, read-only. Diffs a transcribed Datatruck statement against
+  // Zebra's draft for the same driver and period, to the cent: every load line's
+  // gross, miles and driver amount, then the deductions, then the totals.
+  //
+  // It pairs the lines on `Load.referenceNumber` — a statement names its loads by
+  // Amazon reference and Zebra names them DT-016xxx — which is the same handle
+  // the remittance matcher uses, so no mapping is invented here.
+  //
+  // THE ONE ADJUSTMENT IS IN THE COMPARISON ONLY, by ruling: a line the engine
+  // held for `no_remittance` is priced on booked gross for the diff, because
+  // Datatruck never waited for Amazon and comparing a held line against a paid
+  // one reports a difference of POLICY rather than of arithmetic. The engine is
+  // untouched and the report names the lines it applied to, so the diff cannot
+  // quietly launder the hold the week depends on.
+  'diff-statement-against-draft.ts',
 ]
 
 /**

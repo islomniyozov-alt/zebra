@@ -802,6 +802,180 @@ export const DATATRUCK_STATEMENTS: StatementFixture[] = [
       netCents: 2505234,
     },
   },
+  {
+    // ── THE ONLY STATEMENT IN THE FOLDER COVERING 2026-09-13..19 ──────────
+    //
+    // Read from inside the PDF: the other 23 files carry 9/6..9/12 or 8/30, so
+    // this is the single document that can be diffed against the first week
+    // Zebra drafted. `Settlement 0294 OASIS.pdf`.
+    //
+    // SIX OF THE FOURTEEN LINES DELIVER AFTER THE PERIOD ENDS — 9/20 once and
+    // 9/23..9/24 five times. Transcribed as printed rather than trimmed to the
+    // period, because the artefact is the thing and the discrepancy is a
+    // finding: Datatruck does not bound a statement's lines by its own period.
+    //
+    // Ties three ways: the grosses sum to $21,752.85, the mileages to
+    // 12,982.47 and the amounts to $8,266.09, each as printed. Every line is
+    // 38% of its gross.
+    number: 'ST-005533',
+    batch: 'SB-000447',
+    company: 'Statement Date:',
+    driver: 'Muhammadjon Niyozzoda',
+    unitNumber: '4588',
+    tariff: '38% from gross',
+    percentBps: 3800,
+    periodStart: Date.UTC(2026, 8, 13),
+    periodEnd: Date.UTC(2026, 8, 19),
+    statementDate: Date.UTC(2026, 8, 22),
+    // 9/24 ON THE DOCUMENT. Zebra's batch was opened with 9/25 by ruling, so
+    // this is a difference the diff reports rather than a transcription slip.
+    checkDate: Date.UTC(2026, 8, 24),
+    loads: [
+      {
+        loadNumber: '115JSD97Y',
+        puDate: Date.UTC(2026, 8, 12),
+        delDate: Date.UTC(2026, 8, 13),
+        grossCents: 228298,
+        milesHundredths: 259586,
+        amountCents: 86753,
+      },
+      {
+        loadNumber: '112FDQ2PZ',
+        puDate: Date.UTC(2026, 8, 14),
+        delDate: Date.UTC(2026, 8, 15),
+        grossCents: 66070,
+        milesHundredths: 105168,
+        amountCents: 25107,
+      },
+      {
+        loadNumber: '1129QCB45',
+        puDate: Date.UTC(2026, 8, 16),
+        delDate: Date.UTC(2026, 8, 16),
+        grossCents: 296975,
+        milesHundredths: 0,
+        amountCents: 112851,
+      },
+      {
+        loadNumber: '114TWT5FV',
+        puDate: Date.UTC(2026, 8, 15),
+        delDate: Date.UTC(2026, 8, 16),
+        grossCents: 57173,
+        milesHundredths: 0,
+        amountCents: 21726,
+      },
+      {
+        loadNumber: '11594RZ2Z',
+        puDate: Date.UTC(2026, 8, 18),
+        delDate: Date.UTC(2026, 8, 18),
+        grossCents: 80080,
+        milesHundredths: 0,
+        amountCents: 30430,
+      },
+      {
+        loadNumber: '112QNCGG7',
+        puDate: Date.UTC(2026, 8, 17),
+        delDate: Date.UTC(2026, 8, 18),
+        grossCents: 146293,
+        milesHundredths: 209490,
+        amountCents: 55591,
+      },
+      {
+        loadNumber: '112DQYGHB',
+        puDate: Date.UTC(2026, 8, 18),
+        delDate: Date.UTC(2026, 8, 18),
+        grossCents: 57774,
+        milesHundredths: 179378,
+        amountCents: 21954,
+      },
+      {
+        loadNumber: '114NDBP1Q',
+        puDate: Date.UTC(2026, 8, 19),
+        delDate: Date.UTC(2026, 8, 19),
+        grossCents: 162947,
+        milesHundredths: 48461,
+        amountCents: 61920,
+      },
+      {
+        loadNumber: '115BBCGQR',
+        puDate: Date.UTC(2026, 8, 19),
+        delDate: Date.UTC(2026, 8, 20),
+        grossCents: 48408,
+        milesHundredths: 0,
+        amountCents: 18395,
+      },
+      {
+        loadNumber: '1124HJQRR',
+        puDate: Date.UTC(2026, 8, 23),
+        delDate: Date.UTC(2026, 8, 23),
+        grossCents: 214526,
+        milesHundredths: 209354,
+        amountCents: 81520,
+      },
+      {
+        loadNumber: 'T-111NSXYB7',
+        puDate: Date.UTC(2026, 8, 23),
+        delDate: Date.UTC(2026, 8, 23),
+        grossCents: 420924,
+        milesHundredths: 52766,
+        amountCents: 159951,
+      },
+      {
+        loadNumber: '113CSJM6R',
+        puDate: Date.UTC(2026, 8, 24),
+        delDate: Date.UTC(2026, 8, 24),
+        grossCents: 316434,
+        milesHundredths: 45746,
+        amountCents: 120245,
+      },
+      {
+        loadNumber: '116GZSGWQ',
+        puDate: Date.UTC(2026, 8, 24),
+        delDate: Date.UTC(2026, 8, 24),
+        grossCents: 17500,
+        milesHundredths: 8760,
+        amountCents: 6650,
+      },
+      {
+        loadNumber: '115SY3BWR',
+        puDate: Date.UTC(2026, 8, 24),
+        delDate: Date.UTC(2026, 8, 24),
+        grossCents: 61883,
+        milesHundredths: 179538,
+        amountCents: 23516,
+      },
+    ],
+    totals: {
+      grossCents: 2175285,
+      milesHundredths: 1298247,
+      amountCents: 826609,
+    },
+    deductions: [
+      {
+        type: 'Truck Repair',
+        description: 'truck bumper $500/$500',
+        quantity: 1,
+        rateCents: 25000,
+        totalCents: -25000,
+      },
+    ],
+    otherPay: [],
+    summary: {
+      earningsCents: 826609,
+      advancesCents: 0,
+      reimbursementsCents: 0,
+      deductionsCents: -25000,
+      otherPayCents: 0,
+      netCents: 801609,
+    },
+    ytd: {
+      earningsCents: 16365725,
+      advancesCents: 0,
+      reimbursementsCents: 0,
+      deductionsCents: -765131,
+      otherPayCents: 259566,
+      netCents: 15860160,
+    },
+  },
 ]
 
 // ---------------------------------------------------------------------------
