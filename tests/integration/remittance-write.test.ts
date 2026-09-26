@@ -118,27 +118,31 @@ const reading = (): RemittanceReading =>
 let liveLoadId = ''
 let closedLoadId = ''
 
-const freight = (closedIsClosed: boolean): Map<string, FreightRef> =>
+const freight = (closedIsClosed: boolean): Map<string, FreightRef[]> =>
   new Map([
     [
       'LIVE-1',
-      {
-        id: liveLoadId,
-        loadNumber: 'L1',
-        reference: 'LIVE-1',
-        totalRevenueCents: 45000,
-        closedHistory: false,
-      },
+      [
+        {
+          id: liveLoadId,
+          loadNumber: 'L1',
+          reference: 'LIVE-1',
+          totalRevenueCents: 45000,
+          closedHistory: false,
+        },
+      ],
     ],
     [
       'CLOSED-1',
-      {
-        id: closedLoadId,
-        loadNumber: 'L2',
-        reference: 'CLOSED-1',
-        totalRevenueCents: 105000,
-        closedHistory: closedIsClosed,
-      },
+      [
+        {
+          id: closedLoadId,
+          loadNumber: 'L2',
+          reference: 'CLOSED-1',
+          totalRevenueCents: 105000,
+          closedHistory: closedIsClosed,
+        },
+      ],
     ],
   ])
 

@@ -1,3 +1,4 @@
+import { apportionCents } from '../money'
 import type { RemittanceReading, RemittanceRow } from './remittance'
 
 // ---------------------------------------------------------------------------
@@ -86,7 +87,38 @@ export interface PreviewLine {
   outcome: MatchOutcome
   key: RowKey
   remittedCents: number
-  load: FreightRef | null
+  /**
+   * EVERY load sharing this reference, not one of them.
+   *
+   * Owner's ruling, 2026-09-25: remittance matching aggregates by trip. This
+   * was `load: FreightRef | null`, a single row, and for a trip with several
+   * legs the map handed back whichever leg happened to be written last — so a
+   * trip's whole remitted total was compared against ONE leg's rate. On the
+   * 2026-09-13..19 week that produced seven loads reported `over` by four to
+   * eight times, $749.57 against $94.60 among them.
+   *
+   * Empty for `unmatched` and `unkeyable`, which have no freight at all.
+   */
+  loads: readonly FreightRef[]
+  /**
+   * THE DENOMINATOR: the sum of the group's rates.
+   *
+   * The whole of the 2026-09-25 ruling is that this is what `remittedCents` is
+   * compared against. Zero when nothing matched.
+   */
+  ratedCents: number
+  /**
+   * What each load in `loads` takes of `remittedCents`, in the same order.
+   *
+   * COMPUTED HERE SO THE WRITE CANNOT INVENT IT. For a matched group this is
+   * each load's own rate exactly — `apportionCents` with weights that sum to
+   * the total returns the weights — which is the ruling's "each at its own
+   * rate". For a short or over group it is the remitted total apportioned by
+   * rate, largest-remainder, so the parts sum to the cash that actually
+   * arrived and no cent belongs to nobody.
+   */
+  appliedCents: readonly number[]
+  /** `remittedCents - ratedCents`. Negative is short, positive is over. */
   deltaCents: number
 }
 
@@ -118,7 +150,15 @@ const ZERO: Record<MatchOutcome, number> = {
  */
 export function previewRemittance(
   reading: RemittanceReading,
-  freightByReference: ReadonlyMap<string, FreightRef>,
+  /**
+   * EVERY load per reference, not one.
+   *
+   * A trip with three legs has three Zebra loads carrying the same
+   * `referenceNumber`, and a `Map<string, FreightRef>` could only hold the last
+   * of them — silently, which is how a trip's total came to be compared against
+   * one leg's rate.
+   */
+  freightByReference: ReadonlyMap<string, readonly FreightRef[]>,
 ): Preview {
   const units = new Map<string, { key: RowKey; cents: number }>()
 
@@ -152,32 +192,54 @@ export function previewRemittance(
         outcome: 'unkeyable',
         key: unit.key,
         remittedCents: unit.cents,
-        load: null,
+        loads: [],
+        ratedCents: 0,
+        appliedCents: [],
         deltaCents: 0,
       })
       continue
     }
 
-    const load = freightByReference.get(reference) ?? null
-    if (!load) {
+    const group = freightByReference.get(reference) ?? []
+    if (group.length === 0) {
       lines.push({
         outcome: 'unmatched',
         key: unit.key,
         remittedCents: unit.cents,
-        load: null,
+        loads: [],
+        ratedCents: 0,
+        appliedCents: [],
         deltaCents: 0,
       })
       continue
     }
 
-    touched.add(load.id)
-    const delta = unit.cents - load.totalRevenueCents
+    for (const load of group) touched.add(load.id)
+
+    // ── THE DENOMINATOR IS THE GROUP, BY RULING ─────────────────────────
+    //
+    // Owner's ruling, 2026-09-25. A trip's remitted total is compared against
+    // the SUM of its legs' rates. Compared against one leg it read `over` by
+    // four to eight times on the first real week.
+    const ratedCents = group.reduce(
+      (sum, load) => sum + load.totalRevenueCents,
+      0,
+    )
+    const delta = unit.cents - ratedCents
 
     // CLOSED HISTORY IS DECIDED BEFORE THE MONEY IS COMPARED. Whether an
     // imported load was paid short is not a question this system is going to
     // act on, and reporting it as `short` would put it in a queue somebody is
     // expected to work.
-    const outcome: MatchOutcome = load.closedHistory
+    //
+    // ANY LEG CLOSED MAKES THE WHOLE GROUP CLOSED, and nothing is applied. A
+    // trip should not straddle the books cutover — its legs deliver in one
+    // week — but if one ever does, applying part of a trip's payment while
+    // excluding the rest produces a payment nobody can reconcile. Under-
+    // applying is the safe direction and it is VISIBLE: the cash lands in
+    // `unappliedCents` rather than disappearing.
+    const anyClosed = group.some((load) => load.closedHistory)
+    const outcome: MatchOutcome = anyClosed
       ? 'matched_closed_history'
       : delta === 0
         ? 'matched_exact'
@@ -189,7 +251,15 @@ export function previewRemittance(
       outcome,
       key: unit.key,
       remittedCents: unit.cents,
-      load,
+      loads: group,
+      ratedCents,
+      // Nothing is applied to closed history, by the rule above.
+      appliedCents: anyClosed
+        ? group.map(() => 0)
+        : apportionCents(
+            unit.cents,
+            group.map((load) => load.totalRevenueCents),
+          ),
       deltaCents: delta,
     })
   }

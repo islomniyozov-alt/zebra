@@ -58,6 +58,33 @@ neonConfig.webSocketConstructor ??= WebSocket
 neonConfig.poolQueryViaFetch = false
 
 const APPLY = process.argv.includes('--apply')
+/**
+ * RETIRE A PRIOR IMPORT OF THE SAME INVOICE AND WRITE IT AGAIN.
+ *
+ * `writeRemittance` is idempotent on `remittanceKey`, which is what stops a
+ * double payment — so a re-import after a CODE fix does nothing at all unless
+ * the earlier payment is retired first.
+ *
+ * WHY THIS EXISTS: the 2026-09-13..19 remittance was imported on 2026-09-25 by
+ * a matcher that compared a trip's whole remitted total against ONE leg's rate,
+ * and wrote one application carrying the trip total against that leg. Seven
+ * loads then settled as `over` by four to eight times. The ruling of the same
+ * day fixed the matcher; the rows it had already written have to be replaced.
+ *
+ * WHAT IT DOES, precisely:
+ *
+ *   the Payment           SOFT-deleted, `remittanceKey` cleared so the unique
+ *                         index frees up, `referenceNumber` left holding the
+ *                         invoice so the trail survives
+ *   its applications      removed — pure derived join rows with no soft delete
+ *   its accessorials      removed BY `sourceKey` PREFIX, which is the only
+ *                         handle: `LoadAccessorial` carries no payment FK
+ *
+ * THE PAYMENT IS NOT HARD-DELETED, because the standing rule is soft delete on
+ * anything financial. Clearing `remittanceKey` is what makes soft delete
+ * sufficient — without it the unique index would refuse the replacement.
+ */
+const REIMPORT = process.argv.includes('--reimport')
 const PRODUCTION = process.argv.includes('--production')
 const INVOICE = (() => {
   const at = process.argv.indexOf('--invoice')
@@ -211,26 +238,85 @@ async function main(): Promise<void> {
         billingStatus: true,
       },
     })
-    const freight = new Map<string, FreightRef>()
+    // EVERY LOAD PER REFERENCE, by the 2026-09-25 ruling. A `Map` of one
+    // silently kept whichever leg was written last, which is how a trip's total
+    // came to be compared against one leg's rate.
+    const freight = new Map<string, FreightRef[]>()
     for (const load of loads) {
       if (!load.referenceNumber) continue
-      freight.set(load.referenceNumber, {
+      const ref: FreightRef = {
         id: load.id,
         loadNumber: load.loadNumber,
         reference: load.referenceNumber,
         totalRevenueCents: load.totalRevenueCents,
         closedHistory: load.billingStatus === 'CLOSED_IN_DATATRUCK',
-      })
+      }
+      freight.set(load.referenceNumber, [
+        ...(freight.get(load.referenceNumber) ?? []),
+        ref,
+      ])
     }
+    // HOW MUCH THE GROUPING ACTUALLY DOES, measured rather than assumed: if no
+    // reference is shared, the ruling changes nothing and saying so is the
+    // honest report.
+    const shared = [...freight.values()].filter((g) => g.length > 1)
+    console.log(
+      `Groups:   ${shared.length} reference(s) carry more than one load` +
+        (shared.length > 0
+          ? `, largest ${Math.max(...shared.map((g) => g.length))}`
+          : ''),
+    )
     console.log(
       `Freight:  ${references.length} reference(s) named, ${freight.size} found`,
     )
 
     let result: Awaited<ReturnType<typeof writeRemittance>> | null = null
+    const retired: string[] = []
 
     await db
       .$transaction(
         async (tx) => {
+          if (REIMPORT) {
+            const prior = await tx.payment.findFirst({
+              where: {
+                organizationId: tenancy.organizationId,
+                remittanceKey: INVOICE,
+              },
+              select: { id: true, amountCents: true },
+            })
+            if (!prior) {
+              retired.push(
+                'no prior import of this invoice — nothing to retire',
+              )
+            } else {
+              const apps = await tx.paymentLoadApplication.deleteMany({
+                where: { paymentId: prior.id },
+              })
+              const charges = await tx.loadAccessorial.deleteMany({
+                where: {
+                  organizationId: tenancy.organizationId,
+                  sourceKey: { startsWith: `${INVOICE}:` },
+                },
+              })
+              await tx.payment.update({
+                where: { id: prior.id },
+                data: {
+                  deletedAt: new Date(),
+                  // CLEARED so the unique index frees up for the replacement.
+                  // `referenceNumber` still holds the invoice, so the trail is
+                  // not lost by doing this.
+                  remittanceKey: null,
+                  notes: `Retired 2026-09-26: re-imported after the trip-aggregation ruling.`,
+                },
+              })
+              retired.push(
+                `payment ${prior.id} soft-deleted, remittanceKey cleared`,
+                `${apps.count} application(s) removed`,
+                `${charges.count} accessorial(s) removed by sourceKey prefix`,
+              )
+            }
+          }
+
           result = await writeRemittance(tx, {
             organizationId: tenancy.organizationId,
             companyId: company.id,
@@ -263,6 +349,11 @@ async function main(): Promise<void> {
       `  closed history (deliberately untouched)  ${counts.matched_closed_history}`,
     )
     if (counts.unkeyable > 0) console.log(`  unkeyable    ${counts.unkeyable}`)
+
+    if (retired.length > 0) {
+      heading(APPLY ? 'RETIRED THE PRIOR IMPORT' : 'WOULD RETIRE')
+      for (const line of retired) console.log(`  ${line}`)
+    }
 
     heading(APPLY ? 'WRITTEN' : 'WOULD WRITE — nothing committed')
     console.log(`  payment              ${written.paymentId}`)

@@ -234,6 +234,71 @@ async function main(): Promise<void> {
       `  books-own loads whose POD falls in the gap that opens: ${lateOnLastDay}`,
     )
 
+    // ── WHY A LOAD READS AS `over` ────────────────────────────────────────
+    //
+    // `--why-over <loadNumber>...` prints, for each load, its own money and
+    // every remittance row keyed to its reference.
+    //
+    // The first explanation offered for the seven over-lines on 2026-09-13..19
+    // was "a trip's total compared against one leg of several". The grouping fix
+    // then measured that NO Zebra load shares a reference with another — so that
+    // mechanism cannot be it, and the fix, while correct in principle, is inert
+    // on this data. This is the instrument that says what the cause actually is.
+    const whyAt = process.argv.indexOf('--why-over')
+    if (whyAt !== -1) {
+      const numbers = process.argv
+        .slice(whyAt + 1)
+        .filter((a) => a.startsWith('DT-'))
+      const { readRemittance } = await import('@/lib/amazon/remittance')
+      const { keyFor } = await import('@/lib/amazon/remittance-preview')
+      const book = process.argv.find(
+        (a) => a.includes('corpus/amazon') && a.endsWith('.xlsx'),
+      )
+      if (!book) throw new Error('Name the remittance workbook too.')
+      const out = await readRemittance(new Uint8Array(readFileSync(book)))
+      if (!out.ok) throw new Error('the remittance workbook was refused')
+
+      heading(`WHY THESE READ AS over — ${numbers.join(', ')}`)
+      const subjects = await db.load.findMany({
+        where: { loadNumber: { in: numbers } },
+        select: {
+          loadNumber: true,
+          referenceNumber: true,
+          linehaulCents: true,
+          accessorialsCents: true,
+          totalRevenueCents: true,
+          paymentApplications: { select: { amountCents: true } },
+        },
+      })
+      for (const l of subjects) {
+        const applied = l.paymentApplications.reduce(
+          (sum, a) => sum + a.amountCents,
+          0,
+        )
+        console.log(`\n  ${l.loadNumber}  reference ${l.referenceNumber}`)
+        console.log(
+          `      linehaul ${money(l.linehaulCents)}  accessorials ${money(l.accessorialsCents)}  total ${money(l.totalRevenueCents)}`,
+        )
+        console.log(`      applied from the remittance: ${money(applied)}`)
+        const rows = out.reading.rows.filter((r) => {
+          const k = keyFor(r)
+          const ref =
+            k.branch === 'tour' || k.branch === 'load_under_trip'
+              ? k.tripId
+              : k.branch === 'single_load'
+                ? k.loadId
+                : null
+          return ref !== null && ref === l.referenceNumber
+        })
+        console.log(`      remittance rows on that reference: ${rows.length}`)
+        for (const r of rows) {
+          console.log(
+            `         ${r.itemType.padEnd(18)} trip=${r.tripId ?? '-'}  load=${r.loadId ?? '-'}  gross=${money(r.grossCents)}`,
+          )
+        }
+      }
+    }
+
     console.log('\nEVERY STATEMENT ABOVE IS A READ. Nothing was changed.')
   } finally {
     await db.$disconnect()

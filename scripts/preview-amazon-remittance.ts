@@ -115,16 +115,22 @@ async function main(): Promise<void> {
         },
       })
 
-      const freight = new Map<string, FreightRef>()
+      // EVERY LOAD PER REFERENCE, by the 2026-09-25 ruling: a trip's legs share
+      // one reference, and a Map of one kept whichever was written last — so a
+      // trip's total was compared against a single leg's rate.
+      const freight = new Map<string, FreightRef[]>()
       for (const load of loads) {
         if (!load.referenceNumber) continue
-        freight.set(load.referenceNumber, {
-          id: load.id,
-          loadNumber: load.loadNumber,
-          reference: load.referenceNumber,
-          totalRevenueCents: load.totalRevenueCents,
-          closedHistory: load.billingStatus === 'CLOSED_IN_DATATRUCK',
-        })
+        freight.set(load.referenceNumber, [
+          ...(freight.get(load.referenceNumber) ?? []),
+          {
+            id: load.id,
+            loadNumber: load.loadNumber,
+            reference: load.referenceNumber,
+            totalRevenueCents: load.totalRevenueCents,
+            closedHistory: load.billingStatus === 'CLOSED_IN_DATATRUCK',
+          },
+        ])
       }
 
       const preview = previewRemittance(reading, freight)

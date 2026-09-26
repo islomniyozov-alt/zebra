@@ -63,7 +63,8 @@ export interface RemittanceWriteInput {
   companyId: string
   customerId: string
   reading: RemittanceReading
-  freightByReference: ReadonlyMap<string, FreightRef>
+  /** EVERY load per reference. A trip's legs share one reference. */
+  freightByReference: ReadonlyMap<string, readonly FreightRef[]>
   receivedAt: Date
   recordedByUserId?: string | null
 }
@@ -175,7 +176,7 @@ export async function writeRemittance(
   // `unmatched`, which has no load to apply to, and `unkeyable`.
   const live = preview.lines.filter(
     (line) =>
-      line.load !== null &&
+      line.loads.length > 0 &&
       (line.outcome === 'matched_exact' ||
         line.outcome === 'short' ||
         line.outcome === 'over'),
@@ -214,21 +215,53 @@ export async function writeRemittance(
   let accessorialsWritten = 0
 
   for (const line of live) {
-    const load = line.load!
-    await tx.paymentLoadApplication.create({
-      data: {
-        paymentId: payment.id,
-        loadId: load.id,
-        organizationId: input.organizationId,
-        amountCents: line.remittedCents,
-      },
-    })
+    // ── ONE APPLICATION PER LEG, EACH ITS OWN SHARE ─────────────────────
+    //
+    // Owner's ruling, 2026-09-25. This wrote ONE application carrying the
+    // group's whole `remittedCents` against ONE load — so a trip's total landed
+    // on a single leg, and the settlement engine then compared that total
+    // against that leg's rate and called it `over`. Seven loads on the first
+    // real week, $749.57 against $94.60 among them.
+    //
+    // The engine's per-load comparison was right the whole time. This was the
+    // wrong denominator, written into the data.
+    //
+    // `appliedCents` comes from the preview so the split has ONE definition:
+    // for a matched group it is each load's own rate exactly, and for a short or
+    // over group it is the arrived cash apportioned by rate. Either way the
+    // parts sum to `remittedCents`.
+    for (const [index, load] of line.loads.entries()) {
+      await tx.paymentLoadApplication.create({
+        data: {
+          paymentId: payment.id,
+          loadId: load.id,
+          organizationId: input.organizationId,
+          amountCents: line.appliedCents[index] ?? 0,
+        },
+      })
+    }
 
     // ── THE CHARGES THAT ARRIVED WITH THE CASH ──────────────────────────
     //
     // Column-list driven, so a Detention or an Others that has been zero for
     // six weeks needs no code on the day it is not. Zero columns write
     // nothing: a zero accessorial would claim somebody checked and found none.
+    //
+    // ── WHICH LEG A TRIP'S CHARGE LANDS ON ──────────────────────────────
+    //
+    // The FIRST, and it is arbitrary because the data gives no better answer. A
+    // remittance row under a trip carries its own Amazon load id, but Zebra's
+    // legs all carry the TRIP as their `referenceNumber` — there is no column
+    // pairing one to the other, so "which leg had the detention" is not a
+    // question these two files can answer.
+    //
+    // NOT APPORTIONED. A detention charge happened at one stop; splitting it
+    // across three legs would invent three charges that never existed and make
+    // each one unreconcilable against the remittance that named it.
+    //
+    // The `sourceKey` carries the row's own trip-and-load identity, so every
+    // charge stays distinct and greppable back to its line whichever leg holds
+    // it. Stated here rather than left to be discovered.
     const reference =
       line.key.branch === 'tour' || line.key.branch === 'load_under_trip'
         ? line.key.tripId
@@ -253,7 +286,7 @@ export async function writeRemittance(
 
         await tx.loadAccessorial.create({
           data: {
-            loadId: load.id,
+            loadId: line.loads[0]!.id,
             organizationId: input.organizationId,
             type: ACCESSORIAL_TYPE[column] ?? 'OTHER',
             amountCents: cents,

@@ -288,43 +288,51 @@ describe('the five outcomes', () => {
   const freight = new Map([
     [
       'L1',
-      {
-        id: '1',
-        loadNumber: '1',
-        reference: 'L1',
-        totalRevenueCents: 10000,
-        closedHistory: false,
-      },
+      [
+        {
+          id: '1',
+          loadNumber: '1',
+          reference: 'L1',
+          totalRevenueCents: 10000,
+          closedHistory: false,
+        },
+      ],
     ],
     [
       'L2',
-      {
-        id: '2',
-        loadNumber: '2',
-        reference: 'L2',
-        totalRevenueCents: 10000,
-        closedHistory: false,
-      },
+      [
+        {
+          id: '2',
+          loadNumber: '2',
+          reference: 'L2',
+          totalRevenueCents: 10000,
+          closedHistory: false,
+        },
+      ],
     ],
     [
       'L3',
-      {
-        id: '3',
-        loadNumber: '3',
-        reference: 'L3',
-        totalRevenueCents: 10000,
-        closedHistory: false,
-      },
+      [
+        {
+          id: '3',
+          loadNumber: '3',
+          reference: 'L3',
+          totalRevenueCents: 10000,
+          closedHistory: false,
+        },
+      ],
     ],
     [
       'L4',
-      {
-        id: '4',
-        loadNumber: '4',
-        reference: 'L4',
-        totalRevenueCents: 99999,
-        closedHistory: true,
-      },
+      [
+        {
+          id: '4',
+          loadNumber: '4',
+          reference: 'L4',
+          totalRevenueCents: 99999,
+          closedHistory: true,
+        },
+      ],
     ],
   ])
 
@@ -342,7 +350,7 @@ describe('the five outcomes', () => {
   // act on a discrepancy in freight another system settled.
   it('never reports closed history as short, however far off the money is', () => {
     const preview = previewRemittance(reading, freight)
-    const line = preview.lines.find((l) => l.load?.reference === 'L4')
+    const line = preview.lines.find((l) => l.loads[0]?.reference === 'L4')
     expect(line?.outcome).toBe('matched_closed_history')
     expect(line?.deltaCents).toBeLessThan(0)
   })
@@ -350,7 +358,7 @@ describe('the five outcomes', () => {
   it('reports freight it cannot find as unmatched, never creating it', () => {
     const preview = previewRemittance(reading, new Map())
     expect(preview.counts.unmatched).toBe(4)
-    expect(preview.lines.every((line) => line.load === null)).toBe(true)
+    expect(preview.lines.every((line) => line.loads.length === 0)).toBe(true)
   })
 })
 
