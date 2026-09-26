@@ -107,6 +107,46 @@ export function isTourBase(itemType: string, column: string): boolean {
   return column === 'Base Rate' && itemType === TOUR_BASE_ITEM
 }
 
+/**
+ * WHETHER THIS TRIP'S BASE IS MISSING FROM THE RATE, OR ALREADY IN IT.
+ *
+ * Owner's ruling, 2026-09-26, option 1: book the tour base ONLY where
+ * `rate + base == remitted`.
+ *
+ * ── WHY IT IS CONDITIONAL ─────────────────────────────────────────────────
+ *
+ * Booking every completed tour's base unconditionally was tried and measured. Of
+ * the 39 trips carrying one on the 2026-09-13..19 week:
+ *
+ *   29  the base is ALREADY in the rate — `linehaul == remitted` exactly
+ *    5  the base is MISSING — the gap IS the base, exactly
+ *    0  neither
+ *
+ * So Datatruck includes it for most trips and omits it for a few, and a blanket
+ * rule overstated 29 loads by the whole base and held 29 lines that were right.
+ * The zero in "neither" is what makes a conditional rule safe rather than a
+ * heuristic: the two populations do not overlap and nothing falls between them.
+ *
+ * ── IT IS AN EQUALITY, NOT A TOLERANCE ────────────────────────────────────
+ *
+ * `rate + base == remitted` to the cent. A near-miss is NOT a tour base to book
+ * — it is a genuine short or over that somebody has to look at, and rounding it
+ * into a match would be this system deciding a discrepancy was not one. That is
+ * why DT-016422 (over by $272.29) and DT-016453 (over by $0.26) stay over: the
+ * $0.26 is exactly the sort of thing a tolerance would have swallowed.
+ */
+export function booksTourBase(input: {
+  /** What the remittance paid for the whole trip. */
+  remittedCents: number
+  /** The trip's rate as Zebra has it — the sum of the group's revenue. */
+  ratedCents: number
+  /** The tour base this remittance carries, zero when there is none. */
+  tourBaseCents: number
+}): boolean {
+  if (input.tourBaseCents <= 0) return false
+  return input.remittedCents === input.ratedCents + input.tourBaseCents
+}
+
 export interface RemittanceWriteInput {
   organizationId: string
   companyId: string
@@ -318,6 +358,31 @@ export async function writeRemittance(
           ? line.key.loadId
           : ''
 
+    // ── IS THIS TRIP'S BASE MISSING FROM THE RATE? ────────────────────
+    //
+    // Asked ONCE for the whole group, before any row is written, because it is a
+    // question about the trip's arithmetic and not about an individual row.
+    // `line.ratedCents` is the rate as Zebra has it and `line.remittedCents` is
+    // what arrived, both already computed by the preview.
+    const tourBaseCents = reading.rows
+      .filter((row) => {
+        const k = keyFor(row)
+        const ref =
+          k.branch === 'tour' || k.branch === 'load_under_trip'
+            ? k.tripId
+            : k.branch === 'single_load'
+              ? k.loadId
+              : ''
+        return ref === reference && isTourBase(row.itemType, 'Base Rate')
+      })
+      .reduce((sum, row) => sum + (row.money['Base Rate'] ?? 0), 0)
+
+    const bookTheBase = booksTourBase({
+      remittedCents: line.remittedCents,
+      ratedCents: line.ratedCents,
+      tourBaseCents,
+    })
+
     for (const row of reading.rows) {
       const rowKey = keyFor(row)
       const rowReference =
@@ -329,8 +394,10 @@ export async function writeRemittance(
       if (rowReference !== reference) continue
 
       for (const column of MONEY_COLUMNS) {
-        // THE TOUR BASE IS THE ONE EXCEPTION, by the 2026-09-26 ruling.
-        const tourBase = isTourBase(row.itemType, column)
+        // THE TOUR BASE IS THE ONE EXCEPTION, by the 2026-09-26 ruling — and
+        // only where the trip's rate is actually short of it. `bookTheBase` is
+        // the group's arithmetic; `isTourBase` is this row's shape. Both.
+        const tourBase = isTourBase(row.itemType, column) && bookTheBase
         if (NOT_A_CHARGE.has(column) && !tourBase) continue
         const cents = row.money[column] ?? 0
         if (cents === 0) continue

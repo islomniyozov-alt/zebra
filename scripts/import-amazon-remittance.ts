@@ -231,47 +231,17 @@ async function main(): Promise<void> {
           .filter((value): value is string => value !== null),
       ),
     ]
-    const loads = await db.load.findMany({
-      where: { deletedAt: null, referenceNumber: { in: references } },
-      select: {
-        id: true,
-        loadNumber: true,
-        referenceNumber: true,
-        totalRevenueCents: true,
-        billingStatus: true,
-      },
-    })
-    // EVERY LOAD PER REFERENCE, by the 2026-09-25 ruling. A `Map` of one
-    // silently kept whichever leg was written last, which is how a trip's total
-    // came to be compared against one leg's rate.
-    const freight = new Map<string, FreightRef[]>()
-    for (const load of loads) {
-      if (!load.referenceNumber) continue
-      const ref: FreightRef = {
-        id: load.id,
-        loadNumber: load.loadNumber,
-        reference: load.referenceNumber,
-        totalRevenueCents: load.totalRevenueCents,
-        closedHistory: load.billingStatus === 'CLOSED_IN_DATATRUCK',
-      }
-      freight.set(load.referenceNumber, [
-        ...(freight.get(load.referenceNumber) ?? []),
-        ref,
-      ])
-    }
-    // HOW MUCH THE GROUPING ACTUALLY DOES, measured rather than assumed: if no
-    // reference is shared, the ruling changes nothing and saying so is the
-    // honest report.
-    const shared = [...freight.values()].filter((g) => g.length > 1)
-    console.log(
-      `Groups:   ${shared.length} reference(s) carry more than one load` +
-        (shared.length > 0
-          ? `, largest ${Math.max(...shared.map((g) => g.length))}`
-          : ''),
-    )
-    console.log(
-      `Freight:  ${references.length} reference(s) named, ${freight.size} found`,
-    )
+    // ── THE FREIGHT IS READ INSIDE THE TRANSACTION, AFTER THE RETIRE ──────
+    //
+    // It used to be read HERE, before the transaction opened — and on a
+    // `--reimport` that is the state the PREVIOUS import left behind. The
+    // conditional tour-base predicate compares the remitted total against the
+    // load's rate, so a rate still carrying the last run's tour base made
+    // `rate + base == remitted` false for every trip and nothing was booked:
+    // 202 accessorials where 207 were expected, and seven loads still `over`.
+    //
+    // The comparison has to be against the state the write STARTS from, so the
+    // query moved below.
 
     let result: Awaited<ReturnType<typeof writeRemittance>> | null = null
     const retired: string[] = []
@@ -319,6 +289,48 @@ async function main(): Promise<void> {
               )
             }
           }
+
+          const loads = await tx.load.findMany({
+            where: { deletedAt: null, referenceNumber: { in: references } },
+            select: {
+              id: true,
+              loadNumber: true,
+              referenceNumber: true,
+              totalRevenueCents: true,
+              billingStatus: true,
+            },
+          })
+          // EVERY LOAD PER REFERENCE, by the 2026-09-25 ruling. A `Map` of one
+          // silently kept whichever leg was written last, which is how a trip's total
+          // came to be compared against one leg's rate.
+          const freight = new Map<string, FreightRef[]>()
+          for (const load of loads) {
+            if (!load.referenceNumber) continue
+            const ref: FreightRef = {
+              id: load.id,
+              loadNumber: load.loadNumber,
+              reference: load.referenceNumber,
+              totalRevenueCents: load.totalRevenueCents,
+              closedHistory: load.billingStatus === 'CLOSED_IN_DATATRUCK',
+            }
+            freight.set(load.referenceNumber, [
+              ...(freight.get(load.referenceNumber) ?? []),
+              ref,
+            ])
+          }
+          // HOW MUCH THE GROUPING ACTUALLY DOES, measured rather than assumed: if no
+          // reference is shared, the ruling changes nothing and saying so is the
+          // honest report.
+          const shared = [...freight.values()].filter((g) => g.length > 1)
+          console.log(
+            `Groups:   ${shared.length} reference(s) carry more than one load` +
+              (shared.length > 0
+                ? `, largest ${Math.max(...shared.map((g) => g.length))}`
+                : ''),
+          )
+          console.log(
+            `Freight:  ${references.length} reference(s) named, ${freight.size} found`,
+          )
 
           result = await writeRemittance(tx, {
             organizationId: tenancy.organizationId,

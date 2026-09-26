@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   TOUR_BASE_LABEL,
+  booksTourBase,
   isTourBase,
   sourceKeyFor,
 } from '@/lib/amazon/remittance-write'
@@ -54,6 +55,108 @@ describe('which base rate is a charge', () => {
   })
 })
 
+describe('whether the base is missing from the rate or already in it', () => {
+  // ── THE MEASUREMENT THIS RULE EXISTS BECAUSE OF ───────────────────────
+  //
+  // Booking every completed tour's base was tried. Of the 39 trips carrying one
+  // on the 2026-09-13..19 week: 29 already had it in the rate, 5 were missing
+  // it, and ZERO were neither. A blanket rule overstated those 29 by the whole
+  // base and held 29 lines that were correct.
+  //
+  // The zero is what makes a conditional rule safe rather than a heuristic: the
+  // populations do not overlap and nothing falls between them.
+
+  it('BOOKS it when the rate is short by exactly the base', () => {
+    // DT-016233: rate $94.60, base $654.97, remitted $749.57.
+    expect(
+      booksTourBase({
+        remittedCents: 74_957,
+        ratedCents: 9_460,
+        tourBaseCents: 65_497,
+      }),
+    ).toBe(true)
+  })
+
+  it('LEAVES IT when the rate already contains it', () => {
+    // 29 of the 34. `linehaul == remitted` and the base is inside it, so
+    // booking it again overstates the load by the whole base.
+    expect(
+      booksTourBase({
+        remittedCents: 74_957,
+        ratedCents: 74_957,
+        tourBaseCents: 65_497,
+      }),
+    ).toBe(false)
+  })
+
+  it('LEAVES IT when there is no tour base at all', () => {
+    // A single load with no trip. DT-016422 is over by $272.29 and must stay
+    // over rather than acquiring a base it never had.
+    expect(
+      booksTourBase({
+        remittedCents: 106_271,
+        ratedCents: 79_042,
+        tourBaseCents: 0,
+      }),
+    ).toBe(false)
+  })
+
+  // ── AN EQUALITY, NOT A TOLERANCE ──────────────────────────────────────
+  it('LEAVES IT when the sum is a cent out, in either direction', () => {
+    // A near-miss is a genuine short or over for somebody to look at, not a
+    // base to book. DT-016453 is over by $0.26 — exactly the size of thing a
+    // tolerance would have swallowed.
+    expect(
+      booksTourBase({
+        remittedCents: 74_958,
+        ratedCents: 9_460,
+        tourBaseCents: 65_497,
+      }),
+    ).toBe(false)
+    expect(
+      booksTourBase({
+        remittedCents: 74_956,
+        ratedCents: 9_460,
+        tourBaseCents: 65_497,
+      }),
+    ).toBe(false)
+  })
+
+  // ── THE ZERO GUARD, TESTED WHERE IT IS THE ONLY THING STOPPING IT ─────
+  //
+  // The first version of this test used `rated 100, remitted 100, base -1`,
+  // which the EQUALITY already rejects — so removing the guard changed nothing
+  // and `watch-guard` reported THE BREAK DID NOT FIRE. A test that passes for a
+  // reason other than the one it names proves nothing, which is the whole point
+  // of breaking it on purpose.
+  //
+  // These two cases are the discriminating ones: in each, the equality HOLDS and
+  // only the guard refuses.
+  it('LEAVES IT for a zero base even when the arithmetic would agree', () => {
+    // No tour on the trip at all: `remitted == rated + 0` is trivially true, and
+    // without the guard every matched load would "book" a zero accessorial.
+    expect(
+      booksTourBase({
+        remittedCents: 74_957,
+        ratedCents: 74_957,
+        tourBaseCents: 0,
+      }),
+    ).toBe(false)
+  })
+
+  it('LEAVES IT for a negative base even when the arithmetic would agree', () => {
+    // `99 === 100 + (-1)` holds. A negative base is a reading error, not a
+    // credit to book against a load.
+    expect(
+      booksTourBase({
+        remittedCents: 99,
+        ratedCents: 100,
+        tourBaseCents: -1,
+      }),
+    ).toBe(false)
+  })
+})
+
 describe('the tour base in the source key', () => {
   const tour: RowKey = { branch: 'tour', tripId: 'T-1125DMVTW' }
   const INVOICE = 'AZNG4464389DE99C487FB425AC77433D22DF'
@@ -90,7 +193,9 @@ describe('what the writer does with it', () => {
     const source = await import('node:fs').then((fs) =>
       fs.readFileSync('src/lib/amazon/remittance-write.ts', 'utf8'),
     )
-    expect(source).toContain('isTourBase(row.itemType, column)')
+    expect(source).toContain('isTourBase(row.itemType, column) && bookTheBase')
+    // The group's arithmetic is asked ONCE per line, before any row is written.
+    expect(source).toContain('const bookTheBase = booksTourBase({')
     // Only the tour base adds to revenue; the rest is a breakdown of money the
     // rate already contains, and counting it sent all 139 units short.
     expect(source).toContain('isBillable: tourBase,')
