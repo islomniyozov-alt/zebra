@@ -491,6 +491,26 @@ export function computeDriverSettlement(
   for (const load of input.loads) {
     const decision = grossFor(load)
     if (!decision.settles) {
+      // ── THE TARIFF IS KNOWN EVEN WHEN EVERY LINE IS HELD ──────────────
+      //
+      // Owner's ruling, 2026-09-26: the statement's tariff label comes from the
+      // FROZEN RULE. It was only ever set after a line was successfully PAID,
+      // further down — so a driver whose whole week is held got a statement with
+      // no tariff on it at all.
+      //
+      // MEASURED: ST-005533's driver has eight lines and every one is held for
+      // `no_remittance`, and the diff against Datatruck read
+      // `statement "38% from gross"  draft null`. The rule was there the whole
+      // time; nothing had asked it.
+      //
+      // IT LOOKS THE RULE UP AND BLOCKS NOTHING. The `no_pay_rule` blocker below
+      // is deliberately not raised here: a held line with no rule in force is
+      // not a person who would be paid nothing — the line is not being paid
+      // either way — and blocking on it would stop a driver whose only problem
+      // is that Amazon has not sent the money yet.
+      const heldRule = ruleInForce(input.payRules, load.delDate)
+      if (heldRule) payTariffLabel ??= tariffLabel(heldRule)
+
       held.push({
         loadId: load.id,
         loadNumber: load.loadNumber,

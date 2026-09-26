@@ -257,6 +257,20 @@ const INSPECTION_READERS = [
   // untouched and the report names the lines it applied to, so the diff cannot
   // quietly launder the hold the week depends on.
   'diff-statement-against-draft.ts',
+  // ADDED 2026-09-26, read-only. Parses every statement in a folder for one
+  // period and compares each line against Zebra: does the load exist, does its
+  // recorded gross match.
+  //
+  // THE TIE IS A HARD GATE, by ruling. A statement whose parsed lines do not
+  // reproduce its own printed gross, mileage AND amount is reported UNPARSED and
+  // contributes nothing — never partially believed, never repaired, never
+  // guessed at. That is what makes a bulk parse admissible at all next to the
+  // hand-transcribed fixtures: a wrong parse cannot reach the comparison, so the
+  // failure mode is a missing answer rather than a false one.
+  //
+  // It also refuses to count a re-download twice — the folder holds 23 files for
+  // 18 settlements — and reports any duplicate whose twin parses differently.
+  'bulk-parse-statements.ts',
 ]
 
 /**

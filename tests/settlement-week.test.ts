@@ -744,6 +744,55 @@ describe('YTD, when there is no opening balance', () => {
 })
 
 describe('the tariff label', () => {
+  // ── IT SURVIVES A WEEK WHERE NOTHING IS PAID ─────────────────────────
+  //
+  // Owner's ruling, 2026-09-26. The label was only set after a line was
+  // successfully PAID, so a driver whose whole week is held got a statement with
+  // no tariff on it at all.
+  //
+  // MEASURED: ST-005533's driver has eight lines and every one is held for
+  // `no_remittance`. The diff against Datatruck read
+  // `statement "38% from gross"  draft null` — the rule was there the whole time
+  // and nothing had asked it.
+  const heldWeek = (payRules: PayRule[]) => {
+    const base = inputFor(DATATRUCK_STATEMENTS[5]!)
+    const load: SettleableLoad = {
+      id: 'held-tariff',
+      loadNumber: 'AMZ-HELD',
+      companyId: 'co-1',
+      companyName: 'Held Co',
+      puPlace: 'A',
+      delPlace: 'B',
+      puDate: new Date(base.period.start),
+      delDate: new Date(base.period.end),
+      rateCents: 200_000,
+      milesHundredths: 10_000,
+      // Direct freight with no remittance: the engine holds the line.
+      direct: { outcome: 'none', remittedCents: null, confirmedCents: null },
+    }
+    return computeDriverSettlement({ ...base, loads: [load], payRules })
+  }
+
+  it('is set from the frozen rule even when EVERY line is held', () => {
+    const settlement = heldWeek([
+      percentRule(3800, DATATRUCK_STATEMENTS[5]!.periodStart),
+    ])
+    expect(settlement.lines).toHaveLength(0)
+    expect(settlement.held).toHaveLength(1)
+    // THE POINT. Nothing was paid and the tariff is still on the statement.
+    expect(settlement.payTariffLabel).toBe('38% from gross')
+  })
+
+  it('blocks nobody for a held line with no rule in force', () => {
+    // The `no_pay_rule` blocker is deliberately NOT raised on the held path: a
+    // held line is not being paid either way, and blocking on it would stop a
+    // driver whose only problem is that Amazon has not sent the money yet.
+    const settlement = heldWeek([])
+    expect(settlement.held).toHaveLength(1)
+    expect(settlement.blockers).toHaveLength(0)
+    expect(settlement.payTariffLabel).toBeNull()
+  })
+
   it('is built from the rule, never stored beside it', () => {
     expect(tariffLabel(percentRule(8800, Date.UTC(2026, 7, 9)))).toBe(
       '88% from gross',
