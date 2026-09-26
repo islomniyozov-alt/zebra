@@ -299,6 +299,97 @@ async function main(): Promise<void> {
       }
     }
 
+    // ── IS THE TOUR BASE ALREADY INSIDE `Load pay`? ─────────────────────
+    //
+    // `--tour-base <workbook>` answers the question the blanket ruling turns on.
+    // Booking every TOUR - COMPLETED base as additional revenue made 5 loads
+    // match and 29 go SHORT, which says the base was already in the rate for
+    // those 29. This counts the two populations instead of guessing which.
+    //
+    // For every trip carrying a completed tour: the remitted total, the load's
+    // linehaul as Datatruck set it, and the tour base. If linehaul already
+    // equals the remitted total the base is inside it; if the gap IS the base,
+    // it is missing.
+    if (process.argv.includes('--tour-base')) {
+      const { readRemittance } = await import('@/lib/amazon/remittance')
+      const { keyFor } = await import('@/lib/amazon/remittance-preview')
+      const book = process.argv.find(
+        (a) => a.includes('corpus/amazon') && a.endsWith('.xlsx'),
+      )
+      if (!book) throw new Error('Name the remittance workbook.')
+      const out = await readRemittance(new Uint8Array(readFileSync(book)))
+      if (!out.ok) throw new Error('the remittance workbook was refused')
+
+      interface Trip {
+        remitted: number
+        tourBase: number
+      }
+      const trips = new Map<string, Trip>()
+      for (const row of out.reading.rows) {
+        const k = keyFor(row)
+        const ref =
+          k.branch === 'tour' || k.branch === 'load_under_trip'
+            ? k.tripId
+            : k.branch === 'single_load'
+              ? k.loadId
+              : null
+        if (ref === null) continue
+        const t = trips.get(ref) ?? { remitted: 0, tourBase: 0 }
+        t.remitted += row.grossCents
+        if (row.itemType === 'TOUR - COMPLETED') {
+          t.tourBase += row.money['Base Rate'] ?? 0
+        }
+        trips.set(ref, t)
+      }
+
+      const withTour = [...trips].filter(([, t]) => t.tourBase > 0)
+      const subjects = await db.load.findMany({
+        where: { referenceNumber: { in: withTour.map(([ref]) => ref) } },
+        select: {
+          loadNumber: true,
+          referenceNumber: true,
+          linehaulCents: true,
+        },
+      })
+      const byRef = new Map(subjects.map((l) => [l.referenceNumber ?? '', l]))
+
+      heading(`TOUR BASE: ALREADY IN THE RATE, OR MISSING FROM IT?`)
+      let already = 0
+      let missing = 0
+      let neither = 0
+      const neitherRows: string[] = []
+      for (const [ref, t] of withTour) {
+        const load = byRef.get(ref)
+        if (!load) continue
+        if (load.linehaulCents === t.remitted) {
+          already++
+          continue
+        }
+        if (t.remitted - load.linehaulCents === t.tourBase) {
+          missing++
+          continue
+        }
+        neither++
+        neitherRows.push(
+          `    ${load.loadNumber}  remitted ${money(t.remitted)}` +
+            `  linehaul ${money(load.linehaulCents)}` +
+            `  tour base ${money(t.tourBase)}` +
+            `  gap ${money(t.remitted - load.linehaulCents)}`,
+        )
+      }
+      console.log(`  trips carrying a completed tour: ${withTour.length}`)
+      console.log(
+        `  base ALREADY in the rate (linehaul == remitted):        ${already}`,
+      )
+      console.log(
+        `  base MISSING from the rate (gap == the tour base):      ${missing}`,
+      )
+      console.log(
+        `  neither — the gap is something else:                    ${neither}`,
+      )
+      for (const line of neitherRows.slice(0, 15)) console.log(line)
+    }
+
     console.log('\nEVERY STATEMENT ABOVE IS A READ. Nothing was changed.')
   } finally {
     await db.$disconnect()

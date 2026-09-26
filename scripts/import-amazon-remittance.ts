@@ -3,7 +3,10 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { createPrismaClient } from '@/lib/db'
 import { readRemittance } from '@/lib/amazon/remittance'
 import { keyFor, type FreightRef } from '@/lib/amazon/remittance-preview'
-import { writeRemittance } from '@/lib/amazon/remittance-write'
+import {
+  REMITTANCE_IMPORT_TIMEOUT_MS,
+  writeRemittance,
+} from '@/lib/amazon/remittance-write'
 import { assertTenancy } from './datatruck-tenancy'
 
 // ---------------------------------------------------------------------------
@@ -329,7 +332,7 @@ async function main(): Promise<void> {
           })
           if (!APPLY) throw new Rehearsal('dry run')
         },
-        { timeout: 120_000 },
+        { timeout: REMITTANCE_IMPORT_TIMEOUT_MS },
       )
       .catch((error: unknown) => {
         if (error instanceof Rehearsal) return
