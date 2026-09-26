@@ -41,6 +41,9 @@ const nameKey = (raw: string) => raw.trim().replace(/\s+/g, ' ').toUpperCase()
 /** The driver name the preview could not resolve. */
 const DRIVER_NAMES = [
   'JULIA ROSE HALL',
+  // A fifth payee candidate, found by the 9/6..9/12 statement parse rather than
+  // by the candidate scan — whose regex tested `logistics` and not `logistic`.
+  'TJK logistic',
   'CANER GUNAL',
   'GUNAL BENER',
   'BENER GUNAL',

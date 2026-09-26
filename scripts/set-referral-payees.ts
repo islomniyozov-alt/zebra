@@ -51,7 +51,17 @@ const APPLY = process.argv.includes('--apply')
 const PRODUCTION = process.argv.includes('--production')
 
 /** Datatruck driver ids, by ruling. Not a pattern — a list of four. */
-const PAYEE_EXTERNAL_IDS = ['119', '136', '866', '803'] as const
+const PAYEE_EXTERNAL_IDS = [
+  '119',
+  '136',
+  '866',
+  '803',
+  // ADDED 2026-09-26. `TJK logistic`, Datatruck 28, unit 2400, 90% from gross —
+  // found by the 9/6..9/12 statement parse and NOT by the candidate scan, whose
+  // company-suffix regex tested `logistics` and not `logistic`. The instrument
+  // missed it; the artefact did not.
+  '28',
+] as const
 
 const ORGANIZATION_SLUG = 'zebra'
 const PRODUCTION_ORGANIZATION_ID = 'cmsbsc82y0000nsvsa6yffuyh'
