@@ -462,11 +462,16 @@ describe('the broker authority', () => {
   }, 300_000)
 })
 
-describe('the declared work period, and the fallback under it', () => {
-  // THE LABEL IS THE BETTER ANSWER. Amazon prints the period in the Payment
-  // Summary and `parseWorkPeriod` stores it, so the screen asks the remittance
-  // what week it is FOR rather than inferring it from what it touched.
-  it('finds a remittance by the period it declares', async () => {
+describe('the week a remittance belongs to is what it PAID FOR', () => {
+  // Owner's ruling, 2026-09-26. This block used to assert the opposite: that the
+  // label Amazon prints is the better answer and the applications are a fallback.
+  //
+  // THE LABEL IS AMAZON'S PAYMENT PERIOD AND IT SPANS TWO OF OUR WEEKS. The
+  // workbook for `Sep 13 - Sep 19` pays that week's freight AND clears held lines
+  // from the week before, so one invoice is partly one week's remittance and
+  // partly another's. Keying on the label made the screen answer for one of them
+  // and silently deny the other.
+  it('does NOT find one that only declares the period and paid nothing into it', async () => {
     const payment = await owner.payment.create({
       data: {
         organizationId,
@@ -481,19 +486,145 @@ describe('the declared work period, and the fallback under it', () => {
       },
     })
 
-    // NOT ONE APPLICATION ON IT. Under the old question this payment was
-    // invisible — which is the gap the columns close: a remittance that paid
-    // nothing in the period is still that period's remittance.
+    // NOT ONE APPLICATION ON IT. A label is a claim; an application is money
+    // landing on a load with a delivery date. Only the second can place a
+    // payment in a week.
     const company = forCompany(await readWeek(), amazonCompanyId)
-    expect(company.remittance?.found).toBe(true)
-    expect(company.remittance?.invoiceNumber).toBe(`DECLARED-${nonce}`)
+    expect(company.remittance?.invoiceNumber).not.toBe(`DECLARED-${nonce}`)
 
     await owner.payment.delete({ where: { id: payment.id } })
   }, 300_000)
 
-  // AND THE FALLBACK STILL WORKS, which is what makes the columns safe to add:
-  // every payment already in the database has no period, and dropping the old
-  // question would have made this week's remittance vanish for all of them.
+  // ── THE CASE THE RULING EXISTS FOR ──────────────────────────────────────
+  it('DOES find one whose label says another week but which paid into this one', async () => {
+    // Tuesday's workbook, in miniature: labelled for the following week, and it
+    // clears freight delivered in this one. Under the old question this was
+    // invisible for the week it actually paid.
+    const settled = await owner.load.findFirst({
+      where: {
+        companyId: amazonCompanyId,
+        stops: {
+          some: {
+            type: 'DELIVERY',
+            scheduledAt: { gte: PERIOD.start, lte: PERIOD.end },
+          },
+        },
+      },
+      select: { id: true },
+    })
+    expect(settled).not.toBeNull()
+
+    const payment = await owner.payment.create({
+      data: {
+        organizationId,
+        companyId: amazonCompanyId,
+        customerId: relayId,
+        method: 'ACH',
+        remittanceKey: `NEXTWEEK-${nonce}`,
+        receivedAt: new Date(PERIOD.end.getTime() + 9 * 86_400_000),
+        amountCents: 12_345,
+        // The label says the FOLLOWING week.
+        periodStart: new Date(PERIOD.start.getTime() + 7 * 86_400_000),
+        periodEnd: new Date(PERIOD.end.getTime() + 7 * 86_400_000),
+        loadApplications: {
+          create: {
+            organizationId,
+            loadId: settled!.id,
+            amountCents: 12_345,
+          },
+        },
+      },
+    })
+
+    const company = forCompany(await readWeek(), amazonCompanyId)
+    expect(company.remittance?.found).toBe(true)
+    // AND IT IS THE ONE SHOWN, because `receivedAt` leads the ordering: the most
+    // recent cash is what "is the remittance in" is asking about.
+    expect(company.remittance?.invoiceNumber).toBe(`NEXTWEEK-${nonce}`)
+
+    await owner.paymentLoadApplication.deleteMany({
+      where: { paymentId: payment.id },
+    })
+    await owner.payment.delete({ where: { id: payment.id } })
+  }, 300_000)
+
+  // ── WHICH ONE THE SCREEN NAMES WHEN TWO PAID INTO THE WEEK ──────────────
+  //
+  // Next Tuesday there will be two: the invoice for this week and the one for
+  // the following week that clears this week's held lines. The screen shows one,
+  // and ordering them by the LABEL would name the invoice labelled for another
+  // week as this week's remittance — the same confusion as keying membership on
+  // it, one layer down.
+  //
+  // THE TWO PAYMENTS BELOW DISAGREE UNDER THE TWO ORDERINGS, which is the only
+  // way this can be proven. The first attempt at this test did not: both its
+  // payments sorted the same way whichever key led, so breaking the ordering
+  // changed nothing and `watch-guard` reported THE BREAK DID NOT FIRE.
+  it('names the one whose CASH arrived last, not the one labelled latest', async () => {
+    const settled = await owner.load.findFirst({
+      where: {
+        companyId: amazonCompanyId,
+        stops: {
+          some: {
+            type: 'DELIVERY',
+            scheduledAt: { gte: PERIOD.start, lte: PERIOD.end },
+          },
+        },
+      },
+      select: { id: true },
+    })
+    expect(settled).not.toBeNull()
+
+    // Labelled for the FOLLOWING week, cash arrived EARLIER.
+    const lateLabel = await owner.payment.create({
+      data: {
+        organizationId,
+        companyId: amazonCompanyId,
+        customerId: relayId,
+        method: 'ACH',
+        remittanceKey: `LATELABEL-${nonce}`,
+        receivedAt: new Date(PERIOD.end.getTime() + 5 * 86_400_000),
+        amountCents: 1_111,
+        periodStart: new Date(PERIOD.start.getTime() + 7 * 86_400_000),
+        periodEnd: new Date(PERIOD.end.getTime() + 7 * 86_400_000),
+        loadApplications: {
+          create: { organizationId, loadId: settled!.id, amountCents: 1_111 },
+        },
+      },
+    })
+
+    // Labelled for THIS week, cash arrived LATER.
+    const lateCash = await owner.payment.create({
+      data: {
+        organizationId,
+        companyId: amazonCompanyId,
+        customerId: relayId,
+        method: 'ACH',
+        remittanceKey: `LATECASH-${nonce}`,
+        receivedAt: new Date(PERIOD.end.getTime() + 12 * 86_400_000),
+        amountCents: 2_222,
+        periodStart: PERIOD.start,
+        periodEnd: PERIOD.end,
+        loadApplications: {
+          create: { organizationId, loadId: settled!.id, amountCents: 2_222 },
+        },
+      },
+    })
+
+    const company = forCompany(await readWeek(), amazonCompanyId)
+    // `receivedAt` leads: the most recent cash is what "is the remittance in"
+    // asks about. Leading on the label would name LATELABEL instead.
+    expect(company.remittance?.invoiceNumber).toBe(`LATECASH-${nonce}`)
+
+    for (const id of [lateLabel.id, lateCash.id]) {
+      await owner.paymentLoadApplication.deleteMany({
+        where: { paymentId: id },
+      })
+      await owner.payment.delete({ where: { id } })
+    }
+  }, 300_000)
+
+  // AND THE ORDINARY CASE IS UNCHANGED.
   it('still finds one with no declared period, through what it paid for', async () => {
     const company = forCompany(await readWeek(), amazonCompanyId)
     expect(company.remittance?.found).toBe(true)

@@ -302,45 +302,66 @@ export async function thisWeekFor(
 
   // ── §4 the remittance for this period, per authority ───────────────────
   //
-  // ASKED BY THE PERIOD IT DECLARES, with the old question as the fallback.
-  // `periodStart` is parsed from what Amazon prints; the second arm asks what
-  // the payment actually paid for, which is how this worked before the column
-  // existed. Both arms, because every payment already in the database has no
-  // period and every hand-entered one never will.
+  // ASKED BY WHAT THE PAYMENT PAID FOR, never by the period it declares.
+  //
+  // Owner's ruling, 2026-09-26. This used to prefer `Payment.periodStart` — the
+  // label Amazon prints — and fall back to the applications only when the label
+  // was null. That was wrong about what the label MEANS: it is Amazon's PAYMENT
+  // period and it spans two of this carrier's settlement weeks.
+  //
+  // MEASURED: the workbook for `Sep 13 - Sep 19` pays freight from that week AND
+  // clears held lines from the week before it. So a single invoice is partly one
+  // week's remittance and partly another's, and no single label can say which
+  // week it is "for". Keying on the label made the screen answer for one of them
+  // and silently deny the other.
+  //
+  // THE APPLICATIONS CANNOT BE WRONG ABOUT IT. Each one names a load, the load
+  // has a delivery date, and the date decides the week — the same way
+  // `settleableForBatch` decides which freight a batch contains. A payment shows
+  // up in every week it actually paid into, which is the truth about the money.
+  //
+  // THE LABEL STAYS AS FILED, by the same ruling. `periodStart`/`periodEnd` are
+  // still written from `parseWorkPeriod` and still shown; they are simply not
+  // what membership is decided by. Removing them would destroy Amazon's own
+  // statement of its payment period, which is worth keeping for reconciliation.
   const payments = await timed('remittance', () =>
     tx.payment.findMany({
       where: {
         companyId: { in: companyIds },
         deletedAt: null,
         remittanceKey: { not: null },
-        OR: [
-          { periodStart: input.period.start },
-          {
-            periodStart: null,
-            loadApplications: {
-              some: {
-                load: {
-                  stops: {
-                    some: {
-                      type: 'DELIVERY',
-                      scheduledAt: {
-                        gte: input.period.start,
-                        lte: periodEndOfDay,
-                      },
-                    },
+        loadApplications: {
+          some: {
+            load: {
+              stops: {
+                some: {
+                  type: 'DELIVERY',
+                  scheduledAt: {
+                    gte: input.period.start,
+                    lte: periodEndOfDay,
                   },
                 },
               },
             },
           },
-        ],
+        },
       },
-      // `nulls: 'last'` IS LOAD-BEARING. Postgres sorts NULLs FIRST on a DESC
-      // ordering, so the plain version did the opposite of what it claimed: a
-      // hand-entered payment with no period beat the one that declared it.
+      // ── THE MOST RECENT MONEY FIRST, NOT THE LATEST LABEL ───────────────
+      //
+      // This led on `periodStart` while the label decided membership. It no
+      // longer decides membership, and leading on it here would be the same
+      // mistake one layer down: two payments can both pay into this week, and
+      // ordering them by a label that spans TWO weeks would have the screen name
+      // the invoice labelled `Sep 20 - Sep 26` as the remittance for
+      // `Sep 13 - Sep 19` — which is exactly the confusion the ruling removes.
+      //
+      // `receivedAt` is the cash arriving, which is what "is the remittance in"
+      // is asking about. The label stays as the tiebreaker and `nulls: 'last'`
+      // stays with it: Postgres sorts NULLs FIRST on a DESC ordering, so the
+      // plain version did the opposite of what it claimed.
       orderBy: [
-        { periodStart: { sort: 'desc', nulls: 'last' } },
         { receivedAt: 'desc' },
+        { periodStart: { sort: 'desc', nulls: 'last' } },
       ],
       select: {
         companyId: true,
