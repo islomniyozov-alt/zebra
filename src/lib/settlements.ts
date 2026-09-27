@@ -123,17 +123,52 @@ export const SETTLEABLE_LOAD: Prisma.LoadWhereInput = {
   ...NOT_CLOSED_HISTORY,
 }
 
-export function settleableWhere(
-  driverId: string,
+/**
+ * FREIGHT A PERIOD OWES SOMEBODY FOR — THE ONE DEFINITION.
+ *
+ * ── TWO PREDICATES FOR ONE CONCEPT, AND THE LOOSER ONE WROTE THE CHEQUES ──
+ *
+ * Owner's ruling, 2026-09-27: `settleableForBatch` = `settleableWhere`, one
+ * predicate. This is it, and both of them are now this plus their own scoping.
+ *
+ * WHAT THE BATCH USED TO ASK, AND WHAT IT DID NOT. `settleableForBatch` took
+ * `SETTLEABLE_LOAD`, a driver, a DELIVERY STOP dated in the week, and no
+ * existing line. It never asked for POD_RECEIVED, never asked for an APPLIED
+ * POD event, and never asked when that event happened — while this function's
+ * own docstring said "a driver is paid for freight that reached POD, in the
+ * period the POD landed. No POD, no settlement line."
+ *
+ * MEASURED on the 8/30 dev replay, which is how it was found: two DISPATCHED
+ * loads took settlement lines — freight Zebra itself says had not arrived —
+ * for $2,054.23 of gross and $1,316.92 of driver pay. `T-112K9FRC8`/DT-015960
+ * and `T-114T6RF3H`/DT-015841.
+ *
+ * ── THE POD EVENT'S DATE IS WHAT PUTS A LOAD IN A WEEK, NOT THE STOP ──────
+ *
+ * That is the substantive half of the merge and it deserves saying plainly.
+ * The batch's comment argued for the delivery stop, "the same date the pay rule
+ * is looked up on". The stop's `scheduledAt` is a PLAN; the POD event is when
+ * the paperwork landed, and it is the column every other money surface already
+ * reads — `settleableWhere`, `directSettledAwaiting`, the money screen's
+ * in-period applications.
+ *
+ * ON TODAY'S DATA THE TWO COINCIDE ALMOST EVERYWHERE, because both importers
+ * stamp the POD at the file's delivery time by ruling: the Datatruck seed
+ * through `importEventAt`, the Relay trips import through the carried POD. Where
+ * they diverge, one of them is a load that never arrived — which is the case
+ * this merge exists to stop paying.
+ *
+ * THE PAY RULE IS STILL LOOKED UP ON `load.delDate`. That is a separate
+ * decision, deliberately untouched: which week a load belongs to and which
+ * rule priced it are different questions, and collapsing them here would be a
+ * second ruling nobody made.
+ */
+export function settleableInPeriod(
   periodStart: Date,
   periodEnd: Date,
 ): Prisma.LoadWhereInput {
   return {
     ...SETTLEABLE_LOAD,
-    // EITHER SEAT. A team load is this driver's load whichever half of the
-    // crew they are, and filtering on `driverId` alone is how the second crew
-    // member's freight disappears from their own settleable set.
-    OR: [{ driverId }, { coDriverId: driverId }],
     operationalStatus: 'POD_RECEIVED',
     statusEvents: {
       some: {
@@ -143,6 +178,24 @@ export function settleableWhere(
         occurredAt: { gte: periodStart, lte: periodEnd },
       },
     },
+  }
+}
+
+export function settleableWhere(
+  driverId: string,
+  periodStart: Date,
+  periodEnd: Date,
+): Prisma.LoadWhereInput {
+  return {
+    ...settleableInPeriod(periodStart, periodEnd),
+    // EITHER SEAT. A team load is this driver's load whichever half of the
+    // crew they are, and filtering on `driverId` alone is how the second crew
+    // member's freight disappears from their own settleable set.
+    OR: [{ driverId }, { coDriverId: driverId }],
+    // THE STATUS AND THE EVENT MOVED UP INTO `settleableInPeriod`, so the batch
+    // asks for them too. They used to be stated only here, which is precisely
+    // how the batch came to select on less.
+
     // ── NOT SETTLED *FOR THIS DRIVER* ────────────────────────────────────
     //
     // THIS USED TO BE `{ none: {} }` — settled by anybody, for anybody — and
@@ -755,34 +808,28 @@ export async function findSettlementDrift(
   tx: TxClient,
 ): Promise<SettlementDrift[]> {
   const settlements = await tx.settlement.findMany({
-    // ── A DRAFT HAS NOTHING FROZEN TO DRIFT FROM ────────────────────────
+    // ── EVERY SETTLEMENT THAT IS NOT VOID, INCLUDING DRAFTS ─────────────
     //
-    // FOUND 2026-09-27, by the first draft ever to exist on dev. This read was
-    // `status: { not: 'VOID' }`, so it took DRAFT settlements too — and a draft
-    // populates `loadLines` and `deductionLines`, never `lines`. Every draft
-    // therefore reported `totals_disagree_with_lines`, "lines give 0/0/0/0",
-    // and `npm run check` went red on 34 of them at once.
+    // THIS WAS BRIEFLY `notIn: ['VOID', 'DRAFT']` AND THAT WAS WRONG, on
+    // 2026-09-27, for about an hour. The symptom was real — the first batch
+    // draft to exist on dev put 34 settlements into this check and every one
+    // reported `totals_disagree_with_lines`, "lines give 0/0/0/0", turning
+    // `npm run check` red — but excluding DRAFT by status silenced a guard that
+    // matters: `generateSettlement` ALSO produces a DRAFT, and its drafts do
+    // populate `lines`. `finds a line somebody edited away from its snapshot`
+    // caught the over-reach immediately, which is the test doing its job.
     //
-    // IT WAS LATENT RATHER THAN NEW. Production has carried a draft since
-    // 2026-09-25 and this check never saw it: it runs against the test database,
-    // which is forked from DEV, and dev had no batch at all until today. So the
-    // defect was one `open-settlement-batch` away the whole time — and it would
-    // have arrived as a red CI run on somebody else's unrelated commit.
+    // THE DISTINCTION IS WHICH RELATION HOLDS THE DETAIL, NOT THE STATUS. Two
+    // things in this schema are called a settlement draft:
     //
-    // THE SCOPE IS THE FIX, NOT A SUPPRESSION. This function's own docstring
-    // says what it is for: "This is what makes 'approve freezes it' verifiable."
-    // A draft is the opposite of frozen — `refreshDraft` rewrites it wholesale
-    // on every refresh, and the batch opener prints exactly that. Asking a draft
-    // to reproduce from a snapshot it has not taken yet is asking the wrong
-    // question of the right rows.
+    //   `generateSettlement` — one driver, one week, writes `SettlementLine`
+    //   `refreshDraft`       — a whole batch, writes `SettlementLoadLine` and
+    //                          `SettlementDeductionLine`, and no `lines` at all
     //
-    // A DRAFT IS NOT UNCHECKED. `refreshDraft` recomputes it from the loads on
-    // every call, which is a stronger guarantee than this one and is where a
-    // draft's arithmetic belongs.
-    where: {
-      deletedAt: null,
-      status: { notIn: ['VOID', 'DRAFT'] },
-    },
+    // So the totals arm below skips a settlement whose detail is somewhere this
+    // function does not read, and that is stated as a condition on the rows
+    // rather than guessed from a status word.
+    where: { deletedAt: null, status: { not: 'VOID' } },
     select: {
       id: true,
       settlementNumber: true,
@@ -798,6 +845,12 @@ export async function findSettlementDrift(
           payRuleSnapshot: true,
         },
       },
+      // WHETHER THE DETAIL LIVES SOMEWHERE THIS FUNCTION DOES NOT READ. See the
+      // note on the `where` above: a batch draft keeps its lines in
+      // `SettlementLoadLine`, so its stored totals cannot be reproduced from
+      // `lines` and comparing them against an empty set reports a difference
+      // that is an artefact of asking the wrong relation.
+      _count: { select: { loadLines: true, deductionLines: true } },
     },
   })
 
@@ -827,6 +880,26 @@ export async function findSettlementDrift(
           detail: `line ${line.id}: stored ${line.amountCents}, snapshot computes ${recomputed}`,
         })
       }
+    }
+
+    // ── THE DETAIL IS NOT IN `lines` FOR A BATCH DRAFT ──────────────────
+    //
+    // `refreshDraft` writes `SettlementLoadLine` and `SettlementDeductionLine`
+    // and no `SettlementLine` at all, so adding up `lines` gives 0/0/0/0 for a
+    // settlement whose real detail is right there in the other two relations.
+    // Comparing stored totals against that reports a difference that is an
+    // artefact of the question.
+    //
+    // NOT `status === 'DRAFT'`, WHICH WAS TRIED AND WAS TOO WIDE:
+    // `generateSettlement` produces drafts that DO use `lines`, and excluding
+    // them by status stopped this function noticing a hand-edited line. The
+    // condition is about where the rows are, so it asks where the rows are.
+    //
+    // A SETTLEMENT WITH NO DETAIL ANYWHERE IS STILL CHECKED. Only a non-empty
+    // `loadLines` excuses an empty `lines`; totals claiming money with nothing
+    // behind them in either relation still drift.
+    if (settlement.lines.length === 0 && settlement._count.loadLines > 0) {
+      continue
     }
 
     let gross = 0

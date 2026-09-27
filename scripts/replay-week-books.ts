@@ -1,5 +1,6 @@
 import { neonConfig } from '@neondatabase/serverless'
 import { createPrismaClient } from '@/lib/db'
+import { terminatedYieldsToTruck } from '@/lib/datatruck/loads'
 import { transitionOperational } from '@/lib/load-status'
 import { assertTenancy } from './datatruck-tenancy'
 
@@ -62,6 +63,33 @@ import { assertTenancy } from './datatruck-tenancy'
 // settleable set, for ever, because the event nothing can see is the one thing
 // that is checked.
 //
+// ── AND THE SEAT IS CHECKED BEFORE THE POD LANDS ──────────────────────────
+//
+// Owner's ruling, 2026-09-27: the reclassify runs `terminatedYieldsToTruck`.
+//
+// A REPLAY IS AN IMPORT ARRIVING LATE, so it inherits the same defect the
+// 2026-09-13 week had: the Datatruck export attributes freight to whoever the
+// row names, and some of those people had already left. On that week it was ten
+// loads and $10,549.89 — held under two drivers with no pay rule while the two
+// who hauled it got nothing, and the preflight could only report the symptom.
+//
+// REOPENING A WEEK IS EXACTLY WHEN TO FIX IT. Once the POD is stamped the load
+// is settleable, and a settleable load against a departed driver is a blocked
+// statement somebody has to unpick by hand. So the yield runs FIRST, in the same
+// transaction, and the load carries the right driver at the moment it becomes
+// payable.
+//
+// THE DECISION IS THE PURE FUNCTION, NOT THIS FILE. `terminatedYieldsToTruck`
+// lives in `src/lib/datatruck/loads.ts` with its own tests, and it needs the
+// delivery to fall AFTER the termination — freight a departed driver delivered
+// before they left is still theirs. A second copy of those conditions here would
+// be a second definition of who gets paid.
+//
+// IT IS GIVEN THE SAME INSTANT THE POD WILL CARRY, read from the delivery stop
+// rather than from a POD event: the event does not exist yet at this point in the
+// transaction. `repair-terminated-attribution.ts` reads the event because it runs
+// against loads that already have one.
+//
 // AND THE BILLING AXIS IS CLEARED FIRST, in that order, because
 // `CLOSED_IN_DATATRUCK` is one of the DECIDED statuses — `refreshBillingStatus`
 // skips a decided load rather than recomputing it. Clear it after the
@@ -92,6 +120,9 @@ const ORGANIZATION_SLUG = 'zebra'
  * replay reopened.
  */
 const REPLAY_EVENT_NOTE = 'books-replay'
+
+/** The note a reattribution carries, greppable apart from the status moves. */
+const REPLAY_REATTRIBUTION_NOTE = 'books-replay reattribution'
 
 /**
  * One transaction for the week, and the arithmetic behind the number.
@@ -173,6 +204,7 @@ async function main(): Promise<void> {
   const undated: string[] = []
   const alreadyLive: string[] = []
   const notMoved: string[] = []
+  const reattributed: string[] = []
 
   try {
     await db
@@ -204,7 +236,35 @@ async function main(): Promise<void> {
               externalId: true,
               operationalStatus: true,
               totalRevenueCents: true,
-              driver: { select: { firstName: true, lastName: true } },
+              driverId: true,
+              driver: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  terminationDate: true,
+                },
+              },
+              truck: {
+                select: {
+                  unitNumber: true,
+                  // `drivers` is Truck's reverse side of
+                  // `Driver.assignedTruckId`. The pairing lives on the driver
+                  // and only there, so this is the only direction the schema
+                  // can answer.
+                  drivers: {
+                    where: { deletedAt: null },
+                    select: {
+                      id: true,
+                      firstName: true,
+                      lastName: true,
+                      terminationDate: true,
+                      status: true,
+                      kind: true,
+                    },
+                  },
+                },
+              },
               stops: {
                 where: { type: 'DELIVERY' },
                 select: { scheduledAt: true, arrivedAt: true },
@@ -275,6 +335,63 @@ async function main(): Promise<void> {
             if (load.operationalStatus === 'POD_RECEIVED') {
               alreadyLive.push(label)
               continue
+            }
+
+            // ── THE SEAT, BEFORE THE POD ────────────────────────────────
+            //
+            // `deliveredAt` is the instant the POD is about to carry, so the
+            // rule sees exactly the date the settlement will.
+            const linked = load.truck?.drivers ?? []
+            const yielded = terminatedYieldsToTruck({
+              named: load.driver
+                ? {
+                    id: load.driver.id,
+                    name: `${load.driver.firstName} ${load.driver.lastName}`.trim(),
+                    terminationDate: load.driver.terminationDate,
+                  }
+                : null,
+              // MORE THAN ONE DRIVER ON THE TRUCK IS NOT A YIELD. Which of them
+              // drove it is a guess, and this does not guess about pay.
+              truckDriver:
+                linked.length === 1
+                  ? {
+                      id: linked[0]!.id,
+                      name: `${linked[0]!.firstName} ${linked[0]!.lastName}`.trim(),
+                      terminationDate: linked[0]!.terminationDate,
+                      status: linked[0]!.status,
+                      kind: linked[0]!.kind,
+                    }
+                  : null,
+              deliveredAt,
+              unitNumber: load.truck?.unitNumber ?? null,
+            })
+
+            if (yielded.kind === 'yield') {
+              await tx.load.update({
+                where: { id: load.id },
+                data: { driverId: linked[0]!.id },
+              })
+              await tx.loadStatusEvent.create({
+                data: {
+                  loadId: load.id,
+                  organizationId: tenancy.organizationId,
+                  axis: 'OPERATIONAL',
+                  // EQUAL ON PURPOSE: nothing moved. The note is the payload,
+                  // and it carries the name the export gave — a load that names
+                  // somebody the source system never named, with nothing to
+                  // compare against, is unauditable.
+                  fromStatus: load.operationalStatus,
+                  toStatus: load.operationalStatus,
+                  outcome: 'APPLIED',
+                  source: 'INTEGRATION',
+                  note: `${REPLAY_REATTRIBUTION_NOTE}: ${yielded.note}`,
+                },
+              })
+              reattributed.push(
+                `${label} -> ${linked[0]!.firstName} ${linked[0]!.lastName}  ` +
+                  `unit ${load.truck?.unitNumber ?? '(none)'}  ` +
+                  `${money(load.totalRevenueCents)}`,
+              )
             }
 
             const moved = await transitionOperational(
@@ -362,6 +479,12 @@ async function main(): Promise<void> {
   for (const line of reclassified.slice(0, 20)) console.log(`  ${line}`)
   if (reclassified.length > 20) {
     console.log(`  … and ${reclassified.length - 20} more`)
+  }
+  if (reattributed.length > 0) {
+    heading(
+      `REATTRIBUTED — A TERMINATED DRIVER YIELDED — ${reattributed.length}`,
+    )
+    for (const line of reattributed) console.log(`  ${line}`)
   }
   if (alreadyLive.length > 0) {
     heading(`ALREADY LIVE, LEFT ALONE — ${alreadyLive.length}`)

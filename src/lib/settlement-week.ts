@@ -450,6 +450,22 @@ const inPeriod = (day: Date, period: Week): boolean =>
  * VERBATIM FROM THE ARTEFACT: "88% from gross", "32% from gross", "30% from
  * gross". Built from the rule rather than stored, so a rule change cannot leave
  * a label behind claiming the old percentage.
+ *
+ * ── BOTH PERCENT RULES PRINT "FROM GROSS". Owner's ruling, 2026-09-27 ──────
+ *
+ * `PERCENT_LINEHAUL` used to print "30% from linehaul", which contradicted the
+ * paragraph above in the same function: every Datatruck statement in the corpus
+ * says "from gross", including the ones whose rule Zebra holds as
+ * PERCENT_LINEHAUL. The 8/30 replay printed the disagreement twice —
+ * `statement "89% from gross"  draft "89% from linehaul"` — as a difference on
+ * every driver, which is a difference of vocabulary masquerading as a finding
+ * and buries the ones that are about money.
+ *
+ * THE LABEL IS NOT THE BASIS. This changes what the statement PRINTS and
+ * nothing about what `payFor` computes: a PERCENT_LINEHAUL rule still takes its
+ * percentage of linehaul. The two are already separate — the label is built
+ * here and the arithmetic lives in `driver-pay.ts` — and the artefact is the
+ * authority for the wording, as the first paragraph always said.
  */
 export function tariffLabel(rule: PayRule): string | null {
   switch (rule.type) {
@@ -460,7 +476,7 @@ export function tariffLabel(rule: PayRule): string | null {
     case 'PERCENT_LINEHAUL':
       return rule.percentBps === null
         ? null
-        : `${trimPercent(rule.percentBps)}% from linehaul`
+        : `${trimPercent(rule.percentBps)}% from gross`
     case 'PER_MILE':
       return rule.perMileCents === null
         ? null

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
 import { withOrg } from '@/lib/tenancy'
 import { createBroker } from '@/lib/brokers'
+import { transitionOperational } from '@/lib/load-status'
 import { createLoad } from '@/lib/loads'
 import {
   batchInputForOrg,
@@ -92,12 +93,31 @@ async function seedLoad(input: {
   )
   await owner.load.update({
     where: { id: load.id },
-    data: {
-      driverId,
-      operationalStatus: 'POD_RECEIVED',
-      actualMiles: 400,
-    },
+    data: { driverId, actualMiles: 400 },
   })
+  // ── THE POD IS AN EVENT, NOT A COLUMN ─────────────────────────────────
+  //
+  // This helper used to write `operationalStatus: 'POD_RECEIVED'` straight into
+  // the row and stop there. That state was never settleable by
+  // `settleableWhere`, which has always wanted the STATUS and an APPLIED
+  // POD_RECEIVED EVENT dated inside the period — and the fixture got away with
+  // it because `settleableForBatch` asked for neither.
+  //
+  // So the fixture had inherited the very looseness it was meant to be testing
+  // through: a batch built from these loads proved that a batch pays loads with
+  // no POD, and called that a pass. The 2026-09-27 ruling makes the two
+  // predicates one, and this is the fixture catching up to what the engine
+  // always claimed.
+  //
+  // DATED AT THE DELIVERY, like both importers do it — the event's `occurredAt`
+  // is the pay week, so stamping it at test time would put the freight in
+  // whichever week the suite happened to run in.
+  await inOrg((tx) =>
+    transitionOperational(tx, load.id, 'POD_RECEIVED', {
+      source: 'INTEGRATION',
+      occurredAt: new Date(Date.UTC(2026, 7, input.delDay)),
+    }),
+  )
   return load
 }
 
@@ -742,9 +762,29 @@ describe('one batch per period, for the whole operation', () => {
       where: { id: load.id },
       data: { driverId: driver.id },
     })
+    // ── THE STOPS AND THE POD EVENT MOVE TOGETHER ─────────────────────────
+    //
+    // `seedLoad` stamps the POD at its `delDay`, and this test then drags the
+    // freight into a different period by rewriting the stops. Under the
+    // 2026-09-27 one-predicate ruling the POD EVENT is what puts a load in a
+    // week, so moving only the stops left the load out of the batch and this
+    // test failed — correctly, and on its own fixture rather than on the engine.
+    //
+    // It passed before because `settleableForBatch` read the stop and nothing
+    // else, which is the looseness the ruling removed.
+    const movedTo = new Date(period.start.getTime() + 86_400_000)
     await owner.loadStop.updateMany({
       where: { loadId: load.id },
-      data: { scheduledAt: new Date(period.start.getTime() + 86_400_000) },
+      data: { scheduledAt: movedTo },
+    })
+    await owner.loadStatusEvent.updateMany({
+      where: {
+        loadId: load.id,
+        axis: 'OPERATIONAL',
+        toStatus: 'POD_RECEIVED',
+        outcome: 'APPLIED',
+      },
+      data: { occurredAt: movedTo },
     })
 
     const opened = await inOrg((tx) =>

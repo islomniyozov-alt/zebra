@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { settleableForBatch } from '@/lib/settlement-batch'
+import { settleableInPeriod, settleableWhere } from '@/lib/settlements'
 import {
   computeBatch,
   computeDriverSettlement,
@@ -885,5 +887,153 @@ describe('ST-005395 as transcribed', () => {
         `${load.loadNumber} does not pay its stated rate`,
       ).toBe(load.amountCents)
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// ONE PREDICATE. Owner's ruling, 2026-09-27.
+//
+// `settleableForBatch` = `settleableWhere`. The batch used to ask for a delivery
+// stop dated in the week and nothing about the POD; `settleableWhere` had always
+// wanted POD_RECEIVED plus an APPLIED POD event inside the period, and said so
+// in its own docstring. Two definitions of one concept, and the looser one wrote
+// the cheques: two DISPATCHED loads took lines on the 8/30 dev replay for
+// $1,316.92 of driver pay.
+//
+// THESE ASSERT THE SHARED CORE IS ACTUALLY SHARED, not that two functions happen
+// to agree today. A test that compared their outputs field by field would pass
+// just as well with the conditions copied into both.
+// ---------------------------------------------------------------------------
+
+describe('the tariff label, which both percent rules spell the same way', () => {
+  const at = new Date(Date.UTC(2026, 7, 1))
+
+  // ── OWNER'S RULING, 2026-09-27 ──────────────────────────────────────────
+  //
+  // Every Datatruck statement in the corpus prints "from gross", including the
+  // ones whose rule Zebra holds as PERCENT_LINEHAUL — ST-005377 reads
+  // "89% from gross" against a 8900bps PERCENT_LINEHAUL row. The label used to
+  // say "from linehaul", so the 8/30 replay reported a difference on every
+  // driver that was about vocabulary and buried the ones about money.
+  //
+  // THIS TEST EXISTS BECAUSE THE CHANGE WAS UNGUARDED. Breaking the branch under
+  // `watch-guard` failed NOTHING — the only tariff assertions ran over
+  // PERCENT_GROSS fixtures, so the linehaul branch could have said anything.
+  it('prints a percent-of-linehaul rule as "from gross"', () => {
+    expect(
+      tariffLabel({
+        id: 'rule_1',
+        type: 'PERCENT_LINEHAUL',
+        percentBps: 8900,
+        perMileCents: null,
+        flatCents: null,
+        effectiveFrom: at,
+        effectiveTo: null,
+      }),
+    ).toBe('89% from gross')
+  })
+
+  it('prints a percent-of-gross rule the same way', () => {
+    expect(
+      tariffLabel({
+        id: 'rule_1',
+        type: 'PERCENT_GROSS',
+        percentBps: 3000,
+        perMileCents: null,
+        flatCents: null,
+        effectiveFrom: at,
+        effectiveTo: null,
+      }),
+    ).toBe('30% from gross')
+  })
+
+  // THE BASIS IS UNCHANGED, and that is the half worth pinning: the label is
+  // what the statement prints, not what the arithmetic does.
+  it('does not print a basis for the rules that have no percentage', () => {
+    expect(
+      tariffLabel({
+        id: 'rule_1',
+        type: 'PER_MILE',
+        percentBps: null,
+        perMileCents: 65,
+        flatCents: null,
+        effectiveFrom: at,
+        effectiveTo: null,
+      }),
+    ).toBe('$0.65 per mile')
+  })
+})
+
+describe('the batch and the driver ask one question', () => {
+  const period = {
+    start: new Date(Date.UTC(2026, 7, 30)),
+    end: new Date(Date.UTC(2026, 8, 5)),
+  }
+
+  it('both carry the period core, verbatim', () => {
+    const core = settleableInPeriod(
+      period.start,
+      new Date(period.end.getTime() + 86_399_999),
+    )
+    const batch = settleableForBatch(null, period)
+    const driver = settleableWhere(
+      'drv_1',
+      period.start,
+      new Date(period.end.getTime() + 86_399_999),
+    )
+
+    for (const key of Object.keys(core) as (keyof typeof core)[]) {
+      expect(batch[key], `batch is missing ${key}`).toEqual(core[key])
+      expect(driver[key], `settleableWhere is missing ${key}`).toEqual(
+        core[key],
+      )
+    }
+  })
+
+  // ── THE THREE THE BATCH USED TO LEAVE OUT ────────────────────────────────
+  it('REQUIRES the POD status on the batch side', () => {
+    expect(settleableForBatch(null, period).operationalStatus).toBe(
+      'POD_RECEIVED',
+    )
+  })
+
+  it('REQUIRES an APPLIED POD event on the batch side', () => {
+    const events = settleableForBatch(null, period).statusEvents
+    expect(events).toMatchObject({
+      some: {
+        axis: 'OPERATIONAL',
+        toStatus: 'POD_RECEIVED',
+        outcome: 'APPLIED',
+      },
+    })
+  })
+
+  it('DATES that event inside the period, to the last millisecond', () => {
+    const events = settleableForBatch(null, period).statusEvents as {
+      some: { occurredAt: { gte: Date; lte: Date } }
+    }
+    expect(events.some.occurredAt.gte.getTime()).toBe(period.start.getTime())
+    // The Saturday, whole. A period ending at midnight loses everything that
+    // landed on its last day — four loads, on the 9/13 week.
+    expect(events.some.occurredAt.lte.getTime()).toBe(
+      period.end.getTime() + 86_399_999,
+    )
+  })
+
+  // ── AND THE STOP FILTER IS GONE, WHICH IS THE SUBSTANTIVE HALF ───────────
+  //
+  // Kept as an explicit assertion rather than left implied: a delivery stop
+  // dated in the week is a PLAN, and a load that never arrived has one.
+  it('no longer selects on the delivery stop', () => {
+    expect(settleableForBatch(null, period).stops).toBeUndefined()
+  })
+
+  // Each side keeps exactly the scoping that is its own business.
+  it('keeps the batch org-wide and the driver query per driver', () => {
+    expect(settleableForBatch(null, period).driverId).toEqual({ not: null })
+    expect(settleableWhere('drv_1', period.start, period.end).OR).toEqual([
+      { driverId: 'drv_1' },
+      { coDriverId: 'drv_1' },
+    ])
   })
 })

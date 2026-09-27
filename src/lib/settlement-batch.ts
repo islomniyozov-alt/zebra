@@ -1,5 +1,5 @@
 import type { Prisma } from '@/generated/prisma/client'
-import { SETTLEABLE_LOAD } from './settlements'
+import { settleableInPeriod } from './settlements'
 import { isReferralPayee } from './driver-kind'
 import {
   computeBatch,
@@ -102,12 +102,16 @@ export const statementNumberOf = (value: number) =>
 /**
  * Every load that may enter a batch.
  *
- * `SETTLEABLE_LOAD` AND NOTHING ELSE. That constant is the single definition of
- * settleable — not cancelled, not deleted, not closed-in-Datatruck history —
- * and it closed a real hole where an imported POD_RECEIVED load could be
- * settled a second time. Re-deriving the condition here would be a second
- * definition, and two definitions of "settleable" is how closed history gets
- * into a batch.
+ * `settleableInPeriod` AND NOTHING ELSE, plus this function's own scoping.
+ * Owner's ruling, 2026-09-27: one predicate. See that function for what this
+ * one used to leave out and what it cost — two DISPATCHED loads paid on the
+ * 8/30 replay, $1,316.92 of driver pay for freight that had not arrived.
+ *
+ * THE OLD COMMENT HERE SAID "`SETTLEABLE_LOAD` AND NOTHING ELSE" and warned
+ * that "two definitions of settleable is how closed history gets into a batch".
+ * It was right about the hazard and wrong about the scope: sharing the
+ * three-line constant while restating the period condition IS two definitions,
+ * and the restatement is where the POD requirement went missing.
  *
  * A LOAD ALREADY ON A SETTLEMENT IS EXCLUDED BY THE `SettlementLoadLine`
  * UNIQUE, which the database enforces on write. This filter keeps it off the
@@ -119,7 +123,14 @@ export function settleableForBatch(
   period: Week,
 ): Prisma.LoadWhereInput {
   return {
-    ...SETTLEABLE_LOAD,
+    // THE PERIOD, THE STATUS AND THE EVENT — one definition, shared with
+    // `settleableWhere`. The end is pushed to the last millisecond of the
+    // Saturday for the same reason the stop filter used to be: a period ending
+    // at midnight loses everything that landed on the last day.
+    ...settleableInPeriod(
+      period.start,
+      new Date(period.end.getTime() + 86_399_999),
+    ),
     // ONE COMPANY, SEVERAL, OR THE WHOLE ORGANIZATION through the same
     // definition. Settlement is org-wide by ruling, so `null` is now the
     // normal case and the company filter is what a scoped VIEW uses — row-level
@@ -132,18 +143,17 @@ export function settleableForBatch(
             typeof companyId === 'string' ? companyId : { in: [...companyId] },
         }),
     driverId: { not: null },
-    // The DELIVERY is what puts a load in a week — the same date the pay rule
-    // is looked up on, so a load cannot be paid under a rule from a week it
-    // does not belong to.
-    stops: {
-      some: {
-        type: 'DELIVERY',
-        scheduledAt: {
-          gte: period.start,
-          lte: new Date(period.end.getTime() + 86_399_999),
-        },
-      },
-    },
+    // ── THE DELIVERY-STOP FILTER IS GONE, AND THAT IS THE MERGE ───────────
+    //
+    // It used to read: "The DELIVERY is what puts a load in a week — the same
+    // date the pay rule is looked up on, so a load cannot be paid under a rule
+    // from a week it does not belong to."
+    //
+    // The first clause is what `settleableInPeriod` now answers, with the POD
+    // event instead of the stop's plan. The second clause is still true and is
+    // not this filter's job: `ruleInForce` is called on `load.delDate` further
+    // down, whatever put the load in the batch.
+
     // ── SETTLED BY ANYBODY, WHICH IS NOT QUITE RIGHT FOR A TEAM ─────────
     //
     // `settleableWhere` is scoped to `{ none: { driverId } }` because it
