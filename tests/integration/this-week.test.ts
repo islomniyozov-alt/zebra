@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
+import { transitionOperational } from '@/lib/load-status'
 import { withOrg } from '@/lib/tenancy'
 import { createBroker } from '@/lib/brokers'
 import { createLoad } from '@/lib/loads'
@@ -99,12 +100,26 @@ async function seedLoad(input: {
   )
   await owner.load.update({
     where: { id: load.id },
-    data: {
-      driverId: input.driverId,
-      operationalStatus: 'POD_RECEIVED',
-      actualMiles: 300,
-    },
+    data: { driverId: input.driverId, actualMiles: 300 },
   })
+  // ── THE POD IS AN EVENT, NOT A COLUMN ─────────────────────────────────
+  //
+  // Same correction as `settlement-batch.test.ts`, for the same reason. This
+  // wrote `operationalStatus: 'POD_RECEIVED'` into the row and stopped, which
+  // `settleableWhere` never accepted — it wants the status AND an APPLIED
+  // POD_RECEIVED event dated in the period. The money screen reads through
+  // `settleableForBatch`, which asked for neither until the 2026-09-27 ruling
+  // made the two predicates one, so the fixture had been standing on the
+  // looseness it was meant to exercise.
+  //
+  // STAMPED AT THE DELIVERY. The event's `occurredAt` is the week the freight
+  // settles in; at test time it would land in whichever week the suite ran.
+  await inOrg((tx) =>
+    transitionOperational(tx, load.id, 'POD_RECEIVED', {
+      source: 'INTEGRATION',
+      occurredAt: input.deliveredOn,
+    }),
+  )
   return load
 }
 
