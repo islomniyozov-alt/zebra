@@ -96,17 +96,25 @@ export interface PlannedTrip {
    */
   stage: TripStage
   /**
-   * The trip's price in integer cents, or null — and null is the common case.
+   * The trip's gross in integer cents, or null.
    *
-   * SET ONLY FOR A SINGLE-LOAD TRIP: exactly one row in the export, and that
-   * row's Load ID equal to the Trip ID. See `singleLoadRateCents`.
+   * TWO READINGS, ONE FIELD, AND `rateBasis` SAYS WHICH. A single-load trip is
+   * priced from its own row; a multi-leg trip from the sum of its usable legs.
+   * See `tripGrossCents` for what each one is worth and what neither is.
    *
    * The per-leg costs do NOT survive onto this object. A `PlannedTrip` is what
    * the writer sees, and the writer must not be able to reach an allocation
-   * even by mistake — the value either qualified as a price here or it no
-   * longer exists.
+   * even by mistake — the legs were added up here or the value does not exist.
    */
   rateCents: number | null
+  /**
+   * Which reading produced `rateCents`. Null exactly when it is null.
+   *
+   * ON THE OBJECT RATHER THAN RE-DERIVED BY THE PREVIEW, because a second
+   * reader of the same legs is free to disagree with the first — and the whole
+   * point of the label is that the screen says how the number was made.
+   */
+  rateBasis: TripRateBasis | null
 }
 
 export type TripWarningKind =
@@ -284,6 +292,8 @@ export function planTrips(
       })
     }
 
+    const gross = tripGrossCents(tripId, all, usable)
+
     trips.push({
       tripId,
       stops,
@@ -297,7 +307,8 @@ export function planTrips(
       // happened, and calling it delivered would put a load on the invoice
       // queue while the driver is still on it.
       stage: stageOf(usable),
-      rateCents: singleLoadRateCents(tripId, all),
+      rateCents: gross?.cents ?? null,
+      rateBasis: gross?.basis ?? null,
     })
   }
 
@@ -338,14 +349,64 @@ export function planTrips(
  * was still divided up as one. "Exactly one row" means exactly one row.
  * ---------------------------------------------------------------------------
  */
-function singleLoadRateCents(
+// ── AND THE SECOND SENTENCE IS SUPERSEDED, DELIBERATELY ───────────────────
+//
+// Owner's ruling, 2026-09-26, for bulk completed files: "gross from the file."
+// A month's export is imported to BOOK FREIGHT THAT HAS ALREADY RUN, and a
+// delivered load with no rate is not a load a settlement can pay against — it
+// lands in the preflight as freight with no money and somebody types 32 figures
+// by hand off the same file the importer just read.
+//
+// SO A MULTI-LEG TRIP IS PRICED AT THE SUM OF ITS USABLE LEGS' COSTS, and the
+// reading is labelled `leg_sum` rather than passed off as the file's own price.
+//
+// WHAT THE OLD RULE WAS PROTECTING AGAINST IS STILL TRUE: no single leg's
+// `Estimated Cost` is the trip's money. The sum is a different claim from any
+// one of them, and the label is what keeps the two apart on the preview — a
+// dispatcher sees which trips were priced by addition and can check one.
+//
+// NOT VERIFIED AGAINST THE RELAY PORTAL. The `load_row` basis was, on trip
+// 1165YNVHN at $5,089.07 (2026-08-20). The sum has not been, and the label
+// exists partly so that stays visible instead of being smoothed over.
+//
+// A PARTIAL SUM IS REFUSED RATHER THAN RETURNED. If any usable leg carries no
+// cost, the total would be short by exactly the legs the file forgot, and a
+// gross that is quietly low is worse than no gross at all — it settles.
+// MEASURED on `Trips - 2026-09-24T090710.426.csv`: 32 multi-leg trips, all 32
+// carrying a cost on EVERY usable leg, 0 partial. The refusal costs nothing on
+// this file and is the whole reason the next one can be trusted.
+//
+// CANCELLED LEGS ARE OUT OF THE SUM, by rule 3: a replanned leg is money for a
+// trip nobody drove. They still count towards "exactly one row" for `load_row`,
+// which is the original ruling and unchanged.
+
+/** Which reading of the file a trip's gross came from. */
+export type TripRateBasis = 'load_row' | 'leg_sum'
+
+export interface TripGross {
+  cents: number
+  basis: TripRateBasis
+}
+
+function tripGrossCents(
   tripId: string,
   legs: readonly TripLeg[],
-): number | null {
-  if (legs.length !== 1) return null
-  const only = legs[0]!
-  if (only.loadId.trim() !== tripId.trim()) return null
-  return only.costCents
+  usable: readonly TripLeg[],
+): TripGross | null {
+  // THE ORIGINAL PARTITION FIRST, so a single-load trip is still priced by the
+  // reading the owner verified rather than by a sum of one.
+  if (legs.length === 1) {
+    const only = legs[0]!
+    if (only.loadId.trim() !== tripId.trim()) return null
+    return only.costCents === null
+      ? null
+      : { cents: only.costCents, basis: 'load_row' }
+  }
+
+  if (usable.length === 0) return null
+  if (usable.some((leg) => leg.costCents === null)) return null
+  const cents = usable.reduce((sum, leg) => sum + (leg.costCents ?? 0), 0)
+  return { cents, basis: 'leg_sum' }
 }
 
 /**

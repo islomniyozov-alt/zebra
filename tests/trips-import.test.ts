@@ -3,6 +3,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseTripsCsv, type TripLeg } from '@/lib/trips-csv'
 import {
+  CANCELLED_STATUS,
   isPrefixNearMiss,
   nearMissWarnings,
   planTrips,
@@ -250,16 +251,45 @@ describe('the rate, and the two conditions it needs', () => {
     )
   })
 
-  // THE TRAP, AND THE REASON THE LEG COUNT DECIDES FIRST. Trip 116W21ST2 in
-  // the real corpus has four legs whose Load ID all equal the Trip ID; on a
-  // multi-leg trip the column is a share, and 87 corpus trips look like this.
-  it('refuses a multi-leg trip even when every leg matches', () => {
-    expect(
-      priced([
-        { tripId: 'T-1', loadId: 'T-1', costCents: 180000 },
-        { tripId: 'T-1', loadId: 'T-1', costCents: 45000 },
-      ]),
-    ).toBeNull()
+  // ── SUPERSEDED, 2026-09-26: A MULTI-LEG TRIP IS PRICED AT THE SUM ────────
+  //
+  // This test used to assert `toBeNull()` here, under the 2026-08-20 ruling's
+  // second sentence. The new ruling for bulk completed files is "gross from the
+  // file", because a delivered load with no rate cannot be settled and somebody
+  // types the same figures in by hand off the same export.
+  //
+  // THE OLD WARNING STILL STANDS AND IS NOW A LABEL. No single leg's cost is
+  // the trip's money; the SUM is a different claim from any one of them, and
+  // `rateBasis` is how the preview says which claim it is making.
+  it('prices a multi-leg trip at the sum of its legs, labelled as a sum', () => {
+    const trip = planTrips([
+      leg({ tripId: 'T-1', loadId: 'T-1', costCents: 180000 }),
+      leg({ tripId: 'T-1', loadId: 'T-1', costCents: 45000 }),
+    ]).trips[0]!
+    expect(trip.rateCents).toBe(225000)
+    expect(trip.rateBasis).toBe('leg_sum')
+  })
+
+  // AND THE VERIFIED READING KEEPS ITS OWN LABEL, so a dispatcher can tell the
+  // figure Amazon's portal was checked against from one this code added up.
+  it('labels a single-load trip as the row it came from', () => {
+    const trip = planTrips([
+      leg({ tripId: 'T-1', loadId: 'T-1', costCents: 508907 }),
+    ]).trips[0]!
+    expect(trip.rateBasis).toBe('load_row')
+  })
+
+  // A PARTIAL SUM IS REFUSED RATHER THAN RETURNED SHORT. Measured on the
+  // 2026-09-24 fixture: 32 multi-leg trips, all 32 carrying a cost on every
+  // usable leg, 0 partial — so this costs nothing and is why the next file can
+  // be trusted. A gross that is quietly low is worse than none: it settles.
+  it('REFUSES a sum when one leg carries no cost', () => {
+    const trip = planTrips([
+      leg({ tripId: 'T-1', loadId: 'A', costCents: 180000 }),
+      leg({ tripId: 'T-1', loadId: 'B', costCents: null }),
+    ]).trips[0]!
+    expect(trip.rateCents).toBeNull()
+    expect(trip.rateBasis).toBeNull()
   })
 
   it('refuses a single leg whose Load ID is a different id', () => {
@@ -268,15 +298,25 @@ describe('the rate, and the two conditions it needs', () => {
     )
   })
 
-  // A CANCELLED SIBLING STILL MAKES IT A MULTI-LEG TRIP. The cost column was
-  // divided across the legs Amazon planned, not the ones that survived.
-  it('counts cancelled legs towards the leg count', () => {
-    expect(
-      priced([
-        { tripId: 'T-1', loadId: 'T-1', costCents: 180000 },
-        { tripId: 'T-1', loadId: 'T-1', status: 'Cancelled' },
-      ]),
-    ).toBeNull()
+  // A CANCELLED SIBLING STILL MAKES IT A MULTI-LEG TRIP, so the trip is priced
+  // by the SUM rather than by the row — "exactly one row" means exactly one row,
+  // which is the original ruling and unchanged.
+  //
+  // AND THE CANCELLED LEG IS OUT OF THE SUM, by rule 3: a replanned leg is money
+  // for a trip nobody drove. The two clauses together are why the figure here is
+  // 180000 with a `leg_sum` label and not 180000 with a `load_row` one.
+  it('sums the usable legs and leaves the cancelled one out', () => {
+    const trip = planTrips([
+      leg({ tripId: 'T-1', loadId: 'T-1', costCents: 180000 }),
+      leg({
+        tripId: 'T-1',
+        loadId: 'T-1',
+        status: 'Cancelled',
+        costCents: 99999,
+      }),
+    ]).trips[0]!
+    expect(trip.rateCents).toBe(180000)
+    expect(trip.rateBasis).toBe('leg_sum')
   })
 
   it('is null when a single-load trip carries no cost at all', () => {
@@ -320,30 +360,62 @@ describe.skipIf(files.length === 0)('every real trip in the sweep', () => {
   // instances: 1,001 single-leg, 973 of those with Load ID === Trip ID and all
   // 973 carrying a cost; 815 multi-leg, NONE with a matching leg.
   //
-  // SO THE FIRST TEST BELOW CANNOT FAIL ON TODAY'S CORPUS — there is no
-  // multi-leg trip here for it to catch. It is a tripwire for a shape not yet
-  // seen, the same posture as the prefix near-miss warning. What actually
-  // proves the rule is the unit tests above, which construct the shape
-  // deliberately and watch it refused.
+  // ── SUPERSEDED, 2026-09-26 ───────────────────────────────────────────────
+  //
+  // This used to assert that NO multi-leg trip was ever priced, across the whole
+  // sweep. The ruling changed — "gross from the file" for bulk completed files —
+  // so the question the sweep can still answer is a different one: EVERY priced
+  // trip's figure must be re-derivable from its own rows, by the basis the plan
+  // claims. That is the part a corpus can check and a constructed leg cannot.
+  //
+  // BUILT FROM THE ARTEFACT, NOT FROM WHAT THE PLANNER BELIEVES. The figures are
+  // re-parsed out of the file rather than read off the plan, which is flag 88's
+  // lesson: an instrument that inherits the belief it is meant to test proves
+  // nothing. A plan that summed the wrong legs would still agree with itself.
   // ------------------------------------------------------------------------
-  it('never prices a trip that has more than one leg', () => {
+  it('can re-derive every priced trip from its own rows', () => {
     const priced = plans.flatMap((plan) =>
       plan.trips
         .filter((trip) => trip.rateCents !== null)
         .map((trip) => ({ name: plan.name, tripId: trip.tripId, trip })),
     )
+    expect(priced.length).toBeGreaterThan(0)
 
-    // Every priced trip came from a file whose rows for that trip numbered
-    // one. Re-derived from the source rather than trusted from the plan.
-    for (const { name, tripId } of priced) {
+    let rows_ = 0
+    let sums = 0
+    for (const { name, tripId, trip } of priced) {
       const { legs } = parseTripsCsv(readFileSync(join(CORPUS, name), 'utf8'))
       const rows = legs.filter((leg) => leg.tripId === tripId)
-      expect(
-        rows,
-        `${name}:${tripId} was priced with ${rows.length} legs`,
-      ).toHaveLength(1)
-      expect(rows[0]!.loadId).toBe(tripId)
+
+      if (trip.rateBasis === 'load_row') {
+        // THE ORIGINAL RULING, UNCHANGED: exactly one row, named by its load.
+        expect(
+          rows,
+          `${name}:${tripId} claims load_row with ${rows.length} legs`,
+        ).toHaveLength(1)
+        expect(rows[0]!.loadId).toBe(tripId)
+        expect(trip.rateCents).toBe(rows[0]!.costCents)
+        rows_ += 1
+        continue
+      }
+
+      expect(trip.rateBasis).toBe('leg_sum')
+      // CANCELLED LEGS OUT, by rule 3, and every survivor carrying a cost —
+      // a partial sum is refused rather than returned short.
+      const usable = rows.filter((leg) => leg.status !== CANCELLED_STATUS)
+      expect(rows.length).toBeGreaterThan(1)
+      expect(usable.every((leg) => leg.costCents !== null)).toBe(true)
+      expect(trip.rateCents).toBe(
+        usable.reduce((sum, leg) => sum + (leg.costCents ?? 0), 0),
+      )
+      sums += 1
     }
+
+    // BOTH BRANCHES EXERCISED, or the loop above proved one rule and skipped
+    // the other while reporting a pass. The corpus predates the sum, so a run
+    // that found no sums would be the old rule passing under a new name.
+    expect(rows_).toBeGreaterThan(0)
+    expect(sums).toBeGreaterThan(0)
   })
 
   it('prices every single-load trip the export gives a cost for', () => {

@@ -21,6 +21,20 @@ export interface TripsPlanView {
   unchangedCount: number
   /** Loads somebody cancelled. Skipped whole, and said so. */
   cancelledCount: number
+  /** Loads another system billed and was paid for. Refused whole. */
+  closedCount: number
+  /** What the write would file as delivered — the POD, at the file's time. */
+  deliveredCount: number
+  /** Trips whose driver or truck this import would put in an empty seat. */
+  crewSeatedCount: number
+  /**
+   * Refused crew, one line per column, naming the trip and what the file said.
+   *
+   * LINES RATHER THAN A COUNT, by the ruling's own words: "refusals by name".
+   * Three reasons need three different fixes and a number distinguishes none of
+   * them.
+   */
+  crewRefusals: string[]
   skippedLegTotal: number
   /** Distinct facility codes the book could not resolve. */
   unresolvedCodes: string[]

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  filesAsDelivered,
   rateThatWouldLand,
   stageSentence,
   tripRowView,
+  type TripWriteView,
 } from '@/lib/trips-preview'
 import { planTrips, type PlannedTrip } from '@/lib/trips-import'
 import type { TripLeg } from '@/lib/trips-csv'
@@ -27,6 +29,15 @@ const LABELS = {
   cancelled: 'load is cancelled — skipped',
   addsActuals: 'adds actual times',
   marksDelivered: 'marks delivered',
+  closedHistory: 'closed history — untouched',
+  seatsCrew: 'seats the crew',
+  driver: 'driver',
+  truck: 'truck',
+  matchesNobody: 'matches nobody',
+  matchesTwo: 'matches two',
+  fileDisagrees: 'the file names two',
+  rateFromRow: "the row's own cost",
+  rateFromLegs: 'the legs added up',
 }
 
 const trip = (over: Partial<PlannedTrip> = {}): PlannedTrip => ({
@@ -63,6 +74,8 @@ const trip = (over: Partial<PlannedTrip> = {}): PlannedTrip => ({
   cancelledLegs: 0,
   stage: 'finished' as const,
   rateCents: 508907,
+  // The reading the owner verified against the Relay portal, on this very trip.
+  rateBasis: 'load_row',
   ...over,
 })
 
@@ -90,6 +103,9 @@ describe('a confirmer who may see money', () => {
     expect(
       view(true, {}, {
         action: 'enrich',
+        isClosedHistory: false,
+        hasDriver: false,
+        hasTruck: false,
         hasStops: false,
         hasMiles: false,
         hasRate: true,
@@ -104,6 +120,9 @@ describe('a confirmer who may see money', () => {
     expect(
       view(true, {}, {
         action: 'enrich',
+        isClosedHistory: false,
+        hasDriver: false,
+        hasTruck: false,
         hasStops: false,
         hasMiles: false,
         hasRate: false,
@@ -128,9 +147,14 @@ describe('a confirmer who may not see money', () => {
   it('gets every other field unchanged', () => {
     const withMoney = view(true)
     const without = view(false)
-    const { rate, ...rest } = withMoney
+    // BOTH MONEY KEYS COME OFF, and `rateBasis` is one of them: it is a
+    // statement about how a figure was read, which is a statement about the
+    // figure. A role that may not see the number may not be told it was a sum.
+    const { rate, rateBasis, ...rest } = withMoney
     expect(rate).toBeDefined()
+    expect(rateBasis).toBeDefined()
     expect(without).toEqual(rest)
+    expect('rateBasis' in without).toBe(false)
   })
 })
 
@@ -149,6 +173,9 @@ describe('what would land, decided once', () => {
     expect(
       rateThatWouldLand(trip(), {
         action: 'enrich',
+        isClosedHistory: false,
+        hasDriver: false,
+        hasTruck: false,
         hasStops: true,
         hasMiles: true,
         hasRate: true,
@@ -197,6 +224,9 @@ describe('the preview says what a Finished re-import will do', () => {
       ran(),
       {
         action: 'enrich',
+        isClosedHistory: false,
+        hasDriver: false,
+        hasTruck: false,
         hasStops: true,
         hasMiles: true,
         hasRate: true,
@@ -240,6 +270,9 @@ describe('the preview says what a Finished re-import will do', () => {
       trip({ stage: 'finished' }),
       {
         action: 'enrich',
+        isClosedHistory: false,
+        hasDriver: false,
+        hasTruck: false,
         hasStops: true,
         hasMiles: true,
         hasRate: true,
@@ -417,5 +450,173 @@ describe('one load per row', () => {
     // because there is only one parse and one planner behind both.
     expect(planTrips(legs).trips).toHaveLength(2)
     expect(planTrips(legs, 'row').trips).toHaveLength(4)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// WHAT THE IMPORT WOULD FILE AS DELIVERED — ONE READER FOR THE ROW AND THE COUNT.
+//
+// The count first searched `actionDetail` for the translated label, which is a
+// second reader of the same fact in disguise: it breaks on a translation, a
+// moved comma, or a label that is a substring of another — and it breaks into a
+// wrong NUMBER rather than an error. Both call this now.
+// ---------------------------------------------------------------------------
+
+describe('what would be filed as delivered', () => {
+  const enrichWrite = (
+    over: Partial<Extract<TripWriteView, { action: 'enrich' }>> = {},
+  ) => ({
+    action: 'enrich' as const,
+    hasStops: true,
+    hasMiles: true,
+    hasRate: true,
+    hasActuals: false,
+    isDelivered: false,
+    isCancelled: false,
+    isClosedHistory: false,
+    hasDriver: false,
+    hasTruck: false,
+    ...over,
+  })
+
+  it('files a finished trip on a create', () => {
+    expect(
+      filesAsDelivered(trip({ stage: 'finished' }), { action: 'create' }),
+    ).toBe(true)
+  })
+
+  it('does not file a trip that has not finished', () => {
+    expect(
+      filesAsDelivered(trip({ stage: 'running' }), { action: 'create' }),
+    ).toBe(false)
+    expect(filesAsDelivered(trip({ stage: 'upcoming' }), enrichWrite())).toBe(
+      false,
+    )
+  })
+
+  it('files a finished trip whose load is not there yet', () => {
+    expect(filesAsDelivered(trip({ stage: 'finished' }), enrichWrite())).toBe(
+      true,
+    )
+  })
+
+  it('does not file a load already at or past delivered', () => {
+    expect(
+      filesAsDelivered(
+        trip({ stage: 'finished' }),
+        enrichWrite({ isDelivered: true }),
+      ),
+    ).toBe(false)
+  })
+
+  // ── THE TWO REFUSALS ARE NOT DELIVERIES ─────────────────────────────────
+  // `enrichLoad` returns before the landing for both, so counting them would
+  // promise a status move that cannot happen.
+  it('does not file a cancelled load', () => {
+    expect(
+      filesAsDelivered(
+        trip({ stage: 'finished' }),
+        enrichWrite({ isCancelled: true }),
+      ),
+    ).toBe(false)
+  })
+
+  it('does not file closed history', () => {
+    expect(
+      filesAsDelivered(
+        trip({ stage: 'finished' }),
+        enrichWrite({ isClosedHistory: true }),
+      ),
+    ).toBe(false)
+  })
+})
+
+describe('the crew on the row', () => {
+  const seated = (driverId: string | null, truckId: string | null) => ({
+    kind: 'seated' as const,
+    driverId,
+    truckId,
+  })
+
+  it('says it seats the crew, and names the labels it used', () => {
+    const row = tripRowView(
+      trip({ stage: 'finished' }),
+      { action: 'create' },
+      [],
+      LABELS,
+      { maySeeMoney: false, locale: 'en-US' },
+      seated('drv_1', 'trk_1'),
+    )
+    expect(row.seatsCrew).toBe(true)
+    expect(row.actionDetail).toContain('seats the crew')
+    expect(row.crewRefusals).toEqual([])
+  })
+
+  // THE PREVIEW MUST NOT PROMISE A WRITE THAT WILL NOT HAPPEN. Same defect as
+  // showing the file's rate beside a load that already carries money.
+  it('does not claim to seat a crew into seats that are already full', () => {
+    const row = tripRowView(
+      trip({ stage: 'finished' }),
+      {
+        action: 'enrich',
+        hasStops: true,
+        hasMiles: true,
+        hasRate: true,
+        hasActuals: true,
+        isDelivered: true,
+        isCancelled: false,
+        isClosedHistory: false,
+        hasDriver: true,
+        hasTruck: true,
+      },
+      [],
+      LABELS,
+      { maySeeMoney: false, locale: 'en-US' },
+      seated('drv_1', 'trk_1'),
+    )
+    expect(row.seatsCrew).toBe(false)
+    expect(row.actionDetail).not.toContain('seats the crew')
+  })
+
+  it('does not seat a live trip, whatever the file says', () => {
+    const row = tripRowView(
+      trip({ stage: 'running' }),
+      { action: 'create' },
+      [],
+      LABELS,
+      { maySeeMoney: false, locale: 'en-US' },
+      seated('drv_1', 'trk_1'),
+    )
+    expect(row.seatsCrew).toBe(false)
+  })
+
+  // REFUSALS BY NAME, which is the ruling's word. A count tells a dispatcher
+  // there is a problem; the name tells them which roster row to add.
+  it('reports a refusal with the column, the file’s own text and the reason', () => {
+    const row = tripRowView(
+      trip({ stage: 'finished' }),
+      { action: 'create' },
+      [],
+      LABELS,
+      { maySeeMoney: false, locale: 'en-US' },
+      {
+        kind: 'refused',
+        reasons: [
+          {
+            column: 'driver',
+            value: '  JULIA  ROSE HALL ',
+            why: 'matches_nobody',
+          },
+          { column: 'truck', value: '1024', why: 'matches_two' },
+        ],
+      },
+    )
+    expect(row.seatsCrew).toBe(false)
+    // EXACTLY AS THE FILE WROTE IT — that is the string somebody searches the
+    // export for. `nameKey` normalises for matching, never for reporting.
+    expect(row.crewRefusals[0]).toBe(
+      'driver “  JULIA  ROSE HALL ”: matches nobody',
+    )
+    expect(row.crewRefusals[1]).toBe('truck “1024”: matches two')
   })
 })

@@ -191,7 +191,32 @@ export async function transitionOperational(
   // this is not one. `podConfirmed` re-enters this function, where `from === to`
   // and the rank guard make a second call harmless.
   if (to === 'DELIVERED' && load.directSettled) {
-    await podConfirmed(tx, loadId, options.userId ?? null)
+    // ── AND AT THE SAME INSTANT, WHICH IS THE WHOLE OF IT ──────────────────
+    //
+    // Owner's ruling, 2026-09-26, and this line is where it lands.
+    //
+    // `options.occurredAt` used not to be passed here, and `LoadStatusEvent.
+    // occurredAt` carries `@default(now())` — so a POD carried in by a DATED
+    // delivery was itself stamped at the moment of the write. The two events
+    // sat on one load disagreeing about when the freight finished.
+    //
+    // THAT IS A MONEY BUG, not an audit blemish. `settleableWhere` selects on
+    // an APPLIED POD_RECEIVED event INSIDE the period — the POD event's date is
+    // the pay week. So a bulk trips file uploaded on the 26th for freight
+    // delivered on the 19th settled that driver in the week of the 26th, after
+    // the statement for the right week had gone out, while the DELIVERED event
+    // beside it carried the correct date and made every screen look right.
+    //
+    // A CLICK IS UNAFFECTED. A dispatcher pressing Delivered passes no
+    // `occurredAt`, so both events default to now() exactly as before; this
+    // changes behaviour only where a caller said when, which is precisely where
+    // the old behaviour was wrong.
+    await podConfirmed(
+      tx,
+      loadId,
+      options.userId ?? null,
+      options.occurredAt ?? null,
+    )
   }
 
   // THE OTHER AXIS FOLLOWS. The two statuses move independently (schema
@@ -225,10 +250,19 @@ export async function podConfirmed(
   tx: TxClient,
   loadId: string,
   userId: string | null,
+  /**
+   * WHEN the POD landed, when the caller knows.
+   *
+   * Null means now(), which is right for a document attaching — the upload IS
+   * the event. It is wrong for a delivery imported from a file, and the date is
+   * the pay week: see the call inside `transitionOperational` above.
+   */
+  occurredAt: Date | null = null,
 ): Promise<TransitionOutcome> {
   return transitionOperational(tx, loadId, 'POD_RECEIVED', {
     source: 'AUTOMATIC',
     userId,
+    ...(occurredAt ? { occurredAt } : {}),
     // A KEY, not a sentence. The note is rendered by the timeline, which
     // knows the reader's locale; a string written here does not. See
     // isMessageKey in src/lib/i18n.ts.

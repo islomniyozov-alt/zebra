@@ -16,6 +16,7 @@ import {
   type PlannedLoad,
 } from '@/lib/datatruck/loads'
 import { formatCents } from '@/lib/money'
+import { nameKey } from '@/lib/name-key'
 import { transitionOperational } from '@/lib/load-status'
 import { assertTenancy } from './datatruck-tenancy'
 
@@ -174,8 +175,10 @@ function heading(text: string): void {
   console.log('─'.repeat(Math.max(text.length, 62)))
 }
 
-/** Exact, after collapsing case and whitespace. Never nearest-match. */
-const nameKey = (text: string) => text.trim().toLowerCase().replace(/\s+/g, ' ')
+// `nameKey` — exact, after collapsing case and whitespace, never nearest-match
+// — used to be defined here. It is imported now, from `src/lib/name-key.ts`,
+// because the Relay trips importer needs the same key and wrote its own: one
+// lower-cased and the other upper-cased, and each agreed with itself.
 
 const chunk = <T>(rows: readonly T[], size: number): T[][] => {
   const out: T[][] = []

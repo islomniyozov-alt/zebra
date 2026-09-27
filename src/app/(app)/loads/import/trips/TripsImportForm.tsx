@@ -63,6 +63,10 @@ export interface TripsImportLabels {
   /** Facilities the book has, with no street. Its own line, its own fix. */
   noAddressTitle: string
   warningsTitle: string
+  countDelivered: string
+  countCrewSeated: string
+  countClosed: string
+  crewRefusalsTitle: string
   notAssigned: string
   confirm: string
   perRow: string
@@ -236,6 +240,30 @@ export function TripsImportForm({
                 {plan.skippedLegTotal} {labels.skippedLegs}
               </li>
             ) : null}
+            {/* ── THE RULING'S OTHER COUNTS, AND ONLY WHEN THEY ARE NOT ZERO ──
+             * A row of zeroes buries the one number that matters, which is the
+             * same reason `stageSentence` omits an empty stage. */}
+            {plan.deliveredCount > 0 ? (
+              <li>
+                {labels.countDelivered.replace(
+                  '{n}',
+                  String(plan.deliveredCount),
+                )}
+              </li>
+            ) : null}
+            {plan.crewSeatedCount > 0 ? (
+              <li>
+                {labels.countCrewSeated.replace(
+                  '{n}',
+                  String(plan.crewSeatedCount),
+                )}
+              </li>
+            ) : null}
+            {plan.closedCount > 0 ? (
+              <li className="text-ink-3">
+                {labels.countClosed.replace('{n}', String(plan.closedCount))}
+              </li>
+            ) : null}
           </ul>
 
           {plan.rows.length > 0 ? (
@@ -269,6 +297,29 @@ export function TripsImportForm({
                 {plan.warnings.map((warning) => (
                   <li key={warning} className="text-sm text-ink-2">
                     {warning}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {/* ── REFUSED CREW, BY NAME ──────────────────────────────────────
+           * Owner's ruling, 2026-09-26: "refusals by name". Its own box rather
+           * than a line in the warnings, because these have a fix a dispatcher
+           * can perform — add the driver, resolve the duplicate unit — and the
+           * near-miss warnings above are decisions only the office can make.
+           *
+           * NOT AN ERROR AND NOT A REFUSAL OF THE IMPORT. The freight still
+           * books; the seat stays empty and is named here. */}
+          {plan.crewRefusals.length > 0 ? (
+            <div className="flex flex-col gap-z1 rounded-card border border-line bg-surface-2 p-z3">
+              <p className="text-sm font-medium text-ink">
+                {labels.crewRefusalsTitle}
+              </p>
+              <ul className="flex flex-col gap-z1">
+                {plan.crewRefusals.map((line) => (
+                  <li key={line} className="text-sm text-ink-2">
+                    {line}
                   </li>
                 ))}
               </ul>

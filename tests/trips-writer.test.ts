@@ -53,6 +53,7 @@ const trip = (over: Partial<PlannedTrip> = {}): PlannedTrip => ({
   cancelledLegs: 0,
   stage: 'upcoming' as const,
   rateCents: null,
+  rateBasis: null,
   ...over,
 })
 
@@ -185,11 +186,39 @@ describe('what the writer is forbidden to do', () => {
     expect(REDUCES_MONEY.test('linehaulCents: rateCents')).toBe(false)
   })
 
-  // RULE 7. Name-matching a CSV string to a Driver record is a separate ruled
-  // feature; until then these are informational.
-  it('never assigns a driver or a truck', () => {
-    expect(code).not.toContain('driverId')
-    expect(code).not.toContain('truckId')
+  // ── RULE 7 IS SUPERSEDED, AND THE GUARD TURNS INTO A DIFFERENT ONE ───────
+  //
+  // This asserted that the writer never mentioned `driverId` or `truckId` at
+  // all, under Rule 7 — "the CSV's names are informational until name-matching
+  // is its own ruled feature". The 2026-09-26 ruling is that feature.
+  //
+  // WHAT STILL NEEDS GUARDING IS THE ROUTE, NOT THE ABSENCE. A seat written
+  // through `updateLoad` would run `assertAssignable`, whose four rules each
+  // refuse a true statement about freight that has already run — an INACTIVE
+  // driver, a truck at another authority, two finished trips whose paper clocks
+  // overlap. One refusal fails the whole chunk, so the write goes to the column
+  // directly and this is what says so.
+  it('writes seats to the column and never through updateLoad', () => {
+    expect(code).toContain('driverId')
+    // THE CALL, NOT THE WORD. Both names appear in this file's prose — the
+    // reasoning for avoiding them is written where a reader will meet it — so a
+    // guard on the bare string fails on its own explanation. `createLoad` does
+    // assert internally, which is fine: it is called with no crew.
+    expect(source).not.toContain('updateLoad(')
+    expect(source).not.toContain('assertAssignable(')
+  })
+
+  // AND ONLY INTO AN EMPTY SEAT. The posture of the whole file is adds-what-is-
+  // missing, and a dispatcher's correction must survive a re-upload.
+  it('checks the seat is empty before writing it', () => {
+    const seating = source.slice(
+      source.indexOf('async function seatCrew'),
+      source.indexOf('/** Where a landing put the load'),
+    )
+    expect(seating).toContain('!existing.hasDriver')
+    expect(seating).toContain('!existing.hasTruck')
+    // AND ONLY ON A FINISHED TRIP — the dispatch guard's business otherwise.
+    expect(seating).toContain('stageSeatsCrew(trip.stage)')
   })
 
   it('matches the reference exactly, with no normalising', () => {

@@ -10,8 +10,10 @@ import {
   enrichLoad,
   planTripWrite,
   resolveFacilities,
+  resolveTripCrew,
   tripFacilityCodes,
 } from '@/lib/trips-writer'
+import { crewSeatFor } from '@/lib/trips-crew'
 import type { TripLeg } from '@/lib/trips-csv'
 import type { PrismaClient } from '@/generated/prisma/client'
 
@@ -205,12 +207,17 @@ describe('a booked trip lands with what it was given', () => {
     expect(load.totalRevenueCents).toBe(508907)
   })
 
-  // A MULTI-LEG TRIP LANDS WITH NONE, whatever its Load IDs say. No trip in
-  // today's corpus has this shape — 815 multi-leg trips, none with a leg whose
-  // Load ID equals the Trip ID — so it is constructed here on purpose. That is
-  // the point: the rule must hold for the shape the data has not shown yet,
-  // because the equality alone would price it out of an allocation.
-  it('books a multi-leg trip with no rate even when every leg matches', async () => {
+  // ── SUPERSEDED, 2026-09-26: A MULTI-LEG TRIP LANDS WITH THE SUM ──────────
+  //
+  // This read `toBe(0)` under the 2026-08-20 ruling's second sentence. The new
+  // ruling for bulk completed files is "gross from the file", because a
+  // delivered load with no rate cannot settle and somebody ends up typing the
+  // same figures in by hand off the same export.
+  //
+  // THE CACHED TOTAL IS THE HALF WORTH READING BACK. `totalRevenueCents` is a
+  // STORED column; a linehaul written without recomputing it leaves invoices
+  // reading a stale figure, so the assertion below is on both.
+  it('books a multi-leg trip at the sum of its legs', async () => {
     const id = `MULTI-${nonce}`
     const { load } = await importTrip([
       leg({
@@ -228,8 +235,8 @@ describe('a booked trip lands with what it was given', () => {
         stops: [stop('MKC6'), stop('ORD5')],
       }),
     ])
-    expect(load.linehaulCents).toBe(0)
-    expect(load.totalRevenueCents).toBe(0)
+    expect(load.linehaulCents).toBe(225000)
+    expect(load.totalRevenueCents).toBe(225000)
   })
 
   // §1.3'S MONEY WALL. A role that may not see money does not write it, so the
@@ -286,14 +293,7 @@ describe('enrichment adds a missing rate and replaces nothing', () => {
         write.loadId,
         trip,
         facilities,
-        {
-          hasStops: write.hasStops,
-          hasMiles: write.hasMiles,
-          hasRate: write.hasRate,
-          hasActuals: write.hasActuals,
-          isDelivered: write.isDelivered,
-          isCancelled: write.isCancelled,
-        },
+        write,
         trip.rateCents,
       )
       return tx.load.findFirstOrThrow({
@@ -356,14 +356,7 @@ describe('a trip whose load already exists is enriched, not doubled', () => {
         existing.id,
         trip,
         facilities,
-        {
-          hasStops: false,
-          hasMiles: false,
-          hasRate: write.hasRate,
-          hasActuals: write.hasActuals,
-          isDelivered: write.isDelivered,
-          isCancelled: write.isCancelled,
-        },
+        { ...write, hasStops: false, hasMiles: false },
         trip.rateCents,
       )
     })
@@ -596,14 +589,7 @@ describe('booked first, then it runs — the normal lifecycle', () => {
         write.loadId,
         trip,
         facilities,
-        {
-          hasStops: write.hasStops,
-          hasMiles: write.hasMiles,
-          hasRate: write.hasRate,
-          hasActuals: write.hasActuals,
-          isDelivered: write.isDelivered,
-          isCancelled: write.isCancelled,
-        },
+        write,
         null,
         userId,
       )
@@ -685,14 +671,7 @@ describe('booked first, then it runs — the normal lifecycle', () => {
         write.loadId,
         trip,
         facilities,
-        {
-          hasStops: write.hasStops,
-          hasMiles: write.hasMiles,
-          hasRate: write.hasRate,
-          hasActuals: write.hasActuals,
-          isDelivered: write.isDelivered,
-          isCancelled: write.isCancelled,
-        },
+        write,
         null,
         userId,
       )
@@ -1036,14 +1015,7 @@ describe('T-115GY4TBD, the real four-leg trip', () => {
         write.loadId,
         trip,
         facilities,
-        {
-          hasStops: write.hasStops,
-          hasMiles: write.hasMiles,
-          hasRate: write.hasRate,
-          hasActuals: write.hasActuals,
-          isDelivered: write.isDelivered,
-          isCancelled: write.isCancelled,
-        },
+        write,
         null,
         userId,
       )
@@ -1173,14 +1145,7 @@ describe('T-115GY4TBD, the real four-leg trip', () => {
         write.loadId,
         trip,
         facilities,
-        {
-          hasStops: write.hasStops,
-          hasMiles: write.hasMiles,
-          hasRate: write.hasRate,
-          hasActuals: write.hasActuals,
-          isDelivered: write.isDelivered,
-          isCancelled: write.isCancelled,
-        },
+        write,
         null,
         userId,
       )
@@ -1265,14 +1230,7 @@ describe('a cancelled load is left alone', () => {
         write.loadId,
         trip,
         facilities,
-        {
-          hasStops: write.hasStops,
-          hasMiles: write.hasMiles,
-          hasRate: write.hasRate,
-          hasActuals: write.hasActuals,
-          isDelivered: write.isDelivered,
-          isCancelled: write.isCancelled,
-        },
+        write,
         trip.rateCents,
         userId,
       )
@@ -1321,14 +1279,7 @@ describe('a cancelled load is left alone', () => {
         write.loadId,
         trip,
         facilities,
-        {
-          hasStops: write.hasStops,
-          hasMiles: write.hasMiles,
-          hasRate: write.hasRate,
-          hasActuals: write.hasActuals,
-          isDelivered: write.isDelivered,
-          isCancelled: write.isCancelled,
-        },
+        write,
         trip.rateCents,
         userId,
       )
@@ -1407,5 +1358,507 @@ describe('finding a trip by the number dispatch quotes', () => {
     const spaces = await find('   ')
     expect(all.length).toBeGreaterThan(0)
     expect(spaces.length).toBe(all.length)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE BULK COMPLETED FILE. Owner's ruling, 2026-09-26.
+//
+// "a COMPLETED row becomes a delivered load with the POD event at the file's
+// delivery time; driver and truck seated from the file's columns by unique name
+// / unit; gross from the file; idempotent by trip id; closed history untouched."
+//
+// EVERY ASSERTION HERE READS A ROW BACK, for the reason at the top of this file.
+// The one that matters most reads the POD event's `occurredAt`, because that
+// column IS the pay week: `settleableWhere` selects on an APPLIED POD_RECEIVED
+// event inside the period, and nothing else on the load says which week it is.
+// ---------------------------------------------------------------------------
+
+describe('the POD lands at the file delivery time, not the import one', () => {
+  const DELIVERED_AT = '2026-09-19'
+  const completed = (id: string) => [
+    leg({
+      tripId: id,
+      loadId: id,
+      costCents: 508907,
+      stops: [
+        stop('DEN7', {
+          actualArrival: clock('2026-09-18', '06:00'),
+          actualDeparture: clock('2026-09-18', '07:30'),
+        }),
+        stop('MKC6', {
+          actualArrival: clock(DELIVERED_AT, '14:10'),
+          actualDeparture: clock(DELIVERED_AT, '15:40'),
+        }),
+      ],
+    }),
+  ]
+
+  const podEvents = (loadId: string) =>
+    inOrg((tx) =>
+      tx.loadStatusEvent.findMany({
+        where: {
+          loadId,
+          axis: 'OPERATIONAL',
+          outcome: 'APPLIED',
+          toStatus: 'POD_RECEIVED',
+        },
+        select: { occurredAt: true, source: true },
+      }),
+    )
+
+  // ── THE MONEY ASSERTION ──────────────────────────────────────────────────
+  //
+  // Before the fix the POD event was stamped `now()` while DELIVERED beside it
+  // carried the file's clock — so a week-old file settled the driver in the week
+  // of the upload, after the right week's statement had gone out, with every
+  // screen looking correct because the screens read DELIVERED.
+  it('stamps the POD at the last recorded departure', async () => {
+    const id = `T-PODDATE-${nonce}`
+    const { load } = await importTrip(completed(id))
+
+    expect(load.operationalStatus).toBe('POD_RECEIVED')
+    const events = await podEvents(load.id)
+    expect(events).toHaveLength(1)
+
+    // ── 15:40 ON THE 19TH, RESOLVED IN THE STOP'S ZONE ────────────────────
+    //
+    // 20:40Z, not 21:40Z, and the gap is flag 14 in one line. The fixture's
+    // clocks declare `utcOffsetHours: -6`, but that column is the facility's
+    // STANDARD offset and is cross-check metadata, never an instant — on
+    // 2026-09-19 the zone it names is on daylight time at -5. The printed face
+    // is a wall clock and the ZONE resolves it; `zoneForRelayStop` is where
+    // that is decided.
+    //
+    // WRITTEN AS AN EXACT INSTANT ON PURPOSE. A tolerance here would have
+    // accepted either reading, and which one is right is the difference between
+    // two pay weeks for a Sunday delivery.
+    const stamped = events[0]!.occurredAt
+    expect(stamped.toISOString()).toBe('2026-09-19T20:40:00.000Z')
+
+    // AND NOT TODAY, said separately: the equality above would also hold if the
+    // clock happened to agree, and this is the claim that fails loudly.
+    expect(Math.abs(Date.now() - stamped.getTime())).toBeGreaterThan(86_400_000)
+  })
+
+  // §7: POD_RECEIVED IS NEVER SET BY A CLICK. It arrives carried by the
+  // delivery, which is what `AUTOMATIC` records.
+  it('records it as carried by the delivery, not typed', async () => {
+    const id = `T-PODSRC-${nonce}`
+    const { load } = await importTrip(completed(id))
+    const events = await podEvents(load.id)
+    expect(events[0]!.source).toBe('AUTOMATIC')
+  })
+
+  // THE SAME INSTANT ON BOTH, which is the whole of the fix: two events on one
+  // load disagreeing about when the freight finished is what produced the bug.
+  it('agrees with the DELIVERED event about when it finished', async () => {
+    const id = `T-PODPAIR-${nonce}`
+    const { load } = await importTrip(completed(id))
+    const events = await inOrg((tx) =>
+      tx.loadStatusEvent.findMany({
+        where: { loadId: load.id, axis: 'OPERATIONAL', outcome: 'APPLIED' },
+        select: { toStatus: true, occurredAt: true },
+      }),
+    )
+    const delivered = events.find((event) => event.toStatus === 'DELIVERED')!
+    const pod = events.find((event) => event.toStatus === 'POD_RECEIVED')!
+    expect(delivered.occurredAt.getTime()).toBe(pod.occurredAt.getTime())
+  })
+
+  // ── NO DATE, NO EVENT, AND THE LOAD STAYS VISIBLY UNFINISHED ─────────────
+  //
+  // Visible and wrong beats invisible and wrong, which is the Datatruck
+  // importer's own wording for the same decision. A load reading Delivered while
+  // sitting in no driver's settleable set is a silent condition.
+  it('REFUSES to stamp a completed trip the file gave no clock for', async () => {
+    const id = `T-PODNONE-${nonce}`
+    const { load, outcome } = await importTrip([
+      leg({ tripId: id, loadId: id, stops: [stop('DEN7'), stop('MKC6')] }),
+    ])
+
+    expect(load.operationalStatus).toBe('BOOKED')
+    expect(await podEvents(load.id)).toHaveLength(0)
+    // AND SAID OUT LOUD rather than left as silence.
+    expect(outcome.kind === 'created' && outcome.undated).toBe(true)
+  })
+})
+
+describe('idempotent by trip id', () => {
+  it('updates on a re-upload and never books a second load', async () => {
+    const id = `T-AGAIN-${nonce}`
+    const legs = [
+      leg({
+        tripId: id,
+        loadId: id,
+        costCents: 412300,
+        stops: [
+          stop('DEN7', { actualDeparture: clock('2026-09-18', '07:30') }),
+          stop('MKC6', { actualArrival: clock('2026-09-19', '14:10') }),
+        ],
+      }),
+    ]
+    const first = await importTrip(legs)
+    expect(first.outcome.kind).toBe('created')
+
+    // THE SECOND PASS GOES THROUGH THE DECISION, exactly as the action does.
+    const trip = planTrips(legs).trips[0]!
+    const second = await inOrg(async (tx) => {
+      const write = await planTripWrite(tx, trip)
+      if (write.action !== 'enrich') {
+        throw new Error(`expected enrich, got ${write.action}`)
+      }
+      const facilities = await resolveFacilities(tx, tripFacilityCodes(trip))
+      return enrichLoad(
+        tx,
+        organizationId,
+        write.loadId,
+        trip,
+        facilities,
+        write,
+        trip.rateCents,
+        userId,
+      )
+    })
+
+    // NOTHING LEFT TO DO — which is the claim "idempotent" actually makes. A
+    // re-upload that kept finding work would mean the first pass was partial.
+    expect(second.kind).toBe('unchanged')
+
+    const loads = await inOrg((tx) =>
+      tx.load.findMany({ where: { referenceNumber: id, deletedAt: null } }),
+    )
+    expect(loads).toHaveLength(1)
+    expect(loads[0]!.id).toBe(first.load.id)
+
+    // AND ONE POD EVENT, not one per upload: a second APPLIED POD_RECEIVED in a
+    // later week would put the same freight in two settlements.
+    const stamps = await inOrg((tx) =>
+      tx.loadStatusEvent.count({
+        where: {
+          loadId: first.load.id,
+          axis: 'OPERATIONAL',
+          outcome: 'APPLIED',
+          toStatus: 'POD_RECEIVED',
+        },
+      }),
+    )
+    expect(stamps).toBe(1)
+  })
+})
+
+describe('closed history is untouched', () => {
+  it('REFUSES a load another system billed and was paid for', async () => {
+    const id = `T-CLOSED-${nonce}`
+    const customerId = (
+      await inOrg((tx) => ensureRelayCustomer(tx, organizationId))
+    ).id
+
+    // A load as the Datatruck history import leaves one: delivered elsewhere,
+    // billing closed, none of our stops on it, no crew.
+    const closed = await owner.load.create({
+      data: {
+        organizationId,
+        companyId,
+        customerId,
+        loadNumber: `CLOSED-${nonce}`,
+        referenceNumber: id,
+        operationalStatus: 'DELIVERED',
+        billingStatus: 'CLOSED_IN_DATATRUCK',
+        linehaulCents: 77_700,
+      },
+    })
+
+    const trip = planTrips([
+      leg({
+        tripId: id,
+        loadId: id,
+        costCents: 99_900,
+        stops: [
+          stop('DEN7', { actualDeparture: clock('2026-09-18', '07:30') }),
+          stop('MKC6', { actualArrival: clock('2026-09-19', '14:10') }),
+        ],
+      }),
+    ]).trips[0]!
+
+    const outcome = await inOrg(async (tx) => {
+      const write = await planTripWrite(tx, trip)
+      if (write.action !== 'enrich') throw new Error('expected enrich')
+      expect(write.isClosedHistory).toBe(true)
+      const facilities = await resolveFacilities(tx, tripFacilityCodes(trip))
+      return enrichLoad(
+        tx,
+        organizationId,
+        write.loadId,
+        trip,
+        facilities,
+        write,
+        trip.rateCents,
+        userId,
+        { driverId: null, truckId: null },
+      )
+    })
+
+    expect(outcome.kind).toBe('unchanged')
+    expect(outcome.kind === 'unchanged' && outcome.reason).toContain('closed')
+
+    // ── READ THE ROW BACK, because "returned unchanged" was true of the
+    // cancelled half-write too: it refused the status move and wrote the
+    // mileage and the rate anyway.
+    const after = await owner.load.findFirstOrThrow({
+      where: { id: closed.id },
+      include: { stops: true, statusEvents: true },
+    })
+    expect(after.stops).toHaveLength(0)
+    expect(after.linehaulCents).toBe(77_700)
+    expect(after.dispatchedMiles).toBeNull()
+    expect(after.operationalStatus).toBe('DELIVERED')
+    expect(after.billingStatus).toBe('CLOSED_IN_DATATRUCK')
+    // NOT ONE EVENT. A POD_RECEIVED here would put freight another system
+    // settled a year ago into a driver's settleable set for this week.
+    expect(after.statusEvents).toHaveLength(0)
+
+    await owner.load.delete({ where: { id: closed.id } })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE SEATS, FROM THE FILE'S OWN COLUMNS.
+//
+// Owner's ruling, 2026-09-26, which supersedes Rule 7 by the condition Rule 7
+// named for itself. The resolution rules are unit-tested in tests/trips-crew.ts
+// without a database; what needs one is the join — does the roster's two-column
+// name meet the file's one-string name, and does the seat reach the column.
+// ---------------------------------------------------------------------------
+
+describe('the crew a completed file names', () => {
+  let seatDriverId = ''
+  let seatTruckId = ''
+
+  beforeAll(async () => {
+    const driver = await owner.driver.create({
+      data: {
+        organizationId,
+        companyId,
+        // UPPER-CASE IN THE FILE, MIXED ON THE ROSTER, AND THE KEY IS NEITHER.
+        // This is the pair `nameKey` exists for: two importers that normalised
+        // differently would seat this person on one path and refuse them on the
+        // other, and each would agree with itself.
+        firstName: `Seated${nonce}`,
+        lastName: 'Driver',
+        // INACTIVE ON PURPOSE. `assertAssignable` refuses an INACTIVE driver,
+        // and by the 2026-09-25 ruling an import must admit one anyway: who
+        // drove it drove it, and the exclusion lives on new dispatch only. A
+        // seat written through `updateLoad` would fail this test.
+        status: 'INACTIVE',
+      },
+    })
+    seatDriverId = driver.id
+    const truck = await owner.truck.create({
+      data: { organizationId, companyId, unitNumber: `U${nonce}` },
+    })
+    seatTruckId = truck.id
+  }, 300_000)
+
+  afterAll(async () => {
+    await owner.load
+      .updateMany({
+        where: { organizationId, driverId: seatDriverId },
+        data: { driverId: null },
+      })
+      .catch(() => {})
+  })
+
+  const seatedLegs = (id: string) => [
+    leg({
+      tripId: id,
+      loadId: id,
+      costCents: 310_000,
+      driverName: `SEATED${nonce}   DRIVER`,
+      tractorId: `u${nonce}`,
+      stops: [
+        stop('DEN7', { actualDeparture: clock('2026-09-18', '07:30') }),
+        stop('MKC6', { actualArrival: clock('2026-09-19', '14:10') }),
+      ],
+    }),
+  ]
+
+  const importWithCrew = async (id: string) => {
+    const trip = planTrips(seatedLegs(id)).trips[0]!
+    const loadId = await inOrg(async (tx) => {
+      const customerId = (await ensureRelayCustomer(tx, organizationId)).id
+      const facilities = await resolveFacilities(tx, tripFacilityCodes(trip))
+      const resolve = await resolveTripCrew(tx, [trip])
+      const seat = crewSeatFor(trip, resolve)
+      // THE RESOLUTION IS ASSERTED HERE, not inferred from the columns below: a
+      // refusal and an empty column both write no seat, and the report is the
+      // only thing that distinguishes them.
+      expect(seat).toEqual({
+        kind: 'seated',
+        driverId: seatDriverId,
+        truckId: seatTruckId,
+      })
+      if (seat.kind !== 'seated') throw new Error('expected seated')
+      const outcome = await createTripLoad(
+        tx,
+        organizationId,
+        {
+          trip,
+          companyId,
+          customerId,
+          rateCents: trip.rateCents,
+          crew: { driverId: seat.driverId, truckId: seat.truckId },
+        },
+        facilities,
+        userId,
+      )
+      return outcome.loadId
+    })
+    return inOrg((tx) => tx.load.findFirstOrThrow({ where: { id: loadId } }))
+  }
+
+  it('seats the driver and the truck on the load it books', async () => {
+    const load = await importWithCrew(`T-SEAT-${nonce}`)
+    expect(load.driverId).toBe(seatDriverId)
+    expect(load.truckId).toBe(seatTruckId)
+    // AND THE FREIGHT IS STILL PAYABLE, which is the point of seating it: a
+    // settleable load with no driver pays nobody.
+    expect(load.operationalStatus).toBe('POD_RECEIVED')
+  })
+
+  it('does not move a seat somebody already filled', async () => {
+    const id = `T-SEATKEEP-${nonce}`
+    const load = await importWithCrew(id)
+
+    // A dispatcher corrects the seat by hand.
+    const other = await owner.driver.create({
+      data: {
+        organizationId,
+        companyId,
+        firstName: `Corrected${nonce}`,
+        lastName: 'Driver',
+      },
+    })
+    await owner.load.update({
+      where: { id: load.id },
+      data: { driverId: other.id },
+    })
+
+    // The same file is uploaded again.
+    const trip = planTrips(seatedLegs(id)).trips[0]!
+    await inOrg(async (tx) => {
+      const write = await planTripWrite(tx, trip)
+      if (write.action !== 'enrich') throw new Error('expected enrich')
+      expect(write.hasDriver).toBe(true)
+      const facilities = await resolveFacilities(tx, tripFacilityCodes(trip))
+      const resolve = await resolveTripCrew(tx, [trip])
+      const seat = crewSeatFor(trip, resolve)
+      if (seat.kind !== 'seated') throw new Error('expected seated')
+      return enrichLoad(
+        tx,
+        organizationId,
+        write.loadId,
+        trip,
+        facilities,
+        write,
+        trip.rateCents,
+        userId,
+        { driverId: seat.driverId, truckId: seat.truckId },
+      )
+    })
+
+    const after = await inOrg((tx) =>
+      tx.load.findFirstOrThrow({ where: { id: load.id } }),
+    )
+    // THE CORRECTION SURVIVES. Adds what is missing, replaces nothing — which is
+    // what makes a re-upload safe rather than merely duplicate-free.
+    expect(after.driverId).toBe(other.id)
+
+    await owner.load.update({
+      where: { id: load.id },
+      data: { driverId: null },
+    })
+    await owner.driver.delete({ where: { id: other.id } })
+  })
+
+  // ── A PAYEE IS NOT A DRIVER ──────────────────────────────────────────────
+  //
+  // "7 Star" and "Said truck 3609" are referral payees: commission on somebody
+  // else's loads. One of them landing in a seat would pay a referral for
+  // hauling, and would show a company name on the dispatch board as a driver.
+  it('REFUSES to seat a referral payee, so the name matches nobody', async () => {
+    const payee = await owner.driver.create({
+      data: {
+        organizationId,
+        companyId,
+        firstName: `Payee${nonce}`,
+        lastName: 'Referral',
+        kind: 'PAYEE',
+      },
+    })
+
+    const trip = planTrips([
+      leg({
+        tripId: `T-PAYEE-${nonce}`,
+        driverName: `PAYEE${nonce} REFERRAL`,
+        tractorId: '',
+      }),
+    ]).trips[0]!
+
+    const seat = await inOrg(async (tx) =>
+      crewSeatFor(trip, await resolveTripCrew(tx, [trip])),
+    )
+    expect(seat.kind).toBe('refused')
+    if (seat.kind === 'refused') {
+      expect(seat.reasons[0]!.why).toBe('matches_nobody')
+      expect(seat.reasons[0]!.value).toContain('REFERRAL')
+    }
+
+    await owner.driver.delete({ where: { id: payee.id } })
+  })
+
+  // TWO TRUCKS WITH ONE UNIT NUMBER IS A REAL STATE — production carried two
+  // 1024s for a fortnight — and seating either one is a guess about which truck
+  // the freight was on.
+  it('REFUSES a unit number two trucks answer to', async () => {
+    const unit = `DUP${nonce}`
+    // ── AT TWO COMPANIES, WHICH IS THE ONLY WAY THIS EXISTS ────────────────
+    //
+    // `@@unique([companyId, unitNumber])` refuses a duplicate inside one
+    // authority — the database told this test so on its first run. The real
+    // shape is the one the fleet actually had: two trucks numbered 1024 under
+    // two of the group's companies, which is precisely why a Relay file naming
+    // a bare unit number cannot decide between them.
+    const second = await owner.company.create({
+      data: { organizationId, name: `Trips Second ${nonce}` },
+    })
+    const a = await owner.truck.create({
+      data: { organizationId, companyId, unitNumber: unit },
+    })
+    const b = await owner.truck.create({
+      data: { organizationId, companyId: second.id, unitNumber: unit },
+    })
+
+    const trip = planTrips([
+      leg({
+        tripId: `T-DUP-${nonce}`,
+        driverName: '',
+        tractorId: unit.toLowerCase(),
+      }),
+    ]).trips[0]!
+
+    const seat = await inOrg(async (tx) =>
+      crewSeatFor(trip, await resolveTripCrew(tx, [trip])),
+    )
+    expect(seat.kind).toBe('refused')
+    if (seat.kind === 'refused') {
+      expect(seat.reasons).toEqual([
+        { column: 'truck', value: unit.toLowerCase(), why: 'matches_two' },
+      ])
+    }
+
+    await owner.truck.delete({ where: { id: a.id } })
+    await owner.truck.delete({ where: { id: b.id } })
+    await owner.company.delete({ where: { id: second.id } })
   })
 })

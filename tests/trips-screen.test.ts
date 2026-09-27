@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { translator } from '@/lib/i18n'
 import { planSignature, planTrips } from '@/lib/trips-import'
 import type { TripLeg } from '@/lib/trips-csv'
 
@@ -142,19 +143,43 @@ describe('rule 6 — no money reaches this screen', () => {
   })
 })
 
-describe('rule 7 — nothing is auto-assigned', () => {
+describe('the seats, and what is still never assigned', () => {
+  // ── RULE 7 IS SUPERSEDED FOR DRIVER AND TRUCK, 2026-09-26 ────────────────
+  //
+  // This block asserted that the action never set `driverId`, `truckId` or
+  // `trailerId`. The ruling seats the first two from the file on a FINISHED
+  // trip, by the condition Rule 7 stated for its own replacement.
+  //
+  // THE TRAILER IS NOT IN THE RULING AND IS STILL NEVER WRITTEN. The column is
+  // parsed and shown; a trailer is not who gets paid and not what a compliance
+  // list reads, so there was no reason to widen the ruling to it and the guard
+  // stays exactly as it was for that field.
+  //
   // AS A KEY, NOT AS A SUBSTRING. The first version searched for the bare word
   // and failed on `trip.trailerIds` — the preview READING equipment, which is
-  // the rule being obeyed rather than broken. What rule 7 forbids is writing
-  // one, so the pattern is the assignment.
+  // the rule being obeyed rather than broken. What is forbidden is writing one,
+  // so the pattern is the assignment.
   const assignsField = (code: string, field: string) =>
     new RegExp(String.raw`\b${field}\b\s*:`).test(code)
 
-  it('never sets a driver, truck or trailer', () => {
+  it('never sets a trailer', () => {
+    expect(assignsField(codeOf(ACTIONS), 'trailerId')).toBe(false)
+  })
+
+  // ── AND THE ACTION DOES NOT DECIDE A SEAT, IT PASSES ONE ON ──────────────
+  //
+  // Flag 97 and §1.3's own reason for `trips-preview.ts` existing: an action
+  // body runs behind `withCurrentOrg`, so a rule written inside it ships on a
+  // reading. The judgement — one hit seats, none or two refuse — lives in
+  // `trips-crew.ts` where a test can reach it, and this is what stops it
+  // drifting back in here.
+  it('decides no seat inline — it calls the rule and passes the result', () => {
     const code = codeOf(ACTIONS)
-    for (const field of ['driverId', 'truckId', 'trailerId']) {
-      expect(assignsField(code, field), `the action sets ${field}`).toBe(false)
-    }
+    expect(code).toContain('crewSeatFor(')
+    // The shapes an inline decision takes: picking a hit, or counting them.
+    expect(code).not.toContain('driverIdsFor(')
+    expect(code).not.toContain('truckIdsFor(')
+    expect(code).not.toMatch(/hits\.length/)
   })
 
   // The pattern above can fail — proven here rather than assumed, because a
@@ -166,10 +191,16 @@ describe('rule 7 — nothing is auto-assigned', () => {
     expect(assignsField('trip.trailerIds.join()', 'trailerId')).toBe(false)
   })
 
-  // Shown, not assigned — and the screen says so where a dispatcher will read
-  // it rather than only in a comment they will not.
-  it('tells the dispatcher that in words', () => {
+  // AND THE SCREEN SAYS WHAT IT DOES, where a dispatcher will read it rather
+  // than only in a comment they will not. The sentence itself changed with the
+  // ruling — it used to promise that nothing was assigned, which stopped being
+  // true the moment a finished trip started seating its driver.
+  it('tells the dispatcher what will and will not be seated', () => {
     expect(readFileSync(FORM, 'utf8')).toContain('labels.notAssigned')
+    const sentence = translator('en')('trips.notAssigned')
+    // The promise that is still kept, and the one that is not made any more.
+    expect(sentence).toContain('trailer')
+    expect(sentence).not.toContain('Nothing is assigned')
   })
 })
 

@@ -1,5 +1,12 @@
 import { formatCents } from './money'
+import { stageSeatsCrew, type CrewRefusal, type CrewSeat } from './trips-crew'
 import type { PlannedTrip } from './trips-import'
+
+/** The two readings of the file's money, in words. */
+export interface TripRateBasisLabels {
+  rateFromRow: string
+  rateFromLegs: string
+}
 
 // ---------------------------------------------------------------------------
 // THE ROW A DISPATCHER CONFIRMS, INCLUDING THE MONEY — OR NOT INCLUDING IT.
@@ -26,10 +33,49 @@ export interface TripRowLabels {
   create: string
   unchanged: string
   cancelled: string
+  closedHistory: string
   addsStops: string
   addsMiles: string
   addsActuals: string
   marksDelivered: string
+  seatsCrew: string
+}
+
+/** The words a crew refusal is reported in. */
+export interface CrewRefusalLabels {
+  driver: string
+  truck: string
+  matchesNobody: string
+  matchesTwo: string
+  fileDisagrees: string
+}
+
+/**
+ * A refusal, in one line a dispatcher can act on.
+ *
+ * ── NAMED, BECAUSE A COUNT IS NOT ACTIONABLE ──────────────────────────────
+ *
+ * The ruling asks for "refusals by name". "4 refused" tells a dispatcher there
+ * is a problem and not which name to fix; the three reasons need three
+ * different fixes — add the driver to the roster, resolve the duplicate unit
+ * number, or look at a file that names two drivers for one trip.
+ *
+ * THE VALUE IS QUOTED EXACTLY AS THE FILE WROTE IT, trailing spaces and odd
+ * casing included, because that is the string somebody has to search the export
+ * for. `nameKey` normalises for MATCHING; it must not normalise for REPORTING.
+ */
+export function crewRefusalLine(
+  refusal: CrewRefusal,
+  labels: CrewRefusalLabels,
+): string {
+  const column = refusal.column === 'driver' ? labels.driver : labels.truck
+  const why =
+    refusal.why === 'matches_nobody'
+      ? labels.matchesNobody
+      : refusal.why === 'matches_two'
+        ? labels.matchesTwo
+        : labels.fileDisagrees
+  return `${column} “${refusal.value}”: ${why}`
 }
 
 export type TripWriteView =
@@ -42,6 +88,9 @@ export type TripWriteView =
       hasActuals: boolean
       isDelivered: boolean
       isCancelled: boolean
+      isClosedHistory: boolean
+      hasDriver: boolean
+      hasTruck: boolean
     }
 
 export interface TripRowMoney {
@@ -55,14 +104,60 @@ export interface TripRowView {
   lane: string
   stops: number
   miles: string
-  action: 'create' | 'enrich' | 'unchanged' | 'cancelled'
+  action: 'create' | 'enrich' | 'unchanged' | 'cancelled' | 'closed'
   actionDetail: string
   skippedLegs: number
   unresolved: string[]
   driver: string
   equipment: string
+  /**
+   * Whether this import would put the file's crew into the load's seats.
+   *
+   * FALSE IS THREE DIFFERENT FACTS and the row says which through
+   * `crewRefusals` plus `actionDetail`: the file named nobody, the trip has not
+   * finished so the seats are a dispatcher's to fill, or the names were refused.
+   */
+  seatsCrew: boolean
+  /** One line per refused column, naming exactly what the file said. */
+  crewRefusals: string[]
   /** ABSENT — not null — when the role may not see money. */
   rate?: string
+  /**
+   * How that figure was read: the row's own cost, or the legs added up.
+   *
+   * ABSENT ALONGSIDE `rate`, by the same §1.3 rule — it is a statement about a
+   * money figure, and a role that may not see the figure may not see how it was
+   * made either. Absent too when no rate would land, because there is then no
+   * reading to describe.
+   */
+  rateBasis?: string
+}
+
+/**
+ * Would this import file the load as delivered?
+ *
+ * ── ONE READER, BECAUSE THE COUNT AND THE ROW MUST NOT DISAGREE ────────────
+ *
+ * The first version of the "delivered" count searched `actionDetail` for the
+ * translated label. That is a second reader of the same fact, wearing a
+ * disguise: it breaks when somebody translates the word, when a comma moves, or
+ * when a locale writes the phrase as a substring of another label — and it
+ * breaks into a WRONG NUMBER rather than an error.
+ *
+ * So the row and the count call this, and the label is printed from it.
+ *
+ * REFUSED CASES ARE NOT DELIVERIES. A cancelled load and closed history are
+ * both left alone by `enrichLoad` before it reaches the landing, so counting
+ * them would promise a status move that cannot happen.
+ */
+export function filesAsDelivered(
+  trip: PlannedTrip,
+  write: TripWriteView,
+): boolean {
+  if (trip.stage !== 'finished') return false
+  if (write.action === 'create') return true
+  if (write.isCancelled || write.isClosedHistory) return false
+  return !write.isDelivered
 }
 
 /** Does the export carry a check-in for any stop on this trip? */
@@ -87,8 +182,10 @@ export function tripRowView(
   trip: PlannedTrip,
   write: TripWriteView,
   unresolved: string[],
-  labels: TripRowLabels,
+  labels: TripRowLabels & CrewRefusalLabels & TripRateBasisLabels,
   money: TripRowMoney,
+  /** What the file's crew columns resolved to. Null when nothing resolved it. */
+  crew: CrewSeat | null = null,
 ): TripRowView {
   // WHAT THIS ENRICH WOULD ACTUALLY DO, listed before it is summarised.
   //
@@ -99,9 +196,7 @@ export function tripRowView(
   const willAddActuals = Boolean(
     enriching && !enriching.hasActuals && tripHasActuals(trip),
   )
-  const willDeliver = Boolean(
-    enriching && trip.stage === 'finished' && !enriching.isDelivered,
-  )
+  const willDeliver = enriching !== null && filesAsDelivered(trip, write)
 
   // A CANCELLED LOAD IS ITS OWN VERDICT, and it is counted separately rather
   // than folded into "already complete". Somebody said this freight is not
@@ -109,12 +204,45 @@ export function tripRowView(
   // skipped for that reason instead of announcing a write that cannot occur.
   const cancelled = enriching?.isCancelled === true
 
+  // AND SO IS CLOSED HISTORY, for the same reason twice over: the write refuses
+  // it whole, and a dispatcher reading "already complete" beside a load from
+  // last February would have no way to tell that the import had declined to
+  // touch settled freight rather than found nothing to do.
+  const closed = enriching?.isClosedHistory === true
+
+  // ── WHAT THE CREW COLUMNS WOULD DO ────────────────────────────────────────
+  //
+  // SEATED ONLY WHERE A SEAT IS ACTUALLY EMPTY. A trip whose driver resolves
+  // cleanly onto a load that already has one writes nothing, and saying "seats
+  // the crew" there would be the preview promising a write that will not
+  // happen — the same defect as the rate column showing the file's figure for a
+  // load that already carries money.
+  const seatable = crew?.kind === 'seated' && stageSeatsCrew(trip.stage)
+  const driverSeatFree = write.action === 'create' || !write.hasDriver
+  const truckSeatFree = write.action === 'create' || !write.hasTruck
+  const seatsCrew = Boolean(
+    seatable &&
+      !cancelled &&
+      !closed &&
+      ((crew.driverId !== null && driverSeatFree) ||
+        (crew.truckId !== null && truckSeatFree)),
+  )
+
+  // REFUSALS ARE REPORTED WHATEVER THE STAGE. A live trip's names are not
+  // written either way, but a name that matches nobody is a roster gap today
+  // and a refused seat next week — telling a dispatcher now is free.
+  const crewRefusals =
+    crew?.kind === 'refused'
+      ? crew.reasons.map((reason) => crewRefusalLine(reason, labels))
+      : []
+
   const unchanged =
     enriching !== null &&
     enriching.hasStops &&
     enriching.hasMiles &&
     !willAddActuals &&
-    !willDeliver
+    !willDeliver &&
+    !seatsCrew
 
   const row: TripRowView = {
     tripId: trip.tripId,
@@ -124,11 +252,13 @@ export function tripRowView(
     action:
       write.action === 'create'
         ? 'create'
-        : cancelled
-          ? 'cancelled'
-          : unchanged
-            ? 'unchanged'
-            : 'enrich',
+        : closed
+          ? 'closed'
+          : cancelled
+            ? 'cancelled'
+            : unchanged
+              ? 'unchanged'
+              : 'enrich',
     actionDetail:
       // A CREATE FROM A COMPLETED EXPORT SAYS SO. The row used to read "to
       // book" for a trip that had already run, which was true of the write at
@@ -136,25 +266,34 @@ export function tripRowView(
       // the stage. The preview and the write agree by construction or they do
       // not agree at all.
       write.action === 'create'
-        ? trip.stage === 'finished'
-          ? [labels.create, labels.marksDelivered].join(', ')
-          : labels.create
-        : cancelled
-          ? labels.cancelled
-          : unchanged
-            ? labels.unchanged
-            : [
-                enriching!.hasStops ? null : labels.addsStops,
-                enriching!.hasMiles ? null : labels.addsMiles,
-                willAddActuals ? labels.addsActuals : null,
-                willDeliver ? labels.marksDelivered : null,
-              ]
-                .filter(Boolean)
-                .join(', '),
+        ? [
+            labels.create,
+            trip.stage === 'finished' ? labels.marksDelivered : null,
+            seatsCrew ? labels.seatsCrew : null,
+          ]
+            .filter(Boolean)
+            .join(', ')
+        : closed
+          ? labels.closedHistory
+          : cancelled
+            ? labels.cancelled
+            : unchanged
+              ? labels.unchanged
+              : [
+                  enriching!.hasStops ? null : labels.addsStops,
+                  enriching!.hasMiles ? null : labels.addsMiles,
+                  willAddActuals ? labels.addsActuals : null,
+                  willDeliver ? labels.marksDelivered : null,
+                  seatsCrew ? labels.seatsCrew : null,
+                ]
+                  .filter(Boolean)
+                  .join(', '),
     skippedLegs: trip.cancelledLegs,
     unresolved,
     driver: trip.driverNames.join(', ') || '—',
     equipment: [...trip.trailerIds, ...trip.tractorIds].join(' / ') || '—',
+    seatsCrew,
+    crewRefusals,
   }
 
   // THE KEY IS ADDED, NEVER EMPTIED. A role without the permission gets an
@@ -162,6 +301,13 @@ export function tripRowView(
   if (money.maySeeMoney) {
     const cents = rateThatWouldLand(trip, write)
     row.rate = cents === null ? '—' : formatCents(cents, money.locale)
+    // AND HOW IT WAS READ, beside it and under the same permission. A sum of
+    // legs has never been checked against the Relay portal; the label is how a
+    // dispatcher knows to check one rather than trusting 32 of them.
+    if (cents !== null && trip.rateBasis !== null) {
+      row.rateBasis =
+        trip.rateBasis === 'load_row' ? labels.rateFromRow : labels.rateFromLegs
+    }
   }
 
   return row
