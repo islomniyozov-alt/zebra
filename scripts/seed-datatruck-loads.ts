@@ -190,10 +190,11 @@ async function main(): Promise<void> {
   const startedAt = Date.now()
   const bytes = new Uint8Array(readFileSync(FILE))
   const records = asRecords(await readXlsx(bytes))
-  const plan = planLoads(records)
   const where = target()
 
-  console.log(`export  ${FILE} (${bytes.length} bytes, ${plan.read} data rows)`)
+  console.log(
+    `export  ${FILE} (${bytes.length} bytes, ${records.length} data rows)`,
+  )
   console.log(`mode    ${WRITE ? 'WRITE' : 'preview only'}`)
   console.log(
     `read    ${((Date.now() - startedAt) / 1000).toFixed(1)}s to parse`,
@@ -206,6 +207,58 @@ async function main(): Promise<void> {
       host: where.host,
       slug: ORGANIZATION_SLUG,
       expectOrganizationId: where.expectOrganizationId,
+    })
+
+    // ── AMAZON'S CANCELLATION FEES, FOR THE DUPLICATE RULE ────────────────
+    //
+    // Owner's ruling, 2026-09-27: `Total other pay` is held as an echo of the
+    // cancellation fee when `Load pay` is above zero and Amazon's
+    // `LOAD - CANCELLED` for the reference equals it. `otherPayDecision` is the
+    // rule; this is the one fact it needs from outside the export.
+    //
+    // READ FROM THE `TONU` ACCESSORIALS THE REMITTANCE IMPORTER ALREADY WROTE,
+    // not by parsing the workbooks again. Those rows ARE Amazon's cancelled-load
+    // figures — `writeRemittance` maps the `TONU` item type onto them and marks
+    // them non-billable so they record the cash without inflating revenue. A
+    // second parse would be a second reader of one fact, which is the shape this
+    // session has already paid for twice.
+    //
+    // THE PLAN IS THEREFORE BUILT AFTER THE CONNECTION, where it used to be
+    // built before. Nothing else about the ordering changed; the row count in the
+    // banner above now comes from `records` rather than from the plan, because
+    // the plan does not exist yet at that point.
+    //
+    // A LOAD WITH NO TONU ROW YIELDS null AND BOOKS AS BEFORE, which covers the
+    // ordinary case and the first-ever import, where no remittance has landed.
+    const tonuRows = await db.loadAccessorial.findMany({
+      where: {
+        organizationId: tenancy.organizationId,
+        type: 'TONU',
+        load: { deletedAt: null, referenceNumber: { not: null } },
+      },
+      select: {
+        amountCents: true,
+        load: { select: { referenceNumber: true } },
+      },
+    })
+    const cancellationByReference = new Map<string, number>()
+    for (const row of tonuRows) {
+      const reference = row.load.referenceNumber
+      if (reference === null) continue
+      // SUMMED, because a reference can carry more than one cancellation row and
+      // the rule compares against the total Amazon sent for it.
+      cancellationByReference.set(
+        reference,
+        (cancellationByReference.get(reference) ?? 0) + row.amountCents,
+      )
+    }
+    console.log(
+      `amazon  ${cancellationByReference.size} reference(s) carry a LOAD - CANCELLED figure`,
+    )
+
+    const plan = planLoads(records, {
+      cancellationFeeFor: (reference) =>
+        cancellationByReference.get(reference) ?? null,
     })
     const companyByName = new Map(
       tenancy.companies.map((company) => [company.name, company.id]),
@@ -237,6 +290,21 @@ async function main(): Promise<void> {
       0,
     )
 
+    // ── LOUD, NEVER BOOKED ────────────────────────────────────────────────
+    //
+    // Printed BEFORE the reconciliation, because it explains a difference the
+    // reconciliation is about to show: the import's accessorial total will be
+    // short of the export's by exactly the sum below, and a reader who meets
+    // that number first will go looking for a bug.
+    if (plan.duplicateOtherPay.length > 0) {
+      heading(
+        `TOTAL OTHER PAY HELD AS A DUPLICATE CANCELLATION FEE — ${plan.duplicateOtherPay.length}`,
+      )
+      for (const row of plan.duplicateOtherPay) {
+        console.log(`  ${row.externalId}  ${row.reason}`)
+      }
+    }
+
     heading('RECONCILIATION — the sum is the instrument')
     console.log(
       `  linehaul     source ${formatCents(sourceLinehaul).padStart(16)}   import ${formatCents(importLinehaul).padStart(16)}`,
@@ -250,7 +318,19 @@ async function main(): Promise<void> {
       `  difference   linehaul ${formatCents(linehaulGap)}, accessorial ${formatCents(accessorialGap)}` +
         (linehaulGap === 0 && accessorialGap === 0
           ? '  — RECONCILED TO THE CENT'
-          : `  — accounted for by ${plan.held.length} held row(s) below`),
+          : // ── WHAT ACCOUNTS FOR A GAP, NAMED PRECISELY ──────────────────
+            //
+            // THIS USED TO SAY "accounted for by N held row(s) below" AND ONLY
+            // THAT, which the duplicate-cancellation rule made self-
+            // contradictory on its first run: the accessorial column came up
+            // $137.00 short against ZERO held rows, so the report attributed a
+            // real difference to nothing and invited somebody to hunt a bug
+            // that was a ruling.
+            //
+            // Two causes now, both counted. A gap with neither behind it still
+            // reads as unexplained, which is the whole point of the line.
+            `  — accounted for by ${plan.held.length} held row(s) and ` +
+            `${plan.duplicateOtherPay.length} duplicate cancellation fee(s)`),
     )
 
     heading(`HELD — ${plan.held.length} rows this seed will not write`)

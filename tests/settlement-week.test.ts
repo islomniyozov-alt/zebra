@@ -7,6 +7,7 @@ import {
   grossFor,
   isSettlementWeek,
   payoutDateFor,
+  payOnSettledGross,
   tariffLabel,
   weekOf,
   payWeekFor,
@@ -904,6 +905,77 @@ describe('ST-005395 as transcribed', () => {
 // to agree today. A test that compared their outputs field by field would pass
 // just as well with the conditions copied into both.
 // ---------------------------------------------------------------------------
+
+describe('a percent-of-linehaul rule prices on the SETTLED gross', () => {
+  const rule = {
+    id: 'rule-linehaul',
+    type: 'PERCENT_LINEHAUL' as const,
+    percentBps: 8800,
+    perMileCents: null,
+    flatCents: null,
+    effectiveFrom: new Date(Date.UTC(2026, 0, 1)),
+    effectiveTo: null,
+  }
+
+  // ── THE TONU THAT PRODUCED THE RULING ───────────────────────────────────
+  //
+  // `111ZR9GMP` is a cancelled Amazon load: its rate column is $0 and its whole
+  // $175.00 sits in an accessorial. ST-005284 pays Hirsi $154.00 for it, 88% of
+  // $175.00, and Zebra's settlement agrees to the cent.
+  //
+  // IT AGREES BECAUSE THE ENGINE SUBSTITUTES. `payFor` reads `linehaulCents` for
+  // a PERCENT_LINEHAUL rule, so pointing it at the raw load would take 88% of $0
+  // and pay nothing. `payOnSettledGross` puts the decided gross into BOTH money
+  // fields, which is why the basis is right whichever percent rule is in force.
+  //
+  // WITHOUT THIS TEST THE SUBSTITUTION WAS UNGUARDED: breaking `linehaulCents`
+  // inside it failed nothing, because every other engine fixture runs a
+  // PERCENT_GROSS rule and reads the other field. Observed with `watch-guard`.
+  it('pays 88% of $175.00 on a load whose rate column is empty', () => {
+    const result = payOnSettledGross(
+      { id: 'l-tonu', loadNumber: 'DT-015313', milesHundredths: 11_700 },
+      17_500,
+      rule,
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.amountCents).toBe(15_400)
+    // AND THE SNAPSHOT RECORDS THE SUBSTITUTED FIGURE, so a driver can check the
+    // line against the remittance by hand.
+    expect(result.snapshot.basis).toBe(17_500)
+  })
+
+  // The same figure whichever percent rule is in force, which is the point of
+  // substituting into both fields rather than choosing a field.
+  it('pays the same on a percent-of-gross rule', () => {
+    const asGross = payOnSettledGross(
+      { id: 'l-tonu', loadNumber: 'DT-015313', milesHundredths: 11_700 },
+      17_500,
+      { ...rule, type: 'PERCENT_GROSS' as const },
+    )
+    expect(asGross.ok && asGross.amountCents).toBe(15_400)
+  })
+
+  // A PER_MILE RULE TAKES THE STATEMENT'S MILES, not a dispatched figure: a
+  // settlement pays the miles it counts, and falling back to a plan would pay
+  // one.
+  it('takes the statement miles for a per-mile rule', () => {
+    const perMile = payOnSettledGross(
+      { id: 'l-mile', loadNumber: 'DT-000001', milesHundredths: 40_000 },
+      0,
+      {
+        id: 'rule-mile',
+        type: 'PER_MILE' as const,
+        percentBps: null,
+        perMileCents: 65,
+        flatCents: null,
+        effectiveFrom: new Date(Date.UTC(2026, 0, 1)),
+        effectiveTo: null,
+      },
+    )
+    expect(perMile.ok && perMile.amountCents).toBe(26_000)
+  })
+})
 
 describe('the tariff label, which both percent rules spell the same way', () => {
   const at = new Date(Date.UTC(2026, 7, 1))

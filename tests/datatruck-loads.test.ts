@@ -7,6 +7,7 @@ import {
   crewFillFor,
   datatruckCents,
   importEventAt,
+  otherPayDecision,
   parseDatatruckMoment,
   planLoads,
   readEquipment,
@@ -1207,5 +1208,194 @@ describe('which export the importer will read', () => {
     expect(seed).toContain("if (CHOICE.kind === 'refuse')")
     // The predicate it replaced must be gone, not merely unused.
     expect(seed).not.toContain("argument.endsWith('.xlsx')")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// `Total other pay` THAT IS REALLY THE RATE AGAIN. Owner's ruling, 2026-09-27.
+//
+// Hold it as a duplicate of the cancellation fee when `Load pay` is above zero
+// and Amazon's `LOAD - CANCELLED` for the reference equals it. Loud, never
+// booked.
+//
+// THE CASE IT COMES FROM is `1138JCPWX` / DT-015371, one line of ST-005317:
+// Load pay 137.82, Total other pay 137, Total pay 274.82, and Amazon remitted
+// $137.82. One payment in two columns, added by the export's own total.
+// ---------------------------------------------------------------------------
+
+describe('the cancellation fee written twice', () => {
+  // ── THE REAL ROW, WITH THE REAL FIGURES ─────────────────────────────────
+  it('HOLDS the other pay when Amazon matches the rate', () => {
+    const decision = otherPayDecision({
+      loadPayCents: 13782,
+      otherPayCents: 13700,
+      cancellationCents: 13782,
+    })
+    expect(decision.kind).toBe('hold')
+    if (decision.kind !== 'hold') return
+    expect(decision.cents).toBe(13700)
+    // THE REASON CARRIES ALL THREE FIGURES, because a reader deciding whether
+    // the rule was right needs the two it compared and the one it dropped.
+    expect(decision.reason).toContain('13782')
+    expect(decision.reason).toContain('13700')
+  })
+
+  // ── THE 41 THE RULE MUST NOT TOUCH ──────────────────────────────────────
+  //
+  // A plain cancellation puts the whole fee in other pay with `Load pay 0`. That
+  // is the load's ONLY money; holding it would pay the driver nothing for the
+  // cancellation. Measured on dev: 41 of the 42 loads carrying both an Amazon
+  // TONU and a Datatruck other-pay row are this shape.
+  it('BOOKS the other pay when there is no rate beside it', () => {
+    expect(
+      otherPayDecision({
+        loadPayCents: 0,
+        otherPayCents: 17500,
+        cancellationCents: 17500,
+      }).kind,
+    ).toBe('book')
+  })
+
+  // ── ORDINARY EXTRA PAY IS NOT A DUPLICATE ───────────────────────────────
+  it('BOOKS detention or a layover on a load that also earned a rate', () => {
+    expect(
+      otherPayDecision({
+        loadPayCents: 245000,
+        otherPayCents: 15000,
+        cancellationCents: null,
+      }).kind,
+    ).toBe('book')
+  })
+
+  // AND A CANCELLATION THAT DOES NOT MATCH THE RATE IS NOT THE RATE AGAIN.
+  // Two different amounts are two different facts; the rule refuses to guess
+  // which of them the other pay echoes.
+  it('BOOKS it when Amazon disagrees with the rate', () => {
+    expect(
+      otherPayDecision({
+        loadPayCents: 13782,
+        otherPayCents: 13700,
+        cancellationCents: 17500,
+      }).kind,
+    ).toBe('book')
+  })
+
+  // ── THE EQUALITY IS AGAINST `Load pay`, WHICH IS THE WHOLE DESIGN ────────
+  //
+  // Amazon sent $137.82 and the other-pay column says $137.00 — 82 cents apart,
+  // because that column is a rounded re-typing. A rule keyed on the OTHER PAY
+  // matching would never fire on the row that produced it, so this asserts the
+  // choice rather than leaving it to be re-derived.
+  it('does not require the other pay to equal the cancellation', () => {
+    expect(
+      otherPayDecision({
+        loadPayCents: 13782,
+        otherPayCents: 13700,
+        cancellationCents: 13782,
+      }).kind,
+    ).toBe('hold')
+    // …and the converse: matching the other pay is not sufficient on its own.
+    expect(
+      otherPayDecision({
+        loadPayCents: 20000,
+        otherPayCents: 13700,
+        cancellationCents: 13700,
+      }).kind,
+    ).toBe('book')
+  })
+
+  // ── THE ONE INPUT THE `Load pay > 0` CLAUSE DECIDES ─────────────────────
+  //
+  // A zero cancellation total beside a zero rate. Without that clause `0 !== 0`
+  // is false and the load's only money would be held; with it nothing is.
+  //
+  // THIS TEST EXISTS BECAUSE `watch-guard` REFUSED TO PASS WITHOUT IT. Breaking
+  // the clause failed nothing — the equality below it caught every input the
+  // suite had — so the clause was not known to do anything. It is the difference
+  // between a guard and a comment.
+  it('BOOKS when the cancellation total is zero and so is the rate', () => {
+    expect(
+      otherPayDecision({
+        loadPayCents: 0,
+        otherPayCents: 17500,
+        cancellationCents: 0,
+      }).kind,
+    ).toBe('book')
+  })
+
+  it('BOOKS nothing to hold when the other pay is zero', () => {
+    expect(
+      otherPayDecision({
+        loadPayCents: 13782,
+        otherPayCents: 0,
+        cancellationCents: 13782,
+      }).kind,
+    ).toBe('book')
+  })
+})
+
+describe('the planner holds it and still imports the load', () => {
+  const row = (over: Record<string, string> = {}) => ({
+    'Shipment ID': 'DT-099001',
+    'Load ID': '1138JCPWX',
+    'MC Number': 'RAM Haulage LLC',
+    // REQUIRED BY THE PLANNER — a row with no customer is held whole, which is
+    // how the first version of this fixture reported zero planned loads and
+    // looked like a failure of the rule under test.
+    Customer: 'AMAZON LOGISTICS',
+    'Load status': 'delivered',
+    'Load pay': '137.82',
+    'Total other pay': '137',
+    'Total pay': '274.82',
+    'PU date': 'Aug 16, 2026',
+    'DEL date': 'Aug 16, 2026',
+    'Pickup location': 'Greenfield, IN, 46140',
+    'Delivery location': 'Fort Wayne, IN, 46818',
+    ...over,
+  })
+
+  it('keeps the rate, drops the echo, and names the row', () => {
+    const plan = planLoads([row()], {
+      cancellationFeeFor: () => 13782,
+    })
+
+    // THE LOAD IS IMPORTED. The freight is real and the rate is right; one
+    // accessorial was not booked. Reporting it as held would say the load is
+    // missing when it is present and correct.
+    expect(plan.planned).toHaveLength(1)
+    expect(plan.held).toHaveLength(0)
+
+    const load = plan.planned[0]!
+    expect(load.linehaulCents).toBe(13782)
+    expect(load.accessorialCents).toBe(0)
+    // AND THE TOTAL FOLLOWS, which is the figure a settlement prices on.
+    expect(load.totalRevenueCents).toBe(13782)
+
+    // LOUD IN BOTH PLACES.
+    expect(plan.duplicateOtherPay).toHaveLength(1)
+    expect(plan.duplicateOtherPay[0]!.externalId).toBe('DT-099001')
+    expect(load.corrections.join(' ')).toContain('duplicate')
+  })
+
+  // WITHOUT THE LOOKUP NOTHING CHANGES, which is what keeps every existing
+  // caller — and every past import — reading exactly as it did.
+  it('books the other pay when no cancellation figure is supplied', () => {
+    const plan = planLoads([row()])
+    expect(plan.planned[0]!.accessorialCents).toBe(13700)
+    expect(plan.planned[0]!.totalRevenueCents).toBe(27482)
+    expect(plan.duplicateOtherPay).toHaveLength(0)
+  })
+
+  // THE EXPORT'S OWN CROSS-CHECK STILL RUNS FIRST, against the columns as
+  // printed. A row whose `Total pay` disagrees with its own parts is held whole,
+  // and this rule never gets to see it — the two questions are not the same and
+  // the order between them is deliberate.
+  it('still refuses a row whose Total pay does not add up', () => {
+    const plan = planLoads([row({ 'Total pay': '999.99' })], {
+      cancellationFeeFor: () => 13782,
+    })
+    expect(plan.planned).toHaveLength(0)
+    expect(plan.held).toHaveLength(1)
+    expect(plan.duplicateOtherPay).toHaveLength(0)
   })
 })

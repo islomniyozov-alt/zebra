@@ -3,6 +3,7 @@ import {
   payFor,
   ruleInForce,
   type PayRule,
+  type PayResult,
   type PaySnapshot,
 } from './driver-pay'
 import {
@@ -273,6 +274,56 @@ export function grossFor(load: SettleableLoad): GrossDecision {
       rateCents: load.rateCents,
     },
   }
+}
+
+/**
+ * A LOAD'S DRIVER PAY, ON THE GROSS THE WEEK SETTLED IT AT.
+ *
+ * ── ONE PATH, BECAUSE TWO OF THEM DISAGREED BY $154.00 ────────────────────
+ *
+ * Owner's ruling, 2026-09-27: the statement differ prices "(priced week)" from
+ * the engine's settled gross, by this path.
+ *
+ * `payFor` reads `linehaulCents` for a PERCENT_LINEHAUL rule and
+ * `totalRevenueCents` for a PERCENT_GROSS one — a real distinction worth $114 a
+ * load, which is why both rules exist by name. But a SETTLEMENT does not price
+ * on either column: it prices on what `grossFor` decided, which for Amazon
+ * freight is the REMITTED figure rather than anything booked. So the engine
+ * hands `payFor` a load whose two money columns are both that decided gross, and
+ * the basis comes out right whichever percent rule is in force.
+ *
+ * THAT SUBSTITUTION USED TO BE WRITTEN ONLY INSIDE THE ENGINE, and
+ * `diff-statement-against-draft.ts` called `payFor` on the RAW load instead. On a
+ * truck-ordered-not-used load — `111ZR9GMP`, linehaul $0 and $175 of accessorial
+ * — the engine paid 88% of $175 = $154.00, matching ST-005284 to the cent, and
+ * the differ computed 88% of $0 and reported the week $154.00 short. A false
+ * finding from a true measurement of the wrong thing.
+ *
+ * The snapshot records the substituted figure either way, so a driver can check
+ * the line against the remittance by hand.
+ *
+ * MILES COME FROM `milesHundredths`, rounded, and `dispatchedMiles` is null on
+ * purpose: a PER_MILE rule on a settlement pays the miles the STATEMENT counts,
+ * and letting it fall back to a dispatched figure would pay a plan.
+ */
+export function payOnSettledGross(
+  load: Pick<SettleableLoad, 'id' | 'loadNumber' | 'milesHundredths'>,
+  settledGrossCents: number,
+  rule: PayRule,
+): PayResult {
+  return payFor(
+    {
+      id: load.id,
+      loadNumber: load.loadNumber,
+      linehaulCents: settledGrossCents,
+      fuelSurchargeCents: 0,
+      accessorialsCents: 0,
+      totalRevenueCents: settledGrossCents,
+      actualMiles: Math.round(load.milesHundredths / 100),
+      dispatchedMiles: null,
+    },
+    rule,
+  )
 }
 
 // ── one driver's statement ────────────────────────────────────────────────
@@ -549,23 +600,9 @@ export function computeDriverSettlement(
       continue
     }
 
-    // THE SETTLED GROSS IS SUBSTITUTED INTO THE BASIS. For Amazon freight that
-    // is the REMITTED figure, so the percentage is of what arrived rather than
-    // of what we booked — and the snapshot records the substituted figure, so
-    // the line can be checked by hand against the remittance.
-    const result = payFor(
-      {
-        id: load.id,
-        loadNumber: load.loadNumber,
-        linehaulCents: decision.grossCents,
-        fuelSurchargeCents: 0,
-        accessorialsCents: 0,
-        totalRevenueCents: decision.grossCents,
-        actualMiles: Math.round(load.milesHundredths / 100),
-        dispatchedMiles: null,
-      },
-      rule,
-    )
+    // THE SETTLED GROSS IS SUBSTITUTED INTO THE BASIS — see `payOnSettledGross`,
+    // which is the only place that substitution is written.
+    const result = payOnSettledGross(load, decision.grossCents, rule)
 
     if (!result.ok) {
       blockers.push({

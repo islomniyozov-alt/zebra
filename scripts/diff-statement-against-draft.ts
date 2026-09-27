@@ -1,6 +1,7 @@
 import { neonConfig } from '@neondatabase/serverless'
 import { createPrismaClient } from '@/lib/db'
-import { payFor, ruleInForce } from '@/lib/driver-pay'
+import { ruleInForce } from '@/lib/driver-pay'
+import { payOnSettledGross } from '@/lib/settlement-week'
 import { nameKey } from '@/lib/name-key'
 import {
   DATATRUCK_STATEMENTS,
@@ -299,17 +300,50 @@ async function main(): Promise<void> {
       payCents: number | null
       note: string
     }
+    // ── PRICED BY THE ENGINE'S OWN PATH ────────────────────────────────────
+    //
+    // Owner's ruling, 2026-09-27. This used to call `payFor(load, rule)` on the
+    // RAW load, which reads `linehaulCents` for a PERCENT_LINEHAUL rule — and a
+    // settlement never prices on that column. It prices on the gross `grossFor`
+    // decided, which the engine substitutes into BOTH money fields before
+    // calling `payFor`.
+    //
+    // ON A TRUCK-ORDERED-NOT-USED LOAD THE DIFFERENCE IS THE WHOLE FIGURE.
+    // `111ZR9GMP` carries linehaul $0 and $175 of accessorial; the engine paid
+    // 88% of $175 = $154.00, matching ST-005284 to the cent, and this script
+    // computed 88% of $0 and reported the week $154.00 short. A false finding,
+    // which is the worst thing a diagnostic can produce.
+    //
+    // `payOnSettledGross` IS THAT PATH, exported from the engine and called
+    // here. Not copied: a second copy of the substitution is how the first one
+    // came to be missing.
     const pricedByRef = new Map<string, Priced>()
     for (const load of weekLoads) {
       const rule = ruleInForce(
         rules,
         load.statusEvents[0]?.occurredAt ?? new Date(fixture.periodEnd),
       )
-      const paid = payFor(load, rule)
+      // THE GROSS THIS DIFF PRICES ON, and the one adjustment this script is
+      // allowed: a line the engine held for `no_remittance` is priced on booked
+      // gross here, because Datatruck never waited for Amazon. Stated in the
+      // header, reported per line, and applied nowhere else.
+      const settledGross = load.totalRevenueCents
+      const paid =
+        rule === null
+          ? null
+          : payOnSettledGross(
+              {
+                id: load.id,
+                loadNumber: load.loadNumber,
+                milesHundredths: Math.round((load.actualMiles ?? 0) * 100),
+              },
+              settledGross,
+              rule,
+            )
       pricedByRef.set(load.referenceNumber ?? '', {
         loadNumber: load.loadNumber,
-        grossCents: load.totalRevenueCents,
-        payCents: paid.ok ? paid.amountCents : null,
+        grossCents: settledGross,
+        payCents: paid !== null && paid.ok ? paid.amountCents : null,
         note:
           load.paymentApplications.length === 0
             ? 'held no_remittance - priced on booked gross for this diff only'

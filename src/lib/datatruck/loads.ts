@@ -535,6 +535,95 @@ export interface PlannedLoad {
   corrections: string[]
 }
 
+/**
+ * WHETHER `Total other pay` IS THE LOAD'S OWN MONEY OR AN ECHO OF ITS RATE.
+ *
+ * ── THE CANCELLATION FEE WRITTEN TWICE ────────────────────────────────────
+ *
+ * Owner's ruling, 2026-09-27: hold `Total other pay` as a duplicate of the
+ * cancellation fee when `Load pay` is above zero and Amazon's
+ * `LOAD - CANCELLED` figure for the reference equals it. Loud, never booked.
+ *
+ * FOUND ON `1138JCPWX` / DT-015371, from one line of ST-005317:
+ *
+ *   export   Load pay 137.82   Total other pay 137   Total pay 274.82
+ *   Amazon   LOAD - CANCELLED  $137.82
+ *
+ * One truck-ordered-not-used payment, recorded in two columns, which the
+ * export's own `Total pay` then adds. Zebra reproduced that total, so the load
+ * carried $274.82 of revenue for $137.82 of cash and MCKANE was priced at 30%
+ * of the double — $82.45 where Amazon's figure pays $41.35.
+ *
+ * ── THE EQUALITY IS AGAINST `Load pay`, NOT AGAINST THE OTHER PAY ──────────
+ *
+ * Deliberate, and the reason is in the figures above: Amazon remitted $137.82
+ * and the other-pay column says $137.00. They are 82 cents apart, because the
+ * other-pay column is a re-typed, rounded copy. Requiring the cancellation to
+ * equal the OTHER PAY would mean this rule never fires on the case that produced
+ * it. Requiring it to equal `Load pay` — which is the figure Amazon actually
+ * sent — is what identifies the echo.
+ *
+ * ── WHY MOST CANCELLATIONS ARE UNAFFECTED, AND MUST BE ────────────────────
+ *
+ * MEASURED on dev: 42 loads carry both a Datatruck other-pay row and an Amazon
+ * TONU, and 41 of them have `Load pay 0`. Those are correct today — the whole
+ * $175 lives in other pay, is booked once, and the remittance importer marks its
+ * own TONU row non-billable so it records Amazon's figure without adding to
+ * revenue. A rule that fired on them would delete the only booking of real money
+ * and pay those drivers nothing for the cancellation.
+ *
+ * So `Load pay > 0` is not a detail of the predicate. It IS the predicate: the
+ * duplicate exists only where the rate column already holds the fee.
+ *
+ * NOTHING HERE REPAIRS AN EXISTING ROW. DT-015371 stays as it is by ruling; this
+ * decides what a future import books.
+ */
+export type OtherPayDecision =
+  | { kind: 'book' }
+  | { kind: 'hold'; cents: number; reason: string }
+
+export function otherPayDecision(input: {
+  loadPayCents: number
+  otherPayCents: number
+  /** Amazon's `LOAD - CANCELLED` total for this reference, when one is known. */
+  cancellationCents: number | null
+}): OtherPayDecision {
+  const { loadPayCents, otherPayCents, cancellationCents } = input
+  // NOTHING TO HOLD. Said first so the rest reads as one condition rather than
+  // as three guards with a conclusion.
+  if (otherPayCents <= 0) return { kind: 'book' }
+  // THE RATE COLUMN IS EMPTY, so the other pay is the load's only money — this
+  // is the 41-of-42 case on dev and holding it would pay those drivers nothing
+  // for the cancellation.
+  //
+  // IT IS LOAD-BEARING FOR EXACTLY ONE INPUT, and that input is worth stating:
+  // a reference whose cancellation total is ZERO. Without this line, `0 !== 0` is
+  // false and a load with an empty rate would have its only money held. With it,
+  // a zero cancellation can never hold anything.
+  if (loadPayCents <= 0) return { kind: 'book' }
+  // NO CANCELLATION KNOWN, OR ONE THAT DISAGREES WITH THE RATE — ordinary extra
+  // pay, detention or a layover, and holding it would be guessing.
+  //
+  // ONE COMPARISON, NOT TWO. There was an explicit `cancellationCents === null`
+  // clause above this line and it was UNREACHABLE: `null !== loadPayCents` is
+  // already true for every non-zero rate, so the equality below covers the
+  // unknown case on its own. `watch-guard` is what found it — breaking the null
+  // clause failed no test, because no input could tell the two versions apart.
+  //
+  // A clause that cannot be observed failing is a clause that is not known to do
+  // anything, so it is gone rather than left looking load-bearing.
+  if (cancellationCents !== loadPayCents) return { kind: 'book' }
+
+  return {
+    kind: 'hold',
+    cents: otherPayCents,
+    reason:
+      `Total other pay ${otherPayCents} looks like a duplicate of the ` +
+      `cancellation fee: Load pay is ${loadPayCents} and Amazon's ` +
+      `LOAD - CANCELLED for this reference is ${cancellationCents}`,
+  }
+}
+
 export interface HeldLoad {
   externalId: string
   reason: string
@@ -543,6 +632,15 @@ export interface HeldLoad {
 export interface LoadPlan {
   planned: PlannedLoad[]
   held: HeldLoad[]
+  /**
+   * Rows whose `Total other pay` was held as an echo of the cancellation fee.
+   *
+   * SEPARATE FROM `held`, WHICH MEANS THE WHOLE ROW WAS SKIPPED. These loads ARE
+   * imported — the freight is real and the rate is right; it is one accessorial
+   * that was not booked. Folding them into `held` would report the load as
+   * missing when it is present and correct.
+   */
+  duplicateOtherPay: HeldLoad[]
   read: number
 }
 
@@ -562,9 +660,22 @@ const wholeMiles = (raw: string): number | null => {
 
 export function planLoads(
   records: readonly Record<string, string>[],
+  options: {
+    /**
+     * Amazon's `LOAD - CANCELLED` total for a reference, when one is known.
+     *
+     * A FUNCTION RATHER THAN A MAP so the planner stays pure and the caller
+     * decides where the figure comes from — the seed reads it off the `TONU`
+     * accessorials the remittance importer already wrote, which is the same
+     * fact without a second parse of the workbooks. Absent by default, so every
+     * existing caller keeps booking other pay exactly as before.
+     */
+    cancellationFeeFor?: (reference: string) => number | null
+  } = {},
 ): LoadPlan {
   const planned: PlannedLoad[] = []
   const held: HeldLoad[] = []
+  const duplicateOtherPay: HeldLoad[] = []
   const seen = new Set<string>()
 
   const text = (record: Record<string, string>, key: string) =>
@@ -660,6 +771,31 @@ export function planLoads(
       continue
     }
 
+    // ── THE ECHO OF A CANCELLATION FEE, HELD ──────────────────────────
+    //
+    // AFTER the `Total pay` cross-check above, on purpose: that check is about
+    // whether the export agrees with itself, and it must run against the
+    // columns as printed. This is about whether two of those columns are the
+    // same money, which is a different question and comes second.
+    const reference = text(record, 'Load ID')
+    const duplicate = otherPayDecision({
+      loadPayCents: linehaulCents,
+      otherPayCents: accessorialCents,
+      cancellationCents:
+        reference === ''
+          ? null
+          : (options.cancellationFeeFor?.(reference) ?? null),
+    })
+    if (duplicate.kind === 'hold') {
+      accessorialCents = 0
+      // LOUD IN BOTH PLACES. `corrections` travels with the load so the row
+      // itself carries why its other pay is missing; `duplicateOtherPay` is the
+      // list a person reads, because a correction buried among 14,451 rows is
+      // not loud.
+      corrections.push(duplicate.reason)
+      duplicateOtherPay.push({ externalId, reason: duplicate.reason })
+    }
+
     const equipment = readEquipment(text(record, 'Equipment types'))
     if (equipment === null && text(record, 'Equipment types') !== '') {
       corrections.push(
@@ -746,7 +882,7 @@ export function planLoads(
     })
   }
 
-  return { planned, held, read: records.length }
+  return { planned, held, duplicateOtherPay, read: records.length }
 }
 
 // ---------------------------------------------------------------------------
