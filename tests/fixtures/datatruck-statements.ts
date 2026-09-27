@@ -990,7 +990,7 @@ export const DATATRUCK_STATEMENTS: StatementFixture[] = [
 // delivered <= 9/3)". The statement in front of me does not: it carries SIX
 // lines at TWO DIFFERENT RATES, under a header reading "20% from gross".
 //
-//   111D585DVR    DEL 9/3    $780.37  -> $234.11   30%
+//   111D585DV     DEL 9/3    $780.37  -> $234.11   30%
 //   111PP4X5W     DEL 9/2  $1,171.94  -> $351.58   30%
 //   113Y77KN3     DEL 9/2    $614.73  -> $122.95   20%
 //   T-114QYL1J1   DEL 9/2  $1,054.59  -> $210.92   20%
@@ -1017,6 +1017,150 @@ export const DATATRUCK_STATEMENTS: StatementFixture[] = [
 // ($28,437.14 + $1,973.07 = $30,410.21, and the same for net and deductions).
 // A transcription that agreed with itself but not with the statement before it
 // would be a transcription with a typo in it.
+// ── WHY ST-005377 IS NOT IN `DATATRUCK_STATEMENTS` EITHER ─────────────────
+//
+// Its EARNINGS reproduce to the cent. All four lines pay exactly 89% of their
+// own gross, per line, and the engine's total is $4,636.98 against the printed
+// $4,636.98 — including the per-line rounding, which it disagrees with the
+// on-total answer about, like six of the other seven.
+//
+// ITS INSURANCE DEDUCTION DOES NOT, AND THE DIFFERENCE IS DATA RATHER THAN
+// ARITHMETIC. Found by the tie test on 2026-09-27, which is what it is for:
+//
+//   statement  Insurance (GL, AL, Cargo, TI) for September 8 days   $586.67
+//   Zebra      Insurance (GL, AL, Cargo, TI) for August $1800/$450  $450.00
+//
+// Two different charges for two different months. Datatruck billed a pro-rated
+// eight days of September; the recurring charge Zebra holds for this driver is
+// August's. Neither figure is wrong about its own month and the statement cannot
+// be reproduced while they differ, so net comes out $408.98 against a printed
+// $3,950.31 — a gap of $136.67, which is exactly 586.67 - 450.00.
+//
+// SO IT IS TRANSCRIBED AND EXCLUDED, like ST-005395 below, and for the same
+// reason in a different place: `DATATRUCK_STATEMENTS` means "statements this
+// engine reproduces", and quietly relaxing that to accommodate one would cost
+// the array the only thing it asserts. Editing the dev charge to match would be
+// worse — it would make the difference disappear rather than be reported.
+// ── THE SECOND STATEMENT FOR 8/30–9/5, AND THE CLEAN ONE ────────────────
+//
+// Transcribed 2026-09-27 for the dev replay of that week. `Settlement 0292.pdf`
+// inside `statements-2026-09-19/` — the folder is named for the week it was
+// downloaded in, not the week it covers, and this one covers 8/30–9/5. It is
+// the ONLY other statement the corpus holds for that week; the five loose
+// settlement PDFs beside it are 8/9, 8/16 and 8/23.
+//
+// IT TIES, AND UNLIKE ST-005395 IT ALSO REPRODUCES. Every line pays exactly
+// 89% of its own gross — 985.19/1106.96, 1492.88/1677.39, 1251.71/1406.42,
+// 907.20/1019.33 — under a header that reads 89% from gross. One rate, stated
+// and paid, which is why this one belongs in the array and ST-005395 does not.
+//
+// THE LAYOUT PUTS THE HEADER FIGURES IN THE WRONG ROWS, so the summary below
+// is read from the arithmetic rather than from the label a figure sits beside:
+// earnings $4,636.98 is the printed Earnings total, deductions ($686.67) is
+// the printed Deductions total, and 4636.98 - 686.67 = 3950.31 is the printed
+// Net Pay. Three figures that agree three ways.
+//
+// `company` IS THE CARRIER AS PRINTED. "Dolphin Transport inc" — singular,
+// lower-case "inc" — where Zebra's row reads "Dolphins Transport". Not
+// corrected here: a fixture is a transcription, and the difference is the
+// diff's to report.
+export const DATATRUCK_STATEMENT_ST005377: StatementFixture = {
+  number: 'ST-005377',
+  batch: 'SB-000441',
+  company: 'Dolphin Transport inc',
+  driver: 'HECTOR ANTONIO RODRIGUEZ SERRANO',
+  unitNumber: '1236',
+  tariff: '89% from gross',
+  percentBps: 8900,
+  periodStart: Date.UTC(2026, 7, 30),
+  periodEnd: Date.UTC(2026, 8, 5),
+  statementDate: Date.UTC(2026, 8, 8),
+  // THE CHECK DATE IS 9/10, NOT 9/5. The header prints Period End and Check
+  // Date one row apart and the values drift down a line, so the 9/5 sitting
+  // beside "Check Date:" is the period's end and the 9/10 below it is the
+  // check. ST-005395 prints the identical pair, which is what settles it.
+  checkDate: Date.UTC(2026, 8, 10),
+  loads: [
+    {
+      loadNumber: '2004444061',
+      puDate: Date.UTC(2026, 7, 30),
+      delDate: Date.UTC(2026, 7, 31),
+      grossCents: 110696,
+      milesHundredths: 42056,
+      amountCents: 98519,
+    },
+    {
+      loadNumber: '2004434343',
+      puDate: Date.UTC(2026, 7, 31),
+      delDate: Date.UTC(2026, 8, 1),
+      grossCents: 167739,
+      milesHundredths: 71255,
+      amountCents: 149288,
+    },
+    {
+      loadNumber: '2004438364',
+      puDate: Date.UTC(2026, 8, 1),
+      delDate: Date.UTC(2026, 8, 2),
+      grossCents: 140642,
+      milesHundredths: 59342,
+      amountCents: 125171,
+    },
+    {
+      loadNumber: '2004460914',
+      puDate: Date.UTC(2026, 8, 2),
+      delDate: Date.UTC(2026, 8, 2),
+      grossCents: 101933,
+      milesHundredths: 42795,
+      amountCents: 90720,
+    },
+  ],
+  totals: {
+    grossCents: 521010,
+    milesHundredths: 215448,
+    amountCents: 463698,
+  },
+  deductions: [
+    {
+      type: 'Insurance',
+      description: 'Insurance (GL, AL, Cargo, TI) for September 8 days',
+      quantity: 1,
+      rateCents: 58667,
+      totalCents: -58667,
+    },
+    {
+      type: 'Admin Fee',
+      description: '',
+      quantity: 1,
+      rateCents: 5000,
+      totalCents: -5000,
+    },
+    {
+      type: 'Ifta',
+      description: '',
+      quantity: 1,
+      rateCents: 5000,
+      totalCents: -5000,
+    },
+  ],
+  otherPay: [],
+  summary: {
+    earningsCents: 463698,
+    advancesCents: 0,
+    reimbursementsCents: 0,
+    deductionsCents: -68667,
+    otherPayCents: 0,
+    netCents: 395031,
+  },
+  ytd: {
+    earningsCents: 24239248,
+    advancesCents: 0,
+    reimbursementsCents: 0,
+    deductionsCents: -2294202,
+    otherPayCents: 0,
+    netCents: 21945046,
+  },
+}
+
 export const DATATRUCK_STATEMENT_ST005395: StatementFixture = {
   number: 'ST-005395',
   batch: 'SB-000442',
@@ -1077,7 +1221,14 @@ export const DATATRUCK_STATEMENT_ST005395: StatementFixture = {
       percentBps: 3000,
     },
     {
-      loadNumber: '111D585DVR',
+      // CORRECTED 2026-09-27, was '111D585DVR'. The PDF prints `111D585DV`
+      // and Zebra holds that reference on DT-015934 at the same $780.37.
+      //
+      // FOUND BY THE DIFF PAIRING ONE LOAD TWICE — once as "not in Zebra at
+      // all" and once as "in Zebra's week, not on the statement", with
+      // identical gross and identical pay. A typo in a load number cannot be
+      // caught by the tie: the number is not one of the three columns that sum.
+      loadNumber: '111D585DV',
       puDate: Date.UTC(2026, 8, 3),
       delDate: Date.UTC(2026, 8, 3),
       grossCents: 78037,

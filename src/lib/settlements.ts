@@ -755,7 +755,34 @@ export async function findSettlementDrift(
   tx: TxClient,
 ): Promise<SettlementDrift[]> {
   const settlements = await tx.settlement.findMany({
-    where: { deletedAt: null, status: { not: 'VOID' } },
+    // ── A DRAFT HAS NOTHING FROZEN TO DRIFT FROM ────────────────────────
+    //
+    // FOUND 2026-09-27, by the first draft ever to exist on dev. This read was
+    // `status: { not: 'VOID' }`, so it took DRAFT settlements too — and a draft
+    // populates `loadLines` and `deductionLines`, never `lines`. Every draft
+    // therefore reported `totals_disagree_with_lines`, "lines give 0/0/0/0",
+    // and `npm run check` went red on 34 of them at once.
+    //
+    // IT WAS LATENT RATHER THAN NEW. Production has carried a draft since
+    // 2026-09-25 and this check never saw it: it runs against the test database,
+    // which is forked from DEV, and dev had no batch at all until today. So the
+    // defect was one `open-settlement-batch` away the whole time — and it would
+    // have arrived as a red CI run on somebody else's unrelated commit.
+    //
+    // THE SCOPE IS THE FIX, NOT A SUPPRESSION. This function's own docstring
+    // says what it is for: "This is what makes 'approve freezes it' verifiable."
+    // A draft is the opposite of frozen — `refreshDraft` rewrites it wholesale
+    // on every refresh, and the batch opener prints exactly that. Asking a draft
+    // to reproduce from a snapshot it has not taken yet is asking the wrong
+    // question of the right rows.
+    //
+    // A DRAFT IS NOT UNCHECKED. `refreshDraft` recomputes it from the loads on
+    // every call, which is a stronger guarantee than this one and is where a
+    // draft's arithmetic belongs.
+    where: {
+      deletedAt: null,
+      status: { notIn: ['VOID', 'DRAFT'] },
+    },
     select: {
       id: true,
       settlementNumber: true,

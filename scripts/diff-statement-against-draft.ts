@@ -1,7 +1,12 @@
 import { neonConfig } from '@neondatabase/serverless'
 import { createPrismaClient } from '@/lib/db'
 import { payFor, ruleInForce } from '@/lib/driver-pay'
-import { DATATRUCK_STATEMENTS } from '../tests/fixtures/datatruck-statements'
+import { nameKey } from '@/lib/name-key'
+import {
+  DATATRUCK_STATEMENTS,
+  DATATRUCK_STATEMENT_ST005377,
+  DATATRUCK_STATEMENT_ST005395,
+} from '../tests/fixtures/datatruck-statements'
 
 // ---------------------------------------------------------------------------
 // A DATATRUCK STATEMENT AGAINST ZEBRA'S DRAFT, LINE BY LINE, TO THE CENT.
@@ -81,7 +86,25 @@ const cmp = (label: string, datatruck: number, zebra: number) => {
 
 async function main(): Promise<void> {
   if (!WANTED) throw new Error('Name the statement with --statement ST-xxxxxx.')
-  const fixture = DATATRUCK_STATEMENTS.find((s) => s.number === WANTED)
+  // ── THE TWO THAT LIVE OUTSIDE THE ARRAY ARE STILL DIFFABLE ─────────────
+  //
+  // `DATATRUCK_STATEMENTS` means "statements this engine reproduces to the
+  // cent", and two transcribed ones do not: ST-005395 mixes 30% and 20% under a
+  // 20% header, and ST-005377's insurance deduction is August's charge against a
+  // pro-rated September one. Both are excluded from the array on purpose.
+  //
+  // EXCLUDED FROM THE ASSERTION IS NOT EXCLUDED FROM THE COMPARISON. This script
+  // reports differences rather than asserting their absence, so the two the
+  // engine cannot reproduce are exactly the ones worth running it against — and
+  // leaving them unreachable here would mean the only statements anybody diffed
+  // were the ones already known to agree.
+  const OUT_OF_ARRAY = [
+    DATATRUCK_STATEMENT_ST005377,
+    DATATRUCK_STATEMENT_ST005395,
+  ]
+  const fixture =
+    DATATRUCK_STATEMENTS.find((s) => s.number === WANTED) ??
+    OUT_OF_ARRAY.find((s) => s.number === WANTED)
   if (!fixture) throw new Error(`No transcribed fixture for ${WANTED}.`)
 
   const where = target()
@@ -93,13 +116,42 @@ async function main(): Promise<void> {
   )
 
   try {
+    // ── THE DRIVER IS RESOLVED ON THE WHOLE NAME, NOT ON A GUESSED SPLIT ──
+    //
+    // This used to say `firstName: driver.split(' ')[0]` with the rest as the
+    // surname, which is a guess about where a name divides — and it was wrong
+    // the first time it met one: the statement prints
+    // "HECTOR ANTONIO RODRIGUEZ SERRANO", the roster holds
+    // firstName "HECTOR ANTONIO" / lastName "RODRIGUEZ SERRANO", and the diff
+    // reported NO DRAFT SETTLEMENT for a driver who had one.
+    //
+    // THAT IS THE WORST SHAPE THIS SCRIPT CAN FAIL IN. "No settlement" reads as
+    // a finding about the week — a driver Zebra failed to pay — when it was a
+    // finding about a space. Silence that looks like an answer.
+    //
+    // SO THE ROSTER IS READ AND THE JOIN HAPPENS ON `nameKey`, the same shared
+    // key the two importers use, for the same reason given there: the artefact
+    // prints one string and the roster keeps two columns, and splitting the
+    // string is guessing where a middle name goes.
+    const roster = await db.driver.findMany({
+      where: { deletedAt: null },
+      select: { id: true, firstName: true, lastName: true },
+    })
+    const wantedKey = nameKey(fixture.driver)
+    const named = roster.filter(
+      (row) => nameKey(`${row.firstName} ${row.lastName}`) === wantedKey,
+    )
+    if (named.length !== 1) {
+      throw new Error(
+        `"${fixture.driver}" matches ${named.length} roster row(s) on ` +
+          `${where.label}: refusing to guess which driver the statement is for.`,
+      )
+    }
+
     const settlement = await db.settlement.findFirst({
       where: {
         periodStart: new Date(fixture.periodStart),
-        driver: {
-          firstName: fixture.driver.split(' ')[0],
-          lastName: fixture.driver.split(' ').slice(1).join(' '),
-        },
+        driverId: named[0]!.id,
         deletedAt: null,
       },
       select: {
