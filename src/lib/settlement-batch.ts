@@ -579,6 +579,21 @@ export async function openBatch(
     }
   }
 
+  // ── THE NUMBER IS ALLOCATED HERE, NOT AT FINALISE ──────────────────────
+  //
+  // Owner's ruling, 2026-09-28. It was assigned by `finaliseBatch`, so every
+  // DRAFT was nameless and the Batches grid printed a cuid — `cmujowoz` where
+  // Datatruck shows `SB-000448`. A run people discuss for three days before
+  // finalising it needs a name on the first of those days.
+  //
+  // ORG-WIDE AND GAPLESS-ISH, through the same `SeriesCounter` the statements
+  // use. A number is spent when a draft is opened, so a deleted draft leaves a
+  // gap — which is the right trade: reusing one would give two different runs
+  // the same name in somebody's email.
+  const batchNumber = batchNumberOf(
+    await allocateSeries(tx, input.organizationId, BATCH_SERIES),
+  )
+
   const batch = await tx.settlementBatch.create({
     data: {
       organizationId: input.organizationId,
@@ -586,6 +601,7 @@ export async function openBatch(
       periodEnd: input.period.end,
       statementDate: input.statementDate,
       checkDate: checkDateFor(input.period),
+      batchNumber,
     },
     select: { id: true },
   })
@@ -768,9 +784,17 @@ export async function finaliseBatch(
     return { ok: false, reason: { kind: 'not_a_week' } }
   }
 
-  const batchNumber = batchNumberOf(
-    await allocateSeries(tx, batch.organizationId, BATCH_SERIES),
-  )
+  // THE NUMBER THE BATCH ALREADY HAS. `openBatch` allocates it, so finalising
+  // does not mint a second one — a run that changed name between the draft
+  // somebody reviewed and the statement somebody was handed would be the same
+  // week under two identities.
+  //
+  // A BATCH OPENED BEFORE THIS RULING HAS NONE, so one is allocated now rather
+  // than finalising a nameless run: `?? batchNumberOf(...)` and not a throw,
+  // because those drafts are real and are mid-week.
+  const batchNumber =
+    batch.batchNumber ??
+    batchNumberOf(await allocateSeries(tx, batch.organizationId, BATCH_SERIES))
 
   const settlements = await tx.settlement.findMany({
     where: { batchId },

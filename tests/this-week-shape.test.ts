@@ -41,7 +41,12 @@ const FORBIDDEN = [
   'r2ConfigFromEnv',
 ]
 
-// ── REPOINTED 2026-09-28 AT THE PAGE THAT REPLACED THE TUESDAY SCREEN ─────
+// ── REPOINTED TWICE ON 2026-09-28 ─────────────────────────────────────────
+//
+// First at `/accounting/payroll`, which replaced `/money/this-week`; then at
+// `/payroll/batches`, when §6.2 split Accounting from Payroll. Both times this
+// guard failed rather than passing vacuously, which is the "cannot pass by
+// finding nothing" case below doing its job on a directory that had moved.
 //
 // §6.2's Accounting section folded `/money/this-week` into `/accounting/payroll`,
 // and this guard read a directory that no longer exists. IT FAILED RATHER THAN
@@ -57,8 +62,8 @@ const PAGE_DIR = join(
   'src',
   'app',
   '(app)',
-  'accounting',
   'payroll',
+  'batches',
 )
 
 function sources(): { name: string; text: string }[] {
@@ -85,7 +90,7 @@ function sources(): { name: string; text: string }[] {
   for (const entry of readdirSync(PAGE_DIR)) {
     if (!/\.tsx?$/.test(entry)) continue
     found.push({
-      name: `accounting/payroll/${entry}`,
+      name: `payroll/batches/${entry}`,
       text: readFileSync(join(PAGE_DIR, entry), 'utf8'),
     })
   }

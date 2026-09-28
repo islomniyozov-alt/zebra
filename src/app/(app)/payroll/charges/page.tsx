@@ -21,11 +21,11 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterBar } from '@/components/ui/FilterBar'
 import { Tabs } from '@/components/ui/Tabs'
-import { CompanyChips } from '../CompanyChips'
-import { AccountingHeader } from '../AccountingHeader'
-import { GridToolbar } from '../GridToolbar'
-import { GridFooterNav } from '../GridFooterNav'
-import { gridView, keepColumns, pagedFooterLabel } from '../grid-page'
+import { CompanyChips } from '../../_grid/CompanyChips'
+import { PageHeader } from '../../_grid/PageHeader'
+import { GridToolbar } from '../../_grid/GridToolbar'
+import { GridFooterNav } from '../../_grid/GridFooterNav'
+import { gridView, keepColumns, pagedFooterLabel } from '../../_grid/grid-page'
 import { AddCharge } from './AddCharge'
 import { ChargeRowForm } from './ChargeRowForm'
 import type { MessageKey } from '@/lib/i18n'
@@ -190,8 +190,9 @@ export default async function ChargesPage({
 
   const header = (
     <>
-      <AccountingHeader
+      <PageHeader
         title={t('accounting.charges.title')}
+        breadcrumb={[t('nav.group.payroll'), t('accounting.charges.title')]}
         stripeMeans={t('accounting.charges.stripe')}
         action={
           mayEdit && tab === 'scheduled' ? (

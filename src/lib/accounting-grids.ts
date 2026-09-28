@@ -168,22 +168,20 @@ export interface BatchGridRow {
   statements: number
   amountCents: number
   /**
-   * WHICH AUTHORITY CUTS THE CHEQUES — AND THERE IS NOWHERE TO READ IT FROM.
+   * WHICH AUTHORITY CUTS THE CHEQUES — AND FOR ZEBRA THE ANSWER IS ALL OF THEM.
    *
-   * The ruling asks for a pay-company column. `SettlementBatch` has no such
-   * field, `Organization` has no such setting, and nothing in the schema carries
-   * the idea: the batch is org-wide and its load lines each name their own
-   * authority, which is a different fact.
+   * Datatruck carries a real company here because a batch there belongs to one
+   * payer: `SB-000448` is Dolphin's and `SB-000447` is RAM's, both covering
+   * Sep 13-19. Zebra settles the organization in one run (Islom, 2026-09-11),
+   * so the honest value is "all authorities" and the per-company split is the
+   * breakdown directly beneath the row.
    *
-   * SO IT IS ALWAYS NULL AND THE COLUMN RENDERS `—`. The alternative was to
-   * guess — the authority with the largest share, say — which would print a real
-   * company name beside real money on the strength of an assumption nobody made.
-   *
-   * It needs `SettlementBatch.payCompanyId`, which is a migration, and by the
-   * owner's standing ruling a migration rides the next change that needs the
-   * deploy ritual rather than going on its own.
+   * THIS FIELD IS THE BREAKDOWN'S HEADLINE, NOT A MISSING COLUMN. It read
+   * `not recorded` for a few hours, which described `schema.prisma` rather than
+   * the money, and invited a migration that the shape does not need. Owner's
+   * ruling, 2026-09-28: no `payCompanyId`.
    */
-  payCompanyName: string | null
+  payCompanyName: null
   notes: string | null
   /**
    * Settle together, report apart (Islom, 2026-09-11). The batch is the
@@ -284,7 +282,8 @@ export async function readBatches(
       periodEnd: batch.periodEnd,
       statements: batch.settlements.length,
       amountCents,
-      // See the field's own note: there is no column to read this from yet.
+      // Always null: the row's answer is "all authorities" and the names are on
+      // `breakdown`. See the field's own note.
       payCompanyName: null,
       notes: batch.notes,
       breakdown: [...perCompany.values()].sort((left, right) =>

@@ -24,10 +24,10 @@ import { Table, type Column } from '@/components/ui/Table'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterBar } from '@/components/ui/FilterBar'
 import { Tabs } from '@/components/ui/Tabs'
-import { AccountingHeader } from '../AccountingHeader'
-import { GridToolbar } from '../GridToolbar'
-import { GridFooterNav } from '../GridFooterNav'
-import { gridView, keepColumns, pagedFooterLabel } from '../grid-page'
+import { PageHeader } from '../../_grid/PageHeader'
+import { GridToolbar } from '../../_grid/GridToolbar'
+import { GridFooterNav } from '../../_grid/GridFooterNav'
+import { gridView, keepColumns, pagedFooterLabel } from '../../_grid/grid-page'
 import { readGridColumns } from '@/lib/grid-columns'
 
 // ACCOUNTING → REPORTS (§6.2): the same money cut by company, week or driver.
@@ -155,8 +155,9 @@ export default async function ReportsPage({
 
   const header = (
     <>
-      <AccountingHeader
+      <PageHeader
         title={t('accounting.reports.title')}
+        breadcrumb={[t('nav.group.accounting'), t('accounting.reports.title')]}
         stripeMeans={t('accounting.reports.window')}
       />
       <Tabs

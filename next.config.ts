@@ -45,7 +45,7 @@ const nextConfig: NextConfig = {
       { source: '/', destination: '/dashboard', permanent: false },
       {
         source: '/money/this-week',
-        destination: '/accounting/payroll',
+        destination: '/payroll/batches',
         permanent: false,
       },
       {
@@ -55,7 +55,7 @@ const nextConfig: NextConfig = {
       },
       {
         source: '/money',
-        destination: '/accounting/payroll',
+        destination: '/payroll/batches',
         permanent: false,
       },
       {
@@ -78,12 +78,29 @@ const nextConfig: NextConfig = {
       },
       {
         source: '/settlements',
-        destination: '/accounting/payroll',
+        destination: '/payroll/batches',
         permanent: false,
       },
       {
         source: '/settlements/batches',
-        destination: '/accounting/payroll',
+        destination: '/payroll/batches',
+        permanent: false,
+      },
+      // ── AND THE ACCOUNTING PATHS THAT MOVED WITH THE SPLIT ──────────────
+      //
+      // §6.2 split Accounting from Payroll on 2026-09-28, a few hours after the
+      // first set of these was written. `/accounting/payroll` and
+      // `/accounting/charges` existed for exactly that long — long enough to be
+      // in a screenshot run, a commit message and this session's own notes, which
+      // is long enough to be worth a redirect.
+      {
+        source: '/accounting/payroll',
+        destination: '/payroll/batches',
+        permanent: false,
+      },
+      {
+        source: '/accounting/charges',
+        destination: '/payroll/charges',
         permanent: false,
       },
     ]

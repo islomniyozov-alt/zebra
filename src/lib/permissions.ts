@@ -592,34 +592,53 @@ export const NAVIGATION: readonly NavGroup[] = [
   // THE ORDER IS THE WEEK'S ORDER, not an alphabet: money is invoiced, then it
   // arrives, then it is paid out, and Charges and Reports are what you open when
   // one of the first three is wrong.
+  // ── ACCOUNTING AND PAYROLL (§6.2, split 2026-09-28) ──────────────────────
+  //
+  // MONEY IN AND MONEY OUT, which is two jobs and often two people. This was one
+  // group of five that morning; the owner read §6.2.1's divergence table, saw
+  // that Datatruck splits them, and ruled that theirs is better. One list of
+  // five made the reader scan past three entries to reach the one their
+  // afternoon was about.
+  //
+  // THE SPLIT IS NOT DATATRUCK'S EXACTLY. Theirs is by payee kind — Driver,
+  // Dispatcher, Vendor — and Zebra settles drivers and pays neither of the other
+  // two. Ours is by direction.
   {
     key: 'accounting',
     labelKey: 'nav.group.accounting',
     items: [
       item('invoices', '/accounting/invoices', 'invoice'),
       item('payments', '/accounting/payments', 'payment'),
-      item('payroll', '/accounting/payroll', 'settlement'),
-      // CHARGES IS `driver.pay`, NOT `settlement`. It is what comes off a
-      // driver's cheque every week, which is the same resource the driver page
-      // guards its deduction editor with — a role that may read a batch total
-      // does not thereby get to see one driver's insurance instalment.
-      //
-      // GATED ON `read`, WITH THE CONTROLS ON `update`. This entry was written
-      // as `update` first, and the permissions suite caught what that meant:
-      // `driver.pay:update` is OWNER and ADMIN only, so the page whose whole
-      // purpose is the accountant's Monday question would have been invisible to
-      // ACCOUNTING — which reads pay and, today, cannot set it.
-      //
-      // The split is the driver page's own (`maySeePay` / `maySetPay`), not an
-      // invention here. Whether ACCOUNTING should hold `driver.pay:update` is a
-      // question about the role rather than about this screen, and widening a
-      // role is not a thing a new page gets to decide.
-      item('charges', '/accounting/charges', 'driver.pay'),
       item('reports', '/accounting/reports', 'settlement'),
       // §2.6: Expenses and Fuel move to Phase 5. Kept unbuilt rather than
       // dropped — the marker is data, so building one is a one-word edit.
       unbuilt('expenses', '/expenses', 'expense', 'Phase 5'),
       unbuilt('fuel', '/fuel', 'fuel', 'Phase 5'),
+    ],
+  },
+  {
+    key: 'payroll',
+    labelKey: 'nav.group.payroll',
+    items: [
+      // BATCHES CARRIES BALANCES as a tab: both are a run's totals. The week
+      // selector and the Tuesday strip live here, because this is where somebody
+      // opens, refreshes and finalises a run.
+      item('batches', '/payroll/batches', 'settlement'),
+      // STATEMENTS EARNS ITS OWN DESTINATION rather than a tab under Batches.
+      // It is the document a driver is handed, and it is what people arrive
+      // looking for — `driver.pay`, because it is one person's money and not a
+      // run's total.
+      item('statements', '/payroll/statements', 'driver.pay'),
+      // CHARGES IS `driver.pay`, NOT `settlement`: what comes off one driver's
+      // cheque is the resource the driver page guards its deduction editor with,
+      // and a role that may read a batch total does not thereby see somebody's
+      // insurance instalment.
+      //
+      // READ HERE, UPDATE ON THE CONTROLS — the driver page's own split. As of
+      // 2026-09-28 ACCOUNTING holds `driver.pay:update` too, so the editors are
+      // reachable by the people who use them; the entry stays on `read` because
+      // a MANAGER may still look.
+      item('charges', '/payroll/charges', 'driver.pay'),
     ],
   },
   {

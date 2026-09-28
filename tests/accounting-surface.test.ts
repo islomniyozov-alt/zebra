@@ -3,42 +3,93 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 // ---------------------------------------------------------------------------
-// THE ACCOUNTING SECTION IS FIVE PAGES AND EVERY LIST HAS THE SAME CONTROLS.
+// TWO GROUPS, SIX DESTINATIONS, AND EVERY GRID CARRIES THE SAME CONTROLS.
 //
 // ── WHY THIS IS A SOURCE CHECK ────────────────────────────────────────────
 //
 // The ruling is about what each screen OFFERS: search, sort, a date range, a
-// company filter, a sticky header and a totals row. A behavioural test would
-// need a browser, a session and seeded money on every one of them, which is the
-// reason nothing checked the old Money section's shape either.
+// company filter, a sticky header, a totals row, a columns chooser, export and
+// pagination. A behavioural test would need a browser, a session and seeded
+// money on every one of them, which is the reason nothing checked the old Money
+// section's shape either.
 //
 // So this reads the pages. It is the "count the thing you are claiming"
-// instrument: the claim is about these five files, so these five files are what
-// is counted — and the exceptions are named rather than quietly permitted.
+// instrument: the claim is about these six files, so these six files are what is
+// counted — and every exception is named rather than quietly permitted.
+//
+// ── REWRITTEN 2026-09-28 FOR THE SPLIT ────────────────────────────────────
+//
+// It described one Accounting directory of five pages, and §6.2 now has
+// Accounting (Invoices, Payments, Reports) and Payroll (Batches, Statements,
+// Charges). Thirty-three of its cases failed on the move, which is the shape a
+// guard SHOULD fail in: loudly, naming each page, rather than passing because it
+// found nothing.
 // ---------------------------------------------------------------------------
 
-const DIR = join(process.cwd(), 'src', 'app', '(app)', 'accounting')
+const APP = join(process.cwd(), 'src', 'app', '(app)')
+const ACCOUNTING = join(APP, 'accounting')
+const PAYROLL = join(APP, 'payroll')
 
-const PAGES = ['invoices', 'payments', 'payroll', 'charges', 'reports'] as const
+/** Every destination, as `[group directory, segment]`. */
+const PAGES = [
+  [ACCOUNTING, 'invoices'],
+  [ACCOUNTING, 'payments'],
+  [ACCOUNTING, 'reports'],
+  [PAYROLL, 'batches'],
+  [PAYROLL, 'statements'],
+  [PAYROLL, 'charges'],
+] as const
+
+const NAMES = PAGES.map(([, name]) => name)
+
+const dirOf = (name: string) => {
+  const found = PAGES.find(([, segment]) => segment === name)
+  if (!found) throw new Error(`no such destination: ${name}`)
+  return found[0]
+}
 
 const pageSource = (name: string) =>
-  readFileSync(join(DIR, name, 'page.tsx'), 'utf8')
+  readFileSync(join(dirOf(name), name, 'page.tsx'), 'utf8')
 
-describe('the five pages exist', () => {
-  it('is exactly five, with nothing extra alongside them', () => {
-    const directories = readdirSync(DIR, { withFileTypes: true })
+describe('the six destinations exist', () => {
+  it('is exactly six, in two groups, with nothing extra alongside them', () => {
+    const accounting = readdirSync(ACCOUNTING, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
       .sort()
-    // §6.2's table is five destinations, each answering something the other four
-    // do not. A sixth PAGE has to change that table first.
-    //
-    // `export` IS NOT A PAGE and is named here rather than tolerated: it is the
-    // shared CSV route handler (§7.1.5), which has to live under this segment so
-    // that it inherits the same auth context the pages do.
-    expect(directories).toEqual([...PAGES, 'export'].sort())
-    for (const name of PAGES) {
-      expect(existsSync(join(DIR, name, 'page.tsx')), name).toBe(true)
+    const payroll = readdirSync(PAYROLL, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort()
+
+    // §6.2's table is six destinations, each answering something the other five
+    // do not. A seventh has to change that table first.
+    expect(accounting).toEqual(['invoices', 'payments', 'reports'])
+    expect(payroll).toEqual(['batches', 'charges', 'statements'])
+
+    for (const name of NAMES) {
+      expect(existsSync(join(dirOf(name), name, 'page.tsx')), name).toBe(true)
+    }
+  })
+
+  it('keeps the shared grid machinery out of both groups', () => {
+    // `_grid` is private to the router (leading underscore) and belongs to
+    // neither group, because both use it. Living under `accounting/` — where it
+    // started — would have made Payroll import across a sibling section for its
+    // own header.
+    const shared = readdirSync(join(APP, '_grid')).sort()
+    expect(shared).toContain('PageHeader.tsx')
+    expect(shared).toContain('GridToolbar.tsx')
+    expect(shared).toContain('grid-page.ts')
+    // And the CSV route is neither group's either.
+    expect(existsSync(join(APP, 'exports', 'route.ts'))).toBe(true)
+  })
+
+  it('gives every destination a breadcrumb naming its group', () => {
+    // §6.2.1 — two groups, six destinations and eleven tabs is where "where am
+    // I" stops being obvious. The group name is the first crumb.
+    for (const name of NAMES) {
+      expect(pageSource(name), name).toContain('breadcrumb={[')
     }
   })
 })
@@ -49,7 +100,7 @@ describe('the five pages exist', () => {
 // whether the bound is inclusive — and MONEY-DESIGN §0 is the standing lesson
 // about a day's slip on a week boundary looking like nothing.
 describe('every page uses the shared list core', () => {
-  it.each([...PAGES])('%s reads its params through list-view', (name) => {
+  it.each([...NAMES])('%s reads its params through list-view', (name) => {
     const source = pageSource(name)
     expect(source).toContain("from '@/lib/list-view'")
     // EITHER ENTRY POINT. `gridView` calls `readListParams` itself and adds the
@@ -63,11 +114,11 @@ describe('every page uses the shared list core', () => {
     // core" as far as the instrument could tell. An import is the dependency; a
     // string that looks like a call is a string.
     expect(source).toMatch(
-      /import \{[^}]*\bgridView\b[^}]*\} from '\.\.\/grid-page'|import \{[^}]*\breadListParams\b[^}]*\} from '@\/lib\/list-view'/s,
+      /import \{[^}]*\bgridView\b[^}]*\} from '[./]*_grid\/grid-page'|import \{[^}]*\breadListParams\b[^}]*\} from '@\/lib\/list-view'/s,
     )
   })
 
-  it.each([...PAGES])('%s does not parse a date bound by hand', (name) => {
+  it.each([...NAMES])('%s does not parse a date bound by hand', (name) => {
     // The shape `new Date(`${x}T00:00:00` )` in a page is the copy this module
     // exists to prevent. `payroll` and `reports` legitimately build instants, but
     // from a WEEK or a default window, never from `from`/`to`.
@@ -82,7 +133,13 @@ describe('every page uses the shared list core', () => {
 // true of whatever shipped would be no instrument at all. So each exception is
 // listed with its reason and asserted to STILL be the exception.
 describe('the controls each list carries', () => {
-  const LISTS = ['invoices', 'payments', 'payroll', 'charges'] as const
+  const LISTS = [
+    'invoices',
+    'payments',
+    'batches',
+    'statements',
+    'charges',
+  ] as const
 
   // ── ANCHORED ON THE PROP, NOT ON A SUBSTRING ────────────────────────────
   //
@@ -117,7 +174,7 @@ describe('the controls each list carries', () => {
   // that the week IS the range — a second date control beside the week picker
   // would be two answers to the same question, and §7.4.1 wants a range labelled
   // with WHICH date, of which payroll has no other.
-  it.each(['invoices', 'payments', 'charges'] as const)(
+  it.each(['invoices', 'payments', 'charges', 'statements'] as const)(
     '%s has a labelled date range',
     (name) => {
       const source = pageSource(name)
@@ -130,24 +187,21 @@ describe('the controls each list carries', () => {
     },
   )
 
-  // ── PAYROLL HAS BOTH, AND WHICH ONE DEPENDS ON THE TAB ──────────────────
+  // ── THE WEEK PICKER IS ON BATCHES, AND ONLY THERE ───────────────────────
   //
-  // This read "a week picker INSTEAD OF a range" while Payroll was one grid about
-  // one week. With five tabs (§7.1.6) that is no longer true and the test was
-  // right to fail: Batches and Driver statements span every week, so a range over
-  // the check date and the period is exactly what they need, and a week picker
-  // above them would be a control that changes nothing.
-  //
-  // The rule that survives is the ORIGINAL REASON: a week-scoped grid has no
-  // second date to bound, so it gets the picker and not a range.
-  it('payroll has a week picker, for the tabs the week means something to', () => {
-    const source = pageSource('payroll')
+  // This read "payroll has a week picker instead of a range" when Payroll was one
+  // page about one week, then "for the tabs the week means something to" when it
+  // grew five tabs. With the split it is simpler again: Batches is where a run is
+  // opened, refreshed and finalised, so the picker and the Tuesday strip live
+  // there — and Balances, its other tab, is a YEAR, which is why the strip is
+  // rendered per tab rather than per page.
+  it('batches has the week picker and the Tuesday strip', () => {
+    const source = pageSource('batches')
     expect(source).toContain('<WeekPicker')
-    // The picker is rendered only for those tabs, and the flag that decides it is
-    // named — a `weekStrip` shown unconditionally would put a week control above
-    // a grid spanning every week.
-    expect(source).toContain('const weekScoped =')
-    expect(source).toMatch(/\{weekStrip\}/)
+    expect(source).toContain('{weekStrip}')
+    expect(source).toContain('{blockers}')
+    // Per tab, not per page: Balances is a year's totals.
+    expect(source).toMatch(/tab === 'batches' \? \(/)
   })
 
   // THE COMPANY FILTER: on the three lists whose rows belong to an authority.
@@ -162,8 +216,13 @@ describe('the controls each list carries', () => {
     },
   )
 
-  it('payroll has no company filter, because settlement is org-wide', () => {
-    expect(pageSource('payroll')).not.toContain('<CompanyChips')
+  it('batches and statements have no company filter, being org-wide', () => {
+    // A settlement spans every authority a driver pulled for (Islom,
+    // 2026-09-11), so there is no company on a run or on a statement to filter
+    // by — and a chip there would imply a per-authority payroll that does not
+    // exist. The BREAKDOWN rows carry the authorities instead.
+    expect(pageSource('batches')).not.toContain('<CompanyChips')
+    expect(pageSource('statements')).not.toContain('<CompanyChips')
   })
 
   // REPORTS IS NOT A LIST IN TWO OF ITS THREE CUTS. The company and week cuts
@@ -186,11 +245,11 @@ describe('the controls each list carries', () => {
 // The exceptions below are asserted to STILL be exceptions, because a test
 // written to be true of whatever shipped is not an instrument.
 describe('the grid contract', () => {
-  it.each([...PAGES])('%s has tabs over one grid', (name) => {
+  it.each([...NAMES])('%s has tabs over one grid', (name) => {
     expect(pageSource(name)).toContain('<Tabs')
   })
 
-  it.each([...PAGES])('%s offers Export CSV and a columns chooser', (name) => {
+  it.each([...NAMES])('%s offers Export CSV and a columns chooser', (name) => {
     // Both live in `GridToolbar`, which carries the current filter into the
     // export link and the grid id into the preference.
     expect(pageSource(name)).toContain('<GridToolbar')
@@ -201,12 +260,12 @@ describe('the grid contract', () => {
   // `readGridColumns(` — so the break harness found this guard reporting nothing
   // wrong with a page that had stopped reading the preference entirely. Same
   // shape as `xtotals={{` and `xsearch={{` before it.
-  it.each([...PAGES])('%s reads a stored column preference', (name) => {
+  it.each([...NAMES])('%s reads a stored column preference', (name) => {
     expect(pageSource(name)).toMatch(/\breadGridColumns\(/)
     expect(pageSource(name)).toMatch(/\bkeepColumns\(/)
   })
 
-  it.each([...PAGES])('%s paginates', (name) => {
+  it.each([...NAMES])('%s paginates', (name) => {
     expect(pageSource(name)).toContain('<GridFooterNav')
   })
 
@@ -216,7 +275,7 @@ describe('the grid contract', () => {
   // carries the filtered set past the page slice; a paginated grid that forgets
   // it sums twenty rows under a label saying 251, which is the exact
   // disagreement the section exists to prevent — and it would look right.
-  it.each([...PAGES])('%s hands its foot the filtered set', (name) => {
+  it.each([...NAMES])('%s hands its foot the filtered set', (name) => {
     const source = pageSource(name)
     const tables = source.split('<Table').length - 1
     const footRows = source.split('footRows={view.filtered}').length - 1
@@ -243,7 +302,7 @@ describe('the grid contract', () => {
 // Every client component in this section is a leaf whose props come from a
 // server page, so a function type in its Props is this bug by construction.
 // Server Actions are imported, not passed, so nothing legitimate is excluded.
-describe('client components in Accounting take no callbacks', () => {
+describe('client components in these two groups take no callbacks', () => {
   const clientFiles = (() => {
     const found: { name: string; text: string }[] = []
     const walk = (dir: string) => {
@@ -259,7 +318,13 @@ describe('client components in Accounting take no callbacks', () => {
         found.push({ name: entry.name, text })
       }
     }
-    walk(DIR)
+    // BOTH GROUPS AND THE SHARED FOLDER. Written as one directory it would have
+    // stopped covering Payroll the moment the split landed — and passed, because
+    // it would still have found Accounting's files and its own
+    // "cannot pass by finding nothing" case would still have been satisfied.
+    walk(ACCOUNTING)
+    walk(PAYROLL)
+    walk(join(APP, '_grid'))
     return found
   })()
 
@@ -310,9 +375,20 @@ describe('the screenshot script', () => {
     expect(source).toContain('NO SESSION.')
   })
 
-  it('shoots all five pages', () => {
-    for (const name of PAGES) {
-      expect(source, name).toContain(`/accounting/${name}`)
+  it('shoots all six destinations', () => {
+    // BY FULL PATH, not by bare name — `batches` appears in this script's own
+    // prose, and a guard satisfied by a comment is the substring trap this file
+    // has now caught three times.
+    const paths: Record<string, string> = {
+      invoices: '/accounting/invoices',
+      payments: '/accounting/payments',
+      reports: '/accounting/reports',
+      batches: '/payroll/batches',
+      statements: '/payroll/statements',
+      charges: '/payroll/charges',
+    }
+    for (const name of NAMES) {
+      expect(source, name).toContain(`path: '${paths[name]}'`)
     }
   })
 })

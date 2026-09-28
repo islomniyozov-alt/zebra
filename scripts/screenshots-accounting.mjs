@@ -22,82 +22,76 @@ const OUT = 'screenshots'
 const VIEWPORT = { width: 1920, height: 1080 }
 
 const SHOTS = [
-  // ── THE FIVE PAGES, IN SIDEBAR ORDER, DEFAULT TAB ───────────────────────
+  // ── ACCOUNTING, IN SIDEBAR ORDER ────────────────────────────────────────
   { name: 'acc-1-invoices', path: '/accounting/invoices' },
   { name: 'acc-2-payments', path: '/accounting/payments' },
-  { name: 'acc-3-payroll', path: '/accounting/payroll' },
-  { name: 'acc-4-charges', path: '/accounting/charges' },
-  { name: 'acc-5-reports', path: '/accounting/reports' },
+  { name: 'acc-3-reports', path: '/accounting/reports' },
+
+  // ── PAYROLL ─────────────────────────────────────────────────────────────
+  { name: 'pay-1-batches', path: '/payroll/batches' },
+  { name: 'pay-2-statements', path: '/payroll/statements' },
+  { name: 'pay-3-charges', path: '/payroll/charges' },
 
   // ── EVERY OTHER TAB ─────────────────────────────────────────────────────
   //
-  // A tab is a different question (§7.1.6), so a screenshot of one is not
-  // evidence about the others. Thirteen grids, thirteen pictures.
+  // A tab is a different question (§7.1.6), so a picture of one is not evidence
+  // about the others.
   { name: 'acc-1b-invoices-ready', path: '/accounting/invoices?tab=ready' },
   { name: 'acc-1c-invoices-direct', path: '/accounting/invoices?tab=direct' },
   {
     name: 'acc-2b-payments-unapplied',
     path: '/accounting/payments?tab=unapplied',
   },
-  {
-    name: 'acc-3b-payroll-statements',
-    path: '/accounting/payroll?tab=statements',
-  },
-  { name: 'acc-3c-payroll-balances', path: '/accounting/payroll?tab=balances' },
-  { name: 'acc-3d-payroll-onetime', path: '/accounting/payroll?tab=oneTime' },
-  {
-    name: 'acc-3e-payroll-scheduled',
-    path: '/accounting/payroll?tab=scheduled',
-  },
-  { name: 'acc-4b-charges-onetime', path: '/accounting/charges?tab=oneTime' },
-  { name: 'acc-5b-reports-week', path: '/accounting/reports?cut=week' },
-  { name: 'acc-5c-reports-driver', path: '/accounting/reports?cut=driver' },
+  { name: 'acc-3b-reports-week', path: '/accounting/reports?cut=week' },
+  { name: 'acc-3c-reports-driver', path: '/accounting/reports?cut=driver' },
+  { name: 'pay-1b-batches-balances', path: '/payroll/batches?tab=balances' },
+  { name: 'pay-3b-charges-onetime', path: '/payroll/charges?tab=oneTime' },
+  { name: 'pay-3c-charges-thisweek', path: '/payroll/charges?tab=thisWeek' },
 
   // ── THE GRID CONTRACT, VISIBLE ──────────────────────────────────────────
   //
   // Sorted, filtered and on page two, so the footer's `Total (N rows)` can be
-  // checked against a body that is NOT N rows long — which is the whole of the
+  // read against a body that is deliberately NOT N rows long — which is the
   // correction the artefact forced (§7.1.2).
   {
-    name: 'acc-6-invoices-page2',
+    name: 'grid-1-invoices-page2',
     path: '/accounting/invoices?sort=balance&dir=desc&per=25&page=2',
   },
   {
-    name: 'acc-6b-invoices-filtered',
+    name: 'grid-2-invoices-filtered',
     path: '/accounting/invoices?age=d90_plus&sort=balance&dir=desc',
   },
   {
-    name: 'acc-6c-payroll-batches-sorted',
-    path: '/accounting/payroll?tab=batches&sort=amount&dir=desc',
+    name: 'grid-3-batches-sorted',
+    path: '/payroll/batches?sort=amount&dir=desc',
   },
 
   // A week with no batch: §10's empty state is an invitation with the action
-  // attached, and it is a different sentence from "no rows match".
+  // attached, and reads differently from "no rows match".
   {
-    name: 'acc-7-payroll-nobatch',
-    path: '/accounting/payroll?tab=scheduled&week=2026-08-02',
+    name: 'grid-4-batches-nobatch',
+    path: '/payroll/batches?week=2026-08-02',
   },
   // The week this session corrected, so the derived check date is in a picture.
-  {
-    name: 'acc-7b-payroll-week',
-    path: '/accounting/payroll?tab=oneTime&week=2026-09-13',
-  },
+  { name: 'grid-5-batches-week', path: '/payroll/batches?week=2026-09-13' },
 
   // ── RUSSIAN AND FARSI ───────────────────────────────────────────────────
   //
-  // §12: Russian runs ~30% longer and Farsi is right-to-left. A five-item tab
-  // strip over a nine-column grid is where both show.
-  { name: 'acc-8-payroll-ru', path: '/accounting/payroll', locale: 'ru' },
-  { name: 'acc-8b-payroll-fa-rtl', path: '/accounting/payroll', locale: 'fa' },
+  // §12: Russian runs ~30% longer and Farsi is right-to-left. The batches grid
+  // is the widest, and the breadcrumb is new — its separator has to mirror.
+  { name: 'i18n-1-batches-ru', path: '/payroll/batches', locale: 'ru' },
+  { name: 'i18n-2-batches-fa-rtl', path: '/payroll/batches', locale: 'fa' },
   {
-    name: 'acc-8c-invoices-fa-rtl',
+    name: 'i18n-3-invoices-fa-rtl',
     path: '/accounting/invoices',
     locale: 'fa',
   },
 
   // ── AND THE OLD PATHS STILL LAND SOMEWHERE ──────────────────────────────
-  { name: 'acc-9-redirect-thisweek', path: '/money/this-week' },
-  { name: 'acc-9b-redirect-settlements', path: '/settlements' },
+  { name: 'redir-1-thisweek', path: '/money/this-week' },
+  { name: 'redir-2-settlements', path: '/settlements' },
+  { name: 'redir-3-accounting-payroll', path: '/accounting/payroll' },
+  { name: 'redir-4-accounting-charges', path: '/accounting/charges' },
 ]
 
 mkdirSync(OUT, { recursive: true })

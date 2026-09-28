@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
@@ -11,30 +10,20 @@ import { applyList, sumCents, type RawParams } from '@/lib/list-view'
 import {
   balanceShape,
   batchShape,
-  oneTimeShape,
   readBalances,
   readBatches,
-  readOneTimeCharges,
-  readScheduled,
-  readStatements,
-  scheduledForWeek,
-  scheduledShape,
-  statementShape,
   type BalanceGridRow,
   type BatchGridRow,
-  type OneTimeGridRow,
-  type StatementGridRow,
 } from '@/lib/accounting-grids'
-import type { ChargeRow } from '@/lib/driver-deductions'
 import { Table, type Column } from '@/components/ui/Table'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterBar } from '@/components/ui/FilterBar'
 import { Tabs } from '@/components/ui/Tabs'
-import { GridFooterNav } from '../GridFooterNav'
-import { AccountingHeader } from '../AccountingHeader'
-import { GridToolbar } from '../GridToolbar'
-import { gridView, keepColumns, pagedFooterLabel } from '../grid-page'
+import { GridFooterNav } from '../../_grid/GridFooterNav'
+import { PageHeader } from '../../_grid/PageHeader'
+import { GridToolbar } from '../../_grid/GridToolbar'
+import { gridView, keepColumns, pagedFooterLabel } from '../../_grid/grid-page'
 import { WeekPicker } from './WeekPicker'
 import { OpenWeek } from './OpenWeek'
 import { BatchActions } from '../../settlements/batches/[id]/BatchActions'
@@ -86,25 +75,48 @@ const STATUS: Record<string, { tone: StatusTone; label: MessageKey }> = {
 const statusOf = (value: string) =>
   STATUS[value] ?? { tone: 'neutral' as StatusTone, label: null }
 
-const TABS = [
-  'batches',
-  'statements',
-  'balances',
-  'oneTime',
-  'scheduled',
-] as const
+// TWO TABS: both are a run's totals (§6.2). Driver statements and the two
+// charge grids became their own destinations under Payroll.
+const TABS = ['batches', 'balances'] as const
 type Tab = (typeof TABS)[number]
 
 const GRID_FOR: Record<Tab, GridId> = {
   batches: 'payroll.batches',
-  statements: 'payroll.statements',
   balances: 'payroll.balances',
-  oneTime: 'payroll.oneTime',
-  scheduled: 'payroll.scheduled',
+}
+
+// ── THE COLUMN KEYS, FOR THE PREFERENCE READ ────────────────────────────────
+//
+// Declared as data rather than derived from the `Column` arrays, because those
+// are built inside the component with a translator and the preference has to be
+// read in the same transaction as the rows. `tests/accounting-surface.test.ts`
+// checks the two against each other, so a column added to one and not the other
+// fails rather than quietly becoming unhideable.
+const COLUMN_KEYS: Record<Tab, readonly string[]> = {
+  batches: [
+    'batchNumber',
+    'status',
+    'created',
+    'checkDate',
+    'period',
+    'statements',
+    'amount',
+    'payCompany',
+    'notes',
+  ],
+  balances: [
+    'driver',
+    'weeks',
+    'opening',
+    'gross',
+    'deductions',
+    'ytd',
+    'escrow',
+  ],
 }
 
 const WEEKS_OFFERED = 12
-const PATH = '/accounting/payroll'
+const PATH = '/payroll/batches'
 
 export default async function PayrollPage({
   searchParams,
@@ -168,25 +180,12 @@ export default async function PayrollPage({
         select: { periodStart: true },
       })
 
-      // ONLY THE TAB'S OWN ROWS. Reading all five would be four queries nobody
-      // asked for on every page load, and the batches grid alone walks every
-      // settlement's load lines.
+      // ONLY THE TAB'S OWN ROWS. Reading both would be a query nobody asked
+      // for on every page load, and the batches grid walks every settlement's
+      // load lines to build the per-authority breakdown.
       const batches = tab === 'batches' ? await readBatches(tx, scope) : []
-      const statements =
-        tab === 'statements' ? await readStatements(tx, scope) : []
       const balances =
         tab === 'balances' ? await readBalances(tx, scope, year) : []
-      const oneTime =
-        tab === 'oneTime'
-          ? await readOneTimeCharges(tx, scope, {
-              from: chosen.start,
-              to: new Date(chosen.end.getTime() + 86_399_999),
-            })
-          : []
-      const scheduled =
-        tab === 'scheduled'
-          ? scheduledForWeek(await readScheduled(tx, scope), chosen)
-          : []
 
       const columns = await readGridColumns(
         tx,
@@ -199,10 +198,7 @@ export default async function PayrollPage({
         week,
         opened: opened.map((row) => row.periodStart.getTime()),
         batches,
-        statements,
         balances,
-        oneTime,
-        scheduled,
         columns,
       }
     },
@@ -311,14 +307,13 @@ export default async function PayrollPage({
       key: 'payCompany',
       header: t('batches.payCompany'),
       sortable: true,
-      // NO SOURCE FOR THIS YET. `SettlementBatch` carries no paying authority and
-      // nothing in the schema does; see the note on `payCompanyName`. It says
-      // "not recorded" rather than guessing at the authority with the largest
-      // share, which would print a real company beside real money on an
-      // assumption nobody made.
+      // "ALL AUTHORITIES", because that is what a Zebra batch pays out of
+      // (Islom, 2026-09-11) — and the names are on the breakdown rows under the
+      // grid. Datatruck needs a real company here only because a batch there
+      // belongs to one payer. Owner's ruling, 2026-09-28: no migration.
       render: (row) =>
         row.payCompanyName ?? (
-          <span className="text-ink-3">{t('batches.payCompanyMissing')}</span>
+          <span className="text-ink-2">{t('batches.allAuthorities')}</span>
         ),
     },
     {
@@ -326,83 +321,6 @@ export default async function PayrollPage({
       header: t('batches.notes'),
       truncate: true,
       render: (row) => row.notes ?? <span className="text-ink-3">—</span>,
-    },
-  ]
-
-  const statementColumns: Column<StatementGridRow>[] = [
-    {
-      key: 'driver',
-      header: t('payroll.driver'),
-      sortable: true,
-      render: (row) => row.driverName,
-    },
-    {
-      key: 'period',
-      header: t('batches.period'),
-      sortable: true,
-      render: (row) => (
-        <span className="font-mono text-xs" dir="ltr">
-          {day(row.periodStart)} — {day(row.periodEnd)}
-        </span>
-      ),
-    },
-    {
-      key: 'unit',
-      header: t('payroll.unit'),
-      sortable: true,
-      render: (row) => (
-        <span className="z-identifier font-mono text-xs" dir="ltr">
-          {row.unitNumber ?? '—'}
-        </span>
-      ),
-    },
-    {
-      key: 'gross',
-      header: t('payroll.gross'),
-      align: 'end',
-      sortable: true,
-      render: (row) => money(row.grossCents),
-      foot: (shown) => money(sumCents(shown, (row) => row.grossCents)),
-    },
-    {
-      key: 'deductions',
-      header: t('payroll.deductions'),
-      align: 'end',
-      sortable: true,
-      render: (row) => money(row.deductionsCents),
-      foot: (shown) => money(sumCents(shown, (row) => row.deductionsCents)),
-    },
-    {
-      key: 'net',
-      header: t('payroll.net'),
-      align: 'end',
-      sortable: true,
-      render: (row) => money(row.netCents),
-      foot: (shown) => money(sumCents(shown, (row) => row.netCents)),
-    },
-    {
-      key: 'status',
-      header: t('payroll.status'),
-      sortable: true,
-      render: (row) => (
-        <div className="flex items-baseline gap-z2">
-          <StatusBadge
-            tone={statusOf(row.status).tone}
-            label={
-              statusOf(row.status).label
-                ? t(statusOf(row.status).label!)
-                : row.status
-            }
-          />
-          {/* A STATEMENT WITH NO RUN, said in words. These predate batching and
-           * are the reason `batchId` is nullable. */}
-          {row.batchId === null ? (
-            <span className="text-xs text-ink-3">
-              {t('statements.noBatch')}
-            </span>
-          ) : null}
-        </div>
-      ),
     },
   ]
 
@@ -463,141 +381,6 @@ export default async function PayrollPage({
     },
   ]
 
-  const oneTimeColumns: Column<OneTimeGridRow>[] = [
-    {
-      key: 'driver',
-      header: t('payroll.driver'),
-      sortable: true,
-      render: (row) => row.driverName,
-    },
-    {
-      key: 'type',
-      header: t('charges.type'),
-      sortable: true,
-      render: (row) => row.type,
-    },
-    {
-      key: 'description',
-      header: t('charges.description'),
-      truncate: true,
-      sortable: true,
-      render: (row) => row.description,
-    },
-    {
-      key: 'amount',
-      header: t('batches.amount'),
-      align: 'end',
-      sortable: true,
-      // SIGNED. Negative is money off the driver; §8 says a negative figure takes
-      // a leading minus and the danger hue, never parentheses.
-      render: (row) => (
-        <span
-          className={`font-mono tabular-nums ${row.amountCents < 0 ? 'text-danger' : ''}`}
-        >
-          {formatCents(row.amountCents, locale)}
-        </span>
-      ),
-      foot: (shown) => money(sumCents(shown, (row) => row.amountCents)),
-    },
-    {
-      key: 'appliesOn',
-      header: t('oneTime.appliesOn'),
-      sortable: true,
-      render: (row) => (
-        <span className="font-mono text-xs" dir="ltr">
-          {day(row.appliesOn)}
-        </span>
-      ),
-    },
-    {
-      key: 'load',
-      header: t('oneTime.load'),
-      render: (row) =>
-        row.loadNumber === null ? (
-          <span className="text-ink-3">—</span>
-        ) : (
-          <span className="z-identifier font-mono text-xs" dir="ltr">
-            {row.loadNumber}
-          </span>
-        ),
-    },
-    {
-      key: 'settled',
-      header: t('oneTime.settled'),
-      sortable: true,
-      render: (row) => (
-        <StatusBadge
-          tone={row.settledAt ? 'success' : 'warning'}
-          label={row.settledAt ? t('oneTime.settled') : t('oneTime.pending')}
-        />
-      ),
-    },
-  ]
-
-  const scheduledColumns: Column<ChargeRow>[] = [
-    {
-      key: 'driver',
-      header: t('payroll.driver'),
-      sortable: true,
-      render: (row) => row.driverName,
-    },
-    {
-      key: 'type',
-      header: t('charges.type'),
-      sortable: true,
-      render: (row) => row.type,
-    },
-    {
-      key: 'amount',
-      header: t('charges.weekly'),
-      align: 'end',
-      sortable: true,
-      render: (row) => (
-        <span className="inline-flex items-baseline gap-z1">
-          {money(row.amountCents)}
-          {row.monthlyTotalCents !== null ? (
-            <span className="font-mono text-xs text-ink-3">
-              /{formatCents(row.monthlyTotalCents, locale)}
-            </span>
-          ) : null}
-        </span>
-      ),
-      foot: (shown) => money(sumCents(shown, (row) => row.amountCents)),
-    },
-    {
-      key: 'target',
-      header: t('charges.target'),
-      align: 'end',
-      sortable: true,
-      render: (row) =>
-        row.targetCents === null ? (
-          <span className="text-ink-3">—</span>
-        ) : (
-          money(row.targetCents)
-        ),
-    },
-    {
-      key: 'from',
-      header: t('charges.from'),
-      sortable: true,
-      render: (row) => (
-        <span className="font-mono text-xs" dir="ltr">
-          {day(row.effectiveFrom)}
-        </span>
-      ),
-    },
-    {
-      key: 'to',
-      header: t('charges.to'),
-      sortable: true,
-      render: (row) => (
-        <span className="font-mono text-xs" dir="ltr">
-          {row.effectiveTo ? day(row.effectiveTo) : '—'}
-        </span>
-      ),
-    },
-  ]
-
   // ── THE TAB STRIP ────────────────────────────────────────────────────────
 
   const tabHref = (key: string) => {
@@ -621,8 +404,9 @@ export default async function PayrollPage({
 
   const header = (
     <>
-      <AccountingHeader
+      <PageHeader
         title={t('accounting.payroll.title')}
+        breadcrumb={[t('nav.group.payroll'), t('payroll.tab.batches')]}
         stripeMeans={t('accounting.payroll.stripe')}
         action={
           week.batch === null ? (
@@ -652,45 +436,46 @@ export default async function PayrollPage({
     </>
   )
 
-  // THE WEEK PICKER IS ONLY ON THE TABS THE WEEK MEANS SOMETHING TO. Batches,
-  // statements and balances span every week by definition; putting a week control
-  // above them would be a control that changes nothing.
-  const weekScoped = tab === 'oneTime' || tab === 'scheduled'
+  // THE WEEK PICKER IS ON THE BATCHES TAB, because that is where a run is
+  // opened, refreshed and finalised — and the Tuesday strip below it is about
+  // the same week. BALANCES IS A YEAR, not a week, so it gets neither: a week
+  // control above a year's totals is a control that changes nothing.
 
-  const weekStrip = weekScoped ? (
-    <>
-      <WeekPicker
-        weeks={offered.map((period) => ({
-          start: day(period.start),
-          end: day(period.end),
-          hasBatch: data.opened.includes(period.start.getTime()),
-        }))}
-        selected={day(chosen.start)}
-        label={t('payroll.week')}
-        openedLabel={t('payroll.opened')}
-      />
-      <div className="flex flex-wrap items-baseline gap-z3 border-b border-border bg-surface-2 px-gutter py-z2 text-xs text-ink-2">
-        <span className="font-mono" dir="ltr">
-          {day(chosen.start)} — {day(chosen.end)}
-        </span>
-        {week.batch ? (
-          <>
-            <span className="font-mono text-ink" dir="ltr">
-              {week.batch.batchNumber ?? week.batch.status}
-            </span>
-            <span>
-              {t('batch.checkDate')}{' '}
-              <span className="font-mono" dir="ltr">
-                {day(week.batch.checkDate)}
+  const weekStrip =
+    tab === 'batches' ? (
+      <>
+        <WeekPicker
+          weeks={offered.map((period) => ({
+            start: day(period.start),
+            end: day(period.end),
+            hasBatch: data.opened.includes(period.start.getTime()),
+          }))}
+          selected={day(chosen.start)}
+          label={t('payroll.week')}
+          openedLabel={t('payroll.opened')}
+        />
+        <div className="flex flex-wrap items-baseline gap-z3 border-b border-border bg-surface-2 px-gutter py-z2 text-xs text-ink-2">
+          <span className="font-mono" dir="ltr">
+            {day(chosen.start)} — {day(chosen.end)}
+          </span>
+          {week.batch ? (
+            <>
+              <span className="font-mono text-ink" dir="ltr">
+                {week.batch.batchNumber ?? week.batch.status}
               </span>
-            </span>
-          </>
-        ) : (
-          <span>{t('payroll.noBatch')}</span>
-        )}
-      </div>
-    </>
-  ) : null
+              <span>
+                {t('batch.checkDate')}{' '}
+                <span className="font-mono" dir="ltr">
+                  {day(week.batch.checkDate)}
+                </span>
+              </span>
+            </>
+          ) : (
+            <span>{t('payroll.noBatch')}</span>
+          )}
+        </div>
+      </>
+    ) : null
 
   // ── ONE GRID, CHOSEN BY THE TAB ──────────────────────────────────────────
   //
@@ -698,8 +483,11 @@ export default async function PayrollPage({
   // render, paginate control — over a different row type. `gridView` is the
   // arithmetic so that "paginate before filtering" is not reachable from here.
 
+  // BLOCKERS SIT WITH THE BATCHES TAB, beside the week they block. On Balances
+  // — a year's totals — a list of "who cannot be paid this week" would be an
+  // alarm about a period the grid is not showing.
   const blockers =
-    week.blockers.length > 0 && weekScoped ? (
+    week.blockers.length > 0 && tab === 'batches' ? (
       <section className="border-b border-border bg-danger-soft px-gutter py-z3">
         <h2 className="text-sm font-medium text-danger">
           {t('batch.blockers')}
@@ -721,6 +509,15 @@ export default async function PayrollPage({
     return (
       <>
         {header}
+        {/* ── THE TUESDAY STRIP, BACK AT THE TOP (owner's ruling, 2026-09-28) ──
+         *
+         * The week picker, the period with its two dates, and the blockers by
+         * name. This is where a run is opened, refreshed and finalised, so it
+         * is where "which week, and who cannot be paid in it" belongs — and a
+         * blocked driver has no settlement row, so the grid below cannot carry
+         * them. */}
+        {weekStrip}
+        {blockers}
         <FilterBar
           groups={[]}
           search={{
@@ -837,257 +634,41 @@ export default async function PayrollPage({
     )
   }
 
-  if (tab === 'statements') {
-    const view = gridView(data.statements, raw, statementShape, applyList)
-    const columns = keepColumns(statementColumns, data.columns)
-    return (
-      <>
-        {header}
-        <FilterBar
-          groups={[]}
-          search={{
-            param: 'q',
-            label: t('accounting.search'),
-            placeholder: t('accounting.payroll.searchHint'),
-          }}
-          range={{
-            label: t('batches.period'),
-            fromLabel: t('accounting.from'),
-            toLabel: t('accounting.to'),
-          }}
-          clearLabel={t('filter.clear')}
-          moreLabel={t('filter.more')}
-        />
-        <div className="flex items-center justify-end gap-z2 border-b border-border bg-surface px-gutter py-z2">
-          <GridToolbar
-            grid="payroll.statements"
-            columns={statementColumns.map((column) => ({
-              key: column.key,
-              header: column.header,
-            }))}
-            visible={data.columns}
-            search={search}
-            labels={toolbarLabels}
-            errors={errors}
-          />
-        </div>
-        <Table
-          columns={columns}
-          rows={view.paged.rows}
-          footRows={view.filtered}
-          rowKey={(row) => row.id}
-          rowHref={(row) => `/settlements/${row.id}`}
-          stripeTone={(row) => statusOf(row.status).tone}
-          isCancelled={(row) => row.status === 'VOID'}
-          caption={t('payroll.tab.statements')}
-          sort={{
-            key: view.sort.key,
-            dir: view.sort.dir,
-            hrefFor: view.sortFor(PATH),
-            label: t('accounting.sortBy'),
-          }}
-          totals={{
-            label: pagedFooterLabel(
-              t('accounting.total'),
-              t('grid.rows'),
-              view.paged,
-            ),
-          }}
-          empty={
-            <EmptyState
-              title={t('statements.empty')}
-              body={t('accounting.emptyHint')}
-            />
-          }
-        />
-        <GridFooterNav
-          paged={view.paged}
-          per={view.params.per}
-          path={PATH}
-          search={search}
-          hrefForPage={view.hrefForPage(PATH)}
-          labels={footerLabels}
-        />
-      </>
-    )
-  }
+  // ── BALANCES IS THE OTHER TAB, AND THE TAIL ─────────────────────────────
+  //
+  // `batches` returns above, so `tab` is narrowed to this one here. Written as
+  // a third guarded branch the function would have no final return, and the
+  // two-tab shape would be stated twice — once in TABS and once in a chain of
+  // ifs that has to agree with it.
 
-  if (tab === 'balances') {
-    const view = gridView(data.balances, raw, balanceShape, applyList)
-    const columns = keepColumns(balanceColumns, data.columns)
-    return (
-      <>
-        {header}
-        <FilterBar
-          groups={[]}
-          search={{
-            param: 'q',
-            label: t('accounting.search'),
-            placeholder: t('payroll.driver'),
-          }}
-          clearLabel={t('filter.clear')}
-          moreLabel={t('filter.more')}
-        />
-        <div className="flex items-center justify-between gap-z2 border-b border-border bg-surface px-gutter py-z2">
-          {/* THE YEAR, because YTD is per calendar year and nothing else on this
-           * grid says which one. A range would be wrong here: a YTD figure over
-           * an arbitrary window is not a YTD figure. */}
-          <span className="text-xs text-ink-2">
-            {t('balances.year')}{' '}
-            <span className="font-mono text-ink" dir="ltr">
-              {year}
-            </span>
-          </span>
-          <GridToolbar
-            grid="payroll.balances"
-            columns={balanceColumns.map((column) => ({
-              key: column.key,
-              header: column.header,
-            }))}
-            visible={data.columns}
-            search={search}
-            labels={toolbarLabels}
-            errors={errors}
-          />
-        </div>
-        <Table
-          columns={columns}
-          rows={view.paged.rows}
-          footRows={view.filtered}
-          rowKey={(row) => row.driverId}
-          rowHref={(row) => `/drivers/${row.driverId}`}
-          caption={t('payroll.tab.balances')}
-          sort={{
-            key: view.sort.key,
-            dir: view.sort.dir,
-            hrefFor: view.sortFor(PATH),
-            label: t('accounting.sortBy'),
-          }}
-          totals={{
-            label: pagedFooterLabel(
-              t('accounting.total'),
-              t('grid.rows'),
-              view.paged,
-            ),
-          }}
-          empty={
-            <EmptyState
-              title={t('balances.empty')}
-              body={t('balances.emptyHint')}
-            />
-          }
-        />
-        <GridFooterNav
-          paged={view.paged}
-          per={view.params.per}
-          path={PATH}
-          search={search}
-          hrefForPage={view.hrefForPage(PATH)}
-          labels={footerLabels}
-        />
-      </>
-    )
-  }
-
-  if (tab === 'oneTime') {
-    const view = gridView(data.oneTime, raw, oneTimeShape, applyList)
-    const columns = keepColumns(oneTimeColumns, data.columns)
-    return (
-      <>
-        {header}
-        {weekStrip}
-        {blockers}
-        <FilterBar
-          groups={[]}
-          search={{
-            param: 'q',
-            label: t('accounting.search'),
-            placeholder: t('accounting.charges.searchHint'),
-          }}
-          clearLabel={t('filter.clear')}
-          moreLabel={t('filter.more')}
-        />
-        <div className="flex items-center justify-end gap-z2 border-b border-border bg-surface px-gutter py-z2">
-          <GridToolbar
-            grid="payroll.oneTime"
-            columns={oneTimeColumns.map((column) => ({
-              key: column.key,
-              header: column.header,
-            }))}
-            visible={data.columns}
-            search={search}
-            labels={toolbarLabels}
-            errors={errors}
-          />
-        </div>
-        <Table
-          columns={columns}
-          rows={view.paged.rows}
-          footRows={view.filtered}
-          rowKey={(row) => row.id}
-          rowHref={(row) => `/drivers/${row.driverId}`}
-          stripeTone={(row) => (row.settledAt ? 'success' : 'warning')}
-          caption={t('payroll.tab.oneTime')}
-          sort={{
-            key: view.sort.key,
-            dir: view.sort.dir,
-            hrefFor: view.sortFor(PATH),
-            label: t('accounting.sortBy'),
-          }}
-          totals={{
-            label: pagedFooterLabel(
-              t('accounting.total'),
-              t('grid.rows'),
-              view.paged,
-            ),
-          }}
-          empty={
-            <EmptyState
-              title={t('oneTime.empty')}
-              body={t('oneTime.emptyHint')}
-            />
-          }
-        />
-        <GridFooterNav
-          paged={view.paged}
-          per={view.params.per}
-          path={PATH}
-          search={search}
-          hrefForPage={view.hrefForPage(PATH)}
-          labels={footerLabels}
-        />
-      </>
-    )
-  }
-
-  const view = gridView(data.scheduled, raw, scheduledShape, applyList)
-  const columns = keepColumns(scheduledColumns, data.columns)
+  const view = gridView(data.balances, raw, balanceShape, applyList)
+  const columns = keepColumns(balanceColumns, data.columns)
   return (
     <>
       {header}
-      {weekStrip}
-      {blockers}
       <FilterBar
         groups={[]}
         search={{
           param: 'q',
           label: t('accounting.search'),
-          placeholder: t('accounting.charges.searchHint'),
+          placeholder: t('payroll.driver'),
         }}
         clearLabel={t('filter.clear')}
         moreLabel={t('filter.more')}
       />
       <div className="flex items-center justify-between gap-z2 border-b border-border bg-surface px-gutter py-z2">
-        {/* SAID OUT LOUD, because it is the difference between this tab and the
-         * Charges page: these are the rules that touch the week above, not every
-         * rule in the organization. */}
-        <p className="text-xs text-ink-3">
-          {t('accounting.charges.title')} — {day(chosen.start)} →{' '}
-          {day(chosen.end)}
-        </p>
+        {/* THE YEAR, because YTD is per calendar year and nothing else on this
+         * grid says which one. A range would be wrong here: a YTD figure over
+         * an arbitrary window is not a YTD figure. */}
+        <span className="text-xs text-ink-2">
+          {t('balances.year')}{' '}
+          <span className="font-mono text-ink" dir="ltr">
+            {year}
+          </span>
+        </span>
         <GridToolbar
-          grid="payroll.scheduled"
-          columns={scheduledColumns.map((column) => ({
+          grid="payroll.balances"
+          columns={balanceColumns.map((column) => ({
             key: column.key,
             header: column.header,
           }))}
@@ -1095,22 +676,15 @@ export default async function PayrollPage({
           search={search}
           labels={toolbarLabels}
           errors={errors}
-        >
-          <Link href="/accounting/charges">
-            <span className="text-xs text-accent underline">
-              {t('accounting.charges.title')}
-            </span>
-          </Link>
-        </GridToolbar>
+        />
       </div>
       <Table
         columns={columns}
         rows={view.paged.rows}
         footRows={view.filtered}
-        rowKey={(row) => row.id}
+        rowKey={(row) => row.driverId}
         rowHref={(row) => `/drivers/${row.driverId}`}
-        stripeTone={(row) => (row.inForceToday ? 'success' : 'muted')}
-        caption={t('payroll.tab.scheduled')}
+        caption={t('payroll.tab.balances')}
         sort={{
           key: view.sort.key,
           dir: view.sort.dir,
@@ -1119,15 +693,15 @@ export default async function PayrollPage({
         }}
         totals={{
           label: pagedFooterLabel(
-            t('accounting.weeklyTotal'),
+            t('accounting.total'),
             t('grid.rows'),
             view.paged,
           ),
         }}
         empty={
           <EmptyState
-            title={t('accounting.charges.empty')}
-            body={t('accounting.charges.emptyHint')}
+            title={t('balances.empty')}
+            body={t('balances.emptyHint')}
           />
         }
       />
@@ -1141,53 +715,4 @@ export default async function PayrollPage({
       />
     </>
   )
-}
-
-// ── THE COLUMN KEYS, FOR THE PREFERENCE READ ────────────────────────────────
-//
-// Declared as data rather than derived from the `Column` arrays, because those
-// are built inside the component with a translator and the preference has to be
-// read in the same transaction as the rows. The two are checked against each
-// other in `tests/accounting-surface.test.ts`, so a column added to one and not
-// the other fails rather than quietly becoming unhideable.
-const COLUMN_KEYS: Record<Tab, readonly string[]> = {
-  batches: [
-    'batchNumber',
-    'status',
-    'created',
-    'checkDate',
-    'period',
-    'statements',
-    'amount',
-    'payCompany',
-    'notes',
-  ],
-  statements: [
-    'driver',
-    'period',
-    'unit',
-    'gross',
-    'deductions',
-    'net',
-    'status',
-  ],
-  balances: [
-    'driver',
-    'weeks',
-    'opening',
-    'gross',
-    'deductions',
-    'ytd',
-    'escrow',
-  ],
-  oneTime: [
-    'driver',
-    'type',
-    'description',
-    'amount',
-    'appliesOn',
-    'load',
-    'settled',
-  ],
-  scheduled: ['driver', 'type', 'amount', 'target', 'from', 'to'],
 }

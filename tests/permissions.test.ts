@@ -227,14 +227,16 @@ describe('permissionsOf', () => {
 })
 
 describe('navigationFor', () => {
-  it('shows an owner all five groups', () => {
-    // `accounting` SINCE 2026-09-28, in the slot `money` held (§6.2 amended).
-    // Still five groups and still in this order: the section was renamed and
-    // narrowed, not moved.
+  it('shows an owner all six groups', () => {
+    // SIX SINCE THE SPLIT (§6.2, 2026-09-28). `money` became `accounting`, and
+    // then `accounting` became Accounting and Payroll — money in and money out.
+    // The order is the order the sidebar renders, and asserting the whole list
+    // is what makes a group added in the middle a failure rather than a surprise.
     expect(navigationFor(session('OWNER')).map((group) => group.key)).toEqual([
       'operations',
       'fleet',
       'accounting',
+      'payroll',
       'records',
       'admin',
     ])
@@ -288,17 +290,36 @@ describe('navigationFor', () => {
   // that may read a batch total does not thereby get to see somebody's insurance
   // instalment, and asserting the LIST here is what stops the next entry being
   // added under whatever permission was nearest.
-  it('offers accounting exactly the five Accounting pages', () => {
+  it('offers accounting the three money-in pages', () => {
     const group = navigationFor(session('ACCOUNTING')).find(
       (candidate) => candidate.key === 'accounting',
     )
     expect(group?.items.map((item) => item.key)).toEqual([
       'invoices',
       'payments',
-      'payroll',
-      'charges',
       'reports',
     ])
+  })
+
+  it('offers payroll the three money-out pages', () => {
+    // CHARGES IS `driver.pay` AND THE OTHER TWO SPLIT: batches is `settlement`
+    // (a run's totals), statements is `driver.pay` (one person's money). A role
+    // holding only `settlement` therefore sees Batches and neither of the rest,
+    // which is the item filter working inside a group that survives.
+    const group = navigationFor(session('ACCOUNTING')).find(
+      (candidate) => candidate.key === 'payroll',
+    )
+    expect(group?.items.map((item) => item.key)).toEqual([
+      'batches',
+      'statements',
+      'charges',
+    ])
+  })
+
+  it('shows a dispatcher neither money group', () => {
+    const keys = navigationFor(session('DISPATCHER')).map((group) => group.key)
+    expect(keys).not.toContain('accounting')
+    expect(keys).not.toContain('payroll')
   })
 
   // ── WHO MAY CHANGE A CHARGE IS NOT WHO MAY SEE ONE ──────────────────────
@@ -617,6 +638,7 @@ describe('the sidebar only offers screens that exist', () => {
       'operations',
       'fleet',
       'accounting',
+      'payroll',
       'records',
       'admin',
     ])

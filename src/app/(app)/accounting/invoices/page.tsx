@@ -22,11 +22,11 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterBar } from '@/components/ui/FilterBar'
 import { Tabs } from '@/components/ui/Tabs'
 import { ReadyQueue, type ReadyRow } from '../../invoices/ReadyQueue'
-import { CompanyChips } from '../CompanyChips'
-import { AccountingHeader } from '../AccountingHeader'
-import { GridToolbar } from '../GridToolbar'
-import { GridFooterNav } from '../GridFooterNav'
-import { gridView, keepColumns, pagedFooterLabel } from '../grid-page'
+import { CompanyChips } from '../../_grid/CompanyChips'
+import { PageHeader } from '../../_grid/PageHeader'
+import { GridToolbar } from '../../_grid/GridToolbar'
+import { GridFooterNav } from '../../_grid/GridFooterNav'
+import { gridView, keepColumns, pagedFooterLabel } from '../../_grid/grid-page'
 import type { InvoiceStatus } from '@/generated/prisma/client'
 import type { MessageKey } from '@/lib/i18n'
 import type { StatusTone } from '@/lib/status'
@@ -174,8 +174,9 @@ export default async function AccountingInvoicesPage({
 
   const header = (
     <>
-      <AccountingHeader
+      <PageHeader
         title={t('accounting.invoices.title')}
+        breadcrumb={[t('nav.group.accounting'), t('accounting.invoices.title')]}
         stripeMeans={t('accounting.invoices.stripe')}
       />
       <Tabs
