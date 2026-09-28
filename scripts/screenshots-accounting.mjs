@@ -22,54 +22,82 @@ const OUT = 'screenshots'
 const VIEWPORT = { width: 1920, height: 1080 }
 
 const SHOTS = [
-  // ── THE FIVE PAGES, IN SIDEBAR ORDER ────────────────────────────────────
-  { name: 'acc-invoices', path: '/accounting/invoices' },
-  { name: 'acc-payments', path: '/accounting/payments' },
-  { name: 'acc-payroll', path: '/accounting/payroll' },
-  { name: 'acc-charges', path: '/accounting/charges' },
-  { name: 'acc-reports', path: '/accounting/reports' },
+  // ── THE FIVE PAGES, IN SIDEBAR ORDER, DEFAULT TAB ───────────────────────
+  { name: 'acc-1-invoices', path: '/accounting/invoices' },
+  { name: 'acc-2-payments', path: '/accounting/payments' },
+  { name: 'acc-3-payroll', path: '/accounting/payroll' },
+  { name: 'acc-4-charges', path: '/accounting/charges' },
+  { name: 'acc-5-reports', path: '/accounting/reports' },
 
-  // ── THE STATES A DEFAULT SHOT DOES NOT SHOW ─────────────────────────────
+  // ── EVERY OTHER TAB ─────────────────────────────────────────────────────
   //
-  // SORTED AND FILTERED, so the totals row can be checked against the body it
-  // claims to total — §7.1.2's `Total (N rows)` is only evidence if N is
-  // visibly the number of rows on screen.
+  // A tab is a different question (§7.1.6), so a screenshot of one is not
+  // evidence about the others. Thirteen grids, thirteen pictures.
+  { name: 'acc-1b-invoices-ready', path: '/accounting/invoices?tab=ready' },
+  { name: 'acc-1c-invoices-direct', path: '/accounting/invoices?tab=direct' },
   {
-    name: 'acc-invoices-filtered',
+    name: 'acc-2b-payments-unapplied',
+    path: '/accounting/payments?tab=unapplied',
+  },
+  {
+    name: 'acc-3b-payroll-statements',
+    path: '/accounting/payroll?tab=statements',
+  },
+  { name: 'acc-3c-payroll-balances', path: '/accounting/payroll?tab=balances' },
+  { name: 'acc-3d-payroll-onetime', path: '/accounting/payroll?tab=oneTime' },
+  {
+    name: 'acc-3e-payroll-scheduled',
+    path: '/accounting/payroll?tab=scheduled',
+  },
+  { name: 'acc-4b-charges-onetime', path: '/accounting/charges?tab=oneTime' },
+  { name: 'acc-5b-reports-week', path: '/accounting/reports?cut=week' },
+  { name: 'acc-5c-reports-driver', path: '/accounting/reports?cut=driver' },
+
+  // ── THE GRID CONTRACT, VISIBLE ──────────────────────────────────────────
+  //
+  // Sorted, filtered and on page two, so the footer's `Total (N rows)` can be
+  // checked against a body that is NOT N rows long — which is the whole of the
+  // correction the artefact forced (§7.1.2).
+  {
+    name: 'acc-6-invoices-page2',
+    path: '/accounting/invoices?sort=balance&dir=desc&per=25&page=2',
+  },
+  {
+    name: 'acc-6b-invoices-filtered',
     path: '/accounting/invoices?age=d90_plus&sort=balance&dir=desc',
   },
   {
-    name: 'acc-payments-unapplied',
-    path: '/accounting/payments?state=unapplied&sort=amount&dir=desc',
+    name: 'acc-6c-payroll-batches-sorted',
+    path: '/accounting/payroll?tab=batches&sort=amount&dir=desc',
   },
-  // A WEEK WITH NO BATCH. The empty state is an invitation with the action
-  // attached (§10), and it is a different sentence from "no rows match".
-  { name: 'acc-payroll-nobatch', path: '/accounting/payroll?week=2026-08-02' },
-  // The week this session corrected, so the derived check date is in a picture.
-  { name: 'acc-payroll-week', path: '/accounting/payroll?week=2026-09-13' },
-  { name: 'acc-charges-inforce', path: '/accounting/charges?live=yes' },
-  { name: 'acc-reports-driver', path: '/accounting/reports?cut=driver' },
+
+  // A week with no batch: §10's empty state is an invitation with the action
+  // attached, and it is a different sentence from "no rows match".
   {
-    name: 'acc-reports-month',
-    path: '/accounting/reports?cut=company&by=month',
+    name: 'acc-7-payroll-nobatch',
+    path: '/accounting/payroll?tab=scheduled&week=2026-08-02',
+  },
+  // The week this session corrected, so the derived check date is in a picture.
+  {
+    name: 'acc-7b-payroll-week',
+    path: '/accounting/payroll?tab=oneTime&week=2026-09-13',
   },
 
-  // ── THE SIDEBAR ITSELF, which is half the ruling ────────────────────────
+  // ── RUSSIAN AND FARSI ───────────────────────────────────────────────────
   //
-  // Russian and Farsi on one page each: §12 says Russian runs ~30% longer and
-  // Farsi is right-to-left, and a five-item group with a nine-character label is
-  // where that shows. Payroll, because it has the most controls in a row.
-  { name: 'acc-payroll-ru', path: '/accounting/payroll', locale: 'ru' },
-  { name: 'acc-payroll-fa-rtl', path: '/accounting/payroll', locale: 'fa' },
-  { name: 'acc-charges-fa-rtl', path: '/accounting/charges', locale: 'fa' },
+  // §12: Russian runs ~30% longer and Farsi is right-to-left. A five-item tab
+  // strip over a nine-column grid is where both show.
+  { name: 'acc-8-payroll-ru', path: '/accounting/payroll', locale: 'ru' },
+  { name: 'acc-8b-payroll-fa-rtl', path: '/accounting/payroll', locale: 'fa' },
+  {
+    name: 'acc-8c-invoices-fa-rtl',
+    path: '/accounting/invoices',
+    locale: 'fa',
+  },
 
-  // ── AND THAT THE OLD PATHS STILL LAND SOMEWHERE ─────────────────────────
-  //
-  // `/money/this-week` is in bookmarks, in four commit messages and in the
-  // sidebar of any tab left open over the weekend. The shot records where it
-  // goes; the printed URL is the assertion.
-  { name: 'acc-redirect-thisweek', path: '/money/this-week' },
-  { name: 'acc-redirect-settlements', path: '/settlements' },
+  // ── AND THE OLD PATHS STILL LAND SOMEWHERE ──────────────────────────────
+  { name: 'acc-9-redirect-thisweek', path: '/money/this-week' },
+  { name: 'acc-9b-redirect-settlements', path: '/settlements' },
 ]
 
 mkdirSync(OUT, { recursive: true })
