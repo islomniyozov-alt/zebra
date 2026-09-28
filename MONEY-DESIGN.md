@@ -59,6 +59,8 @@ Two of three weeks are Wednesday statement / Friday check. So:
 
 **Statement date and check date are per-batch INPUTS, never derived from the period.** A rule that computed "period end + 3" would have been right one week in three and wrong silently the rest — the same class of error as the boundary itself, and harder to see because each individual statement would look plausible.
 
+> **Superseded for the check date on 2026-09-28** — see "The check date is DERIVED after all" at the end of this section. The statement date is still an input. The sentence above is kept because the *reasoning* it rejects is still rejected: what made deriving safe was not a change of mind about "period end + 3", it was the verified `+ 13` cadence two paragraphs down.
+
 §3's argument survives either shape, which is the point of writing this down rather than picking a cadence: the remittance lands Tuesday, the cash is in Wednesday, and the cheque goes Thursday **or Friday**. The money is in before the cheque is written under both observed patterns. Section 3 rests on that ordering, not on a weekday.
 
 ### The payout cadence: two weeks behind, everyone (Islom's ruling, 2026-09-11)
@@ -82,6 +84,26 @@ The eight-day row is not a second rule. It is the Aug 16–22 week printing a Th
 - `Driver.payoutLagWeeks` stays **0 for everyone**. The field stays — see its comment in `schema.prisma` for why a per-driver lag remains expressible — but nothing sets it, and `payoutDate` therefore equals the batch's check date for every driver.
 - **"Settle this week" (item 6) means the period that ended two Saturdays ago**, not the one that ended yesterday. A batch screen defaulting to the most recent closed week would offer to settle freight two weeks before it is paid for.
 - This supersedes the earlier note that MCKANE's lag was 1. That was inferred from the ruling as given; the artefact never showed a per-driver lag, which was reported at the time as a discrepancy and is now explained — there is no per-driver lag to see.
+
+### The check date is DERIVED after all (Islom's ruling, 2026-09-28)
+
+**`openBatch` computes the check date from the period. It is no longer an input, and cannot be passed.** The statement date stays an input, unchanged.
+
+This reverses the sentence four paragraphs up — "the check date Zebra types is the REAL pay date, and nothing derives it" — and it is worth being precise about which part of §0 falls, because most of it stands:
+
+- **The evidence stands.** All six statements, `period end + 13`, a Friday every time. That table is what makes this safe.
+- **The warning stands.** Datatruck's printed Check Date is early by seven or eight days and must not be copied.
+- **The conclusion was the wrong way round.** Given a cadence verified as uniform and a printed date verified as wrong, "type it" is the branch that admits the error and "derive it" is the branch that excludes it. §0 reasoned from the unreliability of the *documents* to the unreliability of the *rule*, and those are opposite findings about the same table.
+
+**What went wrong, concretely.** Batch `cmuga82ji0000qkvslwyibodv` covers Sep 13–19 and was opened with a check date of **2026-09-25**. Period end 9/19 + 13 is **2026-10-02**. 9/25 is period end + 6 — which is the shape of the *printed* Datatruck lag this very section says must not be copied. The field §0 kept editable so a human could be right is the field through which a human was wrong, one week after it was written, on a real batch.
+
+A typed field cannot tell a deliberate exception from a mis-keyed default. A derivation can be read, and a `payoutLagWeeks` that nothing sets is still there for a per-driver arrangement if one ever appears.
+
+**Consequences, and these ones are code:**
+
+- `checkDateFor(period)` in `src/lib/settlement-week.ts` is the single definition. `payWeekFor` calls it rather than repeating `+ 13 * DAY`, and `openBatch` calls it instead of taking the value.
+- The new-batch form stops asking. The derived date is shown, not typed — a field nobody can edit is not a field somebody can get wrong.
+- **A batch already opened keeps whatever it was given.** Correcting one is deliberate and separate: `scripts/correct-batch-check-date.ts` recomputes from the period and refreshes the draft. It takes no date either.
 
 ---
 
@@ -223,7 +245,7 @@ One action, **"Settle this week"**, for the organization. It:
 - warns if the period's Amazon remittance is not imported (§3);
 - builds every statement and leaves the batch DRAFT for a person to read.
 
-`FINAL` freezes gross, pay rule, PU/DEL dates, **unit number**, deduction amounts and escrow balances. `PAID` records the payout date and the method. Statement date and payout date are separate columns because they are separate events — and both are **inputs**, not derived from the period (§0).
+`FINAL` freezes gross, pay rule, PU/DEL dates, **unit number**, deduction amounts and escrow balances. `PAID` records the payout date and the method. Statement date and payout date are separate columns because they are separate events — the **statement date is an input**, and since 2026-09-28 the **check date is derived** from the period by `checkDateFor` (§0).
 
 **The unit number is a per-settlement field, not a lookup** *(confirmed off the page)*. Muzaffarov settles on unit `0484` for Aug 16–22 and unit `8842` for Aug 23–29. Reading it from the driver's current truck link at render time would silently rewrite last month's statement the next time somebody reassigned a truck — a statement already handed to a person, changing under them. It belongs in the frozen set for the same reason gross and the pay rule do.
 
@@ -307,7 +329,7 @@ No factoring ledger. No trailer rent. No auto-created loads from a remittance. N
 
 No **closed** deduction type enum — see §4. A type that could not be extended without a migration is still refused; a label with `Other` as its escape hatch is not that, and the statements print one.
 
-No statement date or check date derived from the period (§0). No unit number read from the driver's current truck link at render time (§6). No zero-row section standing in for an absent one (§4), and no placeholder standing in for an absent address line (§7).
+No statement date derived from the period, and no check date NOT derived from it — `checkDateFor` or nothing (§0, as amended 2026-09-28). No unit number read from the driver's current truck link at render time (§6). No zero-row section standing in for an absent one (§4), and no placeholder standing in for an absent address line (§7).
 
 ---
 
