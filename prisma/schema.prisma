@@ -2715,7 +2715,43 @@ model Payment {
   amountCents    Int
   // Amount not yet applied to an invoice — a real state, not an error.
   unappliedCents Int      @default(0)
+
+  /// AND `notes` IS CARRYING A FLAG IT SHOULD NOT BE — see `isAdjustment` below.
   notes          String?
+
+  /// NOT A COLUMN YET, AND THE REASON IS THE SAME AS
+  /// `RandomSelection.complianceItemId`'s.
+  ///
+  /// Owner's ruling, 2026-09-28: `isAdjustment Boolean @default(false)` goes into
+  /// MIGRATION 61, bundled with the `RandomSelection.complianceItemId` drop,
+  /// whenever a code change next needs the deploy ritual — not as a migration of
+  /// its own.
+  ///
+  /// ── WHAT IS STANDING IN FOR IT MEANWHILE ────────────────────────────────
+  ///
+  /// `ADJUSTMENT_NOTE_PREFIX` in src/lib/amazon/remittance-write.ts, matched
+  /// against `notes` by the money screen. A STRING STANDING IN FOR A BOOLEAN: it
+  /// is written in one place and read in one place through a shared constant,
+  /// which is the only thing that makes it tolerable.
+  ///
+  /// ── WHY THE FLAG IS NEEDED AT ALL ───────────────────────────────────────
+  ///
+  /// Owner's ruling, 2026-09-27: a workbook whose money is entirely
+  /// `Adjustments - Dispute` books a Payment with ZERO applications, unapplied by
+  /// design, shown on the money screen. The 2026-09-26 ruling says a payment that
+  /// only declares the period and paid nothing into it is NOT the week's
+  /// remittance.
+  ///
+  /// Those two are not in conflict, but they are indistinguishable BY SHAPE: a
+  /// dispute credit has no applications, and neither does a freight remittance
+  /// whose every unit is closed history — which is most of the corpus. So the
+  /// writer has to mark it, and nothing on this row carries the fact otherwise.
+  /// Keying on the absence of applications was tried and broke the earlier
+  /// ruling's own guard on the first run.
+  ///
+  /// WHEN THE COLUMN LANDS, the money screen's second membership arm reads it
+  /// instead of the prefix, and `ADJUSTMENT_NOTE_PREFIX` goes back to being only
+  /// what it looks like — the first words of a human-readable note.
 
   recordedByUserId String?
   recordedBy       User?   @relation(fields: [recordedByUserId], references: [id])
