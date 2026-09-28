@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v7 — §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
+**Status:** v8 — §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -277,34 +277,51 @@ numbers is a group the reader has to try in turn, which is what happened: the
 Tuesday screen was the entry point and the other two were reached from it, so
 their sidebar entries only ever served people who had lost their place._
 
-_**Accounting is five destinations and no more**, each answering a question
-nothing else on the list answers:_
+_**Two groups, six destinations.** Owner's ruling, 2026-09-28, revising the
+one-section shape of the same morning: "the spec was mine and theirs is better."
+Datatruck splits Accounting from Payroll and the artefact in
+`corpus/datatruck/ui/` shows why — money coming IN and money going OUT are two
+jobs, often two people, and one list of five made the reader scan past three
+entries to reach the one their afternoon was about._
 
-| Page     | The question                                      |
-| -------- | ------------------------------------------------- |
-| Invoices | who owes us, and how old is it                    |
-| Payments | what came in, and what it paid for                |
-| Payroll  | what one week costs per driver, and its state     |
-| Charges  | what comes off cheques every week, across drivers |
-| Reports  | the same money cut by company, week or driver     |
+| Group          | Destination | The question                                   |
+| -------------- | ----------- | ---------------------------------------------- |
+| **Accounting** | Invoices    | who owes us, and how old is it                 |
+|                | Payments    | what came in, and what it paid for             |
+|                | Reports     | the same money cut by company, week or driver  |
+| **Payroll**    | Batches     | what pay runs exist, and what state each is in |
+|                | Statements  | what one driver was paid for one week          |
+|                | Charges     | what comes off cheques, standing and one-off   |
 
-_**Each page is tabs over one grid** (§7.1.6), modelled on the Salary page the
-office already uses. Owner's ruling, 2026-09-28:_
+_**Each destination is tabs over one grid** (§7.1.6):_
 
-| Page     | Tabs                                                                           |
-| -------- | ------------------------------------------------------------------------------ |
-| Invoices | Invoices · Ready to invoice · Direct-settled                                   |
-| Payments | Payments · Unapplied                                                           |
-| Payroll  | Batches · Driver statements · Balances · One-time charges · Scheduled payments |
-| Charges  | Scheduled · One-time                                                           |
-| Reports  | By authority · By week · By driver                                             |
+| Destination | Tabs                                         |
+| ----------- | -------------------------------------------- |
+| Invoices    | Invoices · Ready to invoice · Direct-settled |
+| Payments    | Payments · Unapplied                         |
+| Batches     | Batches · Balances                           |
+| Statements  | Driver statements                            |
+| Charges     | Scheduled · One-time · This week             |
+| Reports     | By authority · By week · By driver           |
 
-_**Charges and Payroll → Scheduled payments read the same table and are not the
-same screen**, which is the one place this structure could collapse into a
-duplicate. Charges is org-wide and every week — "who is not paying insurance",
-which needs no batch to answer. Payroll's tab is scoped to the week the page is
-showing: what will come off THIS run. A rule dormant until November appears on
-one and not the other, and that difference is the reason both exist._
+_**What moved, and nothing was deleted.** The five Payroll TABS became three
+Payroll DESTINATIONS plus two tabs. Batches and Balances stay together because
+both are a run's totals; Driver statements earns its own entry because it is the
+document a driver is handed and the thing people arrive looking for; the two
+charge tabs join the Charges page, which leaves Accounting for Payroll._
+
+_**"This week" is the third Charges tab, and is where the week-scoped view went.**
+Scheduled is org-wide and every week; This week is what comes off the run on
+screen. The distinction this section has recorded since it was built survives the
+move — two tabs of one page rather than two pages, which is the honest shape for
+two views of one table._
+
+_**Charges → Scheduled and Charges → This week read the same table and are not
+the same grid**, which is the one place this structure could collapse into a
+duplicate. Scheduled is org-wide and every week — "who is not paying insurance",
+which needs no batch to answer. This week is scoped to the run on screen. A rule
+dormant until November appears on the first and not the second, and that
+difference is the reason both exist._
 
 _**The batches grid carries a per-company breakdown row under each batch.** The
 batch is the organization's by ruling (Islom, 2026-09-11) and its money is not:
@@ -319,18 +336,18 @@ _Added 2026-09-28, against the four Salary and Invoice screenshots in
 it deliberately is not, recorded so that "it doesn't look like Datatruck" has an
 answer other than somebody's memory._
 
-| Datatruck                                                                                                                   | Zebra                                                            | Why                                                                                                                                                                                      |
-| --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Two sidebar groups** — Accounting (Invoice, Salary, Bill) and Payroll (Driver, Dispatcher, Vendor, Charges, Transactions) | **One**, Accounting, with five pages                             | The owner's spec of 2026-09-28 says one section. Recorded as a divergence because the artefact says otherwise and the next reader will notice.                                           |
-| **One batch per pay company** — `SB-000448` Dolphin and `SB-000447` RAM both cover Sep 13–19                                | **One batch for the organization**, with a per-company breakdown | Islom's ruling of 2026-09-11. This is the root of two other differences: it is why Datatruck needs a Pay company COLUMN, and why Zebra needs a breakdown ROW.                            |
-| **Pay company column** carries a real authority                                                                             | **`not recorded`**                                               | Nothing in `schema.prisma` holds a paying authority for a batch. Guessing — the largest share, say — would print a real company beside real money. Needs `SettlementBatch.payCompanyId`. |
-| **`POSTED` / `PARTIAL POSTED`** pills                                                                                       | **`DRAFT` / `FINAL` / `PAID`**                                   | `SettlementBatchStatus` has three values and no partial state. A fourth pill would be a status nothing can produce.                                                                      |
-| **Seven Salary tabs** (adds Salary report, Dispatcher salary)                                                               | **Five**                                                         | The spec names five. Dispatcher pay is not a thing Zebra settles at all.                                                                                                                 |
-| **`No Rows To Show`**                                                                                                       | **A written empty state with an action**                         | §10 and §14 — "No data available" is listed as an anti-pattern by name. This is the one place Zebra should NOT match the artefact.                                                       |
-| **Footer is a strip of named figures**, left-aligned below the grid                                                         | **Column-aligned sticky foot**                                   | §7.1.2. A sum belongs under the column it sums; a strip makes the reader match figure to column by name. The COUNT is kept in words, as Datatruck has it.                                |
-| **A filter funnel on every column header**                                                                                  | **One filter bar above the grid** (§7.4)                         | "Chips, not dropdown menus... never in a drawer." Per-column funnels are twelve hidden states; the bar's state is in the URL and can be sent to somebody.                                |
-| **Checkbox column, Delete, Change status**                                                                                  | **Not built**                                                    | §7.1 specifies bulk selection as a floating action bar over the table foot. The spec did not ask for it and no grid here has it yet — an honest gap rather than a decision.              |
-| **Breadcrumb** (`Accounting / Salary / Batches`)                                                                            | **Not built**                                                    | The shell has no breadcrumb anywhere; adding one to this section alone would be an inconsistency, and adding one everywhere is not this ruling.                                          |
+| Datatruck                                                                                                                   | Zebra                                                            | Why                                                                                                                                                                                                                                                                                                                        |
+| --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Two sidebar groups** — Accounting (Invoice, Salary, Bill) and Payroll (Driver, Dispatcher, Vendor, Charges, Transactions) | **Two** — Accounting and Payroll, on a different split           | _Resolved 2026-09-28: the artefact won._ This row recorded a divergence for about four hours; the owner read it and ruled that theirs is better. The split differs — ours is MONEY IN / MONEY OUT rather than by payee kind, because Zebra settles drivers and pays neither dispatchers nor vendors.                       |
+| **One batch per pay company** — `SB-000448` Dolphin and `SB-000447` RAM both cover Sep 13–19                                | **One batch for the organization**, with a per-company breakdown | Islom's ruling of 2026-09-11. This is the root of two other differences: it is why Datatruck needs a Pay company COLUMN, and why Zebra needs a breakdown ROW.                                                                                                                                                              |
+| **Pay company column** carries a real authority                                                                             | **`All authorities`**, with the names on the breakdown rows      | _Resolved 2026-09-28, with no migration._ Datatruck needs the column because a batch belongs to one payer; Zebra's belongs to all of them, so the honest value IS "all authorities" and the split is the breakdown directly beneath. It had been reading `not recorded`, which described the schema rather than the money. |
+| **`POSTED` / `PARTIAL POSTED`** pills                                                                                       | **`DRAFT` / `FINAL` / `PAID`**                                   | `SettlementBatchStatus` has three values and no partial state. A fourth pill would be a status nothing can produce.                                                                                                                                                                                                        |
+| **Seven Salary tabs** (adds Salary report, Dispatcher salary)                                                               | **Five**                                                         | The spec names five. Dispatcher pay is not a thing Zebra settles at all.                                                                                                                                                                                                                                                   |
+| **`No Rows To Show`**                                                                                                       | **A written empty state with an action**                         | §10 and §14 — "No data available" is listed as an anti-pattern by name. This is the one place Zebra should NOT match the artefact.                                                                                                                                                                                         |
+| **Footer is a strip of named figures**, left-aligned below the grid                                                         | **Column-aligned sticky foot**                                   | §7.1.2. A sum belongs under the column it sums; a strip makes the reader match figure to column by name. The COUNT is kept in words, as Datatruck has it.                                                                                                                                                                  |
+| **A filter funnel on every column header**                                                                                  | **Both** — funnels that write the URL the bar reads              | _Built 2026-09-28 by ruling._ §7.4's objection was HIDDEN state, and these have none: a funnel sets the same query parameter the bar renders as a chip, so the two are one filter with two handles, and a filtered grid is still a link somebody can send.                                                                 |
+| **Checkbox column, Delete, Change status**                                                                                  | **Checkbox and Change status; no Delete**                        | _Built 2026-09-28 by ruling._ Change status runs the SAME `finaliseBatch` / `markBatchPaid` per batch, blockers and all — a bulk path that skipped them would be a way to finalise a blocked week from a checkbox. Delete is absent because a batch is money, soft-deleted, and that is not a toolbar action.              |
+| **Breadcrumb** (`Accounting / Salary / Batches`)                                                                            | **Built, in these two groups only**                              | _Built 2026-09-28 by ruling._ It earns its place here and nowhere else: two groups, six destinations and eleven tabs is the point at which "where am I" stops being obvious. The rest of the shell is one level deep.                                                                                                      |
 
 _**Receivables folds into Invoices.** Aging is a view of the invoice list, not a
 second list of the same rows — §7.4 already makes a filter a URL, so "over 60
