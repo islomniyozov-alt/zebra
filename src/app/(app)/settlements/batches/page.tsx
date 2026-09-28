@@ -52,6 +52,7 @@ export default async function BatchesPage() {
             weekHint: t('batch.weekHint'),
             statementDate: t('batch.statementDate'),
             checkDate: t('batch.checkDate'),
+            checkDateDerived: t('batch.checkDateDerived'),
             create: t('batch.create'),
           }}
         />

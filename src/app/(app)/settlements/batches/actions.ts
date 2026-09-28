@@ -57,9 +57,12 @@ export async function createBatchAction(
   const companyId = String(formData.get('companyId') ?? '')
   const day = String(formData.get('periodStart') ?? '')
   const statementDate = String(formData.get('statementDate') ?? '')
-  const checkDate = String(formData.get('checkDate') ?? '')
+  // NO `checkDate` READ. `openBatch` derives it from the period, so a posted
+  // field would be ignored — and a field that is read and ignored is worse than
+  // one that is never read, because the form looks like it still decides.
+  // §0 as amended 2026-09-28.
 
-  if (!companyId || !day || !statementDate || !checkDate) {
+  if (!companyId || !day || !statementDate) {
     return { error: t('batch.error.incomplete'), blocked: [] }
   }
 
@@ -82,7 +85,6 @@ export async function createBatchAction(
         organizationId: session.organizationId,
         period,
         statementDate: new Date(`${statementDate}T00:00:00.000Z`),
-        checkDate: new Date(`${checkDate}T00:00:00.000Z`),
       }),
     { timeoutMs: SETTLEMENT_BATCH_TIMEOUT_MS },
   )

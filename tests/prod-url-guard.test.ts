@@ -371,6 +371,17 @@ const MAINTENANCE_READERS = [
   // opening a second one, which is what `openBatch`'s `period_taken` refusal
   // hands back.
   'open-settlement-batch.ts',
+  // ADDED 2026-09-28, by ruling. `openBatch` derives the check date now, and a
+  // batch opened before that keeps the one it was given — cmuga82ji0000qkvslwyibodv
+  // holds 2026-09-25 against a period ending 9/19, which is period end + 6.
+  //
+  // IT TAKES NO DATE, only a batch id: a repair script with a `--check` flag
+  // would be the deleted field growing back where nobody looks.
+  //
+  // AND IT REFUSES ANYTHING THAT IS NOT DRAFT. The check date is printed on a
+  // FINAL statement, and changing a date somebody has already been handed is a
+  // second version of a paper document rather than a correction.
+  'correct-batch-check-date.ts',
   'backfill-direct-pod.mjs',
   // Written 2026-09-06 and NOT RUN. `billingStatusFor` is a rule over a cached
   // column, so changing it drifts every untouched row; this repairs them

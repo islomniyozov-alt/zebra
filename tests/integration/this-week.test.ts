@@ -1012,7 +1012,6 @@ describe('opening the batch from this screen', () => {
         organizationId,
         period: PERIOD,
         statementDate: TUESDAY,
-        checkDate: PAY_DAY,
       }),
     )
     expect(opened.ok).toBe(true)
@@ -1032,7 +1031,10 @@ describe('opening the batch from this screen', () => {
     expect(batch.status).toBe('DRAFT')
     expect(batch.periodStart.getTime()).toBe(PERIOD.start.getTime())
     expect(batch.statementDate.toISOString().slice(0, 10)).toBe('2026-09-15')
-    // CHECK DATE = PERIOD END + 13, the Friday the money moves (§0).
+    // CHECK DATE = PERIOD END + 13, the Friday the money moves — and since
+    // 2026-09-28 nothing passed it: `openBatch` derives it, and this assertion
+    // is now about the derivation rather than about a value the test supplied.
+    // The period ends Sat 2026-09-05, so the money moves Fri 2026-09-18.
     expect(batch.checkDate.toISOString().slice(0, 10)).toBe('2026-09-18')
     // Drafted on creation, so there is something to read.
     expect(batch.settlements.length).toBeGreaterThan(0)

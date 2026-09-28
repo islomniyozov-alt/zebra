@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { settleableForBatch } from '@/lib/settlement-batch'
 import { settleableInPeriod, settleableWhere } from '@/lib/settlements'
 import {
+  CHECK_DATE_LAG_DAYS,
+  checkDateFor,
   computeBatch,
   computeDriverSettlement,
   grossFor,
@@ -467,6 +469,86 @@ describe('the week boundary', () => {
 // there, and a reading that treated the week ending today as "the most recent
 // closed week" would show freight nobody is paid for until a fortnight later.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// THE CHECK DATE IS DERIVED. Owner's ruling, 2026-09-28.
+//
+// MONEY-DESIGN §0 made it a typed input because Datatruck's PRINTED Check Date
+// is early by seven or eight days on all six statements. The same table says
+// `period end + 13` lands on a Friday every time, and that is the half worth
+// trusting: the DOCUMENT is unreliable, the CADENCE is not.
+//
+// AND THE TYPED FIELD IS WHAT WENT WRONG. Batch cmuga82ji0000qkvslwyibodv
+// covers Sep 13-19 and holds a check date of 2026-09-25 — period end + 6, the
+// shape of the printed lag §0 forbids copying, one week after §0 was written.
+// ---------------------------------------------------------------------------
+
+describe('checkDateFor', () => {
+  const on = (day: string) => new Date(`${day}T00:00:00.000Z`)
+  const derived = (start: string) =>
+    checkDateFor(weekOf(on(start)))
+      .toISOString()
+      .slice(0, 10)
+
+  // ── THE MONEY THAT ACTUALLY MOVED, FROM §0's TABLE ──────────────────────
+  //
+  // Not the printed Check Dates. These are the "money actually moved" column,
+  // which is what this function is for — read off the artefact rather than
+  // computed and then admired.
+  it.each([
+    ['2026-08-09', '2026-08-28'], // ST-005284, printed 8/21
+    ['2026-08-16', '2026-09-04'], // ST-005301/005310/005317, printed Thu 8/27
+    ['2026-08-23', '2026-09-11'], // ST-005336/005352, printed 9/4
+  ])('week of %s was paid %s', (start, moved) => {
+    expect(derived(start)).toBe(moved)
+  })
+
+  // ── THE BATCH THIS RULING IS ABOUT ──────────────────────────────────────
+  it('gives Sep 13-19 a check date of 2026-10-02, not 2026-09-25', () => {
+    expect(derived('2026-09-13')).toBe('2026-10-02')
+    expect(derived('2026-09-13')).not.toBe('2026-09-25')
+  })
+
+  // The wrong value's shape, named so nobody reintroduces it as a default:
+  // period end + 6 is what Datatruck PRINTS and what was keyed.
+  it('is not period end + 6, which is what Datatruck prints', () => {
+    const period = weekOf(on('2026-09-13'))
+    expect(checkDateFor(period).getTime() - period.end.getTime()).toBe(
+      13 * 86_400_000,
+    )
+    expect(checkDateFor(period).getTime() - period.end.getTime()).not.toBe(
+      6 * 86_400_000,
+    )
+  })
+
+  it('gives the following week 2026-10-09', () => {
+    expect(derived('2026-09-20')).toBe('2026-10-09')
+  })
+
+  it('is always a Friday, for every week of a year', () => {
+    for (let week = 0; week < 60; week++) {
+      const period = weekOf(
+        new Date(Date.UTC(2026, 0, 4) + week * 7 * 86_400_000),
+      )
+      const check = checkDateFor(period)
+      expect(isSettlementWeek(period)).toBe(true)
+      expect(check.getUTCDay(), period.end.toISOString()).toBe(5)
+      expect(check.getTime() - period.end.getTime()).toBe(13 * 86_400_000)
+    }
+  })
+
+  // ONE DEFINITION, and this is the assertion that keeps it one. `payWeekFor`
+  // used to spell `+ 13 * DAY` itself; two copies of a cadence is how the
+  // screen and the create come to disagree about a date.
+  it('is the same function payWeekFor offers', () => {
+    const { period, payDay } = payWeekFor(on('2026-09-15'))
+    expect(payDay.getTime()).toBe(checkDateFor(period).getTime())
+  })
+
+  it('states the lag once', () => {
+    expect(CHECK_DATE_LAG_DAYS).toBe(13)
+  })
+})
 
 describe('the period due this Friday', () => {
   const pinned = [

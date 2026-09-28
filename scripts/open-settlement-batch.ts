@@ -5,14 +5,20 @@ import {
   openBatch,
   refreshDraft,
 } from '@/lib/settlement-batch'
+import { checkDateFor } from '@/lib/settlement-week'
 import { assertTenancy } from './datatruck-tenancy'
 
 // ---------------------------------------------------------------------------
 // OPEN THE WEEK AS A DRAFT AND REFRESH IT. NEVER FINALISE.
 //
 //   npx tsx -r dotenv/config scripts/open-settlement-batch.ts --production \
-//     --week 2026-09-13 --statement 2026-09-22 --check 2026-09-25
+//     --week 2026-09-13 --statement 2026-09-22
 //   ... --apply
+//
+// NO `--check`. The check date is period end + 13, derived by `checkDateFor`,
+// and passing the flag is REFUSED rather than ignored — this usage line used to
+// carry `--check 2026-09-25`, which is six days after a week ending 9/19 and is
+// the wrong date batch cmuga82ji0000qkvslwyibodv holds.
 //
 // Owner's ruling, 2026-09-25: the first real settlement week after the
 // operational cutover, opened as DRAFT only.
@@ -93,7 +99,26 @@ const money = (cents: number) =>
 async function main(): Promise<void> {
   const weekStart = day(arg('week'), 'week')
   const statementDate = day(arg('statement'), 'statement')
-  const checkDate = day(arg('check'), 'check')
+
+  // ── `--check` IS REFUSED, NOT IGNORED ───────────────────────────────────
+  //
+  // The check date is derived from the period now (§0 as amended 2026-09-28),
+  // and this script is where the wrong one came from: the usage line above used
+  // to read `--week 2026-09-13 --statement 2026-09-22 --check 2026-09-25`, which
+  // is period end + 6 against a week ending 9/19 and is what batch
+  // cmuga82ji0000qkvslwyibodv holds.
+  //
+  // SO A STALE COMMAND LINE HAS TO FAIL RATHER THAN WORK QUIETLY. That exact
+  // string is in this repository, in session notes and in somebody's shell
+  // history; accepting and ignoring it would open the batch with the right date
+  // while the operator believed the flag had been honoured — a difference
+  // nothing on screen would show.
+  if (process.argv.includes('--check')) {
+    throw new Error(
+      '--check is no longer accepted: the check date is period end + 13, ' +
+        'derived by checkDateFor. Drop the flag and re-run.',
+    )
+  }
   // ── THE END IS THE SATURDAY AT MIDNIGHT, NOT THE LAST MILLISECOND ───────
   //
   // DERIVED, never typed: two dates by hand are two chances to ask about six
@@ -123,7 +148,8 @@ async function main(): Promise<void> {
     `Week:   ${period.start.toISOString().slice(0, 10)} → ${period.end.toISOString().slice(0, 10)}`,
   )
   console.log(
-    `Dates:  statement ${statementDate.toISOString().slice(0, 10)}, check ${checkDate.toISOString().slice(0, 10)}`,
+    `Dates:  statement ${statementDate.toISOString().slice(0, 10)} (typed), ` +
+      `check ${checkDateFor(period).toISOString().slice(0, 10)} (derived)`,
   )
 
   try {
@@ -141,7 +167,6 @@ async function main(): Promise<void> {
             organizationId: tenancy.organizationId,
             period,
             statementDate,
-            checkDate,
           })
 
           let batchId: string

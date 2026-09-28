@@ -25,10 +25,10 @@ export interface MoneyWeekState {
 /**
  * Open a batch for the period that is due, prefilled.
  *
- * THE PREFILL IS A DEFAULT, NOT A DERIVATION, and §0's rule survives it: the
- * statement date and the check date land on the batch screen as editable
- * fields. What this removes is the retyping, not the decision — somebody who
- * cut cheques on Thursday that week changes the date and the batch obeys.
+ * THE CHECK DATE IS NO LONGER PASSED. `openBatch` derives it from the period
+ * (§0 as amended 2026-09-28), so this action cannot offer a wrong one and no
+ * longer offers a right one either. The statement date is still an input and is
+ * still prefilled with today, which the batch screen can change.
  *
  * `payWeekFor` IS CALLED HERE RATHER THAN PASSED IN. A period arriving from the
  * browser is a period a stale tab can be wrong about, and opening a batch for
@@ -39,7 +39,7 @@ export async function openBatchForWeekAction(
   _previous: MoneyWeekState,
 ): Promise<MoneyWeekState> {
   const { t } = await getLocaleContext()
-  const { period, payDay } = payWeekFor(new Date())
+  const { period } = payWeekFor(new Date())
 
   const outcome = await withCurrentOrg(
     'create',
@@ -56,8 +56,6 @@ export async function openBatchForWeekAction(
             new Date().getUTCDate(),
           ),
         ),
-        // Period end + 13 — the Friday the money actually moves (§0).
-        checkDate: payDay,
       }),
     { timeoutMs: SETTLEMENT_BATCH_TIMEOUT_MS },
   )

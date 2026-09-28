@@ -126,9 +126,9 @@ export function isSettlementWeek(week: Week): boolean {
  * standing at the bank wants to see.
  *
  * `payDay` IS ALWAYS A FRIDAY because the period always ends on a Saturday and
- * a Saturday plus thirteen days is a Friday. It is computed here and OFFERED as
- * the batch's check-date default; §0 requires the date to be typed, and a
- * default somebody can overwrite is not a derivation.
+ * a Saturday plus thirteen days is a Friday. It comes from `checkDateFor`,
+ * which is the same function `openBatch` uses — this screen offers no default
+ * the create could disagree with, because there is nothing left to offer.
  */
 export function payWeekFor(today: Date): { period: Week; payDay: Date } {
   const midnight = Date.UTC(
@@ -139,10 +139,42 @@ export function payWeekFor(today: Date): { period: Week; payDay: Date } {
   const sinceSaturday = (new Date(midnight).getUTCDay() + 1) % 7
   const latestSaturday = midnight - sinceSaturday * DAY
   const end = new Date(latestSaturday - 7 * DAY)
-  return {
-    period: { start: new Date(end.getTime() - 6 * DAY), end },
-    payDay: new Date(end.getTime() + 13 * DAY),
-  }
+  const period = { start: new Date(end.getTime() - 6 * DAY), end }
+  return { period, payDay: checkDateFor(period) }
+}
+
+/** The lag, once, in the one place both the screen and the create read it. */
+export const CHECK_DATE_LAG_DAYS = 13
+
+/**
+ * THE DAY THE MONEY MOVES FOR A PERIOD. One definition, and not an input.
+ *
+ * ── WHY THIS IS DERIVED, HAVING BEEN TYPED ───────────────────────────────
+ *
+ * MONEY-DESIGN §0 made the check date a per-batch input on the grounds that
+ * Datatruck's PRINTED Check Date is wrong — early by seven or eight days on all
+ * six statements — so nothing should be computed from a document that lies.
+ *
+ * That reasoned from an unreliable document to an unreliable rule, and the same
+ * table says the opposite: `period end + 13` lands on a Friday every time, on
+ * every statement, verified. The cadence is the reliable half.
+ *
+ * AND THE EDITABLE FIELD IS WHAT WENT WRONG. Batch cmuga82ji0000qkvslwyibodv
+ * covers Sep 13-19 and was opened with a check date of 2026-09-25 — period end
+ * + 6, which is the shape of the printed lag §0 forbids copying. One week after
+ * §0 was written, on a real batch, through the field §0 kept open so that a
+ * person could be right. A typed date cannot tell a deliberate exception from a
+ * mis-keyed default; owner's ruling, 2026-09-28, is that it is derived.
+ *
+ * THE STATEMENT DATE IS STILL AN INPUT. It is when the paperwork was cut, which
+ * is a fact about an afternoon rather than a rule — §0's two-of-three Wednesday
+ * wobble is real and is about that date, not this one.
+ *
+ * A PER-DRIVER EXCEPTION IS STILL EXPRESSIBLE. `Driver.payoutLagWeeks` shifts
+ * `payoutDate` off this date and nothing sets it; see `payoutDateFor`.
+ */
+export function checkDateFor(period: Week): Date {
+  return new Date(period.end.getTime() + CHECK_DATE_LAG_DAYS * DAY)
 }
 
 // ── which gross a load settles on (§3) ────────────────────────────────────

@@ -2,6 +2,7 @@ import type { Prisma } from '@/generated/prisma/client'
 import { settleableInPeriod } from './settlements'
 import { isReferralPayee } from './driver-kind'
 import {
+  checkDateFor,
   computeBatch,
   remittanceOutcome,
   isSettlementWeek,
@@ -516,10 +517,22 @@ export async function batchInputForOrg(
  * prefilled from the week that is due — and a second create would be a second
  * place for the period to be got wrong.
  *
- * THE DATES ARRIVE ALREADY DECIDED. This function does not compute a statement
- * date or a check date from the period, because §0 forbids deriving them; a
- * caller may OFFER a default somebody can overwrite, which is a different
- * thing, and `payWeekFor` is where that default comes from.
+ * ── THE STATEMENT DATE ARRIVES; THE CHECK DATE CANNOT ────────────────────
+ *
+ * The statement date is when the paperwork was cut, which is a fact about an
+ * afternoon, so it is an input and stays one.
+ *
+ * THE CHECK DATE IS NOT IN THIS SIGNATURE AT ALL. It is `checkDateFor(period)`
+ * — period end + 13, the verified company cadence — and a caller has no way to
+ * pass a different one. §0 used to require it typed; batch
+ * cmuga82ji0000qkvslwyibodv was typed 2026-09-25 against a period ending 9/19,
+ * which is period end + 6 and the exact mistake §0 was warning about. Owner's
+ * ruling, 2026-09-28.
+ *
+ * AN OPTIONAL OVERRIDE WOULD BE THE SAME BUG WITH A LONGER NAME. A parameter
+ * that is usually omitted is a parameter that gets passed wrong once, and once
+ * is what this cost. Correcting an already-open batch is deliberate and lives
+ * in `scripts/correct-batch-check-date.ts`, which takes no date either.
  */
 export async function openBatch(
   tx: TxClient,
@@ -527,7 +540,6 @@ export async function openBatch(
     organizationId: string
     period: Week
     statementDate: Date
-    checkDate: Date
   },
 ): Promise<
   { ok: true; batchId: string } | { ok: false; reason: BatchRefusal }
@@ -573,7 +585,7 @@ export async function openBatch(
       periodStart: input.period.start,
       periodEnd: input.period.end,
       statementDate: input.statementDate,
-      checkDate: input.checkDate,
+      checkDate: checkDateFor(input.period),
     },
     select: { id: true },
   })

@@ -685,7 +685,6 @@ describe('one batch per period, for the whole operation', () => {
         organizationId,
         period,
         statementDate: new Date(Date.UTC(2026, 10, 10)),
-        checkDate: new Date(Date.UTC(2026, 10, 13)),
       }),
     )
     expect(first.ok).toBe(true)
@@ -696,7 +695,6 @@ describe('one batch per period, for the whole operation', () => {
         organizationId,
         period,
         statementDate: new Date(Date.UTC(2026, 10, 10)),
-        checkDate: new Date(Date.UTC(2026, 10, 13)),
       }),
     )
     expect(second.ok).toBe(false)
@@ -792,7 +790,6 @@ describe('one batch per period, for the whole operation', () => {
         organizationId,
         period,
         statementDate: new Date(Date.UTC(2026, 10, 24)),
-        checkDate: new Date(Date.UTC(2026, 10, 27)),
       }),
     )
     expect(opened.ok).toBe(true)
