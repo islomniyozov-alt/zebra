@@ -102,11 +102,21 @@ export default async function PaymentsPage() {
       <div className="flex items-baseline justify-between gap-z4 border-b border-border bg-surface px-gutter py-z3">
         <h1 className="text-lg font-medium text-ink">{t('payments.title')}</h1>
         {mayRecord ? (
-          <Link href="/payments/new">
-            <Button variant="primary" size="compact">
-              {t('payments.record')}
-            </Button>
-          </Link>
+          <div className="flex items-center gap-z2">
+            {/* THE WORKBOOK ROUTE, BESIDE THE MANUAL ONE. An accountant looking
+             * for "where did Amazon's money go" looks at payments — a screen
+             * nothing links to is a screen nobody finds. */}
+            <Link href="/payments/import">
+              <Button variant="secondary" size="compact">
+                {t('remittance.title')}
+              </Button>
+            </Link>
+            <Link href="/payments/new">
+              <Button variant="primary" size="compact">
+                {t('payments.record')}
+              </Button>
+            </Link>
+          </div>
         ) : null}
       </div>
 

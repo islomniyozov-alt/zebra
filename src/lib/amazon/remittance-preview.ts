@@ -83,6 +83,24 @@ export interface FreightRef {
   closedHistory: boolean
 }
 
+/**
+ * THE REFERENCE A KEYED ROW BELONGS TO — trip for a tour or a leg, load for a
+ * single load, and nothing for a row that cannot be keyed.
+ *
+ * ONE DEFINITION, because this appeared three times: inside
+ * `previewRemittance`, inside `remittanceReferences`, and then in the upload
+ * screen. Any two of them disagreeing means the preview counts a reference the
+ * freight lookup never asked for, and the row reports `unmatched` against a load
+ * that is sitting right there.
+ */
+export function referenceOfKey(key: RowKey): string | null {
+  return key.branch === 'tour' || key.branch === 'load_under_trip'
+    ? key.tripId
+    : key.branch === 'single_load'
+      ? key.loadId
+      : null
+}
+
 export interface PreviewLine {
   outcome: MatchOutcome
   key: RowKey

@@ -1,10 +1,15 @@
 import type { Prisma } from '@/generated/prisma/client'
-import { parseWorkPeriod, type RemittanceReading } from './remittance'
+import {
+  parseWorkPeriod,
+  type RemittanceReading,
+  type RemittanceSummary,
+} from './remittance'
 import { loadRevenueCents } from '../money'
 import { refreshBillingStatus } from '../billing-status'
 import { MONEY_COLUMNS } from './remittance-shape'
 import {
   keyFor,
+  referenceOfKey,
   previewRemittance,
   type FreightRef,
   type Preview,
@@ -214,6 +219,138 @@ export function isAdjustmentOnly(reading: RemittanceReading): boolean {
  * a production ritual, which is a decision to take deliberately rather than
  * fold into this change. Flagged rather than done.
  */
+/**
+ * THE REFERENCES A WORKBOOK NAMES, deduplicated, in the preview's own terms.
+ *
+ * `keyFor` decides whether a row is keyed by its trip or by its load, and this
+ * has to agree with it exactly — a reference list built by reading `loadId`
+ * directly would miss every leg under a trip and the preview would report them
+ * unmatched.
+ */
+export function remittanceReferences(reading: RemittanceReading): string[] {
+  return [
+    ...new Set(
+      reading.rows
+        // ONE DEFINITION OF WHAT A ROW'S REFERENCE IS — see `referenceOfKey`.
+        .map((row) => referenceOfKey(keyFor(row)))
+        .filter((value): value is string => value !== null),
+    ),
+  ]
+}
+
+/**
+ * The freight those references point at, EVERY load per reference.
+ *
+ * ── A MAP OF ONE WAS THE 2026-09-25 BUG ───────────────────────────────────
+ *
+ * A trip with three legs has three Zebra loads carrying one `referenceNumber`,
+ * and `Map<string, FreightRef>` kept whichever was written last — silently,
+ * which is how a trip's whole remitted total came to be compared against one
+ * leg's rate and seven lines were reported `over`.
+ *
+ * ── READ IT INSIDE THE TRANSACTION THE WRITE USES ─────────────────────────
+ *
+ * Not before it opens. The conditional tour-base predicate compares the remitted
+ * total against the load's RATE, and on a re-import the rate outside the
+ * transaction still carries the previous run's tour base — which made
+ * `rate + base == remitted` false for every trip and booked nothing. The
+ * comparison has to be against the state the write starts from.
+ *
+ * EXTRACTED FROM THE SCRIPT ON 2026-09-28 so the upload screen builds the same
+ * map. Two copies of "which loads does this reference mean" is the shape that
+ * produced the bug above.
+ */
+export async function freightForReferences(
+  tx: TxClient,
+  references: readonly string[],
+): Promise<Map<string, FreightRef[]>> {
+  const loads =
+    references.length === 0
+      ? []
+      : await tx.load.findMany({
+          where: { deletedAt: null, referenceNumber: { in: [...references] } },
+          select: {
+            id: true,
+            loadNumber: true,
+            referenceNumber: true,
+            totalRevenueCents: true,
+            billingStatus: true,
+          },
+        })
+
+  const freight = new Map<string, FreightRef[]>()
+  for (const load of loads) {
+    if (!load.referenceNumber) continue
+    freight.set(load.referenceNumber, [
+      ...(freight.get(load.referenceNumber) ?? []),
+      {
+        id: load.id,
+        loadNumber: load.loadNumber,
+        reference: load.referenceNumber,
+        totalRevenueCents: load.totalRevenueCents,
+        closedHistory: load.billingStatus === 'CLOSED_IN_DATATRUCK',
+      },
+    ])
+  }
+  return freight
+}
+
+/** A company as the carrier match needs to see it. */
+export interface CarrierCandidate {
+  id: string
+  name: string
+  legalName: string | null
+  scac: string | null
+}
+
+export type CarrierMatch =
+  | { ok: true; company: CarrierCandidate }
+  | { ok: false; matched: number }
+
+/**
+ * WHICH AUTHORITY A WORKBOOK'S CASH BELONGS TO.
+ *
+ * Owner's ruling, 2026-09-25: the company whose identity matches the workbook's
+ * Carrier line, and REFUSE unless exactly one. Confirmed the same day as SCAC
+ * AND legal name, both exact, both picking the same row.
+ *
+ * ── THE RULING SAID "MC" AND THE WORKBOOK HAS NO MC ───────────────────────
+ *
+ * Checked against the raw sheet: there is no motor-carrier number anywhere in
+ * it. What it carries is a Carrier name and a SCAC —
+ * `carrier "RAM HAULAGE LLC"`, `scac "ABFQZ"` — and `Company.legalName` and
+ * `Company.scac` are the two columns that answer them.
+ *
+ * NOT A FUZZY MATCH. Case is folded because Amazon shouts the carrier name and
+ * the company row does not; nothing else is relaxed. A week's cash is not routed
+ * by a near miss, and two companies in this group differ by one word.
+ *
+ * ── EXTRACTED FROM THE SCRIPT ON 2026-09-28 ───────────────────────────────
+ *
+ * It lived inline in `scripts/import-amazon-remittance.ts` and the upload SCREEN
+ * needed the same decision. Two copies of "which carrier got paid" is the shape
+ * this codebase has paid for twice already — see `settleableInPeriod`. One
+ * function, both callers.
+ */
+export function matchRemittanceCarrier(
+  summary: Pick<RemittanceSummary, 'carrier' | 'scac'>,
+  companies: readonly CarrierCandidate[],
+): CarrierMatch {
+  const same = (a: string | null, b: string | null) =>
+    a !== null &&
+    b !== null &&
+    a.trim().toUpperCase() === b.trim().toUpperCase()
+
+  const matches = companies.filter(
+    (company) =>
+      same(company.scac, summary.scac) &&
+      same(company.legalName, summary.carrier),
+  )
+  return matches.length === 1
+    ? { ok: true, company: matches[0]! }
+    : { ok: false, matched: matches.length }
+}
+
 export const ADJUSTMENT_NOTE_PREFIX = 'Amazon adjustment'
 
 export function adjustmentNote(reading: RemittanceReading): string | null {

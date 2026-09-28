@@ -10,6 +10,7 @@ import { InspectionPanel } from '../../_reference/InspectionPanel'
 import { DriverDocuments } from '../../_reference/DriverDocuments'
 import { inspectionPanelData } from '../../_reference/inspection-view'
 import { PAY_RULE_TYPES, payRulesFor } from '@/lib/driver-pay'
+import { DEDUCTION_TYPES } from '@/lib/driver-deductions'
 import { onTimeRateForDriver } from '@/lib/dispatch-fields'
 import {
   dqfChecklist,
@@ -24,6 +25,24 @@ import { RecordForm } from '@/components/forms/RecordForm'
 import { AssetActions } from '../../_reference/AssetActions'
 import { updateDriverAction } from '../actions'
 import { PayRules, type PayRuleRowView } from './PayRules'
+import { Deductions, type DeductionRowView } from './Deductions'
+import { OpeningBalances, type OpeningRowView } from './OpeningBalances'
+
+/**
+ * The six categories a Datatruck year-to-date block prints.
+ *
+ * STATED HERE RATHER THAN IMPORTED FROM THE GENERATED CLIENT, because a page is
+ * a server component and the enum's runtime object is not what this needs — the
+ * order is the order the statement prints, which no generated value knows.
+ */
+const OPENING_CATEGORIES = [
+  'EARNINGS',
+  'ADVANCES',
+  'REIMBURSEMENTS',
+  'DEDUCTIONS',
+  'OTHER_PAY',
+  'NET_PAY',
+] as const
 import type { MessageKey } from '@/lib/i18n'
 import { driverFields } from '../fields'
 import { dateInputValue } from '../../_reference/shared'
@@ -87,6 +106,18 @@ export default async function EditDriverPage({
     // Pay rules ride along on the same transaction rather than a second
     // round trip — this screen is one read.
     const payRules = await payRulesFor(tx, id)
+    // WHAT COMES OFF THE CHEQUE AND WHAT CAME INTO THE YEAR. Read here with
+    // everything else rather than in their own round trips: the page is one
+    // transaction by design, and two more would be two more chances to render
+    // half a driver.
+    const deductions = await tx.recurringDeduction.findMany({
+      where: { driverId: id },
+      orderBy: [{ effectiveFrom: 'desc' }, { type: 'asc' }],
+    })
+    const openingBalances = await tx.driverOpeningBalance.findMany({
+      where: { driverId: id },
+      orderBy: [{ year: 'desc' }, { category: 'asc' }],
+    })
 
     // ONE STATEMENT, BOTH SEATS, FINISHED FREIGHT ONLY. Derived on every
     // read: nothing on `Driver` stores a score, so there is no stale
@@ -135,6 +166,8 @@ export default async function EditDriverPage({
       trucks,
       trailers,
       payRules,
+      deductions,
+      openingBalances,
       onTimeRate,
       dqf,
       compliance,
@@ -159,6 +192,8 @@ export default async function EditDriverPage({
     trucks,
     trailers,
     payRules,
+    deductions,
+    openingBalances,
     onTimeRate,
     dqf,
     compliance,
@@ -250,6 +285,42 @@ export default async function EditDriverPage({
     notes: rule.notes,
   }))
 
+  // ── THE FIGURE EACH DEDUCTION TURNS ON, FROM ITS OWN CENTS COLUMN ───────
+  //
+  // A monthly split prints both halves — `$450.00 / wk of $1,800.00` — because
+  // the weekly figure alone is the one an accountant cannot check against the
+  // statement, which prints the pair.
+  const deductionViews: DeductionRowView[] = deductions.map((row) => ({
+    id: row.id,
+    type: row.type,
+    description: row.description,
+    figure:
+      row.cadence === 'MONTHLY_SPLIT_WEEKLY' && row.monthlyTotalCents !== null
+        ? `${formatCents(row.amountCents, locale)} / wk of ${formatCents(
+            row.monthlyTotalCents,
+            locale,
+          )}`
+        : `${formatCents(row.amountCents, locale)} / wk`,
+    target:
+      row.targetCents === null
+        ? null
+        : `${formatCents(row.targetCents, locale)} target`,
+    from: day(row.effectiveFrom) ?? '—',
+    to: day(row.effectiveTo),
+    isRunning: row.effectiveTo === null,
+  }))
+
+  const openingViews: OpeningRowView[] = openingBalances.map((row) => ({
+    id: row.id,
+    category: row.category,
+    categoryLabel: row.category,
+    // SIGNED AS STORED. Deductions are negative and print negative; making them
+    // positive here would disagree with the statement and with what was typed.
+    amount: formatCents(row.amountCents, locale),
+    asOf: day(row.asOf) ?? '—',
+    source: row.source,
+  }))
+
   const PAY_ERROR_KEYS: MessageKey[] = [
     'payRule.error.driverNotFound',
     'payRule.error.customUnsupported',
@@ -258,6 +329,18 @@ export default async function EditDriverPage({
     'payRule.error.badFlat',
     'payRule.error.badDates',
     'payRule.error.overlaps',
+    'deduction.error.driverNotFound',
+    'deduction.error.unknownType',
+    'deduction.error.badAmount',
+    'deduction.error.badMonthlyTotal',
+    'deduction.error.badTarget',
+    'deduction.error.badDates',
+    'deduction.error.overlaps',
+    'opening.error.driverNotFound',
+    'opening.error.badYear',
+    'opening.error.badAmount',
+    'opening.error.badDates',
+    'opening.error.noSource',
   ]
   const translate = Object.fromEntries(
     PAY_ERROR_KEYS.map((key) => [key, t(key)]),
@@ -478,6 +561,89 @@ export default async function EditDriverPage({
                 linehaulHint: t('payRule.linehaulHint'),
               }}
               readOnly={!maySetPay}
+            />
+          </div>
+        ) : null}
+
+        {/* THE SAME PERMISSION AS THE PAY RULES, because a deduction changes
+         * what a driver is paid. See deduction-actions.ts. */}
+        {maySeePay ? (
+          <div className="mt-z4 max-w-[860px]">
+            <Deductions
+              driverId={id}
+              rows={deductionViews}
+              types={DEDUCTION_TYPES.map((type) => ({
+                value: type,
+                label: type,
+              }))}
+              cadences={[
+                {
+                  value: 'WEEKLY',
+                  label: t('deduction.cadence.weekly'),
+                },
+                {
+                  value: 'MONTHLY_SPLIT_WEEKLY',
+                  label: t('deduction.cadence.monthly'),
+                },
+              ]}
+              today={new Date().toISOString().slice(0, 10)}
+              translate={translate}
+              readOnly={!maySetPay}
+              labels={{
+                title: t('deduction.title'),
+                hint: t('deduction.hint'),
+                add: t('deduction.add'),
+                type: t('deduction.type'),
+                description: t('deduction.description'),
+                descriptionHint: t('deduction.descriptionHint'),
+                amount: t('deduction.amount'),
+                cadence: t('deduction.cadence'),
+                monthlyTotal: t('deduction.monthlyTotal'),
+                monthlyTotalHint: t('deduction.monthlyTotalHint'),
+                target: t('deduction.target'),
+                targetHint: t('deduction.targetHint'),
+                from: t('deduction.from'),
+                to: t('deduction.to'),
+                toHint: t('deduction.toHint'),
+                open: t('deduction.open'),
+                notes: t('deduction.notes'),
+                save: t('deduction.save'),
+                close: t('deduction.close'),
+                closeHint: t('deduction.closeHint'),
+                none: t('deduction.none'),
+              }}
+            />
+          </div>
+        ) : null}
+
+        {maySeePay ? (
+          <div className="mt-z4 max-w-[860px]">
+            <OpeningBalances
+              driverId={id}
+              rows={openingViews}
+              categories={OPENING_CATEGORIES.map((category) => ({
+                value: category,
+                label: category,
+              }))}
+              year={new Date().getUTCFullYear()}
+              today={new Date().toISOString().slice(0, 10)}
+              translate={translate}
+              readOnly={!maySetPay}
+              labels={{
+                title: t('opening.title'),
+                hint: t('opening.hint'),
+                year: t('opening.year'),
+                category: t('opening.category'),
+                amount: t('opening.amount'),
+                amountHint: t('opening.amountHint'),
+                asOf: t('opening.asOf'),
+                source: t('opening.source'),
+                sourceHint: t('opening.sourceHint'),
+                notes: t('opening.notes'),
+                save: t('opening.save'),
+                none: t('opening.none'),
+                replaces: t('opening.replaces'),
+              }}
             />
           </div>
         ) : null}
