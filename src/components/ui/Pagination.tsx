@@ -71,7 +71,16 @@ export function Pagination({
 
   return (
     <div className="flex flex-wrap items-center gap-z2 border-t border-border bg-surface px-gutter py-z2">
-      <span className="font-mono text-xs tabular-nums text-ink-2" dir="ltr">
+      {/* `dir="auto"`, NOT `dir="ltr"`.
+       *
+       * The range is `1–4 of 4` — Latin digits with a translated word between
+       * them, which in Farsi is `1–4 از 4`. Forced LTR, the bidi algorithm put
+       * the Persian word at the wrong end and the RTL screenshot read
+       * `۱–۴ ۴ از`. §12's rule is about IDENTIFIERS, which must not reorder;
+       * this is a SENTENCE containing numbers, and it should follow the
+       * direction of its own first strong character. Found in the Farsi shot,
+       * which is what that shot is for. */}
+      <span className="font-mono text-xs tabular-nums text-ink-2" dir="auto">
         {labels.range}
       </span>
 

@@ -776,48 +776,55 @@ export default async function PayrollPage({
               body={t('accounting.emptyHint')}
             />
           }
+          below={
+            <>
+              {/* THE PER-COMPANY BREAKDOWN, under the grid rather than inside it.
+               * §6.2 asks for it as an indented continuation of each batch row;
+               * `Table` renders one row per record and cannot nest, so this is the
+               * honest version — a second reading of the same page's batches, in the
+               * same order, with each authority's share. Flagged as a divergence from
+               * the ruling rather than presented as satisfying it. */}
+              {view.paged.rows.some((row) => row.breakdown.length > 0) ? (
+                <section className="border-t border-border bg-surface-2 px-gutter py-z3">
+                  <h2 className="text-xs font-medium uppercase tracking-[0.04em] text-ink-2">
+                    {t('batches.breakdown')}
+                  </h2>
+                  <ul className="mt-z2 flex flex-col gap-z1">
+                    {view.paged.rows.map((row) =>
+                      row.breakdown.length === 0 ? null : (
+                        <li
+                          key={row.id}
+                          className="flex flex-wrap items-baseline gap-z3"
+                        >
+                          <span
+                            className="font-mono text-xs text-ink"
+                            dir="ltr"
+                          >
+                            {row.batchNumber ?? row.id.slice(0, 8)}
+                          </span>
+                          {row.breakdown.map((company) => (
+                            <span
+                              key={company.companyId}
+                              className="text-xs text-ink-2"
+                            >
+                              {company.companyName}{' '}
+                              <span className="font-mono tabular-nums text-ink">
+                                {formatCents(company.amountCents, locale)}
+                              </span>{' '}
+                              <span className="font-mono tabular-nums text-ink-3">
+                                ({company.statements})
+                              </span>
+                            </span>
+                          ))}
+                        </li>
+                      ),
+                    )}
+                  </ul>
+                </section>
+              ) : null}
+            </>
+          }
         />
-        {/* THE PER-COMPANY BREAKDOWN, under the grid rather than inside it.
-         * §6.2 asks for it as an indented continuation of each batch row;
-         * `Table` renders one row per record and cannot nest, so this is the
-         * honest version — a second reading of the same page's batches, in the
-         * same order, with each authority's share. Flagged as a divergence from
-         * the ruling rather than presented as satisfying it. */}
-        {view.paged.rows.some((row) => row.breakdown.length > 0) ? (
-          <section className="border-t border-border bg-surface-2 px-gutter py-z3">
-            <h2 className="text-xs font-medium uppercase tracking-[0.04em] text-ink-2">
-              {t('batches.breakdown')}
-            </h2>
-            <ul className="mt-z2 flex flex-col gap-z1">
-              {view.paged.rows.map((row) =>
-                row.breakdown.length === 0 ? null : (
-                  <li
-                    key={row.id}
-                    className="flex flex-wrap items-baseline gap-z3"
-                  >
-                    <span className="font-mono text-xs text-ink" dir="ltr">
-                      {row.batchNumber ?? row.id.slice(0, 8)}
-                    </span>
-                    {row.breakdown.map((company) => (
-                      <span
-                        key={company.companyId}
-                        className="text-xs text-ink-2"
-                      >
-                        {company.companyName}{' '}
-                        <span className="font-mono tabular-nums text-ink">
-                          {formatCents(company.amountCents, locale)}
-                        </span>{' '}
-                        <span className="font-mono tabular-nums text-ink-3">
-                          ({company.statements})
-                        </span>
-                      </span>
-                    ))}
-                  </li>
-                ),
-              )}
-            </ul>
-          </section>
-        ) : null}
         <GridFooterNav
           paged={view.paged}
           per={view.params.per}

@@ -123,6 +123,16 @@ interface TableProps<Row> {
    * `tests/accounting-surface.test.ts` checks that every paginated grid passes it.
    */
   footRows?: readonly Row[]
+  /**
+   * Rendered INSIDE the scrolling region, immediately below the last row.
+   *
+   * For a continuation that belongs to the rows rather than to the page — the
+   * batches grid's per-authority breakdown (§6.2). Rendered after `<Table>`
+   * instead, it lands at the bottom of the window, because this component's
+   * container is `flex-1` and takes every pixel the shell has: a four-row grid
+   * put the breakdown five hundred pixels below the four rows it describes.
+   */
+  below?: ReactNode
 }
 
 export function Table<Row>({
@@ -137,6 +147,7 @@ export function Table<Row>({
   sort,
   totals,
   footRows,
+  below,
 }: TableProps<Row>) {
   if (totals && columns[0]?.foot) {
     // The first foot cell carries the label, so a `foot` there would be
@@ -325,6 +336,7 @@ export function Table<Row>({
           </tfoot>
         ) : null}
       </table>
+      {below}
     </div>
   )
 }

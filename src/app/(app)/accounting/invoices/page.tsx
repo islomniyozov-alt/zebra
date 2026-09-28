@@ -4,7 +4,11 @@ import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyIdScopeFilter, companyScopeFilter } from '@/lib/tenancy'
 import { formatCents } from '@/lib/money'
-import { directSettledAwaiting, readyToInvoice } from '@/lib/invoices'
+import {
+  directSettledAwaiting,
+  readyToInvoice,
+  readyToInvoiceWhere,
+} from '@/lib/invoices'
 import { readGridColumns } from '@/lib/grid-columns'
 import { applyList, sumCents, type RawParams } from '@/lib/list-view'
 import {
@@ -111,21 +115,29 @@ export default async function AccountingInvoicesPage({
 
   const data = await withCurrentOrg('read', 'invoice', async (tx, session) => {
     const scope = companyScopeFilter(session.companyScopes)
-    const [invoices, companies, ready, direct, columns] = await Promise.all([
-      readInvoices(tx, scope, new Date()),
-      tx.company.findMany({
-        where: {
-          isActive: true,
-          ...companyIdScopeFilter(session.companyScopes),
-        },
-        orderBy: { name: 'asc' },
-        select: { id: true, name: true },
-      }),
-      mayCreate ? readyToInvoice(tx, scope) : Promise.resolve([]),
-      directSettledAwaiting(tx, scope),
-      readGridColumns(tx, session.userId, 'invoices.invoices', COLUMN_KEYS),
-    ])
-    return { invoices, companies, ready, direct, columns }
+    const [invoices, companies, ready, direct, readyCount, columns] =
+      await Promise.all([
+        readInvoices(tx, scope, new Date()),
+        tx.company.findMany({
+          where: {
+            isActive: true,
+            ...companyIdScopeFilter(session.companyScopes),
+          },
+          orderBy: { name: 'asc' },
+          select: { id: true, name: true },
+        }),
+        mayCreate ? readyToInvoice(tx, scope) : Promise.resolve([]),
+        directSettledAwaiting(tx, scope),
+        // COUNTED, NOT INFERRED FROM THE ROWS. `readyToInvoice` takes 500, so
+        // `ready.length` is the CAP once there are more than that — and the tab
+        // would read "500" forever while the real number grew. Same predicate,
+        // counted in SQL.
+        mayCreate
+          ? tx.load.count({ where: { ...readyToInvoiceWhere(), ...scope } })
+          : Promise.resolve(0),
+        readGridColumns(tx, session.userId, 'invoices.invoices', COLUMN_KEYS),
+      ])
+    return { invoices, companies, ready, direct, readyCount, columns }
   })
 
   const money = (cents: number) => (
@@ -174,7 +186,7 @@ export default async function AccountingInvoicesPage({
                 {
                   key: 'ready',
                   label: t('invoices.tab.ready'),
-                  count: data.ready.length,
+                  count: data.readyCount,
                 },
               ]
             : []),
