@@ -303,33 +303,36 @@ describe('navigationFor', () => {
 
   // ── WHO MAY CHANGE A CHARGE IS NOT WHO MAY SEE ONE ──────────────────────
   //
-  // This assertion is here because the first version of the Charges nav entry
-  // was gated on `driver.pay:update` and this suite caught what that meant:
-  // `driver.pay:update` is OWNER and ADMIN ONLY, so the page whose whole purpose
-  // is the accountant's Monday question was invisible to ACCOUNTING.
+  // THREE POSITIONS IN ONE DAY, and the sequence is the point. The Charges nav
+  // entry was first gated on `driver.pay:update`, and this suite caught what
+  // that meant: OWNER and ADMIN only, so the page whose whole purpose is the
+  // accountant's Monday question was invisible to ACCOUNTING. The entry moved to
+  // `driver.pay:read` with the editors on `update`, and the remaining oddity —
+  // an accountant who could see every charge and change none — was flagged as a
+  // question about the ROLE rather than answered by a screen.
   //
-  // The entry reads `driver.pay:read` now and the page gates its Add button and
-  // row editors on `update` — the driver page's own split. Whether ACCOUNTING
-  // ought to hold `driver.pay:update` is a question about the ROLE, and is
-  // flagged rather than answered by a screen.
-  it('lets a manager and accounting SEE charges without setting them', () => {
-    for (const role of ['ACCOUNTING', 'MANAGER'] as const) {
-      const group = navigationFor(session(role)).find(
-        (candidate) => candidate.key === 'accounting',
-      )
-      expect(
-        group?.items.map((item) => item.key),
-        role,
-      ).toContain('charges')
-      expect(can(session(role), 'read', 'driver.pay'), role).toBe(true)
-      expect(can(session(role), 'update', 'driver.pay'), role).toBe(false)
-    }
+  // The owner answered it: ACCOUNTING holds `driver.pay:update` as of
+  // 2026-09-28. The split that survives is the one §1 states — a MANAGER reads
+  // what a driver is paid and does not set it.
+  it('lets a manager see charges without setting them', () => {
+    expect(can(session('MANAGER'), 'read', 'driver.pay')).toBe(true)
+    expect(can(session('MANAGER'), 'update', 'driver.pay')).toBe(false)
   })
 
-  it('gives OWNER and ADMIN the write side, and nobody else', () => {
-    for (const role of ['OWNER', 'ADMIN'] as const) {
+  it('lets accounting set them, which is the whole of the ruling', () => {
+    expect(can(session('ACCOUNTING'), 'read', 'driver.pay')).toBe(true)
+    expect(can(session('ACCOUNTING'), 'update', 'driver.pay')).toBe(true)
+  })
+
+  it('gives OWNER, ADMIN and ACCOUNTING the write side, and nobody else', () => {
+    for (const role of ['OWNER', 'ADMIN', 'ACCOUNTING'] as const) {
       expect(can(session(role), 'update', 'driver.pay'), role).toBe(true)
     }
+    for (const role of ['MANAGER', 'DISPATCHER', 'DRIVER'] as const) {
+      expect(can(session(role), 'update', 'driver.pay'), role).toBe(false)
+    }
+    // A DISPATCHER SEES NO DRIVER PAY AT ALL, which is the older rule and is not
+    // touched by widening the write side.
     expect(can(session('DISPATCHER'), 'read', 'driver.pay')).toBe(false)
   })
 

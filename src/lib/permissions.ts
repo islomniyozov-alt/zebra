@@ -373,6 +373,24 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     ...SHELL_READ,
     ...EMBEDDED_MONEY_READ,
     ...RATE_ENTRY,
+    // ── SETTING WHAT COMES OFF A DRIVER'S CHEQUE ──────────────────────────
+    //
+    // Owner's ruling, 2026-09-28. `driver.pay:update` was OWNER and ADMIN only,
+    // which the Accounting → Charges screen made visible: the page whose whole
+    // purpose is the accountant's Monday question — "who is not paying
+    // insurance" — was readable by ACCOUNTING and editable by neither of the
+    // two roles that sit in that section all day.
+    //
+    // THE READ SIDE WAS ALREADY THEIRS. `driver.pay:read` is in MONEY_READ, so
+    // this does not widen what ACCOUNTING can SEE by one field; it lets them
+    // write the rows they were already looking at. Insurance, escrow and a loan
+    // are the accountant's to set, and were reaching the database by hand or not
+    // at all — the four replayed weeks on dev showed every statement's
+    // deductions against Zebra's $0.00, which was this gap and not an engine one.
+    //
+    // MANAGER IS DELIBERATELY NOT INCLUDED: §1's rule that a manager reads what
+    // a driver is paid and does not set it is unchanged.
+    'driver.pay:update',
     ...read('dashboard'),
     ...read('load'),
     ...read('calendar'),
