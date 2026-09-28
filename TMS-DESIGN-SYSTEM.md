@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v4 — §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
+**Status:** v5 — §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -265,9 +265,43 @@ The spec lists seventeen destinations. Seventeen flat items is a wall. Group the
 
 - **Operations** — Dashboard, Dispatch, Loads, Calendar
 - **Fleet** — Trucks, Trailers, Drivers, Maintenance
-- **Money** — Invoices, Receivables, Payments, Settlements, Expenses, Fuel
-- **Records** — Brokers, Documents, Reports
+- **Accounting** — Invoices, Payments, Payroll, Charges, Reports _(amended 2026-09-28; was **Money** — Invoices, Receivables, Payments, Settlements, Expenses, Fuel)_
+- **Records** — Brokers, Documents
 - **Admin** — Users, Settings
+
+_§6.2 amended 2026-09-28, owner's ruling. The **Money** group had grown to
+eight entries, six of them built, and three of those answered the same question:
+`/money/this-week` and `/settlements/batches` and `/settlements` are one week's
+pay seen from three distances. A group where three items land on the same
+numbers is a group the reader has to try in turn, which is what happened: the
+Tuesday screen was the entry point and the other two were reached from it, so
+their sidebar entries only ever served people who had lost their place._
+
+_**Accounting is five destinations and no more**, each answering a question
+nothing else on the list answers:_
+
+| Page     | The question                                      |
+| -------- | ------------------------------------------------- |
+| Invoices | who owes us, and how old is it                    |
+| Payments | what came in, and what it paid for                |
+| Payroll  | what one week costs per driver, and its state     |
+| Charges  | what comes off cheques every week, across drivers |
+| Reports  | the same money cut by company, week or driver     |
+
+_**Receivables folds into Invoices.** Aging is a view of the invoice list, not a
+second list of the same rows — §7.4 already makes a filter a URL, so "over 60
+days" is a chip rather than a page._
+
+_**Reports leaves Records for Accounting**, and `/money/by-company` becomes its
+company cut. A report is read by the person who reconciles, and they are already
+in this section when the question occurs to them._
+
+_**Payroll absorbs This week, Settlements and Settlement batches.** The week
+selector is what the three had between them: one page where the week is a
+control rather than a route. The per-driver statement stays its own page,
+because it is a document somebody prints and hands over._
+
+_Expenses and Fuel stay unbuilt and keep their Phase 5 marker._
 
 Groups render only where the user's role grants at least one child. A dispatcher without financial permission never sees an empty **Money** heading.
 
@@ -316,6 +350,37 @@ The primary interface of the application. Everything else is support.
 - **Truncate addresses and commodity. Never truncate a load number, invoice number, or money figure.** Those are the fields people copy.
 - Bulk selection raises a floating action bar over the table foot, showing the count and only the actions valid for the whole selection.
 - Every table has a written empty state (§10).
+
+#### 7.1.1 Sort — _added 2026-09-28_
+
+A sortable column header is a button carrying the column's name and, when it is
+the active one, a direction caret. **Sort state serialises into the URL** on the
+same argument §7.4 makes for filters: a sorted view is a thing somebody sends.
+
+- Two query keys, `sort` and `dir`. An unrecognised column name sorts by the
+  table's default rather than erroring — a stale link should open.
+- **Sorting does not animate the rows** (§11). They are in a different order on
+  the next paint, with no transition between the two.
+- Money and dates sort by their stored value, never by the rendered string.
+  `$1,000.00` sorts above `$9.99` as text and below it as money, and the
+  rendered form is the one a reader would blame.
+- The caret is not the only signal: the active header also carries
+  `aria-sort`, and a sorted column's header sits in `--z-ink` where the others
+  are `--z-ink-2`.
+
+#### 7.1.2 Totals row — _added 2026-09-28_
+
+A table of money gets a **sticky foot**, `--z-surface-2`, a 1px `--z-border-strong`
+top rule, weight 600, aligned to its columns.
+
+- **It totals the rows shown, and says so.** A foot that silently totalled
+  everything while a filter was on would be the most expensive kind of wrong on
+  a financial screen. The leading cell reads `Total (N rows)` where N is what is
+  on screen, so the number is never ambiguous about its own scope.
+- Only summable columns carry a figure. A status column's foot is empty, not a
+  count of something nobody asked about.
+- A filtered total and an unfiltered one must never render identically — if the
+  filter removed nothing, N still states the count.
 - The whole row is clickable via a stretched-link `::after` on a real anchor — middle-click and keyboard both work. Interactive controls inside the row raise `z-index` as dead zones. _(pattern proven on the admin board)_
 
 ### 7.2 Status badge
@@ -340,6 +405,31 @@ No gradients. No sparkline unless the trend changes a decision. No icons in KPI 
 Sits directly under the page title, never in a drawer. Chips, not dropdown menus, for the two or three filters a screen actually uses; everything else in a **More filters** popover. Active filters render as removable chips. Filter state serializes into the URL — a dispatcher sends a filtered board to a colleague by pasting a link.
 
 **Saved views** are first-class: a named filter set, per user, pinned to the top of the table. "My trucks today" should be one click, not four.
+
+#### 7.4.1 Date range — _added 2026-09-28_
+
+Two date inputs, `from` and `to`, labelled with what they bound — **"Delivered",
+"Issued", "Paid"**, never a bare "Date". Every financial list has more than one
+date on it and an unlabelled range is a filter nobody can predict.
+
+- Either end alone is valid. `from` with no `to` means "since", and the chip
+  says so in words.
+- The bounds are **inclusive**, and the screen says which field they apply to in
+  the same breath as the range. An off-by-one day on a week boundary puts a
+  Saturday's money in the wrong week, which is MONEY-DESIGN §0's own lesson.
+- The range lands in the URL as two keys, and clears with the same **Clear
+  filters** the chips use.
+
+#### 7.4.2 The company filter on a financial list — _added 2026-09-28_
+
+§6.3 makes the topbar control a filter rather than a mode, and financial lists
+inherit that exactly: chips, one per authority, only where `maxCompanies > 1`.
+
+**But a total is not a list.** Where a figure is the thing somebody acts on —
+the batch a button opens, the week's Ready — the filter narrows the ROWS and
+leaves that figure alone, and the screen says it is doing so. A total that moved
+when an authority was picked would not correspond to anything anybody can press.
+_(The Tuesday screen already worked this way; this writes it down.)_
 
 ### 7.5 Forms
 
