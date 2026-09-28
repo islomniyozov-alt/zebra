@@ -2,7 +2,16 @@ import { describe, expect, it } from 'vitest'
 import {
   activeSort,
   applyList,
+  csvCell,
+  csvDay,
+  csvMoney,
   dayBound,
+  DEFAULT_PAGE_SIZE,
+  PAGE_SIZES,
+  pageHref,
+  paginate,
+  toCsv,
+  visibleColumns,
   isFiltered,
   readListParams,
   sortHref,
@@ -272,5 +281,151 @@ describe('the totals row', () => {
     // identically". So there is no branch that omits the number.
     expect(totalsLabel('Total', 4, 'rows')).toBe('Total (4 rows)')
     expect(totalsLabel('Total', 0, 'rows')).toBe('Total (0 rows)')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// PAGINATION, COLUMNS AND EXPORT (§7.1.3–§7.1.5).
+// ---------------------------------------------------------------------------
+
+describe('pagination', () => {
+  const many = Array.from({ length: 12 }, (_, index) => ({
+    ...ROWS[0]!,
+    id: `r${index}`,
+    cents: index,
+  }))
+
+  // PAGE SIZE FIVE IS NOT ONE OF `PAGE_SIZES`, so `readListParams` would have
+  // fallen back to 50 and the whole list would fit on one page — which is what the
+  // first version of this test did, and it read as `paginate` ignoring the page.
+  // The arithmetic is tested directly so it does not depend on which sizes the
+  // interface happens to offer.
+  const pageOf = (per: number, page: number) => ({
+    ...readListParams({}),
+    per,
+    page,
+  })
+
+  it('slices the page and says what it sliced', () => {
+    const paged = paginate(many, pageOf(5, 2))
+    expect(ids(paged.rows)).toEqual(['r5', 'r6', 'r7', 'r8', 'r9'])
+    expect(paged.page).toBe(2)
+    expect(paged.pages).toBe(3)
+    expect(paged.total).toBe(12)
+    expect(paged.firstRow).toBe(6)
+    expect(paged.lastRow).toBe(10)
+  })
+
+  // A PAGE PAST THE END SHOWS THE LAST PAGE, not the first and not nothing.
+  // Narrowing a filter while on page 7 leaves a page number with nothing behind
+  // it; jumping to page one would lose the reader's place, and an empty grid is
+  // something they have to diagnose.
+  it('clamps a page past the end to the last page', () => {
+    const paged = paginate(many, pageOf(5, 99))
+    expect(paged.page).toBe(3)
+    expect(ids(paged.rows)).toEqual(['r10', 'r11'])
+  })
+
+  it('opens page one for a nonsense page number', () => {
+    for (const page of ['0', '-3', 'cheese', '']) {
+      expect(readListParams({ page }).page).toBe(1)
+    }
+  })
+
+  it('falls back to the default page size for an unoffered one', () => {
+    expect(readListParams({ per: '7' }).per).toBe(DEFAULT_PAGE_SIZE)
+    expect(readListParams({ per: '100' }).per).toBe(100)
+    expect(PAGE_SIZES).toContain(DEFAULT_PAGE_SIZE)
+  })
+
+  it('reports an empty list as one page with no rows', () => {
+    const paged = paginate([], readListParams({}))
+    expect(paged.pages).toBe(1)
+    expect(paged.total).toBe(0)
+    expect(paged.firstRow).toBe(0)
+    expect(paged.lastRow).toBe(0)
+  })
+
+  it('keeps every filter in a page link, and drops page 1', () => {
+    expect(pageHref('/x', { q: 'a', per: '25' }, 3)).toBe(
+      '/x?q=a&per=25&page=3',
+    )
+    // Page one is the default, so it is absent — a link that always carried
+    // `page=1` would make every unfiltered URL longer for no information.
+    expect(pageHref('/x', { q: 'a' }, 1)).toBe('/x?q=a')
+  })
+})
+
+describe('the columns chooser', () => {
+  const available = ['a', 'b', 'c']
+
+  it('shows everything when nothing is stored', () => {
+    expect(visibleColumns(available, null)).toEqual(available)
+    expect(visibleColumns(available, 'not an array')).toEqual(available)
+  })
+
+  it('keeps the table order, not the stored order', () => {
+    // A stored list is a SET of what to show. Letting it reorder columns would
+    // mean a five-phase-old preference deciding that money sits left of an
+    // identifier.
+    expect(visibleColumns(available, ['c', 'a'])).toEqual(['a', 'c'])
+  })
+
+  // A STORED COLUMN THAT NO LONGER EXISTS IS IGNORED. A preference row outlives
+  // every deploy, and a rename must not empty somebody's grid.
+  it('ignores a column the table no longer has', () => {
+    expect(visibleColumns(available, ['a', 'gone'])).toEqual(['a'])
+  })
+
+  it('falls back to everything when the stored list names nothing real', () => {
+    expect(visibleColumns(available, ['gone', 'also-gone'])).toEqual(available)
+    expect(visibleColumns(available, [])).toEqual(available)
+  })
+})
+
+describe('the CSV', () => {
+  it('quotes only what needs quoting, and doubles inner quotes', () => {
+    expect(csvCell('plain')).toBe('plain')
+    expect(csvCell('has,comma')).toBe('"has,comma"')
+    expect(csvCell('has"quote')).toBe('"has""quote"')
+    expect(csvCell('has\nnewline')).toBe('"has\nnewline"')
+    expect(csvCell(null)).toBe('')
+    expect(csvCell(42)).toBe('42')
+  })
+
+  // A LEADING `=`, `+`, `-` OR `@` IS A FORMULA IN EXCEL AND SHEETS. A note
+  // reading `=1+1` becomes a computed cell; a broker named `-Acme` becomes an
+  // error value. The apostrophe is the one transformation this export makes.
+  it('defuses a value that would be read as a formula', () => {
+    expect(csvCell('=1+1')).toBe("'=1+1")
+    expect(csvCell('-Acme')).toBe("'-Acme")
+    expect(csvCell('@here')).toBe("'@here")
+    expect(csvCell('+1')).toBe("'+1")
+    // A NUMBER IS NOT TEXT and is not touched: money goes out as arithmetic.
+    expect(csvCell(-5)).toBe('-5')
+  })
+
+  it('writes money as arithmetic input', () => {
+    // §7.1.5 — no symbol, no separator. `1234.56`.
+    expect(csvMoney(123_456)).toBe('1234.56')
+    expect(csvMoney(5)).toBe('0.05')
+    expect(csvMoney(0)).toBe('0.00')
+    expect(csvMoney(-123_456)).toBe('-1234.56')
+    // The minus belongs to the whole figure, not to the cents.
+    expect(csvMoney(-5)).toBe('-0.05')
+  })
+
+  it('writes a date as yyyy-mm-dd, never a locale format', () => {
+    expect(csvDay(on('2026-09-19'))).toBe('2026-09-19')
+    expect(csvDay(null)).toBe('')
+  })
+
+  it('carries a BOM and CRLF, because Excel is the reader', () => {
+    const text = toCsv(['a', 'b'], [[1, 'x,y']])
+    // Without the BOM, Excel on Windows reads UTF-8 as the system codepage and a
+    // Russian driver's name arrives as mojibake in the one application this file
+    // exists to be opened in.
+    expect(text.startsWith('\ufeff')).toBe(true)
+    expect(text).toBe('\ufeffa,b\r\n1,"x,y"\r\n')
   })
 })

@@ -31,8 +31,12 @@ describe('the five pages exist', () => {
       .map((entry) => entry.name)
       .sort()
     // §6.2's table is five destinations, each answering something the other four
-    // do not. A sixth directory has to change that table first.
-    expect(directories).toEqual([...PAGES].sort())
+    // do not. A sixth PAGE has to change that table first.
+    //
+    // `export` IS NOT A PAGE and is named here rather than tolerated: it is the
+    // shared CSV route handler (§7.1.5), which has to live under this segment so
+    // that it inherits the same auth context the pages do.
+    expect(directories).toEqual([...PAGES, 'export'].sort())
     for (const name of PAGES) {
       expect(existsSync(join(DIR, name, 'page.tsx')), name).toBe(true)
     }
@@ -48,7 +52,19 @@ describe('every page uses the shared list core', () => {
   it.each([...PAGES])('%s reads its params through list-view', (name) => {
     const source = pageSource(name)
     expect(source).toContain("from '@/lib/list-view'")
-    expect(source).toContain('readListParams(raw)')
+    // EITHER ENTRY POINT. `gridView` calls `readListParams` itself and adds the
+    // filter/sort/paginate order that §7.1.3 depends on; a page calling
+    // `readListParams` directly is the simpler form for a grid with no pages.
+    // What is forbidden is neither.
+    //
+    // THE IMPORT, NOT THE CALL. Written as `toMatch(/gridView\(|readListParams\(/)`
+    // this guard did not fire when the import was deleted — the call sites still
+    // matched the text, so a page that could not compile still "used the shared
+    // core" as far as the instrument could tell. An import is the dependency; a
+    // string that looks like a call is a string.
+    expect(source).toMatch(
+      /import \{[^}]*\bgridView\b[^}]*\} from '\.\.\/grid-page'|import \{[^}]*\breadListParams\b[^}]*\} from '@\/lib\/list-view'/s,
+    )
   })
 
   it.each([...PAGES])('%s does not parse a date bound by hand', (name) => {
@@ -91,9 +107,10 @@ describe('the controls each list carries', () => {
   it.each([...LISTS])('%s has a totals row that states its count', (name) => {
     const source = pageSource(name)
     expect(source).toMatch(/\n\s+totals=\{\{/)
-    // §7.1.2 — `Total (N rows)`. Built by `totalsLabel`, which has no branch
-    // that omits the number.
-    expect(source).toContain('totalsLabel(')
+    // §7.1.2 — `Total (N rows)`, or §7.1.3's paginated `Total (1–50 of 340)`.
+    // Both are composed by a helper with no branch that omits the numbers; what
+    // is forbidden is a literal.
+    expect(source).toMatch(/totalsLabel\(|pagedFooterLabel\(/)
   })
 
   // THE RANGE: three of the four have one. PAYROLL DOES NOT, and the reason is
@@ -113,10 +130,24 @@ describe('the controls each list carries', () => {
     },
   )
 
-  it('payroll has a week picker instead of a range, deliberately', () => {
+  // ── PAYROLL HAS BOTH, AND WHICH ONE DEPENDS ON THE TAB ──────────────────
+  //
+  // This read "a week picker INSTEAD OF a range" while Payroll was one grid about
+  // one week. With five tabs (§7.1.6) that is no longer true and the test was
+  // right to fail: Batches and Driver statements span every week, so a range over
+  // the check date and the period is exactly what they need, and a week picker
+  // above them would be a control that changes nothing.
+  //
+  // The rule that survives is the ORIGINAL REASON: a week-scoped grid has no
+  // second date to bound, so it gets the picker and not a range.
+  it('payroll has a week picker, for the tabs the week means something to', () => {
     const source = pageSource('payroll')
     expect(source).toContain('<WeekPicker')
-    expect(source).not.toContain('range={{')
+    // The picker is rendered only for those tabs, and the flag that decides it is
+    // named — a `weekStrip` shown unconditionally would put a week control above
+    // a grid spanning every week.
+    expect(source).toContain('const weekScoped =')
+    expect(source).toMatch(/\{weekStrip\}/)
   })
 
   // THE COMPANY FILTER: on the three lists whose rows belong to an authority.

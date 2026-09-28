@@ -35,9 +35,33 @@ export interface ListParams {
   to: Date | null
   /** A company id, or null for every authority the session can see. */
   company: string | null
+  /** 1-based. Out-of-range values are clamped by `paginate`, never rejected. */
+  page: number
+  /** Rows per page. One of `PAGE_SIZES`. */
+  per: number
 }
 
-export const LIST_PARAM_KEYS = ['q', 'sort', 'dir', 'from', 'to', 'company']
+export const LIST_PARAM_KEYS = [
+  'q',
+  'sort',
+  'dir',
+  'from',
+  'to',
+  'company',
+  'page',
+  'per',
+]
+
+/**
+ * §7.1.3 — 50 by default.
+ *
+ * NOT INFINITE SCROLL. §1's reader is comparing, and a list whose length they
+ * cannot state is a list they cannot finish reading. A page size they can raise
+ * is the compromise; 500 exists so "just show me all of it" has an answer that
+ * is not the export.
+ */
+export const PAGE_SIZES = [25, 50, 100, 500] as const
+export const DEFAULT_PAGE_SIZE = 50
 
 /** What a Next.js `searchParams` hands over: one value, several, or nothing. */
 export type RawParams = Record<string, string | string[] | undefined>
@@ -93,6 +117,16 @@ export function readListParams(raw: RawParams): ListParams {
     from: dayBound(raw.from, 'start'),
     to: dayBound(raw.to, 'end'),
     company: one(raw.company),
+    // CLAMPED, NOT REJECTED. `?page=0`, `?page=-3` and `?page=cheese` all open
+    // page one — a pagination link somebody edited by hand should show them
+    // something rather than an error, and the upper bound depends on how many
+    // rows the filter left, which is not known here.
+    page: Math.max(1, Math.trunc(Number(one(raw.page)) || 1)),
+    per: PAGE_SIZES.includes(
+      Number(one(raw.per)) as (typeof PAGE_SIZES)[number],
+    )
+      ? Number(one(raw.per))
+      : DEFAULT_PAGE_SIZE,
   }
 }
 
@@ -241,6 +275,145 @@ export function sortHref(
   if (columnKey === current.key && current.dir === 'asc')
     next.set('dir', 'desc')
   return `${pathname}?${next}`
+}
+
+/**
+ * One page of a filtered list, and the numbers the footer says out loud.
+ *
+ * ── THE FOOTER SAYS WHICH PAGE, AND THAT IS THE WHOLE POINT ───────────────
+ *
+ * §7.1.3: the footer totals the rows ON THE PAGE and states `12 of 340`. A
+ * footer that silently summed all 340 while showing 12 is §7.1.2's filter bug one
+ * control further out, and pagination is exactly where it would appear — so both
+ * numbers come out of here together and the screen cannot have one without the
+ * other.
+ *
+ * `page` IS CLAMPED TO WHAT EXISTS. Deleting rows, or narrowing a filter while
+ * on page 7, leaves a page number with nothing behind it; showing the last page
+ * is the only answer that is not an empty grid the reader has to diagnose.
+ */
+export interface Paged<Row> {
+  rows: Row[]
+  /** After clamping. What the pagination control should show as current. */
+  page: number
+  pages: number
+  /** Every row the filter selected, across all pages. */
+  total: number
+  /** 1-based index of the first row shown, or 0 when there are none. */
+  firstRow: number
+  lastRow: number
+}
+
+export function paginate<Row>(
+  rows: readonly Row[],
+  params: ListParams,
+): Paged<Row> {
+  const total = rows.length
+  const pages = Math.max(1, Math.ceil(total / params.per))
+  const page = Math.min(params.page, pages)
+  const start = (page - 1) * params.per
+  const slice = rows.slice(start, start + params.per)
+  return {
+    rows: slice,
+    page,
+    pages,
+    total,
+    firstRow: total === 0 ? 0 : start + 1,
+    lastRow: start + slice.length,
+  }
+}
+
+/** The URL for one page, keeping every filter. See `sortHref`'s reasoning. */
+export function pageHref(
+  pathname: string,
+  raw: RawParams,
+  page: number,
+): string {
+  const next = new URLSearchParams()
+  for (const [key, value] of Object.entries(raw)) {
+    if (key === 'page') continue
+    const single = Array.isArray(value) ? value[0] : value
+    if (single !== undefined && single !== '') next.set(key, single)
+  }
+  if (page > 1) next.set('page', String(page))
+  return next.size > 0 ? `${pathname}?${next}` : pathname
+}
+
+// ---------------------------------------------------------------------------
+// COLUMNS (§7.1.4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Which columns a stored preference leaves visible.
+ *
+ * ── AN UNKNOWN STORED COLUMN IS IGNORED, NOT FATAL ────────────────────────
+ *
+ * A preference row outlives every deploy. Renaming a column must not empty
+ * somebody's grid, and an unrecognised name in the list must not throw on a
+ * screen they open every morning — so the stored list is INTERSECTED with what
+ * the table actually has.
+ *
+ * AND AN EMPTY RESULT FALLS BACK TO EVERYTHING. A stored list that happens to
+ * name nothing this table still has would otherwise render a grid with no
+ * columns, which looks like a broken page rather than a stale preference.
+ */
+export function visibleColumns(
+  available: readonly string[],
+  stored: unknown,
+): string[] {
+  if (!Array.isArray(stored)) return [...available]
+  const wanted = new Set(stored.filter((name) => typeof name === 'string'))
+  const kept = available.filter((name) => wanted.has(name))
+  return kept.length === 0 ? [...available] : kept
+}
+
+// ---------------------------------------------------------------------------
+// EXPORT (§7.1.5)
+// ---------------------------------------------------------------------------
+
+/**
+ * One CSV cell, quoted only where it has to be.
+ *
+ * A LEADING `=`, `+`, `-` OR `@` IS PREFIXED WITH AN APOSTROPHE. Excel and
+ * Sheets treat those as the start of a formula, so a note reading
+ * `=1+1` becomes a computed cell and a broker named `-Acme` becomes an error
+ * value. This is the one transformation the export makes to a value, it is
+ * applied to text only, and it is here rather than at a call site because every
+ * column would otherwise need to remember.
+ */
+export function csvCell(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'number') return String(value)
+  const guarded = /^[=+\-@]/.test(value) ? `'${value}` : value
+  return /[",\r\n]/.test(guarded) ? `"${guarded.replace(/"/g, '""')}"` : guarded
+}
+
+/** Cents as arithmetic input: `1234.56`. No symbol, no separator (§7.1.5). */
+export function csvMoney(cents: number): string {
+  const sign = cents < 0 ? '-' : ''
+  const absolute = Math.abs(cents)
+  return `${sign}${Math.trunc(absolute / 100)}.${String(absolute % 100).padStart(2, '0')}`
+}
+
+/** A date as `yyyy-mm-dd`, or empty. Never a locale format — §12. */
+export function csvDay(value: Date | null | undefined): string {
+  return value ? value.toISOString().slice(0, 10) : ''
+}
+
+/**
+ * A CSV document, with CRLF endings and a BOM.
+ *
+ * THE BOM IS NOT DECORATION. Excel on Windows reads a UTF-8 file without one as
+ * the system codepage, so a Russian driver's name arrives as mojibake in the one
+ * application this file exists to be opened in. CRLF for the same reason.
+ */
+export function toCsv(
+  header: readonly string[],
+  rows: readonly (readonly (string | number | null | undefined)[])[],
+): string {
+  const lines = [header.map(csvCell).join(',')]
+  for (const row of rows) lines.push(row.map(csvCell).join(','))
+  return `﻿${lines.join('\r\n')}\r\n`
 }
 
 /**
