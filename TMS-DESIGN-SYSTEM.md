@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v5 — §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
+**Status:** v6 — §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -288,6 +288,30 @@ nothing else on the list answers:_
 | Charges  | what comes off cheques every week, across drivers |
 | Reports  | the same money cut by company, week or driver     |
 
+_**Each page is tabs over one grid** (§7.1.6), modelled on the Salary page the
+office already uses. Owner's ruling, 2026-09-28:_
+
+| Page     | Tabs                                                                           |
+| -------- | ------------------------------------------------------------------------------ |
+| Invoices | Invoices · Ready to invoice · Direct-settled                                   |
+| Payments | Payments · Unapplied                                                           |
+| Payroll  | Batches · Driver statements · Balances · One-time charges · Scheduled payments |
+| Charges  | Scheduled · One-time                                                           |
+| Reports  | By authority · By week · By driver                                             |
+
+_**Charges and Payroll → Scheduled payments read the same table and are not the
+same screen**, which is the one place this structure could collapse into a
+duplicate. Charges is org-wide and every week — "who is not paying insurance",
+which needs no batch to answer. Payroll's tab is scoped to the week the page is
+showing: what will come off THIS run. A rule dormant until November appears on
+one and not the other, and that difference is the reason both exist._
+
+_**The batches grid carries a per-company breakdown row under each batch.** The
+batch is the organization's by ruling (Islom, 2026-09-11) and its money is not:
+settle together, report apart. The breakdown is an indented continuation of its
+parent row, never a separate grid — a reader comparing four authorities' shares
+of one week is comparing rows that have to be adjacent (rule 1)._
+
 _**Receivables folds into Invoices.** Aging is a view of the invoice list, not a
 second list of the same rows — §7.4 already makes a filter a URL, so "over 60
 days" is a chip rather than a page._
@@ -382,6 +406,74 @@ top rule, weight 600, aligned to its columns.
 - A filtered total and an unfiltered one must never render identically — if the
   filter removed nothing, N still states the count.
 - The whole row is clickable via a stretched-link `::after` on a real anchor — middle-click and keyboard both work. Interactive controls inside the row raise `z-index` as dead zones. _(pattern proven on the admin board)_
+
+#### 7.1.3 The grid contract — _added 2026-09-28_
+
+Every grid in Accounting carries the same seven controls, and a grid that is
+missing one is a grid that has to say which and why in `§6.2`'s table:
+
+**Filter · Search · Sortable headers · Columns chooser · Company filter · Export
+CSV · Footer (count + sum) · Pagination.**
+
+- **Every control serialises into the URL** except the columns chooser, which is
+  a per-user preference (below). One link reproduces what somebody is looking at,
+  including the page they are on — which is what makes "the total on my screen is
+  wrong" an answerable sentence.
+- **The footer totals the rows on the PAGE, and says which page.** `12 of 340`
+  and a sum. A footer that silently summed all 340 while showing 12 is the same
+  bug as §7.1.2's filter case, one control further out. Where the whole filtered
+  sum is worth having, it is a SECOND figure with its own words, never the same
+  number in the same place meaning something else.
+- **Pagination is a page size and a page number**, both in the URL, defaulting to
+  50 rows. Not infinite scroll: §1's reader is comparing, and a list whose length
+  they cannot state is a list they cannot finish reading.
+
+#### 7.1.4 Columns chooser — _added 2026-09-28_
+
+§7.1 has required this since Phase 1 for anything past nine columns, and never
+specified where the choice lives.
+
+- **Persisted per user per table**, in `UserPreference` under
+  `columns.<table>`. That namespace was written into `schema.prisma`'s own
+  comment before anything used it; this is the thing it was reserved for.
+- **A stored column that no longer exists is ignored, not an error.** A renamed
+  column must not empty somebody's grid — and a preference row is the one piece
+  of state that outlives every deploy.
+- **Hiding a column does not change the totals.** The sum is over rows, not over
+  what is visible; a column somebody hid is still money they owe or are owed.
+
+#### 7.1.5 Export CSV — _added 2026-09-28_
+
+- **The export is the rows the filter selected — every page of them, not the
+  page on screen.** The button sits beside a footer that says "12 of 340", so
+  exporting 12 would be the most plausible possible wrong answer.
+- **One definition of the rows and one of the filter, shared with the screen.**
+  The export re-runs the same reader and the same `applyList`; it does not carry
+  its own query. Two queries that are supposed to agree about money are two
+  queries that will not.
+- **Codes, not labels (§12).** Status values, load and invoice numbers and
+  authority ids export untranslated, because a CSV is read by a machine
+  downstream — and by an accountant who will paste it into something that does
+  not speak Russian.
+- **Money exports as a decimal figure with no currency symbol and no thousands
+  separator**, because the file is arithmetic input. `1234.56`.
+
+#### 7.1.6 Tabs over one grid — _added 2026-09-28_
+
+A page in Accounting is **tabs across the top and one grid below**. Modelled on
+the Salary page the office already knows.
+
+- **A tab is a different QUESTION about the same subject, never a filter.**
+  "Unapplied" is a chip; "Balances" is a tab. If a tab could be expressed as a
+  filter on the tab beside it, it is a chip and it belongs in the filter bar.
+- **The tab is in the URL** (`?tab=`), first tab default, and an unrecognised
+  value opens the first rather than erroring — a stale link should open.
+- **Each tab owns its own columns, sort, and column preference.** They are
+  different grids; sharing a `sort` between them would carry a column name into a
+  table that does not have it.
+- **The page's actions are top-right and belong to the PAGE, not the tab**, so
+  they do not move as somebody switches. An action that only makes sense on one
+  tab lives in that tab's own toolbar.
 
 ### 7.2 Status badge
 
