@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v6 — §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
+**Status:** v7 — §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -312,6 +312,26 @@ settle together, report apart. The breakdown is an indented continuation of its
 parent row, never a separate grid — a reader comparing four authorities' shares
 of one week is comparing rows that have to be adjacent (rule 1)._
 
+#### 6.2.1 Where Zebra's Accounting differs from Datatruck's, and why
+
+_Added 2026-09-28, against the four Salary and Invoice screenshots in
+`corpus/datatruck/ui/`. Zebra is modelled on that surface; these are the places
+it deliberately is not, recorded so that "it doesn't look like Datatruck" has an
+answer other than somebody's memory._
+
+| Datatruck                                                                                                                   | Zebra                                                            | Why                                                                                                                                                                                      |
+| --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Two sidebar groups** — Accounting (Invoice, Salary, Bill) and Payroll (Driver, Dispatcher, Vendor, Charges, Transactions) | **One**, Accounting, with five pages                             | The owner's spec of 2026-09-28 says one section. Recorded as a divergence because the artefact says otherwise and the next reader will notice.                                           |
+| **One batch per pay company** — `SB-000448` Dolphin and `SB-000447` RAM both cover Sep 13–19                                | **One batch for the organization**, with a per-company breakdown | Islom's ruling of 2026-09-11. This is the root of two other differences: it is why Datatruck needs a Pay company COLUMN, and why Zebra needs a breakdown ROW.                            |
+| **Pay company column** carries a real authority                                                                             | **`not recorded`**                                               | Nothing in `schema.prisma` holds a paying authority for a batch. Guessing — the largest share, say — would print a real company beside real money. Needs `SettlementBatch.payCompanyId`. |
+| **`POSTED` / `PARTIAL POSTED`** pills                                                                                       | **`DRAFT` / `FINAL` / `PAID`**                                   | `SettlementBatchStatus` has three values and no partial state. A fourth pill would be a status nothing can produce.                                                                      |
+| **Seven Salary tabs** (adds Salary report, Dispatcher salary)                                                               | **Five**                                                         | The spec names five. Dispatcher pay is not a thing Zebra settles at all.                                                                                                                 |
+| **`No Rows To Show`**                                                                                                       | **A written empty state with an action**                         | §10 and §14 — "No data available" is listed as an anti-pattern by name. This is the one place Zebra should NOT match the artefact.                                                       |
+| **Footer is a strip of named figures**, left-aligned below the grid                                                         | **Column-aligned sticky foot**                                   | §7.1.2. A sum belongs under the column it sums; a strip makes the reader match figure to column by name. The COUNT is kept in words, as Datatruck has it.                                |
+| **A filter funnel on every column header**                                                                                  | **One filter bar above the grid** (§7.4)                         | "Chips, not dropdown menus... never in a drawer." Per-column funnels are twelve hidden states; the bar's state is in the URL and can be sent to somebody.                                |
+| **Checkbox column, Delete, Change status**                                                                                  | **Not built**                                                    | §7.1 specifies bulk selection as a floating action bar over the table foot. The spec did not ask for it and no grid here has it yet — an honest gap rather than a decision.              |
+| **Breadcrumb** (`Accounting / Salary / Batches`)                                                                            | **Not built**                                                    | The shell has no breadcrumb anywhere; adding one to this section alone would be an inconsistency, and adding one everywhere is not this ruling.                                          |
+
 _**Receivables folds into Invoices.** Aging is a view of the invoice list, not a
 second list of the same rows — §7.4 already makes a filter a URL, so "over 60
 days" is a chip rather than a page._
@@ -397,10 +417,21 @@ same argument §7.4 makes for filters: a sorted view is a thing somebody sends.
 A table of money gets a **sticky foot**, `--z-surface-2`, a 1px `--z-border-strong`
 top rule, weight 600, aligned to its columns.
 
-- **It totals the rows shown, and says so.** A foot that silently totalled
-  everything while a filter was on would be the most expensive kind of wrong on
-  a financial screen. The leading cell reads `Total (N rows)` where N is what is
-  on screen, so the number is never ambiguous about its own scope.
+- **It totals every row the filter selected, and says how many.** The leading
+  cell reads `Total (N rows)`, where N is the size of the filtered set — not the
+  page. A foot that silently totalled everything while a filter was on would be
+  the most expensive kind of wrong on a financial screen; stating N is what stops
+  the figure being ambiguous about its own scope.
+
+  _Corrected 2026-09-28, from the artefact. This said "the rows SHOWN" and,
+  once pagination landed in §7.1.3, that meant the twenty rows on screen.
+  Datatruck's Salary batches grid shows `1-20 of 251` beside
+  `Batch total count: 251  Sum: $9,536,606.61` — the sum is over all 251. That is
+  also the useful answer: an accountant filtering to one authority's week wants
+  what the week costs, not what the first twenty rows of it cost. The page is
+  stated separately, by the pagination bar, so there is still exactly one sum and
+  its scope is still in words._
+
 - Only summable columns carry a figure. A status column's foot is empty, not a
   count of something nobody asked about.
 - A filtered total and an unfiltered one must never render identically — if the
@@ -419,11 +450,17 @@ CSV · Footer (count + sum) · Pagination.**
   a per-user preference (below). One link reproduces what somebody is looking at,
   including the page they are on — which is what makes "the total on my screen is
   wrong" an answerable sentence.
-- **The footer totals the rows on the PAGE, and says which page.** `12 of 340`
-  and a sum. A footer that silently summed all 340 while showing 12 is the same
-  bug as §7.1.2's filter case, one control further out. Where the whole filtered
-  sum is worth having, it is a SECOND figure with its own words, never the same
-  number in the same place meaning something else.
+- **The footer totals the FILTERED SET and the pagination bar states the page.**
+  `Total (251 rows)` with the sums in the foot, and `1–20 of 251` in the bar
+  below it. Two facts, two places, one sum.
+
+  _Corrected 2026-09-28, from the artefact — this said the footer totals the
+  page. Datatruck shows `1-20 of 251` and `Sum: $9,536,606.61` together, and the
+  sum is over all 251. The hazard the original sentence was written against is
+  real and is answered by SAYING N rather than by narrowing the sum: a figure
+  whose scope is printed next to it is not ambiguous, and a page-sized sum on a
+  financial screen is a number nobody asked for._
+
 - **Pagination is a page size and a page number**, both in the URL, defaulting to
   50 rows. Not infinite scroll: §1's reader is comparing, and a list whose length
   they cannot state is a list they cannot finish reading.
