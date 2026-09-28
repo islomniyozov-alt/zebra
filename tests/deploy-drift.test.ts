@@ -4,9 +4,12 @@ import { describe, expect, it } from 'vitest'
 // sites below rather than with a .d.ts nobody would keep in step.
 import {
   classify,
+  commitFromStamp,
   isMissingCredentials,
   looksLikeCommit,
+  stampFor,
   unreadableRefusal,
+  STAMP_PREFIX,
 } from '../scripts/deploy-drift-rules.mjs'
 import { credentialsFor, isProduction } from '../scripts/check-credentials.mjs'
 
@@ -357,5 +360,145 @@ describe('check-deploy-drift.mjs', () => {
     // The old `process.exit(0)` at the bottom is what this replaced. If one
     // comes back, the refusal above it is decoration.
     expect(source).not.toMatch(/\nprocess\.exit\(0\)/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// A SHORT SHA THAT IS ALSO A NUMBER. Owner's ruling, 2026-09-28.
+//
+// Production deployed `9838e03` and `check:drift` read it back as `9838000` —
+// the sha parsed as scientific notation, 9838 × 10³, because a bare
+// `--message 9838e03` is a numeric-looking CLI argument and is coerced before it
+// reaches Cloudflare. Nothing on the reading side can undo that: `9838000` could
+// have been `9838e03`, `98380e02` or `983800e01`.
+//
+// IT FAILED LOUDLY, which is why it cost an hour and not a week. But it left the
+// one instrument that says where production stands unable to say it.
+//
+// THE FIX IS THE PREFIX, and these are the tests that would have caught it.
+// ---------------------------------------------------------------------------
+
+describe('a stamp can never parse as a number', () => {
+  // THE SHA THAT BROKE IT, and the shape of the class: `^\d+e\d+$`.
+  const NUMERIC_SHA = '9838e03'
+
+  it('the sha alone IS a number, which is the whole problem', () => {
+    // Stated in the test rather than trusted: this is the premise everything
+    // below rests on, and it is one line to check.
+    expect(Number(NUMERIC_SHA)).toBe(9_838_000)
+    expect(Number.isNaN(Number(NUMERIC_SHA))).toBe(false)
+  })
+
+  it('the STAMPED form is not', () => {
+    const stamp = stampFor(NUMERIC_SHA, false)
+    expect(stamp).toBe('sha-9838e03')
+    // NaN is the assertion: any parser that tries to make this a number fails,
+    // which is exactly what the CLI argument needed.
+    expect(Number.isNaN(Number(stamp))).toBe(true)
+  })
+
+  it('and the reader gets the sha back out of it', () => {
+    expect(commitFromStamp(stampFor(NUMERIC_SHA, false))).toBe(NUMERIC_SHA)
+  })
+
+  it('carries +dirty through the prefix', () => {
+    expect(stampFor(NUMERIC_SHA, true)).toBe('sha-9838e03+dirty')
+    expect(commitFromStamp('sha-9838e03+dirty')).toBe('9838e03+dirty')
+  })
+
+  // ── EVERY SHORT SHA STAMPS TO SOMETHING NON-NUMERIC ─────────────────────
+  //
+  // Not just the one that bit. A sha is seven hex characters, so the numeric
+  // ones are those matching `^\d+e\d+$`; this walks a handful of that shape
+  // plus ordinary ones and asserts the property for all of them.
+  it.each([
+    '9838e03',
+    '1234e56',
+    '123e456',
+    '0e00000',
+    '2819d73',
+    'abc1234',
+    '0123456789abcdef0123456789abcdef01234567',
+  ])('%s stamps to a non-numeric string', (sha) => {
+    expect(Number.isNaN(Number(stampFor(sha, false)))).toBe(true)
+    expect(commitFromStamp(stampFor(sha, false))).toBe(sha)
+  })
+
+  // ── THE LEGACY BARE FORM STILL READS ────────────────────────────────────
+  //
+  // Every version already deployed carries an unprefixed sha. A reader that only
+  // understood the new shape would call the whole deployment history unstamped
+  // the moment this shipped — which is the loudest possible way to fix a quiet
+  // bug and still be wrong.
+  it('still reads a bare sha from before the prefix existed', () => {
+    expect(commitFromStamp('2819d73')).toBe('2819d73')
+    expect(commitFromStamp('9838e03')).toBe('9838e03')
+    expect(looksLikeCommit('2819d73')).toBe(true)
+  })
+
+  // A COERCED NUMBER IS NOT RECOVERABLE AND IS NOT PRETENDED TO BE. `9838000`
+  // is seven hex digits, so it reads as a commit and git then says it is not one
+  // in this clone — loud, which is what happened and what should happen.
+  it('hands a coerced number on rather than guessing what it was', () => {
+    expect(commitFromStamp('9838000')).toBe('9838000')
+    expect(commitFromStamp('9838000')).not.toBe('9838e03')
+  })
+
+  it('refuses a message that names no commit at all', () => {
+    for (const message of ['', null, 'Updated secrets via dashboard', 'sha-']) {
+      expect(commitFromStamp(message)).toBeNull()
+      expect(looksLikeCommit(message)).toBe(false)
+    }
+  })
+
+  // ── AND `classify` COMPARES THE STRIPPED COMMIT ─────────────────────────
+  //
+  // The end of the chain: a prefixed stamp of HEAD has to read as `current`, or
+  // every deploy from now on would report itself behind.
+  it('calls a prefixed stamp of HEAD current', () => {
+    expect(
+      classify({
+        label: 'production',
+        deployedMessage: stampFor(NUMERIC_SHA, false),
+        head: NUMERIC_SHA,
+        isKnownCommit: true,
+        changedSourceFiles: [],
+      }),
+    ).toEqual({ state: 'current', loud: false })
+  })
+
+  it('and still measures a prefixed stamp that IS behind', () => {
+    const verdict = classify({
+      label: 'production',
+      deployedMessage: stampFor('2819d73', false),
+      head: '9838e03',
+      isKnownCommit: true,
+      changedSourceFiles: ['src/lib/this-week.ts'],
+    })
+    expect(verdict.state).toBe('behind-source')
+    expect(verdict.loud).toBe(true)
+  })
+
+  it('states the prefix once, where both sides read it', () => {
+    expect(STAMP_PREFIX).toBe('sha-')
+    expect(stampFor('abc1234', false).startsWith(STAMP_PREFIX)).toBe(true)
+  })
+
+  // ── AND THE DEPLOY DOES NOT BUILD THE MESSAGE ITSELF ────────────────────
+  //
+  // The rules module can be perfect and the bug still ship: what reached
+  // Cloudflare on 2026-09-28 was a string `deploy.mjs` composed on its own line.
+  // A prefix agreed by two files that each spell it is the same class of bug one
+  // layer up, so this reads the deploy's source and checks it asks.
+  //
+  // SOURCE-GREPPED because `deploy.mjs` shells out to git, wrangler and the
+  // integration gate on import — the rules module exists precisely so a test can
+  // import something that does not.
+  it('has the deploy stamp through stampFor rather than composing it', () => {
+    const source = readFileSync('scripts/deploy.mjs', 'utf8')
+    expect(source).toContain("from './deploy-drift-rules.mjs'")
+    expect(source).toContain('stampFor(sha, dirty)')
+    // THE SHAPE THAT WAS THERE BEFORE, asserted absent by its own text.
+    expect(source).not.toContain('`${sha}+dirty`')
   })
 })

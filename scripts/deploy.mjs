@@ -9,6 +9,7 @@ import {
   readReceipt,
   workingCopy,
 } from './integration-receipt.mjs'
+import { stampFor } from './deploy-drift-rules.mjs'
 
 // ---------------------------------------------------------------------------
 // DEPLOY, WITH THE COMMIT STAMPED ON THE VERSION.
@@ -50,7 +51,10 @@ const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim()
 
 const sha = git('rev-parse', '--short', 'HEAD')
 const dirty = git('status', '--porcelain').length > 0
-const message = dirty ? `${sha}+dirty` : sha
+// THROUGH `stampFor`, NOT BUILT HERE. A bare sha on the command line can be a
+// NUMBER — `9838e03` became `9838000` on 2026-09-28 and `check:drift` could not
+// read production back. See `STAMP_PREFIX` for the whole of it.
+const message = stampFor(sha, dirty)
 
 console.log(`Deploying ${message} to ${deployTarget}.`)
 if (dirty) {
