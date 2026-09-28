@@ -25,7 +25,16 @@ interface Props {
     description: string
     from: string
   }
-  errorFor: (key: string) => string
+  /**
+   * Every refusal sentence this form can be handed, keyed by the message key the
+   * action returns — ALREADY TRANSLATED.
+   *
+   * AN OBJECT, NOT A FUNCTION. A closure over `t` cannot be serialised across the
+   * server/client boundary: React refuses it and the page 500s. That is how the
+   * first version of this shipped past typecheck, lint and 2,418 tests, and it
+   * was found by photographing the screen.
+   */
+  errors: Record<string, string>
 }
 
 /**
@@ -42,7 +51,7 @@ interface Props {
  * open above the list would cost eight rows of comparison on a 1080p screen, and
  * comparison is what the list is for.
  */
-export function AddCharge({ drivers, types, labels, errorFor }: Props) {
+export function AddCharge({ drivers, types, labels, errors }: Props) {
   const [open, setOpen] = useState(false)
   const [state, add, pending] = useActionState(addChargeAction, CHARGE_INITIAL)
   const [cadence, setCadence] = useState('WEEKLY')
@@ -90,7 +99,7 @@ export function AddCharge({ drivers, types, labels, errorFor }: Props) {
       <Input
         name="amount"
         label={labels.amount}
-        dir="ltr"
+        inputMode="decimal"
         className="w-[120px]"
       />
       {/* Only where the cadence trues up to a month's total. Offering it on a
@@ -99,14 +108,14 @@ export function AddCharge({ drivers, types, labels, errorFor }: Props) {
         <Input
           name="monthlyTotal"
           label={labels.monthlyTotal}
-          dir="ltr"
+          inputMode="decimal"
           className="w-[120px]"
         />
       ) : null}
       <Input
         name="target"
         label={labels.target}
-        dir="ltr"
+        inputMode="decimal"
         className="w-[120px]"
       />
       <Input
@@ -128,7 +137,7 @@ export function AddCharge({ drivers, types, labels, errorFor }: Props) {
       </Button>
       {state.error ? (
         <p className="w-full text-xs text-danger" role="alert">
-          {errorFor(state.error)}
+          {errors[state.error] ?? state.error}
         </p>
       ) : null}
     </form>

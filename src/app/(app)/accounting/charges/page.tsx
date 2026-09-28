@@ -145,10 +145,10 @@ export default async function ChargesPage({
   const day = (value: Date | null) =>
     value === null ? '—' : value.toISOString().slice(0, 10)
 
-  const errorFor = (key: string) => t(key as MessageKey)
-  // Every error sentence the two client forms can be handed, translated here —
-  // a client component cannot call `t`.
-  void ERROR_KEYS
+  // EVERY REFUSAL SENTENCE, TRANSLATED HERE. A client component cannot call `t`,
+  // and a function that closes over it cannot be serialised across the boundary —
+  // which is what the first version of this page did, and why it 500d.
+  const errors = Object.fromEntries(ERROR_KEYS.map((key) => [key, t(key)]))
 
   const columns: Column<ChargeRow>[] = [
     {
@@ -262,7 +262,7 @@ export default async function ChargesPage({
                   target: t('charges.target'),
                   description: t('charges.description'),
                 }}
-                errorFor={errorFor}
+                errors={errors}
               />
             ),
           } satisfies Column<ChargeRow>,
@@ -298,7 +298,7 @@ export default async function ChargesPage({
                 description: t('charges.description'),
                 from: t('charges.from'),
               }}
-              errorFor={errorFor}
+              errors={errors}
             />
           ) : null
         }

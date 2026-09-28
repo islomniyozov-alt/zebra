@@ -26,8 +26,16 @@ interface Props {
     target: string
     description: string
   }
-  /** Already translated by the page — this component does no i18n. */
-  errorFor: (key: string) => string
+  /**
+   * Every refusal sentence this form can be handed, keyed by the message key the
+   * action returns — ALREADY TRANSLATED.
+   *
+   * AN OBJECT, NOT A FUNCTION. A closure over `t` cannot be serialised across
+   * the server/client boundary: React refuses it and the page 500s. That is how
+   * the first version of this shipped past typecheck, lint and 2,418 tests, and
+   * it was found by photographing the screen.
+   */
+  errors: Record<string, string>
 }
 
 /**
@@ -63,7 +71,7 @@ export function ChargeRowForm({
   description,
   splitsMonthly,
   labels,
-  errorFor,
+  errors,
 }: Props) {
   const [open, setOpen] = useState<'none' | 'edit' | 'stop'>('none')
   const [editState, edit, editing] = useActionState(
@@ -93,7 +101,7 @@ export function ChargeRowForm({
         </Button>
         {error ? (
           <span className="text-xs text-danger" role="alert">
-            {errorFor(error)}
+            {errors[error] ?? error}
           </span>
         ) : null}
       </div>
@@ -122,7 +130,7 @@ export function ChargeRowForm({
         </Button>
         {error ? (
           <p className="w-full text-xs text-danger" role="alert">
-            {errorFor(error)}
+            {errors[error] ?? error}
           </p>
         ) : null}
       </form>
@@ -135,7 +143,7 @@ export function ChargeRowForm({
         name="amount"
         label={labels.amount}
         defaultValue={amount}
-        dir="ltr"
+        inputMode="decimal"
         className="w-[110px]"
       />
       {/* THE MONTH'S TOTAL ONLY WHERE THE CADENCE HAS ONE. Sent on a weekly rule
@@ -146,7 +154,7 @@ export function ChargeRowForm({
           name="monthlyTotal"
           label={labels.monthlyTotal}
           defaultValue={monthlyTotal}
-          dir="ltr"
+          inputMode="decimal"
           className="w-[110px]"
         />
       ) : null}
@@ -154,7 +162,7 @@ export function ChargeRowForm({
         name="target"
         label={labels.target}
         defaultValue={target}
-        dir="ltr"
+        inputMode="decimal"
         className="w-[110px]"
       />
       <Input
@@ -171,7 +179,7 @@ export function ChargeRowForm({
       </Button>
       {error ? (
         <p className="w-full text-xs text-danger" role="alert">
-          {errorFor(error)}
+          {errors[error] ?? error}
         </p>
       ) : null}
     </form>
