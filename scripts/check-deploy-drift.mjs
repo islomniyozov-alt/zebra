@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import {
   classify,
+  commitFromStamp,
   isMissingCredentials,
   looksLikeCommit,
   unreadableRefusal,
@@ -266,8 +267,22 @@ for (const environment of ENVIRONMENTS) {
     ? `config version atop the last real deploy ${configAtop}`
     : deployedMessage
 
-  const commit = deployedMessage.replace('+dirty', '')
+  // THROUGH `commitFromStamp`, WHICH IS THE WHOLE POINT OF THE PREFIX.
+  //
+  // This line was left behind when the stamp gained one, and the first prefixed
+  // deploy printed `fatal: Not a valid object name sha-6b4d7dc^{commit}` from
+  // the `cat-file` below. It still SAID "matches HEAD", because `classify`
+  // compares strings and production happened to equal HEAD — so the defect was
+  // invisible in the only case where it does no harm.
+  //
+  // ONE COMMIT BEHIND AND IT GOES QUIET. `isKnownCommit: false` classifies as
+  // `unknown-commit`, and `unknown-commit` is not loud; `changedSourceFiles`
+  // comes back empty for the same reason. The instrument that exists to say
+  // production is behind would have stopped being able to say it, which is the
+  // bug the prefix was fixing, one layer further out.
+  const commit = (commitFromStamp(deployedMessage) ?? '').replace('+dirty', '')
   const isKnownCommit = (() => {
+    if (!commit) return false
     try {
       git('cat-file', '-e', `${commit}^{commit}`)
       return true

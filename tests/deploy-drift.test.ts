@@ -355,6 +355,31 @@ describe('check-deploy-drift.mjs', () => {
     ).toHaveLength(1)
   })
 
+  // ── THE READER STRIPS THE PREFIX BEFORE IT TALKS TO GIT ─────────────────
+  //
+  // `classify` was taught the prefix and THIS SCRIPT WAS NOT, so the first
+  // prefixed deploy printed `fatal: Not a valid object name
+  // sha-6b4d7dc^{commit}` while reporting "matches HEAD" — correct by accident,
+  // because production equalled HEAD and the string comparison short-circuits.
+  //
+  // ONE COMMIT BEHIND IS WHERE IT COSTS SOMETHING: a failed `cat-file` means
+  // `isKnownCommit: false`, which classifies as `unknown-commit`, which is
+  // QUIET. Source-grepped rather than called, for the reason the whole rules
+  // module exists — this script shells out to git and wrangler on import.
+  it('derives the commit through commitFromStamp, not by hand', () => {
+    expect(source).toContain('commitFromStamp')
+    expect(source).toContain("from './deploy-drift-rules.mjs'")
+    // The line this replaced. A `+dirty` strip that does not go through the
+    // parser is a second place that has to know the format.
+    expect(source).not.toContain("deployedMessage.replace('+dirty', '')")
+  })
+
+  it('asks git nothing when the message named no commit', () => {
+    // `commitFromStamp` returns null for a config-version message, and
+    // `cat-file -e ^{commit}` on an empty string is a fatal, not a false.
+    expect(source).toContain('if (!commit) return false')
+  })
+
   it('takes its exit code from the refusal, not from a literal 0', () => {
     expect(source).toContain('process.exit(refusal.exitCode)')
     // The old `process.exit(0)` at the bottom is what this replaced. If one
