@@ -8,45 +8,48 @@ import {
   listCharges,
   type ChargeRow,
 } from '@/lib/driver-deductions'
+import { readGridColumns } from '@/lib/grid-columns'
+import { applyList, sumCents, type RawParams } from '@/lib/list-view'
 import {
-  applyList,
-  activeSort,
-  readListParams,
-  sortHref,
-  sumCents,
-  totalsLabel,
-  type ListShape,
-  type RawParams,
-} from '@/lib/list-view'
+  oneTimeShape,
+  readOneTimeCharges,
+  scheduledShape,
+  type OneTimeGridRow,
+} from '@/lib/accounting-grids'
 import { Table, type Column } from '@/components/ui/Table'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterBar } from '@/components/ui/FilterBar'
+import { Tabs } from '@/components/ui/Tabs'
 import { CompanyChips } from '../CompanyChips'
 import { AccountingHeader } from '../AccountingHeader'
+import { GridToolbar } from '../GridToolbar'
+import { GridFooterNav } from '../GridFooterNav'
+import { gridView, keepColumns, pagedFooterLabel } from '../grid-page'
 import { AddCharge } from './AddCharge'
 import { ChargeRowForm } from './ChargeRowForm'
 import type { MessageKey } from '@/lib/i18n'
 
-// ACCOUNTING → CHARGES (§6.2): what comes off cheques every week, across drivers.
+// ACCOUNTING → CHARGES (§6.2, §7.1.6): two tabs over one grid.
 //
-// ── THE QUESTION NO OTHER SCREEN COULD ANSWER ─────────────────────────────
+//   Scheduled  standing rules — what comes off every week, across every driver
+//   One-time   single lines somebody added to one week
 //
-// The driver page's editor answers "what comes off THIS driver's cheque", which
-// is the question you have when you are already looking at a driver. It cannot
-// answer the one the office asks on a Monday: "who is not paying insurance".
-// That needed 164 driver pages, so nobody asked it — and the four replayed weeks
-// on dev showed every statement's deductions against Zebra's $0.00, because dev
-// held no recurring charges at all and no screen made that visible.
+// ── THIS PAGE AND PAYROLL → SCHEDULED PAYMENTS ARE NOT THE SAME SCREEN ────
 //
-// THE STRIPE MEANS IN FORCE TODAY. A rule scheduled to start next month and a
-// rule that ended in June are both "not in force" and neither is an error, so the
-// muted bar says dormant rather than wrong — and the word is in the row (rule 5).
+// They read the same table, which is the one place this structure could have
+// collapsed into a duplicate, so §6.2 states the difference and so does this:
 //
-// AMOUNTS ARE THE WEEKLY INSTALMENT. A monthly-split rule shows `$450` with its
-// month's total beside it, which is how the statements print it — `$1800/$450` —
-// and summing the instalments is the figure that means something: what one week
-// of charges is worth.
+//   HERE       org-wide and every week. "Who is not paying insurance", which is
+//              answerable with no batch and no week selected.
+//   PAYROLL    scoped to the week that page is showing — what comes off THIS run.
+//
+// A rule dormant until November is on this screen and not on that one. Owner's
+// ruling, 2026-09-28, chosen over dropping one of them.
+//
+// THE STRIPE MEANS IN FORCE TODAY. A rule scheduled to start next month and one
+// that ended in June are both dormant and neither is an error, so the muted bar
+// says dormant rather than wrong — and the word is in the row (rule 5).
 
 const ERROR_KEYS: MessageKey[] = [
   'deduction.error.driverNotFound',
@@ -58,6 +61,31 @@ const ERROR_KEYS: MessageKey[] = [
   'deduction.error.overlaps',
 ]
 
+const TABS = ['scheduled', 'oneTime'] as const
+type Tab = (typeof TABS)[number]
+
+const SCHEDULED_COLUMNS: readonly string[] = [
+  'driver',
+  'type',
+  'amount',
+  'target',
+  'from',
+  'to',
+  'live',
+  'edit',
+]
+const ONE_TIME_COLUMNS: readonly string[] = [
+  'driver',
+  'type',
+  'description',
+  'amount',
+  'appliesOn',
+  'load',
+  'settled',
+]
+
+const PATH = '/accounting/charges'
+
 export default async function ChargesPage({
   searchParams,
 }: {
@@ -67,68 +95,300 @@ export default async function ChargesPage({
   // `maySetPay`). `driver.pay:read` is MONEY_READ, so ACCOUNTING and MANAGER get
   // the list; `driver.pay:update` is OWNER and ADMIN only, so they alone get the
   // Add button and the row editors.
-  //
-  // NOT gated on `settlement`: a role that may read a batch total does not
-  // thereby get to see one driver's insurance instalment.
   if (!(await currentUserCan('read', 'driver.pay'))) notFound()
   const mayEdit = await currentUserCan('update', 'driver.pay')
 
   const raw = await searchParams
-  const params = readListParams(raw)
   const { t, locale } = await getLocaleContext()
 
+  const wanted = typeof raw.tab === 'string' ? raw.tab : null
+  const tab: Tab = (TABS as readonly string[]).includes(wanted ?? '')
+    ? (wanted as Tab)
+    : 'scheduled'
+
+  const search = new URLSearchParams(
+    Object.entries(raw).flatMap(([key, value]) =>
+      value === undefined
+        ? []
+        : [
+            [key, Array.isArray(value) ? (value[0] ?? '') : value] as [
+              string,
+              string,
+            ],
+          ],
+    ),
+  )
+
   const data = await withCurrentOrg(
-    'update',
+    'read',
     'driver.pay',
     async (tx, session) => {
       const scope = companyScopeFilter(session.companyScopes)
-      const [charges, drivers, companies] = await Promise.all([
-        listCharges(tx, scope),
-        tx.driver.findMany({
-          where: { deletedAt: null, ...scope },
-          orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
-          select: { id: true, firstName: true, lastName: true },
-        }),
-        // `companyIdScopeFilter`, NOT `companyScopeFilter`. The second is
-        // `{ companyId: ... }`, which is not a valid `CompanyWhereInput` — see
-        // tenancy.ts: it compiles, and 500s for the first person whose membership
-        // is scoped to one authority. And Company retires with `isActive`.
-        tx.company.findMany({
-          where: {
-            isActive: true,
-            ...companyIdScopeFilter(session.companyScopes),
-          },
-          orderBy: { name: 'asc' },
-          select: { id: true, name: true },
-        }),
-      ])
-      return { charges, drivers, companies }
+      const [charges, oneTime, drivers, companies, columns] = await Promise.all(
+        [
+          listCharges(tx, scope),
+          readOneTimeCharges(tx, scope),
+          tx.driver.findMany({
+            where: { deletedAt: null, ...scope },
+            orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+            select: { id: true, firstName: true, lastName: true },
+          }),
+          tx.company.findMany({
+            where: {
+              isActive: true,
+              ...companyIdScopeFilter(session.companyScopes),
+            },
+            orderBy: { name: 'asc' },
+            select: { id: true, name: true },
+          }),
+          readGridColumns(
+            tx,
+            session.userId,
+            tab === 'scheduled' ? 'charges.scheduled' : 'charges.oneTime',
+            tab === 'scheduled' ? SCHEDULED_COLUMNS : ONE_TIME_COLUMNS,
+          ),
+        ],
+      )
+      return { charges, oneTime, drivers, companies, columns }
     },
   )
 
-  const shape: ListShape<ChargeRow> = {
-    searchText: (row) =>
-      `${row.driverName} ${row.type} ${row.description ?? ''} ${row.companyName}`,
-    // §7.4.1 — STARTS is the date bounded. "Which charges started in September"
-    // is the question a range answers here; `effectiveTo` is mostly null and a
-    // range over it would exclude every live rule.
-    dateOf: (row) => row.effectiveFrom,
-    companyIdOf: (row) => row.companyId,
-    sorts: {
-      driver: (row) => row.driverName,
-      type: (row) => row.type,
-      amount: (row) => row.amountCents,
-      cadence: (row) => row.cadence,
-      target: (row) => row.targetCents,
-      from: (row) => row.effectiveFrom.getTime(),
-      to: (row) => row.effectiveTo?.getTime() ?? null,
-    },
-    defaultSort: 'driver',
+  const money = (cents: number) => (
+    <span className="font-mono tabular-nums">{formatCents(cents, locale)}</span>
+  )
+  const day = (value: Date | null) =>
+    value === null ? '—' : value.toISOString().slice(0, 10)
+  const errors = Object.fromEntries(ERROR_KEYS.map((key) => [key, t(key)]))
+  const gridErrors = {
+    'grid.columns.errorEmpty': t('grid.columns.errorEmpty'),
+    'grid.columns.errorGrid': t('grid.columns.errorGrid'),
+  }
+  const toolbarLabels = {
+    export: t('grid.export'),
+    columns: t('grid.columns'),
+    apply: t('grid.columns.apply'),
+    cancel: t('grid.columns.cancel'),
+    firstLocked: t('grid.columns.firstLocked'),
+  }
+  const footerLabels = {
+    of: t('grid.of'),
+    previous: t('grid.previous'),
+    next: t('grid.next'),
+    perPage: t('grid.perPage'),
   }
 
+  const tabHref = (key: string) => {
+    const next = new URLSearchParams(search)
+    next.set('tab', key)
+    next.delete('sort')
+    next.delete('dir')
+    next.delete('page')
+    next.delete('type')
+    next.delete('live')
+    return `${PATH}?${next}`
+  }
+
+  const header = (
+    <>
+      <AccountingHeader
+        title={t('accounting.charges.title')}
+        stripeMeans={t('accounting.charges.stripe')}
+        action={
+          mayEdit && tab === 'scheduled' ? (
+            <AddCharge
+              drivers={data.drivers.map((driver) => ({
+                id: driver.id,
+                name: `${driver.lastName}, ${driver.firstName}`,
+              }))}
+              types={DEDUCTION_TYPES}
+              labels={{
+                add: t('charges.add'),
+                cancel: t('charges.cancel'),
+                save: t('charges.save'),
+                driver: t('charges.driver'),
+                type: t('charges.type'),
+                cadence: t('charges.cadence'),
+                weekly: t('charges.cadenceWeekly'),
+                monthlySplit: t('charges.cadenceMonthly'),
+                amount: t('charges.weekly'),
+                monthlyTotal: t('charges.monthlyTotal'),
+                target: t('charges.target'),
+                description: t('charges.description'),
+                from: t('charges.from'),
+              }}
+              errors={errors}
+            />
+          ) : null
+        }
+      />
+      <Tabs
+        tabs={[
+          {
+            key: 'scheduled',
+            label: t('charges.tab.scheduled'),
+            count: data.charges.length,
+          },
+          {
+            key: 'oneTime',
+            label: t('charges.tab.oneTime'),
+            count: data.oneTime.length,
+          },
+        ]}
+        active={tab}
+        hrefFor={tabHref}
+        label={t('grid.tabs')}
+      />
+    </>
+  )
+
+  // ── ONE-TIME CHARGES ─────────────────────────────────────────────────────
+  if (tab === 'oneTime') {
+    const view = gridView(data.oneTime, raw, oneTimeShape, applyList)
+    const columns: Column<OneTimeGridRow>[] = [
+      {
+        key: 'driver',
+        header: t('charges.driver'),
+        sortable: true,
+        render: (row) => row.driverName,
+      },
+      {
+        key: 'type',
+        header: t('charges.type'),
+        sortable: true,
+        render: (row) => row.type,
+      },
+      {
+        key: 'description',
+        header: t('charges.description'),
+        truncate: true,
+        sortable: true,
+        render: (row) => row.description,
+      },
+      {
+        key: 'amount',
+        header: t('batches.amount'),
+        align: 'end',
+        sortable: true,
+        // SIGNED. §8: a negative figure takes a leading minus and the danger
+        // hue, never parentheses — dispatchers are not accountants.
+        render: (row) => (
+          <span
+            className={`font-mono tabular-nums ${row.amountCents < 0 ? 'text-danger' : ''}`}
+          >
+            {formatCents(row.amountCents, locale)}
+          </span>
+        ),
+        foot: (shown) => money(sumCents(shown, (row) => row.amountCents)),
+      },
+      {
+        key: 'appliesOn',
+        header: t('oneTime.appliesOn'),
+        sortable: true,
+        render: (row) => (
+          <span className="font-mono text-xs" dir="ltr">
+            {day(row.appliesOn)}
+          </span>
+        ),
+      },
+      {
+        key: 'load',
+        header: t('oneTime.load'),
+        render: (row) =>
+          row.loadNumber === null ? (
+            <span className="text-ink-3">—</span>
+          ) : (
+            <span className="z-identifier font-mono text-xs" dir="ltr">
+              {row.loadNumber}
+            </span>
+          ),
+      },
+      {
+        key: 'settled',
+        header: t('oneTime.settled'),
+        sortable: true,
+        render: (row) => (
+          <StatusBadge
+            tone={row.settledAt ? 'success' : 'warning'}
+            label={row.settledAt ? t('oneTime.settled') : t('oneTime.pending')}
+          />
+        ),
+      },
+    ]
+
+    return (
+      <>
+        {header}
+        <FilterBar
+          groups={[]}
+          search={{
+            param: 'q',
+            label: t('accounting.search'),
+            placeholder: t('accounting.charges.searchHint'),
+          }}
+          range={{
+            label: t('oneTime.appliesOn'),
+            fromLabel: t('accounting.from'),
+            toLabel: t('accounting.to'),
+          }}
+          clearLabel={t('filter.clear')}
+          moreLabel={t('filter.more')}
+        />
+        <div className="flex items-center justify-end gap-z2 border-b border-border bg-surface px-gutter py-z2">
+          <GridToolbar
+            grid="charges.oneTime"
+            columns={columns.map((column) => ({
+              key: column.key,
+              header: column.header,
+            }))}
+            visible={data.columns}
+            search={search}
+            labels={toolbarLabels}
+            errors={gridErrors}
+          />
+        </div>
+        <Table
+          columns={keepColumns(columns, data.columns)}
+          rows={view.paged.rows}
+          footRows={view.filtered}
+          rowKey={(row) => row.id}
+          rowHref={(row) => `/drivers/${row.driverId}`}
+          stripeTone={(row) => (row.settledAt ? 'success' : 'warning')}
+          caption={t('charges.tab.oneTime')}
+          sort={{
+            key: view.sort.key,
+            dir: view.sort.dir,
+            hrefFor: view.sortFor(PATH),
+            label: t('accounting.sortBy'),
+          }}
+          totals={{
+            label: pagedFooterLabel(
+              t('accounting.total'),
+              t('grid.rows'),
+              view.paged,
+            ),
+          }}
+          empty={
+            <EmptyState
+              title={t('oneTime.empty')}
+              body={t('oneTime.emptyHint')}
+            />
+          }
+        />
+        <GridFooterNav
+          paged={view.paged}
+          per={view.params.per}
+          path={PATH}
+          search={search}
+          hrefForPage={view.hrefForPage(PATH)}
+          labels={footerLabels}
+        />
+      </>
+    )
+  }
+
+  // ── SCHEDULED (standing rules) ───────────────────────────────────────────
   const typeFilter = typeof raw.type === 'string' ? raw.type : null
   const liveFilter = typeof raw.live === 'string' ? raw.live : null
-
   const narrowed = data.charges.filter((row) => {
     if (typeFilter !== null && row.type !== typeFilter) return false
     if (liveFilter === 'yes' && !row.inForceToday) return false
@@ -136,19 +396,7 @@ export default async function ChargesPage({
     return true
   })
 
-  const rows = applyList(narrowed, params, shape)
-  const current = activeSort(params, shape)
-
-  const money = (cents: number) => (
-    <span className="font-mono tabular-nums">{formatCents(cents, locale)}</span>
-  )
-  const day = (value: Date | null) =>
-    value === null ? '—' : value.toISOString().slice(0, 10)
-
-  // EVERY REFUSAL SENTENCE, TRANSLATED HERE. A client component cannot call `t`,
-  // and a function that closes over it cannot be serialised across the boundary —
-  // which is what the first version of this page did, and why it 500d.
-  const errors = Object.fromEntries(ERROR_KEYS.map((key) => [key, t(key)]))
+  const view = gridView(narrowed, raw, scheduledShape, applyList)
 
   const columns: Column<ChargeRow>[] = [
     {
@@ -173,7 +421,7 @@ export default async function ChargesPage({
           {money(row.amountCents)}
           {/* `$1800/$450` is how the statements print a monthly split. The
            * month's total is context for the instalment, not a second figure to
-           * add — so it is dimmer and smaller, never in the total. */}
+           * add — so it is dimmer and smaller, and never in the total. */}
           {row.monthlyTotalCents !== null ? (
             <span className="font-mono text-xs text-ink-3">
               /{formatCents(row.monthlyTotalCents, locale)}
@@ -272,38 +520,7 @@ export default async function ChargesPage({
 
   return (
     <>
-      <AccountingHeader
-        title={t('accounting.charges.title')}
-        stripeMeans={t('accounting.charges.stripe')}
-        action={
-          mayEdit ? (
-            <AddCharge
-              drivers={data.drivers.map((driver) => ({
-                id: driver.id,
-                name: `${driver.lastName}, ${driver.firstName}`,
-              }))}
-              types={DEDUCTION_TYPES}
-              labels={{
-                add: t('charges.add'),
-                cancel: t('charges.cancel'),
-                save: t('charges.save'),
-                driver: t('charges.driver'),
-                type: t('charges.type'),
-                cadence: t('charges.cadence'),
-                weekly: t('charges.cadenceWeekly'),
-                monthlySplit: t('charges.cadenceMonthly'),
-                amount: t('charges.weekly'),
-                monthlyTotal: t('charges.monthlyTotal'),
-                target: t('charges.target'),
-                description: t('charges.description'),
-                from: t('charges.from'),
-              }}
-              errors={errors}
-            />
-          ) : null
-        }
-      />
-
+      {header}
       <FilterBar
         groups={[
           {
@@ -345,33 +562,45 @@ export default async function ChargesPage({
         clearLabel={t('filter.clear')}
         moreLabel={t('filter.more')}
       />
-
-      <CompanyChips
-        companies={data.companies}
-        label={t('accounting.company')}
-        allLabel={t('accounting.allCompanies')}
-      />
-
+      <div className="flex items-center justify-between gap-z2 border-b border-border bg-surface px-gutter py-z2">
+        <CompanyChips
+          companies={data.companies}
+          label={t('accounting.company')}
+          allLabel={t('accounting.allCompanies')}
+        />
+        <GridToolbar
+          grid="charges.scheduled"
+          columns={columns.map((column) => ({
+            key: column.key,
+            header: column.header,
+          }))}
+          visible={data.columns}
+          search={search}
+          labels={toolbarLabels}
+          errors={gridErrors}
+        />
+      </div>
       <Table
-        columns={columns}
-        rows={rows}
+        columns={keepColumns(columns, data.columns)}
+        rows={view.paged.rows}
+        footRows={view.filtered}
         rowKey={(row) => row.id}
         // NO `rowHref`. §7.1 makes the whole row a link where there is a detail
         // page to open; this row's detail IS the row, and the editor inside it
         // would sit under a stretched link that swallowed its buttons.
         stripeTone={(row) => (row.inForceToday ? 'success' : 'muted')}
-        caption={t('accounting.charges.title')}
+        caption={t('charges.tab.scheduled')}
         sort={{
-          key: current.key,
-          dir: current.dir,
-          hrefFor: (key) => sortHref('/accounting/charges', raw, key, current),
+          key: view.sort.key,
+          dir: view.sort.dir,
+          hrefFor: view.sortFor(PATH),
           label: t('accounting.sortBy'),
         }}
         totals={{
-          label: totalsLabel(
+          label: pagedFooterLabel(
             t('accounting.weeklyTotal'),
-            rows.length,
-            t('accounting.rows'),
+            t('grid.rows'),
+            view.paged,
           ),
         }}
         empty={
@@ -380,6 +609,14 @@ export default async function ChargesPage({
             body={t('accounting.charges.emptyHint')}
           />
         }
+      />
+      <GridFooterNav
+        paged={view.paged}
+        per={view.params.per}
+        path={PATH}
+        search={search}
+        hrefForPage={view.hrefForPage(PATH)}
+        labels={footerLabels}
       />
     </>
   )

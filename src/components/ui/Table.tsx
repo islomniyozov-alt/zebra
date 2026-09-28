@@ -38,9 +38,16 @@ export interface Column<Row> {
    */
   sortable?: boolean
   /**
-   * §7.1.2 — what this column contributes to the sticky foot, over THE ROWS IT
-   * WAS GIVEN. Absent leaves the foot cell empty, which is the right answer for
-   * a status column: a count of statuses is a number nobody asked for.
+   * §7.1.2 — what this column contributes to the sticky foot.
+   *
+   * IT IS HANDED THE FILTERED SET, NOT THE PAGE. `footRows` below, defaulting to
+   * `rows` where a grid does not paginate. Corrected 2026-09-28 from the
+   * artefact: Datatruck prints `1-20 of 251` beside a sum over all 251, and that
+   * is the useful answer — an accountant filtering to one authority's week wants
+   * what the week costs, not what its first twenty rows cost.
+   *
+   * Absent leaves the foot cell empty, which is the right answer for a status
+   * column: a count of statuses is a number nobody asked for.
    */
   foot?: (rows: readonly Row[]) => ReactNode
 }
@@ -106,6 +113,16 @@ interface TableProps<Row> {
    * than implied by position.
    */
   totals?: { label: string }
+  /**
+   * The rows the foot sums — every row the filter selected, across pages.
+   *
+   * Omitted on a grid with no pagination, where the page IS the filtered set.
+   * Passing it explicitly rather than inferring it means a paginated grid that
+   * forgets is a grid whose foot sums twenty rows and says 251, which is exactly
+   * the disagreement §7.1.2 exists to prevent — so
+   * `tests/accounting-surface.test.ts` checks that every paginated grid passes it.
+   */
+  footRows?: readonly Row[]
 }
 
 export function Table<Row>({
@@ -119,6 +136,7 @@ export function Table<Row>({
   rowHref,
   sort,
   totals,
+  footRows,
 }: TableProps<Row>) {
   if (totals && columns[0]?.foot) {
     // The first foot cell carries the label, so a `foot` there would be
@@ -299,7 +317,7 @@ export function Table<Row>({
                       {totals.label}
                     </span>
                   ) : (
-                    (column.foot?.(rows) ?? null)
+                    (column.foot?.(footRows ?? rows) ?? null)
                   )}
                 </td>
               ))}

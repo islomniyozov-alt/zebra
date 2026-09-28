@@ -3,38 +3,55 @@ import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyIdScopeFilter, companyScopeFilter } from '@/lib/tenancy'
-import { listPayments, type PaymentRow } from '@/lib/payments'
 import { formatCents } from '@/lib/money'
-import {
-  applyList,
-  activeSort,
-  readListParams,
-  sortHref,
-  sumCents,
-  totalsLabel,
-  type ListShape,
-  type RawParams,
-} from '@/lib/list-view'
+import { readGridColumns } from '@/lib/grid-columns'
+import { applyList, sumCents, type RawParams } from '@/lib/list-view'
+import { paymentShape, readPayments } from '@/lib/accounting-grids'
+import type { PaymentRow } from '@/lib/payments'
 import { Table, type Column } from '@/components/ui/Table'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterBar } from '@/components/ui/FilterBar'
+import { Tabs } from '@/components/ui/Tabs'
 import { Button } from '@/components/ui/Button'
 import { CompanyChips } from '../CompanyChips'
 import { AccountingHeader } from '../AccountingHeader'
+import { GridToolbar } from '../GridToolbar'
+import { GridFooterNav } from '../GridFooterNav'
+import { gridView, keepColumns, pagedFooterLabel } from '../grid-page'
 import type { MessageKey } from '@/lib/i18n'
 
-// ACCOUNTING → PAYMENTS (§6.2): what came in, and what it paid for.
+// ACCOUNTING → PAYMENTS (§6.2, §7.1.6): two tabs over one grid.
 //
-// THE STRIPE MEANS UNAPPLIED, which is the only thing on this screen that asks
-// somebody to do something. A fully applied payment is finished work and takes
-// the neutral bar; a payment with money still on it is a question waiting for an
-// answer. Carried over unchanged from `/payments`, and now SAID IN THE HEADER as
-// §2 has always required.
+//   Payments   what came in, and what it paid for
+//   Unapplied  money sitting on an account with nothing to show for it
 //
-// IMPORT IS A BUTTON HERE, not a fifth destination in the sidebar. It is how the
-// Amazon remittance workbooks arrive, which is most of the rows on this screen —
-// but it is an action on this list rather than a question of its own, and §6.2's
-// table is about questions.
+// ── "UNAPPLIED" IS A TAB HERE AND A CHIP EVERYWHERE ELSE ──────────────────
+//
+// §7.1.6's test says a tab that could be written as a filter on the tab beside it
+// IS a filter. This one could — and it stays a tab because it is the question the
+// screen exists to answer on a Tuesday, and the count in the tab strip is the
+// answer at a glance. The chip remains on the first tab, so the filter bar is not
+// lying about what is possible; both set the same parameter through the same
+// predicate and cannot disagree.
+//
+// THE STRIPE MEANS UNAPPLIED, which is the only thing here that asks somebody to
+// do something. A fully applied payment is finished work.
+
+const TABS = ['payments', 'unapplied'] as const
+type Tab = (typeof TABS)[number]
+
+const COLUMN_KEYS: readonly string[] = [
+  'received',
+  'method',
+  'reference',
+  'payer',
+  'authority',
+  'amount',
+  'unapplied',
+  'appliedTo',
+]
+
+const PATH = '/accounting/payments'
 
 export default async function AccountingPaymentsPage({
   searchParams,
@@ -44,18 +61,31 @@ export default async function AccountingPaymentsPage({
   if (!(await currentUserCan('read', 'payment'))) notFound()
 
   const raw = await searchParams
-  const params = readListParams(raw)
   const { t, locale } = await getLocaleContext()
   const mayRecord = await currentUserCan('create', 'payment')
 
+  const wanted = typeof raw.tab === 'string' ? raw.tab : null
+  const tab: Tab = (TABS as readonly string[]).includes(wanted ?? '')
+    ? (wanted as Tab)
+    : 'payments'
+
+  const search = new URLSearchParams(
+    Object.entries(raw).flatMap(([key, value]) =>
+      value === undefined
+        ? []
+        : [
+            [key, Array.isArray(value) ? (value[0] ?? '') : value] as [
+              string,
+              string,
+            ],
+          ],
+    ),
+  )
+
   const data = await withCurrentOrg('read', 'payment', async (tx, session) => {
     const scope = companyScopeFilter(session.companyScopes)
-    const [payments, companies] = await Promise.all([
-      listPayments(tx, scope),
-      // `companyIdScopeFilter`, NOT `companyScopeFilter`. The second is
-      // `{ companyId: ... }`, which is not a valid `CompanyWhereInput` — see
-      // tenancy.ts: it compiles, and 500s for the first person whose membership
-      // is scoped to one authority. And Company retires with `isActive`.
+    const [payments, companies, columns] = await Promise.all([
+      readPayments(tx, scope),
       tx.company.findMany({
         where: {
           isActive: true,
@@ -64,57 +94,45 @@ export default async function AccountingPaymentsPage({
         orderBy: { name: 'asc' },
         select: { id: true, name: true },
       }),
+      readGridColumns(tx, session.userId, 'payments.payments', COLUMN_KEYS),
     ])
-    return { payments, companies }
+    return { payments, companies, columns }
   })
 
-  const shape: ListShape<PaymentRow> = {
-    // The reference is the field people are holding when they come to this
-    // screen — a check number off a stub, an Amazon payment id off a workbook.
-    searchText: (row) =>
-      `${row.referenceNumber ?? ''} ${row.customerName} ${row.companyName}`,
-    // §7.4.1 — RECEIVED is the date bounded, and the bar says so. A payment has
-    // only one date, which is why this is the easy one; Invoices has three.
-    dateOf: (row) => row.receivedAt,
-    companyIdOf: (row) => row.companyId,
-    sorts: {
-      received: (row) => row.receivedAt.getTime(),
-      method: (row) => row.method,
-      reference: (row) => row.referenceNumber,
-      payer: (row) => row.customerName,
-      authority: (row) => row.companyName,
-      amount: (row) => row.amountCents,
-      unapplied: (row) => row.unappliedCents,
-    },
-    defaultSort: 'received',
-    defaultDir: 'desc',
-  }
+  const unappliedCount = data.payments.filter(
+    (row) => row.unappliedCents > 0,
+  ).length
 
-  // UNAPPLIED IS A CHIP, because "what still needs applying" is the question
-  // this screen exists to answer and a sort does not answer it — a sort puts the
-  // zeroes at the other end of a list somebody still has to scroll.
-  const only = typeof raw.state === 'string' ? raw.state : null
+  const state =
+    tab === 'unapplied'
+      ? 'unapplied'
+      : typeof raw.state === 'string'
+        ? raw.state
+        : null
   const narrowed =
-    only === 'unapplied'
+    state === 'unapplied'
       ? data.payments.filter((row) => row.unappliedCents > 0)
-      : only === 'applied'
+      : state === 'applied'
         ? data.payments.filter((row) => row.unappliedCents === 0)
         : data.payments
 
-  const rows = applyList(narrowed, params, shape)
-  const current = activeSort(params, shape)
+  const view = gridView(narrowed, raw, paymentShape, applyList)
 
   const money = (cents: number) => (
     <span className="font-mono tabular-nums">{formatCents(cents, locale)}</span>
   )
+  const errors = {
+    'grid.columns.errorEmpty': t('grid.columns.errorEmpty'),
+    'grid.columns.errorGrid': t('grid.columns.errorGrid'),
+  }
 
-  const columns: Column<PaymentRow>[] = [
+  const allColumns: Column<PaymentRow>[] = [
     {
       key: 'received',
       header: t('payments.received'),
       sortable: true,
       render: (row) => (
-        <span className="font-mono">
+        <span className="font-mono" dir="ltr">
           {row.receivedAt.toISOString().slice(0, 10)}
         </span>
       ),
@@ -145,6 +163,13 @@ export default async function AccountingPaymentsPage({
       render: (row) => row.customerName,
     },
     {
+      key: 'authority',
+      header: t('accounting.company'),
+      truncate: true,
+      sortable: true,
+      render: (row) => row.companyName,
+    },
+    {
       key: 'amount',
       header: t('payments.amount'),
       align: 'end',
@@ -157,11 +182,7 @@ export default async function AccountingPaymentsPage({
       header: t('payments.unapplied'),
       align: 'end',
       sortable: true,
-      render: (row) =>
-        // §8 — empty and zero are different facts, and here they are the same
-        // fact rendered differently on purpose: a zero is the finished state and
-        // should read as a number, not as an absence.
-        money(row.unappliedCents),
+      render: (row) => money(row.unappliedCents),
       foot: (shown) => money(sumCents(shown, (row) => row.unappliedCents)),
     },
     {
@@ -175,6 +196,18 @@ export default async function AccountingPaymentsPage({
     },
   ]
 
+  const tabHref = (key: string) => {
+    const next = new URLSearchParams(search)
+    next.set('tab', key)
+    next.delete('sort')
+    next.delete('dir')
+    next.delete('page')
+    // The tab owns the state, so a chip set on the other tab does not follow it
+    // across and quietly narrow a grid that already narrowed itself.
+    next.delete('state')
+    return `${PATH}?${next}`
+  }
+
   return (
     <>
       <AccountingHeader
@@ -183,8 +216,6 @@ export default async function AccountingPaymentsPage({
         action={
           mayRecord ? (
             <div className="flex items-center gap-z2">
-              {/* Link wrapping Button — the house pattern; `Button` takes no
-               * `asChild`. */}
               <Link href="/payments/import">
                 <Button variant="secondary" size="compact">
                   {t('accounting.import')}
@@ -199,28 +230,42 @@ export default async function AccountingPaymentsPage({
           ) : null
         }
       />
-
-      <FilterBar
-        groups={[
+      <Tabs
+        tabs={[
+          { key: 'payments', label: t('payments.tab.payments') },
           {
-            param: 'state',
-            label: t('accounting.payments.state'),
-            choices: [
-              {
-                value: 'unapplied',
-                label: t('accounting.payments.unappliedOnly'),
-                count: data.payments.filter((row) => row.unappliedCents > 0)
-                  .length,
-              },
-              {
-                value: 'applied',
-                label: t('accounting.payments.appliedOnly'),
-                count: data.payments.filter((row) => row.unappliedCents === 0)
-                  .length,
-              },
-            ],
+            key: 'unapplied',
+            label: t('payments.tab.unapplied'),
+            count: unappliedCount,
           },
         ]}
+        active={tab}
+        hrefFor={tabHref}
+        label={t('grid.tabs')}
+      />
+      <FilterBar
+        groups={
+          tab === 'unapplied'
+            ? []
+            : [
+                {
+                  param: 'state',
+                  label: t('accounting.payments.state'),
+                  choices: [
+                    {
+                      value: 'unapplied',
+                      label: t('accounting.payments.unappliedOnly'),
+                      count: unappliedCount,
+                    },
+                    {
+                      value: 'applied',
+                      label: t('accounting.payments.appliedOnly'),
+                      count: data.payments.length - unappliedCount,
+                    },
+                  ],
+                },
+              ]
+        }
         search={{
           param: 'q',
           label: t('accounting.search'),
@@ -234,31 +279,49 @@ export default async function AccountingPaymentsPage({
         clearLabel={t('filter.clear')}
         moreLabel={t('filter.more')}
       />
-
-      <CompanyChips
-        companies={data.companies}
-        label={t('accounting.company')}
-        allLabel={t('accounting.allCompanies')}
-      />
-
+      <div className="flex items-center justify-between gap-z2 border-b border-border bg-surface px-gutter py-z2">
+        <CompanyChips
+          companies={data.companies}
+          label={t('accounting.company')}
+          allLabel={t('accounting.allCompanies')}
+        />
+        <GridToolbar
+          grid="payments.payments"
+          columns={allColumns.map((column) => ({
+            key: column.key,
+            header: column.header,
+          }))}
+          visible={data.columns}
+          search={search}
+          labels={{
+            export: t('grid.export'),
+            columns: t('grid.columns'),
+            apply: t('grid.columns.apply'),
+            cancel: t('grid.columns.cancel'),
+            firstLocked: t('grid.columns.firstLocked'),
+          }}
+          errors={errors}
+        />
+      </div>
       <Table
-        columns={columns}
-        rows={rows}
+        columns={keepColumns(allColumns, data.columns)}
+        rows={view.paged.rows}
+        footRows={view.filtered}
         rowKey={(row) => row.id}
         rowHref={(row) => `/payments/${row.id}`}
         stripeTone={(row) => (row.unappliedCents > 0 ? 'warning' : 'neutral')}
         caption={t('accounting.payments.title')}
         sort={{
-          key: current.key,
-          dir: current.dir,
-          hrefFor: (key) => sortHref('/accounting/payments', raw, key, current),
+          key: view.sort.key,
+          dir: view.sort.dir,
+          hrefFor: view.sortFor(PATH),
           label: t('accounting.sortBy'),
         }}
         totals={{
-          label: totalsLabel(
+          label: pagedFooterLabel(
             t('accounting.total'),
-            rows.length,
-            t('accounting.rows'),
+            t('grid.rows'),
+            view.paged,
           ),
         }}
         empty={
@@ -267,6 +330,19 @@ export default async function AccountingPaymentsPage({
             body={t('accounting.emptyHint')}
           />
         }
+      />
+      <GridFooterNav
+        paged={view.paged}
+        per={view.params.per}
+        path={PATH}
+        search={search}
+        hrefForPage={view.hrefForPage(PATH)}
+        labels={{
+          of: t('grid.of'),
+          previous: t('grid.previous'),
+          next: t('grid.next'),
+          perPage: t('grid.perPage'),
+        }}
       />
     </>
   )

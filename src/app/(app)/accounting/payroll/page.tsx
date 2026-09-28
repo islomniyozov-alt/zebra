@@ -752,6 +752,7 @@ export default async function PayrollPage({
         <Table
           columns={columns}
           rows={view.paged.rows}
+          footRows={view.filtered}
           rowKey={(row) => row.id}
           rowHref={(row) => `/settlements/batches/${row.id}`}
           stripeTone={(row) => statusOf(row.status).tone}
@@ -765,7 +766,7 @@ export default async function PayrollPage({
           totals={{
             label: pagedFooterLabel(
               t('accounting.total'),
-              t('grid.of'),
+              t('grid.rows'),
               view.paged,
             ),
           }}
@@ -866,6 +867,7 @@ export default async function PayrollPage({
         <Table
           columns={columns}
           rows={view.paged.rows}
+          footRows={view.filtered}
           rowKey={(row) => row.id}
           rowHref={(row) => `/settlements/${row.id}`}
           stripeTone={(row) => statusOf(row.status).tone}
@@ -880,7 +882,7 @@ export default async function PayrollPage({
           totals={{
             label: pagedFooterLabel(
               t('accounting.total'),
-              t('grid.of'),
+              t('grid.rows'),
               view.paged,
             ),
           }}
@@ -944,6 +946,7 @@ export default async function PayrollPage({
         <Table
           columns={columns}
           rows={view.paged.rows}
+          footRows={view.filtered}
           rowKey={(row) => row.driverId}
           rowHref={(row) => `/drivers/${row.driverId}`}
           caption={t('payroll.tab.balances')}
@@ -956,7 +959,7 @@ export default async function PayrollPage({
           totals={{
             label: pagedFooterLabel(
               t('accounting.total'),
-              t('grid.of'),
+              t('grid.rows'),
               view.paged,
             ),
           }}
@@ -1013,6 +1016,7 @@ export default async function PayrollPage({
         <Table
           columns={columns}
           rows={view.paged.rows}
+          footRows={view.filtered}
           rowKey={(row) => row.id}
           rowHref={(row) => `/drivers/${row.driverId}`}
           stripeTone={(row) => (row.settledAt ? 'success' : 'warning')}
@@ -1026,7 +1030,7 @@ export default async function PayrollPage({
           totals={{
             label: pagedFooterLabel(
               t('accounting.total'),
-              t('grid.of'),
+              t('grid.rows'),
               view.paged,
             ),
           }}
@@ -1095,6 +1099,7 @@ export default async function PayrollPage({
       <Table
         columns={columns}
         rows={view.paged.rows}
+        footRows={view.filtered}
         rowKey={(row) => row.id}
         rowHref={(row) => `/drivers/${row.driverId}`}
         stripeTone={(row) => (row.inForceToday ? 'success' : 'muted')}
@@ -1108,7 +1113,7 @@ export default async function PayrollPage({
         totals={{
           label: pagedFooterLabel(
             t('accounting.weeklyTotal'),
-            t('grid.of'),
+            t('grid.rows'),
             view.paged,
           ),
         }}

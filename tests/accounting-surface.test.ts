@@ -171,9 +171,58 @@ describe('the controls each list carries', () => {
   // driver cut is an ordinary list and gets the full set.
   it('reports gives its driver cut the list controls', () => {
     const source = pageSource('reports')
-    expect(source).toContain('totalsLabel(')
+    // `pagedFooterLabel` since the driver cut gained pagination — the general
+    // assertion above accepts either, and this one names the paginated form
+    // because the driver cut is a list and the other two cuts are a matrix.
+    expect(source).toContain('pagedFooterLabel(')
     expect(source).toMatch(/\n\s+sort=\{\{/)
     expect(source).toMatch(/\n\s+range=\{\{/)
+  })
+})
+
+// ── THE GRID CONTRACT, ON EVERY PAGE (§7.1.3) ───────────────────────────────
+//
+// Seven controls, named together so a grid missing one has to say which and why.
+// The exceptions below are asserted to STILL be exceptions, because a test
+// written to be true of whatever shipped is not an instrument.
+describe('the grid contract', () => {
+  it.each([...PAGES])('%s has tabs over one grid', (name) => {
+    expect(pageSource(name)).toContain('<Tabs')
+  })
+
+  it.each([...PAGES])('%s offers Export CSV and a columns chooser', (name) => {
+    // Both live in `GridToolbar`, which carries the current filter into the
+    // export link and the grid id into the preference.
+    expect(pageSource(name)).toContain('<GridToolbar')
+  })
+
+  // WORD-BOUNDARY ANCHORED, for the third time in this file. `toContain` is
+  // satisfied by a PREFIXED symbol — `xreadGridColumns(` contains
+  // `readGridColumns(` — so the break harness found this guard reporting nothing
+  // wrong with a page that had stopped reading the preference entirely. Same
+  // shape as `xtotals={{` and `xsearch={{` before it.
+  it.each([...PAGES])('%s reads a stored column preference', (name) => {
+    expect(pageSource(name)).toMatch(/\breadGridColumns\(/)
+    expect(pageSource(name)).toMatch(/\bkeepColumns\(/)
+  })
+
+  it.each([...PAGES])('%s paginates', (name) => {
+    expect(pageSource(name)).toContain('<GridFooterNav')
+  })
+
+  // ── THE FOOT SUMS THE FILTERED SET, NOT THE PAGE ────────────────────────
+  //
+  // §7.1.2 as corrected from the artefact on 2026-09-28. `footRows` is what
+  // carries the filtered set past the page slice; a paginated grid that forgets
+  // it sums twenty rows under a label saying 251, which is the exact
+  // disagreement the section exists to prevent — and it would look right.
+  it.each([...PAGES])('%s hands its foot the filtered set', (name) => {
+    const source = pageSource(name)
+    const tables = source.split('<Table').length - 1
+    const footRows = source.split('footRows={view.filtered}').length - 1
+    expect(footRows, `${name}: ${tables} tables, ${footRows} footRows`).toBe(
+      tables,
+    )
   })
 })
 

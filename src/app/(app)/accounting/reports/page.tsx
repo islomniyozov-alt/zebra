@@ -15,19 +15,20 @@ import {
 } from '@/lib/by-company'
 import {
   applyList,
-  activeSort,
   readListParams,
-  sortHref,
   sumCents,
-  totalsLabel,
   type ListShape,
   type RawParams,
 } from '@/lib/list-view'
 import { Table, type Column } from '@/components/ui/Table'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterBar } from '@/components/ui/FilterBar'
+import { Tabs } from '@/components/ui/Tabs'
 import { AccountingHeader } from '../AccountingHeader'
-import { CutPicker } from './CutPicker'
+import { GridToolbar } from '../GridToolbar'
+import { GridFooterNav } from '../GridFooterNav'
+import { gridView, keepColumns, pagedFooterLabel } from '../grid-page'
+import { readGridColumns } from '@/lib/grid-columns'
 
 // ACCOUNTING → REPORTS (§6.2): the same money cut by company, week or driver.
 //
@@ -57,6 +58,14 @@ export type Cut = 'company' | 'week' | 'driver'
 
 const CUTS: readonly Cut[] = ['company', 'week', 'driver']
 
+const DRIVER_COLUMNS: readonly string[] = [
+  'driver',
+  'weeks',
+  'gross',
+  'deductions',
+  'net',
+]
+
 export default async function ReportsPage({
   searchParams,
 }: {
@@ -67,6 +76,19 @@ export default async function ReportsPage({
   const raw = await searchParams
   const params = readListParams(raw)
   const { t, locale } = await getLocaleContext()
+
+  const search = new URLSearchParams(
+    Object.entries(raw).flatMap(([key, value]) =>
+      value === undefined
+        ? []
+        : [
+            [key, Array.isArray(value) ? (value[0] ?? '') : value] as [
+              string,
+              string,
+            ],
+          ],
+    ),
+  )
 
   const cutParam = typeof raw.cut === 'string' ? raw.cut : null
   const cut: Cut = (CUTS as readonly string[]).includes(cutParam ?? '')
@@ -99,11 +121,17 @@ export default async function ReportsPage({
   const data = await withCurrentOrg(
     'read',
     'settlement',
-    async (tx) => {
+    async (tx, session) => {
       if (cut === 'driver') {
         return {
           kind: 'driver' as const,
           rows: await driverTotals(tx, { from, to }),
+          columns: await readGridColumns(
+            tx,
+            session.userId,
+            'reports.driver',
+            DRIVER_COLUMNS,
+          ),
         }
       }
       const [gross, pay, first] = await Promise.all([
@@ -131,20 +159,55 @@ export default async function ReportsPage({
         title={t('accounting.reports.title')}
         stripeMeans={t('accounting.reports.window')}
       />
-      <CutPicker
-        cuts={CUTS}
-        selected={cut}
-        grouping={grouping}
-        labels={{
-          cut: t('reports.cut'),
-          company: t('reports.byCompany'),
-          week: t('reports.byWeek'),
-          driver: t('reports.byDriver'),
-          grouping: t('reports.grouping'),
-          weekly: t('reports.weekly'),
-          monthly: t('reports.monthly'),
+      <Tabs
+        tabs={[
+          { key: 'company', label: t('reports.tab.company') },
+          { key: 'week', label: t('reports.tab.week') },
+          { key: 'driver', label: t('reports.tab.driver') },
+        ]}
+        active={cut}
+        hrefFor={(key) => {
+          const next = new URLSearchParams(search)
+          next.set('cut', key)
+          // EACH CUT OWNS ITS ORDERING (§7.1.6). A sort by `net` means nothing in
+          // the authority matrix, and a stale `sort` would sit in the URL waiting
+          // to be misread when the reader came back.
+          next.delete('sort')
+          next.delete('dir')
+          next.delete('page')
+          return `/accounting/reports?${next}`
         }}
+        label={t('grid.tabs')}
       />
+      {/* THE GROUPING BELONGS TO THE TWO PERIOD CUTS ONLY. A weeks/months control
+       * above the driver cut would change nothing, and a control that changes
+       * nothing teaches the reader that the controls are decorative. */}
+      {cut === 'driver' ? null : (
+        <div className="flex items-center gap-z1 border-b border-border bg-surface px-gutter py-z2">
+          <span className="text-xs font-medium uppercase tracking-[0.04em] text-ink-3">
+            {t('reports.grouping')}
+          </span>
+          {(['week', 'month'] as const).map((unit) => {
+            const next = new URLSearchParams(search)
+            next.set('by', unit)
+            return (
+              <Link
+                key={unit}
+                href={`/accounting/reports?${next}`}
+                scroll={false}
+                aria-current={grouping === unit ? 'true' : undefined}
+                className={
+                  grouping === unit
+                    ? 'h-control-compact rounded-control border border-accent bg-accent-soft px-z2 text-xs font-medium text-accent'
+                    : 'h-control-compact rounded-control border border-border-strong bg-surface px-z2 text-xs font-medium text-ink-2 hover:bg-surface-3'
+                }
+              >
+                {unit === 'week' ? t('reports.weekly') : t('reports.monthly')}
+              </Link>
+            )
+          })}
+        </div>
+      )}
       <FilterBar
         groups={[]}
         search={
@@ -187,8 +250,10 @@ export default async function ReportsPage({
       defaultSort: 'net',
       defaultDir: 'desc',
     }
-    const rows = applyList(data.rows, params, shape)
-    const current = activeSort(params, shape)
+    // THE FULL GRID CONTRACT ON THE ONE CUT THAT IS A LIST (§7.1.3). The other
+    // two are a matrix — periods down, authorities across — and `Table` renders
+    // one row per record, so they carry the range and nothing else.
+    const view = gridView(data.rows, raw, shape, applyList)
 
     const columns: Column<DriverTotalRow>[] = [
       {
@@ -240,24 +305,46 @@ export default async function ReportsPage({
     return (
       <>
         {header}
+        <div className="flex items-center justify-end gap-z2 border-b border-border bg-surface px-gutter py-z2">
+          <GridToolbar
+            grid="reports.driver"
+            columns={columns.map((column) => ({
+              key: column.key,
+              header: column.header,
+            }))}
+            visible={data.columns}
+            search={search}
+            labels={{
+              export: t('grid.export'),
+              columns: t('grid.columns'),
+              apply: t('grid.columns.apply'),
+              cancel: t('grid.columns.cancel'),
+              firstLocked: t('grid.columns.firstLocked'),
+            }}
+            errors={{
+              'grid.columns.errorEmpty': t('grid.columns.errorEmpty'),
+              'grid.columns.errorGrid': t('grid.columns.errorGrid'),
+            }}
+          />
+        </div>
         <Table
-          columns={columns}
-          rows={rows}
+          columns={keepColumns(columns, data.columns)}
+          rows={view.paged.rows}
+          footRows={view.filtered}
           rowKey={(row) => row.driverId}
           rowHref={(row) => `/drivers/${row.driverId}`}
           caption={t('reports.byDriver')}
           sort={{
-            key: current.key,
-            dir: current.dir,
-            hrefFor: (key) =>
-              sortHref('/accounting/reports', raw, key, current),
+            key: view.sort.key,
+            dir: view.sort.dir,
+            hrefFor: view.sortFor('/accounting/reports'),
             label: t('accounting.sortBy'),
           }}
           totals={{
-            label: totalsLabel(
+            label: pagedFooterLabel(
               t('accounting.total'),
-              rows.length,
-              t('accounting.rows'),
+              t('grid.rows'),
+              view.paged,
             ),
           }}
           empty={
@@ -266,6 +353,19 @@ export default async function ReportsPage({
               body={t('reports.emptyDriverHint')}
             />
           }
+        />
+        <GridFooterNav
+          paged={view.paged}
+          per={view.params.per}
+          path="/accounting/reports"
+          search={search}
+          hrefForPage={view.hrefForPage('/accounting/reports')}
+          labels={{
+            of: t('grid.of'),
+            previous: t('grid.previous'),
+            next: t('grid.next'),
+            perPage: t('grid.perPage'),
+          }}
         />
       </>
     )

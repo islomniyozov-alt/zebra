@@ -65,19 +65,25 @@ export function gridView<Row>(
 }
 
 /**
- * The footer's leading cell: `Total (1–50 of 340)`.
+ * The footer's leading cell: `Total (251 rows)`.
  *
- * §7.1.3 — THE FOOTER TOTALS THE PAGE AND SAYS WHICH PAGE. A sum with no scope
- * beside it is the number people quote by accident, and with pagination on, the
- * scope is two facts rather than one: how many are shown and how many there are.
+ * §7.1.2, corrected 2026-09-28 from the artefact — the foot sums every row the
+ * filter selected, not the page, so the label names that same scope. A sum with
+ * no scope beside it is the number people quote by accident; which page is on
+ * screen is a separate fact and the pagination bar says it.
  */
 export function pagedFooterLabel(
   total: string,
-  of: string,
+  rows: string,
   paged: Paged<unknown>,
 ): string {
+  // THE SIZE OF THE FILTERED SET, NOT THE PAGE. The foot sums all of it
+  // (§7.1.2, corrected from the artefact), so the label has to name the same
+  // scope — `Total (251 rows)`. Which page is on screen is the pagination bar's
+  // sentence, `1–20 of 251`, and keeping the two apart is what stops one number
+  // being read as the other.
   if (paged.total === 0) return total
-  return `${total} (${paged.firstRow}–${paged.lastRow} ${of} ${paged.total})`
+  return `${total} (${paged.total} ${rows})`
 }
 
 /** Unpaginated grids keep §7.1.2's plain form. */

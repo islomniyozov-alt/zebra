@@ -1,47 +1,46 @@
+import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyIdScopeFilter, companyScopeFilter } from '@/lib/tenancy'
 import { formatCents } from '@/lib/money'
-import { agingBucketFor, type AgingBucket } from '@/lib/factoring'
 import { directSettledAwaiting, readyToInvoice } from '@/lib/invoices'
+import { readGridColumns } from '@/lib/grid-columns'
+import { applyList, sumCents, type RawParams } from '@/lib/list-view'
 import {
-  applyList,
-  activeSort,
-  readListParams,
-  sortHref,
-  sumCents,
-  totalsLabel,
-  type ListShape,
-  type RawParams,
-} from '@/lib/list-view'
+  invoiceShape,
+  readInvoices,
+  type InvoiceGridRow,
+} from '@/lib/accounting-grids'
 import { Table, type Column } from '@/components/ui/Table'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterBar } from '@/components/ui/FilterBar'
-import Link from 'next/link'
+import { Tabs } from '@/components/ui/Tabs'
 import { ReadyQueue, type ReadyRow } from '../../invoices/ReadyQueue'
 import { CompanyChips } from '../CompanyChips'
 import { AccountingHeader } from '../AccountingHeader'
+import { GridToolbar } from '../GridToolbar'
+import { GridFooterNav } from '../GridFooterNav'
+import { gridView, keepColumns, pagedFooterLabel } from '../grid-page'
 import type { InvoiceStatus } from '@/generated/prisma/client'
 import type { MessageKey } from '@/lib/i18n'
 import type { StatusTone } from '@/lib/status'
 
-// ACCOUNTING → INVOICES (§6.2, amended 2026-09-28): who owes us, and how old.
+// ACCOUNTING → INVOICES (§6.2, §7.1.6): three tabs over one grid.
 //
-// ── RECEIVABLES FOLDED IN HERE ────────────────────────────────────────────
+//   Invoices          who owes us, and how old is it
+//   Ready to invoice  freight that could be billed and has not been
+//   Direct-settled    freight that will never be invoiced, and is still owed
 //
-// `/receivables` was a second list of the same rows with a different heading.
-// Aging is a VIEW of the invoice list — an age chip and a due-date sort — which
-// §7.4 already makes shareable as a URL. What it is not is a separate page you
-// have to remember exists, which is how "over 90 days" came to be a question
-// nobody asked twice.
+// Each is a different question, which is §7.1.6's test. "Ready to invoice" is
+// not a filter on the invoice list — those rows are LOADS, and no invoice exists
+// for them yet. That is the clearest case of the distinction in the section.
 //
-// The factor's reserve did NOT fold in, and is not on this screen: it is money
-// owed by the factor rather than by a broker, and adding the two produces a
-// figure that answers neither. It keeps its own screen at /receivables/factoring.
+// RECEIVABLES FOLDED IN as the age chip on the first tab: aging is a view of the
+// invoice list, not a second list of the same rows.
 
-const INVOICE_TONE: Record<InvoiceStatus, StatusTone> = {
+const INVOICE_TONE: Record<string, StatusTone> = {
   DRAFT: 'neutral',
   READY_TO_SEND: 'neutral',
   SENT: 'progress',
@@ -53,6 +52,8 @@ const INVOICE_TONE: Record<InvoiceStatus, StatusTone> = {
   WRITTEN_OFF: 'muted',
 }
 
+const BUCKETS = ['current', 'd31_60', 'd61_90', 'd90_plus'] as const
+
 const ERROR_KEYS: MessageKey[] = [
   'invoices.error.noLoads',
   'invoices.error.notReady',
@@ -60,27 +61,21 @@ const ERROR_KEYS: MessageKey[] = [
   'invoices.error.mixedCompanies',
 ]
 
-const BUCKETS: readonly AgingBucket[] = [
-  'current',
-  'd31_60',
-  'd61_90',
-  'd90_plus',
+const TABS = ['invoices', 'ready', 'direct'] as const
+type Tab = (typeof TABS)[number]
+
+const COLUMN_KEYS: readonly string[] = [
+  'invoiceNumber',
+  'customer',
+  'authority',
+  'issued',
+  'due',
+  'total',
+  'balance',
+  'status',
 ]
 
-interface Row {
-  id: string
-  invoiceNumber: string
-  customerName: string
-  companyId: string
-  companyName: string
-  issued: Date | null
-  due: Date | null
-  totalCents: number
-  balanceCents: number
-  status: InvoiceStatus
-  /** Null when nothing is outstanding — a paid invoice has no age. */
-  bucket: AgingBucket | null
-}
+const PATH = '/accounting/invoices'
 
 export default async function AccountingInvoicesPage({
   searchParams,
@@ -90,34 +85,34 @@ export default async function AccountingInvoicesPage({
   if (!(await currentUserCan('read', 'invoice'))) notFound()
 
   const raw = await searchParams
-  const params = readListParams(raw)
   const { t, locale } = await getLocaleContext()
   const mayCreate = await currentUserCan('create', 'invoice')
 
+  const wanted = typeof raw.tab === 'string' ? raw.tab : null
+  const requested: Tab = (TABS as readonly string[]).includes(wanted ?? '')
+    ? (wanted as Tab)
+    : 'invoices'
+  // The queue is a create surface, so a role that cannot raise an invoice is not
+  // offered it and cannot land on it by following a link.
+  const tab: Tab = requested === 'ready' && !mayCreate ? 'invoices' : requested
+
+  const search = new URLSearchParams(
+    Object.entries(raw).flatMap(([key, value]) =>
+      value === undefined
+        ? []
+        : [
+            [key, Array.isArray(value) ? (value[0] ?? '') : value] as [
+              string,
+              string,
+            ],
+          ],
+    ),
+  )
+
   const data = await withCurrentOrg('read', 'invoice', async (tx, session) => {
     const scope = companyScopeFilter(session.companyScopes)
-    const [invoices, companies, ready, direct] = await Promise.all([
-      tx.invoice.findMany({
-        where: { deletedAt: null, ...scope },
-        orderBy: { createdAt: 'desc' },
-        take: 500,
-        select: {
-          id: true,
-          invoiceNumber: true,
-          issueDate: true,
-          dueDate: true,
-          totalCents: true,
-          balanceCents: true,
-          status: true,
-          companyId: true,
-          company: { select: { name: true } },
-          customer: { select: { name: true } },
-        },
-      }),
-      // `companyIdScopeFilter`, NOT `companyScopeFilter`. The second is
-      // `{ companyId: ... }`, which is not a valid `CompanyWhereInput` — see
-      // tenancy.ts: it compiles, and 500s for the first person whose membership
-      // is scoped to one authority. And Company retires with `isActive`.
+    const [invoices, companies, ready, direct, columns] = await Promise.all([
+      readInvoices(tx, scope, new Date()),
       tx.company.findMany({
         where: {
           isActive: true,
@@ -126,85 +121,157 @@ export default async function AccountingInvoicesPage({
         orderBy: { name: 'asc' },
         select: { id: true, name: true },
       }),
-      // READY TO INVOICE, and freight that will never be invoiced. Both came
-      // with this list from `/invoices` — the create path is not a separate
-      // question (§6.2) and a screen that only listed invoices would leave
-      // "raise the ones that are ready" with nowhere to happen.
       mayCreate ? readyToInvoice(tx, scope) : Promise.resolve([]),
       directSettledAwaiting(tx, scope),
+      readGridColumns(tx, session.userId, 'invoices.invoices', COLUMN_KEYS),
     ])
-    return { invoices, companies, ready, direct }
+    return { invoices, companies, ready, direct, columns }
   })
-
-  const midnight = Date.UTC(
-    new Date().getUTCFullYear(),
-    new Date().getUTCMonth(),
-    new Date().getUTCDate(),
-  )
-
-  const all: Row[] = data.invoices.map((invoice) => ({
-    id: invoice.id,
-    invoiceNumber: invoice.invoiceNumber,
-    customerName: invoice.customer.name,
-    companyId: invoice.companyId,
-    companyName: invoice.company.name,
-    issued: invoice.issueDate,
-    due: invoice.dueDate,
-    totalCents: invoice.totalCents,
-    balanceCents: invoice.balanceCents,
-    status: invoice.status,
-    // AGE IS A FACT ABOUT AN OUTSTANDING BALANCE. A paid invoice that was
-    // settled late is not "90 days past due" — it is closed, and a bucket on it
-    // would put it in a chip whose total is money somebody is chasing.
-    bucket:
-      invoice.balanceCents > 0 && invoice.dueDate !== null
-        ? agingBucketFor(
-            Math.floor((midnight - invoice.dueDate.getTime()) / 86_400_000),
-          )
-        : null,
-  }))
-
-  const shape: ListShape<Row> = {
-    // The number, the broker and the authority — the three things on screen a
-    // person would type. Not the status word: that is what the chips are for.
-    searchText: (row) =>
-      `${row.invoiceNumber} ${row.customerName} ${row.companyName}`,
-    // §7.4.1 — ISSUED is the date this range bounds, and the bar says so.
-    dateOf: (row) => row.issued,
-    companyIdOf: (row) => row.companyId,
-    sorts: {
-      invoiceNumber: (row) => row.invoiceNumber,
-      customer: (row) => row.customerName,
-      issued: (row) => row.issued?.getTime() ?? null,
-      due: (row) => row.due?.getTime() ?? null,
-      total: (row) => row.totalCents,
-      balance: (row) => row.balanceCents,
-      status: (row) => row.status,
-    },
-    defaultSort: 'issued',
-    defaultDir: 'desc',
-  }
-
-  // THE AGE CHIP IS APPLIED BEFORE `applyList`, because it is this screen's own
-  // filter rather than one of the four shared ones. Order does not change the
-  // set — both are predicates — and doing it here keeps the totals row over
-  // exactly what the body renders.
-  const age = typeof raw.age === 'string' ? raw.age : null
-  const narrowed =
-    age !== null && (BUCKETS as readonly string[]).includes(age)
-      ? all.filter((row) => row.bucket === age)
-      : all
-
-  const rows = applyList(narrowed, params, shape)
-  const current = activeSort(params, shape)
 
   const money = (cents: number) => (
     <span className="font-mono tabular-nums">{formatCents(cents, locale)}</span>
   )
   const day = (value: Date | null) =>
     value ? value.toISOString().slice(0, 10) : '—'
+  const errors = {
+    'grid.columns.errorEmpty': t('grid.columns.errorEmpty'),
+    'grid.columns.errorGrid': t('grid.columns.errorGrid'),
+  }
+  const toolbarLabels = {
+    export: t('grid.export'),
+    columns: t('grid.columns'),
+    apply: t('grid.columns.apply'),
+    cancel: t('grid.columns.cancel'),
+    firstLocked: t('grid.columns.firstLocked'),
+  }
+  const footerLabels = {
+    of: t('grid.of'),
+    previous: t('grid.previous'),
+    next: t('grid.next'),
+    perPage: t('grid.perPage'),
+  }
 
-  const columns: Column<Row>[] = [
+  const tabHref = (key: string) => {
+    const next = new URLSearchParams(search)
+    next.set('tab', key)
+    next.delete('sort')
+    next.delete('dir')
+    next.delete('page')
+    return `${PATH}?${next}`
+  }
+
+  const header = (
+    <>
+      <AccountingHeader
+        title={t('accounting.invoices.title')}
+        stripeMeans={t('accounting.invoices.stripe')}
+      />
+      <Tabs
+        tabs={[
+          { key: 'invoices', label: t('invoices.tab.invoices') },
+          ...(mayCreate
+            ? [
+                {
+                  key: 'ready',
+                  label: t('invoices.tab.ready'),
+                  count: data.ready.length,
+                },
+              ]
+            : []),
+          {
+            key: 'direct',
+            label: t('invoices.tab.direct'),
+            count: data.direct.length,
+          },
+        ]}
+        active={tab}
+        hrefFor={tabHref}
+        label={t('grid.tabs')}
+      />
+    </>
+  )
+
+  // ── READY TO INVOICE ─────────────────────────────────────────────────────
+  if (tab === 'ready') {
+    return (
+      <>
+        {header}
+        <ReadyQueue
+          rows={data.ready.map(
+            (load): ReadyRow => ({
+              id: load.id,
+              loadNumber: load.loadNumber,
+              customerName: load.customerName,
+              totalRevenueCents: load.totalRevenueCents,
+            }),
+          )}
+          locale={locale}
+          translate={Object.fromEntries(ERROR_KEYS.map((key) => [key, t(key)]))}
+          labels={{
+            ready: t('invoices.ready'),
+            empty: t('invoices.readyEmpty'),
+            create: t('invoices.create'),
+            createHint: t('invoices.createBatch'),
+            selected: t('invoices.selected'),
+            customer: t('invoices.customer'),
+            total: t('invoices.total'),
+          }}
+        />
+      </>
+    )
+  }
+
+  // ── DIRECT-SETTLED ───────────────────────────────────────────────────────
+  //
+  // Not invoiceable and not in broker AR — but it IS money owed, and a screen
+  // that omits it teaches everybody that Zebra does not know about Relay work.
+  if (tab === 'direct') {
+    return (
+      <>
+        {header}
+        <section className="min-h-0 flex-1 overflow-auto bg-surface px-gutter py-z3">
+          <p className="text-xs text-ink-3">{t('invoices.directHint')}</p>
+          {data.direct.length === 0 ? (
+            <EmptyState
+              title={t('invoices.direct')}
+              body={t('accounting.emptyHint')}
+            />
+          ) : (
+            <ul className="mt-z3 flex flex-col">
+              {data.direct.map((load) => (
+                <li
+                  key={load.id}
+                  className="flex items-baseline gap-z3 border-b border-border py-z1 text-sm last:border-b-0"
+                >
+                  <Link
+                    href={`/loads/${load.id}`}
+                    className="z-identifier font-mono font-medium text-ink hover:text-accent"
+                    dir="ltr"
+                  >
+                    {load.loadNumber}
+                  </Link>
+                  <span className="font-mono tabular-nums text-ink-2">
+                    {formatCents(load.totalRevenueCents, locale)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </>
+    )
+  }
+
+  // ── THE INVOICE GRID ─────────────────────────────────────────────────────
+  const age = typeof raw.age === 'string' ? raw.age : null
+  const narrowed =
+    age !== null && (BUCKETS as readonly string[]).includes(age)
+      ? data.invoices.filter((row) => row.bucket === age)
+      : data.invoices
+
+  const view = gridView(narrowed, raw, invoiceShape, applyList)
+
+  const allColumns: Column<InvoiceGridRow>[] = [
     {
       key: 'invoiceNumber',
       header: t('invoices.number'),
@@ -221,6 +288,12 @@ export default async function AccountingInvoicesPage({
       truncate: true,
       sortable: true,
       render: (row) => row.customerName,
+    },
+    {
+      key: 'authority',
+      header: t('accounting.company'),
+      truncate: true,
+      render: (row) => row.companyName,
     },
     {
       key: 'issued',
@@ -256,8 +329,10 @@ export default async function AccountingInvoicesPage({
       sortable: true,
       render: (row) => (
         <StatusBadge
-          tone={INVOICE_TONE[row.status]}
-          label={t(`invoiceStatus.${row.status}` as MessageKey)}
+          tone={INVOICE_TONE[row.status] ?? 'neutral'}
+          label={t(
+            `invoiceStatus.${row.status as InvoiceStatus}` as MessageKey,
+          )}
         />
       ),
     },
@@ -265,63 +340,7 @@ export default async function AccountingInvoicesPage({
 
   return (
     <>
-      <AccountingHeader
-        title={t('accounting.invoices.title')}
-        stripeMeans={t('accounting.invoices.stripe')}
-      />
-
-      {mayCreate ? (
-        <ReadyQueue
-          rows={data.ready.map(
-            (load): ReadyRow => ({
-              id: load.id,
-              loadNumber: load.loadNumber,
-              customerName: load.customerName,
-              totalRevenueCents: load.totalRevenueCents,
-            }),
-          )}
-          locale={locale}
-          translate={Object.fromEntries(ERROR_KEYS.map((key) => [key, t(key)]))}
-          labels={{
-            ready: t('invoices.ready'),
-            empty: t('invoices.readyEmpty'),
-            create: t('invoices.create'),
-            createHint: t('invoices.createBatch'),
-            selected: t('invoices.selected'),
-            customer: t('invoices.customer'),
-            total: t('invoices.total'),
-          }}
-        />
-      ) : null}
-
-      {/* DIRECT-SETTLED FREIGHT. Not invoiceable and not in broker AR — but it is
-       * money owed, and a screen that omits it teaches everybody that Zebra does
-       * not know about Relay work. */}
-      {data.direct.length > 0 ? (
-        <section className="border-b border-border bg-surface-2 px-gutter py-z3">
-          <h2 className="text-sm font-medium text-ink">
-            {t('invoices.direct')}
-          </h2>
-          <p className="mt-z1 text-xs text-ink-3">{t('invoices.directHint')}</p>
-          <ul className="mt-z2 flex flex-wrap gap-x-z5 gap-y-z1">
-            {data.direct.map((load) => (
-              <li key={load.id} className="text-xs">
-                <Link
-                  href={`/loads/${load.id}`}
-                  className="z-identifier font-mono font-medium text-ink hover:text-accent"
-                  dir="ltr"
-                >
-                  {load.loadNumber}
-                </Link>{' '}
-                <span className="font-mono tabular-nums text-ink-2">
-                  {formatCents(load.totalRevenueCents, locale)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
+      {header}
       <FilterBar
         groups={[
           {
@@ -330,10 +349,8 @@ export default async function AccountingInvoicesPage({
             choices: BUCKETS.map((bucket) => ({
               value: bucket,
               label: t(`aging.${bucket}` as MessageKey),
-              // Counted from the same predicate the chip filters by, over every
-              // invoice rather than the narrowed set — a chip showing the count
-              // it would produce, not the count it currently shows.
-              count: all.filter((row) => row.bucket === bucket).length,
+              count: data.invoices.filter((row) => row.bucket === bucket)
+                .length,
             })),
           },
         ]}
@@ -350,32 +367,44 @@ export default async function AccountingInvoicesPage({
         clearLabel={t('filter.clear')}
         moreLabel={t('filter.more')}
       />
-
-      <CompanyChips
-        companies={data.companies}
-        label={t('accounting.company')}
-        allLabel={t('accounting.allCompanies')}
-      />
-
+      <div className="flex items-center justify-between gap-z2 border-b border-border bg-surface px-gutter py-z2">
+        <CompanyChips
+          companies={data.companies}
+          label={t('accounting.company')}
+          allLabel={t('accounting.allCompanies')}
+        />
+        <GridToolbar
+          grid="invoices.invoices"
+          columns={allColumns.map((column) => ({
+            key: column.key,
+            header: column.header,
+          }))}
+          visible={data.columns}
+          search={search}
+          labels={toolbarLabels}
+          errors={errors}
+        />
+      </div>
       <Table
-        columns={columns}
-        rows={rows}
+        columns={keepColumns(allColumns, data.columns)}
+        rows={view.paged.rows}
+        footRows={view.filtered}
         rowKey={(row) => row.id}
         rowHref={(row) => `/invoices/${row.id}`}
-        stripeTone={(row) => INVOICE_TONE[row.status]}
+        stripeTone={(row) => INVOICE_TONE[row.status] ?? 'neutral'}
         isCancelled={(row) => row.status === 'VOID'}
         caption={t('accounting.invoices.title')}
         sort={{
-          key: current.key,
-          dir: current.dir,
-          hrefFor: (key) => sortHref('/accounting/invoices', raw, key, current),
+          key: view.sort.key,
+          dir: view.sort.dir,
+          hrefFor: view.sortFor(PATH),
           label: t('accounting.sortBy'),
         }}
         totals={{
-          label: totalsLabel(
+          label: pagedFooterLabel(
             t('accounting.total'),
-            rows.length,
-            t('accounting.rows'),
+            t('grid.rows'),
+            view.paged,
           ),
         }}
         empty={
@@ -384,6 +413,14 @@ export default async function AccountingInvoicesPage({
             body={t('accounting.emptyHint')}
           />
         }
+      />
+      <GridFooterNav
+        paged={view.paged}
+        per={view.params.per}
+        path={PATH}
+        search={search}
+        hrefForPage={view.hrefForPage(PATH)}
+        labels={footerLabels}
       />
     </>
   )
