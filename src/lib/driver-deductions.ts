@@ -189,6 +189,99 @@ export async function saveRecurringDeduction(
   return { ok: true, deductionId: created.id }
 }
 
+export type UpdateDeductionFailure =
+  | 'not_found'
+  | 'bad_amount'
+  | 'bad_monthly_total'
+  | 'bad_target'
+
+export type UpdateDeductionResult =
+  | { ok: true }
+  | { ok: false; reason: UpdateDeductionFailure }
+
+/**
+ * Change the FIGURES on an existing rule, in place.
+ *
+ * ── WHAT THIS DELIBERATELY CANNOT CHANGE ──────────────────────────────────
+ *
+ * Not the driver, not the type, and not `effectiveFrom`. Those three are what
+ * `saveRecurringDeduction` checks for overlaps, and moving any of them could put
+ * two rules of one type over the same week — which the engine would then charge
+ * twice. Ending this rule and starting another is how those change, which is
+ * what `closeRecurringDeduction` is for.
+ *
+ * NOT THE CADENCE EITHER, because `monthlyTotalCents` is required for one
+ * cadence and refused for the other; switching it in place is two edits that
+ * have to land together, and a half-applied one is a rule the engine cannot
+ * price.
+ *
+ * ── WHY EDITING THE AMOUNT IS SAFE AND DELETING IS NOT ────────────────────
+ *
+ * A FINAL settlement is a frozen snapshot — `FINAL` freezes deduction amounts
+ * (MONEY-DESIGN §7) — so a corrected instalment does not rewrite a statement
+ * somebody has already been handed. A DRAFT recomputes from the rules as they
+ * are now, which is the point: fixing a mis-keyed $450 should change this week's
+ * draft, and it does, on the next refresh.
+ *
+ * The same validation as the writer, not a second copy of it: the two call the
+ * same predicates in the same order, and `tests/driver-deductions.test.ts` runs
+ * the bad-figure cases against both.
+ */
+export async function updateRecurringDeduction(
+  tx: TxClient,
+  deductionId: string,
+  patch: {
+    description?: string | null
+    amountCents: number
+    monthlyTotalCents?: number | null
+    targetCents?: number | null
+    notes?: string | null
+  },
+): Promise<UpdateDeductionResult> {
+  const row = await tx.recurringDeduction.findFirst({
+    where: { id: deductionId },
+    select: { id: true, cadence: true },
+  })
+  if (!row) return { ok: false, reason: 'not_found' }
+
+  if (!Number.isInteger(patch.amountCents) || patch.amountCents <= 0) {
+    return { ok: false, reason: 'bad_amount' }
+  }
+
+  const monthly = patch.monthlyTotalCents ?? null
+  if (row.cadence === 'MONTHLY_SPLIT_WEEKLY') {
+    if (monthly === null || !Number.isInteger(monthly) || monthly <= 0) {
+      return { ok: false, reason: 'bad_monthly_total' }
+    }
+    // THE LARGER FIGURE, same as the writer: `$450/$1800` keyed the wrong way
+    // round collects four times what was agreed and both numbers look plausible.
+    if (monthly < patch.amountCents) {
+      return { ok: false, reason: 'bad_monthly_total' }
+    }
+  } else if (monthly !== null) {
+    return { ok: false, reason: 'bad_monthly_total' }
+  }
+
+  const target = patch.targetCents ?? null
+  if (target !== null && (!Number.isInteger(target) || target <= 0)) {
+    return { ok: false, reason: 'bad_target' }
+  }
+
+  await tx.recurringDeduction.update({
+    where: { id: deductionId },
+    data: {
+      amountCents: patch.amountCents,
+      monthlyTotalCents: monthly,
+      targetCents: target,
+      ...(patch.description === undefined
+        ? {}
+        : { description: patch.description }),
+      ...(patch.notes === undefined ? {} : { notes: patch.notes }),
+    },
+  })
+  return { ok: true }
+}
+
 export type CloseDeductionFailure = 'not_found' | 'bad_dates'
 
 export type CloseDeductionResult =
@@ -325,4 +418,99 @@ export async function saveOpeningBalance(
     select: { id: true },
   })
   return { ok: true, balanceId: row.id }
+}
+
+// ---------------------------------------------------------------------------
+// EVERY RECURRING CHARGE IN THE ORGANIZATION, ACROSS DRIVERS.
+//
+// ── WHY A CROSS-DRIVER READ EXISTS AT ALL ─────────────────────────────────
+//
+// The per-driver editor answers "what comes off THIS driver's cheque", which is
+// the question you have when you are already looking at a driver. It cannot
+// answer the one the office actually asks on a Monday: "who is not paying
+// insurance". That question requires reading 164 driver pages, so in practice
+// nobody asked it — and the four replayed weeks on dev showed every statement
+// diff against Zebra's $0.00 in the deductions column, because dev held no
+// recurring charges at all and there was no single screen on which that was
+// visible.
+//
+// ── ACTIVE IS A FACT ABOUT A DATE, SO IT IS COMPUTED HERE ─────────────────
+//
+// `effectiveTo` null means open-ended, not "active" — a rule can be scheduled to
+// start next month. The engine's `ruleInForce` decides this for a settlement
+// week; this decides it for TODAY, which is what a list on a screen is about,
+// and says so in the field name rather than calling it `active`.
+// ---------------------------------------------------------------------------
+
+export interface ChargeRow {
+  id: string
+  driverId: string
+  driverName: string
+  companyId: string
+  companyName: string
+  type: string
+  description: string | null
+  amountCents: number
+  cadence: DeductionCadence
+  monthlyTotalCents: number | null
+  targetCents: number | null
+  effectiveFrom: Date
+  effectiveTo: Date | null
+  /** In force on the day this was read. See the header. */
+  inForceToday: boolean
+}
+
+export async function listCharges(
+  tx: TxClient,
+  where: Prisma.DriverWhereInput = {},
+): Promise<ChargeRow[]> {
+  const rows = await tx.recurringDeduction.findMany({
+    // SCOPED THROUGH THE DRIVER, because that is where the company scope lives —
+    // `RecurringDeduction.organizationId` is denormalised for RLS and carries no
+    // company, so filtering on it would show every authority's charges to
+    // somebody scoped to one.
+    where: { driver: { deletedAt: null, ...where } },
+    orderBy: [{ driver: { lastName: 'asc' } }, { type: 'asc' }],
+    select: {
+      id: true,
+      type: true,
+      description: true,
+      amountCents: true,
+      cadence: true,
+      monthlyTotalCents: true,
+      targetCents: true,
+      effectiveFrom: true,
+      effectiveTo: true,
+      driverId: true,
+      driver: {
+        select: {
+          firstName: true,
+          lastName: true,
+          companyId: true,
+          company: { select: { name: true } },
+        },
+      },
+    },
+  })
+
+  const today = Date.now()
+
+  return rows.map((row) => ({
+    id: row.id,
+    driverId: row.driverId,
+    driverName: `${row.driver.firstName} ${row.driver.lastName}`,
+    companyId: row.driver.companyId,
+    companyName: row.driver.company.name,
+    type: row.type,
+    description: row.description,
+    amountCents: row.amountCents,
+    cadence: row.cadence,
+    monthlyTotalCents: row.monthlyTotalCents,
+    targetCents: row.targetCents,
+    effectiveFrom: row.effectiveFrom,
+    effectiveTo: row.effectiveTo,
+    inForceToday:
+      row.effectiveFrom.getTime() <= today &&
+      (row.effectiveTo === null || row.effectiveTo.getTime() >= today),
+  }))
 }

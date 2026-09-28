@@ -560,31 +560,46 @@ export const NAVIGATION: readonly NavGroup[] = [
       item('maintenance', '/maintenance', 'maintenance'),
     ],
   },
+  // ── ACCOUNTING (§6.2, amended 2026-09-28) ────────────────────────────────
+  //
+  // Was MONEY, with eight entries. Three of them — `/money/this-week`,
+  // `/settlements` and `/settlements/batches` — were one week's pay seen from
+  // three distances, so the group had to be tried in turn rather than read.
+  //
+  // FIVE DESTINATIONS, EACH ANSWERING SOMETHING THE OTHER FOUR DO NOT: who owes
+  // us, what came in, what a week costs per driver, what comes off cheques every
+  // week, and the same money cut three ways. §6.2 states that as a table, so a
+  // sixth entry has to say which question is missing.
+  //
+  // THE ORDER IS THE WEEK'S ORDER, not an alphabet: money is invoiced, then it
+  // arrives, then it is paid out, and Charges and Reports are what you open when
+  // one of the first three is wrong.
   {
-    key: 'money',
-    labelKey: 'nav.group.money',
+    key: 'accounting',
+    labelKey: 'nav.group.accounting',
     items: [
-      // MONEY → THIS WEEK (item 6) — FIRST IN THE GROUP, because it is the one
-      // screen anybody opens on a Tuesday and every other entry here is
-      // something it links to.
-      item('thisWeek', '/money/this-week', 'settlement'),
-      // MONEY → BY COMPANY (item 7). Settle together, report apart: the
-      // batch is org-wide, and this is where a person sees which authority
-      // the money belonged to. Read-only, so 'read' is the whole of it.
-      item('byCompany', '/money/by-company', 'settlement'),
-      item('invoices', '/invoices', 'invoice'),
-      item('receivables', '/receivables', 'receivable'),
-      item('payments', '/payments', 'payment'),
-      item('settlements', '/settlements', 'settlement'),
-      // MONEY-DESIGN item 3. Its own entry rather than a tab under
-      // /settlements: the two are different documents with different rules —
-      // that one is a per-driver settlement showing its working, this one is a
-      // company's week in the layout drivers already read.
-      item('settlementBatches', '/settlements/batches', 'settlement'),
-      // §2.6: Expenses, Fuel and IFTA move to Phase 5. Phase 4 is fleet and
-      // safety, not the spend ledger — maintenance COSTS land in Phase 4
-      // because they attach to a work order, but the general expense screens
-      // do not.
+      item('invoices', '/accounting/invoices', 'invoice'),
+      item('payments', '/accounting/payments', 'payment'),
+      item('payroll', '/accounting/payroll', 'settlement'),
+      // CHARGES IS `driver.pay`, NOT `settlement`. It is what comes off a
+      // driver's cheque every week, which is the same resource the driver page
+      // guards its deduction editor with — a role that may read a batch total
+      // does not thereby get to see one driver's insurance instalment.
+      //
+      // GATED ON `read`, WITH THE CONTROLS ON `update`. This entry was written
+      // as `update` first, and the permissions suite caught what that meant:
+      // `driver.pay:update` is OWNER and ADMIN only, so the page whose whole
+      // purpose is the accountant's Monday question would have been invisible to
+      // ACCOUNTING — which reads pay and, today, cannot set it.
+      //
+      // The split is the driver page's own (`maySeePay` / `maySetPay`), not an
+      // invention here. Whether ACCOUNTING should hold `driver.pay:update` is a
+      // question about the role rather than about this screen, and widening a
+      // role is not a thing a new page gets to decide.
+      item('charges', '/accounting/charges', 'driver.pay'),
+      item('reports', '/accounting/reports', 'settlement'),
+      // §2.6: Expenses and Fuel move to Phase 5. Kept unbuilt rather than
+      // dropped — the marker is data, so building one is a one-word edit.
       unbuilt('expenses', '/expenses', 'expense', 'Phase 5'),
       unbuilt('fuel', '/fuel', 'fuel', 'Phase 5'),
     ],
@@ -599,7 +614,9 @@ export const NAVIGATION: readonly NavGroup[] = [
       // per ENTITY rather than per role: a dispatcher sees the PODs they filed
       // and not the settlement PDFs beside them. See document-browser.ts.
       item('documents', '/documents', 'document'),
-      unbuilt('reports', '/reports', 'report', 'Phase 5'),
+      // Reports LEFT THIS GROUP for Accounting (§6.2). It was `unbuilt` here
+      // under a Phase 5 marker and is now a real screen there — the person who
+      // reconciles is already in Accounting when the question occurs to them.
     ],
   },
   {

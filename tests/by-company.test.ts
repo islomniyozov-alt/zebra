@@ -140,11 +140,15 @@ describe('the numbers', () => {
 describe('where the grouping happens', () => {
   const source = readFileSync('src/lib/by-company.ts', 'utf8')
 
-  it('groups both numbers in SQL', () => {
-    expect(source.match(/GROUP BY/g) ?? []).toHaveLength(2)
+  // THREE SINCE 2026-09-28, not two: `driverTotals` is Reports' by-driver cut
+  // (§6.2) and it aggregates settlements the same way, so it is under the same
+  // rule and counted by the same instrument. The number is the number of
+  // aggregate queries in this file, and a fourth has to come and say so here.
+  it('groups every aggregate in SQL', () => {
+    expect(source.match(/GROUP BY/g) ?? []).toHaveLength(3)
   })
 
-  it('reads loads through the two grouped queries and nowhere else', () => {
+  it('reads loads through the grouped queries and nowhere else', () => {
     // `findMany` over loads is the shape this forbids: it would mean rows
     // crossing the wire to be summed in a worker.
     expect(source).not.toMatch(/load\.findMany|loads\.map\(/)

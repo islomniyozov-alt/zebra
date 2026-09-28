@@ -27,8 +27,66 @@ const nextConfig: NextConfig = {
   // itself redirects to `/login` without a session, so this is the entry point
   // in both states. Still `permanent: false` — a 308 would be cached by every
   // browser that ever saw it, and the destination has already moved once.
+  // THE MONEY SECTION MOVED TO ACCOUNTING (§6.2, amended 2026-09-28) and every
+  // old path still resolves. Not politeness: `/money/this-week` is in bookmarks,
+  // in four commit messages, in session notes and in the sidebar of any tab left
+  // open over the weekend, and a 404 on a money screen reads as data loss rather
+  // than as a moved page.
+  //
+  // `permanent: false` THROUGHOUT. A 308 is cached by every browser that ever
+  // saw it, and this section has now moved once — which is the argument the `/`
+  // redirect above already makes about its own destination.
+  //
+  // `/settlements/:id` AND `/invoices/:id` ARE NOT REDIRECTED. The detail pages
+  // did not move: a settlement is the document a driver is handed and Payroll
+  // links to it, so only the LIST paths are here.
   async redirects() {
-    return [{ source: '/', destination: '/dashboard', permanent: false }]
+    return [
+      { source: '/', destination: '/dashboard', permanent: false },
+      {
+        source: '/money/this-week',
+        destination: '/accounting/payroll',
+        permanent: false,
+      },
+      {
+        source: '/money/by-company',
+        destination: '/accounting/reports?cut=company',
+        permanent: false,
+      },
+      {
+        source: '/money',
+        destination: '/accounting/payroll',
+        permanent: false,
+      },
+      {
+        source: '/invoices',
+        destination: '/accounting/invoices',
+        permanent: false,
+      },
+      {
+        source: '/payments',
+        destination: '/accounting/payments',
+        permanent: false,
+      },
+      // Receivables folded into Invoices as an age chip. The factoring screen
+      // did NOT fold in — it is money owed by the factor rather than by a broker
+      // — so it keeps its own path and is not redirected.
+      {
+        source: '/receivables',
+        destination: '/accounting/invoices',
+        permanent: false,
+      },
+      {
+        source: '/settlements',
+        destination: '/accounting/payroll',
+        permanent: false,
+      },
+      {
+        source: '/settlements/batches',
+        destination: '/accounting/payroll',
+        permanent: false,
+      },
+    ]
   },
   turbopack: {
     resolveAlias: forWorkers

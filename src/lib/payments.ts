@@ -550,6 +550,8 @@ export interface PaymentRow {
   amountCents: number
   unappliedCents: number
   customerName: string
+  /** The authority's id, for §7.4.2's company chip. Named, not derived. */
+  companyId: string
   companyName: string
   appliedToCount: number
 }
@@ -569,6 +571,7 @@ export async function listPayments(
       receivedAt: true,
       amountCents: true,
       unappliedCents: true,
+      companyId: true,
       customer: { select: { name: true } },
       company: { select: { name: true } },
       _count: { select: { applications: true, loadApplications: true } },
@@ -583,6 +586,7 @@ export async function listPayments(
     amountCents: payment.amountCents,
     unappliedCents: payment.unappliedCents,
     customerName: payment.customer?.name ?? '—',
+    companyId: payment.companyId,
     companyName: payment.company.name,
     appliedToCount:
       payment._count.applications + payment._count.loadApplications,

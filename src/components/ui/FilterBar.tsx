@@ -51,9 +51,28 @@ export interface FilterSearch {
   placeholder: string
 }
 
+/**
+ * §7.4.1 — two date inputs, and the label says WHICH DATE they bound.
+ *
+ * "Delivered", "Issued", "Paid" — never a bare "Date". Every financial list has
+ * more than one date on it, and an unlabelled range is a filter nobody can
+ * predict. Either end alone is valid: `from` with nothing after it means since.
+ *
+ * The keys are fixed at `from` and `to` rather than configurable, because the
+ * bounds are read back by `readListParams`, and a screen that named them
+ * something else would be a screen whose URL the shared reader could not parse.
+ */
+export interface FilterRange {
+  /** What the range is ABOUT, translated. Rendered before the inputs. */
+  label: string
+  fromLabel: string
+  toLabel: string
+}
+
 interface FilterBarProps {
   groups: readonly FilterGroup[]
   search?: FilterSearch
+  range?: FilterRange
   clearLabel: string
   moreLabel: string
 }
@@ -61,6 +80,7 @@ interface FilterBarProps {
 export function FilterBar({
   groups,
   search,
+  range,
   clearLabel,
   moreLabel,
 }: FilterBarProps) {
@@ -102,9 +122,27 @@ export function FilterBar({
     [params, pathname, router, search],
   )
 
+  // ON CHANGE, NOT ON SUBMIT, and deliberately unlike the search box above. A
+  // date input fires `change` when a day is picked, not per keystroke, so there
+  // is no query behind every character and nothing to debounce — and a range
+  // that needed a separate Apply would be a control people leave half-set.
+  const setDay = useCallback(
+    (param: 'from' | 'to', value: string) => {
+      const next = new URLSearchParams(params.toString())
+      if (value === '') next.delete(param)
+      else next.set(param, value)
+      router.replace(next.size > 0 ? `${pathname}?${next}` : pathname, {
+        scroll: false,
+      })
+    },
+    [params, pathname, router],
+  )
+
   const active =
     groups.some((group) => params.get(group.param) !== null) ||
-    (search !== undefined && params.get(search.param) !== null)
+    (search !== undefined && params.get(search.param) !== null) ||
+    (range !== undefined &&
+      (params.get('from') !== null || params.get('to') !== null))
 
   return (
     <div className="flex flex-wrap items-center gap-z2 border-b border-border bg-surface px-gutter py-z2">
@@ -178,6 +216,34 @@ export function FilterBar({
             className="h-control-compact rounded-control border border-border-strong bg-surface px-z2 font-mono text-xs text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none"
           />
         </form>
+      ) : null}
+
+      {range ? (
+        <div className="flex items-center gap-z1">
+          {/* WHICH DATE, said once, before both inputs (§7.4.1). */}
+          <span className="text-xs font-medium uppercase tracking-[0.04em] text-ink-3">
+            {range.label}
+          </span>
+          <input
+            type="date"
+            aria-label={range.fromLabel}
+            key={`from-${params.get('from') ?? ''}`}
+            defaultValue={params.get('from') ?? ''}
+            onChange={(event) => setDay('from', event.target.value)}
+            className="h-control-compact rounded-control border border-border-strong bg-surface px-z2 font-mono text-xs text-ink focus:border-accent focus:outline-none"
+          />
+          <span aria-hidden className="text-xs text-ink-3">
+            –
+          </span>
+          <input
+            type="date"
+            aria-label={range.toLabel}
+            key={`to-${params.get('to') ?? ''}`}
+            defaultValue={params.get('to') ?? ''}
+            onChange={(event) => setDay('to', event.target.value)}
+            className="h-control-compact rounded-control border border-border-strong bg-surface px-z2 font-mono text-xs text-ink focus:border-accent focus:outline-none"
+          />
+        </div>
       ) : null}
 
       <Button variant="ghost" size="compact" disabled>

@@ -393,3 +393,82 @@ export function assembleReport(input: {
 
   return { periods, firstSettledPeriodStart: input.firstSettledPeriodStart }
 }
+
+// ---------------------------------------------------------------------------
+// THE THIRD CUT: BY DRIVER.
+//
+// §6.2's Reports page offers the same money by company, by week or by driver.
+// The first two come out of `assembleReport` above; this is the third, and it is
+// a different shape rather than a transpose — a driver's row is what they were
+// PAID, not what an authority billed, and the two are never the same number.
+//
+// ── SETTLED WEEKS ONLY, AND IT SAYS SO ────────────────────────────────────
+//
+// `FINAL` and `PAID` batches, exactly like `driverPayByCompany`. A DRAFT is
+// recomputed on every refresh and its figures change under the reader; putting
+// them in a report would make the report disagree with itself between two
+// readings, which is worse than a report that is missing this week.
+//
+// GROUPED IN SQL, NOT IN THE WORKER. Same rule as the rest of this file: the
+// money screen already went down the road of summing rows in TypeScript and came
+// back at 4,427ms. `by-company.test.ts` breaks on a version that groups here.
+// ---------------------------------------------------------------------------
+
+export interface DriverTotalRow {
+  driverId: string
+  driverName: string
+  /** How many settlements in the window — the weeks they were paid for. */
+  weeks: number
+  grossCents: number
+  deductionsCents: number
+  otherPayCents: number
+  netCents: number
+}
+
+export async function driverTotals(
+  tx: TxClient,
+  input: { from: Date; to: Date },
+): Promise<DriverTotalRow[]> {
+  const rows = await tx.$queryRaw<
+    {
+      driver_id: string
+      first_name: string
+      last_name: string
+      weeks: bigint
+      gross: bigint
+      deductions: bigint
+      other_pay: bigint
+      net: bigint
+    }[]
+  >`
+    SELECT
+      d."id"                          AS driver_id,
+      d."firstName"                   AS first_name,
+      d."lastName"                    AS last_name,
+      COUNT(*)::bigint                AS weeks,
+      SUM(st."earningsCents")::bigint AS gross,
+      SUM(st."deductionsCents")::bigint AS deductions,
+      SUM(st."otherPayCents")::bigint AS other_pay,
+      SUM(st."netCents")::bigint      AS net
+    FROM "Settlement" st
+    JOIN "SettlementBatch" b ON b."id" = st."batchId"
+    JOIN "Driver" d ON d."id" = st."driverId"
+    WHERE b."status" IN ('FINAL', 'PAID')
+      AND b."deletedAt" IS NULL
+      AND d."deletedAt" IS NULL
+      AND b."periodStart" >= ${input.from}
+      AND b."periodStart" < ${input.to}
+    GROUP BY d."id", d."firstName", d."lastName"
+    ORDER BY d."lastName", d."firstName"
+  `
+
+  return rows.map((row) => ({
+    driverId: row.driver_id,
+    driverName: `${row.first_name} ${row.last_name}`,
+    weeks: Number(row.weeks),
+    grossCents: Number(row.gross),
+    deductionsCents: Number(row.deductions),
+    otherPayCents: Number(row.other_pay),
+    netCents: Number(row.net),
+  }))
+}

@@ -27,6 +27,40 @@ export interface Column<Row> {
   /** Addresses and commodity, yes. Identifiers and money, never. */
   truncate?: boolean
   render: (row: Row) => ReactNode
+  /**
+   * §7.1.1 — this header becomes a link that sorts by this column.
+   *
+   * The SORTING ITSELF IS NOT HERE. `applyList` in `lib/list-view.ts` orders the
+   * rows by the column's stored value before they reach this component; this
+   * flag only says the header is operable. A column marked sortable whose key
+   * has no entry in the shape's `sorts` renders a header that reorders nothing,
+   * so `tests/list-view.test.ts` checks the pair for the screens in Accounting.
+   */
+  sortable?: boolean
+  /**
+   * §7.1.2 — what this column contributes to the sticky foot, over THE ROWS IT
+   * WAS GIVEN. Absent leaves the foot cell empty, which is the right answer for
+   * a status column: a count of statuses is a number nobody asked for.
+   */
+  foot?: (rows: readonly Row[]) => ReactNode
+}
+
+/**
+ * §7.1.1 — the current order, and where each header points.
+ *
+ * LINKS RATHER THAN CLIENT STATE, which is what keeps this component
+ * server-rendered and what makes a sorted view a URL somebody can send (the
+ * same argument §7.4 makes for filters). It also works with JavaScript off and
+ * gives the keyboard and middle-click their ordinary behaviour for free.
+ */
+export interface TableSort {
+  /** The column actually in force, after `activeSort`'s fallback. */
+  key: string
+  dir: 'asc' | 'desc'
+  /** The URL that sorts by this column, built by the page from its own params. */
+  hrefFor: (columnKey: string) => string
+  /** Announced on every sortable header. Translated by the caller. */
+  label: string
 }
 
 interface TableProps<Row> {
@@ -60,6 +94,18 @@ interface TableProps<Row> {
    * of that and is the reason the rule specifies the mechanism.
    */
   rowHref?: (row: Row) => string | null
+  /** §7.1.1. Absent means no header is operable. */
+  sort?: TableSort
+  /**
+   * §7.1.2 — the sticky foot.
+   *
+   * THE LABEL SAYS HOW MANY ROWS IT TOTALLED, and the caller composes it because
+   * the caller has both the count and the translator. A foot that silently
+   * totalled the query while the body rendered the filter is the most expensive
+   * kind of wrong on a financial screen, so the scope is stated in words rather
+   * than implied by position.
+   */
+  totals?: { label: string }
 }
 
 export function Table<Row>({
@@ -71,7 +117,19 @@ export function Table<Row>({
   empty,
   caption,
   rowHref,
+  sort,
+  totals,
 }: TableProps<Row>) {
+  if (totals && columns[0]?.foot) {
+    // The first foot cell carries the label, so a `foot` there would be
+    // overwritten. Loud in development rather than silently dropped — the
+    // leading column of a financial list is an identifier and is never summable
+    // anyway, so this is a mistake rather than a limitation.
+    throw new Error(
+      `The first column ("${columns[0].key}") cannot have a foot: that cell ` +
+        'carries the totals label. Move the sum to a money column.',
+    )
+  }
   if (columns.length > 9) {
     // §7.1. Anything beyond nine goes behind a column chooser. Failing loudly
     // in development beats discovering it on a 1080p screen at 6am.
@@ -89,19 +147,55 @@ export function Table<Row>({
           <tr>
             {/* The stripe column. No header text; it is not a data column. */}
             {stripeTone ? <th className="w-[3px] p-0" aria-hidden /> : null}
-            {columns.map((column) => (
-              <th
-                key={column.key}
-                scope="col"
-                className={cx(
-                  'sticky top-0 z-10 border-b border-border bg-surface-2 px-z3 py-z2',
-                  'text-xs font-semibold uppercase tracking-[0.04em] text-ink-2',
-                  column.align === 'end' ? 'text-end' : 'text-start',
-                )}
-              >
-                {column.header}
-              </th>
-            ))}
+            {columns.map((column) => {
+              const active = sort?.key === column.key
+              return (
+                <th
+                  key={column.key}
+                  scope="col"
+                  // §7.1.1 — the caret is not the only signal. `aria-sort` says
+                  // it to a screen reader, and the active header sits in `ink`
+                  // where the others are `ink-2`.
+                  aria-sort={
+                    active
+                      ? sort.dir === 'desc'
+                        ? 'descending'
+                        : 'ascending'
+                      : undefined
+                  }
+                  className={cx(
+                    'sticky top-0 z-10 border-b border-border bg-surface-2 px-z3 py-z2',
+                    'text-xs font-semibold uppercase tracking-[0.04em]',
+                    active ? 'text-ink' : 'text-ink-2',
+                    column.align === 'end' ? 'text-end' : 'text-start',
+                  )}
+                >
+                  {sort && column.sortable ? (
+                    <Link
+                      href={sort.hrefFor(column.key)}
+                      scroll={false}
+                      aria-label={`${column.header} — ${sort.label}`}
+                      className={cx(
+                        'inline-flex items-center gap-z1 uppercase tracking-[0.04em]',
+                        'transition-colors duration-120 ease-out hover:text-accent',
+                        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent',
+                        column.align === 'end' && 'flex-row-reverse',
+                      )}
+                    >
+                      {column.header}
+                      {/* A caret only on the active column. An indicator on
+                       * every sortable header is nine arrows competing with the
+                       * one that means something. */}
+                      <span aria-hidden className="text-ink-3">
+                        {active ? (sort.dir === 'desc' ? '▾' : '▴') : ''}
+                      </span>
+                    </Link>
+                  ) : (
+                    column.header
+                  )}
+                </th>
+              )
+            })}
           </tr>
         </thead>
 
@@ -176,6 +270,42 @@ export function Table<Row>({
             })
           )}
         </tbody>
+
+        {/* §7.1.2 — sticky foot, surface-2, a border-strong top rule, weight
+         * 600, aligned to its columns. Suppressed on an empty body: "Total (0
+         * rows) $0.00" under a written empty state is two answers to the same
+         * question, and §10 says the empty state is the one that invites an
+         * action. */}
+        {totals && rows.length > 0 ? (
+          <tfoot>
+            <tr className="sticky bottom-0 z-10 bg-surface-2">
+              {stripeTone ? (
+                <td
+                  aria-hidden
+                  className="w-[3px] border-t border-border-strong p-0"
+                />
+              ) : null}
+              {columns.map((column, index) => (
+                <td
+                  key={column.key}
+                  className={cx(
+                    'border-t border-border-strong px-z3 py-z2',
+                    'text-[length:var(--z-body-size)]/[var(--z-body-line)] font-semibold text-ink',
+                    column.align === 'end' ? 'text-end' : 'text-start',
+                  )}
+                >
+                  {index === 0 ? (
+                    <span className="text-xs uppercase tracking-[0.04em] text-ink-2">
+                      {totals.label}
+                    </span>
+                  ) : (
+                    (column.foot?.(rows) ?? null)
+                  )}
+                </td>
+              ))}
+            </tr>
+          </tfoot>
+        ) : null}
       </table>
     </div>
   )

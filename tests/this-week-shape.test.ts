@@ -41,13 +41,24 @@ const FORBIDDEN = [
   'r2ConfigFromEnv',
 ]
 
+// ── REPOINTED 2026-09-28 AT THE PAGE THAT REPLACED THE TUESDAY SCREEN ─────
+//
+// §6.2's Accounting section folded `/money/this-week` into `/accounting/payroll`,
+// and this guard read a directory that no longer exists. IT FAILED RATHER THAN
+// PASSING VACUOUSLY, which is the "cannot pass by finding nothing" test below
+// doing exactly its job — the deletion was caught by the instrument built against
+// that hazard, on the first run.
+//
+// The rule is unchanged and so is its reason: the week's summary is ONE
+// transaction, `objectBytes` calls `assertOutsideTransaction`, and so the first
+// broker load would take the screen down entirely rather than merely slow it.
 const PAGE_DIR = join(
   process.cwd(),
   'src',
   'app',
   '(app)',
-  'money',
-  'this-week',
+  'accounting',
+  'payroll',
 )
 
 function sources(): { name: string; text: string }[] {
@@ -59,11 +70,22 @@ function sources(): { name: string; text: string }[] {
         'utf8',
       ),
     },
+    // `payroll.ts` IS UNDER THE SAME RULE. It is the week's reader now, it runs
+    // in one transaction, and reaching for `renderStatementPdf` there to find
+    // out whether a statement is printable is the same reasonable instinct with
+    // the same consequence.
+    {
+      name: 'src/lib/payroll.ts',
+      text: readFileSync(
+        join(process.cwd(), 'src', 'lib', 'payroll.ts'),
+        'utf8',
+      ),
+    },
   ]
   for (const entry of readdirSync(PAGE_DIR)) {
     if (!/\.tsx?$/.test(entry)) continue
     found.push({
-      name: `money/this-week/${entry}`,
+      name: `accounting/payroll/${entry}`,
       text: readFileSync(join(PAGE_DIR, entry), 'utf8'),
     })
   }

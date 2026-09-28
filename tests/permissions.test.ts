@@ -228,16 +228,19 @@ describe('permissionsOf', () => {
 
 describe('navigationFor', () => {
   it('shows an owner all five groups', () => {
+    // `accounting` SINCE 2026-09-28, in the slot `money` held (§6.2 amended).
+    // Still five groups and still in this order: the section was renamed and
+    // narrowed, not moved.
     expect(navigationFor(session('OWNER')).map((group) => group.key)).toEqual([
       'operations',
       'fleet',
-      'money',
+      'accounting',
       'records',
       'admin',
     ])
   })
 
-  it('never shows a dispatcher an empty Money heading', () => {
+  it('never shows a dispatcher an empty Accounting heading', () => {
     // §7, stated as a UI rule but enforced here: a group with no permitted
     // child does not render at all. Rendering the heading and hiding the items
     // tells someone exactly what they are missing.
@@ -247,7 +250,7 @@ describe('navigationFor', () => {
       'fleet',
       'records',
     ])
-    expect(groups.find((group) => group.key === 'money')).toBeUndefined()
+    expect(groups.find((group) => group.key === 'accounting')).toBeUndefined()
   })
 
   it('drops individual items too, not just whole groups', () => {
@@ -271,10 +274,63 @@ describe('navigationFor', () => {
     expect(can(session('DISPATCHER'), 'read', 'report')).toBe(false)
   })
 
-  it('shows accounting Money but not Admin', () => {
+  it('shows accounting the Accounting group but not Admin', () => {
     const keys = navigationFor(session('ACCOUNTING')).map((group) => group.key)
-    expect(keys).toContain('money')
+    expect(keys).toContain('accounting')
     expect(keys).not.toContain('admin')
+  })
+
+  // ── THE FIVE PAGES, AND CHARGES IS THE ONE WITH ITS OWN PERMISSION ──────
+  //
+  // §6.2's table is five destinations. Charges is `driver.pay` + update rather
+  // than `settlement` + read, because it is what comes off one driver's cheque —
+  // the same resource the driver page guards its deduction editor with. A role
+  // that may read a batch total does not thereby get to see somebody's insurance
+  // instalment, and asserting the LIST here is what stops the next entry being
+  // added under whatever permission was nearest.
+  it('offers accounting exactly the five Accounting pages', () => {
+    const group = navigationFor(session('ACCOUNTING')).find(
+      (candidate) => candidate.key === 'accounting',
+    )
+    expect(group?.items.map((item) => item.key)).toEqual([
+      'invoices',
+      'payments',
+      'payroll',
+      'charges',
+      'reports',
+    ])
+  })
+
+  // ── WHO MAY CHANGE A CHARGE IS NOT WHO MAY SEE ONE ──────────────────────
+  //
+  // This assertion is here because the first version of the Charges nav entry
+  // was gated on `driver.pay:update` and this suite caught what that meant:
+  // `driver.pay:update` is OWNER and ADMIN ONLY, so the page whose whole purpose
+  // is the accountant's Monday question was invisible to ACCOUNTING.
+  //
+  // The entry reads `driver.pay:read` now and the page gates its Add button and
+  // row editors on `update` — the driver page's own split. Whether ACCOUNTING
+  // ought to hold `driver.pay:update` is a question about the ROLE, and is
+  // flagged rather than answered by a screen.
+  it('lets a manager and accounting SEE charges without setting them', () => {
+    for (const role of ['ACCOUNTING', 'MANAGER'] as const) {
+      const group = navigationFor(session(role)).find(
+        (candidate) => candidate.key === 'accounting',
+      )
+      expect(
+        group?.items.map((item) => item.key),
+        role,
+      ).toContain('charges')
+      expect(can(session(role), 'read', 'driver.pay'), role).toBe(true)
+      expect(can(session(role), 'update', 'driver.pay'), role).toBe(false)
+    }
+  })
+
+  it('gives OWNER and ADMIN the write side, and nobody else', () => {
+    for (const role of ['OWNER', 'ADMIN'] as const) {
+      expect(can(session(role), 'update', 'driver.pay'), role).toBe(true)
+    }
+    expect(can(session('DISPATCHER'), 'read', 'driver.pay')).toBe(false)
   })
 
   it('shows a driver nothing', () => {
@@ -557,7 +613,7 @@ describe('the sidebar only offers screens that exist', () => {
     expect(navigationFor(owner).map((group) => group.key)).toEqual([
       'operations',
       'fleet',
-      'money',
+      'accounting',
       'records',
       'admin',
     ])
