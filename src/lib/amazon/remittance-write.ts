@@ -158,6 +158,77 @@ export interface RemittanceWriteInput {
   recordedByUserId?: string | null
 }
 
+/**
+ * True when every row in the workbook is money that is not freight.
+ *
+ * `classifyItemType` returns null for `Adjustments - Dispute` on purpose, so a
+ * file with no classified row is a file with no freight. Asserted on the ROWS
+ * rather than on the Load Board summary block: the rows are what the writer
+ * iterates, and a mismatch between the two is exactly the kind of thing that
+ * should show up as a refusal somewhere rather than be papered over here.
+ */
+export function isAdjustmentOnly(reading: RemittanceReading): boolean {
+  return (
+    reading.rows.length > 0 && reading.rows.every((row) => row.item === null)
+  )
+}
+
+/**
+ * Amazon's printed adjustment lines, for the note on such a payment.
+ *
+ * Null for an ordinary freight remittance, so the caller keeps its existing
+ * wording and nothing changes for the six weeks already imported.
+ */
+/**
+ * THE MARKER THAT SAYS "THIS PAYMENT IS A CREDIT, NOT FREIGHT".
+ *
+ * ── WHY A MARKER IS NEEDED AT ALL ─────────────────────────────────────────
+ *
+ * Two rulings meet here and they LOOK like they conflict:
+ *
+ *   2026-09-26  a payment that only declares the period and paid nothing into
+ *               it is NOT the week's remittance — the label spans two weeks and
+ *               the applications are the better evidence
+ *   2026-09-27  a workbook whose money is entirely `Adjustments - Dispute`
+ *               books a payment with zero applications, SHOWN on the money
+ *               screen with Amazon's text
+ *
+ * THEY ONLY CONFLICT IF THE TWO CANNOT BE TOLD APART, and by shape they cannot:
+ * a dispute credit has no applications, and so does a freight remittance whose
+ * every unit is closed history — which is most of the corpus. "Zero
+ * applications" is therefore not the discriminator, and the first attempt at
+ * this used it and broke the 2026-09-26 guard on its first run.
+ *
+ * SO THE WRITER MARKS IT, and the screen reads the mark. The fact lives in the
+ * workbook — no freight rows — and nothing on the `Payment` row carries it
+ * otherwise.
+ *
+ * ── A NOTE PREFIX IS THE INTERIM, AND A COLUMN IS THE DURABLE FIX ─────────
+ *
+ * This is our own text, written in exactly one place and read in exactly one
+ * place through this constant, which is what makes it tolerable — unlike
+ * matching Amazon's wording, which changes without notice and did so this week.
+ *
+ * IT IS STILL A STRING STANDING IN FOR A BOOLEAN. The durable form is a column
+ * on `Payment` — `isAdjustment`, defaulting false — and that is a migration and
+ * a production ritual, which is a decision to take deliberately rather than
+ * fold into this change. Flagged rather than done.
+ */
+export const ADJUSTMENT_NOTE_PREFIX = 'Amazon adjustment'
+
+export function adjustmentNote(reading: RemittanceReading): string | null {
+  if (!isAdjustmentOnly(reading)) return null
+  const lines = reading.summary.adjustments
+    // ZERO LINES ARE DROPPED. Every workbook prints all four adjustment
+    // categories whether or not they carry anything, so keeping the zeros would
+    // bury the one line that says what happened in three that say nothing.
+    .filter((line) => line.cents !== 0)
+    .map((line) => `${line.type} · ${line.description}`.trim())
+  const period = reading.summary.workPeriod ?? ''
+  const head = `${ADJUSTMENT_NOTE_PREFIX} ${period}`.trim()
+  return lines.length === 0 ? head : `${head} — ${lines.join('; ')}`
+}
+
 export interface RemittanceWriteResult {
   paymentId: string
   /** Units that produced writes. Never includes closed history. */
@@ -288,7 +359,19 @@ export async function writeRemittance(
       amountCents: headerCents,
       unappliedCents: headerCents - appliedCents,
       recordedByUserId: input.recordedByUserId ?? null,
-      notes: `Amazon remittance ${reading.summary.workPeriod ?? ''}`.trim(),
+      // ── AMAZON'S OWN TEXT, WHEN THE MONEY IS ENTIRELY AN ADJUSTMENT ────
+      //
+      // Owner's ruling, 2026-09-27: such a workbook books a Payment with zero
+      // applications, unapplied by design, shown on the money screen with
+      // Amazon's text. This is that text — the adjustment lines as printed,
+      // `Adjustments · 2 Resolved`, not a sentence written here about them.
+      //
+      // WHY IT MATTERS ON THIS PAYMENT PARTICULARLY: it has no applications, so
+      // nothing else on the screen can say what it was for. A freight payment is
+      // explained by the loads it paid; this one is explained only by its note.
+      notes:
+        adjustmentNote(reading) ??
+        `Amazon remittance ${reading.summary.workPeriod ?? ''}`.trim(),
       // THE WORK PERIOD AS DAYS, not only as the sentence in `notes`. The money
       // screen asks "is this week's remittance in" and had to ask it sideways —
       // through the loads the payment applied to — because the period existed

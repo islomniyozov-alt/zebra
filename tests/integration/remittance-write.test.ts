@@ -105,7 +105,7 @@ const reading = (): RemittanceReading =>
       },
     ],
     footer: [],
-    census: { counts: [], unrecognised: [] },
+    census: { counts: [], unrecognised: [], adjustments: [] },
     dormantColumnsSeen: [],
     totals: {
       bodyCents: 150000,

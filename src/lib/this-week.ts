@@ -1,4 +1,5 @@
 import type { Prisma } from '@/generated/prisma/client'
+import { ADJUSTMENT_NOTE_PREFIX } from './amazon/remittance-write'
 import { NOT_CLOSED_HISTORY } from './billing-status'
 import { batchInputForOrg } from './settlement-batch'
 import { computeBatch, type Week } from './settlement-week'
@@ -86,6 +87,17 @@ export interface RemittancePayment {
   appliedIntoPeriodCents: number
   receivedAt: Date
   importedAt: Date
+  /**
+   * AMAZON'S OWN TEXT for a payment that applied to nothing.
+   *
+   * Owner's ruling, 2026-09-27. A freight payment is explained by the loads it
+   * paid; a dispute credit has no loads, so its note is the only thing on the
+   * screen that can say what it was for — `Adjustments · 2 Resolved`.
+   *
+   * Null on every freight payment, so the row carries the text only where it is
+   * the explanation rather than a duplicate of one.
+   */
+  adjustmentText: string | null
 }
 
 export interface RemittanceState {
@@ -365,21 +377,72 @@ export async function thisWeekFor(
         companyId: { in: companyIds },
         deletedAt: null,
         remittanceKey: { not: null },
-        loadApplications: {
-          some: {
-            load: {
-              stops: {
-                some: {
-                  type: 'DELIVERY',
-                  scheduledAt: {
-                    gte: input.period.start,
-                    lte: periodEndOfDay,
+        // ── TWO WAYS TO BELONG TO A WEEK, AND THE SECOND IS NARROW ─────────
+        //
+        // Owner's ruling, 2026-09-27: a workbook whose money is entirely
+        // `Adjustments - Dispute` books a Payment with ZERO applications,
+        // unapplied by design, and is shown on the money screen.
+        //
+        // THE FIRST ARM IS THE 2026-09-26 RULING AND IS UNCHANGED: a payment
+        // belongs to every week it actually paid freight into, decided by the
+        // delivery dates of the loads it applied to. That is what replaced
+        // keying on Amazon's label, because the label spans two of our weeks.
+        //
+        // THE SECOND ARM EXISTS BECAUSE THERE IS NOTHING ELSE TO ASK. A payment
+        // with no applications has no loads, no delivery dates and therefore no
+        // freight-derived week. Its label is the only statement of what it is
+        // for, so it is used — and only here, only for a payment that applied to
+        // nothing at all. That is not a retreat from the earlier ruling: the
+        // label was rejected because it was WORSE EVIDENCE than the
+        // applications, and where there are no applications it is the only
+        // evidence there is.
+        //
+        // `none: {}` IS THE WHOLE CONDITION, not "applied less than its total".
+        // A freight payment that happens to be fully unapplied — every unit
+        // closed history, which is most of the corpus — must NOT appear in a
+        // week by its label; it appears in the weeks its freight belongs to, or
+        // in none. Only a payment with no applications whatsoever qualifies.
+        OR: [
+          {
+            loadApplications: {
+              some: {
+                load: {
+                  stops: {
+                    some: {
+                      type: 'DELIVERY',
+                      scheduledAt: {
+                        gte: input.period.start,
+                        lte: periodEndOfDay,
+                      },
+                    },
                   },
                 },
               },
             },
           },
-        },
+          {
+            // ── THE MARK, NOT THE ABSENCE OF APPLICATIONS ────────────────
+            //
+            // `loadApplications: { none: {} }` ALONE WAS WRONG and the suite said
+            // so immediately: a freight remittance whose every unit is closed
+            // history also applies to nothing, and that is most of the corpus. It
+            // would have started appearing in whatever week its label named,
+            // which is exactly what the 2026-09-26 ruling removed —
+            // `does NOT find one that only declares the period and paid nothing
+            // into it` is the guard that caught it.
+            //
+            // So this arm asks for the writer's own mark as well. See
+            // `ADJUSTMENT_NOTE_PREFIX`: it is written in one place, read here,
+            // and stands in for a column until somebody rules on the migration.
+            notes: { startsWith: ADJUSTMENT_NOTE_PREFIX },
+            loadApplications: { none: {} },
+            // THE LABEL OVERLAPPING THIS WEEK, not equalling its start: Amazon's
+            // period is its own and need not line up with a settlement week. It
+            // is obeyed ONLY here, for a payment with no freight to ask instead.
+            periodStart: { lte: periodEndOfDay },
+            periodEnd: { gte: input.period.start },
+          },
+        ],
       },
       // ── THE MOST RECENT MONEY FIRST, NOT THE LATEST LABEL ───────────────
       //
@@ -403,6 +466,8 @@ export async function thisWeekFor(
         remittanceKey: true,
         amountCents: true,
         receivedAt: true,
+        // THE NOTE, FOR A PAYMENT THAT APPLIED TO NOTHING. See `adjustmentText`.
+        notes: true,
         // THE LABEL, SHOWN AND NOT OBEYED. See `RemittancePayment`.
         periodStart: true,
         periodEnd: true,
@@ -446,6 +511,11 @@ export async function thisWeekFor(
         appliedIntoPeriodCents,
         receivedAt: payment.receivedAt,
         importedAt: payment.createdAt,
+        // ONLY WHERE IT EXPLAINS SOMETHING. A payment with applications is
+        // explained by them; repeating its note beside them would put the same
+        // fact on the screen twice and make the one that matters look ordinary.
+        adjustmentText:
+          payment.loadApplications.length === 0 ? payment.notes : null,
       },
     ])
   }

@@ -142,13 +142,80 @@ export interface ItemClass {
 const SCOPES = new Set(['TOUR', 'LOAD'])
 const OUTCOMES = new Set(['COMPLETED', 'CANCELLED'])
 
-/** `TOUR - COMPLETED` -> `{scope, outcome}`; anything unrecognised -> null. */
+/**
+ * `TOUR - COMPLETED` -> `{scope, outcome}`; anything unrecognised -> null.
+ *
+ * ── CASE-FOLDED AGAINST THE CLOSED SET OF FOUR ────────────────────────────
+ *
+ * Owner's ruling, 2026-09-27. This compared the printed text against the two
+ * upper-case sets directly, and on 2026-09-28 two new workbooks for the week of
+ * Sep 13 printed `Load - Completed` and `Tour - Cancelled` in Title Case. Both
+ * were refused whole, which is the reader doing its job and not a bug.
+ *
+ * IT IS NOT A DATED FORMAT CHANGE, WHICH IS WHY FOLDING IS THE ANSWER RATHER
+ * THAN A MIGRATION. `AZNG4464389D…` covers the SAME work period, the same work
+ * type (SPOT) and the same payment date (Sep 23), prints UPPER CASE, and parsed
+ * without complaint. Amazon issues several invoices per period and they do not
+ * agree with each other about case. So both spellings have to be accepted
+ * permanently.
+ *
+ * FOLDING IS SAFE HERE IN A WAY THE LABEL MATCHING IS NOT. The labels at the top
+ * of `remittance.ts` are matched exactly on purpose, because `Invoice date::` and
+ * a future `Invoice date range::` are different keys and a loose comparison would
+ * silently read the wrong cell. This is a CLOSED SET OF FOUR values on one axis
+ * each: `LOAD`/`TOUR` and `COMPLETED`/`CANCELLED`. Folding case cannot make two
+ * different members collide, because no two members differ only by case.
+ *
+ * THE SEPARATOR IS STILL EXACT — ` - `, with its spaces. A fifth value with a
+ * different separator is still a refusal, which is what the census is for.
+ */
 export function classifyItemType(raw: string): ItemClass | null {
   const parts = raw.split(' - ')
   if (parts.length !== 2) return null
-  const [scope, outcome] = parts as [string, string]
+  // `.toUpperCase()` AND NOTHING ELSE. An earlier version trimmed each part too,
+  // which quietly widened the separator: `LOAD  -  COMPLETED` split into
+  // `'LOAD '` and `' COMPLETED'` and then classified. That is whitespace
+  // tolerance, not case-folding, and the ruling was the latter — the test
+  // asserting the separator stays exact is what caught it.
+  const [scope, outcome] = parts.map((part) => part.toUpperCase()) as [
+    string,
+    string,
+  ]
   if (!SCOPES.has(scope) || !OUTCOMES.has(outcome)) return null
   return { scope: scope as ItemScope, outcome: outcome as ItemOutcome }
+}
+
+/**
+ * `Adjustments - Dispute` — money that is not freight.
+ *
+ * ── THE FIFTH VALUE THE CENSUS WAS BUILT TO SURFACE ───────────────────────
+ *
+ * Owner's ruling, 2026-09-27: a workbook whose money is entirely
+ * `Adjustments - Dispute` books a Payment with zero applications, unapplied by
+ * design. So the type is RECOGNISED — the file must parse — and it is not
+ * freight, so it gets no `ItemClass` and reaches no matcher.
+ *
+ * FOUND on `AZNG1AE30DB7…`, $350.00 for the week of Sep 13: its Load Board total
+ * is `0.0` and the whole amount sits in `Adjustments | 2 Resolved`. There is no
+ * reference on those rows and therefore no load to apply cash to — which is why
+ * "zero applications" is the correct shape rather than a failure to match.
+ *
+ * DELIBERATELY NOT A MEMBER OF `ItemClass`. Adding `ADJUSTMENTS` to `SCOPES`
+ * would make `Adjustments - Completed` classify as freight on the day it appears,
+ * and would put a non-freight row in front of every reader that switches on
+ * `scope`. The closed set of four stays four.
+ */
+const ADJUSTMENT_SCOPE = 'ADJUSTMENTS'
+const ADJUSTMENT_OUTCOMES = new Set(['DISPUTE'])
+
+export function isAdjustmentItemType(raw: string): boolean {
+  const parts = raw.split(' - ')
+  if (parts.length !== 2) return false
+  const [scope, outcome] = parts.map((part) => part.toUpperCase()) as [
+    string,
+    string,
+  ]
+  return scope === ADJUSTMENT_SCOPE && ADJUSTMENT_OUTCOMES.has(outcome)
 }
 
 /**
@@ -163,6 +230,14 @@ export function classifyItemType(raw: string): ItemClass | null {
 export interface ItemCensus {
   counts: { value: string; rows: number; scope: ItemScope | null }[]
   unrecognised: string[]
+  /**
+   * Values recognised as money that is not freight — `Adjustments - Dispute`.
+   *
+   * SEPARATE FROM `counts[].scope`, WHICH STAYS NULL FOR THEM. A reader that
+   * switches on scope must not meet an adjustment wearing a freight scope, and a
+   * refusal list that included them would refuse a file this system can now read.
+   */
+  adjustments: string[]
 }
 
 export function censusItemTypes(values: readonly string[]): ItemCensus {
@@ -177,8 +252,17 @@ export function censusItemTypes(values: readonly string[]): ItemCensus {
       scope: classifyItemType(value)?.scope ?? null,
     }))
 
+  // UNRECOGNISED IS WHAT IS NEITHER FREIGHT NOR AN ADJUSTMENT. `scope === null`
+  // was the whole test, which is what refused the $350 dispute workbook: an
+  // adjustment has no scope by design, so absence of scope stopped meaning
+  // "this system does not know what this is".
   return {
     counts: rows,
-    unrecognised: rows.filter((r) => r.scope === null).map((r) => r.value),
+    unrecognised: rows
+      .filter((r) => r.scope === null && !isAdjustmentItemType(r.value))
+      .map((r) => r.value),
+    adjustments: rows
+      .filter((r) => isAdjustmentItemType(r.value))
+      .map((r) => r.value),
   }
 }

@@ -4,6 +4,8 @@ import { createPrismaClient } from '@/lib/db'
 import { readRemittance } from '@/lib/amazon/remittance'
 import { keyFor, type FreightRef } from '@/lib/amazon/remittance-preview'
 import {
+  adjustmentNote,
+  isAdjustmentOnly,
   REMITTANCE_IMPORT_TIMEOUT_MS,
   writeRemittance,
 } from '@/lib/amazon/remittance-write'
@@ -364,6 +366,26 @@ async function main(): Promise<void> {
       `  closed history (deliberately untouched)  ${counts.matched_closed_history}`,
     )
     if (counts.unkeyable > 0) console.log(`  unkeyable    ${counts.unkeyable}`)
+
+    // ── A CREDIT IS NOT A MATCHING FAILURE ────────────────────────────────
+    //
+    // Owner's ruling, 2026-09-27: a workbook whose money is entirely
+    // `Adjustments - Dispute` books a Payment with zero applications, unapplied
+    // BY DESIGN. The counts above describe rows, and on such a file they read
+    // `unmatched 1` / `unkeyable 1` — every word of which is true and all of
+    // which invites somebody to go looking for a load that was never there.
+    //
+    // So the file says what it is, once, in the report a person reads.
+    if (isAdjustmentOnly(reading)) {
+      console.log(
+        `
+  THIS WORKBOOK IS A CREDIT, NOT FREIGHT. Its whole ` +
+          `${money(reading.totals.headerCents)} is an adjustment: the rows above ` +
+          `name no load because there is none to name, and the payment is ` +
+          `unapplied by design.
+  ${adjustmentNote(reading) ?? ''}`,
+      )
+    }
 
     if (retired.length > 0) {
       heading(APPLY ? 'RETIRED THE PRIOR IMPORT' : 'WOULD RETIRE')

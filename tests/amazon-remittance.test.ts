@@ -6,8 +6,11 @@ import {
   censusItemTypes,
   checkColumns,
   classifyItemType,
+  isAdjustmentItemType,
+  type ItemClass,
 } from '@/lib/amazon/remittance-shape'
 import { parseSheet } from '@/lib/datatruck/xlsx'
+import { adjustmentNote, isAdjustmentOnly } from '@/lib/amazon/remittance-write'
 import {
   readRemittance,
   remittanceCents,
@@ -400,9 +403,53 @@ describe.skipIf(files.length === 0)('the six workbooks', () => {
           .map((seen) => seen.column)
           .join(', ')} — the importer must be looked at before it runs`,
       ).toEqual([])
-      expect(outcome.reading.summary.adjustmentTotalCents).toBe(0)
     }
     expect(DORMANT_MONEY_COLUMNS).toEqual(['Detention', 'Others'])
+  })
+
+  // ── AN ADJUSTMENT TOTAL IS ZERO ON FREIGHT, AND ONLY THERE ──────────────
+  //
+  // THIS USED TO ASSERT ZERO ON EVERY WORKBOOK, inside the dormant-column test,
+  // and it was true of the six profiled weeks — the comment on
+  // `RemittanceSummary.adjustments` said so. On 2026-09-28 `AZNG1AE30DB7…`
+  // arrived with $350.00 and the assertion failed, correctly: that is the
+  // instrument reporting a real change rather than a bug.
+  //
+  // SO THE CLAIM IS SHARPER NOW RATHER THAN WEAKER. A workbook that carries
+  // freight still has a zero adjustment total; a workbook whose Load Board total
+  // is zero carries its whole amount as adjustments. Relaxing this to "may be
+  // non-zero" would have thrown away the part that still holds.
+  it('has a zero adjustment total on every workbook that carries freight', async () => {
+    let freight = 0
+    let adjustmentOnly = 0
+    for (const name of files) {
+      const outcome = await readRemittance(
+        new Uint8Array(readFileSync(`${DIR}/${name}`)),
+      )
+      if (!outcome.ok) continue
+      const isFreight = outcome.reading.rows.some((row) => row.item !== null)
+      if (isFreight) {
+        freight += 1
+        expect(
+          outcome.reading.summary.adjustmentTotalCents,
+          `${name} carries freight AND a non-zero adjustment total — the two ` +
+            `have never been mixed and the writer does not know how to`,
+        ).toBe(0)
+      } else {
+        adjustmentOnly += 1
+        // ITS WHOLE AMOUNT IS THE ADJUSTMENT. Asserted rather than assumed: a
+        // file with no freight and no adjustment either would be an empty
+        // invoice, which is a different thing and should not pass as this one.
+        expect(outcome.reading.summary.adjustmentTotalCents).toBeGreaterThan(0)
+        expect(outcome.reading.totals.headerCents).toBe(
+          outcome.reading.summary.adjustmentTotalCents,
+        )
+      }
+    }
+    // BOTH KINDS PRESENT, or the loop proved one rule and skipped the other
+    // while reporting a pass.
+    expect(freight).toBeGreaterThan(0)
+    expect(adjustmentOnly).toBeGreaterThan(0)
   })
 })
 
@@ -487,4 +534,177 @@ describe('the work period Amazon prints', () => {
     expect(parseWorkPeriod('')).toBeNull()
     expect(parseWorkPeriod(null)).toBeNull()
   })
+})
+
+// ---------------------------------------------------------------------------
+// THE ITEM TYPE, CASE-FOLDED — AND THE FIFTH VALUE THAT IS NOT FREIGHT.
+//
+// Owner's ruling, 2026-09-27, after two workbooks for the week of Sep 13 were
+// refused whole on 2026-09-28: one printed `Load - Completed` and
+// `Tour - Cancelled` in Title Case, the other carried `Adjustments - Dispute`.
+// ---------------------------------------------------------------------------
+
+describe('the four freight item types, in any case', () => {
+  it('reads the upper case every imported week has printed', () => {
+    expect(classifyItemType('LOAD - COMPLETED')).toEqual({
+      scope: 'LOAD',
+      outcome: 'COMPLETED',
+    })
+    expect(classifyItemType('TOUR - CANCELLED')).toEqual({
+      scope: 'TOUR',
+      outcome: 'CANCELLED',
+    })
+  })
+
+  // THE TITLE CASE THAT ARRIVED ON 2026-09-28, in `AZNG7A601875…`. Not a dated
+  // format change: `AZNG4464389D…` covers the same week, the same work type and
+  // the same payment date in UPPER CASE, so both spellings are permanent.
+  it('reads the Title Case the supplementary invoices print', () => {
+    expect(classifyItemType('Load - Completed')).toEqual({
+      scope: 'LOAD',
+      outcome: 'COMPLETED',
+    })
+    expect(classifyItemType('Tour - Cancelled')).toEqual({
+      scope: 'TOUR',
+      outcome: 'CANCELLED',
+    })
+  })
+
+  // AND CANONICALISES, so nothing downstream has to fold again. A reader that
+  // switched on the raw text would work on one invoice and not the other.
+  it('returns the canonical upper-case form whatever it was given', () => {
+    expect(classifyItemType('load - completed')?.scope).toBe('LOAD')
+    expect(classifyItemType('tOuR - cOmPlEtEd')?.outcome).toBe('COMPLETED')
+  })
+
+  // ── THE SEPARATOR IS STILL EXACT, WHICH IS THE LIMIT OF THE FOLD ────────
+  //
+  // Folding case cannot make two members collide, because no two members of the
+  // closed set differ only by case. Folding the SEPARATOR could: it would make
+  // `LOAD-COMPLETED` and a future `LOAD - COMPLETED - PARTIAL` argue. So a value
+  // that does not split on ` - ` into exactly two parts is still refused.
+  it('REFUSES a value whose separator is not " - "', () => {
+    expect(classifyItemType('LOAD-COMPLETED')).toBeNull()
+    expect(classifyItemType('LOAD  -  COMPLETED')).toBeNull()
+    expect(classifyItemType('LOAD - COMPLETED - PARTIAL')).toBeNull()
+  })
+
+  it('REFUSES a fifth value on either axis', () => {
+    expect(classifyItemType('BLOCK - COMPLETED')).toBeNull()
+    expect(classifyItemType('LOAD - DISPUTED')).toBeNull()
+  })
+})
+
+describe('Adjustments - Dispute is recognised and is not freight', () => {
+  it('is recognised in any case', () => {
+    expect(isAdjustmentItemType('Adjustments - Dispute')).toBe(true)
+    expect(isAdjustmentItemType('ADJUSTMENTS - DISPUTE')).toBe(true)
+  })
+
+  // NOT FREIGHT, WHICH IS THE HALF THAT KEEPS IT SAFE. `classifyItemType` must
+  // return null for it, so it reaches no matcher and gets no scope — a
+  // non-freight row wearing `scope: 'LOAD'` would be applied to a load.
+  it('gets no ItemClass, so nothing can mistake it for a load', () => {
+    expect(classifyItemType('Adjustments - Dispute')).toBeNull()
+  })
+
+  it('is not in the census refusal list, and is named as an adjustment', () => {
+    const census = censusItemTypes([
+      'Load - Completed',
+      'Adjustments - Dispute',
+      'Adjustments - Dispute',
+    ])
+    expect(census.unrecognised).toEqual([])
+    expect(census.adjustments).toEqual(['Adjustments - Dispute'])
+    // AND IT STILL HAS NO SCOPE in the counts, which is what readers switch on.
+    expect(
+      census.counts.find((row) => row.value === 'Adjustments - Dispute')?.scope,
+    ).toBeNull()
+  })
+
+  // A GENUINELY UNKNOWN VALUE IS STILL A REFUSAL. The point of recognising one
+  // fifth value is not to stop refusing a sixth.
+  it('still refuses a value nobody has ruled on', () => {
+    const census = censusItemTypes(['Adjustments - Reversal', 'BLOCK - X'])
+    expect(census.unrecognised).toEqual(['Adjustments - Reversal', 'BLOCK - X'])
+    expect(census.adjustments).toEqual([])
+  })
+})
+
+describe('adjustment-only means EVERY row, not some', () => {
+  // A minimal reading: `isAdjustmentOnly` reads nothing but `rows`.
+  const reading = (items: (ItemClass | null)[]) =>
+    ({
+      rows: items.map((item) => ({ item })),
+    }) as unknown as Parameters<typeof isAdjustmentOnly>[0]
+
+  const freight: ItemClass = { scope: 'LOAD', outcome: 'COMPLETED' }
+
+  it('is true when nothing in the file is freight', () => {
+    expect(isAdjustmentOnly(reading([null, null]))).toBe(true)
+  })
+
+  // ── THE CASE NO WORKBOOK HAS YET SHOWN, WHICH IS WHY IT IS CONSTRUCTED ──
+  //
+  // `every` versus `some` is unobservable on the corpus: no file mixes freight
+  // with adjustments, which the sweep test asserts from the other direction. So
+  // `watch-guard` could not tell the two versions apart until this existed.
+  //
+  // IT MATTERS BECAUSE `some` WOULD BOOK A FREIGHT WORKBOOK AS AN ADJUSTMENT —
+  // one dispute row among two hundred loads and the payment's note would claim
+  // the whole ACH was a credit, while the money screen showed it by its label
+  // instead of by the freight it paid.
+  it('is FALSE when one row among many is freight', () => {
+    expect(isAdjustmentOnly(reading([null, freight, null]))).toBe(false)
+    expect(isAdjustmentOnly(reading([freight]))).toBe(false)
+  })
+
+  // An empty file is not an adjustment either: nothing to describe is not the
+  // same as money with no freight behind it.
+  it('is FALSE for a file with no rows at all', () => {
+    expect(isAdjustmentOnly(reading([]))).toBe(false)
+  })
+})
+
+describe('the two workbooks that were refused on 2026-09-28', () => {
+  const find = (fragment: string) => files.find((n) => n.includes(fragment))
+
+  it.skipIf(!find('BA0CE6CC'))(
+    'reads the Title Case one, and it ties',
+    async () => {
+      const name = find('BA0CE6CC')!
+      const outcome = await readRemittance(
+        new Uint8Array(readFileSync(`${DIR}/${name}`)),
+      )
+      expect(outcome.ok, `${name} was refused`).toBe(true)
+      if (!outcome.ok) return
+      expect(outcome.reading.totals.headerCents).toBe(166_340)
+      expect(totalsAgree(outcome.reading)).toBe(true)
+      expect(outcome.reading.census.unrecognised).toEqual([])
+      // IT IS FREIGHT, so it must classify: a file that parsed with every row
+      // unclassified would book a payment against nothing.
+      expect(outcome.reading.rows.some((row) => row.item !== null)).toBe(true)
+    },
+  )
+
+  it.skipIf(!find('BBC4959'))(
+    'reads the dispute one as money with no freight',
+    async () => {
+      const name = find('BBC4959')!
+      const outcome = await readRemittance(
+        new Uint8Array(readFileSync(`${DIR}/${name}`)),
+      )
+      expect(outcome.ok, `${name} was refused`).toBe(true)
+      if (!outcome.ok) return
+      expect(outcome.reading.totals.headerCents).toBe(35_000)
+      expect(outcome.reading.census.unrecognised).toEqual([])
+      // NO FREIGHT AT ALL — the whole $350.00 is the adjustment, which is what
+      // makes "a Payment with zero applications" the right shape rather than a
+      // matching failure.
+      expect(isAdjustmentOnly(outcome.reading)).toBe(true)
+      expect(outcome.reading.summary.adjustmentTotalCents).toBe(35_000)
+      // AND AMAZON'S OWN TEXT, which is all the money screen will have to show.
+      expect(adjustmentNote(outcome.reading)).toContain('Resolved')
+    },
+  )
 })

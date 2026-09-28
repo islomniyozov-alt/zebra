@@ -759,6 +759,138 @@ describe('the week a remittance belongs to is what it PAID FOR', () => {
     }
   }, 300_000)
 
+  // ── A CREDIT WITH NO FREIGHT BEHIND IT ──────────────────────────────────
+  //
+  // Owner's ruling, 2026-09-27: a workbook whose money is entirely
+  // `Adjustments - Dispute` books a Payment with ZERO applications, unapplied by
+  // design, shown on the money screen with Amazon's text.
+  //
+  // IT CANNOT BE FOUND THE WAY EVERY OTHER PAYMENT IS. The 2026-09-26 ruling
+  // decides membership by the delivery dates of the loads a payment applied to,
+  // because Amazon's label spans two of our weeks. A payment with no
+  // applications has no loads, so there are no dates — its label is the only
+  // statement of what it is for, and this is the one place that label is obeyed.
+  it('lists an adjustment-only payment, by its label, with Amazon text', async () => {
+    const credit = await owner.payment.create({
+      data: {
+        organizationId,
+        companyId: amazonCompanyId,
+        customerId: relayId,
+        method: 'ACH',
+        remittanceKey: `DISPUTE-${nonce}`,
+        receivedAt: new Date(PERIOD.end.getTime() + 4 * 86_400_000),
+        amountCents: 35_000,
+        unappliedCents: 35_000,
+        periodStart: PERIOD.start,
+        periodEnd: PERIOD.end,
+        notes:
+          'Amazon adjustment Sep 13 - Sep 19, 2026 — Adjustments · 2 Resolved',
+        // NO `loadApplications`. That absence is the whole point.
+      },
+    })
+
+    const company = forCompany(await readWeek(), amazonCompanyId)
+    const shown = company.remittance!.payments.find(
+      (row) => row.invoiceNumber === `DISPUTE-${nonce}`,
+    )
+    expect(shown, 'the credit is missing from the week').toBeDefined()
+    if (!shown) return
+
+    expect(shown.totalCents).toBe(35_000)
+    // NOTHING LANDED IN THE PERIOD, and the screen says so rather than implying
+    // the week received $350 of freight money.
+    expect(shown.appliedIntoPeriodCents).toBe(0)
+    // AMAZON'S OWN TEXT, which is all there is to explain it.
+    expect(shown.adjustmentText).toContain('2 Resolved')
+
+    await owner.payment.delete({ where: { id: credit.id } })
+  }, 300_000)
+
+  // ── A CREDIT BELONGS TO THE WEEK ITS LABEL NAMES, AND ONLY THAT ONE ─────
+  //
+  // The label is obeyed for these payments because there is no freight to ask
+  // instead — which makes the BOUND on it the only thing stopping one credit from
+  // appearing in every week at once. `watch-guard` found this untested: removing
+  // both date conditions failed nothing, because every credit in the suite
+  // happened to be labelled for the week under test.
+  it('does NOT list a credit whose label is for another week', async () => {
+    const elsewhere = await owner.payment.create({
+      data: {
+        organizationId,
+        companyId: amazonCompanyId,
+        customerId: relayId,
+        method: 'ACH',
+        remittanceKey: `DISPUTEFAR-${nonce}`,
+        receivedAt: new Date(PERIOD.end.getTime() + 4 * 86_400_000),
+        amountCents: 12_500,
+        unappliedCents: 12_500,
+        // FOUR WEEKS LATER, so no overlap with the period under test.
+        periodStart: new Date(PERIOD.start.getTime() + 28 * 86_400_000),
+        periodEnd: new Date(PERIOD.end.getTime() + 28 * 86_400_000),
+        notes:
+          'Amazon adjustment Oct 11 - Oct 17, 2026 — Adjustments · 1 Resolved',
+      },
+    })
+
+    const company = forCompany(await readWeek(), amazonCompanyId)
+    const keys = company.remittance!.payments.map((row) => row.invoiceNumber)
+    expect(keys).not.toContain(`DISPUTEFAR-${nonce}`)
+
+    await owner.payment.delete({ where: { id: elsewhere.id } })
+  }, 300_000)
+
+  // ── AND A FULLY-UNAPPLIED FREIGHT PAYMENT IS NOT SWEPT IN WITH IT ───────
+  //
+  // Nearly every payment in the corpus is almost entirely unapplied, because
+  // nearly every unit is closed history. If the new arm had keyed on "applied
+  // less than its total" rather than on "applied to nothing at all", those
+  // payments would start appearing in whatever week their LABEL names — which is
+  // exactly the confusion the 2026-09-26 ruling removed.
+  it('does NOT list a freight payment by its label just because it is unapplied', async () => {
+    // FREIGHT OUTSIDE THE WEEK, seeded rather than borrowed: the application has
+    // to point at a load whose delivery is NOT in this period, or the first
+    // membership arm would find it and prove nothing.
+    const outside = await seedLoad({
+      companyId: amazonCompanyId,
+      customerId: relayId,
+      driverId: paidDriverId,
+      rateCents: 500_000,
+      deliveredOn: new Date(PERIOD.end.getTime() + 9 * 86_400_000),
+    })
+
+    const freight = await owner.payment.create({
+      data: {
+        organizationId,
+        companyId: amazonCompanyId,
+        customerId: relayId,
+        method: 'ACH',
+        remittanceKey: `LABELONLY-${nonce}`,
+        receivedAt: new Date(PERIOD.end.getTime() + 5 * 86_400_000),
+        amountCents: 500_000,
+        unappliedCents: 499_900,
+        // LABELLED FOR THIS WEEK, and it applied to freight OUTSIDE it.
+        periodStart: PERIOD.start,
+        periodEnd: PERIOD.end,
+        loadApplications: {
+          create: {
+            organizationId,
+            loadId: outside.id,
+            amountCents: 100,
+          },
+        },
+      },
+    })
+
+    const company = forCompany(await readWeek(), amazonCompanyId)
+    const keys = company.remittance!.payments.map((row) => row.invoiceNumber)
+    expect(keys).not.toContain(`LABELONLY-${nonce}`)
+
+    await owner.paymentLoadApplication.deleteMany({
+      where: { paymentId: freight.id },
+    })
+    await owner.payment.delete({ where: { id: freight.id } })
+  }, 300_000)
+
   // AND THE ORDINARY CASE IS UNCHANGED.
   it('still finds one with no declared period, through what it paid for', async () => {
     const company = forCompany(await readWeek(), amazonCompanyId)
