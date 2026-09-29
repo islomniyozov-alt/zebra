@@ -285,6 +285,52 @@ describe('the grid contract', () => {
   })
 })
 
+// ── THE TABS EACH DESTINATION HAS, AGAINST §6.2's OWN TABLE ────────────────
+//
+// THIS EXISTS BECAUSE THE DOCUMENT GOT AHEAD OF THE CODE TWICE IN ONE DAY.
+// §6.2 listed `Charges: Scheduled · One-time · This week` and the page had two
+// tabs, so `?tab=thisWeek` fell back to Scheduled and rendered a screen that
+// looked correct — the failure is invisible unless somebody asks for the tab by
+// name, which is what the screenshot run did.
+//
+// §6.2.1 had already described the checkbox column and the funnels as built
+// while they were not, for a few hours, for the same reason: an amendment
+// landing before its code is right, and nothing was watching the gap close.
+//
+// SO THE COUNT IS ASSERTED AGAINST THE DOCUMENT, not against the code. The
+// numbers come from §6.2's table and a page that grows or loses a tab has to
+// change the table first — which is the order §15 requires anyway.
+describe('each destination has the tabs §6.2 says it has', () => {
+  const EXPECTED: Record<string, readonly string[]> = {
+    invoices: ['invoices', 'ready', 'direct'],
+    payments: ['payments', 'unapplied'],
+    reports: ['company', 'week', 'driver'],
+    batches: ['batches', 'balances'],
+    statements: ['statements'],
+    charges: ['scheduled', 'oneTime', 'thisWeek'],
+  }
+
+  it.each(Object.keys(EXPECTED))('%s declares its tab list', (name) => {
+    const source = pageSource(name)
+    // The literal the page narrows `?tab=` against. Reports names its cuts
+    // `CUTS` because a cut is what that page calls a tab.
+    const match = /const (?:TABS|CUTS)(?::[^=]+)? = \[([^\]]*)\]/.exec(source)
+    expect(match, `${name} has no TABS/CUTS literal`).not.toBeNull()
+    const declared = [...(match?.[1] ?? '').matchAll(/'([^']+)'/g)].map(
+      (hit) => hit[1],
+    )
+    expect(declared, name).toEqual([...EXPECTED[name]!])
+  })
+
+  it('and the design system still says the same thing', () => {
+    // If §6.2's table is edited, this is the line that notices the code was not.
+    const doc = readFileSync('TMS-DESIGN-SYSTEM.md', 'utf8')
+    expect(doc).toContain('Scheduled · One-time · This week')
+    expect(doc).toContain('Batches · Balances')
+    expect(doc).toContain('Invoices · Ready to invoice · Direct-settled')
+  })
+})
+
 // ── RULING 6: THE CHECKBOX COLUMN AND THE COLUMN FUNNELS ───────────────────
 describe('bulk status and the column funnels', () => {
   const batches = pageSource('batches')

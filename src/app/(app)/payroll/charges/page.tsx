@@ -13,9 +13,13 @@ import { applyList, sumCents, type RawParams } from '@/lib/list-view'
 import {
   oneTimeShape,
   readOneTimeCharges,
+  scheduledForWeek,
   scheduledShape,
   type OneTimeGridRow,
 } from '@/lib/accounting-grids'
+import { payWeekFor } from '@/lib/settlement-week'
+import { recentWeeks, weekFromParam } from '@/lib/payroll'
+import { WeekPicker } from '../batches/WeekPicker'
 import { Table, type Column } from '@/components/ui/Table'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -61,7 +65,9 @@ const ERROR_KEYS: MessageKey[] = [
   'deduction.error.overlaps',
 ]
 
-const TABS = ['scheduled', 'oneTime'] as const
+// THREE TABS (§6.2). `thisWeek` is the same table as `scheduled`, scoped to the
+// run on screen — the distinction that keeps this page from being two pages.
+const TABS = ['scheduled', 'oneTime', 'thisWeek'] as const
 type Tab = (typeof TABS)[number]
 
 const SCHEDULED_COLUMNS: readonly string[] = [
@@ -106,6 +112,14 @@ export default async function ChargesPage({
     ? (wanted as Tab)
     : 'scheduled'
 
+  // THE SAME `?week=` THE BATCHES PAGE READS, so a link carries across the two
+  // screens. Defaulting to the week that is due (MONEY-DESIGN §0), not the one
+  // that just closed.
+  const due = payWeekFor(new Date())
+  const chosen =
+    weekFromParam(typeof raw.week === 'string' ? raw.week : null) ?? due.period
+  const offered = recentWeeks(due.period, 12)
+
   const search = new URLSearchParams(
     Object.entries(raw).flatMap(([key, value]) =>
       value === undefined
@@ -149,7 +163,12 @@ export default async function ChargesPage({
           ),
         ],
       )
-      return { charges, oneTime, drivers, companies, columns }
+      // THE WEEK-SCOPED SET IS THE SAME ROWS, NARROWED — not a second query.
+      // `scheduledForWeek` takes the overlap, because a rule starting or ending
+      // mid-week still applies to that week, which is what the engine's
+      // `ruleInForce` decides for a period.
+      const thisWeek = scheduledForWeek(charges, chosen)
+      return { charges, oneTime, thisWeek, drivers, companies, columns }
     },
   )
 
@@ -233,6 +252,11 @@ export default async function ChargesPage({
             key: 'oneTime',
             label: t('charges.tab.oneTime'),
             count: data.oneTime.length,
+          },
+          {
+            key: 'thisWeek',
+            label: t('charges.tab.thisWeek'),
+            count: data.thisWeek.length,
           },
         ]}
         active={tab}
@@ -372,6 +396,147 @@ export default async function ChargesPage({
             <EmptyState
               title={t('oneTime.empty')}
               body={t('oneTime.emptyHint')}
+            />
+          }
+        />
+        <GridFooterNav
+          paged={view.paged}
+          per={view.params.per}
+          path={PATH}
+          search={search}
+          hrefForPage={view.hrefForPage(PATH)}
+          labels={footerLabels}
+        />
+      </>
+    )
+  }
+
+  // ── THIS WEEK (the standing rules that touch the run on screen) ─────────
+  //
+  // The same table as Scheduled and NOT the same grid. A rule dormant until
+  // November is on that tab and not on this one, which is the difference §6.2
+  // records and the reason both exist rather than one.
+  if (tab === 'thisWeek') {
+    const view = gridView(data.thisWeek, raw, scheduledShape, applyList)
+    const columns: Column<ChargeRow>[] = [
+      {
+        key: 'driver',
+        header: t('charges.driver'),
+        sortable: true,
+        render: (row) => row.driverName,
+      },
+      {
+        key: 'type',
+        header: t('charges.type'),
+        sortable: true,
+        render: (row) => row.type,
+      },
+      {
+        key: 'amount',
+        header: t('charges.weekly'),
+        align: 'end',
+        sortable: true,
+        render: (row) => (
+          <span className="inline-flex items-baseline gap-z1">
+            {money(row.amountCents)}
+            {row.monthlyTotalCents !== null ? (
+              <span className="font-mono text-xs text-ink-3">
+                /{formatCents(row.monthlyTotalCents, locale)}
+              </span>
+            ) : null}
+          </span>
+        ),
+        foot: (shown) => money(sumCents(shown, (row) => row.amountCents)),
+      },
+      {
+        key: 'from',
+        header: t('charges.from'),
+        sortable: true,
+        render: (row) => (
+          <span className="font-mono text-xs" dir="ltr">
+            {day(row.effectiveFrom)}
+          </span>
+        ),
+      },
+      {
+        key: 'to',
+        header: t('charges.to'),
+        sortable: true,
+        render: (row) => (
+          <span className="font-mono text-xs" dir="ltr">
+            {day(row.effectiveTo)}
+          </span>
+        ),
+      },
+    ]
+
+    return (
+      <>
+        {header}
+        <WeekPicker
+          weeks={offered.map((period) => ({
+            start: day(period.start),
+            end: day(period.end),
+            hasBatch: false,
+          }))}
+          selected={day(chosen.start)}
+          label={t('payroll.week')}
+          openedLabel={t('payroll.opened')}
+        />
+        <p className="border-b border-border bg-surface-2 px-gutter py-z2 text-xs text-ink-2">
+          {t('charges.thisWeekHint')}{' '}
+          <span className="font-mono" dir="ltr">
+            {day(chosen.start)} — {day(chosen.end)}
+          </span>
+        </p>
+        <FilterBar
+          groups={[]}
+          search={{
+            param: 'q',
+            label: t('accounting.search'),
+            placeholder: t('accounting.charges.searchHint'),
+          }}
+          clearLabel={t('filter.clear')}
+          moreLabel={t('filter.more')}
+        />
+        <div className="flex items-center justify-end gap-z2 border-b border-border bg-surface px-gutter py-z2">
+          <GridToolbar
+            grid="payroll.scheduled"
+            columns={columns.map((column) => ({
+              key: column.key,
+              header: column.header,
+            }))}
+            visible={data.columns}
+            search={search}
+            labels={toolbarLabels}
+            errors={gridErrors}
+          />
+        </div>
+        <Table
+          columns={columns}
+          rows={view.paged.rows}
+          footRows={view.filtered}
+          rowKey={(row) => row.id}
+          rowHref={(row) => `/drivers/${row.driverId}`}
+          stripeTone={(row) => (row.inForceToday ? 'success' : 'muted')}
+          caption={t('charges.tab.thisWeek')}
+          sort={{
+            key: view.sort.key,
+            dir: view.sort.dir,
+            hrefFor: view.sortFor(PATH),
+            label: t('accounting.sortBy'),
+          }}
+          totals={{
+            label: pagedFooterLabel(
+              t('accounting.weeklyTotal'),
+              t('grid.rows'),
+              view.paged,
+            ),
+          }}
+          empty={
+            <EmptyState
+              title={t('accounting.charges.empty')}
+              body={t('charges.thisWeekHint')}
             />
           }
         />

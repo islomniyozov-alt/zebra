@@ -52,6 +52,13 @@ const STATUS: Record<string, { tone: StatusTone; label: MessageKey }> = {
 const statusOf = (value: string) =>
   STATUS[value] ?? { tone: 'neutral' as StatusTone, label: null }
 
+// ONE TAB, DECLARED THE SAME WAY THE OTHERS DECLARE THEIRS. The strip renders
+// so the section looks the same everywhere, and the literal is here so
+// `tests/accounting-surface.test.ts` can check this page against §6.2's table
+// like the other five — a page whose tab list is inline is a page that table
+// cannot see.
+const TABS = ['statements'] as const
+
 const COLUMN_KEYS: readonly string[] = [
   'driver',
   'period',
@@ -195,12 +202,12 @@ export default async function StatementsPage({
       <Tabs
         tabs={[
           {
-            key: 'statements',
+            key: TABS[0],
             label: t('payroll.tab.statements'),
             count: data.statements.length,
           },
         ]}
-        active="statements"
+        active={TABS[0]}
         hrefFor={() => PATH}
         label={t('grid.tabs')}
       />
