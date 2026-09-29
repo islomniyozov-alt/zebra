@@ -12,6 +12,7 @@ import {
   voidSettlementAction,
   addTripsAction,
   recalculateAction,
+  sendToDriverAction,
 } from '../actions'
 import { SETTLEMENT_INITIAL, type SettlementState } from '../settlement-state'
 
@@ -341,6 +342,59 @@ export function Recalculate({
       >
         {label}
       </Button>
+    </form>
+  )
+}
+
+/**
+ * Mail this statement to the driver.
+ *
+ * IT IS THE ONLY CONTROL ON THIS PAGE WITH A CONFIRM, and the confirm names
+ * the address. Everything else here writes a row somebody can look at
+ * afterwards; this one puts a figure in front of a person and cannot be
+ * recalled. The address is shown because the mistake worth catching is the
+ * right button pressed on the wrong driver's statement.
+ *
+ * IT REFUSES LOUDLY RATHER THAN HIDING. On dev it always fails with
+ * `not_production` (see `statement-send.ts`), and that refusal is the message
+ * the office should see — a button greyed out with no sentence would send
+ * somebody looking for a permission they do not lack.
+ */
+export function SendToDriver({
+  settlementId,
+  email,
+  labels,
+  translate,
+}: {
+  settlementId: string
+  email: string | null
+  labels: { send: string; confirm: string; sent: string }
+  translate: Record<string, string>
+}) {
+  const [state, act, pending] = useActionState<SettlementState, FormData>(
+    sendToDriverAction.bind(null, settlementId),
+    SETTLEMENT_INITIAL,
+  )
+
+  return (
+    <form
+      action={act}
+      className="flex items-center gap-z2"
+      onSubmit={(event) => {
+        if (!globalThis.confirm(`${labels.confirm} ${email ?? ''}`.trim())) {
+          event.preventDefault()
+        }
+      }}
+    >
+      <Button
+        type="submit"
+        variant="secondary"
+        size="compact"
+        disabled={pending}
+      >
+        {labels.send}
+      </Button>
+      <Error state={state} translate={translate} />
     </form>
   )
 }

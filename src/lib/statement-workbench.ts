@@ -231,3 +231,166 @@ export async function addTripsToSettlement(
   await refreshTotals(tx, settlementId)
   return { ok: true, added: loadIds.length }
 }
+
+// ---------------------------------------------------------------------------
+// THE HEADER BOX (§6.2.2).
+//
+// Fourteen figures, and the rule the section is built on is that EVERY ONE OF
+// THEM IS THE SUM OF SOMETHING ON THE PAGE BELOW IT. So this reads them from
+// the settlement's own stored totals and its own lines — never by recomputing
+// the engine — because a header that disagreed with the grid under it would be
+// the one thing a driver checking his pay would find first.
+//
+// ── THE TWO `‹ ›` PAIRS GO TO DIFFERENT PLACES ────────────────────────────
+//
+// The artefact puts prev/next on the settlement number AND on the period, and
+// they are two different journeys: one walks the batch (the run somebody is
+// working through), the other walks the driver (one person across weeks). Both
+// are read here so the page never renders a chevron that leads nowhere.
+// ---------------------------------------------------------------------------
+
+export interface StatementNeighbours {
+  /** Adjacent statements in the same batch, by settlement number. */
+  prevInBatch: { id: string; settlementNumber: string } | null
+  nextInBatch: { id: string; settlementNumber: string } | null
+  /** The same driver's adjacent periods, whatever batch they sit in. */
+  prevPeriod: { id: string; periodStart: Date; periodEnd: Date } | null
+  nextPeriod: { id: string; periodStart: Date; periodEnd: Date } | null
+}
+
+export interface FuelAndTolls {
+  fuelCents: number
+  tollCents: number
+  totalCents: number
+  fuelCount: number
+  tollCount: number
+  /**
+   * What is already coming off the cheque, from `Expense.isDriverDeduction`.
+   *
+   * THE WHOLE POINT OF PRINTING IT BESIDE THE TOTAL. §6.2.3: a read is not a
+   * charge, and the header figure is what was BURNED. Without this second
+   * number the reader cannot tell a company-fuel driver from one who is about
+   * to be charged $284.43, which is the difference the four modes exist to
+   * settle.
+   */
+  alreadyDeductedCents: number
+}
+
+/**
+ * Fuel and tolls for one driver in one period.
+ *
+ * READ-ONLY AND CHARGES NOTHING. `FuelTransaction` carries the purchase and
+ * `Expense` carries the toll; neither carries a decision about who pays, so
+ * this reports and stops. The columns that would let it charge are the held
+ * migration (§6.2.3).
+ *
+ * BOUNDED BY THE PERIOD THE STATEMENT ALREADY HAS, not by a week recomputed
+ * here — the statement's period is frozen on the row and a second opinion
+ * about which days it covers is how a figure ends up on two statements.
+ */
+export async function fuelAndTollsFor(
+  tx: TxClient,
+  input: { driverId: string; periodStart: Date; periodEnd: Date },
+): Promise<FuelAndTolls> {
+  // INCLUSIVE AT BOTH ENDS, on every one of the three reads below. The period
+  // end is stored as the Saturday itself, so a Saturday fill-up belongs to the
+  // week it happened in.
+  const window = { driverId: input.driverId, deletedAt: null }
+  const [fuel, tolls, deducted] = await Promise.all([
+    tx.fuelTransaction.aggregate({
+      where: {
+        ...window,
+        purchasedAt: { gte: input.periodStart, lte: input.periodEnd },
+      },
+      _sum: { totalCents: true },
+      _count: { _all: true },
+    }),
+    tx.expense.aggregate({
+      where: {
+        ...window,
+        category: 'TOLLS',
+        incurredAt: { gte: input.periodStart, lte: input.periodEnd },
+      },
+      _sum: { amountCents: true },
+      _count: { _all: true },
+    }),
+    tx.expense.aggregate({
+      where: {
+        ...window,
+        category: 'TOLLS',
+        isDriverDeduction: true,
+        incurredAt: { gte: input.periodStart, lte: input.periodEnd },
+      },
+      _sum: { amountCents: true },
+    }),
+  ])
+
+  const fuelCents = fuel._sum.totalCents ?? 0
+  const tollCents = tolls._sum.amountCents ?? 0
+  return {
+    fuelCents,
+    tollCents,
+    totalCents: fuelCents + tollCents,
+    fuelCount: fuel._count._all,
+    tollCount: tolls._count._all,
+    alreadyDeductedCents: deducted._sum.amountCents ?? 0,
+  }
+}
+
+/** The four documents a reader can step to from this one. */
+export async function statementNeighbours(
+  tx: TxClient,
+  input: {
+    settlementId: string
+    batchId: string | null
+    driverId: string
+    settlementNumber: string
+    periodStart: Date
+  },
+): Promise<StatementNeighbours> {
+  const inBatch = { id: true, settlementNumber: true }
+  const inPeriod = { id: true, periodStart: true, periodEnd: true }
+  const batchWhere = (direction: 'lt' | 'gt') => ({
+    batchId: input.batchId ?? '',
+    deletedAt: null,
+    settlementNumber: { [direction]: input.settlementNumber },
+  })
+  const driverWhere = (direction: 'lt' | 'gt') => ({
+    driverId: input.driverId,
+    deletedAt: null,
+    id: { not: input.settlementId },
+    periodStart: { [direction]: input.periodStart },
+  })
+
+  // NO BATCH MEANS NO BATCH NEIGHBOURS, and `batchId: ''` finds nothing rather
+  // than finding every unbatched statement in the organization — which is what
+  // `batchId: null` would have matched.
+  const [prevInBatch, nextInBatch, prevPeriod, nextPeriod] = await Promise.all([
+    input.batchId === null
+      ? null
+      : tx.settlement.findFirst({
+          where: batchWhere('lt'),
+          orderBy: { settlementNumber: 'desc' },
+          select: inBatch,
+        }),
+    input.batchId === null
+      ? null
+      : tx.settlement.findFirst({
+          where: batchWhere('gt'),
+          orderBy: { settlementNumber: 'asc' },
+          select: inBatch,
+        }),
+    tx.settlement.findFirst({
+      where: driverWhere('lt'),
+      orderBy: { periodStart: 'desc' },
+      select: inPeriod,
+    }),
+    tx.settlement.findFirst({
+      where: driverWhere('gt'),
+      orderBy: { periodStart: 'asc' },
+      select: inPeriod,
+    }),
+  ])
+
+  return { prevInBatch, nextInBatch, prevPeriod, nextPeriod }
+}

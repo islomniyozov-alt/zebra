@@ -10,6 +10,11 @@ import { allocateNumber } from './counters'
 import { sheetDates, type SheetDates, type SheetStop } from './stop-actuals'
 import { NOT_CLOSED_HISTORY } from './billing-status'
 import {
+  chargeSnapshot,
+  chargeTotalCents,
+  isValidQuantity,
+} from './settlement-charge'
+import {
   amountFromSnapshot,
   payFor,
   readSnapshot,
@@ -481,8 +486,18 @@ export type LineResult =
 export interface AddLineInput {
   type: SettlementLineType
   description: string
-  /** POSITIVE as typed. The sign is decided by the type, not by the typist. */
+  /**
+   * The PER-UNIT rate, POSITIVE as typed. The sign is decided by the type, not
+   * by the typist, and the TOTAL is `amountCents × quantity` computed below —
+   * never a third figure anybody types (§6.2.2).
+   */
   amountCents: number
+  /**
+   * Defaults to 1, which is what every caller before the workbench meant. A
+   * quantity of 1 stores no snapshot, so an ordinary one-off charge is written
+   * exactly as it always was.
+   */
+  quantity?: number
 }
 
 /**
@@ -503,6 +518,13 @@ export async function addSettlementLine(
     return { ok: false, reason: 'bad_amount' }
   }
 
+  // QUANTITY IS CHECKED WITH THE SAME SEVERITY AS THE AMOUNT, because it is a
+  // factor of the money and not a label on it. `bad_amount` is the reason on
+  // purpose: to the person at the screen, a rejected quantity and a rejected
+  // rate are the same mistake in the same row of the same form.
+  const quantity = input.quantity ?? 1
+  if (!isValidQuantity(quantity)) return { ok: false, reason: 'bad_amount' }
+
   const settlement = await tx.settlement.findFirst({
     where: { id: settlementId, deletedAt: null },
     select: { id: true, organizationId: true, status: true },
@@ -514,9 +536,8 @@ export async function addSettlementLine(
   // another, which leaves both in the record.
   if (settlement.status !== 'DRAFT') return { ok: false, reason: 'not_draft' }
 
-  const amountCents = isDeduction(input.type)
-    ? -input.amountCents
-    : input.amountCents
+  const totalCents = chargeTotalCents(input.amountCents, quantity)
+  const amountCents = isDeduction(input.type) ? -totalCents : totalCents
 
   const last = await tx.settlementLine.findFirst({
     where: { settlementId: settlement.id },
@@ -532,6 +553,12 @@ export async function addSettlementLine(
       description,
       amountCents,
       sortOrder: (last?.sortOrder ?? 0) + 1,
+      // ONLY WHEN IT SAYS SOMETHING. At quantity 1 the rate IS the total and a
+      // snapshot would add a row of Json to every hand-entered charge in the
+      // system to record that 1 × $50.00 is $50.00.
+      ...(quantity === 1
+        ? {}
+        : { payRuleSnapshot: chargeSnapshot(input.amountCents, quantity) }),
     },
     select: { id: true },
   })

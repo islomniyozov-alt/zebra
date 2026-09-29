@@ -1,6 +1,7 @@
 'use server'
 
 import { redirect } from 'next/navigation'
+import { headers } from 'next/headers'
 import { revalidatePath } from 'next/cache'
 import { withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
@@ -15,6 +16,7 @@ import {
 import { MoneyFormatError, parseMoneyToCents } from '@/lib/money'
 import { normalizeTypedDate, utcMidnight } from '@/lib/typed-date'
 import { addTripsToSettlement } from '@/lib/statement-workbench'
+import { sendStatementToDriver } from '@/lib/statement-send'
 import { refreshTotals } from '@/lib/settlements'
 import { SETTLEMENT_INITIAL, type SettlementState } from './settlement-state'
 import type {
@@ -46,6 +48,17 @@ const ERRORS: Record<string, MessageKey> = {
   bad_amount: 'settlements.error.badAmount',
   no_description: 'settlements.error.noDescription',
   wrong_sign: 'settlements.error.wrongSign',
+  // SEND TO DRIVER. Every refusal keeps its own sentence (§6.2.1): the office
+  // does something different about a missing address than about a deployment
+  // that is not allowed to send, and one "could not send" would hide which.
+  not_final: 'settlements.error.notFinal',
+  voided: 'settlements.error.voided',
+  no_email: 'settlements.error.noEmail',
+  not_production: 'settlements.error.notProduction',
+  not_configured: 'settlements.error.mailNotConfigured',
+  rejected: 'settlements.error.mailRejected',
+  unreachable: 'settlements.error.mailUnreachable',
+  misconfigured: 'settlements.error.mailMisconfigured',
 }
 
 const fail = (reason: string, loadNumbers: string[] = []): SettlementState => ({
@@ -107,11 +120,19 @@ export async function addLineAction(
     return fail('bad_amount')
   }
 
+  // QUANTITY IS OPTIONAL ON THE WIRE and 1 when absent — the add-line form
+  // that predates the workbench does not send the field, and its callers all
+  // meant one of the thing. A field present but unreadable is NOT 1: that is
+  // somebody who typed something into the box.
+  const rawQuantity = text(formData, 'quantity')
+  const quantity = rawQuantity === '' ? 1 : Number(rawQuantity)
+
   const outcome = await withCurrentOrg('update', 'settlement', (tx) =>
     addSettlementLine(tx, settlementId, {
       type: text(formData, 'type') as SettlementLineType,
       description: text(formData, 'description'),
       amountCents,
+      quantity,
     }),
   )
 
@@ -235,6 +256,43 @@ export async function recalculateAction(
   await withCurrentOrg('update', 'settlement', (tx) =>
     refreshTotals(tx, settlementId),
   )
+  revalidatePath(`/settlements/${settlementId}`)
+  return SETTLEMENT_INITIAL
+}
+
+/**
+ * Mail one statement to its driver.
+ *
+ * THE SENTENCES ARE RESOLVED HERE AND PASSED IN, not looked up in the lib.
+ * `sendStatementToDriver` builds a message and must not know about `t` — the
+ * same reason `basisSentence` takes templates: the Farsi statement rendered
+ * mirrored numbers around unmirrored glued words the first time words were
+ * assembled next to figures.
+ */
+export async function sendToDriverAction(
+  settlementId: string,
+  _previous: SettlementState,
+  _formData: FormData,
+): Promise<SettlementState> {
+  const { t, locale } = await getLocaleContext()
+  const host = (await headers()).get('host')
+  const origin = process.env.APP_ORIGIN || (host ? `https://${host}` : '')
+
+  const outcome = await withCurrentOrg('update', 'settlement', (tx) =>
+    sendStatementToDriver(tx, settlementId, {
+      origin,
+      locale,
+      labels: {
+        subject: t('statementMail.subject'),
+        greeting: t('statementMail.greeting'),
+        body: t('statementMail.body'),
+        link: t('statementMail.link'),
+      },
+    }),
+  )
+
+  if (!outcome.ok) return fail(outcome.reason)
+
   revalidatePath(`/settlements/${settlementId}`)
   return SETTLEMENT_INITIAL
 }

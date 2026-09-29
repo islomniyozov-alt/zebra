@@ -5,19 +5,25 @@ import { getLocaleContext } from '@/lib/locale'
 import { isDeduction } from '@/lib/settlements'
 import { basisSentence, type BasisTemplates } from '@/lib/settlement-view'
 import { readSnapshot } from '@/lib/driver-pay'
+import { readCharge } from '@/lib/settlement-charge'
 import { formatCents } from '@/lib/money'
 import { Button } from '@/components/ui/Button'
 import { Table, type Column } from '@/components/ui/Table'
-import { addableTrips } from '@/lib/statement-workbench'
+import {
+  addableTrips,
+  fuelAndTollsFor,
+  statementNeighbours,
+} from '@/lib/statement-workbench'
 import { sumCents, totalsLabel } from '@/lib/list-view'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { PageHeader } from '../../_grid/PageHeader'
+import { ChargeGrid, type ChargeRow } from './ChargeGrid'
 import {
-  AddLine,
   AddTrips,
   Approve,
   Recalculate,
   MarkPaid,
-  RemoveLine,
+  SendToDriver,
   VoidSettlement,
 } from './SettlementActions'
 import type {
@@ -28,12 +34,32 @@ import type {
 import type { MessageKey } from '@/lib/i18n'
 import type { StatusTone } from '@/lib/status'
 
-// One settlement, and the working behind every figure on it.
+// ---------------------------------------------------------------------------
+// THE SETTLEMENT WORKBENCH (TMS-DESIGN-SYSTEM §6.2.2).
 //
-// THE CALCULATION COLUMN IS THE POINT. Not "$897.00" but "30% of $2,990.00
-// gross" beside it, rendered from the line's OWN frozen snapshot — the same
-// sentence the PDF prints, from the same function, so the paper and the screen
-// cannot disagree in front of a driver.
+// Owner's ruling, 2026-09-29, against ST-005562 and the six screenshots in
+// `corpus/datatruck/ui/`.
+//
+// ── WHAT THIS REPLACED, AND WHY THE SHAPE WAS THE PROBLEM ─────────────────
+//
+// Nine stacked full-width cards: header, trips, three line groups, totals, add
+// trips, add line, recalculate, approve, mark paid, void. Every one of them
+// correct, and a four-load statement still ran past three screens — so the net
+// pay, which is the figure somebody opens a statement to check, was below the
+// fold under a form for adding deductions.
+//
+// THE ARTEFACT FITS THE SAME WORK ON ONE SCREEN by treating the totals as a
+// HEADER and the edits as ROWS. That is the whole idea being adopted: nothing
+// here computes anything the old page did not.
+//
+// ── THE HEADER'S RULE ─────────────────────────────────────────────────────
+//
+// §6.2.2: every figure in the header box is the sum of something on the page
+// below it. Gross, earnings, deductions and net come off the settlement's own
+// stored integers and each one has its grid underneath. The two that do not —
+// balances and fuel & tolls — carry a Review link to where their rows live,
+// which is why they are links and not bare numbers.
+// ---------------------------------------------------------------------------
 
 const TONE: Record<SettlementStatus, StatusTone> = {
   DRAFT: 'neutral',
@@ -42,7 +68,6 @@ const TONE: Record<SettlementStatus, StatusTone> = {
   VOID: 'muted',
 }
 
-/** Offered on the add-line control. LOAD_PAY is not among them — it is earned. */
 /** The held reasons, in the reader's language. Same three the batch names. */
 const HELD_REASON: Record<string, MessageKey> = {
   no_remittance: 'batch.held.noRemittance',
@@ -50,17 +75,17 @@ const HELD_REASON: Record<string, MessageKey> = {
   short: 'batch.held.short',
 }
 
-const ADDABLE: SettlementLineType[] = [
+/** Offered on the add-rows. LOAD_PAY is not among them — it is earned. */
+const OTHER_PAY_TYPES: SettlementLineType[] = ['REIMBURSEMENT', 'BONUS']
+const DEDUCTION_TYPES: SettlementLineType[] = [
   'DEDUCTION_ADVANCE',
   'DEDUCTION_FUEL',
   'DEDUCTION_INSURANCE',
-  'DEDUCTION_ESCROW',
   'DEDUCTION_EQUIPMENT',
   'DEDUCTION_VIOLATION',
   'DEDUCTION_OTHER',
-  'REIMBURSEMENT',
-  'BONUS',
 ]
+const BALANCE_TYPES: SettlementLineType[] = ['DEDUCTION_ESCROW']
 
 const PAY_METHODS: PaymentMethod[] = ['ACH', 'CHECK', 'WIRE', 'ZELLE', 'CASH']
 
@@ -74,6 +99,14 @@ const ERROR_KEYS: MessageKey[] = [
   'settlements.error.badAmount',
   'settlements.error.noDescription',
   'settlements.error.wrongSign',
+  'settlements.error.notFinal',
+  'settlements.error.voided',
+  'settlements.error.noEmail',
+  'settlements.error.notProduction',
+  'settlements.error.mailNotConfigured',
+  'settlements.error.mailRejected',
+  'settlements.error.mailUnreachable',
+  'settlements.error.mailMisconfigured',
 ]
 
 export default async function SettlementPage({
@@ -99,9 +132,13 @@ export default async function SettlementPage({
         periodEnd: true,
         status: true,
         grossCents: true,
+        earningsCents: true,
         deductionsCents: true,
         reimbursementsCents: true,
+        advancesCents: true,
+        otherPayCents: true,
         netCents: true,
+        milesHundredths: true,
         approvedAt: true,
         paidAt: true,
         paymentMethod: true,
@@ -109,8 +146,18 @@ export default async function SettlementPage({
         unitNumber: true,
         payTariffLabel: true,
         payoutDate: true,
+        batchId: true,
         company: { select: { name: true } },
-        driver: { select: { id: true, firstName: true, lastName: true } },
+        driver: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            employmentType: true,
+          },
+        },
+        _count: { select: { documents: true } },
         batch: {
           select: {
             id: true,
@@ -126,10 +173,6 @@ export default async function SettlementPage({
         // was cut. §7 freezes those at FINAL for exactly this reason: a load
         // re-dated or re-rated afterwards must not change a document somebody
         // was handed.
-        //
-        // SO THE GRID READS THE SNAPSHOT AND NOT THE LOAD. Joining to `Load`
-        // for the same columns would render today's values under a statement
-        // number, which is the one thing a settlement must never do.
         loadLines: {
           orderBy: { sortOrder: 'asc' },
           select: {
@@ -144,6 +187,15 @@ export default async function SettlementPage({
             grossCents: true,
             milesHundredths: true,
             amountCents: true,
+            // THE TWO LIVE FIELDS ON THIS PAGE, AND NEITHER IS MONEY. The
+            // artefact's grid carries a broker reference and an operational
+            // status, and the snapshot freezes neither — correctly, because
+            // both are facts about the LOAD TODAY rather than about what was
+            // paid. They are read through the relation and nothing on the
+            // statement depends on them.
+            load: {
+              select: { referenceNumber: true, operationalStatus: true },
+            },
           },
         },
         lines: {
@@ -163,14 +215,14 @@ export default async function SettlementPage({
 
   if (!settlement) notFound()
 
-  // ── WHAT IS STILL ADDABLE, READ ONLY WHERE IT COULD BE USED ───────────
+  // ── THE THREE READS THE HEADER NEEDS, AND NOTHING THE PAGE WILL NOT SHOW ─
   //
-  // A DRAFT somebody may edit. On an approved statement the panel would offer
+  // `addable` is DRAFT-only: on an approved statement the panel would offer
   // buttons that `addTripsToSettlement` refuses, and the read costs a
-  // `batchInputForOrg` — not free, and pointless on a document that is frozen.
-  const addable =
+  // `batchInputForOrg`, which is not free.
+  const [addable, fuel, neighbours] = await Promise.all([
     settlement.status === 'DRAFT' && mayEdit
-      ? await withCurrentOrg('read', 'settlement', (tx, session) =>
+      ? withCurrentOrg('read', 'settlement', (tx, session) =>
           addableTrips(tx, {
             organizationId: session.organizationId,
             driverId: settlement.driver.id,
@@ -178,18 +230,32 @@ export default async function SettlementPage({
             periodEnd: settlement.periodEnd,
           }),
         )
-      : []
+      : Promise.resolve([]),
+    withCurrentOrg('read', 'settlement', (tx) =>
+      fuelAndTollsFor(tx, {
+        driverId: settlement.driver.id,
+        periodStart: settlement.periodStart,
+        periodEnd: settlement.periodEnd,
+      }),
+    ),
+    withCurrentOrg('read', 'settlement', (tx) =>
+      statementNeighbours(tx, {
+        settlementId: settlement.id,
+        batchId: settlement.batchId,
+        driverId: settlement.driver.id,
+        settlementNumber: settlement.settlementNumber,
+        periodStart: settlement.periodStart,
+      }),
+    ),
+  ])
 
   const day = (value: Date | null) =>
     value ? value.toISOString().slice(0, 10) : '—'
   const translate = Object.fromEntries(ERROR_KEYS.map((key) => [key, t(key)]))
 
   const isDraft = settlement.status === 'DRAFT'
+  const mayAdd = isDraft && mayEdit
 
-  // THE WORKING, IN THE READER'S LANGUAGE. Templates rather than glued words:
-  // the first version concatenated English around the figures and the Farsi
-  // screen rendered "of $2,450.00 gross 30%" — mirrored numbers, unmirrored
-  // words, unreadable in the one place a driver checks their pay.
   const basisTemplates: BasisTemplates = {
     percentGross: t('payRule.basis.percentGross'),
     percentLinehaul: t('payRule.basis.percentLinehaul'),
@@ -198,57 +264,150 @@ export default async function SettlementPage({
     flatPerLoad: t('payRule.basis.flatPerLoad'),
   }
 
-  // ── WHICH GROUP EACH LINE BELONGS TO ─────────────────────────────────
-  //
-  // `isDeduction` is the existing one-place answer and is not second-guessed
-  // here. BALANCES is escrow: it is the only line that is neither pay nor a
-  // charge but a transfer into a balance somebody gets back, and the statements
-  // print it apart for that reason.
-  const balanceTypes = new Set(['DEDUCTION_ESCROW'])
-  const LINE_GROUPS = [
-    {
-      key: 'otherPay',
-      heading: 'settlements.group.otherPay' as MessageKey,
-      lines: settlement.lines.filter(
-        (line) => !isDeduction(line.type) && line.type !== 'LOAD_PAY',
-      ),
-    },
-    {
-      key: 'deductions',
-      heading: 'settlements.group.deductions' as MessageKey,
-      lines: settlement.lines.filter(
-        (line) => isDeduction(line.type) && !balanceTypes.has(line.type),
-      ),
-    },
-    {
-      key: 'balances',
-      heading: 'settlements.group.balances' as MessageKey,
-      lines: settlement.lines.filter((line) => balanceTypes.has(line.type)),
-    },
-    {
-      key: 'loadPay',
-      heading: 'settlements.group.loadPay' as MessageKey,
-      // LOAD PAY STAYS VISIBLE even though the trips grid above shows the same
-      // freight: the grid is the SNAPSHOT and these are the LINES that make the
-      // total. Dropping them would leave the header's gross unexplained by
-      // anything on the page.
-      lines: settlement.lines.filter((line) => line.type === 'LOAD_PAY'),
-    },
-  ]
-
   const money = (cents: number) => (
     <span className="font-mono tabular-nums">{formatCents(cents, locale)}</span>
   )
+
+  // ── THE LINES, SPLIT THE WAY THE PRINTED STATEMENT SPLITS THEM ─────────
+  //
+  // BALANCES is escrow: the only line that is neither pay nor a charge but a
+  // transfer into a balance somebody gets back, which is why the statements
+  // print it apart. `isDeduction` is the existing one-place answer and is not
+  // second-guessed here.
+  const balanceSet = new Set<SettlementLineType>(BALANCE_TYPES)
+  const toChargeRow = (line: (typeof settlement.lines)[number]): ChargeRow => {
+    const charge = readCharge(line.payRuleSnapshot)
+    return {
+      id: line.id,
+      typeLabel: t(`settlementLine.${line.type}` as MessageKey),
+      description: line.description,
+      // THE SIGN LIVES ON THE TOTAL AND NOWHERE ELSE. A rate of -$50.00 beside
+      // a total of -$50.00 reads as two deductions to anybody scanning.
+      rateCents: charge ? charge.rateCents : null,
+      quantity: charge ? charge.quantity : null,
+      amountCents: line.amountCents,
+      removable: mayAdd && line.type !== 'LOAD_PAY',
+      basis: basisSentence(
+        readSnapshot(line.payRuleSnapshot),
+        locale,
+        basisTemplates,
+      ),
+    }
+  }
+
+  const otherPayLines = settlement.lines.filter(
+    (line) => !isDeduction(line.type) && line.type !== 'LOAD_PAY',
+  )
+  const deductionLines = settlement.lines.filter(
+    (line) => isDeduction(line.type) && !balanceSet.has(line.type),
+  )
+  const balanceLines = settlement.lines.filter((line) =>
+    balanceSet.has(line.type),
+  )
+  const loadPayLines = settlement.lines.filter(
+    (line) => line.type === 'LOAD_PAY',
+  )
+
+  const typeOptions = (types: readonly SettlementLineType[]) =>
+    types.map((type) => ({
+      value: type,
+      label: t(`settlementLine.${type}` as MessageKey),
+    }))
+
+  const gridLabels = {
+    type: t('settlements.lineType'),
+    amount: t('settlements.amount'),
+    quantity: t('workbench.quantity'),
+    total: t('workbench.total'),
+    description: t('settlements.description'),
+    add: t('settlements.add'),
+    remove: t('settlements.remove'),
+  }
 
   type TripRow = (typeof settlement.loadLines)[number]
 
   const tripColumns: Column<TripRow>[] = [
     {
-      key: 'loadNumber',
-      header: t('settlements.trip.load'),
+      key: 'trip',
+      header: t('workbench.trip'),
       render: (row) => (
         <span className="z-identifier font-mono" dir="ltr">
           {row.loadNumber}
+        </span>
+      ),
+    },
+    {
+      key: 'load',
+      header: t('workbench.loadId'),
+      render: (row) =>
+        row.load?.referenceNumber ? (
+          <span className="font-mono text-xs text-ink-2" dir="ltr">
+            {row.load.referenceNumber}
+          </span>
+        ) : (
+          <span className="text-ink-3">—</span>
+        ),
+    },
+    {
+      key: 'unit',
+      header: t('payroll.unit'),
+      // ONE UNIT FOR THE WHOLE STATEMENT, repeated down the column. Zebra
+      // freezes the truck per settlement (`Settlement.unitNumber`) rather than
+      // per line, because the letterhead is chosen from it — so every row
+      // carries the same number and that is the truth, not a rendering
+      // shortcut.
+      render: () =>
+        settlement.unitNumber === null ? (
+          <span className="text-ink-3">—</span>
+        ) : (
+          <span className="z-identifier font-mono text-xs" dir="ltr">
+            {settlement.unitNumber}
+          </span>
+        ),
+    },
+    {
+      key: 'totalPay',
+      header: t('workbench.totalPay'),
+      align: 'end',
+      // THE GROSS THE RULE WAS APPLIED TO — the artefact's "Total pay" and the
+      // PDF's "Load gross" are the same column under two names.
+      render: (row) => money(row.grossCents),
+      foot: (rows) => money(sumCents(rows, (row) => row.grossCents)),
+    },
+    {
+      key: 'driverGross',
+      header: t('workbench.driverGross'),
+      align: 'end',
+      render: (row) => money(row.amountCents),
+      foot: (rows) => money(sumCents(rows, (row) => row.amountCents)),
+    },
+    {
+      key: 'status',
+      header: t('payroll.status'),
+      render: (row) =>
+        row.load ? (
+          <span className="text-xs text-ink-2">
+            {t(`status.${row.load.operationalStatus}` as MessageKey)}
+          </span>
+        ) : (
+          <span className="text-ink-3">—</span>
+        ),
+    },
+    {
+      key: 'delDate',
+      header: t('settlements.trip.delDate'),
+      render: (row) => (
+        <span className="font-mono text-xs" dir="ltr">
+          {day(row.delDate)}
+        </span>
+      ),
+    },
+    {
+      key: 'puDate',
+      header: t('settlements.trip.puDate'),
+      render: (row) => (
+        <span className="font-mono text-xs" dir="ltr">
+          {day(row.puDate)}
         </span>
       ),
     },
@@ -265,38 +424,13 @@ export default async function SettlementPage({
       render: (row) => row.delPlace,
     },
     {
-      key: 'puDate',
-      header: t('settlements.trip.puDate'),
-      render: (row) => (
-        <span className="font-mono text-xs" dir="ltr">
-          {day(row.puDate)}
-        </span>
-      ),
-    },
-    {
-      key: 'delDate',
-      header: t('settlements.trip.delDate'),
-      render: (row) => (
-        <span className="font-mono text-xs" dir="ltr">
-          {day(row.delDate)}
-        </span>
-      ),
-    },
-    {
-      key: 'gross',
-      header: t('settlements.trip.gross'),
-      align: 'end',
-      render: (row) => money(row.grossCents),
-      foot: (rows) => money(sumCents(rows, (row) => row.grossCents)),
-    },
-    {
       key: 'miles',
-      header: t('settlements.trip.miles'),
+      header: t('workbench.totalMiles'),
       align: 'end',
-      // STORED IN HUNDREDTHS and printed whole: §8 says miles are an integer
-      // with a thousands separator. The hundredths exist so a per-mile rate
-      // does not lose a fraction of a cent, not so a statement prints 1,234.56
-      // miles.
+      // TOTAL, NOT LOADED, and labelled as such (§6.2.2 as corrected in
+      // v10.1). The snapshot freezes ONE mileage — the one the PDF prints — so
+      // calling it "loaded" here would make the screen disagree with the paper
+      // by the deadhead. The second column is the held migration.
       render: (row) => (
         <span className="font-mono tabular-nums">
           {Math.round(row.milesHundredths / 100).toLocaleString(locale)}
@@ -310,82 +444,139 @@ export default async function SettlementPage({
         </span>
       ),
     },
-    {
-      key: 'amount',
-      header: t('settlements.trip.amount'),
-      align: 'end',
-      render: (row) => money(row.amountCents),
-      foot: (rows) => money(sumCents(rows, (row) => row.amountCents)),
-    },
   ]
+
+  const driverName = `${settlement.driver.firstName} ${settlement.driver.lastName}`
 
   return (
     <>
-      <div className="flex items-baseline justify-between gap-z4 border-b border-border bg-surface px-gutter py-z3">
-        <div className="flex items-center gap-z3">
-          <h1 className="text-lg font-medium text-ink">
-            <span className="font-mono">{settlement.settlementNumber}</span>
-          </h1>
-          <StatusBadge
-            tone={TONE[settlement.status]}
-            label={t(`settlementStatus.${settlement.status}` as MessageKey)}
-          />
-        </div>
-        {/* A real link, not a fetch — the browser handles a PDF better than
-         * anything worth writing here. */}
-        <a
-          href={`/api/settlements/${settlement.id}/pdf`}
-          target="_blank"
-          rel="noopener"
-        >
-          <Button variant="secondary" size="compact">
-            {t('settlements.download')}
-          </Button>
-        </a>
-      </div>
+      <PageHeader
+        title={settlement.settlementNumber}
+        breadcrumb={[t('nav.group.payroll'), t('nav.statements')]}
+        action={
+          // ── THE ACTION ROW (§6.2.2) ────────────────────────────────
+          //
+          // It belongs to the PAGE and does not move as the statement changes
+          // state — except that a control which cannot act is absent rather
+          // than disabled, which is this codebase's existing rule and the
+          // reason Post disappears once a statement is approved.
+          <div className="flex flex-wrap items-center gap-z2">
+            {mayAdd ? (
+              <Recalculate
+                settlementId={settlement.id}
+                label={t('settlements.recalculate')}
+              />
+            ) : null}
+            {settlement.status !== 'DRAFT' && settlement.status !== 'VOID' ? (
+              <SendToDriver
+                settlementId={settlement.id}
+                email={settlement.driver.email}
+                labels={{
+                  send: t('workbench.sendToDriver'),
+                  confirm: t('workbench.sendConfirm'),
+                  sent: t('workbench.sent'),
+                }}
+                translate={translate}
+              />
+            ) : null}
+            {isDraft && mayApprove ? (
+              <Approve
+                settlementId={settlement.id}
+                translate={translate}
+                labels={{
+                  approve: t('workbench.post'),
+                  hint: t('settlements.approveHint'),
+                }}
+              />
+            ) : null}
+            <a
+              href={`/api/settlements/${settlement.id}/pdf`}
+              target="_blank"
+              rel="noopener"
+            >
+              <Button variant="secondary" size="compact">
+                {t('workbench.exportPdf')}
+              </Button>
+            </a>
+          </div>
+        }
+      />
 
-      <div className="min-h-0 flex-1 overflow-y-auto bg-surface-2 px-gutter py-z5">
-        <div className="flex max-w-[900px] flex-col gap-z4">
-          {/* ── THE HEADER BOX ───────────────────────────────────────────
-           *
-           * The block the printed statement opens with, in the order it
-           * prints: who, under which authority, on which run, against which
-           * unit and tariff, for which period, paid on which date.
-           *
-           * IT IS THE PDF'S OWN HEADER, FIELD FOR FIELD — `statement-pdf.ts`
-           * lays out Settlement, Batch ID, Driver, Unit Number and Payment
-           * tariff across the top and the three dates down the right. A screen
-           * that showed a different subset would make "the paper says
-           * something else" a sentence somebody has to resolve in front of a
-           * driver, which §7's whole freeze exists to prevent.
-           *
-           * THREE COLUMNS, NOT TWO. The old two-column list ran to eight rows
-           * before the lines began; the same facts fit in three and leave the
-           * trips above the fold at 1080p (rule 1).
-           */}
-          <section className="rounded-card border border-border bg-surface p-z4">
-            <dl className="grid grid-cols-[auto_1fr_auto_1fr_auto_1fr] gap-x-z3 gap-y-z1 text-sm">
-              <dt className="text-ink-2">{t('settlements.driver')}</dt>
-              <dd className="text-ink">
+      <div className="min-h-0 flex-1 overflow-y-auto bg-surface-2 px-gutter py-z4">
+        <div className="flex flex-col gap-z4">
+          {/* ── THE HEADER BOX (§6.2.2) ──────────────────────────────── */}
+          <section className="rounded-card border border-border bg-surface px-z4 py-z3">
+            <div className="flex flex-wrap items-baseline gap-x-z5 gap-y-z2">
+              <Fact label={t('workbench.settlement')}>
+                <span className="flex items-baseline gap-z1">
+                  <Step
+                    href={
+                      neighbours.prevInBatch
+                        ? `/settlements/${neighbours.prevInBatch.id}`
+                        : null
+                    }
+                    label={t('workbench.previous')}
+                    glyph="‹"
+                  />
+                  <span className="font-mono text-ink" dir="ltr">
+                    {settlement.settlementNumber}
+                  </span>
+                  <Step
+                    href={
+                      neighbours.nextInBatch
+                        ? `/settlements/${neighbours.nextInBatch.id}`
+                        : null
+                    }
+                    label={t('workbench.next')}
+                    glyph="›"
+                  />
+                </span>
+              </Fact>
+              <Fact label={t('settlements.driver')}>
                 <Link
                   href={`/drivers/${settlement.driver.id}`}
-                  className="hover:text-accent"
+                  className="text-ink hover:text-accent"
                 >
-                  {settlement.driver.firstName} {settlement.driver.lastName}
+                  {driverName}
                 </Link>
-              </dd>
-              <dt className="text-ink-2">{t('payroll.unit')}</dt>
-              <dd className="text-ink">
-                {settlement.unitNumber === null ? (
-                  <span className="text-ink-3">—</span>
-                ) : (
-                  <span className="z-identifier font-mono" dir="ltr">
-                    {settlement.unitNumber}
+              </Fact>
+              <Fact label={t('settlements.period')}>
+                <span className="flex items-baseline gap-z1">
+                  <Step
+                    href={
+                      neighbours.prevPeriod
+                        ? `/settlements/${neighbours.prevPeriod.id}`
+                        : null
+                    }
+                    label={t('workbench.previousPeriod')}
+                    glyph="‹"
+                  />
+                  <span className="font-mono text-ink" dir="ltr">
+                    {day(settlement.periodStart)} — {day(settlement.periodEnd)}
                   </span>
+                  <Step
+                    href={
+                      neighbours.nextPeriod
+                        ? `/settlements/${neighbours.nextPeriod.id}`
+                        : null
+                    }
+                    label={t('workbench.nextPeriod')}
+                    glyph="›"
+                  />
+                </span>
+              </Fact>
+              <Fact label={t('workbench.driverType')}>
+                {t(
+                  `drivers.employment.${settlement.driver.employmentType}` as MessageKey,
                 )}
-              </dd>
-              <dt className="text-ink-2">{t('batches.batch')}</dt>
-              <dd className="text-ink">
+              </Fact>
+              <Fact label={t('settlements.tariff')}>
+                {settlement.payTariffLabel ?? (
+                  <span className="text-ink-3">—</span>
+                )}
+              </Fact>
+              <Fact label={t('ref.authority')}>{settlement.company.name}</Fact>
+              <Fact label={t('batches.batch')}>
                 {settlement.batch === null ? (
                   <span className="text-ink-3">{t('statements.noBatch')}</span>
                 ) : (
@@ -398,71 +589,91 @@ export default async function SettlementPage({
                       settlement.batch.id.slice(0, 8)}
                   </Link>
                 )}
-              </dd>
+              </Fact>
+              <Fact label={t('batch.checkDate')}>
+                <span className="font-mono" dir="ltr">
+                  {day(
+                    settlement.payoutDate ??
+                      settlement.batch?.checkDate ??
+                      null,
+                  )}
+                </span>
+              </Fact>
+              <span className="ms-auto">
+                <StatusBadge
+                  tone={TONE[settlement.status]}
+                  label={t(
+                    `settlementStatus.${settlement.status}` as MessageKey,
+                  )}
+                />
+              </span>
+            </div>
 
-              <dt className="text-ink-2">{t('ref.authority')}</dt>
-              <dd className="text-ink">{settlement.company.name}</dd>
-              <dt className="text-ink-2">{t('settlements.period')}</dt>
-              <dd className="font-mono text-ink" dir="ltr">
-                {day(settlement.periodStart)} → {day(settlement.periodEnd)}
-              </dd>
-              <dt className="text-ink-2">{t('batch.checkDate')}</dt>
-              <dd className="font-mono text-ink" dir="ltr">
-                {day(
-                  settlement.payoutDate ?? settlement.batch?.checkDate ?? null,
+            {/* THE FIGURES, ON THEIR OWN ROW AND SEPARATED BY A RULE. They are
+             * what the page is for; the block above is who and when. */}
+            <div className="mt-z3 flex flex-wrap items-baseline gap-x-z5 gap-y-z2 border-t border-border pt-z3">
+              <Fact label={t('workbench.totalPay')}>
+                {money(settlement.grossCents)}
+              </Fact>
+              <Fact label={t('workbench.earnings')}>
+                {money(settlement.earningsCents)}
+              </Fact>
+              <Fact label={t('workbench.otherPayReimbursements')}>
+                {money(settlement.otherPayCents)} /{' '}
+                {money(settlement.reimbursementsCents)}
+              </Fact>
+              <Fact label={t('workbench.deductionsAdvances')}>
+                <span className="text-danger">
+                  {money(-settlement.deductionsCents)}
+                </span>{' '}
+                / {money(settlement.advancesCents)}
+              </Fact>
+              <Fact label={t('workbench.tripsCount')}>
+                <span className="font-mono tabular-nums">
+                  {settlement.loadLines.length}
+                </span>
+              </Fact>
+              <Fact label={t('workbench.balances')}>
+                {money(
+                  balanceLines.reduce((sum, line) => sum + line.amountCents, 0),
                 )}
-              </dd>
-
-              {/* THE TARIFF SPANS, because it is a sentence rather than a
-               * field — "30% from gross" is the whole of how this driver is
-               * paid and it reads badly squeezed into a third of a row. */}
-              <dt className="text-ink-2">{t('settlements.tariff')}</dt>
-              <dd className="col-span-5 text-ink">
-                {settlement.payTariffLabel ?? (
-                  <span className="text-ink-3">—</span>
-                )}
-              </dd>
-              {settlement.approvedAt ? (
-                <>
-                  <dt className="text-ink-2">{t('settlements.approvedOn')}</dt>
-                  <dd className="font-mono text-ink">
-                    {day(settlement.approvedAt)}
-                  </dd>
-                </>
-              ) : null}
-              {settlement.paidAt ? (
-                <>
-                  <dt className="text-ink-2">{t('settlements.paidOn')}</dt>
-                  <dd className="text-ink">
-                    <span className="font-mono">{day(settlement.paidAt)}</span>
-                    {settlement.paymentReference ? (
-                      <span className="text-ink-3">
-                        {' · '}
-                        {settlement.paymentMethod} {settlement.paymentReference}
-                      </span>
-                    ) : null}
-                  </dd>
-                </>
-              ) : null}
-            </dl>
+              </Fact>
+              {/* §6.2.3: A READ IS NOT A CHARGE. The label says what was
+               * burned, and the second figure says what is already coming off
+               * the cheque — without it a reader cannot tell a company-fuel
+               * driver from one about to be charged the whole of it. */}
+              <Fact label={t('workbench.fuelTolls')}>
+                {money(fuel.totalCents)}
+                <span className="ms-z1 text-xs text-ink-3">
+                  {t('workbench.burned')}
+                  {fuel.alreadyDeductedCents > 0
+                    ? ` · ${t('workbench.deducted')} ${formatCents(
+                        fuel.alreadyDeductedCents,
+                        locale,
+                      )}`
+                    : ''}
+                </span>
+              </Fact>
+              <Fact label={t('workbench.attachments')}>
+                <Link
+                  href={`/documents?settlementId=${settlement.id}`}
+                  className="font-mono tabular-nums text-ink hover:text-accent"
+                >
+                  {settlement._count.documents}
+                </Link>
+              </Fact>
+              <span className="ms-auto flex items-baseline gap-z2">
+                <span className="text-xs uppercase tracking-[0.04em] text-ink-2">
+                  {t('settlements.net')}
+                </span>
+                <span className="font-mono text-lg font-medium tabular-nums text-ink">
+                  {formatCents(settlement.netCents, locale)}
+                </span>
+              </span>
+            </div>
           </section>
 
-          {/* ── THE TRIPS GRID ───────────────────────────────────────────
-           *
-           * The freight this statement pays for, in the PDF's own columns:
-           * load number, PU, DEL, the two dates, load gross, miles, and what
-           * the driver was paid for it.
-           *
-           * ITS OWN GRID, ABOVE THE LINES, because they answer different
-           * questions. A trip row says "this load, this money"; a settlement
-           * LINE says "this adjustment". They were one list, so a $50 fuel
-           * deduction sat between two loads and the reader had to tell them
-           * apart by reading.
-           *
-           * `Table` RATHER THAN A LIST, for the sticky header and the totals
-           * foot — a statement is a document somebody checks against a
-           * printout, and the column sums are the check.
-           */}
+          {/* ── THE TRIPS GRID ─────────────────────────────────────────── */}
           {settlement.loadLines.length > 0 ? (
             <section className="overflow-hidden rounded-card border border-border bg-surface">
               <h2 className="border-b border-border px-z4 py-z3 text-md font-medium text-ink">
@@ -474,6 +685,7 @@ export default async function SettlementPage({
                 rowKey={(row) => row.id}
                 rowHref={(row) => `/loads/${row.loadId}`}
                 caption={t('settlements.trips')}
+                footRows={settlement.loadLines}
                 totals={{
                   label: totalsLabel(
                     t('accounting.total'),
@@ -486,132 +698,13 @@ export default async function SettlementPage({
             </section>
           ) : null}
 
-          {/* ── THE LINES, IN THREE GROUPS ───────────────────────────────
+          {/* ── ADD TRIPS ──────────────────────────────────────────────
            *
-           * Owner's ruling: Other pay, Deductions, Balances. They were one
-           * list, so a $50 fuel deduction sat between two bonuses and the
-           * reader told them apart by reading the sign.
-           *
-           * THE PRINTED STATEMENT ALREADY SEPARATES THEM — `statement-pdf.ts`
-           * lays out Earnings and then Deductions under their own headings
-           * with their own totals — so the screen running them together was
-           * the one place the two disagreed about shape.
-           *
-           * AN EMPTY GROUP IS OMITTED, NEVER RENDERED AT ZERO. §4, confirmed
-           * off the page: the two Dolphins statements carry no Deductions
-           * block at all. A zero-row table claims somebody looked and found
-           * nothing; an absent section claims nothing.
-           */}
-          {LINE_GROUPS.map((group) =>
-            group.lines.length === 0 ? null : (
-              <section
-                key={group.key}
-                className="rounded-card border border-border bg-surface p-z4"
-              >
-                <div className="flex items-baseline justify-between gap-z3">
-                  <h2 className="text-md font-medium text-ink">
-                    {t(group.heading)}
-                  </h2>
-                  <span className="font-mono text-sm font-medium tabular-nums text-ink">
-                    {formatCents(
-                      group.lines.reduce(
-                        (sum, line) => sum + line.amountCents,
-                        0,
-                      ),
-                      locale,
-                    )}
-                  </span>
-                </div>
-                <ul className="mt-z3 flex flex-col">
-                  {group.lines.map((line) => (
-                    <li
-                      key={line.id}
-                      className="flex items-baseline gap-z3 border-b border-border py-z2 text-sm last:border-b-0"
-                    >
-                      {line.load ? (
-                        <Link
-                          href={`/loads/${line.load.id}`}
-                          className="z-identifier w-[70px] font-mono text-xs text-ink-3 hover:text-accent"
-                        >
-                          {line.load.loadNumber}
-                        </Link>
-                      ) : (
-                        <span className="w-[70px] text-xs text-ink-3">
-                          {t(`settlementLine.${line.type}` as MessageKey)}
-                        </span>
-                      )}
-                      <span className="text-ink">{line.description}</span>
-                      {/* The working, from the line's own snapshot. */}
-                      <span className="text-xs text-ink-3">
-                        {basisSentence(
-                          readSnapshot(line.payRuleSnapshot),
-                          locale,
-                          basisTemplates,
-                        )}
-                      </span>
-                      <span
-                        className={
-                          isDeduction(line.type)
-                            ? 'ms-auto font-mono tabular-nums text-danger'
-                            : 'ms-auto font-mono tabular-nums text-ink'
-                        }
-                      >
-                        {formatCents(line.amountCents, locale)}
-                      </span>
-                      {isDraft && mayEdit && line.type !== 'LOAD_PAY' ? (
-                        <RemoveLine
-                          settlementId={settlement.id}
-                          lineId={line.id}
-                          label={t('settlements.remove')}
-                        />
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ),
-          )}
-
-          {/* THE TOTALS, IN A SECTION OF THEIR OWN. They were the foot of the
-           * one list; with three lists above them they belong to none of the
-           * three and to all of them. */}
-          <section className="rounded-card border border-border bg-surface p-z4">
-            {/* Every figure here is the lines added, and the lines are their
-             * own stored integers — so a reader can check the document against
-             * the freight it came from (rule 9-money). */}
-            <dl className="mt-z4 grid grid-cols-[1fr_auto] gap-x-z4 gap-y-z1 text-sm">
-              <dt className="text-ink-2">{t('settlements.gross')}</dt>
-              <dd className="text-end font-mono tabular-nums text-ink">
-                {formatCents(settlement.grossCents, locale)}
-              </dd>
-              {settlement.reimbursementsCents !== 0 ? (
-                <>
-                  <dt className="text-ink-2">
-                    {t('settlements.reimbursements')}
-                  </dt>
-                  <dd className="text-end font-mono tabular-nums text-ink">
-                    {formatCents(settlement.reimbursementsCents, locale)}
-                  </dd>
-                </>
-              ) : null}
-              {settlement.deductionsCents !== 0 ? (
-                <>
-                  <dt className="text-ink-2">{t('settlements.deductions')}</dt>
-                  <dd className="text-end font-mono tabular-nums text-danger">
-                    {formatCents(-settlement.deductionsCents, locale)}
-                  </dd>
-                </>
-              ) : null}
-              <dt className="border-t border-border pt-z1 font-medium text-ink">
-                {t('settlements.net')}
-              </dt>
-              <dd className="border-t border-border pt-z1 text-end font-mono tabular-nums font-medium text-ink">
-                {formatCents(settlement.netCents, locale)}
-              </dd>
-            </dl>
-          </section>
-
-          {isDraft && mayEdit && addable.length > 0 ? (
+           * Still a panel and not an add-row, because it is not one: the
+           * add-row writes a figure somebody typed, and this offers a LIST of
+           * this driver's unsettled freight with the held ones marked. There
+           * is nothing to type. */}
+          {mayAdd && addable.length > 0 ? (
             <section className="rounded-card border border-border bg-surface p-z4">
               <AddTrips
                 settlementId={settlement.id}
@@ -620,8 +713,6 @@ export default async function SettlementPage({
                   loadNumber: trip.loadNumber,
                   route: `${trip.puPlace} → ${trip.delPlace}`,
                   gross: formatCents(trip.grossCents, locale),
-                  // THE REASON IN WORDS, not a code. "Held" alone sends
-                  // somebody to another screen to find out why.
                   held:
                     trip.held === null
                       ? null
@@ -638,52 +729,107 @@ export default async function SettlementPage({
             </section>
           ) : null}
 
-          {isDraft && mayEdit ? (
-            <section className="rounded-card border border-border bg-surface p-z4">
-              <AddLine
-                settlementId={settlement.id}
-                types={ADDABLE.map((type) => ({
-                  value: type,
-                  label: t(`settlementLine.${type}` as MessageKey),
-                }))}
-                translate={translate}
-                labels={{
-                  heading: t('settlements.addLine'),
-                  hint: t('settlements.addLineHint'),
-                  type: t('settlements.lineType'),
-                  description: t('settlements.description'),
-                  amount: t('settlements.amount'),
-                  add: t('settlements.add'),
-                }}
-              />
-            </section>
+          {/* ── THE THREE LINE GRIDS, EACH WITH ITS ADD-ROW ─────────────
+           *
+           * Rendered even when empty, unlike the old page — because an empty
+           * grid here is not a claim that somebody looked and found nothing,
+           * it is the row you add the first deduction in. That is the whole
+           * difference the add-row makes: the section IS the control. */}
+          {otherPayLines.length > 0 || mayAdd ? (
+            <ChargeGrid
+              settlementId={settlement.id}
+              rows={otherPayLines.map(toChargeRow)}
+              types={typeOptions(OTHER_PAY_TYPES)}
+              canAdd={mayAdd}
+              locale={locale}
+              translate={translate}
+              labels={{
+                ...gridLabels,
+                heading: t('settlements.group.otherPay'),
+              }}
+            />
           ) : null}
 
-          {/* RECALCULATE SITS WITH POST, because they are the two things you do
-           * when you have finished editing. It re-adds the lines; it does not
-           * re-price them — see the action. */}
-          {isDraft && mayEdit ? (
-            <section className="flex items-center gap-z3 rounded-card border border-border bg-surface p-z4">
-              <Recalculate
-                settlementId={settlement.id}
-                label={t('settlements.recalculate')}
-              />
-              <p className="text-xs text-ink-3">
-                {t('settlements.recalculateHint')}
-              </p>
-            </section>
+          {deductionLines.length > 0 || mayAdd ? (
+            <ChargeGrid
+              settlementId={settlement.id}
+              rows={deductionLines.map(toChargeRow)}
+              types={typeOptions(DEDUCTION_TYPES)}
+              canAdd={mayAdd}
+              locale={locale}
+              translate={translate}
+              labels={{
+                ...gridLabels,
+                heading: t('settlements.group.deductions'),
+              }}
+            />
           ) : null}
 
-          {isDraft && mayApprove ? (
+          {balanceLines.length > 0 || mayAdd ? (
+            <ChargeGrid
+              settlementId={settlement.id}
+              rows={balanceLines.map(toChargeRow)}
+              types={typeOptions(BALANCE_TYPES)}
+              canAdd={mayAdd}
+              locale={locale}
+              translate={translate}
+              labels={{
+                ...gridLabels,
+                heading: t('settlements.group.balances'),
+              }}
+            />
+          ) : null}
+
+          {/* LOAD PAY STAYS VISIBLE even though the trips grid shows the same
+           * freight: the grid is the SNAPSHOT and these are the LINES that
+           * make the total. Dropping them leaves the header's gross
+           * unexplained by anything on the page. */}
+          {loadPayLines.length > 0 ? (
             <section className="rounded-card border border-border bg-surface p-z4">
-              <Approve
-                settlementId={settlement.id}
-                translate={translate}
-                labels={{
-                  approve: t('settlements.approve'),
-                  hint: t('settlements.approveHint'),
-                }}
-              />
+              <div className="flex items-baseline justify-between gap-z3">
+                <h2 className="text-md font-medium text-ink">
+                  {t('settlements.group.loadPay')}
+                </h2>
+                <span className="font-mono text-sm font-medium tabular-nums text-ink">
+                  {formatCents(
+                    loadPayLines.reduce(
+                      (sum, line) => sum + line.amountCents,
+                      0,
+                    ),
+                    locale,
+                  )}
+                </span>
+              </div>
+              <ul className="mt-z3 flex flex-col">
+                {loadPayLines.map((line) => (
+                  <li
+                    key={line.id}
+                    className="flex items-baseline gap-z3 border-b border-border py-z2 text-sm last:border-b-0"
+                  >
+                    {line.load ? (
+                      <Link
+                        href={`/loads/${line.load.id}`}
+                        className="z-identifier w-[70px] font-mono text-xs text-ink-3 hover:text-accent"
+                      >
+                        {line.load.loadNumber}
+                      </Link>
+                    ) : (
+                      <span className="w-[70px] text-xs text-ink-3" />
+                    )}
+                    <span className="text-ink">{line.description}</span>
+                    <span className="text-xs text-ink-3">
+                      {basisSentence(
+                        readSnapshot(line.payRuleSnapshot),
+                        locale,
+                        basisTemplates,
+                      )}
+                    </span>
+                    <span className="ms-auto font-mono tabular-nums text-ink">
+                      {formatCents(line.amountCents, locale)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </section>
           ) : null}
 
@@ -724,5 +870,58 @@ export default async function SettlementPage({
         </div>
       </div>
     </>
+  )
+}
+
+/** One label:value pair in the header box. */
+function Fact({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <span className="flex items-baseline gap-z2">
+      <span className="text-xs uppercase tracking-[0.04em] text-ink-2">
+        {label}
+      </span>
+      <span className="text-sm text-ink">{children}</span>
+    </span>
+  )
+}
+
+/**
+ * One chevron.
+ *
+ * RENDERED AS INERT TEXT WHEN THERE IS NOWHERE TO GO, never as a link to the
+ * current page: a control that looks live and does nothing is the thing §10
+ * objects to, and at the first or last statement in a batch that is exactly
+ * what the other half of the pair would be.
+ */
+function Step({
+  href,
+  label,
+  glyph,
+}: {
+  href: string | null
+  label: string
+  glyph: string
+}) {
+  if (href === null) {
+    return (
+      <span aria-hidden className="text-ink-3">
+        {glyph}
+      </span>
+    )
+  }
+  return (
+    <Link
+      href={href}
+      aria-label={label}
+      className="text-ink-2 hover:text-accent"
+    >
+      <span aria-hidden>{glyph}</span>
+    </Link>
   )
 }
