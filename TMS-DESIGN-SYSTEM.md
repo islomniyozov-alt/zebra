@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v8 — §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
+**Status:** v9 — §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -47,8 +47,22 @@ This is the one memorable element, and it is load-bearing rather than decorative
 
 Rules:
 
-- The stripe reflects **operational** status on load surfaces, **billing** status on invoice and AR surfaces, and **compliance urgency** on fleet and driver surfaces. One meaning per screen, stated in the screen's header.
-- The stripe is never the only indicator (rule 5). The status word sits in the row.
+- The stripe reflects **operational** status on load surfaces, **billing** status on invoice and AR surfaces, and **compliance urgency** on fleet and driver surfaces. One meaning per screen.
+- The stripe is never the only indicator (rule 5). **The status word sits in the row, and that is where its meaning is stated** — not in a gloss beside the page title.
+
+  \_Amended 2026-09-29. This said "stated in the screen's header", and the
+  Accounting build did exactly that: `stripe: the driver's line`,
+  `stripe: billing status`, `stripe: in force today`, in grey, next to every
+  page title. Read on the deployed screens it is a note from one developer to
+  another about a rendering decision — the owner's word for it was "leaked" —
+  and it is furniture the reader has to skip past to reach the grid, which is
+  rule 1's whole objection.
+
+  IT WAS ALSO REDUNDANT WHERE IT MATTERED. Every one of those grids carries the
+  status as a WORD in its own column, because rule 5 has always required it. The
+  header gloss named a fact the row already states, which is the definition of
+  something to delete.\_
+
 - The stripe does not animate. Ever.
 - Cancelled rows get the muted stripe _and_ 60% text opacity. Nothing else in the system reduces text opacity.
 
