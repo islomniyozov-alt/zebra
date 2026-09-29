@@ -4,7 +4,7 @@ import { getLocaleContext } from '@/lib/locale'
 import { formatCents } from '@/lib/money'
 import { companyScopeFilter } from '@/lib/tenancy'
 import { payWeekFor } from '@/lib/settlement-week'
-import { payrollWeek, recentWeeks, weekFromParam } from '@/lib/payroll'
+import { recentWeeks, weekBatch, weekFromParam } from '@/lib/payroll'
 import { readGridColumns, type GridId } from '@/lib/grid-columns'
 import {
   applyList,
@@ -31,7 +31,9 @@ import { ColumnFunnel } from '../../_grid/ColumnFunnel'
 import { BulkStatus } from './BulkStatus'
 import { GridToolbar } from '../../_grid/GridToolbar'
 import { gridView, keepColumns, pagedFooterLabel } from '../../_grid/grid-page'
+import { Suspense } from 'react'
 import { WeekPicker } from './WeekPicker'
+import { WeekStrip } from './WeekStrip'
 import { OpenWeek } from './OpenWeek'
 import { BatchActions } from '../../settlements/batches/[id]/BatchActions'
 import type { MessageKey } from '@/lib/i18n'
@@ -174,7 +176,11 @@ export default async function PayrollPage({
     'settlement',
     async (tx, session) => {
       const scope = companyScopeFilter(session.companyScopes)
-      const week = await payrollWeek(tx, {
+      // THE CHEAP HALF ONLY. `payrollWeek` ran the engine over every driver
+      // to find the blockers — 8,493ms and nine statements against 408ms for
+      // the grid — so the page waited nine seconds to render four rows. The
+      // blockers stream in behind it, through `<WeekStrip>`.
+      const week = await weekBatch(tx, {
         organizationId: session.organizationId,
         period: chosen,
       })
@@ -448,15 +454,23 @@ export default async function PayrollPage({
         title={t('accounting.payroll.title')}
         breadcrumb={[t('nav.group.payroll'), t('payroll.tab.batches')]}
         action={
-          week.batch === null ? (
+          week === null ? (
             mayOpen ? (
               <OpenWeek week={day(chosen.start)} label={t('money.openBatch')} />
             ) : null
           ) : mayWrite ? (
             <BatchActions
-              batchId={week.batch.id}
-              status={week.batch.status}
-              canFinalise={week.blockers.length === 0}
+              batchId={week.id}
+              status={week.status}
+              // ── FINALISE IS OFFERED AND THE SERVER DECIDES ──────────
+              //
+              // It was gated on a blocker count this page no longer computes,
+              // and computing one here would put the 8.5 seconds back. The
+              // button is enabled; `finaliseBatch` refreshes the draft and
+              // refuses by name if anything blocks, which it did anyway — the
+              // gate here was never the real one, and its own comment said so:
+              // "the action re-checks the blockers server-side regardless".
+              canFinalise
               labels={{
                 refresh: t('batch.refresh'),
                 finalise: t('batch.finalise'),
@@ -497,15 +511,15 @@ export default async function PayrollPage({
           <span className="font-mono" dir="ltr">
             {day(chosen.start)} — {day(chosen.end)}
           </span>
-          {week.batch ? (
+          {week ? (
             <>
               <span className="font-mono text-ink" dir="ltr">
-                {week.batch.batchNumber ?? week.batch.status}
+                {week.batchNumber ?? week.status}
               </span>
               <span>
                 {t('batch.checkDate')}{' '}
                 <span className="font-mono" dir="ltr">
-                  {day(week.batch.checkDate)}
+                  {day(week.checkDate)}
                 </span>
               </span>
             </>
@@ -525,21 +539,25 @@ export default async function PayrollPage({
   // BLOCKERS SIT WITH THE BATCHES TAB, beside the week they block. On Balances
   // — a year's totals — a list of "who cannot be paid this week" would be an
   // alarm about a period the grid is not showing.
+  // ── THE STRIP, BEHIND ITS OWN BOUNDARY ────────────────────────────────
+  //
+  // Only on the Batches tab, and only for the selected week (owner's ruling).
+  // Balances is a YEAR, so a week's blockers above it would be an alarm about a
+  // period the grid is not showing.
+  //
+  // THE FALLBACK IS EMPTY, NOT A SKELETON. §14 rejects skeleton loaders on a
+  // table that returns quickly, and the same argument holds here: this is one
+  // strip that is usually absent entirely, so a placeholder would flash a
+  // problem that most weeks do not have.
   const blockers =
-    week.blockers.length > 0 && tab === 'batches' ? (
-      <section className="border-b border-border bg-danger-soft px-gutter py-z3">
-        <h2 className="text-sm font-medium text-danger">
-          {t('batch.blockers')}
-        </h2>
-        <ul className="mt-z1 flex flex-wrap gap-x-z5 gap-y-z1 text-xs text-ink">
-          {week.blockers.map((row) => (
-            <li key={row.driverId}>
-              <span className="font-medium">{row.driverName}</span> —{' '}
-              {t(row.reason as MessageKey)}
-            </li>
-          ))}
-        </ul>
-      </section>
+    tab === 'batches' ? (
+      <Suspense fallback={null}>
+        <WeekStrip
+          period={chosen}
+          batchId={week?.id ?? null}
+          batchStatus={week?.status ?? null}
+        />
+      </Suspense>
     ) : null
 
   if (tab === 'batches') {

@@ -1,6 +1,6 @@
 import type { Prisma } from '@/generated/prisma/client'
 import { computeBatch, isSettlementWeek, weekOf } from './settlement-week'
-import { batchInputForOrg } from './settlement-batch'
+import { batchInputForOrg, settleableForBatch } from './settlement-batch'
 import type { Week } from './settlement-week'
 
 type TxClient = Prisma.TransactionClient
@@ -110,12 +110,6 @@ export function recentWeeks(latest: Week, count: number): Week[] {
   return weeks
 }
 
-const HELD_REASON: Record<string, string> = {
-  no_remittance: 'batch.held.noRemittance',
-  over: 'batch.held.over',
-  short: 'batch.held.short',
-}
-
 const BLOCKER_REASON: Record<string, string> = {
   no_pay_rule: 'batch.blocker.noPayRule',
   pay_rule_unusable: 'batch.blocker.ruleUnusable',
@@ -128,10 +122,25 @@ const BLOCKER_REASON: Record<string, string> = {
  * because "who could not be paid" is answerable before anybody opens anything —
  * and it is the answer somebody needs BEFORE they press Open, not after.
  */
-export async function payrollWeek(
+/**
+ * The batch covering one week, and nothing that costs the engine.
+ *
+ * ── SPLIT OUT OF `payrollWeek` BECAUSE THE STRIP COST 8.5 SECONDS ────────
+ *
+ * Measured on dev, 2026-09-29: `readBatches` 408ms and 2 statements,
+ * `payrollWeek` 8,493ms and 9 — so the Batches page was 95% one call, and
+ * every load of it recomputed every driver's settlement to find out who was
+ * blocked. On a cold worker that is also the likeliest explanation for the one
+ * 500 nothing could reproduce.
+ *
+ * THIS IS THE PART THE HEADER AND THE GRID NEED, and it is one query. Whether
+ * a batch exists, what state it is in, its two dates: enough to render the page
+ * and decide which action button to show. The blockers stream in behind it.
+ */
+export async function weekBatch(
   tx: TxClient,
   input: { organizationId: string; period: Week },
-): Promise<PayrollWeek> {
+): Promise<PayrollWeek['batch']> {
   const batch = await tx.settlementBatch.findFirst({
     where: {
       organizationId: input.organizationId,
@@ -144,122 +153,130 @@ export async function payrollWeek(
       status: true,
       statementDate: true,
       checkDate: true,
-      settlements: {
-        orderBy: { createdAt: 'asc' },
-        select: {
-          id: true,
-          settlementNumber: true,
-          unitNumber: true,
-          earningsCents: true,
-          deductionsCents: true,
-          otherPayCents: true,
-          netCents: true,
-          driverId: true,
-          driver: { select: { firstName: true, lastName: true } },
-          loadLines: { select: { id: true } },
-        },
-      },
     },
   })
+  return batch
+}
 
-  // THE ENGINE IS ASKED ONLY WHERE ITS ANSWER IS ABOUT SOMETHING UNSETTLED.
-  //
-  // A FINAL or PAID batch is frozen: its held lines are simply loads still
-  // waiting, which belong to a later week's draft, and it could not have been
-  // finalised with a blocker. Recomputing there would print a problem against a
-  // week nobody can act on — which is the batch screen's own rule, kept.
-  const live = batch === null || batch.status === 'DRAFT'
-  const computed = live
-    ? computeBatch({
-        period: input.period,
-        // These two only reach the printed statement, and nothing here prints
-        // one. The batch's own dates where there is a batch; the period's end
-        // otherwise, so the call is well-formed for a week not yet opened.
-        statementDate: batch?.statementDate ?? input.period.end,
-        checkDate: batch?.checkDate ?? input.period.end,
-        drivers: await batchInputForOrg(tx, {
-          organizationId: input.organizationId,
-          period: input.period,
-          statementDate: batch?.statementDate ?? input.period.end,
-          checkDate: batch?.checkDate ?? input.period.end,
-        }),
-      })
-    : { held: [], blockers: [], negative: [] }
+export interface WeekTrouble {
+  blockers: { driverId: string; driverName: string; reason: string }[]
+  heldCount: number
+  heldSumCents: number
+  /** True where the blockers were derived from stored rows (see below). */
+  fromStored: boolean
+}
 
-  const heldByDriver = new Map<string, string>()
-  for (const row of computed.held) {
-    if (!heldByDriver.has(row.driverId)) {
-      heldByDriver.set(
-        row.driverId,
-        HELD_REASON[row.line.reason.kind] ?? 'batch.held.short',
-      )
-    }
+/**
+ * Who cannot be paid for this week, and what is held.
+ *
+ * ── STORED WHERE A BATCH EXISTS, COMPUTED ONLY WHERE ONE DOES NOT ────────
+ *
+ * Owner's ruling, 2026-09-29. A batch that exists has already had the engine
+ * run over it — that is what `refreshDraft` does, and it WRITES the answer: a
+ * settlement row per driver it could price. So "who is blocked" is answerable
+ * from rows rather than by running the engine again: a driver with settleable
+ * freight in the period and no settlement in the batch is a driver the last
+ * refresh could not pay.
+ *
+ * TWO QUERIES INSTEAD OF NINE, and no `computeBatch`. What it gives up is the
+ * REASON — stored rows say a driver is missing, not whether it was a missing
+ * pay rule or an unusable one — so the stored path reports one reason and says
+ * so. The precise reason is a click away on the batch itself, which is where
+ * somebody goes to fix it.
+ *
+ * AND IT IS AS FRESH AS THE DRAFT IS. A rule added since the last refresh will
+ * not show until somebody refreshes, which is exactly what the Refresh button
+ * is for and exactly what the figures beside it already mean. The alternative —
+ * recomputing on every page load — is the 8.5 seconds this replaces.
+ *
+ * WITH NO BATCH THERE IS NOTHING STORED, so the engine runs. That is the
+ * expensive path and it is the one where the answer cannot come from anywhere
+ * else: "who could not be paid if I opened this week" is a question about a
+ * batch that does not exist. It streams in behind the grid.
+ */
+export async function weekTrouble(
+  tx: TxClient,
+  input: {
+    organizationId: string
+    period: Week
+    batchId: string | null
+    batchStatus: string | null
+  },
+): Promise<WeekTrouble> {
+  // A FINAL OR PAID BATCH HAS NEITHER, BY DEFINITION. It could not have been
+  // finalised with a blocker, and its held lines are loads still waiting, which
+  // belong to a later week's draft.
+  if (input.batchId !== null && input.batchStatus !== 'DRAFT') {
+    return { blockers: [], heldCount: 0, heldSumCents: 0, fromStored: true }
   }
-  const blockedByDriver = new Map<string, string>()
-  for (const row of computed.blockers) {
-    blockedByDriver.set(
-      row.driverId,
-      BLOCKER_REASON[row.blocker.kind] ?? 'batch.blocker.ruleUnusable',
-    )
-  }
-  const negativeIds = new Set(computed.negative.map((row) => row.driverId))
 
-  const statusState: Record<string, PayrollRowState> = {
-    DRAFT: 'draft',
-    FINAL: 'final',
-    PAID: 'paid',
-  }
+  if (input.batchId !== null) {
+    const [seated, settled] = await Promise.all([
+      // Everyone with settleable freight in the week, by name. `distinct` keeps
+      // this one row per driver rather than one per load.
+      tx.load.findMany({
+        where: settleableForBatch(null, input.period),
+        select: {
+          driverId: true,
+          driver: { select: { firstName: true, lastName: true } },
+        },
+        distinct: ['driverId'],
+      }),
+      tx.settlement.findMany({
+        where: { batchId: input.batchId, deletedAt: null },
+        select: { driverId: true },
+      }),
+    ])
 
-  const rows: PayrollRow[] = (batch?.settlements ?? []).map((settlement) => {
-    const blocked = blockedByDriver.get(settlement.driverId) ?? null
-    const held = heldByDriver.get(settlement.driverId) ?? null
-    // The precedence the interface reads, worst first. See `PayrollRow.state`.
-    const state: PayrollRowState = blocked
-      ? 'blocked'
-      : negativeIds.has(settlement.driverId)
-        ? 'negative'
-        : held
-          ? 'held'
-          : (statusState[batch?.status ?? 'DRAFT'] ?? 'draft')
+    const paid = new Set(settled.map((row) => row.driverId))
+    const blockers = seated
+      .filter((row) => row.driverId !== null && !paid.has(row.driverId))
+      .map((row) => ({
+        driverId: row.driverId!,
+        driverName: row.driver
+          ? `${row.driver.firstName} ${row.driver.lastName}`
+          : row.driverId!,
+        // ONE REASON, AND IT SAYS IT IS THE STORED ONE. The engine distinguishes
+        // a missing pay rule from an unusable one; rows cannot, and claiming the
+        // more specific of the two would be inventing a diagnosis.
+        reason: 'batch.blocker.notInBatch',
+      }))
+
     return {
-      settlementId: settlement.id,
-      settlementNumber: settlement.settlementNumber,
-      driverId: settlement.driverId,
-      driverName: `${settlement.driver.firstName} ${settlement.driver.lastName}`,
-      unitNumber: settlement.unitNumber,
-      grossCents: settlement.earningsCents,
-      deductionsCents: settlement.deductionsCents,
-      otherPayCents: settlement.otherPayCents,
-      netCents: settlement.netCents,
-      loadCount: settlement.loadLines.length,
-      state,
-      reason: blocked ?? held ?? null,
+      blockers,
+      // HELD LINES ARE NOT DERIVABLE FROM ROWS. A held line is a load the engine
+      // declined to price; nothing is written for it, so the absence looks
+      // exactly like a load nobody has. Reported as unknown rather than zero —
+      // §8's rule that empty and zero are different facts.
+      heldCount: -1,
+      heldSumCents: 0,
+      fromStored: true,
     }
+  }
+
+  const computed = computeBatch({
+    period: input.period,
+    statementDate: input.period.end,
+    checkDate: input.period.end,
+    drivers: await batchInputForOrg(tx, {
+      organizationId: input.organizationId,
+      period: input.period,
+      statementDate: input.period.end,
+      checkDate: input.period.end,
+    }),
   })
 
   return {
-    period: input.period,
-    batch: batch
-      ? {
-          id: batch.id,
-          batchNumber: batch.batchNumber,
-          status: batch.status,
-          statementDate: batch.statementDate,
-          checkDate: batch.checkDate,
-        }
-      : null,
-    rows,
     blockers: computed.blockers.map((row) => ({
       driverId: row.driverId,
       driverName: row.driverName,
       reason: BLOCKER_REASON[row.blocker.kind] ?? 'batch.blocker.ruleUnusable',
     })),
     heldCount: computed.held.length,
-    // THE RATE, because that is what a held line is worth — the money that
-    // could not be settled. `HeldLine` has no other figure on it.
     heldSumCents: computed.held.reduce(
       (sum, row) => sum + row.line.rateCents,
       0,
     ),
+    fromStored: false,
   }
 }

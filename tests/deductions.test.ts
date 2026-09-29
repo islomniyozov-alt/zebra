@@ -378,3 +378,107 @@ describe('the type list is a list, not a gate', () => {
     expect(result.lines[0]?.totalCents).toBe(-12500)
   })
 })
+
+// ---------------------------------------------------------------------------
+// A TARGET STOPS ANY RULE, NOT ONLY ESCROW. Owner's ruling, 2026-09-29.
+//
+// The branch was `rule.type === 'Escrow'`, so a $4,000 cap on an insurance rule
+// was stored, printed and IGNORED — the engine charged past it forever. Julia
+// Rose Hall's insurance is exactly that shape, which is why the ruling exists.
+// ---------------------------------------------------------------------------
+
+describe('a target on a rule that is not escrow', () => {
+  const insurance = {
+    id: 'ins-1',
+    driverId: 'd1',
+    type: 'Insurance',
+    description: 'Insurance',
+    amountCents: 125_000,
+    cadence: 'WEEKLY' as const,
+    monthlyTotalCents: null,
+    targetCents: 400_000,
+    effectiveFrom: new Date(Date.UTC(2026, 8, 4)),
+    effectiveTo: null,
+  }
+  const period = {
+    start: new Date(Date.UTC(2026, 8, 13)),
+    end: new Date(Date.UTC(2026, 8, 19)),
+  }
+
+  const run = (collected: number) =>
+    computeDeductions({
+      period,
+      rules: [insurance],
+      charges: [],
+      escrowHeldCents: 0,
+      collectedToDateCents: { 'ins-1': collected },
+    })
+
+  it('takes the full instalment while the cap is far away', () => {
+    const line = run(0).lines[0]
+    expect(line?.totalCents).toBe(-125_000)
+    // §7.1 of the ruling: the statement prints target and remaining.
+    // `$4000/$4000`, not `$4,000.00` — `dollars()` prints the form the real
+    // statements use, which MONEY-DESIGN §5 records as `$1800/$450`.
+    expect(line?.description).toContain('$4000/$4000')
+  })
+
+  it('counts what has already been taken', () => {
+    const line = run(250_000).lines[0]
+    expect(line?.totalCents).toBe(-125_000)
+    expect(line?.description).toContain('$4000/$1500')
+  })
+
+  // THE LAST INSTALMENT IS THE REMAINDER. $1,250 weekly against $4,000 takes
+  // 1,250 three times and 250 once — a fourth full instalment would collect
+  // $5,000 against a $4,000 cap, which is the failure this prevents.
+  it('takes only what is left, and says the target is reached', () => {
+    const line = run(375_000).lines[0]
+    expect(line?.totalCents).toBe(-25_000)
+    expect(line?.note).toContain('Insurance target $4000 reached')
+  })
+
+  it('writes no line at all once the target is met', () => {
+    // NOT A ZERO LINE. A zero claims somebody was charged nothing this week;
+    // an absent line claims nothing, which is §4's rule.
+    expect(run(400_000).lines).toHaveLength(0)
+    expect(run(450_000).lines).toHaveLength(0)
+  })
+
+  it('still charges forever where there is no target', () => {
+    const uncapped = { ...insurance, targetCents: null }
+    const result = computeDeductions({
+      period,
+      rules: [uncapped],
+      charges: [],
+      escrowHeldCents: 0,
+      collectedToDateCents: { 'ins-1': 9_999_999 },
+    })
+    expect(result.lines[0]?.totalCents).toBe(-125_000)
+    // And no target means no split appended: there is nothing to report.
+    expect(result.lines[0]?.description).toBe('Insurance')
+  })
+
+  // ESCROW KEEPS ITS LEDGER. It is refundable and the balance is a fact people
+  // ask about directly, so it counts `escrowHeldCents` rather than its lines —
+  // and a stray `collectedToDateCents` entry must not move it.
+  it('escrow still counts its ledger, not its lines', () => {
+    const escrow = {
+      ...insurance,
+      id: 'esc-1',
+      type: 'Escrow',
+      description: 'Security Deposit {split}',
+      amountCents: 25_000,
+      targetCents: 250_000,
+    }
+    const result = computeDeductions({
+      period,
+      rules: [escrow],
+      charges: [],
+      escrowHeldCents: 240_000,
+      collectedToDateCents: { 'esc-1': 0 },
+    })
+    expect(result.lines[0]?.totalCents).toBe(-10_000)
+    expect(result.lines[0]?.description).toBe('Security Deposit $2500/$100')
+  })
+})

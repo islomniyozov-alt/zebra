@@ -7,6 +7,8 @@ import { basisSentence, type BasisTemplates } from '@/lib/settlement-view'
 import { readSnapshot } from '@/lib/driver-pay'
 import { formatCents } from '@/lib/money'
 import { Button } from '@/components/ui/Button'
+import { Table, type Column } from '@/components/ui/Table'
+import { sumCents, totalsLabel } from '@/lib/list-view'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import {
   AddLine,
@@ -94,8 +96,46 @@ export default async function SettlementPage({
         paidAt: true,
         paymentMethod: true,
         paymentReference: true,
+        unitNumber: true,
+        payTariffLabel: true,
+        payoutDate: true,
         company: { select: { name: true } },
         driver: { select: { id: true, firstName: true, lastName: true } },
+        batch: {
+          select: {
+            id: true,
+            batchNumber: true,
+            statementDate: true,
+            checkDate: true,
+          },
+        },
+        // ── THE TRIPS, FROM THE FROZEN SNAPSHOT ────────────────────────
+        //
+        // `SettlementLoadLine` carries the load's number, its two places, its
+        // two dates, its gross and its miles AS THEY WERE when the statement
+        // was cut. §7 freezes those at FINAL for exactly this reason: a load
+        // re-dated or re-rated afterwards must not change a document somebody
+        // was handed.
+        //
+        // SO THE GRID READS THE SNAPSHOT AND NOT THE LOAD. Joining to `Load`
+        // for the same columns would render today's values under a statement
+        // number, which is the one thing a settlement must never do.
+        loadLines: {
+          orderBy: { sortOrder: 'asc' },
+          select: {
+            id: true,
+            loadId: true,
+            loadNumber: true,
+            companyName: true,
+            puPlace: true,
+            delPlace: true,
+            puDate: true,
+            delDate: true,
+            grossCents: true,
+            milesHundredths: true,
+            amountCents: true,
+          },
+        },
         lines: {
           orderBy: { sortOrder: 'asc' },
           select: {
@@ -131,6 +171,89 @@ export default async function SettlementPage({
     flatPerLoad: t('payRule.basis.flatPerLoad'),
   }
 
+  const money = (cents: number) => (
+    <span className="font-mono tabular-nums">{formatCents(cents, locale)}</span>
+  )
+
+  type TripRow = (typeof settlement.loadLines)[number]
+
+  const tripColumns: Column<TripRow>[] = [
+    {
+      key: 'loadNumber',
+      header: t('settlements.trip.load'),
+      render: (row) => (
+        <span className="z-identifier font-mono" dir="ltr">
+          {row.loadNumber}
+        </span>
+      ),
+    },
+    {
+      key: 'pu',
+      header: t('settlements.trip.pu'),
+      truncate: true,
+      render: (row) => row.puPlace,
+    },
+    {
+      key: 'del',
+      header: t('settlements.trip.del'),
+      truncate: true,
+      render: (row) => row.delPlace,
+    },
+    {
+      key: 'puDate',
+      header: t('settlements.trip.puDate'),
+      render: (row) => (
+        <span className="font-mono text-xs" dir="ltr">
+          {day(row.puDate)}
+        </span>
+      ),
+    },
+    {
+      key: 'delDate',
+      header: t('settlements.trip.delDate'),
+      render: (row) => (
+        <span className="font-mono text-xs" dir="ltr">
+          {day(row.delDate)}
+        </span>
+      ),
+    },
+    {
+      key: 'gross',
+      header: t('settlements.trip.gross'),
+      align: 'end',
+      render: (row) => money(row.grossCents),
+      foot: (rows) => money(sumCents(rows, (row) => row.grossCents)),
+    },
+    {
+      key: 'miles',
+      header: t('settlements.trip.miles'),
+      align: 'end',
+      // STORED IN HUNDREDTHS and printed whole: §8 says miles are an integer
+      // with a thousands separator. The hundredths exist so a per-mile rate
+      // does not lose a fraction of a cent, not so a statement prints 1,234.56
+      // miles.
+      render: (row) => (
+        <span className="font-mono tabular-nums">
+          {Math.round(row.milesHundredths / 100).toLocaleString(locale)}
+        </span>
+      ),
+      foot: (rows) => (
+        <span className="font-mono tabular-nums">
+          {Math.round(
+            sumCents(rows, (row) => row.milesHundredths) / 100,
+          ).toLocaleString(locale)}
+        </span>
+      ),
+    },
+    {
+      key: 'amount',
+      header: t('settlements.trip.amount'),
+      align: 'end',
+      render: (row) => money(row.amountCents),
+      foot: (rows) => money(sumCents(rows, (row) => row.amountCents)),
+    },
+  ]
+
   return (
     <>
       <div className="flex items-baseline justify-between gap-z4 border-b border-border bg-surface px-gutter py-z3">
@@ -158,8 +281,25 @@ export default async function SettlementPage({
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-surface-2 px-gutter py-z5">
         <div className="flex max-w-[900px] flex-col gap-z4">
+          {/* ── THE HEADER BOX ───────────────────────────────────────────
+           *
+           * The block the printed statement opens with, in the order it
+           * prints: who, under which authority, on which run, against which
+           * unit and tariff, for which period, paid on which date.
+           *
+           * IT IS THE PDF'S OWN HEADER, FIELD FOR FIELD — `statement-pdf.ts`
+           * lays out Settlement, Batch ID, Driver, Unit Number and Payment
+           * tariff across the top and the three dates down the right. A screen
+           * that showed a different subset would make "the paper says
+           * something else" a sentence somebody has to resolve in front of a
+           * driver, which §7's whole freeze exists to prevent.
+           *
+           * THREE COLUMNS, NOT TWO. The old two-column list ran to eight rows
+           * before the lines began; the same facts fit in three and leave the
+           * trips above the fold at 1080p (rule 1).
+           */}
           <section className="rounded-card border border-border bg-surface p-z4">
-            <dl className="grid grid-cols-[auto_1fr] gap-x-z4 gap-y-z1 text-sm">
+            <dl className="grid grid-cols-[auto_1fr_auto_1fr_auto_1fr] gap-x-z3 gap-y-z1 text-sm">
               <dt className="text-ink-2">{t('settlements.driver')}</dt>
               <dd className="text-ink">
                 <Link
@@ -169,11 +309,53 @@ export default async function SettlementPage({
                   {settlement.driver.firstName} {settlement.driver.lastName}
                 </Link>
               </dd>
+              <dt className="text-ink-2">{t('payroll.unit')}</dt>
+              <dd className="text-ink">
+                {settlement.unitNumber === null ? (
+                  <span className="text-ink-3">—</span>
+                ) : (
+                  <span className="z-identifier font-mono" dir="ltr">
+                    {settlement.unitNumber}
+                  </span>
+                )}
+              </dd>
+              <dt className="text-ink-2">{t('batches.batch')}</dt>
+              <dd className="text-ink">
+                {settlement.batch === null ? (
+                  <span className="text-ink-3">{t('statements.noBatch')}</span>
+                ) : (
+                  <Link
+                    href={`/settlements/batches/${settlement.batch.id}`}
+                    className="z-identifier font-mono hover:text-accent"
+                    dir="ltr"
+                  >
+                    {settlement.batch.batchNumber ??
+                      settlement.batch.id.slice(0, 8)}
+                  </Link>
+                )}
+              </dd>
+
               <dt className="text-ink-2">{t('ref.authority')}</dt>
               <dd className="text-ink">{settlement.company.name}</dd>
               <dt className="text-ink-2">{t('settlements.period')}</dt>
-              <dd className="font-mono text-ink">
+              <dd className="font-mono text-ink" dir="ltr">
                 {day(settlement.periodStart)} → {day(settlement.periodEnd)}
+              </dd>
+              <dt className="text-ink-2">{t('batch.checkDate')}</dt>
+              <dd className="font-mono text-ink" dir="ltr">
+                {day(
+                  settlement.payoutDate ?? settlement.batch?.checkDate ?? null,
+                )}
+              </dd>
+
+              {/* THE TARIFF SPANS, because it is a sentence rather than a
+               * field — "30% from gross" is the whole of how this driver is
+               * paid and it reads badly squeezed into a third of a row. */}
+              <dt className="text-ink-2">{t('settlements.tariff')}</dt>
+              <dd className="col-span-5 text-ink">
+                {settlement.payTariffLabel ?? (
+                  <span className="text-ink-3">—</span>
+                )}
               </dd>
               {settlement.approvedAt ? (
                 <>
@@ -199,6 +381,45 @@ export default async function SettlementPage({
               ) : null}
             </dl>
           </section>
+
+          {/* ── THE TRIPS GRID ───────────────────────────────────────────
+           *
+           * The freight this statement pays for, in the PDF's own columns:
+           * load number, PU, DEL, the two dates, load gross, miles, and what
+           * the driver was paid for it.
+           *
+           * ITS OWN GRID, ABOVE THE LINES, because they answer different
+           * questions. A trip row says "this load, this money"; a settlement
+           * LINE says "this adjustment". They were one list, so a $50 fuel
+           * deduction sat between two loads and the reader had to tell them
+           * apart by reading.
+           *
+           * `Table` RATHER THAN A LIST, for the sticky header and the totals
+           * foot — a statement is a document somebody checks against a
+           * printout, and the column sums are the check.
+           */}
+          {settlement.loadLines.length > 0 ? (
+            <section className="overflow-hidden rounded-card border border-border bg-surface">
+              <h2 className="border-b border-border px-z4 py-z3 text-md font-medium text-ink">
+                {t('settlements.trips')}
+              </h2>
+              <Table
+                columns={tripColumns}
+                rows={settlement.loadLines}
+                rowKey={(row) => row.id}
+                rowHref={(row) => `/loads/${row.loadId}`}
+                caption={t('settlements.trips')}
+                totals={{
+                  label: totalsLabel(
+                    t('accounting.total'),
+                    settlement.loadLines.length,
+                    t('accounting.rows'),
+                  ),
+                }}
+                empty={null}
+              />
+            </section>
+          ) : null}
 
           <section className="rounded-card border border-border bg-surface p-z4">
             <h2 className="text-md font-medium text-ink">

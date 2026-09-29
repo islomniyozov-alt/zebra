@@ -446,6 +446,12 @@ export interface DriverSettlementInput {
   charges: readonly OneOffCharge[]
   escrowHeldCents: number
   collectedThisMonthCents?: Readonly<Record<string, number>>
+  /**
+   * What each capped rule has already taken, across settled weeks, by rule id.
+   * Passed straight through to `computeDeductions` — see its own note for why
+   * escrow counts a ledger and everything else counts its lines.
+   */
+  collectedToDateCents?: Readonly<Record<string, number>>
   fuelCents?: number | null
   /**
    * The driver's own payout lag, in whole weeks.
@@ -679,6 +685,9 @@ export function computeDriverSettlement(
       inPeriod(charge.appliesOn, input.period),
     ),
     escrowHeldCents: input.escrowHeldCents,
+    ...(input.collectedToDateCents
+      ? { collectedToDateCents: input.collectedToDateCents }
+      : {}),
     ...(input.collectedThisMonthCents
       ? { collectedThisMonthCents: input.collectedThisMonthCents }
       : {}),

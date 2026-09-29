@@ -301,7 +301,7 @@ export async function batchInputForOrg(
   if (driverIds.length === 0) return []
 
   const year = input.period.start.getUTCFullYear()
-  const [drivers, payRules, charges, escrow, opening, prior] =
+  const [drivers, payRules, charges, escrow, collected, opening, prior] =
     await Promise.all([
       tx.driver.findMany({
         where: { id: { in: driverIds } },
@@ -332,6 +332,32 @@ export async function batchInputForOrg(
             by: ['driverId'],
             where: { driverId: { in: driverIds } },
             _sum: { amountCents: true },
+          })
+        : [],
+      // ── WHAT EACH CAPPED RULE HAS ALREADY TAKEN ──────────────────────
+      //
+      // Owner's ruling, 2026-09-29: a target stops ANY recurring deduction,
+      // not only escrow. Escrow counts its own ledger because it is
+      // refundable; everything else counts the lines it has already written,
+      // which carry `recurringDeductionId`.
+      //
+      // FINAL AND PAID ONLY. A DRAFT is recomputed on every refresh, so
+      // counting its lines would count this week's instalment against this
+      // week's remaining — the rule would stop one week early, and it would
+      // stop differently depending on how many times somebody pressed
+      // Refresh.
+      netPay
+        ? tx.settlementDeductionLine.groupBy({
+            by: ['recurringDeductionId'],
+            where: {
+              recurringDeductionId: { not: null },
+              settlement: {
+                driverId: { in: driverIds },
+                deletedAt: null,
+                batch: { status: { in: ['FINAL', 'PAID'] }, deletedAt: null },
+              },
+            },
+            _sum: { totalCents: true },
           })
         : [],
       netPay
@@ -381,6 +407,19 @@ export async function batchInputForOrg(
 
   const escrowOf = new Map(
     escrow.map((row) => [row.driverId, row._sum.amountCents ?? 0]),
+  )
+
+  // STORED AS A NEGATIVE, COUNTED AS A POSITIVE. `totalCents` on a deduction
+  // line is what it takes OFF the cheque, so it is negative; a target is a
+  // positive ceiling. `Math.abs` once here rather than at the comparison, where
+  // a missed sign would quietly make every cap unreachable.
+  const collectedOf = new Map(
+    collected
+      .filter((row) => row.recurringDeductionId !== null)
+      .map((row) => [
+        row.recurringDeductionId!,
+        Math.abs(row._sum.totalCents ?? 0),
+      ]),
   )
 
   // Crew names for the "Team with" header, from the drivers already read.
@@ -487,6 +526,13 @@ export async function batchInputForOrg(
         recurring: recurringAll.filter((rule) => rule.driverId === driver.id),
         charges: charges.filter((charge) => charge.driverId === driver.id),
         escrowHeldCents: escrowOf.get(driver.id) ?? 0,
+        // Only this driver's rules, so one driver's cap cannot be read against
+        // another's collections.
+        collectedToDateCents: Object.fromEntries(
+          recurringAll
+            .filter((rule) => rule.driverId === driver.id)
+            .map((rule) => [rule.id, collectedOf.get(rule.id) ?? 0]),
+        ),
         payoutLagWeeks: driver.payoutLagWeeks,
         checkDate: input.checkDate,
         openingBalances: openingMine,

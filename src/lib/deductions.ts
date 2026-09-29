@@ -55,7 +55,10 @@ export interface RecurringRule {
   cadence: DeductionCadence
   /** The `$1800` of `$1800/$450`. Null for WEEKLY. */
   monthlyTotalCents: number | null
-  /** Escrow's target. Null everywhere else. */
+  /**
+   * A ceiling the rule stops itself at, for ANY type (owner's ruling,
+   * 2026-09-29). Null where the charge runs indefinitely, which is most of them.
+   */
   targetCents: number | null
   effectiveFrom: Date
   effectiveTo: Date | null
@@ -95,6 +98,23 @@ export interface DeductionInput {
    * `prorateFinalMonth`.
    */
   collectedThisMonthCents?: Readonly<Record<string, number>>
+  /**
+   * What each rule has already taken, across every settled week, by rule id.
+   *
+   * ── ESCROW HAS A LEDGER AND NOTHING ELSE DOES ──────────────────────────
+   *
+   * `escrowHeldCents` is a running balance in its own table, because escrow is
+   * refundable and somebody has to be able to ask what is held. An insurance
+   * cap needs no ledger — what it needs is the sum of what this rule has
+   * already charged, which the settlement lines already record against
+   * `recurringDeductionId`.
+   *
+   * SO A TARGET ON A NON-ESCROW RULE COUNTS LINES, and the caller supplies the
+   * sum. Absent means zero collected, which is right for a rule whose first
+   * week this is and wrong for nothing: a caller that forgets it makes the cap
+   * too generous, never too tight, and `settlement-batch.ts` is the one caller.
+   */
+  collectedToDateCents?: Readonly<Record<string, number>>
   /**
    * The fuel total for the period, from the transaction import. Absent means
    * NO FUEL LINE — never a zero line, which would claim somebody looked.
@@ -241,6 +261,26 @@ function renderDescription(
 }
 
 /**
+ * A capped line always prints `target/remaining`, template or not.
+ *
+ * ── WHY THIS IS NOT LEFT TO `{split}` ─────────────────────────────────────
+ *
+ * `renderDescription` substitutes `{split}` where the stored description asks
+ * for it, which is how the escrow rules in the corpus are written —
+ * `Security Deposit {split}`. A rule typed through the Charges screen has no
+ * placeholder at all: Julia Rose Hall's is the word "Insurance".
+ *
+ * The ruling is that the STATEMENT prints target and remaining, so a rule with
+ * a target prints them whether or not somebody thought to type a placeholder.
+ * Appended rather than substituted, and only when it is not already there — a
+ * description carrying `{split}` has put the figures where its author wanted.
+ */
+function withSplit(rendered: string, split: string): string {
+  if (rendered.includes(split)) return rendered
+  return rendered === '' ? split : `${rendered} ${split}`
+}
+
+/**
  * The deduction lines for one driver, one period.
  *
  * ORDERED AS THE STATEMENTS PRINT THEM: recurring rules in the order given,
@@ -280,10 +320,36 @@ export function computeDeductions(input: DeductionInput): DeductionResult {
     // statement prints beside the target, and when it reaches zero the rule
     // stops and SAYS SO — a line that silently disappears is indistinguishable
     // from a rule somebody deleted.
-    if (rule.type === 'Escrow' && rule.targetCents !== null) {
-      const remaining = rule.targetCents - escrowHeld
+    // ── ANY TARGET STOPS ITSELF, AND THE LINE PRINTS TARGET / REMAINING ──
+    //
+    // Owner's ruling, 2026-09-29. This branch was `rule.type === 'Escrow'`, so
+    // a $4,000 cap on an insurance rule was stored, printed and IGNORED — the
+    // engine kept charging past it. Julia Rose Hall's insurance is exactly that
+    // shape and is why the ruling exists.
+    //
+    // WHERE THE BALANCE COMES FROM DIFFERS AND THE ARITHMETIC DOES NOT. Escrow
+    // counts its ledger, because it is refundable and the balance is a fact
+    // somebody asks about directly. Everything else counts what its own lines
+    // have already taken. Both answer the same question — how much of the
+    // target is left — so both go through one branch rather than two that have
+    // to agree.
+    if (rule.targetCents !== null) {
+      const isEscrow = rule.type === 'Escrow'
+      const collected = isEscrow
+        ? escrowHeld
+        : (input.collectedToDateCents?.[rule.id] ?? 0)
+      const remaining = rule.targetCents - collected
+
+      // REACHED MEANS NO LINE AT ALL, not a zero one. A zero line claims
+      // somebody was charged nothing this week; an absent line claims nothing,
+      // which is what §4 asks for and what the note on the LAST line already
+      // said would happen.
       if (remaining <= 0) continue
 
+      // THE LAST INSTALMENT IS THE REMAINDER, not the full amount. A $1,250
+      // weekly against $4,000 takes 1,250 three times and 250 once — charging
+      // the fourth in full would collect $5,000 against a $4,000 cap, which is
+      // the whole failure this prevents.
       const take = Math.min(rule.amountCents, remaining)
       const split = `${dollars(rule.targetCents)}/${dollars(remaining)}`
       const reached = take === remaining
@@ -291,17 +357,22 @@ export function computeDeductions(input: DeductionInput): DeductionResult {
       lines.push({
         ruleId: rule.id,
         type: rule.type,
-        description: renderDescription(rule, input.period, split),
+        description: withSplit(
+          renderDescription(rule, input.period, split),
+          split,
+        ),
         quantity: 1,
         rateCents: take,
         totalCents: -take,
+        // THE NOTE NAMES THE TYPE, because "target reached" on a statement with
+        // three capped rules on it would not say which one stopped.
         ...(reached
           ? {
-              note: `Escrow target ${dollars(rule.targetCents)} reached; no further deductions.`,
+              note: `${rule.type} target ${dollars(rule.targetCents)} reached; no further deductions.`,
             }
           : {}),
       })
-      escrowHeld += take
+      if (isEscrow) escrowHeld += take
       continue
     }
 
