@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v9 — §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
+**Status:** v10 — §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -363,6 +363,23 @@ answer other than somebody's memory._
 | **Checkbox column, Delete, Change status**                                                                                  | **Checkbox and Change status; no Delete**                        | _Built 2026-09-28 by ruling._ Change status runs the SAME `finaliseBatch` / `markBatchPaid` per batch, blockers and all — a bulk path that skipped them would be a way to finalise a blocked week from a checkbox. Delete is absent because a batch is money, soft-deleted, and that is not a toolbar action.              |
 | **Breadcrumb** (`Accounting / Salary / Batches`)                                                                            | **Built, in these two groups only**                              | _Built 2026-09-28 by ruling._ It earns its place here and nowhere else: two groups, six destinations and eleven tabs is the point at which "where am I" stops being obvious. The rest of the shell is one level deep.                                                                                                      |
 
+_Eleven more, added 2026-09-29 against `ST-005562.pdf` and the six workbench
+screenshots:_
+
+| Datatruck                                                                          | Zebra                                                         | Why                                                                                                                                                                                                                                                                                                                                            |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **The trip is the unit** — `TR-016783-01`, a numbered leg                          | **The load is the unit**                                      | Zebra has no trip entity: a load is dispatched once and its stops are its legs. The Trip column prints the load number rather than inventing an `-01` suffix that nothing allocates and nothing can look up.                                                                                                                                   |
+| **A `TIME` selector** on the open-batch screen — Delivery time / Pickup time       | **The POD, always**                                           | A settlement week is decided by when the POD landed (MONEY-DESIGN §0). A control offering to bound the window by delivery date would preview a set `openBatch` then refuses to produce — a filter that disagrees with the thing it is previewing.                                                                                              |
+| **Four unavailable buckets, one of them a pair** — `In transit outside date range` | **Five, disjoint, with a stated precedence**                  | Zebra adds `no driver` and `no pay rule`, which Datatruck cannot need because a trip there always carries a payee. The PAIR is not reproduced and the reason is the row above: Datatruck ranges on the delivery date, so a load can be both in transit and out of range. Zebra ranges on the POD, and a load in transit has no POD to compare. |
+| **Unavailable groups are collapsible rows inside the grid**                        | **A section below, per-reason heading, count always visible** | The counts and the what-to-do sentence never collapse; the load numbers under them do, and are capped. `Already in batch (7,052)` rendered flat is the one shape this screen must not take, and `no pay rule (3)` hidden behind a triangle is the one fact on the page somebody can act on.                                                    |
+| **Check date = created + 2** — every batch from `SB-000433` to `SB-000449`         | **Period end + 13**                                           | Zebra's cadence, owner's ruling of 2026-09-27, not a defect in either. Recorded because the two artefacts sit in one folder and the difference otherwise reads as a bug the next time somebody checks a check date against the corpus.                                                                                                         |
+| **`Post` the action, `POSTED` the pill**                                           | **`Post` the action, `APPROVED` the pill**                    | §10 says name things as the user names them, and the office says post. A BUTTON names an action and may speak the office's language; a PILL names a stored state on rows somebody was paid on. Renaming the enum is a migration over money that buys nothing a label already gives.                                                            |
+| **Per-cell edit pencils** on deduction rows                                        | **No pencil; remove and re-add**                              | Extends the 2026-09-28 ruling to the workbench. A line carries a frozen `payRuleSnapshot`; editing the amount in place leaves the snapshot describing a figure that is no longer on the row.                                                                                                                                                   |
+| **`Send to driver`**                                                               | **Built, and it refuses by name**                             | One channel exists (`sendEmail`, Resend) and `Driver.email` is nullable. A driver with no address gets a named refusal. It sends from production only: a dev deploy holds real drivers' real addresses, and a rehearsal that reaches one of them is not a rehearsal.                                                                           |
+| **`+ Deduction tariff`** on the workbench                                          | **Not built**                                                 | It creates a STANDING rule from inside one statement. Zebra's standing rules live on Payroll → Charges where they are visible across every driver; a rule created from one statement is how a deduction nobody can find gets onto forty cheques.                                                                                               |
+| **`Dispatcher salary` tab**                                                        | **Not built**                                                 | Recorded already at the five-tabs row; repeated here because the workbench's tab bar shows seven and the difference is now visible on two screens.                                                                                                                                                                                             |
+| **Fuel: four show-and-deduct modes**                                               | **Specified in §6.2.3, unbuilt**                              | Needs a migration, and a migration needs the ritual in `AGENTS.md`. Production is behind a dispatch awaiting review, so the model is specified here and built when that clears. This is the change the held migration 61 was waiting for.                                                                                                      |
+
 _**Receivables folds into Invoices.** Aging is a view of the invoice list, not a
 second list of the same rows — §7.4 already makes a filter a URL, so "over 60
 days" is a chip rather than a page._
@@ -381,6 +398,99 @@ _Expenses and Fuel stay unbuilt and keep their Phase 5 marker._
 Groups render only where the user's role grants at least one child. A dispatcher without financial permission never sees an empty **Money** heading.
 
 Active item: `--z-accent-soft` fill, `--z-accent` text, 2px accent bar on the leading edge. Icons at 16px, always paired with a label. Icon-only navigation is forbidden except in the collapsed rail, which shows tooltips.
+
+#### 6.2.2 The settlement workbench — _added 2026-09-29_
+
+_Owner's ruling, 2026-09-29, against `corpus/datatruck/ST-005562.pdf` and the
+six workbench screenshots added to `corpus/datatruck/ui/` the same day._
+
+**The statement page stops being a document with edit panels bolted under it and
+becomes the place the week is actually assembled.** The page it replaces was
+nine stacked cards — header, trips, lines, totals, add trips, add line,
+recalculate, approve, mark paid — each a full-width panel, so a statement with
+four loads ran past three screens and the figure somebody opened the page to
+check was below the fold. The artefact fits the same work in one screen because
+it treats the totals as a HEADER and the edits as ROWS.
+
+Top to bottom, four parts:
+
+**1. The action row**, top-right, belonging to the page (§7.1.6): Add trips ·
+Add charges · Recalculate · Send to driver · Post · Export PDF.
+
+**2. The header box.** One dense block of label:value pairs at body size, in the
+artefact's own order and grouping:
+
+| Row | Fields                                                                                  |
+| --- | --------------------------------------------------------------------------------------- |
+| 1   | Settlement no. `‹ ›` · Driver, period `‹ ›` · Driver type · Payment tariff              |
+| 2   | Total pay · Earnings · Other pay / Reimbursements · Deductions / Advances · Trips count |
+| 3   | Total gross · Net pay · Balances · Fuel & toll expenses · Attachments & notes           |
+
+- **Not KPI cards.** §7.3 is for a handful of figures somebody watches over time.
+  Fourteen of them as cards is a wall, and these are not trends — they are one
+  document's arithmetic.
+- **Every figure in the header is the sum of something on the page below it.**
+  A figure with nothing under it is a figure nobody can check, which is the
+  whole objection this system has to a dashboard.
+- **`Balances` and `Fuel & toll expenses` carry a Review link, not just a
+  number**, because both are sums of rows that live elsewhere.
+- **`‹ ›` on the settlement number steps through the batch's statements** in the
+  grid's own order; **`‹ ›` on the period steps the same driver through their
+  weeks.** Two different journeys, and the artefact puts them on the two things
+  they move: a run and a person.
+
+**3. The trips grid** — Trip · Load · Unit · Total pay · Driver gross · Status ·
+Delivery date · Pickup date · Pickup · Delivery · Loaded miles.
+
+- **It is the frozen snapshot, never a join to today's load** (§7, and the
+  existing comment in `SettlementLoadLine`).
+- **Loaded miles on screen, total miles on paper, and both are labelled.** The
+  artefact shows 547.78 on the grid and prints 568.18 for the same load; the
+  difference is the deadhead. A statement that prints a mileage a driver cannot
+  find on the screen he was shown is precisely the argument the freeze exists to
+  settle.
+
+**4. Other pay · Deductions · Driver balances**, three grids, each ending in an
+**inline add-row** rather than a separate panel:
+
+- Columns are the grid's own: Type (select) · Amount · Quantity · Total ·
+  Description · Add.
+- **The total is computed and never typed.** ST-005562 prints Quantity and Rate
+  and the total is their product; a typed total that disagrees with its own
+  factors is a money bug that survives every review because both numbers look
+  deliberate.
+- **Quantity defaults to 1 and amount to the type's own rate where it has one.**
+- **No per-cell edit pencil** (ruled 2026-09-28). A line carries a frozen
+  `payRuleSnapshot`; editing the amount in place leaves the snapshot describing
+  a figure that is no longer on the row. Remove and re-add.
+
+#### 6.2.3 Fuel and tolls — _added 2026-09-29_
+
+_Specification. Built when the ritual allows a migration — see §6.2.1's last
+row. `FuelTransaction` already exists and carries the purchase; what it does not
+carry is anything about being CHARGED to somebody._
+
+- **Show and deduct are two booleans, not one.** The artefact has "Show fuel
+  transactions" and "Add to calculate Fuel transactions" as separate checkboxes,
+  and they are separate questions: a company-fuel driver is shown what was
+  burned in his truck and charged nothing for it.
+- **Retail and invoice are two amounts and the difference is not rounding.**
+  $339.92 at the pump, $284.43 on the fuel-card invoice, on the same gallon of
+  diesel. Which one a driver is charged is a policy decision that has to be
+  recorded per statement, because changing it silently restates what somebody
+  was paid. The artefact offers four modes — retail, retail plus fees, invoice,
+  and invoice showing both — and all four print a different statement.
+- **Money in cents, gallons in decimal** (§8, and `FuelTransaction` already does
+  this).
+- **Pending and added are states of the transaction, not two tables.** A
+  transaction is pending until a statement claims it; the statement that claimed
+  it is the record that it was charged once.
+- **The importer names what it needs and refuses what it does not recognise.**
+  The provider's format is unknown. A stub that guesses a column order will
+  silently import the wrong column as money the first time a provider reorders
+  its export — so it declares its required headers, fails closed on an
+  unrecognised file, and says which header it could not find. A named refusal is
+  a working importer for a format nobody has seen yet; a guess is not.
 
 ### 6.3 Company filter
 
