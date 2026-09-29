@@ -10,6 +10,8 @@ import {
   markPaidAction,
   removeLineAction,
   voidSettlementAction,
+  addTripsAction,
+  recalculateAction,
 } from '../actions'
 import { SETTLEMENT_INITIAL, type SettlementState } from '../settlement-state'
 
@@ -220,6 +222,125 @@ export function VoidSettlement({
         </Button>
         <Error state={state} translate={translate} />
       </div>
+    </form>
+  )
+}
+
+/**
+ * The unsettled freight this driver has in the period, offered for adding.
+ *
+ * ── HELD LOADS ARE LISTED, MARKED, AND NOT PRE-TICKED ─────────────────────
+ *
+ * Owner's ruling: "held included with reason". A held load is one the engine
+ * declined to price — the remittance has not arrived, or arrived short — and it
+ * is the most interesting row in the panel, because it is the freight somebody
+ * has to decide about. Hiding it would make the panel lie by omission about
+ * what this driver ran.
+ *
+ * ITS CHECKBOX STARTS EMPTY AND ITS ROW CARRIES THE REASON. Adding one is then
+ * a deliberate act by somebody who has read why the engine would not. A clean
+ * load starts ticked, because that is the case where there is nothing to weigh.
+ */
+export function AddTrips({
+  settlementId,
+  trips,
+  translate,
+  labels,
+}: {
+  settlementId: string
+  trips: readonly {
+    loadId: string
+    loadNumber: string
+    route: string
+    gross: string
+    held: string | null
+  }[]
+  translate: Record<string, string>
+  labels: { heading: string; hint: string; add: string; heldNote: string }
+}) {
+  const [state, act, pending] = useActionState(
+    addTripsAction.bind(null, settlementId),
+    SETTLEMENT_INITIAL,
+  )
+
+  if (trips.length === 0) return null
+
+  return (
+    <form action={act} className="flex flex-col gap-z2">
+      <h2 className="text-md font-medium text-ink">{labels.heading}</h2>
+      <p className="text-xs text-ink-3">{labels.hint}</p>
+
+      <ul className="flex flex-col">
+        {trips.map((trip) => (
+          <li
+            key={trip.loadId}
+            className="flex items-baseline gap-z3 border-b border-border py-z2 text-sm last:border-b-0"
+          >
+            <input
+              type="checkbox"
+              name="load"
+              value={trip.loadId}
+              defaultChecked={trip.held === null}
+              aria-label={trip.loadNumber}
+              className="size-[14px] accent-[var(--color-accent)]"
+            />
+            <span className="z-identifier font-mono text-ink" dir="ltr">
+              {trip.loadNumber}
+            </span>
+            <span className="flex-1 truncate text-ink-2">{trip.route}</span>
+            {trip.held ? (
+              <span className="text-xs text-warning">
+                {labels.heldNote} {trip.held}
+              </span>
+            ) : null}
+            <span className="font-mono tabular-nums text-ink">
+              {trip.gross}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      <div className="flex items-center gap-z2">
+        <Button
+          type="submit"
+          variant="primary"
+          size="compact"
+          disabled={pending}
+        >
+          {labels.add}
+        </Button>
+        {state.error ? (
+          <p className="text-xs text-danger" role="alert">
+            {translate[state.error] ?? state.error}
+          </p>
+        ) : null}
+      </div>
+    </form>
+  )
+}
+
+/** Re-add the lines. See the action for why it does not re-price them. */
+export function Recalculate({
+  settlementId,
+  label,
+}: {
+  settlementId: string
+  label: string
+}) {
+  const [, act, pending] = useActionState(
+    recalculateAction.bind(null, settlementId),
+    SETTLEMENT_INITIAL,
+  )
+  return (
+    <form action={act}>
+      <Button
+        type="submit"
+        variant="secondary"
+        size="compact"
+        disabled={pending}
+      >
+        {label}
+      </Button>
     </form>
   )
 }

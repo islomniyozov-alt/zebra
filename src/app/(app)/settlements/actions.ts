@@ -14,6 +14,8 @@ import {
 } from '@/lib/settlements'
 import { MoneyFormatError, parseMoneyToCents } from '@/lib/money'
 import { normalizeTypedDate, utcMidnight } from '@/lib/typed-date'
+import { addTripsToSettlement } from '@/lib/statement-workbench'
+import { refreshTotals } from '@/lib/settlements'
 import { SETTLEMENT_INITIAL, type SettlementState } from './settlement-state'
 import type {
   PaymentMethod,
@@ -182,5 +184,57 @@ export async function voidSettlementAction(
   revalidatePath(`/settlements/${settlementId}`)
   revalidatePath('/settlements')
   revalidatePath('/loads')
+  return SETTLEMENT_INITIAL
+}
+
+// ── THE WORKBENCH: ADD TRIPS, AND RECALCULATE ──────────────────────────────
+
+/**
+ * Put chosen loads onto this DRAFT settlement.
+ *
+ * THE FORM POSTS IDS AND NOTHING ELSE. Prices, places and dates come from the
+ * same reader that offered the rows — a form that posted an amount would let a
+ * hand-edited request write any figure onto a statement.
+ */
+export async function addTripsAction(
+  settlementId: string,
+  _previous: SettlementState,
+  formData: FormData,
+): Promise<SettlementState> {
+  const loadIds = formData.getAll('load').map(String).filter(Boolean)
+
+  const outcome = await withCurrentOrg('update', 'settlement', (tx) =>
+    addTripsToSettlement(tx, settlementId, loadIds),
+  )
+  if (!outcome.ok) return fail(outcome.reason)
+
+  revalidatePath(`/settlements/${settlementId}`)
+  revalidatePath('/payroll/statements')
+  return SETTLEMENT_INITIAL
+}
+
+/**
+ * Recompute this settlement's totals from the lines it now carries.
+ *
+ * ── IT RE-ADDS; IT DOES NOT RE-PRICE ──────────────────────────────────────
+ *
+ * `refreshTotals` sums the lines. It does not re-run the pay rule, re-read the
+ * loads or re-apply deductions — that is `refreshDraft`, and it belongs to the
+ * BATCH because it throws every settlement away and rebuilds it.
+ *
+ * SO THIS IS THE HONEST SCOPE FOR A BUTTON ON ONE STATEMENT: after adding a
+ * trip or a charge by hand, the header figures agree with the rows again. A
+ * button labelled Recalculate that silently rebuilt the statement would discard
+ * exactly the hand edits the person just made.
+ */
+export async function recalculateAction(
+  settlementId: string,
+  _previous: SettlementState,
+  _formData: FormData,
+): Promise<SettlementState> {
+  await withCurrentOrg('update', 'settlement', (tx) =>
+    refreshTotals(tx, settlementId),
+  )
+  revalidatePath(`/settlements/${settlementId}`)
   return SETTLEMENT_INITIAL
 }
