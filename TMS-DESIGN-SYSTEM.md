@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v10 — §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
+**Status:** v10.1 — §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -444,11 +444,15 @@ Delivery date · Pickup date · Pickup · Delivery · Loaded miles.
 
 - **It is the frozen snapshot, never a join to today's load** (§7, and the
   existing comment in `SettlementLoadLine`).
-- **Loaded miles on screen, total miles on paper, and both are labelled.** The
-  artefact shows 547.78 on the grid and prints 568.18 for the same load; the
-  difference is the deadhead. A statement that prints a mileage a driver cannot
-  find on the screen he was shown is precisely the argument the freeze exists to
-  settle.
+- **One mileage, labelled for which one it is.** The artefact shows 547.78 on
+  the grid and prints 568.18 for the same load; the difference is the deadhead.
+  The snapshot freezes ONE figure — the total the statement prints — so the grid
+  shows that same figure under the header `Total miles`, and the two surfaces
+  agree. A second column is a migration (`loadedMilesHundredths` on
+  `SettlementLoadLine`) and waits with §6.2.3. **Until it exists, the grid must
+  not label the frozen total as `Loaded miles`**, which would make the screen
+  disagree with the paper by the deadhead and be the exact argument the freeze
+  exists to settle.
 
 **4. Other pay · Deductions · Driver balances**, three grids, each ending in an
 **inline add-row** rather than a separate panel:
@@ -466,9 +470,21 @@ Delivery date · Pickup date · Pickup · Delivery · Loaded miles.
 
 #### 6.2.3 Fuel and tolls — _added 2026-09-29_
 
-_Specification. Built when the ritual allows a migration — see §6.2.1's last
-row. `FuelTransaction` already exists and carries the purchase; what it does not
-carry is anything about being CHARGED to somebody._
+_`FuelTransaction` already exists and carries the purchase; what it does not
+carry is anything about being CHARGED to somebody. Owner's ruling, 2026-09-29:
+the migration is HELD until production dispatches, so this section splits in
+two._
+
+**Built now, because none of it needs a column:** the header box's
+`Fuel & toll expenses` figure and its Review panel read the driver's existing
+`FuelTransaction` rows for the period, and the CSV importer's stub declares its
+required headers and refuses a file it does not recognise. **A read is not a
+charge** — nothing on a statement changes, and the figure is labelled as what
+was BURNED rather than what was deducted, because those are not the same number
+until somebody rules which of the four modes applies.
+
+**Waits for the migration:** every column below, the deduct side, the toll
+model, and `DEDUCTION_TOLL`.
 
 - **Show and deduct are two booleans, not one.** The artefact has "Show fuel
   transactions" and "Add to calculate Fuel transactions" as separate checkboxes,
