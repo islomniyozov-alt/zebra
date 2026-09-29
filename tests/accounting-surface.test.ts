@@ -500,3 +500,68 @@ describe('the screenshot script', () => {
     }
   })
 })
+
+// ── THE OPEN-BATCH PREVIEW (owner's ruling, 2026-09-29) ────────────────────
+describe('the open-batch flow', () => {
+  const preview = readFileSync('src/lib/batch-preview.ts', 'utf8')
+  const page = readFileSync(join(PAYROLL, 'batches', 'new', 'page.tsx'), 'utf8')
+
+  // ── EVERY BUCKET IS RENDERED, AND NAMED FROM ONE LIST ───────────────────
+  //
+  // Five reasons in the lib and four rendered would hide a whole class of
+  // excluded freight, silently, on the screen whose entire job is to say what
+  // is being left out. The page maps `UNAVAILABLE_REASONS` rather than listing
+  // headings by hand, so a sixth reason appears without an edit here.
+  it('renders every reason the classifier can return', () => {
+    expect(page).toContain('UNAVAILABLE_REASONS.map')
+    for (const reason of [
+      'inTransit',
+      'outsideRange',
+      'alreadyInBatch',
+      'noDriver',
+      'noRule',
+    ]) {
+      expect(preview, reason).toContain(`${reason}:`)
+      expect(page, reason).toContain(reason)
+    }
+  })
+
+  it('gives every reason a label and a sentence about what to do', () => {
+    // §10: an empty state is an invitation. "No pay rule" is not a fact about
+    // a load, it is a task on a driver page, and the hint says so.
+    const labels = [...page.matchAll(/'(preview\.reason\.\w+)'/g)].map(
+      (hit) => hit[1],
+    )
+    const hints = [...page.matchAll(/'(preview\.hint\.\w+)'/g)].map(
+      (hit) => hit[1],
+    )
+    expect(new Set(labels).size).toBe(5)
+    expect(new Set(hints).size).toBe(5)
+  })
+
+  // ── A LOAD LANDS IN EXACTLY ONE BUCKET ──────────────────────────────────
+  //
+  // The classifier is one chained conditional rather than five filters, so a
+  // load with no POD and no driver is reported once. Five independent passes
+  // would let a load appear twice, or — worse — fall between them as the
+  // predicates drifted.
+  it('classifies with one decision per load, not five filters', () => {
+    expect(preview).toContain('const reason: UnavailableReason | null =')
+    expect(preview).not.toMatch(/loads\.filter\([^)]*\)\s*\.filter/)
+  })
+
+  it('bounds the window on the POD, not the delivery stop', () => {
+    // MONEY-DESIGN §0: a week is decided by when the POD landed. A load
+    // delivered Saturday whose POD arrives Monday belongs to the next week,
+    // which is what `outsideRange` exists to show.
+    expect(preview).toContain('podAt < input.from || podAt > input.to')
+  })
+
+  it('says the batch is org-wide before the button is pressed', () => {
+    // Datatruck opens one batch per payer and Zebra does not (§6.2.1), so
+    // picking an authority and getting every authority's freight would be a
+    // surprise about money.
+    expect(page).toContain("t('preview.orgWide')")
+    expect(page).toContain("t('preview.willOpen')")
+  })
+})

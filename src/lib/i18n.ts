@@ -37,6 +37,36 @@ const en = {
   'nav.group.fleet': 'Fleet',
   'nav.group.money': 'Money',
   'nav.group.accounting': 'Accounting',
+  'preview.title': 'Open a batch',
+  'preview.create': 'Create',
+  'preview.available': 'Available trips',
+  'preview.unavailable': 'Not going in',
+  'preview.pod': 'POD',
+  'preview.considered': 'considered',
+  'preview.willOpen': 'Create opens the week',
+  'preview.orgWide':
+    'The batch covers every authority; the filter above narrows this list only.',
+  'preview.twoWeeks':
+    'That range spans two settlement weeks. Narrow it to one.',
+  'preview.exists': 'A batch already covers this week:',
+  'preview.emptyAvailable': 'No trips would go into this batch',
+  'preview.emptyAvailableHint':
+    'Widen the range, or look below at what is being left out and why.',
+  'preview.reason.inTransit': 'In transit',
+  'preview.reason.outsideRange': 'POD outside the range',
+  'preview.reason.alreadyInBatch': 'Already on a statement',
+  'preview.reason.noDriver': 'No driver',
+  'preview.reason.noRule': 'No pay rule',
+  'preview.hint.inTransit':
+    'No POD has landed. These pay in the week their POD arrives.',
+  'preview.hint.outsideRange':
+    'Delivered near this window but the POD fell outside it — a week is decided by the POD.',
+  'preview.hint.alreadyInBatch':
+    'These are settled. Open the statement to see what was paid.',
+  'preview.hint.noDriver':
+    'Nobody is seated on these, so there is nobody to pay. Assign a driver on the load.',
+  'preview.hint.noRule':
+    'The driver has no pay rule in force. Set one on the driver page and these join the batch.',
   'settlements.group.loadPay': 'Load pay',
   'settlements.group.otherPay': 'Other pay',
   'settlements.group.deductions': 'Deductions',
@@ -2588,6 +2618,36 @@ const ru: Dictionary = {
   'nav.group.fleet': 'Автопарк',
   'nav.group.money': 'Финансы',
   'nav.group.accounting': 'Бухгалтерия',
+  'preview.title': 'Открыть партию',
+  'preview.create': 'Создать',
+  'preview.available': 'Доступные рейсы',
+  'preview.unavailable': 'Не войдут',
+  'preview.pod': 'POD',
+  'preview.considered': 'рассмотрено',
+  'preview.willOpen': 'Создание открывает неделю',
+  'preview.orgWide':
+    'Партия охватывает все компании; фильтр выше сужает только этот список.',
+  'preview.twoWeeks':
+    'Этот диапазон охватывает две расчётные недели. Сузьте до одной.',
+  'preview.exists': 'Эта неделя уже покрыта партией:',
+  'preview.emptyAvailable': 'В эту партию не войдёт ни один рейс',
+  'preview.emptyAvailableHint':
+    'Расширьте диапазон или посмотрите ниже, что исключено и почему.',
+  'preview.reason.inTransit': 'В пути',
+  'preview.reason.outsideRange': 'POD вне диапазона',
+  'preview.reason.alreadyInBatch': 'Уже в расчёте',
+  'preview.reason.noDriver': 'Без водителя',
+  'preview.reason.noRule': 'Нет правила оплаты',
+  'preview.hint.inTransit':
+    'POD не получен. Они оплачиваются на неделе поступления POD.',
+  'preview.hint.outsideRange':
+    'Доставлено рядом с этим окном, но POD вне его — неделя определяется по POD.',
+  'preview.hint.alreadyInBatch':
+    'Они уже рассчитаны. Откройте расчёт, чтобы увидеть выплату.',
+  'preview.hint.noDriver':
+    'На них нет водителя, платить некому. Назначьте водителя в грузе.',
+  'preview.hint.noRule':
+    'У водителя нет действующего правила оплаты. Задайте его на странице водителя.',
   'settlements.group.loadPay': 'Оплата за грузы',
   'settlements.group.otherPay': 'Прочие начисления',
   'settlements.group.deductions': 'Удержания',
@@ -5127,6 +5187,36 @@ const fa: Dictionary = {
   'nav.group.fleet': 'ناوگان',
   'nav.group.money': 'مالی',
   'nav.group.accounting': 'حساب‌داری',
+  'preview.title': 'باز کردن دسته',
+  'preview.create': 'ایجاد',
+  'preview.available': 'سفرهای در دسترس',
+  'preview.unavailable': 'واردنشدنی‌ها',
+  'preview.pod': 'رسید تحویل',
+  'preview.considered': 'بررسی‌شده',
+  'preview.willOpen': 'ایجاد، این هفته را باز می‌کند',
+  'preview.orgWide':
+    'دسته همهٔ شرکت‌ها را در بر می‌گیرد؛ فیلتر بالا تنها این فهرست را محدود می‌کند.',
+  'preview.twoWeeks':
+    'این بازه دو هفتهٔ تسویه را در بر می‌گیرد. آن را به یکی محدود کنید.',
+  'preview.exists': 'یک دسته از پیش این هفته را پوشش می‌دهد:',
+  'preview.emptyAvailable': 'هیچ سفری وارد این دسته نمی‌شود',
+  'preview.emptyAvailableHint':
+    'بازه را گسترده کنید، یا پایین‌تر ببینید چه چیزی و چرا کنار گذاشته شده است.',
+  'preview.reason.inTransit': 'در مسیر',
+  'preview.reason.outsideRange': 'رسید خارج از بازه',
+  'preview.reason.alreadyInBatch': 'از پیش در صورت‌حساب',
+  'preview.reason.noDriver': 'بدون راننده',
+  'preview.reason.noRule': 'بدون قاعدهٔ پرداخت',
+  'preview.hint.inTransit':
+    'رسیدی نرسیده است. این‌ها در هفتهٔ رسیدن رسید پرداخت می‌شوند.',
+  'preview.hint.outsideRange':
+    'نزدیک این بازه تحویل شده اما رسید بیرون آن افتاده — هفته را رسید تعیین می‌کند.',
+  'preview.hint.alreadyInBatch':
+    'این‌ها تسویه شده‌اند. برای دیدن پرداخت، صورت‌حساب را باز کنید.',
+  'preview.hint.noDriver':
+    'کسی روی این‌ها نیست، پس کسی برای پرداخت نیست. در بار راننده تعیین کنید.',
+  'preview.hint.noRule':
+    'راننده قاعدهٔ پرداخت جاری ندارد. در صفحهٔ راننده یکی تعیین کنید.',
   'settlements.group.loadPay': 'دستمزد بار',
   'settlements.group.otherPay': 'سایر پرداخت‌ها',
   'settlements.group.deductions': 'کسورات',

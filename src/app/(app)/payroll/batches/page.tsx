@@ -31,10 +31,11 @@ import { ColumnFunnel } from '../../_grid/ColumnFunnel'
 import { BulkStatus } from './BulkStatus'
 import { GridToolbar } from '../../_grid/GridToolbar'
 import { gridView, keepColumns, pagedFooterLabel } from '../../_grid/grid-page'
+import Link from 'next/link'
 import { Suspense } from 'react'
+import { Button } from '@/components/ui/Button'
 import { WeekPicker } from './WeekPicker'
 import { WeekStrip } from './WeekStrip'
-import { OpenWeek } from './OpenWeek'
 import { BatchActions } from '../../settlements/batches/[id]/BatchActions'
 import type { MessageKey } from '@/lib/i18n'
 import type { StatusTone } from '@/lib/status'
@@ -456,7 +457,19 @@ export default async function PayrollPage({
         action={
           week === null ? (
             mayOpen ? (
-              <OpenWeek week={day(chosen.start)} label={t('money.openBatch')} />
+              // THE PREVIEW, NOT A BARE CREATE. `OpenWeek` opened the selected
+              // week with one click and no sight of what was about to go in;
+              // the flow at /new shows the trips and, more usefully, what is
+              // being left out and why. The one-click button is gone rather
+              // than kept beside it — two ways to open a batch is two ways to
+              // open the wrong one.
+              <Link
+                href={`/payroll/batches/new?from=${day(chosen.start)}&to=${day(chosen.end)}`}
+              >
+                <Button variant="primary" size="compact">
+                  {t('money.openBatch')}
+                </Button>
+              </Link>
             ) : null
           ) : mayWrite ? (
             <BatchActions
