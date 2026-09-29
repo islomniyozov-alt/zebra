@@ -133,3 +133,71 @@ describe('every integration suite states its transaction budget', () => {
     expect(LOAD_WRITE_TIMEOUT_MS).toBeGreaterThan(5_000)
   })
 })
+
+// ── AND THE SUITES OUTSIDE `tests/integration/` ────────────────────────────
+//
+// THE RULE ABOVE SCANS ONE DIRECTORY, AND THAT IS HOW ONE GOT AWAY.
+// `tests/integrity.test.ts` opens a transaction through `runInOrg` and passed
+// no budget, so it ran on Prisma's 5s default — the exact state this file
+// exists to prevent, in a file it was not looking at. It had been marginal for
+// a while and tipped over on 2026-09-29: three runs at 8.9s, 11.8s and 13.3s
+// reading 14,464 loads, with nothing whatsoever wrong.
+//
+// So the scan follows the CALL rather than the directory: anything under
+// `tests/` that opens a transaction states its budget, by the same imported
+// name, for the same reason.
+describe('transactions outside tests/integration state a budget too', () => {
+  const files = readdirSync(join(process.cwd(), 'tests'))
+    .filter((name) => name.endsWith('.test.ts'))
+    // NOT THIS FILE. It quotes `timeoutMs:` in its own prose and its own
+    // assertions, so scanning itself finds a budget of `'` — an instrument
+    // reading its own description and reporting it as a finding.
+    .filter((name) => name !== 'transaction-budget.test.ts')
+    .map((name) => ({
+      name,
+      source: readFileSync(join(process.cwd(), 'tests', name), 'utf8'),
+    }))
+    .filter(
+      (file) =>
+        file.source.includes('runInOrg(') ||
+        file.source.includes('$transaction('),
+    )
+
+  it('reads real files, so the check cannot pass by finding nothing', () => {
+    expect(files.length).toBeGreaterThan(0)
+    expect(files.map((file) => file.name)).toContain('integrity.test.ts')
+  })
+
+  it.each(files.map((file) => file.name))('%s names its budget', (name) => {
+    const file = files.find((candidate) => candidate.name === name)!
+    // ── ONE BUDGET PER CALL SITE, NOT ONE PER FILE ─────────────────────
+    //
+    // Written as `toContain('timeoutMs:')` this passed `this-week-timing.test.ts`
+    // — which had two transactions and one budget, and the unbudgeted one
+    // expired at 7.5s in the very next gate run. A file is not the unit; a
+    // transaction is.
+    const opens = (file.source.match(/\$transaction\(|runInOrg\(/g) ?? [])
+      .length
+    const budgets = (file.source.match(/timeout(?:Ms)?:/g) ?? []).length
+    expect(
+      budgets,
+      `${name} opens ${opens} transaction(s) and states ${budgets} budget(s); the rest run on Prisma's 5s default`,
+    ).toBeGreaterThanOrEqual(opens)
+
+    const written = /timeoutMs:\s*([^,\n]+)/.exec(file.source)?.[1]?.trim()
+    expect(written, name).toBeDefined()
+    expect(/^[A-Za-z_$][\w$]*$/.test(written!), `${name}: ${written}`).toBe(
+      true,
+    )
+
+    // A LINE SCAN, NOT A REGEX BUILT FROM A TEMPLATE LITERAL. The first version
+    // of this check was `new RegExp(\`import\s*...\`)`, and the escapes
+    // collapsed on the way into the file: `\s` in a template literal is the
+    // letter `s`, so the pattern was `imports*{` and matched nothing. It failed
+    // three real files that were all correct.
+    const importsIt = file.source
+      .split('\n')
+      .some((line) => line.includes('import') && line.includes(written!))
+    expect(importsIt, `${name} uses ${written} without importing it`).toBe(true)
+  })
+})

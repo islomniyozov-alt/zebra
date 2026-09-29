@@ -48,10 +48,14 @@ export function gridView<Row>(
     rows: readonly Row[],
     params: ListParams,
     shape: ListShape<Row>,
+    raw?: RawParams,
   ) => Row[],
 ): GridView<Row> {
   const params = readListParams(raw)
-  const filtered = apply(rows, params, shape)
+  // `raw` GOES THROUGH, for the `f.<column>` keys the funnels write. Dropping it
+  // here would leave the funnels setting a parameter nothing reads — a control
+  // that appears to work, which is the failure §7.4 is actually about.
+  const filtered = apply(rows, params, shape, raw)
   const sort = activeSort(params, shape)
   return {
     params,

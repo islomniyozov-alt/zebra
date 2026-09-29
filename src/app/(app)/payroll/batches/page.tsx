@@ -6,7 +6,12 @@ import { companyScopeFilter } from '@/lib/tenancy'
 import { payWeekFor } from '@/lib/settlement-week'
 import { payrollWeek, recentWeeks, weekFromParam } from '@/lib/payroll'
 import { readGridColumns, type GridId } from '@/lib/grid-columns'
-import { applyList, sumCents, type RawParams } from '@/lib/list-view'
+import {
+  applyList,
+  columnFilterParam,
+  sumCents,
+  type RawParams,
+} from '@/lib/list-view'
 import {
   balanceShape,
   batchShape,
@@ -22,6 +27,8 @@ import { FilterBar } from '@/components/ui/FilterBar'
 import { Tabs } from '@/components/ui/Tabs'
 import { GridFooterNav } from '../../_grid/GridFooterNav'
 import { PageHeader } from '../../_grid/PageHeader'
+import { ColumnFunnel } from '../../_grid/ColumnFunnel'
+import { BulkStatus } from './BulkStatus'
 import { GridToolbar } from '../../_grid/GridToolbar'
 import { gridView, keepColumns, pagedFooterLabel } from '../../_grid/grid-page'
 import { WeekPicker } from './WeekPicker'
@@ -216,6 +223,35 @@ export default async function PayrollPage({
     'grid.columns.errorEmpty': t('grid.columns.errorEmpty'),
     'grid.columns.errorGrid': t('grid.columns.errorGrid'),
   }
+  // ONE CLIENT ISLAND PER HEADER, rather than a client boundary around the
+  // grid: `Table` stays server-rendered and only the popover is interactive.
+  const funnelFor = (columnKey: string, header: string) => (
+    <ColumnFunnel
+      param={columnFilterParam(columnKey)}
+      column={header}
+      labels={{
+        open: t('grid.filterColumn'),
+        apply: t('grid.filterApply'),
+        clear: t('grid.filterClear'),
+      }}
+    />
+  )
+
+  const bulkLabels = {
+    selected: t('grid.selected'),
+    finalise: t('batches.finaliseSelected'),
+    markPaid: t('batches.markPaidSelected'),
+    clear: t('grid.clearSelection'),
+    blocked: t('batches.bulkBlocked'),
+    done: t('batches.bulkDone'),
+  }
+  const bulkReasons = {
+    'batch.error.notFound': t('batch.error.notFound'),
+    'batch.error.notDraft': t('batch.error.notDraft'),
+    'batch.error.notAWeek': t('batch.error.notAWeek'),
+    'batch.blockers': t('batch.blockers'),
+  }
+
   const footerLabels = {
     of: t('grid.of'),
     previous: t('grid.previous'),
@@ -235,6 +271,7 @@ export default async function PayrollPage({
   const batchColumns: Column<BatchGridRow>[] = [
     {
       key: 'batchNumber',
+      filterable: true,
       header: t('batches.batch'),
       sortable: true,
       render: (row) => (
@@ -245,6 +282,7 @@ export default async function PayrollPage({
     },
     {
       key: 'status',
+      filterable: true,
       header: t('payroll.status'),
       sortable: true,
       render: (row) => {
@@ -305,6 +343,7 @@ export default async function PayrollPage({
     },
     {
       key: 'payCompany',
+      filterable: true,
       header: t('batches.payCompany'),
       sortable: true,
       // "ALL AUTHORITIES", because that is what a Zebra batch pays out of
@@ -318,6 +357,7 @@ export default async function PayrollPage({
     },
     {
       key: 'notes',
+      filterable: true,
       header: t('batches.notes'),
       truncate: true,
       render: (row) => row.notes ?? <span className="text-ink-3">—</span>,
@@ -546,82 +586,86 @@ export default async function PayrollPage({
             errors={errors}
           />
         </div>
-        <Table
-          columns={columns}
-          rows={view.paged.rows}
-          footRows={view.filtered}
-          rowKey={(row) => row.id}
-          rowHref={(row) => `/settlements/batches/${row.id}`}
-          stripeTone={(row) => statusOf(row.status).tone}
-          caption={t('payroll.tab.batches')}
-          sort={{
-            key: view.sort.key,
-            dir: view.sort.dir,
-            hrefFor: view.sortFor(PATH),
-            label: t('accounting.sortBy'),
-          }}
-          totals={{
-            label: pagedFooterLabel(
-              t('accounting.total'),
-              t('grid.rows'),
-              view.paged,
-            ),
-          }}
-          empty={
-            <EmptyState
-              title={t('batches.empty')}
-              body={t('accounting.emptyHint')}
-            />
-          }
-          below={
-            <>
-              {/* THE PER-COMPANY BREAKDOWN, under the grid rather than inside it.
-               * §6.2 asks for it as an indented continuation of each batch row;
-               * `Table` renders one row per record and cannot nest, so this is the
-               * honest version — a second reading of the same page's batches, in the
-               * same order, with each authority's share. Flagged as a divergence from
-               * the ruling rather than presented as satisfying it. */}
-              {view.paged.rows.some((row) => row.breakdown.length > 0) ? (
-                <section className="border-t border-border bg-surface-2 px-gutter py-z3">
-                  <h2 className="text-xs font-medium uppercase tracking-[0.04em] text-ink-2">
-                    {t('batches.breakdown')}
-                  </h2>
-                  <ul className="mt-z2 flex flex-col gap-z1">
-                    {view.paged.rows.map((row) =>
-                      row.breakdown.length === 0 ? null : (
-                        <li
-                          key={row.id}
-                          className="flex flex-wrap items-baseline gap-z3"
-                        >
-                          <span
-                            className="font-mono text-xs text-ink"
-                            dir="ltr"
+        <BulkStatus labels={bulkLabels} reasons={bulkReasons}>
+          <Table
+            columns={columns}
+            rows={view.paged.rows}
+            footRows={view.filtered}
+            rowKey={(row) => row.id}
+            rowHref={(row) => `/settlements/batches/${row.id}`}
+            funnelFor={funnelFor}
+            selection={{ name: 'batch', label: t('grid.select') }}
+            stripeTone={(row) => statusOf(row.status).tone}
+            caption={t('payroll.tab.batches')}
+            sort={{
+              key: view.sort.key,
+              dir: view.sort.dir,
+              hrefFor: view.sortFor(PATH),
+              label: t('accounting.sortBy'),
+            }}
+            totals={{
+              label: pagedFooterLabel(
+                t('accounting.total'),
+                t('grid.rows'),
+                view.paged,
+              ),
+            }}
+            empty={
+              <EmptyState
+                title={t('batches.empty')}
+                body={t('accounting.emptyHint')}
+              />
+            }
+            below={
+              <>
+                {/* THE PER-COMPANY BREAKDOWN, under the grid rather than inside it.
+                 * §6.2 asks for it as an indented continuation of each batch row;
+                 * `Table` renders one row per record and cannot nest, so this is the
+                 * honest version — a second reading of the same page's batches, in the
+                 * same order, with each authority's share. Flagged as a divergence from
+                 * the ruling rather than presented as satisfying it. */}
+                {view.paged.rows.some((row) => row.breakdown.length > 0) ? (
+                  <section className="border-t border-border bg-surface-2 px-gutter py-z3">
+                    <h2 className="text-xs font-medium uppercase tracking-[0.04em] text-ink-2">
+                      {t('batches.breakdown')}
+                    </h2>
+                    <ul className="mt-z2 flex flex-col gap-z1">
+                      {view.paged.rows.map((row) =>
+                        row.breakdown.length === 0 ? null : (
+                          <li
+                            key={row.id}
+                            className="flex flex-wrap items-baseline gap-z3"
                           >
-                            {row.batchNumber ?? row.id.slice(0, 8)}
-                          </span>
-                          {row.breakdown.map((company) => (
                             <span
-                              key={company.companyId}
-                              className="text-xs text-ink-2"
+                              className="font-mono text-xs text-ink"
+                              dir="ltr"
                             >
-                              {company.companyName}{' '}
-                              <span className="font-mono tabular-nums text-ink">
-                                {formatCents(company.amountCents, locale)}
-                              </span>{' '}
-                              <span className="font-mono tabular-nums text-ink-3">
-                                ({company.statements})
-                              </span>
+                              {row.batchNumber ?? row.id.slice(0, 8)}
                             </span>
-                          ))}
-                        </li>
-                      ),
-                    )}
-                  </ul>
-                </section>
-              ) : null}
-            </>
-          }
-        />
+                            {row.breakdown.map((company) => (
+                              <span
+                                key={company.companyId}
+                                className="text-xs text-ink-2"
+                              >
+                                {company.companyName}{' '}
+                                <span className="font-mono tabular-nums text-ink">
+                                  {formatCents(company.amountCents, locale)}
+                                </span>{' '}
+                                <span className="font-mono tabular-nums text-ink-3">
+                                  ({company.statements})
+                                </span>
+                              </span>
+                            ))}
+                          </li>
+                        ),
+                      )}
+                    </ul>
+                  </section>
+                ) : null}
+              </>
+            }
+          />
+        </BulkStatus>
         <GridFooterNav
           paged={view.paged}
           per={view.params.per}

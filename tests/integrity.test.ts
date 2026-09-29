@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, it } from 'vitest'
 import { createPrismaClient } from '@/lib/db'
+import { LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import { findAuthorityDrift } from '@/lib/asset-transfer'
 import { findFactoringDrift } from '@/lib/factoring'
 import { findPaymentDrift } from '@/lib/payments'
@@ -54,6 +55,20 @@ async function acrossEveryOrg<T>(
     found.push(
       ...(await runInOrg(owner, organization.id, check, {
         attribution: unattributed('read-only integrity assertion'),
+        // ── THE BUDGET, NAMED AND IMPORTED ─────────────────────────────
+        //
+        // This ran on Prisma's 5s DEFAULT, which is exactly the state
+        // `tests/transaction-budget.test.ts` exists to prevent — and it is
+        // outside the `tests/integration/` directory that guard scans, which is
+        // why it survived. It has been marginal for a while and tipped over on
+        // 2026-09-29: three runs at 8.9s, 11.8s and 13.3s.
+        //
+        // NOTHING IS BEING HIDDEN BY THE LONGER BUDGET. These checks are
+        // read-only — they recompute a cached column and assert it agrees — so
+        // the assertion is unchanged and only the clock moved. What was failing
+        // was the transaction expiring mid-read over 14,464 loads at roughly
+        // 200ms to us-east-2, which is the arithmetic that file already states.
+        timeoutMs: LOAD_WRITE_TIMEOUT_MS,
       })),
     )
   }

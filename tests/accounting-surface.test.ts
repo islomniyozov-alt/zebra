@@ -285,6 +285,68 @@ describe('the grid contract', () => {
   })
 })
 
+// ── RULING 6: THE CHECKBOX COLUMN AND THE COLUMN FUNNELS ───────────────────
+describe('bulk status and the column funnels', () => {
+  const batches = pageSource('batches')
+
+  it('puts the batches grid inside the bulk form', () => {
+    expect(batches).toContain('<BulkStatus')
+    expect(batches).toContain("selection={{ name: 'batch'")
+  })
+
+  // ── THE SAFETY ARGUMENT, READ OUT OF THE SOURCE ─────────────────────────
+  //
+  // A bulk route that gathered ids and wrote `status = 'FINAL'` would be a way
+  // to finalise a blocked week from a checkbox: a driver with no pay rule paid
+  // nothing, silently, because the screen that names them was never consulted.
+  // The action must go through the same two functions a single button does.
+  it('changes status through finaliseBatch and markBatchPaid, per batch', () => {
+    const action = readFileSync(
+      join(PAYROLL, 'batches', 'bulk-actions.ts'),
+      'utf8',
+    )
+    expect(action).toContain('finaliseBatch(tx, id, session.userId)')
+    expect(action).toContain('markBatchPaid(tx, id, session.userId)')
+    // NO DIRECT WRITE. This is the shape the ruling forbids.
+    expect(action).not.toMatch(/settlementBatch\.update\([^)]*status/s)
+    expect(action).not.toContain('updateMany')
+  })
+
+  it('reports refusals by name, with the drivers responsible', () => {
+    const action = readFileSync(
+      join(PAYROLL, 'batches', 'bulk-actions.ts'),
+      'utf8',
+    )
+    // "3 of 5 changed" tells somebody two weeks of driver pay did not happen
+    // and not which.
+    expect(action).toContain('blockers.map((row) => row.driverName)')
+    expect(action).toContain('batch: name')
+  })
+
+  it('gives the funnel-able columns something to match on', () => {
+    // A column marked `filterable` whose key has no entry in the shape's
+    // `columnFilters` renders a control that narrows nothing — which looks
+    // exactly like a filter that found no rows.
+    const grids = readFileSync('src/lib/accounting-grids.ts', 'utf8')
+    const marked = [
+      ...batches.matchAll(/key: '(\w+)',\s+filterable: true/g),
+    ].map((match) => match[1])
+    expect(marked.length).toBeGreaterThan(0)
+    const block = grids.slice(grids.indexOf('columnFilters: {'))
+    for (const key of marked) {
+      expect(block, key).toContain(`${key}:`)
+    }
+  })
+
+  it('namespaces the funnel parameter so it cannot collide with a chip', () => {
+    const core = readFileSync('src/lib/list-view.ts', 'utf8')
+    // `f.status` and a screen's own `status` chip both exist on this grid.
+    expect(core).toContain(
+      'export const columnFilterParam = (columnKey: string) => `f.${columnKey}`',
+    )
+  })
+})
+
 // ── NO FUNCTION CROSSES THE SERVER/CLIENT BOUNDARY ──────────────────────────
 //
 // THIS TEST EXISTS BECAUSE THE FIRST VERSION OF THE CHARGES PAGE DID IT.

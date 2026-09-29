@@ -38,6 +38,14 @@ export interface Column<Row> {
    */
   sortable?: boolean
   /**
+   * §6.2.1 — this header gets a filter funnel writing `f.<key>`.
+   *
+   * THE MATCHING LIVES IN `ListShape.columnFilters`, not here: a column marked
+   * filterable whose key has no entry there renders a control that narrows
+   * nothing, which `tests/accounting-surface.test.ts` checks the pair for.
+   */
+  filterable?: boolean
+  /**
    * §7.1.2 — what this column contributes to the sticky foot.
    *
    * IT IS HANDED THE FILTERED SET, NOT THE PAGE. `footRows` below, defaulting to
@@ -104,6 +112,22 @@ interface TableProps<Row> {
   /** §7.1.1. Absent means no header is operable. */
   sort?: TableSort
   /**
+   * §6.2.1 — renders a funnel on each `filterable` column.
+   *
+   * A RENDER PROP, because the funnel is a client component and this one is not.
+   * The page passes a factory so `Table` stays server-rendered: a client island
+   * per header, rather than a client boundary around the whole grid.
+   */
+  funnelFor?: (columnKey: string, header: string) => ReactNode
+  /**
+   * §6.2.1 — a leading checkbox column, posting `name` per row.
+   *
+   * THE FORM IS THE CALLER'S. This renders inputs and nothing else: what the
+   * selection DOES is a money question, and a component that rendered its own
+   * action would be deciding it.
+   */
+  selection?: { name: string; label: string }
+  /**
    * §7.1.2 — the sticky foot.
    *
    * THE LABEL SAYS HOW MANY ROWS IT TOTALLED, and the caller composes it because
@@ -145,6 +169,8 @@ export function Table<Row>({
   caption,
   rowHref,
   sort,
+  funnelFor,
+  selection,
   totals,
   footRows,
   below,
@@ -176,6 +202,14 @@ export function Table<Row>({
           <tr>
             {/* The stripe column. No header text; it is not a data column. */}
             {stripeTone ? <th className="w-[3px] p-0" aria-hidden /> : null}
+            {selection ? (
+              <th
+                scope="col"
+                className="sticky top-0 z-10 w-[32px] border-b border-border bg-surface-2 px-z2 py-z2"
+              >
+                <span className="sr-only">{selection.label}</span>
+              </th>
+            ) : null}
             {columns.map((column) => {
               const active = sort?.key === column.key
               return (
@@ -222,6 +256,9 @@ export function Table<Row>({
                   ) : (
                     column.header
                   )}
+                  {column.filterable && funnelFor
+                    ? funnelFor(column.key, column.header)
+                    : null}
                 </th>
               )
             })}
@@ -232,7 +269,9 @@ export function Table<Row>({
           {rows.length === 0 ? (
             <tr>
               <td
-                colSpan={columns.length + (stripeTone ? 1 : 0)}
+                colSpan={
+                  columns.length + (stripeTone ? 1 : 0) + (selection ? 1 : 0)
+                }
                 className="p-0"
               >
                 {empty}
@@ -265,6 +304,21 @@ export function Table<Row>({
                         TONE_STRIPE[cancelled ? 'muted' : stripeTone(row)],
                       )}
                     />
+                  ) : null}
+                  {selection ? (
+                    // `relative z-10` — §7.1: an interactive control inside a
+                    // row raises its stacking so the stretched link does not
+                    // swallow the click. A checkbox under the row's anchor
+                    // would open the row instead of ticking.
+                    <td className="relative z-10 w-[32px] px-z2">
+                      <input
+                        type="checkbox"
+                        name={selection.name}
+                        value={rowKey(row)}
+                        aria-label={`${selection.label}: ${rowKey(row)}`}
+                        className="size-[14px] accent-[var(--color-accent)]"
+                      />
+                    </td>
                   ) : null}
                   {columns.map((column, index) => (
                     <td
@@ -313,6 +367,9 @@ export function Table<Row>({
                   aria-hidden
                   className="w-[3px] border-t border-border-strong p-0"
                 />
+              ) : null}
+              {selection ? (
+                <td aria-hidden className="border-t border-border-strong" />
               ) : null}
               {columns.map((column, index) => (
                 <td

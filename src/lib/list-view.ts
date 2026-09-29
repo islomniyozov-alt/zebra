@@ -131,16 +131,32 @@ export function readListParams(raw: RawParams): ListParams {
 }
 
 /** True when any of the four controls is doing something. */
-export function isFiltered(params: ListParams): boolean {
+export function isFiltered(params: ListParams, raw: RawParams = {}): boolean {
   return (
     params.q !== null ||
     params.from !== null ||
     params.to !== null ||
-    params.company !== null
+    params.company !== null ||
+    Object.keys(raw).some((key) => key.startsWith('f.'))
   )
 }
 
 export type SortValue = string | number | null
+
+/**
+ * §6.2.1 — the per-column funnels, and why they are allowed.
+ *
+ * §7.4 objects to "dropdown menus where three chips would do" and to filters in
+ * a drawer, and the objection is to HIDDEN STATE: a control whose setting the
+ * reader cannot see and cannot send to somebody. A funnel that writes a query
+ * parameter has none — it lands in the URL beside the chips, the filter bar
+ * shows it, and Clear filters clears it.
+ *
+ * `f.<column>` IS THE PARAMETER. Namespaced so a column called `status` cannot
+ * collide with a screen's own `status` chip, which is exactly the pair that
+ * exists on the Batches grid today.
+ */
+export const columnFilterParam = (columnKey: string) => `f.${columnKey}`
 
 export interface ListShape<Row> {
   /**
@@ -170,6 +186,15 @@ export interface ListShape<Row> {
   /** Used when `sort` is absent or names a column this list does not have. */
   defaultSort: string
   defaultDir?: SortDirection
+  /**
+   * What each funnel-able column matches on, by column key.
+   *
+   * THE SAME TEXT THE COLUMN RENDERS, as far as possible: a reader filtering the
+   * Status column types what they can see in it. Where the rendered form is a
+   * translated label the stored value is used instead and the funnel says so —
+   * a filter that only worked in English would be worse than none.
+   */
+  columnFilters?: Readonly<Record<string, (row: Row) => string | null>>
 }
 
 /**
@@ -196,6 +221,8 @@ export function applyList<Row>(
   rows: readonly Row[],
   params: ListParams,
   shape: ListShape<Row>,
+  /** The untouched query, for the `f.<column>` keys the funnels write. */
+  raw: RawParams = {},
 ): Row[] {
   const needle = params.q?.toLowerCase() ?? null
 
@@ -208,6 +235,21 @@ export function applyList<Row>(
 
     if (shape.companyIdOf && params.company !== null) {
       if (shape.companyIdOf(row) !== params.company) return false
+    }
+
+    // ── THE COLUMN FUNNELS ────────────────────────────────────────────
+    //
+    // Applied with everything else rather than before or after it: a funnel is
+    // one more predicate over the same rows, so the totals row and the count in
+    // the footer cover it without knowing it exists.
+    if (shape.columnFilters) {
+      for (const [key, of] of Object.entries(shape.columnFilters)) {
+        const wanted = one(raw[columnFilterParam(key)])
+        if (wanted === null) continue
+        const value = of(row)
+        if (value === null) return false
+        if (!value.toLowerCase().includes(wanted.toLowerCase())) return false
+      }
     }
 
     if (shape.dateOf && (params.from !== null || params.to !== null)) {

@@ -312,6 +312,15 @@ export const batchShape: ListShape<BatchGridRow> = {
   },
   defaultSort: 'period',
   defaultDir: 'desc',
+  // WHAT THE FUNNELS MATCH ON. The STORED value, not the rendered one: a status
+  // funnel typing "FINAL" has to work in Russian too, and the label is
+  // translated while the enum is not (§12).
+  columnFilters: {
+    batchNumber: (row) => row.batchNumber,
+    status: (row) => row.status,
+    payCompany: (row) => row.payCompanyName,
+    notes: (row) => row.notes,
+  },
 }
 
 // ── PAYROLL → DRIVER STATEMENTS ────────────────────────────────────────────

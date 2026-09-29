@@ -71,13 +71,20 @@ async function countQueries(
   // transaction moves the cold start where it belongs.
   await client.$queryRaw`select 1`
 
-  await client.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe(
-      `SELECT set_config('app.current_org_id', $1, true)`,
-      organizationId,
-    )
-    await thisWeekFor(tx as never, { period, payDay })
-  })
+  await client.$transaction(
+    async (tx) => {
+      await tx.$executeRawUnsafe(
+        `SELECT set_config('app.current_org_id', $1, true)`,
+        organizationId,
+      )
+      await thisWeekFor(tx as never, { period, payDay })
+    },
+    // THE BUDGET, NAMED. This ran on Prisma's 5s default and tipped over at
+    // 7.5s on 2026-09-29 — the same fault as `integrity.test.ts` an hour
+    // earlier, in the same file as a transaction that already had one. Counting
+    // the call sites is what found it; see `transaction-budget.test.ts`.
+    { timeout: SETTLEMENT_BATCH_TIMEOUT_MS },
+  )
   await client.$disconnect()
 
   // Minus the BEGIN/COMMIT pair, the `set_config` this harness added, and the
