@@ -1,4 +1,4 @@
-import type { Prisma } from '@/generated/prisma/client'
+import { Prisma } from '@/generated/prisma/client'
 import { companyScopeFilter } from './tenancy'
 import { listPayments, type PaymentRow } from './payments'
 import { listCharges, type ChargeRow } from './driver-deductions'
@@ -194,103 +194,148 @@ export async function readBatches(
   tx: TxClient,
   scope: Scope,
 ): Promise<BatchGridRow[]> {
-  const batches = await tx.settlementBatch.findMany({
-    where: { deletedAt: null },
-    orderBy: { periodStart: 'desc' },
-    take: 500,
-    select: {
-      id: true,
-      batchNumber: true,
-      status: true,
-      createdAt: true,
-      checkDate: true,
-      statementDate: true,
-      periodStart: true,
-      periodEnd: true,
-      notes: true,
-      settlements: {
-        select: {
-          id: true,
-          netCents: true,
-          loadLines: {
-            select: {
-              amountCents: true,
-              load: {
-                select: {
-                  companyId: true,
-                  company: { select: { name: true } },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  })
+  // ── TWO GROUPED READS, AND THE MEASUREMENT THAT SHAPED THEM ────────────
+  //
+  // Owner's ruling, 2026-09-29: item 7's shape — group in SQL, as
+  // `grossByCompany` does.
+  //
+  // THE FIRST THING THE MEASUREMENT SAID WAS THAT THE PREMISE WAS WRONG. The
+  // previous version was ALREADY one statement: `relationJoins` collapses a
+  // nested include into one lateral join, so there was never an N+1 to remove.
+  // What it did was carry every settlement and all 827 of its load lines across
+  // the wire to add them up in the worker and produce fourteen rows.
+  //
+  // THE SECOND THING IT SAID WAS THAT THREE STATEMENTS ARE SLOWER THAN ONE
+  // HERE. Measured on dev, four batches and 141 settlements, best of three:
+  //
+  //   ONE   relation-join read, 827 lines transferred   265ms   1 statement
+  //   THREE grouped reads, 14 rows transferred          761ms   3 statements
+  //   TWO   grouped reads, 14 rows transferred          514ms   2 statements
+  //
+  // Three round trips cost 761ms and two cost 514ms — about 250ms each, which
+  // is the link, and it is why the payload saving does not show yet.
+  //
+  // At roughly 250ms to us-east-2 the ROUND TRIP is the cost and the payload is
+  // not, on a dataset this size. So the batch rows and their totals are folded
+  // into one grouped statement rather than three, which is the shape that is
+  // both item 7's and the cheapest available.
+  //
+  // AND AT 514ms IT IS STILL SLOWER THAN THE 265ms SINGLE READ. It is kept
+  // because the
+  // thing that grows is load lines — 827 now, and a year of weeks is tens of
+  // thousands — while this transfers `batches × authorities` whatever happens.
+  // The crossover is soon and the old shape has no ceiling. That is a judgement
+  // about the future, so it is written here as one rather than dressed up as a
+  // speed-up: on today's data this change costs about 250ms.
+  const rows = await tx.$queryRaw<
+    {
+      id: string
+      batch_number: string | null
+      status: string
+      created_at: Date
+      check_date: Date
+      statement_date: Date
+      period_start: Date
+      period_end: Date
+      notes: string | null
+      statements: bigint
+      amount: bigint
+    }[]
+  >`
+    SELECT
+      b."id"                                   AS id,
+      b."batchNumber"                          AS batch_number,
+      b."status"::text                         AS status,
+      b."createdAt"                            AS created_at,
+      b."checkDate"                            AS check_date,
+      b."statementDate"                        AS statement_date,
+      b."periodStart"                          AS period_start,
+      b."periodEnd"                            AS period_end,
+      b."notes"                                AS notes,
+      COUNT(st."id")::bigint                   AS statements,
+      COALESCE(SUM(st."netCents"), 0)::bigint  AS amount
+    FROM "SettlementBatch" b
+    LEFT JOIN "Settlement" st
+      ON st."batchId" = b."id" AND st."deletedAt" IS NULL
+    WHERE b."deletedAt" IS NULL
+    GROUP BY b."id"
+    ORDER BY b."periodStart" DESC
+    LIMIT 500
+  `
+  if (rows.length === 0) return []
 
-  // THE COMPANY SCOPE APPLIES TO THE BREAKDOWN, NOT TO THE BATCH. A batch is
-  // org-wide by ruling, so hiding one because a scoped user cannot see one of its
+  const ids = rows.map((row) => row.id)
+
+  // ── THE BREAKDOWN, GROUPED IN POSTGRES ─────────────────────────────────
+  //
+  // `COUNT(DISTINCT st."id")` is the part worth reading twice: a driver counts
+  // ONCE per authority they pulled for, however many of that authority's loads
+  // they ran. The hand-rolled version needed a second pass over the same lines
+  // to avoid counting a driver once per LOAD; here the database does it, and
+  // getting it wrong would have inflated every authority's statement count.
+  const breakdownRows = await tx.$queryRaw<
+    {
+      batch_id: string
+      company_id: string
+      company_name: string
+      statements: bigint
+      amount: bigint
+    }[]
+  >`
+    SELECT
+      st."batchId"                    AS batch_id,
+      l."companyId"                   AS company_id,
+      c."name"                        AS company_name,
+      COUNT(DISTINCT st."id")::bigint AS statements,
+      SUM(line."amountCents")::bigint AS amount
+    FROM "SettlementLoadLine" line
+    JOIN "Settlement" st ON st."id" = line."settlementId"
+    JOIN "Load" l        ON l."id"  = line."loadId"
+    JOIN "Company" c     ON c."id"  = l."companyId"
+    WHERE st."batchId" IN (${Prisma.join(ids)})
+      AND st."deletedAt" IS NULL
+    GROUP BY st."batchId", l."companyId", c."name"
+    ORDER BY c."name"
+  `
+
+  // THE COMPANY SCOPE NARROWS THE BREAKDOWN, NOT THE BATCH. A batch is org-wide
+  // by ruling, so hiding one because a scoped user cannot see one of its
   // authorities would hide the week itself. What narrows is which authorities'
-  // rows they see under it — and the batch total stays the batch total, which is
-  // §7.4.2's rule about an actionable figure.
+  // rows they see under it — and the batch total stays the batch total, which
+  // is §7.4.2's rule about an actionable figure.
   const allowed =
     'companyId' in scope && scope.companyId ? new Set(scope.companyId.in) : null
 
-  return batches.map((batch) => {
-    const perCompany = new Map<string, BatchCompanyRow>()
-    let amountCents = 0
+  const breakdownOf = new Map<string, BatchCompanyRow[]>()
+  for (const row of breakdownRows) {
+    if (allowed && !allowed.has(row.company_id)) continue
+    const list = breakdownOf.get(row.batch_id) ?? []
+    list.push({
+      companyId: row.company_id,
+      companyName: row.company_name,
+      statements: Number(row.statements),
+      amountCents: Number(row.amount),
+    })
+    breakdownOf.set(row.batch_id, list)
+  }
 
-    for (const settlement of batch.settlements) {
-      amountCents += settlement.netCents
-      for (const line of settlement.loadLines) {
-        const id = line.load.companyId
-        if (allowed && !allowed.has(id)) continue
-        const existing = perCompany.get(id)
-        if (existing) {
-          existing.amountCents += line.amountCents
-        } else {
-          perCompany.set(id, {
-            companyId: id,
-            companyName: line.load.company.name,
-            statements: 0,
-            amountCents: line.amountCents,
-          })
-        }
-      }
-      // A DRIVER COUNTS ONCE PER AUTHORITY THEY PULLED FOR, which is why this is
-      // a second pass over the same lines: summing `statements` inside the loop
-      // above would count a driver once per LOAD.
-      const touched = new Set(
-        settlement.loadLines
-          .map((line) => line.load.companyId)
-          .filter((id) => !allowed || allowed.has(id)),
-      )
-      for (const id of touched) {
-        const row = perCompany.get(id)
-        if (row) row.statements += 1
-      }
-    }
-
-    return {
-      id: batch.id,
-      batchNumber: batch.batchNumber,
-      status: batch.status,
-      createdAt: batch.createdAt,
-      checkDate: batch.checkDate,
-      statementDate: batch.statementDate,
-      periodStart: batch.periodStart,
-      periodEnd: batch.periodEnd,
-      statements: batch.settlements.length,
-      amountCents,
-      // Always null: the row's answer is "all authorities" and the names are on
-      // `breakdown`. See the field's own note.
-      payCompanyName: null,
-      notes: batch.notes,
-      breakdown: [...perCompany.values()].sort((left, right) =>
-        left.companyName.localeCompare(right.companyName),
-      ),
-    }
-  })
+  return rows.map((row) => ({
+    id: row.id,
+    batchNumber: row.batch_number,
+    status: row.status,
+    createdAt: row.created_at,
+    checkDate: row.check_date,
+    statementDate: row.statement_date,
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    statements: Number(row.statements),
+    amountCents: Number(row.amount),
+    // Always null: the row's answer is "all authorities" and the names are on
+    // `breakdown`. See the field's own note.
+    payCompanyName: null,
+    notes: row.notes,
+    breakdown: breakdownOf.get(row.id) ?? [],
+  }))
 }
 
 export const batchShape: ListShape<BatchGridRow> = {

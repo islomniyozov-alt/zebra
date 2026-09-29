@@ -196,7 +196,6 @@ export default async function StatementsPage({
     <>
       <PageHeader
         title={t('payroll.tab.statements')}
-        stripeMeans={t('accounting.payroll.stripe')}
         breadcrumb={[t('nav.group.payroll'), t('payroll.tab.statements')]}
       />
       <Tabs

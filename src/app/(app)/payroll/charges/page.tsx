@@ -212,7 +212,6 @@ export default async function ChargesPage({
       <PageHeader
         title={t('accounting.charges.title')}
         breadcrumb={[t('nav.group.payroll'), t('accounting.charges.title')]}
-        stripeMeans={t('accounting.charges.stripe')}
         action={
           mayEdit && tab === 'scheduled' ? (
             <AddCharge

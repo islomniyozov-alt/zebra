@@ -177,7 +177,6 @@ export default async function AccountingInvoicesPage({
       <PageHeader
         title={t('accounting.invoices.title')}
         breadcrumb={[t('nav.group.accounting'), t('accounting.invoices.title')]}
-        stripeMeans={t('accounting.invoices.stripe')}
       />
       <Tabs
         tabs={[

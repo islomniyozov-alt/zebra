@@ -158,7 +158,6 @@ export default async function ReportsPage({
       <PageHeader
         title={t('accounting.reports.title')}
         breadcrumb={[t('nav.group.accounting'), t('accounting.reports.title')]}
-        stripeMeans={t('accounting.reports.window')}
       />
       <Tabs
         tabs={[

@@ -157,6 +157,21 @@ interface TableProps<Row> {
    * put the breakdown five hundred pixels below the four rows it describes.
    */
   below?: ReactNode
+  /**
+   * §6.2 — a continuation row rendered directly beneath its parent.
+   *
+   * THE BATCHES GRID'S PER-AUTHORITY BREAKDOWN, and the reason `below` was not
+   * enough: rendered after the table it sat under the FOOT, so four batches and
+   * their ten authority rows were two lists a reader had to match up by batch
+   * number. §6.2 asks for "an indented continuation of its parent row", because
+   * somebody comparing four authorities' shares of one week is comparing rows
+   * that have to be adjacent (rule 1).
+   *
+   * IT IS A `<tr>`, NOT A NESTED TABLE. One table means one set of column
+   * widths, so an authority's amount lines up under the batch's amount — which
+   * is the entire point of putting it there.
+   */
+  rowDetail?: (row: Row) => ReactNode
 }
 
 export function Table<Row>({
@@ -174,6 +189,7 @@ export function Table<Row>({
   totals,
   footRows,
   below,
+  rowDetail,
 }: TableProps<Row>) {
   if (totals && columns[0]?.foot) {
     // The first foot cell carries the label, so a `foot` there would be
@@ -281,7 +297,8 @@ export function Table<Row>({
             rows.map((row) => {
               const cancelled = isCancelled?.(row) ?? false
               const href = rowHref?.(row) ?? null
-              return (
+              const detail = rowDetail?.(row) ?? null
+              return [
                 <tr
                   key={rowKey(row)}
                   className={cx(
@@ -348,8 +365,28 @@ export function Table<Row>({
                       )}
                     </td>
                   ))}
-                </tr>
-              )
+                </tr>,
+                // THE CONTINUATION, IMMEDIATELY BENEATH. A second `<tr>` in the
+                // same table body, spanning every column, so it inherits the
+                // grid's widths and sits against the row it describes.
+                detail === null ? null : (
+                  <tr
+                    key={`${rowKey(row)}-detail`}
+                    className="border-b border-border bg-surface-2"
+                  >
+                    {stripeTone ? (
+                      <td aria-hidden className="w-[3px] p-0" />
+                    ) : null}
+                    {selection ? <td aria-hidden className="w-[32px]" /> : null}
+                    <td
+                      colSpan={columns.length}
+                      className="px-z3 py-z1 ps-z6 text-xs text-ink-2"
+                    >
+                      {detail}
+                    </td>
+                  </tr>
+                ),
+              ]
             })
           )}
         </tbody>
