@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v10.8 — §6.2: Invoices gains a Factored tab, a status filter and bulk Mark sent 2026-09-30; v10.7 — §6.2.4 standing charges specified and held for migration 61, 2026-09-30; v10.6 — §6.2.2: the Trip column is the broker’s reference and Add trips is unconditional 2026-09-30; v10.5 — §6.2.2: every statement exports, a draft’s PDF is watermarked 2026-09-30 (owner’s ruling, reversing the same day’s refusal); v10.4 — §8’s heading rule decides by an allowlist of issued series 2026-09-30; v10.3 — §8 forbids an internal id in a heading and §6.2.2 gives the statement its title rule 2026-09-30 (owner’s ruling); v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
+**Status:** v10.9 — §6.2.5 applying a payment 2026-09-30, and §7.5’s six-field cap applied against a brief asking for a modal; v10.8 — §6.2: Invoices gains a Factored tab, a status filter and bulk Mark sent 2026-09-30; v10.7 — §6.2.4 standing charges specified and held for migration 61, 2026-09-30; v10.6 — §6.2.2: the Trip column is the broker’s reference and Add trips is unconditional 2026-09-30; v10.5 — §6.2.2: every statement exports, a draft’s PDF is watermarked 2026-09-30 (owner’s ruling, reversing the same day’s refusal); v10.4 — §8’s heading rule decides by an allowlist of issued series 2026-09-30; v10.3 — §8 forbids an internal id in a heading and §6.2.2 gives the statement its title rule 2026-09-30 (owner’s ruling); v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -599,6 +599,34 @@ model, and `DEDUCTION_TOLL`.
   unrecognised file, and says which header it could not find. A named refusal is
   a working importer for a format nobody has seen yet; a guess is not.
 
+#### 6.2.5 Applying a payment — _added 2026-09-30_
+
+_Owner's ruling, 2026-09-30. Money arrives as one wire against several open
+items; until it is applied it sits unapplied and nothing it paid for looks
+paid._
+
+**One list of the payer's OPEN ITEMS, both kinds together.** Direct-settled
+loads with a balance and invoices with a balance, in one list — because the
+question is "what does this payer owe us", and a screen that answered it in
+two tables would make the person add up two subtotals to see whether the wire
+is covered.
+
+- **Every row's amount is prefilled to that item's balance and is editable.**
+  The common case is a wire that clears its items exactly, and the common case
+  should be one click.
+- **Partial is allowed and the remainder STAYS UNAPPLIED.** Not forced onto the
+  oldest item, not written off. Unapplied money is a real state — §6 already
+  says so about `unappliedCents` — and a screen that always zeroed it would be
+  inventing an allocation nobody made.
+- **ONE TRANSACTION, ALL OR NOTHING.** This is the opposite of bulk Change
+  status and bulk Mark sent, deliberately: those are independent acts on
+  independent rows where partial success is honest. Here one person is
+  DIVIDING ONE PAYMENT, and applying three of their five allocations while
+  refusing two would leave a split nobody chose. Every refusal is named.
+- **The application rows are written one at a time, not with `createMany`.**
+  The audit extension reports `createMany` as an unfollowable operation, so a
+  bulk insert would apply money with no audit trail behind it.
+
 #### 6.2.4 Standing charges — _specified 2026-09-30, unbuilt_
 
 _Owner's ruling, 2026-09-30. A fourth tab on Payroll → Charges, joining
@@ -863,6 +891,16 @@ _(The Tuesday screen already worked this way; this writes it down.)_
 Label above input, 12px `--z-ink-2`. Mark required fields, not optional ones. Validate on blur, never on keystroke. Errors sit under the field in `--z-danger`, 12px, and say what to do — see §10.
 
 **Modals hold six fields at most.** Anything larger is a full page. The Add Load form is a full page.
+
+_Applied 2026-09-30 against a brief that asked for a modal, and this rule won.
+Part two of the accounting finish-week specified "a modal listing the payer's
+open items". That surface is ONE EDITABLE AMOUNT PER OPEN ITEM and the count
+is unbounded — Werner alone has two hundred loads ready to invoice, so a payer
+with ten open items is ordinary rather than exceptional. Six fields is the
+cap; ten amounts in a dialog would be a scrolling form inside a focus trap,
+with the running total the reader most needs pushed off-screen. Built as a
+full page, flagged rather than silently resolved (`AGENTS.md`), and the owner
+can overrule it. See §6.2.5._
 
 ### 7.6 Add Load — the hot path
 
