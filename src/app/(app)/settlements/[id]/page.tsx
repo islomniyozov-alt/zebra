@@ -217,6 +217,9 @@ export default async function SettlementPage({
           select: {
             id: true,
             batchNumber: true,
+            // READ FOR THE EXPORT GATE. The statement route refuses on the
+            // BATCH's status, not the settlement's — see the gate below.
+            status: true,
             statementDate: true,
             checkDate: true,
           },
@@ -600,12 +603,19 @@ export default async function SettlementPage({
              * Datatruck-layout one all along. Two documents for one
              * settlement, and the workbench was showing the wrong one.
              *
-             * ABSENT ON A DRAFT rather than disabled. That route answers 409
-             * for a draft on a recorded ruling — a draft's lines are thrown
-             * away and rebuilt on every refresh, so a PDF of one is a figure
-             * that will be different tomorrow — and the batch page already
-             * hides the same link for the same reason. */}
-            {settlement.status !== 'DRAFT' ? (
+             * ABSENT WHEN THE ROUTE WOULD REFUSE, on exactly the route's own
+             * condition: no batch, or a batch still in DRAFT. A draft's lines
+             * are thrown away and rebuilt on every refresh, so a PDF of one
+             * is a figure that will be different tomorrow.
+             *
+             * THE FIRST VERSION GATED ON THE SETTLEMENT'S STATUS AND WAS
+             * WRONG. A settlement can be PAID inside a batch that is still a
+             * draft — dev holds exactly that row — so the button appeared and
+             * the route answered 409. Two conditions that were supposed to
+             * agree, written twice. Found by fetching the real bytes from the
+             * deployed worker, not by the suite. */}
+            {settlement.batch !== null &&
+            settlement.batch.status !== 'DRAFT' ? (
               <a
                 href={`/api/settlements/statement/${settlement.id}`}
                 target="_blank"

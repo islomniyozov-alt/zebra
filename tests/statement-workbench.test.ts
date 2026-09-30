@@ -600,11 +600,19 @@ describe('Export PDF points at the statement, not the retired stub', () => {
     expect(page).not.toMatch(/href=\{`\/api\/settlements\/\$\{[^}]+\}\/pdf`\}/)
   })
 
-  it('is absent on a draft, because that route answers 409 for one', () => {
-    // A draft's lines are thrown away and rebuilt on every refresh, so a PDF
-    // of one is a figure that will be different tomorrow. The batch page
-    // hides the same link for the same reason.
-    expect(page).toMatch(/settlement\.status !== 'DRAFT' \? \(/)
+  it('is gated on the BATCH, which is what the route actually refuses on', () => {
+    // THE FIRST VERSION OF THIS GUARD ASSERTED THE WRONG CONDITION and
+    // passed. The page gated on `settlement.status !== 'DRAFT'` while the
+    // route refuses on `!settlement.batch || settlement.batch.status ===
+    // 'DRAFT'` — so a PAID settlement inside a draft batch, which dev holds,
+    // showed a button that answered 409. Two conditions that had to agree,
+    // written twice, and the test copied the wrong one.
+    //
+    // Caught by fetching the real bytes from the deployed worker. Every one
+    // of dev's twelve statements answered 409.
+    expect(page).toMatch(
+      /settlement\.batch !== null &&\s+settlement\.batch\.status !== 'DRAFT'/,
+    )
   })
 
   it('and the route it used is gone from the tree', () => {
