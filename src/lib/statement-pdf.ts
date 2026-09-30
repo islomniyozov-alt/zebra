@@ -159,6 +159,17 @@ export interface StatementPdfInput {
    * printing "YTD" over a figure that is not one.
    */
   ytdFromPeriodStart: Date | null
+  /**
+   * Stamp DRAFT across the sheet.
+   *
+   * Owner's ruling, 2026-09-30: every statement exports, and a draft's PDF
+   * says so on its face. THE WATERMARK IS WHAT REPLACED THE REFUSAL — the
+   * route used to answer 409 for a draft because its figures are rebuilt on
+   * every refresh, and a sheet with DRAFT across it cannot be mistaken for
+   * the one somebody was paid on, which is the whole thing the refusal was
+   * protecting.
+   */
+  draft?: boolean
 }
 
 const LEFT = 40
@@ -185,6 +196,25 @@ export function renderStatementPdf(input: StatementPdfInput): Uint8Array {
   }
   const rule = () => {
     ops.push(`${LEFT} ${y} m ${RIGHT} ${y} l 0.5 w S`)
+  }
+
+  // ── THE DRAFT WATERMARK, DRAWN FIRST ───────────────────────────────────
+  //
+  // Before anything else, so every figure sits ON TOP of it and stays
+  // readable — a stamp over the numbers would make the document harder to
+  // check, which is the opposite of why somebody prints a draft.
+  //
+  // LIGHT GREY AND ROTATED, not a box in a corner. It has to survive being
+  // photocopied, faxed to a factor, and photographed on a phone in a cab; a
+  // corner label survives none of those as well as a diagonal across the
+  // page. Roughly 45 degrees, by the rotation matrix, because PDF has no
+  // `rotate` operator.
+  if (input.draft) {
+    const cos = 0.7071
+    ops.push(
+      'q 0.88 0.88 0.88 rg BT /F2 96 Tf ' +
+        `${cos} ${cos} ${-cos} ${cos} 120 200 Tm (DRAFT) Tj ET Q`,
+    )
   }
 
   // ── header: the company on the left, the four dates on the right ───────

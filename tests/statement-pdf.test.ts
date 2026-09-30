@@ -559,3 +559,71 @@ describe('every figure the input carries reaches the page', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// THE DRAFT WATERMARK (§6.2.2, owner's ruling 2026-09-30).
+//
+// It replaced a 409. The route used to refuse a draft because its figures are
+// rebuilt on every refresh; the watermark is what makes rendering one safe, so
+// these cases are the ones holding that trade open.
+// ---------------------------------------------------------------------------
+
+describe('a draft renders, and says so on its face', () => {
+  const draft = renderStatementPdf(
+    inputFor({ draft: true, statementNumber: '' }),
+  )
+  const final = renderStatementPdf(inputFor())
+
+  it('stamps DRAFT across the sheet', () => {
+    expect(drawn(draft)).toContain('DRAFT')
+  })
+
+  it('and a finalised one carries no such stamp', () => {
+    expect(drawn(final)).not.toContain('DRAFT')
+  })
+
+  it('leaves the Settlement line empty rather than printing an id', () => {
+    // §8: no number until one is issued. The placeholder is two row ids, and
+    // printing it on paper would put there the exact string the heading rule
+    // keeps off the screen.
+    const text = drawn(draft)
+    expect(text).toContain('Settlement:')
+    expect(text.join('\n')).not.toMatch(/DRAFT-[a-z0-9]/)
+  })
+
+  it('still prints every figure — a draft is for checking', () => {
+    // THE WHOLE REASON THE REFUSAL WAS WRONG. Somebody prints a draft to
+    // check it before posting, so a watermarked sheet missing its numbers
+    // would be worse than the 409 it replaced.
+    const joined = drawn(draft).join('\n')
+    for (const load of FIXTURE.loads) {
+      expect(joined, load.loadNumber).toContain(load.loadNumber)
+      expect(joined).toContain(statementMoney(load.grossCents))
+      expect(joined).toContain(statementMoney(load.amountCents))
+    }
+    for (const [key, cents] of Object.entries(FIXTURE.summary)) {
+      expect(joined, `summary ${key}`).toContain(statementMoney(cents))
+    }
+  })
+
+  it('draws the watermark UNDER the figures, not over them', () => {
+    // A stamp on top of the numbers makes the document harder to check,
+    // which is the opposite of why somebody prints a draft. In PDF content
+    // streams, first drawn is underneath.
+    const raw = new TextDecoder('latin1').decode(draft)
+    const stamp = raw.indexOf('(DRAFT) Tj')
+    const firstFigure = raw.indexOf(
+      `(${statementMoney(FIXTURE.totals.amountCents)}) Tj`,
+    )
+    expect(stamp).toBeGreaterThan(-1)
+    expect(firstFigure).toBeGreaterThan(-1)
+    expect(stamp).toBeLessThan(firstFigure)
+  })
+
+  it('is still one page of a valid PDF', () => {
+    const raw = new TextDecoder('latin1').decode(draft)
+    expect(raw.startsWith('%PDF-')).toBe(true)
+    expect(raw).toContain('%%EOF')
+    expect((raw.match(/\/Type\s*\/Page(?![s])/g) ?? []).length).toBe(1)
+  })
+})

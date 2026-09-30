@@ -600,19 +600,18 @@ describe('Export PDF points at the statement, not the retired stub', () => {
     expect(page).not.toMatch(/href=\{`\/api\/settlements\/\$\{[^}]+\}\/pdf`\}/)
   })
 
-  it('is gated on the BATCH, which is what the route actually refuses on', () => {
-    // THE FIRST VERSION OF THIS GUARD ASSERTED THE WRONG CONDITION and
-    // passed. The page gated on `settlement.status !== 'DRAFT'` while the
-    // route refuses on `!settlement.batch || settlement.batch.status ===
-    // 'DRAFT'` — so a PAID settlement inside a draft batch, which dev holds,
-    // showed a button that answered 409. Two conditions that had to agree,
-    // written twice, and the test copied the wrong one.
+  it('is offered on every statement, with no condition on it', () => {
+    // Owner's ruling, 2026-09-30, reversing the same day's "absent on a
+    // draft". The route renders everything now, so the page states nothing
+    // about when it can.
     //
-    // Caught by fetching the real bytes from the deployed worker. Every one
-    // of dev's twelve statements answered 409.
-    expect(page).toMatch(
-      /settlement\.batch !== null &&\s+settlement\.batch\.status !== 'DRAFT'/,
-    )
+    // THE TWO PREVIOUS VERSIONS OF THIS GUARD BOTH RESTATED A SERVER RULE IN
+    // THE PAGE, and the second restated it WRONG — it tested the settlement's
+    // status where the route tested the batch's, so a PAID statement in a
+    // draft batch showed a button that answered 409, and this test passed
+    // over it. The absence of a condition is the thing being asserted.
+    expect(page).not.toMatch(/settlement\.batch\.status !== 'DRAFT'/)
+    expect(page).not.toMatch(/settlement\.status !== 'DRAFT' \? \(\s*<a/)
   })
 
   it('and the route it used is gone from the tree', () => {
@@ -630,5 +629,58 @@ describe('Export PDF points at the statement, not the retired stub', () => {
         ),
       ),
     ).toBe(false)
+  })
+})
+
+describe('the statement route refuses nothing', () => {
+  const route = readFileSync(
+    join(
+      process.cwd(),
+      'src',
+      'app',
+      'api',
+      'settlements',
+      'statement',
+      '[id]',
+      'route.ts',
+    ),
+    'utf8',
+  )
+
+  it('has no 409 left in it', () => {
+    // Owner's ruling, 2026-09-30. The refusal is what the watermark replaced.
+    //
+    // ON THE CALL, NOT ON THE NUMBER. The first version matched `\b409\b` and
+    // failed against the comments explaining why the refusal is gone — one of
+    // which literally says "there is no 409 left in this file". Second time
+    // this session a negative guard has fired on its own prose.
+    expect(route).not.toMatch(/apiError\(\s*409/)
+    expect(route).not.toMatch(/'draft' as const/)
+  })
+
+  it('tells the renderer when to stamp, from the BATCH not the settlement', () => {
+    // A settlement can be PAID inside a batch still being assembled — dev
+    // holds that row — and it is the batch that decides whether these figures
+    // are still moving.
+    expect(route).toMatch(
+      /const isDraft =\s*settlement\.batch === null \|\| settlement\.batch\.status === 'DRAFT'/,
+    )
+    expect(route).toMatch(/draft: isDraft,/)
+  })
+
+  it('blanks a placeholder number instead of printing it', () => {
+    // §8 on paper: the placeholder is two row ids, and the heading rule keeps
+    // that string off the screen.
+    expect(route).toMatch(
+      /isPlaceholderNumber\(settlement\.settlementNumber\)\s*\?\s*''/,
+    )
+  })
+
+  it('survives a settlement with no batch at all', () => {
+    // Six on dev. Every batch-derived field needs a fallback or the route
+    // throws instead of rendering.
+    expect(route).toMatch(/settlement\.batch\?\.batchNumber \?\? ''/)
+    expect(route).toMatch(/settlement\.batch\?\.statementDate \?\?/)
+    expect(route).toMatch(/settlement\.batch\?\.checkDate \?\?/)
   })
 })

@@ -594,38 +594,30 @@ export default async function SettlementPage({
                 }}
               />
             ) : null}
-            {/* ── EXPORT PDF POINTS AT THE STATEMENT, NOT THE OLD STUB ────
+            {/* ── EXPORT PDF, ON EVERY STATEMENT ─────────────────────
              *
-             * Owner, 2026-09-30: "the statement PDF is a stub — gross and net
-             * only, no lines". It was, because this button linked
-             * `/api/settlements/{id}/pdf` — a SECOND renderer, older and
-             * thinner, while the batch detail page had been linking the real
-             * Datatruck-layout one all along. Two documents for one
-             * settlement, and the workbench was showing the wrong one.
+             * Owner's ruling, 2026-09-30, and it reversed twice in a day —
+             * worth recording because the second reversal is the one that
+             * matters. The route refused a draft with a 409; the button was
+             * then hidden to match; the owner ruled that drafts export with
+             * a watermark, so the refusal went and the button came back.
              *
-             * ABSENT WHEN THE ROUTE WOULD REFUSE, on exactly the route's own
-             * condition: no batch, or a batch still in DRAFT. A draft's lines
-             * are thrown away and rebuilt on every refresh, so a PDF of one
-             * is a figure that will be different tomorrow.
-             *
-             * THE FIRST VERSION GATED ON THE SETTLEMENT'S STATUS AND WAS
-             * WRONG. A settlement can be PAID inside a batch that is still a
-             * draft — dev holds exactly that row — so the button appeared and
-             * the route answered 409. Two conditions that were supposed to
-             * agree, written twice. Found by fetching the real bytes from the
-             * deployed worker, not by the suite. */}
-            {settlement.batch !== null &&
-            settlement.batch.status !== 'DRAFT' ? (
-              <a
-                href={`/api/settlements/statement/${settlement.id}`}
-                target="_blank"
-                rel="noopener"
-              >
-                <Button variant="secondary" size="compact">
-                  {t('workbench.exportPdf')}
-                </Button>
-              </a>
-            ) : null}
+             * NO CONDITION AT ALL NOW, which is the point: the two previous
+             * versions were both attempts to restate the route's refusal in
+             * the page, and the second got it wrong — it tested the
+             * settlement's status where the route tested the batch's. A
+             * control whose availability has to be kept in sync with a
+             * server rule is a control that will drift out of sync with it.
+             * The route renders everything, so the button is always there. */}
+            <a
+              href={`/api/settlements/statement/${settlement.id}`}
+              target="_blank"
+              rel="noopener"
+            >
+              <Button variant="secondary" size="compact">
+                {t('workbench.exportPdf')}
+              </Button>
+            </a>
           </div>
         }
       />
