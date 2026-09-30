@@ -5,6 +5,7 @@ import {
   statementMiles,
   statementMoney,
   usDate,
+  textWidth,
   type StatementPdfInput,
 } from '@/lib/statement-pdf'
 import { DATATRUCK_STATEMENTS } from './fixtures/datatruck-statements'
@@ -697,5 +698,148 @@ describe('the Load number column is the broker number', () => {
       }),
     )
     expect(drawn(empty)).toContain('DT-016018')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// NO TWO CELLS MAY TOUCH (owner's report, 2026-09-30).
+//
+// The Earnings table printed `310$1,503.26` and the header ran `Driver:` into
+// `Unit Number:`. Both came from one cause: the renderer measured every
+// string as `length * size * 0.5`, which under-counts Helvetica capitals by
+// about a third and digits by a hair — enough to slide a right-aligned cell
+// into its neighbour.
+//
+// ── WHY THIS MEASURES THE CONTENT STREAM AND NOT `pdftotext` ─────────────
+//
+// The ruling asks for "a space or column boundary in the extracted text", and
+// the faithful way to read that is a layout-preserving extraction. `pdftotext
+// -layout` would do it and is how the corpus is read — but it is poppler, it
+// is not installed on the CI runner, and a test that silently skips where it
+// matters is worse than no test.
+//
+// So this reads the positions the renderer WROTE: every `Td` carries an x and
+// a baseline, and `textWidth` is the same function the renderer places with.
+// Cells on one baseline are sorted left to right and required to keep a real
+// gap. That is the column boundary, measured in points, which is the thing
+// "a space in the text" is evidence OF.
+// ---------------------------------------------------------------------------
+
+interface DrawnCell {
+  x: number
+  size: number
+  text: string
+}
+
+/** Every drawn run, grouped by baseline, left to right. */
+function cellsByRow(bytes: Uint8Array): Map<number, DrawnCell[]> {
+  const raw = new TextDecoder('latin1').decode(bytes)
+  const rows = new Map<number, DrawnCell[]>()
+  const runs = raw.matchAll(
+    /BT \/F\d (\d+(?:\.\d+)?) Tf (-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?) Td \(((?:\\.|[^\\()])*)\) Tj ET/g,
+  )
+  for (const run of runs) {
+    const size = Number(run[1])
+    const x = Number(run[2])
+    const y = Number(run[3])
+    const text = run[4]!.replace(/\\([()\\])/g, '$1')
+    if (text === '') continue
+    if (!rows.has(y)) rows.set(y, [])
+    rows.get(y)!.push({ x, size, text })
+  }
+  for (const cells of rows.values()) cells.sort((a, b) => a.x - b.x)
+  return rows
+}
+
+/**
+ * The gap a column boundary must keep, less a hair for binary arithmetic.
+ *
+ * The header's gap comes out at 7.999999999999943 against a COLUMN_GAP of 8 —
+ * summing per-character widths in floating point does that. An epsilon here
+ * is honest; rounding the measurement would hide a real 0.4pt error just as
+ * happily as this imaginary one.
+ */
+const COLUMN_GAP_PT = 8 - 1e-6
+
+describe('the sheet has no two cells touching', () => {
+  const pdf = renderStatementPdf(
+    inputFor({
+      // THE NAME THAT BROKE IT. Twenty-one capitals, measured 34pt narrower
+      // than it draws under the old approximation.
+      driverName: 'ABDUNAZARJONI ALIZODA',
+    }),
+  )
+  const rows = cellsByRow(pdf)
+
+  it('keeps a real gap between every neighbouring pair', () => {
+    const tight: string[] = []
+    for (const [y, cells] of rows) {
+      for (let index = 0; index + 1 < cells.length; index++) {
+        const left = cells[index]!
+        const next = cells[index + 1]!
+        const gap = next.x - (left.x + textWidth(left.text, left.size))
+        // THREE POINTS, NOT ZERO. "Do the glyphs overlap" is the wrong
+        // question: the header that was reported as running together left
+        // 1.4pt between the driver's name and the next label, which does not
+        // overlap and does read as one word. The smallest DELIBERATE gap on
+        // the sheet is the 4pt between a label and its own value, so three
+        // is the widest floor that accuses nothing innocent.
+        if (gap < 3) {
+          tight.push(
+            `y=${y} gap=${gap.toFixed(2)} ${JSON.stringify(left.text)} | ${JSON.stringify(next.text)}`,
+          )
+        }
+      }
+    }
+    expect(tight, tight.join('\n')).toEqual([])
+  })
+
+  it('separates the mileage from the amount on every earnings row', () => {
+    // THE PAIR THAT WAS REPORTED, asserted by name rather than only by the
+    // sweep above — so a regression here fails with the owner's own example
+    // instead of as one line in a list.
+    const money = FIXTURE.loads.map((load) => statementMoney(load.amountCents))
+    let checked = 0
+    for (const cells of rows.values()) {
+      for (let index = 0; index + 1 < cells.length; index++) {
+        const left = cells[index]!
+        const next = cells[index + 1]!
+        if (!money.includes(next.text)) continue
+        const gap = next.x - (left.x + textWidth(left.text, left.size))
+        // THE FULL COLUMN GAP HERE, because these are two COLUMNS rather
+        // than a label and its value — and this is the pair that was
+        // reported printing as `310$1,503.26`.
+        expect(gap, `${left.text} | ${next.text}`).toBeGreaterThanOrEqual(
+          COLUMN_GAP_PT,
+        )
+        checked += 1
+      }
+    }
+    expect(checked).toBeGreaterThan(0)
+  })
+
+  it('keeps the driver name clear of the next header field', () => {
+    const header = [...rows.values()].find((cells) =>
+      cells.some((cell) => cell.text === 'Driver:'),
+    )
+    expect(header).toBeDefined()
+    const name = header!.find((cell) => cell.text === 'ABDUNAZARJONI ALIZODA')
+    expect(name).toBeDefined()
+    const after = header!.find((cell) => cell.x > name!.x)
+    if (after) {
+      const gap = after.x - (name!.x + textWidth(name!.text, name!.size))
+      expect(gap, `name | ${after.text}`).toBeGreaterThanOrEqual(COLUMN_GAP_PT)
+    }
+  })
+
+  it('draws nothing past the right margin', () => {
+    for (const cells of rows.values()) {
+      for (const cell of cells) {
+        const rightEdge = cell.x + textWidth(cell.text, cell.size)
+        // The watermark is rotated and placed by matrix, not by Td, so it is
+        // not in this set at all — everything here is ordinary text.
+        expect(rightEdge, cell.text).toBeLessThanOrEqual(573)
+      }
+    }
   })
 })

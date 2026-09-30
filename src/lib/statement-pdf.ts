@@ -191,9 +191,182 @@ const LEFT = 40
 const RIGHT = 572
 const TOP = 780
 
+// ---------------------------------------------------------------------------
+// HOW WIDE A STRING IS, IN HELVETICA.
+//
+// THIS REPLACED `length * size * 0.5`, WHICH WAS WRONG IN BOTH DIRECTIONS AND
+// PUT TWO COLUMNS ON TOP OF EACH OTHER. Owner, 2026-09-30: the Earnings
+// table printed `310$1,503.26` and the header ran `Driver:` into
+// `Unit Number:`.
+//
+// The approximation under-counted capitals badly — Helvetica's uppercase
+// averages about 0.70 em against the 0.50 it assumed, so a 21-character
+// driver name was measured 34pt narrower than it draws and sailed through the
+// next column. On the totals row it under-counted digits just enough to put
+// the mileage 2pt INSIDE the amount: measured, not guessed — see the test.
+//
+// SO THE WIDTHS ARE THE REAL ONES. Adobe's Helvetica advance widths, in
+// 1/1000 em, for printable ASCII. Two properties of this font do most of the
+// work: every DIGIT is 556, so figures are tabular and a column of them lines
+// up, and `,` and `.` are both 278, so money strings of the same shape are
+// the same width.
+//
+// UNKNOWN CHARACTERS COUNT AS 556, the digit width — a deliberate
+// over-estimate for the narrow punctuation that might slip in, because
+// over-estimating pushes a right-aligned cell LEFT, away from its neighbour.
+// Wrong in the safe direction.
+// ---------------------------------------------------------------------------
+
+const HELVETICA_WIDTHS: Record<string, number> = {
+  ' ': 278,
+  '!': 278,
+  '"': 355,
+  '#': 556,
+  $: 556,
+  '%': 889,
+  '&': 667,
+  "'": 191,
+  '(': 333,
+  ')': 333,
+  '*': 389,
+  '+': 584,
+  ',': 278,
+  '-': 333,
+  '.': 278,
+  '/': 278,
+  0: 556,
+  1: 556,
+  2: 556,
+  3: 556,
+  4: 556,
+  5: 556,
+  6: 556,
+  7: 556,
+  8: 556,
+  9: 556,
+  ':': 278,
+  ';': 278,
+  '<': 584,
+  '=': 584,
+  '>': 584,
+  '?': 556,
+  '@': 1015,
+  A: 667,
+  B: 667,
+  C: 722,
+  D: 722,
+  E: 667,
+  F: 611,
+  G: 778,
+  H: 722,
+  I: 278,
+  J: 500,
+  K: 667,
+  L: 556,
+  M: 833,
+  N: 722,
+  O: 778,
+  P: 667,
+  Q: 778,
+  R: 722,
+  S: 667,
+  T: 611,
+  U: 722,
+  V: 667,
+  W: 944,
+  X: 667,
+  Y: 667,
+  Z: 611,
+  '[': 278,
+  '\\': 278,
+  ']': 278,
+  '^': 469,
+  _: 556,
+  '`': 333,
+  a: 556,
+  b: 556,
+  c: 500,
+  d: 556,
+  e: 556,
+  f: 278,
+  g: 556,
+  h: 556,
+  i: 222,
+  j: 222,
+  k: 500,
+  l: 222,
+  m: 833,
+  n: 556,
+  o: 556,
+  p: 556,
+  q: 556,
+  r: 333,
+  s: 500,
+  t: 278,
+  u: 556,
+  v: 500,
+  w: 722,
+  x: 500,
+  y: 500,
+  z: 500,
+  '{': 334,
+  '|': 260,
+  '}': 334,
+  '~': 584,
+}
+
+/** Advance width in points. Exported so the layout test measures what draws. */
+export function textWidth(value: string, size: number): number {
+  let thousandths = 0
+  for (const character of value) {
+    thousandths += HELVETICA_WIDTHS[character] ?? 556
+  }
+  return (thousandths / 1000) * size
+}
+
+/**
+ * The gap every pair of neighbouring cells must keep.
+ *
+ * A COLUMN BOUNDARY IS A DISTANCE, NOT A HOPE. The old layout left the
+ * mileage's right edge 2pt from the amount's left edge and relied on no
+ * figure ever being wide enough to close it; a five-digit mileage was.
+ */
+const COLUMN_GAP = 8
+
 /** The Earnings table's column origins, measured off the artefact's spacing. */
 const EARN_X = [40, 118, 216, 314, 370, 426, 492, 540] as const
+
+/**
+ * The three right-aligned Earnings columns, as RIGHT EDGES.
+ *
+ * Stated as edges rather than as `EARN_X[i] + 46`, which was an offset nobody
+ * could check against anything. Budgeted from the page edge inwards: the
+ * amount gets room for `$123,456.78` at 8pt, the mileage for `123,456.78`,
+ * and `COLUMN_GAP` sits between them.
+ */
+const EARN_GROSS_RIGHT = 464
+const EARN_MILES_RIGHT = 516
+const EARN_AMOUNT_RIGHT = RIGHT
+
+/** Header index -> the edge its column is right-aligned on. */
+const EARN_RIGHT_FOR: Record<number, number> = {
+  5: EARN_GROSS_RIGHT,
+  6: EARN_MILES_RIGHT,
+  7: EARN_AMOUNT_RIGHT,
+}
+
 const DED_X = [40, 118, 396, 452, 520] as const
+
+/** The Deductions table's right-aligned columns, on the same discipline. */
+const DED_QTY_RIGHT = 452
+const DED_RATE_RIGHT = 512
+const DED_TOTAL_RIGHT = RIGHT
+
+const DED_RIGHT_FOR: Record<number, number> = {
+  2: DED_QTY_RIGHT,
+  3: DED_RATE_RIGHT,
+  4: DED_TOTAL_RIGHT,
+}
 
 export function renderStatementPdf(input: StatementPdfInput): Uint8Array {
   const ops: string[] = []
@@ -207,7 +380,10 @@ export function renderStatementPdf(input: StatementPdfInput): Uint8Array {
   }
   /** Right-aligned, which is how every money column on the artefact sits. */
   const right = (value: string, x: number, size = 8, bold = false) => {
-    text(value, x - value.length * size * 0.5, size, bold)
+    // MEASURED, NOT ESTIMATED. `length * size * 0.5` was the bug: it
+    // under-counted capitals by about a third and digits by a hair, which is
+    // enough to slide a right-aligned cell into its neighbour.
+    text(value, x - textWidth(value, size), size, bold)
   }
   const rule = () => {
     ops.push(`${LEFT} ${y} m ${RIGHT} ${y} l 0.5 w S`)
@@ -258,11 +434,43 @@ export function renderStatementPdf(input: StatementPdfInput): Uint8Array {
     ['Driver:', input.driverName],
     ['Unit Number:', input.unitNumber ?? ''],
   ]
+  // ── LAID OUT BY MEASUREMENT, AND IT WRAPS ─────────────────────────────
+  //
+  // Four pairs every 133pt, with the value placed at `label.length * 4.2`,
+  // which is the 0.5-em guess again wearing a different constant. A
+  // 21-character driver name draws about 118pt wide and was allotted 84, so
+  // `ABDUNAZARJONI ALIZODA` ran straight through `Unit Number:` — the second
+  // half of what the owner reported on 2026-09-30.
+  //
+  // NOW EACH PAIR TAKES THE ROOM IT NEEDS AND THE ROW WRAPS when the next one
+  // will not fit. A name is not a field with a maximum length; truncating one
+  // on the document a driver checks their own pay against would be choosing
+  // the wrong thing to protect.
   let x = LEFT
   for (const [label, value] of pairs) {
+    // THE LABEL ALWAYS DRAWS, EVEN WITH NOTHING AFTER IT. Skipping the pair
+    // when the value is empty dropped `Settlement:` from a draft — and §8's
+    // rule is that a draft shows the line BLANK, not that it hides it. A
+    // labelled blank says "no number yet"; an absent label says nothing, and
+    // the reader cannot tell it from a sheet that never had the field.
+    const labelWidth = textWidth(label, 8)
+    const valueWidth = textWidth(value, 8)
+    const pairWidth = labelWidth + 4 + valueWidth
+
+    // WRAP RATHER THAN OVERFLOW. A pair that would cross the right margin
+    // starts the next line instead of running off the sheet.
+    if (x > LEFT && x + pairWidth > RIGHT) {
+      y -= 12
+      x = LEFT
+    }
+
     text(label, x, 8, true)
-    text(value, x + label.length * 4.2, 8)
-    x += 133
+    text(value, x + labelWidth + 4, 8)
+
+    // AT LEAST THE OLD PITCH, SO THE COMMON CASE STILL LINES UP in columns —
+    // a short Settlement and Batch ID keep the artefact's spacing, and only a
+    // pair that genuinely needs more room pushes its neighbour along.
+    x += Math.max(133, pairWidth + COLUMN_GAP)
   }
   y -= 13
   if (input.payTariffLabel) {
@@ -353,7 +561,7 @@ export function renderStatementPdf(input: StatementPdfInput): Uint8Array {
     'Total amount',
   ]
   earnHeads.forEach((head, index) => {
-    if (index >= 5) right(head, EARN_X[index]! + 46, 7, true)
+    if (index >= 5) right(head, EARN_RIGHT_FOR[index]!, 7, true)
     else text(head, EARN_X[index]!, 7, true)
   })
   y -= 4
@@ -392,9 +600,9 @@ export function renderStatementPdf(input: StatementPdfInput): Uint8Array {
     text(load.delPlace, EARN_X[2]!, 7)
     text(usDate(load.puDate), EARN_X[3]!, 7)
     text(usDate(load.delDate), EARN_X[4]!, 7)
-    right(statementMoney(load.grossCents), EARN_X[5]! + 46, 7)
-    right(statementMiles(load.milesHundredths), EARN_X[6]! + 46, 7)
-    right(statementMoney(load.amountCents), EARN_X[7]! + 32, 7)
+    right(statementMoney(load.grossCents), EARN_GROSS_RIGHT, 7)
+    right(statementMiles(load.milesHundredths), EARN_MILES_RIGHT, 7)
+    right(statementMoney(load.amountCents), EARN_AMOUNT_RIGHT, 7)
     y -= 11
   }
 
@@ -402,9 +610,9 @@ export function renderStatementPdf(input: StatementPdfInput): Uint8Array {
   rule()
   y -= 12
   text('Total:', EARN_X[0]!, 8, true)
-  right(statementMoney(input.totals.grossCents), EARN_X[5]! + 46, 8, true)
-  right(statementMiles(input.totals.milesHundredths), EARN_X[6]! + 46, 8, true)
-  right(statementMoney(input.totals.amountCents), EARN_X[7]! + 32, 8, true)
+  right(statementMoney(input.totals.grossCents), EARN_GROSS_RIGHT, 8, true)
+  right(statementMiles(input.totals.milesHundredths), EARN_MILES_RIGHT, 8, true)
+  right(statementMoney(input.totals.amountCents), EARN_AMOUNT_RIGHT, 8, true)
   y -= 20
 
   // ── Deductions and Other Pay, each OMITTED when it has no rows ─────────
@@ -418,7 +626,7 @@ export function renderStatementPdf(input: StatementPdfInput): Uint8Array {
     y -= 13
     const heads = [firstHead, 'Description', 'Quantity', 'Rate', 'Total amount']
     heads.forEach((head, index) => {
-      if (index >= 2) right(head, DED_X[index]! + 46, 7, true)
+      if (index >= 2) right(head, DED_RIGHT_FOR[index]!, 7, true)
       else text(head, DED_X[index]!, 7, true)
     })
     y -= 4
@@ -429,16 +637,16 @@ export function renderStatementPdf(input: StatementPdfInput): Uint8Array {
       total += row.totalCents
       text(row.type, DED_X[0]!, 7)
       text(row.description, DED_X[1]!, 7)
-      right(String(row.quantity), DED_X[2]! + 46, 7)
-      right(statementMoney(row.rateCents), DED_X[3]! + 46, 7)
-      right(statementMoney(row.totalCents), DED_X[4]! + 46, 7)
+      right(String(row.quantity), DED_QTY_RIGHT, 7)
+      right(statementMoney(row.rateCents), DED_RATE_RIGHT, 7)
+      right(statementMoney(row.totalCents), DED_TOTAL_RIGHT, 7)
       y -= 11
     }
     y -= 2
     rule()
     y -= 12
     text('Total:', DED_X[0]!, 8, true)
-    right(statementMoney(total), DED_X[4]! + 46, 8, true)
+    right(statementMoney(total), DED_TOTAL_RIGHT, 8, true)
     y -= 20
   }
 
