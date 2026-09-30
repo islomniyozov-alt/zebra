@@ -658,14 +658,27 @@ describe('the statement route refuses nothing', () => {
     expect(route).not.toMatch(/'draft' as const/)
   })
 
-  it('tells the renderer when to stamp, from the BATCH not the settlement', () => {
-    // A settlement can be PAID inside a batch still being assembled — dev
-    // holds that row — and it is the batch that decides whether these figures
-    // are still moving.
-    expect(route).toMatch(
-      /const isDraft =\s*settlement\.batch === null \|\| settlement\.batch\.status === 'DRAFT'/,
-    )
+  it('stamps on the settlement own status, not the batch one', () => {
+    // Owner's ruling, 2026-09-30, correcting the first version of this.
+    //
+    // The watermark is a claim about THIS DOCUMENT — "these figures may still
+    // move". A settlement that has been approved or paid is finished whatever
+    // its batch is still doing around it, and dev holds exactly that row:
+    // ST-000001, PAID, inside SB-000004 which is still a draft. Keying on the
+    // batch stamped DRAFT on a sheet for a cheque already paid.
+    expect(route).toMatch(/const isDraft = settlement\.status === 'DRAFT'/)
+    expect(route).not.toMatch(/settlement\.batch\.status === 'DRAFT'/)
     expect(route).toMatch(/draft: isDraft,/)
+  })
+
+  it('prints the broker reference in the Load number column', () => {
+    // ST-005562 lists Amazon's references. Read live, because the snapshot
+    // freezes the load number and not the reference — flagged at the call
+    // site, and the frozen DT- number remains the fallback.
+    expect(route).toMatch(/load: \{ select: \{ referenceNumber: true \} \}/)
+    expect(route).toMatch(
+      /referenceNumber: line\.load\?\.referenceNumber \?\? null/,
+    )
   })
 
   it('blanks a placeholder number instead of printing it', () => {

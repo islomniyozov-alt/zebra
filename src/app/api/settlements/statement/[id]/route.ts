@@ -35,6 +35,8 @@ export async function GET(
         where: { id, deletedAt: null },
         select: {
           settlementNumber: true,
+          // THE WATERMARK KEYS ON THIS, not on the batch — see below.
+          status: true,
           unitNumber: true,
           teamWith: true,
           referralWith: true,
@@ -70,7 +72,13 @@ export async function GET(
               checkDate: true,
             },
           },
-          loadLines: { orderBy: { sortOrder: 'asc' } },
+          loadLines: {
+            orderBy: { sortOrder: 'asc' },
+            // THE BROKER'S OWN NUMBER, read through the relation because the
+            // snapshot does not freeze it. See the mapping below for what
+            // that costs and why it is still the right column to print.
+            include: { load: { select: { referenceNumber: true } } },
+          },
           deductionLines: { orderBy: { sortOrder: 'asc' } },
         },
       })
@@ -85,11 +93,17 @@ export async function GET(
       // saying so ON THE DOCUMENT, and the people who want a draft on paper
       // are the ones checking it before it is posted.
       //
-      // `draft` DRIVES THE WATERMARK AND THE BLANK NUMBER, and it is the
-      // BATCH's state, not the settlement's — a settlement can be PAID inside
-      // a batch still being assembled, which dev holds.
-      const isDraft =
-        settlement.batch === null || settlement.batch.status === 'DRAFT'
+      // `draft` DRIVES THE WATERMARK, AND IT IS THE SETTLEMENT'S OWN STATUS.
+      // Owner's ruling, 2026-09-30, correcting the first version of this
+      // which keyed on the batch.
+      //
+      // The watermark is a claim about THIS DOCUMENT — "these figures may
+      // still move". A settlement that has been approved or paid is finished
+      // whatever its batch is still doing around it, and dev holds exactly
+      // that row: ST-000001, PAID, inside SB-000004 which is still a draft.
+      // Stamping that sheet DRAFT would tell a driver the cheque he has
+      // already been paid is provisional.
+      const isDraft = settlement.status === 'DRAFT'
 
       // YTD — COMPUTED, NEVER STORED. Opening balance for the year plus every
       // FINAL settlement in it, this one included.
@@ -165,7 +179,26 @@ export async function GET(
             start: settlement.periodStart,
             end: settlement.periodEnd,
           }),
-        loads: settlement.loadLines,
+        // ── THE LOAD NUMBER COLUMN IS THE BROKER'S NUMBER ──────────────
+        //
+        // Owner's ruling, 2026-09-30, and it matches the artefact:
+        // ST-005562 lists 116RX75DK and T-111N3H6NQ, which are Amazon's
+        // references. A driver checking a line against his own paperwork has
+        // the broker's number in front of him; DT-016018 is Zebra's internal
+        // id and means nothing outside this system.
+        //
+        // READ LIVE, WHICH IS A COMPROMISE AND IS FLAGGED AS ONE.
+        // `SettlementLoadLine` freezes the load number and not the
+        // reference, so a broker reference corrected next year would change
+        // what an issued statement prints — the exact drift §7's freeze
+        // exists to prevent. The proper fix is a frozen column on the
+        // snapshot, which is a migration, and the migration is held. Until
+        // then the DT- number remains frozen underneath as the fallback, so
+        // a line can always be identified even if the reference moves.
+        loads: settlement.loadLines.map((line) => ({
+          ...line,
+          referenceNumber: line.load?.referenceNumber ?? null,
+        })),
         totals: {
           grossCents: settlement.grossCents,
           milesHundredths: settlement.milesHundredths,

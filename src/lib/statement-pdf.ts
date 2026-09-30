@@ -71,7 +71,22 @@ export function statementMiles(hundredths: number): string {
 }
 
 export interface StatementLoadRow {
+  /** Zebra's own id, `DT-016018`. The fallback, and always present. */
   loadNumber: string
+  /**
+   * The BROKER's number for this load — `116RX75DK` — and what the Load
+   * number column prints when there is one.
+   *
+   * Owner's ruling, 2026-09-30, off the artefact: ST-005562 lists Amazon's
+   * references, because a driver checking a line against his own paperwork
+   * has the broker's number in front of him and `DT-016018` means nothing
+   * outside this system.
+   *
+   * NOT FROZEN, WHICH IS A COMPROMISE. The snapshot keeps `loadNumber` and
+   * not this, so it is read through the relation at render time — see the
+   * route. A frozen column is the proper fix and is a migration.
+   */
+  referenceNumber?: string | null
   /** Whose freight this line is. Printed only when a statement has more than
    * one — see `renderStatementPdf`. */
   companyName: string
@@ -369,7 +384,10 @@ export function renderStatementPdf(input: StatementPdfInput): Uint8Array {
       text(load.companyName, EARN_X[0]!, 8, true)
       y -= 11
     }
-    text(load.loadNumber, EARN_X[0]!, 7)
+    // THE BROKER'S NUMBER, FALLING BACK TO ZEBRA'S. An empty string is a
+    // load that never carried a reference, and `||` catches it where `??`
+    // would print a blank cell.
+    text(load.referenceNumber || load.loadNumber, EARN_X[0]!, 7)
     text(load.puPlace, EARN_X[1]!, 7)
     text(load.delPlace, EARN_X[2]!, 7)
     text(usDate(load.puDate), EARN_X[3]!, 7)

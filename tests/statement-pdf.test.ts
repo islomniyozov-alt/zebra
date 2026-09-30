@@ -627,3 +627,75 @@ describe('a draft renders, and says so on its face', () => {
     expect((raw.match(/\/Type\s*\/Page(?![s])/g) ?? []).length).toBe(1)
   })
 })
+
+describe('the Load number column is the broker number', () => {
+  // Owner's ruling, 2026-09-30, off ST-005562 — which lists 116RX75DK and
+  // T-111N3H6NQ, Amazon's references. A driver checking a line against his
+  // own paperwork has the broker's number in front of him.
+  const withRefs = inputFor({
+    loads: FIXTURE.loads.map((row, index) => ({
+      loadNumber: row.loadNumber,
+      referenceNumber: index === 0 ? null : `REF-${index}`,
+      companyName: 'RAM Haulage LLC',
+      puPlace: 'Greenfield,IN',
+      delPlace: 'Fort Wayne,IN',
+      puDate: new Date(row.puDate),
+      delDate: new Date(row.delDate),
+      grossCents: row.grossCents,
+      milesHundredths: row.milesHundredths,
+      amountCents: row.amountCents,
+    })),
+  })
+  // CELLS, NOT THE JOINED TEXT. Each entry is one string the renderer drew,
+  // so an exact match is a claim about a CELL. The first version of the last
+  // case searched the joined document and failed against a deduction reading
+  // "Charge for late Del Load#111VS62GS" — a load number quoted inside a
+  // sentence, which is true of the statement and says nothing about the
+  // column under test.
+  const cells = drawn(renderStatementPdf(withRefs))
+
+  it('prints the reference where the load has one', () => {
+    for (let index = 1; index < FIXTURE.loads.length; index++) {
+      expect(cells, `REF-${index}`).toContain(`REF-${index}`)
+    }
+  })
+
+  it('falls back to the DT- number where it does not', () => {
+    // THE FALLBACK IS THE FROZEN FIELD, so a line is always identifiable
+    // even when the reference is missing or later moves.
+    expect(cells).toContain(FIXTURE.loads[0]!.loadNumber)
+  })
+
+  it('does not print both for the same line', () => {
+    // A column that showed the reference AND the internal id would be two
+    // answers to "which load is this", which is what the column exists to
+    // give one of.
+    for (let index = 1; index < FIXTURE.loads.length; index++) {
+      expect(cells, FIXTURE.loads[index]!.loadNumber).not.toContain(
+        FIXTURE.loads[index]!.loadNumber,
+      )
+    }
+  })
+
+  it('treats an empty reference as absent, not as a blank cell', () => {
+    const empty = renderStatementPdf(
+      inputFor({
+        loads: [
+          {
+            loadNumber: 'DT-016018',
+            referenceNumber: '',
+            companyName: 'RAM Haulage LLC',
+            puPlace: 'A,IN',
+            delPlace: 'B,IN',
+            puDate: new Date(Date.UTC(2026, 8, 4)),
+            delDate: new Date(Date.UTC(2026, 8, 4)),
+            grossCents: 17500,
+            milesHundredths: 2500,
+            amountCents: 525,
+          },
+        ],
+      }),
+    )
+    expect(drawn(empty)).toContain('DT-016018')
+  })
+})
