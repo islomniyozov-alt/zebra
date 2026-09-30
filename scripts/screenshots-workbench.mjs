@@ -73,32 +73,68 @@ const newContext = async (locale = 'en') => {
 }
 
 // ── FIND A STATEMENT ──────────────────────────────────────────────────────
+// A PAID statement renders none of the three add-rows, because there is
+// nothing to add to a document somebody was paid on — which is correct, and
+// makes it the wrong picture of a workbench. The first run of this script
+// photographed exactly that: a grid with no controls in it.
+//
+// SO EDITABILITY IS PROBED, NOT INFERRED FROM A STATUS COLUMN. The question is
+// "does this page show the add-row", and the honest way to ask it is to open
+// the page and look for the add-row. Reading a status string would be this
+// script re-deriving `isDraft && mayEdit` from the outside, and getting it
+// wrong the first time either half changes.
 const finder = await newContext()
 const finderPage = await finder.newPage()
 await finderPage.goto(`${BASE}/payroll/statements`, {
   waitUntil: 'domcontentloaded',
 })
 await finderPage.waitForTimeout(1500)
-const statementPath = await finderPage.evaluate(() => {
-  const link = document.querySelector('a[href^="/settlements/"]')
-  return link ? new URL(link.href).pathname : null
-})
+const candidates = await finderPage.evaluate(() =>
+  [...document.querySelectorAll('a[href^="/settlements/"]')]
+    .map((a) => new URL(a.href).pathname)
+    .filter((path, index, all) => all.indexOf(path) === index)
+    .slice(0, 12),
+)
+
+let editablePath = null
+let finishedPath = null
+for (const path of candidates) {
+  if (editablePath && finishedPath) break
+  await finderPage.goto(`${BASE}${path}`, { waitUntil: 'domcontentloaded' })
+  await finderPage.waitForTimeout(400)
+  const editable = (await finderPage.locator('select[name="type"]').count()) > 0
+  if (editable && !editablePath) editablePath = path
+  if (!editable && !finishedPath) finishedPath = path
+}
 await finder.close()
 
-if (!statementPath) {
+if (!editablePath && !finishedPath) {
   console.error(
     'NO STATEMENT ON /payroll/statements. The workbench cannot be photographed.',
   )
   await browser.close()
   process.exit(1)
 }
-console.log(`workbench statement: ${statementPath}\n`)
+if (!editablePath) {
+  console.error(
+    'NO EDITABLE STATEMENT among the first 12 — the add-rows appear in no\n' +
+      'shot. Open a batch first, or say so when reporting these.',
+  )
+}
+const statementPath = editablePath ?? finishedPath
+console.log(`editable statement: ${editablePath ?? '(none found)'}`)
+console.log(`finished statement: ${finishedPath ?? '(none found)'}\n`)
 
 const SHOTS = [
   // ── THE WORKBENCH ───────────────────────────────────────────────────────
   { name: 'wb-1-statement', path: statementPath },
   { name: 'wb-2-statement-ru', path: statementPath, locale: 'ru' },
   { name: 'wb-3-statement-fa-rtl', path: statementPath, locale: 'fa' },
+  // The same page with nothing left to do on it, so the difference between
+  // editable and finished is a picture rather than a sentence.
+  ...(finishedPath && finishedPath !== statementPath
+    ? [{ name: 'wb-8-statement-finished', path: finishedPath }]
+    : []),
 
   // ── THE OPEN-BATCH SCREEN ───────────────────────────────────────────────
   //

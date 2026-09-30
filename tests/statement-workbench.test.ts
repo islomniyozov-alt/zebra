@@ -401,3 +401,46 @@ describe('send to driver refuses before it reaches a real person', () => {
     expect(result).toEqual({ ok: false, reason: 'rejected' })
   })
 })
+
+describe('the trips grid cannot hand Table more than nine columns', () => {
+  // §7.1 caps a table at nine and `Table` THROWS above it — the workbench
+  // 500'd on its first render on dev with eleven. These are source checks for
+  // the same reason `accounting-surface.test.ts` is: the claim is about what
+  // the page hands a component, and the alternative is a browser.
+  it('declares the cap as a number rather than a habit', () => {
+    expect(page).toMatch(/\nconst MAX_VISIBLE_COLUMNS = 9\n/)
+  })
+
+  it('hides exactly Load ID and Unit by default', () => {
+    expect(page).toMatch(/key !== 'load' && key !== 'unit'/)
+  })
+
+  it('slices, so a stale preference holding ten cannot reach Table', () => {
+    // A preference row outlives every deploy (§7.1.4), so one written before
+    // the cap existed can still arrive holding eleven.
+    expect(page).toMatch(/\.slice\(0, MAX_VISIBLE_COLUMNS\)/)
+  })
+
+  it('passes the kept set to the table and not the whole list', () => {
+    // Tolerant of prettier's wrap and no looser: the `columns=` prop must
+    // be a `keepColumns` call over `tripColumns`, on one line or three.
+    expect(page).toMatch(/columns=\{keepColumns\(\s*tripColumns,/)
+  })
+
+  it('offers the hidden two back through the chooser', () => {
+    expect(page).toMatch(/<ColumnsChooser\b/)
+    expect(page).toMatch(/grid="settlements\.trips"/)
+  })
+})
+
+describe('the frozen tariff label carries its own direction', () => {
+  it('is wrapped in dir="ltr"', () => {
+    // §12. `payTariffLabel` is stored as the statement printed it — "3% from
+    // gross" — and the bidi algorithm renders that as "from gross 3%" on the
+    // Farsi screen. Caught in the RTL screenshot, not by a test, which is why
+    // there is now a test.
+    expect(page).toMatch(
+      /<span dir="ltr">\{settlement\.payTariffLabel\}<\/span>/,
+    )
+  })
+})

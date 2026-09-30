@@ -63,6 +63,23 @@ import type { Action, Resource } from '@/lib/permissions'
 // a download attached. `driver.pay` for anything naming a driver's money,
 // `invoice`/`payment` for theirs.
 
+/**
+ * Grids this endpoint cannot address, excluded from the type and not merely
+ * checked for.
+ *
+ * THE PREDICATE IS THE POINT. Returning 400 at runtime would leave the switch
+ * below still nominally handling `settlements.trips`, so TypeScript would stop
+ * requiring a case for it AND stop requiring one for the next grid somebody
+ * adds — the exhaustiveness that made this decision surface at all would be
+ * the thing the fix destroyed. Narrowing keeps it.
+ */
+type ExportableGrid = Exclude<GridId, 'settlements.trips'>
+
+const NOT_EXPORTABLE = new Set<GridId>(['settlements.trips'])
+
+const isExportable = (grid: GridId): grid is ExportableGrid =>
+  !NOT_EXPORTABLE.has(grid)
+
 const GUARD: Record<GridId, { action: Action; resource: Resource }> = {
   'invoices.invoices': { action: 'read', resource: 'invoice' },
   'invoices.ready': { action: 'create', resource: 'invoice' },
@@ -70,6 +87,10 @@ const GUARD: Record<GridId, { action: Action; resource: Resource }> = {
   'payments.payments': { action: 'read', resource: 'payment' },
   'payments.unapplied': { action: 'read', resource: 'payment' },
   'payroll.batches': { action: 'read', resource: 'settlement' },
+  // Document-scoped; see NOT_EXPORTABLE below. The entry exists because the
+  // map is exhaustive on purpose, and that exhaustiveness is what made adding
+  // the grid id surface this decision instead of burying it.
+  'settlements.trips': { action: 'read', resource: 'driver.pay' },
   'payroll.statements': { action: 'read', resource: 'driver.pay' },
   'payroll.balances': { action: 'read', resource: 'driver.pay' },
   'payroll.oneTime': { action: 'read', resource: 'driver.pay' },
@@ -97,6 +118,25 @@ export async function GET(request: Request): Promise<Response> {
   const grid = url.searchParams.get('grid') ?? ''
   if (!isGridId(grid)) {
     return new Response('Unknown grid.', { status: 400 })
+  }
+
+  // ── GRIDS THAT BELONG TO ONE DOCUMENT ──────────────────────────────────
+  //
+  // This endpoint is addressed by GRID PLUS FILTERS and nothing else, which is
+  // the whole reason a CSV link is a URL somebody can paste. A statement's
+  // trips grid is scoped to one settlement, and there is no settlement in that
+  // address — so the honest answer is a refusal that says which, not an empty
+  // file or every trip in the organization.
+  //
+  // It is registered as a grid because §7.1.4's column preference is keyed by
+  // grid id and that promise applies here too. Exportability and a column
+  // preference are two different properties and this is where they part.
+  if (!isExportable(grid)) {
+    return new Response(
+      'That grid belongs to a single document and is exported from it. ' +
+        'Use the statement PDF.',
+      { status: 400 },
+    )
   }
 
   const raw: RawParams = Object.fromEntries(url.searchParams.entries())

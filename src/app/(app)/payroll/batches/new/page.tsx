@@ -44,6 +44,12 @@ import type { MessageKey } from '@/lib/i18n'
 
 const PATH = '/payroll/batches/new'
 
+/** §6.2.1 — how many load numbers one reason lists before it says "and N more". */
+const LIST_CAP = 40
+
+/** Groups at or below this open themselves; longer ones start shut. */
+const OPEN_UP_TO = 12
+
 const REASON_LABEL: Record<UnavailableReason, MessageKey> = {
   inTransit: 'preview.reason.inTransit',
   outsideRange: 'preview.reason.outsideRange',
@@ -286,58 +292,87 @@ export default async function OpenBatchPage({
             body={t('preview.emptyAvailableHint')}
           />
         }
-      />
-
-      {/* ── AND EVERYTHING THAT WOULD NOT GO IN ───────────────────────────
-       *
-       * Grouped by reason, each with a sentence saying what to do about it.
-       * §10: an empty state is an invitation, and so is this — "no rule" is
-       * not a fact about a load, it is a task on a driver page.
-       *
-       * AN EMPTY GROUP IS OMITTED (§4). Five headings with four zeroes under
-       * them would bury the one that matters. */}
-      {totalUnavailable > 0 ? (
-        <section className="border-t border-border bg-surface-2 px-gutter py-z3">
-          <h2 className="text-sm font-medium text-ink">
-            {t('preview.unavailable')}{' '}
-            <span className="font-mono tabular-nums text-ink-3">
-              {totalUnavailable}
-            </span>
-          </h2>
-          <div className="mt-z2 flex flex-col gap-z3">
-            {UNAVAILABLE_REASONS.map((reason) => {
-              const rows = data.preview.unavailable[reason]
-              if (rows.length === 0) return null
-              return (
-                <div key={reason}>
-                  <h3 className="text-xs font-medium uppercase tracking-[0.04em] text-ink-2">
-                    {t(REASON_LABEL[reason])}{' '}
-                    <span className="font-mono tabular-nums text-ink-3">
-                      {rows.length}
-                    </span>
-                  </h3>
-                  <p className="text-xs text-ink-3">{t(REASON_HINT[reason])}</p>
-                  <ul className="mt-z1 flex flex-wrap gap-x-z4 gap-y-z1 text-xs">
-                    {rows.map((row) => (
-                      <li key={row.loadId}>
-                        <span
-                          className="z-identifier font-mono text-ink"
-                          dir="ltr"
-                        >
-                          {row.loadNumber}
-                        </span>{' '}
-                        <span className="text-ink-3">
-                          {row.driverName ?? t('preview.reason.noDriver')}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+        below={
+          <>
+            {/* ── AND EVERYTHING THAT WOULD NOT GO IN ───────────────────────────
+             *
+             * Grouped by reason, each with a sentence saying what to do about it.
+             * §10: an empty state is an invitation, and so is this — "no rule" is
+             * not a fact about a load, it is a task on a driver page.
+             *
+             * AN EMPTY GROUP IS OMITTED (§4). Five headings with four zeroes under
+             * them would bury the one that matters. */}
+            {totalUnavailable > 0 ? (
+              <section className="border-t border-border bg-surface-2 px-gutter py-z3">
+                <h2 className="text-sm font-medium text-ink">
+                  {t('preview.unavailable')}{' '}
+                  <span className="font-mono tabular-nums text-ink-3">
+                    {totalUnavailable}
+                  </span>
+                </h2>
+                <div className="mt-z2 flex flex-col gap-z3">
+                  {UNAVAILABLE_REASONS.map((reason) => {
+                    const rows = data.preview.unavailable[reason]
+                    if (rows.length === 0) return null
+                    // ── THE COUNT AND THE SENTENCE NEVER COLLAPSE. THE ROWS DO ──
+                    //
+                    // §6.2.1. A dev shot of a two-week range rendered
+                    // `Already on a statement 189` as a flat wall of load numbers
+                    // eight rows deep, and buried `No pay rule 3` — the only
+                    // actionable thing on the page — below the fold under it.
+                    //
+                    // OPEN WHEN SHORT, SHUT WHEN LONG, and the heading says the
+                    // number either way. A group somebody can take in at a glance
+                    // should not need a click; one that would push the page over a
+                    // screen should not cost one.
+                    const shown = rows.slice(0, LIST_CAP)
+                    const hidden = rows.length - shown.length
+                    return (
+                      <details key={reason} open={rows.length <= OPEN_UP_TO}>
+                        <summary className="cursor-pointer">
+                          <span className="text-xs font-medium uppercase tracking-[0.04em] text-ink-2">
+                            {t(REASON_LABEL[reason])}{' '}
+                            <span className="font-mono tabular-nums text-ink-3">
+                              {rows.length}
+                            </span>
+                          </span>
+                          <span className="block text-xs text-ink-3">
+                            {t(REASON_HINT[reason])}
+                          </span>
+                        </summary>
+                        <ul className="mt-z1 flex flex-wrap gap-x-z4 gap-y-z1 text-xs">
+                          {shown.map((row) => (
+                            <li key={row.loadId}>
+                              <span
+                                className="z-identifier font-mono text-ink"
+                                dir="ltr"
+                              >
+                                {row.loadNumber}
+                              </span>{' '}
+                              <span className="text-ink-3">
+                                {row.driverName ?? t('preview.reason.noDriver')}
+                              </span>
+                            </li>
+                          ))}
+                          {/* THE REMAINDER IS COUNTED, NOT TRAILED OFF. `…` would
+                           * leave the reader unable to tell forty from four
+                           * hundred, and the whole point of this section is the
+                           * size of what is being left out. */}
+                          {hidden > 0 ? (
+                            <li className="text-ink-3">
+                              {t('preview.andMore')} {hidden}
+                            </li>
+                          ) : null}
+                        </ul>
+                      </details>
+                    )
+                  })}
                 </div>
-              )
-            })}
-          </div>
-        </section>
-      ) : null}
+              </section>
+            ) : null}
+          </>
+        }
+      />
     </>
   )
 }

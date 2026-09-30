@@ -17,6 +17,9 @@ import {
 import { sumCents, totalsLabel } from '@/lib/list-view'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { PageHeader } from '../../_grid/PageHeader'
+import { ColumnsChooser } from '../../_grid/ColumnsChooser'
+import { keepColumns } from '../../_grid/grid-page'
+import { readGridColumns } from '@/lib/grid-columns'
 import { ChargeGrid, type ChargeRow } from './ChargeGrid'
 import {
   AddTrips,
@@ -88,6 +91,57 @@ const DEDUCTION_TYPES: SettlementLineType[] = [
 const BALANCE_TYPES: SettlementLineType[] = ['DEDUCTION_ESCROW']
 
 const PAY_METHODS: PaymentMethod[] = ['ACH', 'CHECK', 'WIRE', 'ZELLE', 'CASH']
+
+// ── THE TRIPS GRID'S ELEVEN COLUMNS, AND THE NINE THAT SHOW ──────────────
+//
+// §7.1 caps a table at nine and `Table` throws above it. §6.2.2 (v10.2) names
+// which two go behind the chooser and why: `load` is the BROKER's reference, a
+// key somebody looks a load up by rather than a column read down, and `unit`
+// repeats — Zebra freezes one truck per settlement, so it is the same number on
+// every row, and it belongs in the header box where ST-005562 prints it.
+//
+// THE ORDER HERE IS THE TABLE'S ORDER. `readGridColumns` returns a SET; the
+// column list below decides where each one sits.
+const TRIP_COLUMN_KEYS = [
+  'trip',
+  'load',
+  'unit',
+  'totalPay',
+  'driverGross',
+  'status',
+  'delDate',
+  'puDate',
+  'pu',
+  'del',
+  'miles',
+] as const
+
+const TRIP_COLUMNS_DEFAULT = TRIP_COLUMN_KEYS.filter(
+  (key) => key !== 'load' && key !== 'unit',
+)
+
+/** §7.1, and `Table` throws above it rather than scrolling sideways. */
+const MAX_VISIBLE_COLUMNS = 9
+
+/**
+ * Which trip columns to render, from what this user has stored.
+ *
+ * TWO CASES THAT BOTH LOOK LIKE "EVERYTHING". `visibleColumns` returns the
+ * whole available list when no preference exists — sensible for a grid of
+ * eight columns, and eleven here, which is the throw. So a set that is
+ * literally all eleven is read as "never chosen" and becomes the default nine.
+ *
+ * AND THE SLICE IS NOT DECORATION. A preference row outlives every deploy
+ * (§7.1.4), so one written before this cap existed, or edited by hand, can
+ * still arrive holding ten. Handing that to `Table` would 500 the page for one
+ * person in a way nobody else could reproduce.
+ */
+function visibleTripColumns(stored: readonly string[]): string[] {
+  const kept = TRIP_COLUMN_KEYS.filter((key) => stored.includes(key))
+  const chosen =
+    kept.length === TRIP_COLUMN_KEYS.length ? TRIP_COLUMNS_DEFAULT : kept
+  return chosen.slice(0, MAX_VISIBLE_COLUMNS)
+}
 
 const ERROR_KEYS: MessageKey[] = [
   'settlements.error.notFound',
@@ -220,7 +274,7 @@ export default async function SettlementPage({
   // `addable` is DRAFT-only: on an approved statement the panel would offer
   // buttons that `addTripsToSettlement` refuses, and the read costs a
   // `batchInputForOrg`, which is not free.
-  const [addable, fuel, neighbours] = await Promise.all([
+  const [addable, fuel, storedColumns, neighbours] = await Promise.all([
     settlement.status === 'DRAFT' && mayEdit
       ? withCurrentOrg('read', 'settlement', (tx, session) =>
           addableTrips(tx, {
@@ -237,6 +291,14 @@ export default async function SettlementPage({
         periodStart: settlement.periodStart,
         periodEnd: settlement.periodEnd,
       }),
+    ),
+    withCurrentOrg('read', 'settlement', (tx, session) =>
+      readGridColumns(
+        tx,
+        session.userId,
+        'settlements.trips',
+        TRIP_COLUMN_KEYS,
+      ),
     ),
     withCurrentOrg('read', 'settlement', (tx) =>
       statementNeighbours(tx, {
@@ -461,6 +523,30 @@ export default async function SettlementPage({
           // than disabled, which is this codebase's existing rule and the
           // reason Post disappears once a statement is approved.
           <div className="flex flex-wrap items-center gap-z2">
+            {/* ── ADD TRIPS AND ADD CHARGES ARE JUMPS, NOT SECOND CONTROLS ──
+             *
+             * Both things they would open already exist further down the page,
+             * and a toolbar copy would be a second control writing the same
+             * rows — two places to fix when the rule changes. An anchor is
+             * honest about that: it takes you to the one control.
+             *
+             * ADD TRIPS IS ABSENT WHEN THERE IS NOTHING TO ADD rather than
+             * disabled, which is this codebase's rule — "you cannot do that
+             * yet" is better said by the control not being there. */}
+            {mayAdd && addable.length > 0 ? (
+              <a href="#trips-to-add">
+                <Button variant="secondary" size="compact">
+                  {t('settlements.addTrips')}
+                </Button>
+              </a>
+            ) : null}
+            {mayAdd ? (
+              <a href="#charges-to-add">
+                <Button variant="secondary" size="compact">
+                  {t('workbench.addCharges')}
+                </Button>
+              </a>
+            ) : null}
             {mayAdd ? (
               <Recalculate
                 settlementId={settlement.id}
@@ -483,6 +569,7 @@ export default async function SettlementPage({
               <Approve
                 settlementId={settlement.id}
                 translate={translate}
+                inToolbar
                 labels={{
                   approve: t('workbench.post'),
                   hint: t('settlements.approveHint'),
@@ -571,11 +658,32 @@ export default async function SettlementPage({
                 )}
               </Fact>
               <Fact label={t('settlements.tariff')}>
-                {settlement.payTariffLabel ?? (
+                {/* §12: `dir="ltr"` ON A FROZEN LATIN STRING. `payTariffLabel`
+                 * is stored as the statement printed it — "3% from gross" —
+                 * and the bidi algorithm reorders that to "from gross 3%" on
+                 * the Farsi screen, which is the same class of bug the
+                 * `basisSentence` templates exist to avoid. It cannot be
+                 * templated, because it is frozen; it can be given a
+                 * direction. */}
+                {settlement.payTariffLabel === null ? (
                   <span className="text-ink-3">—</span>
+                ) : (
+                  <span dir="ltr">{settlement.payTariffLabel}</span>
                 )}
               </Fact>
               <Fact label={t('ref.authority')}>{settlement.company.name}</Fact>
+              {/* BACK IN THE HEADER (v10.2). One truck per settlement, frozen
+               * — as a grid column it was the same number on every row, and
+               * ST-005562 prints it here. */}
+              <Fact label={t('payroll.unit')}>
+                {settlement.unitNumber === null ? (
+                  <span className="text-ink-3">—</span>
+                ) : (
+                  <span className="z-identifier font-mono" dir="ltr">
+                    {settlement.unitNumber}
+                  </span>
+                )}
+              </Fact>
               <Fact label={t('batches.batch')}>
                 {settlement.batch === null ? (
                   <span className="text-ink-3">{t('statements.noBatch')}</span>
@@ -676,11 +784,34 @@ export default async function SettlementPage({
           {/* ── THE TRIPS GRID ─────────────────────────────────────────── */}
           {settlement.loadLines.length > 0 ? (
             <section className="overflow-hidden rounded-card border border-border bg-surface">
-              <h2 className="border-b border-border px-z4 py-z3 text-md font-medium text-ink">
-                {t('settlements.trips')}
-              </h2>
+              <div className="flex items-baseline justify-between gap-z3 border-b border-border px-z4 py-z3">
+                <h2 className="text-md font-medium text-ink">
+                  {t('settlements.trips')}
+                </h2>
+                {/* THE CHOOSER IS WHY THIS GRID IS LEGAL. Eleven columns, nine
+                 * shown — §6.2.2 as corrected in v10.2, and the other two are
+                 * a tick away rather than gone. */}
+                <ColumnsChooser
+                  grid="settlements.trips"
+                  columns={tripColumns.map((column) => ({
+                    key: column.key,
+                    header: String(column.header),
+                  }))}
+                  visible={visibleTripColumns(storedColumns)}
+                  labels={{
+                    open: t('grid.columns'),
+                    apply: t('grid.columns.apply'),
+                    cancel: t('grid.columns.cancel'),
+                    firstLocked: t('grid.columns.firstLocked'),
+                  }}
+                  errors={translate}
+                />
+              </div>
               <Table
-                columns={tripColumns}
+                columns={keepColumns(
+                  tripColumns,
+                  visibleTripColumns(storedColumns),
+                )}
                 rows={settlement.loadLines}
                 rowKey={(row) => row.id}
                 rowHref={(row) => `/loads/${row.loadId}`}
@@ -705,7 +836,10 @@ export default async function SettlementPage({
            * this driver's unsettled freight with the held ones marked. There
            * is nothing to type. */}
           {mayAdd && addable.length > 0 ? (
-            <section className="rounded-card border border-border bg-surface p-z4">
+            <section
+              id="trips-to-add"
+              className="scroll-mt-z4 rounded-card border border-border bg-surface p-z4"
+            >
               <AddTrips
                 settlementId={settlement.id}
                 trips={addable.map((trip) => ({
@@ -751,18 +885,20 @@ export default async function SettlementPage({
           ) : null}
 
           {deductionLines.length > 0 || mayAdd ? (
-            <ChargeGrid
-              settlementId={settlement.id}
-              rows={deductionLines.map(toChargeRow)}
-              types={typeOptions(DEDUCTION_TYPES)}
-              canAdd={mayAdd}
-              locale={locale}
-              translate={translate}
-              labels={{
-                ...gridLabels,
-                heading: t('settlements.group.deductions'),
-              }}
-            />
+            <div id="charges-to-add" className="scroll-mt-z4">
+              <ChargeGrid
+                settlementId={settlement.id}
+                rows={deductionLines.map(toChargeRow)}
+                types={typeOptions(DEDUCTION_TYPES)}
+                canAdd={mayAdd}
+                locale={locale}
+                translate={translate}
+                labels={{
+                  ...gridLabels,
+                  heading: t('settlements.group.deductions'),
+                }}
+              />
+            </div>
           ) : null}
 
           {balanceLines.length > 0 || mayAdd ? (

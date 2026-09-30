@@ -41,6 +41,10 @@ export const GRID_IDS = [
   'charges.scheduled',
   'charges.oneTime',
   'reports.driver',
+  // THE WORKBENCH'S TRIPS GRID. Eleven columns, nine shown — §6.2.2 as
+  // corrected in v10.2, because §7.1 caps a table at nine and throws above
+  // it. This is the grid that found the cap.
+  'settlements.trips',
 ] as const
 
 export type GridId = (typeof GRID_IDS)[number]

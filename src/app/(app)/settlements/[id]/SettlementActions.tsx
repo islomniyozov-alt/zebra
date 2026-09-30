@@ -131,15 +131,44 @@ export function Approve({
   settlementId,
   translate,
   labels,
+  inToolbar = false,
 }: {
   settlementId: string
   translate: Record<string, string>
   labels: { approve: string; hint: string }
+  /**
+   * §6.2.2's action row rather than a panel of its own.
+   *
+   * THE HINT IS THE WHOLE DIFFERENCE. "Approving freezes it. Deductions can no
+   * longer be added" is a paragraph, and a paragraph in a toolbar wraps across
+   * the page head and shoves the buttons sideways — which is exactly what the
+   * first render of the workbench did. It belongs on the button as a title
+   * there, and as prose when the control has a panel to itself.
+   */
+  inToolbar?: boolean
 }) {
   const [state, act, pending] = useActionState<SettlementState, FormData>(
     approveSettlementAction.bind(null, settlementId),
     SETTLEMENT_INITIAL,
   )
+
+  if (inToolbar) {
+    return (
+      <form action={act} className="flex items-center gap-z2">
+        <Button
+          type="submit"
+          variant="primary"
+          size="compact"
+          disabled={pending}
+          title={labels.hint}
+        >
+          {labels.approve}
+        </Button>
+        <Error state={state} translate={translate} />
+      </form>
+    )
+  }
+
   return (
     <form action={act} className="flex flex-col gap-z2">
       <p className="max-w-[68ch] text-sm text-ink-3">{labels.hint}</p>
