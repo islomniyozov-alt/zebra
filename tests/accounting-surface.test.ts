@@ -302,7 +302,7 @@ describe('the grid contract', () => {
 // change the table first — which is the order §15 requires anyway.
 describe('each destination has the tabs §6.2 says it has', () => {
   const EXPECTED: Record<string, readonly string[]> = {
-    invoices: ['invoices', 'ready', 'direct'],
+    invoices: ['invoices', 'ready', 'factored', 'direct'],
     payments: ['payments', 'unapplied'],
     reports: ['company', 'week', 'driver'],
     batches: ['batches', 'balances'],
@@ -327,7 +327,9 @@ describe('each destination has the tabs §6.2 says it has', () => {
     const doc = readFileSync('TMS-DESIGN-SYSTEM.md', 'utf8')
     expect(doc).toContain('Scheduled · One-time · This week')
     expect(doc).toContain('Batches · Balances')
-    expect(doc).toContain('Invoices · Ready to invoice · Direct-settled')
+    expect(doc).toContain(
+      'Invoices · Ready to invoice · Factored · Direct-settled',
+    )
   })
 })
 
@@ -563,5 +565,55 @@ describe('the open-batch flow', () => {
     // surprise about money.
     expect(page).toContain("t('preview.orgWide')")
     expect(page).toContain("t('preview.willOpen')")
+  })
+})
+
+describe('Invoices finishes a week (§6.2, v10.8)', () => {
+  const page = readFileSync(join(ACCOUNTING, 'invoices', 'page.tsx'), 'utf8')
+  const bulk = readFileSync(
+    join(ACCOUNTING, 'invoices', 'bulk-actions.ts'),
+    'utf8',
+  )
+  const grids = readFileSync(
+    join(process.cwd(), 'src', 'lib', 'accounting-grids.ts'),
+    'utf8',
+  )
+
+  it('filters by status through a funnel the bar can also render', () => {
+    // §6.2.1: a funnel writes the same query parameter the filter bar shows
+    // as a chip, so a filtered grid stays a link somebody can send.
+    expect(grids).toMatch(/columnFilters: \{\s*status: \(row\) => row\.status,/)
+    expect(page).toMatch(/filterable: true,/)
+    expect(page).toMatch(/funnelFor=\{funnelFor\}/)
+  })
+
+  it('keeps factored invoices out of the default population', () => {
+    // A factored invoice is SOLD. Leaving it in Invoices would put money the
+    // factor already paid us for into the aging chips and the balance total.
+    expect(page).toMatch(/tab === 'factored'/)
+    expect(page).toMatch(/filter\(\(row\) => !row\.isFactored\)/)
+  })
+
+  it('records a send per invoice, through the real function', () => {
+    // Not `updateMany`: `markInvoiceSent` refuses an already-sent invoice and
+    // an empty channel, and a bulk path that skipped it would record sends
+    // that never happened.
+    expect(bulk).toMatch(/await markInvoiceSent\(tx, id, \{ channel \}\)/)
+    expect(bulk).not.toMatch(/updateMany/)
+    expect(bulk).not.toMatch(/sentAt: new Date\(\)/)
+  })
+
+  it('asks for the channel rather than defaulting it', () => {
+    // "Did we send it" and "where did it go" are different questions in a
+    // payment chase. A default would put an answer in the record that nobody
+    // gave.
+    expect(bulk).toMatch(/formData\.get\('channel'\)/)
+    expect(bulk).not.toMatch(/channel \|\| 'email'/)
+    expect(bulk).not.toMatch(/channel \?\? 'email'/)
+  })
+
+  it('names every refusal instead of counting them', () => {
+    expect(bulk).toMatch(/invoice: name,/)
+    expect(bulk).toMatch(/refusals\.push/)
   })
 })

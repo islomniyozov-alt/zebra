@@ -10,7 +10,12 @@ import {
   readyToInvoiceWhere,
 } from '@/lib/invoices'
 import { readGridColumns } from '@/lib/grid-columns'
-import { applyList, sumCents, type RawParams } from '@/lib/list-view'
+import {
+  applyList,
+  columnFilterParam,
+  sumCents,
+  type RawParams,
+} from '@/lib/list-view'
 import {
   invoiceShape,
   readInvoices,
@@ -25,6 +30,8 @@ import { ReadyQueue, type ReadyRow } from '../../invoices/ReadyQueue'
 import { CompanyChips } from '../../_grid/CompanyChips'
 import { PageHeader } from '../../_grid/PageHeader'
 import { GridToolbar } from '../../_grid/GridToolbar'
+import { BulkMarkSent } from './BulkMarkSent'
+import { ColumnFunnel } from '../../_grid/ColumnFunnel'
 import { GridFooterNav } from '../../_grid/GridFooterNav'
 import { gridView, keepColumns, pagedFooterLabel } from '../../_grid/grid-page'
 import type { InvoiceStatus } from '@/generated/prisma/client'
@@ -65,7 +72,7 @@ const ERROR_KEYS: MessageKey[] = [
   'invoices.error.mixedCompanies',
 ]
 
-const TABS = ['invoices', 'ready', 'direct'] as const
+const TABS = ['invoices', 'ready', 'factored', 'direct'] as const
 type Tab = (typeof TABS)[number]
 
 const COLUMN_KEYS: readonly string[] = [
@@ -79,6 +86,16 @@ const COLUMN_KEYS: readonly string[] = [
   'status',
 ]
 
+/**
+ * How an invoice went out.
+ *
+ * `markInvoiceSent` takes any string; this list exists so the record does not
+ * collect four spellings of "email". The VALUE is stored and the label is
+ * translated — §7.1.5's rule about codes, applied to a thing that gets read
+ * back during a payment chase.
+ */
+const SEND_CHANNELS = ['email', 'portal', 'edi', 'post'] as const
+
 const PATH = '/accounting/invoices'
 
 export default async function AccountingInvoicesPage({
@@ -91,6 +108,9 @@ export default async function AccountingInvoicesPage({
   const raw = await searchParams
   const { t, locale } = await getLocaleContext()
   const mayCreate = await currentUserCan('create', 'invoice')
+  // RECORDING A SEND IS AN UPDATE, not a create — the invoice exists and
+  // this writes a fact about it. permissions.ts decides; this only asks.
+  const mayUpdate = await currentUserCan('update', 'invoice')
 
   const wanted = typeof raw.tab === 'string' ? raw.tab : null
   const requested: Tab = (TABS as readonly string[]).includes(wanted ?? '')
@@ -156,6 +176,20 @@ export default async function AccountingInvoicesPage({
     cancel: t('grid.columns.cancel'),
     firstLocked: t('grid.columns.firstLocked'),
   }
+  // ONE CLIENT ISLAND PER HEADER, so `Table` stays server-rendered and only
+  // the popover is interactive — the same shape the batches grid uses.
+  const funnelFor = (columnKey: string, header: string) => (
+    <ColumnFunnel
+      param={columnFilterParam(columnKey)}
+      column={header}
+      labels={{
+        open: t('grid.filterColumn'),
+        apply: t('grid.filterApply'),
+        clear: t('grid.filterClear'),
+      }}
+    />
+  )
+
   const footerLabels = {
     of: t('grid.of'),
     previous: t('grid.previous'),
@@ -190,6 +224,11 @@ export default async function AccountingInvoicesPage({
                 },
               ]
             : []),
+          {
+            key: 'factored',
+            label: t('invoices.tab.factored'),
+            count: data.invoices.filter((row) => row.isFactored).length,
+          },
           {
             key: 'direct',
             label: t('invoices.tab.direct'),
@@ -274,12 +313,25 @@ export default async function AccountingInvoicesPage({
     )
   }
 
-  // ── THE INVOICE GRID ─────────────────────────────────────────────────────
+  // ── THE INVOICE GRID, AND THE FACTORED TAB IS THE SAME GRID ─────────────
+  //
+  // §6.2: a factored invoice is SOLD, so it is a different question about the
+  // same rows rather than a narrowing of this one — which is why it is a tab.
+  // It shares every column, sort and filter; only the population differs.
+  //
+  // AND IT IS EXCLUDED FROM THE DEFAULT TAB, which is the half that matters.
+  // An invoice the factor collects is not our receivable, so leaving it in
+  // "Invoices" would put money somebody else already paid us for into the
+  // aging chips and the balance total — a figure the office would chase.
   const age = typeof raw.age === 'string' ? raw.age : null
+  const population =
+    tab === 'factored'
+      ? data.invoices.filter((row) => row.isFactored)
+      : data.invoices.filter((row) => !row.isFactored)
   const narrowed =
     age !== null && (BUCKETS as readonly string[]).includes(age)
-      ? data.invoices.filter((row) => row.bucket === age)
-      : data.invoices
+      ? population.filter((row) => row.bucket === age)
+      : population
 
   const view = gridView(narrowed, raw, invoiceShape, applyList)
 
@@ -339,6 +391,10 @@ export default async function AccountingInvoicesPage({
       key: 'status',
       header: t('invoices.status'),
       sortable: true,
+      // §6.2 (v10.8). Paired with `invoiceShape.columnFilters.status` — a
+      // `filterable` column whose key has no entry there renders a control
+      // that narrows nothing, which the grid contract forbids.
+      filterable: true,
       render: (row) => (
         <StatusBadge
           tone={INVOICE_TONE[row.status] ?? 'neutral'}
@@ -397,35 +453,54 @@ export default async function AccountingInvoicesPage({
           errors={errors}
         />
       </div>
-      <Table
-        columns={keepColumns(allColumns, data.columns)}
-        rows={view.paged.rows}
-        footRows={view.filtered}
-        rowKey={(row) => row.id}
-        rowHref={(row) => `/invoices/${row.id}`}
-        stripeTone={(row) => INVOICE_TONE[row.status] ?? 'neutral'}
-        isCancelled={(row) => row.status === 'VOID'}
-        caption={t('accounting.invoices.title')}
-        sort={{
-          key: view.sort.key,
-          dir: view.sort.dir,
-          hrefFor: view.sortFor(PATH),
-          label: t('accounting.sortBy'),
+      <BulkMarkSent
+        channels={SEND_CHANNELS.map((channel) => ({
+          value: channel,
+          label: t(`invoices.channel.${channel}` as MessageKey),
+        }))}
+        labels={{
+          selected: t('grid.selected'),
+          markSent: t('invoices.markSentSelected'),
+          channel: t('invoices.channel'),
+          clear: t('grid.clearSelection'),
+          done: t('invoices.bulkSentDone'),
         }}
-        totals={{
-          label: pagedFooterLabel(
-            t('accounting.total'),
-            t('grid.rows'),
-            view.paged,
-          ),
-        }}
-        empty={
-          <EmptyState
-            title={t('accounting.invoices.empty')}
-            body={t('accounting.emptyHint')}
-          />
-        }
-      />
+        reasons={errors}
+      >
+        <Table
+          columns={keepColumns(allColumns, data.columns)}
+          rows={view.paged.rows}
+          footRows={view.filtered}
+          rowKey={(row) => row.id}
+          rowHref={(row) => `/invoices/${row.id}`}
+          funnelFor={funnelFor}
+          {...(mayUpdate
+            ? { selection: { name: 'invoice', label: t('grid.select') } }
+            : {})}
+          stripeTone={(row) => INVOICE_TONE[row.status] ?? 'neutral'}
+          isCancelled={(row) => row.status === 'VOID'}
+          caption={t('accounting.invoices.title')}
+          sort={{
+            key: view.sort.key,
+            dir: view.sort.dir,
+            hrefFor: view.sortFor(PATH),
+            label: t('accounting.sortBy'),
+          }}
+          totals={{
+            label: pagedFooterLabel(
+              t('accounting.total'),
+              t('grid.rows'),
+              view.paged,
+            ),
+          }}
+          empty={
+            <EmptyState
+              title={t('accounting.invoices.empty')}
+              body={t('accounting.emptyHint')}
+            />
+          }
+        />
+      </BulkMarkSent>
       <GridFooterNav
         paged={view.paged}
         per={view.params.per}

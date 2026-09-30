@@ -45,6 +45,15 @@ export interface InvoiceGridRow {
   totalCents: number
   balanceCents: number
   status: string
+  /**
+   * SOLD, not ours to collect. The Factored tab is this field (§6.2).
+   *
+   * It is carried on the row rather than queried per tab because the aging
+   * chips and the totals have to be able to EXCLUDE it: a factored invoice is
+   * not a receivable, and counting one in "over 90 days" is chasing money
+   * somebody else already paid us for.
+   */
+  isFactored: boolean
   /** Null when nothing is outstanding — a paid invoice has no age. */
   bucket: AgingBucket | null
 }
@@ -66,6 +75,7 @@ export async function readInvoices(
       totalCents: true,
       balanceCents: true,
       status: true,
+      isFactored: true,
       companyId: true,
       company: { select: { name: true } },
       customer: { select: { name: true } },
@@ -89,6 +99,7 @@ export async function readInvoices(
     totalCents: invoice.totalCents,
     balanceCents: invoice.balanceCents,
     status: invoice.status,
+    isFactored: invoice.isFactored,
     // AGE IS A FACT ABOUT AN OUTSTANDING BALANCE. A paid invoice settled late is
     // not "90 days past due" — it is closed, and a bucket on it would put it in a
     // chip whose total is money somebody is chasing.
@@ -113,6 +124,19 @@ export const invoiceShape: ListShape<InvoiceGridRow> = {
     due: (row) => row.due?.getTime() ?? null,
     total: (row) => row.totalCents,
     balance: (row) => row.balanceCents,
+    status: (row) => row.status,
+  },
+  // ── THE STATUS FILTER (§6.2, 2026-09-30) ────────────────────────────────
+  //
+  // A funnel that writes the same query parameter the filter bar renders as a
+  // chip, which is what §6.2.1 settled: two handles on one filter, and a
+  // filtered grid stays a link somebody can send.
+  //
+  // KEYED ON THE STORED VALUE, not the translated label. An accountant
+  // filtering in Russian and pasting the URL to somebody reading English must
+  // land on the same rows (§7.1.5's reasoning about codes, applied to a
+  // filter).
+  columnFilters: {
     status: (row) => row.status,
   },
   defaultSort: 'issued',

@@ -37,6 +37,15 @@ const en = {
   'nav.group.fleet': 'Fleet',
   'nav.group.money': 'Money',
   'nav.group.accounting': 'Accounting',
+  'invoices.channel.email': 'Email',
+  'invoices.channel.portal': 'Broker portal',
+  'invoices.channel.edi': 'EDI',
+  'invoices.channel.post': 'Post',
+  'invoices.tab.factored': 'Factored',
+  'invoices.factoredHint':
+    'Sold to a factor, who collects them. Not counted as receivable and not aged on the Invoices tab.',
+  'invoices.markSentSelected': 'Mark sent',
+  'invoices.bulkSentDone': 'marked sent',
   'workbench.noAddableTrips': 'No unsettled trips in this period',
   'workbench.noAddableTripsHint':
     'Everything this driver ran in the period is already on a statement. A trip held for a missing remittance would appear here with its reason.',
@@ -2668,6 +2677,15 @@ const ru: Dictionary = {
   'nav.group.fleet': 'Автопарк',
   'nav.group.money': 'Финансы',
   'nav.group.accounting': 'Бухгалтерия',
+  'invoices.channel.email': 'Эл. почта',
+  'invoices.channel.portal': 'Портал брокера',
+  'invoices.channel.edi': 'EDI',
+  'invoices.channel.post': 'Почта',
+  'invoices.tab.factored': 'Факторинг',
+  'invoices.factoredHint':
+    'Проданы фактору, который их взыскивает. Не считаются дебиторкой и не стареют на вкладке «Счета».',
+  'invoices.markSentSelected': 'Отметить отправленными',
+  'invoices.bulkSentDone': 'отмечено отправленными',
   'workbench.noAddableTrips': 'В этом периоде нет нерассчитанных рейсов',
   'workbench.noAddableTripsHint':
     'Всё, что водитель отработал за период, уже в расчёте. Рейс, задержанный из-за отсутствия оплаты, появился бы здесь с причиной.',
@@ -5288,6 +5306,15 @@ const fa: Dictionary = {
   'nav.group.fleet': 'ناوگان',
   'nav.group.money': 'مالی',
   'nav.group.accounting': 'حساب‌داری',
+  'invoices.channel.email': 'رایانامه',
+  'invoices.channel.portal': 'درگاه کارگزار',
+  'invoices.channel.edi': 'EDI',
+  'invoices.channel.post': 'پست',
+  'invoices.tab.factored': 'واگذارشده',
+  'invoices.factoredHint':
+    'به شرکت فاکتورینگ واگذار شده و وصول با اوست. جزو مطالبات شمرده نمی‌شود و در برگهٔ فاکتورها کهنه نمی‌شود.',
+  'invoices.markSentSelected': 'علامت‌گذاری ارسال‌شده',
+  'invoices.bulkSentDone': 'علامت‌گذاری‌شده',
   'workbench.noAddableTrips': 'در این دوره سفر تسویه‌نشده‌ای نیست',
   'workbench.noAddableTripsHint':
     'هر چه راننده در این دوره انجام داده از پیش در صورت‌حساب است. سفری که به دلیل نرسیدن حواله نگه داشته شده باشد، با دلیلش اینجا دیده می‌شود.',
