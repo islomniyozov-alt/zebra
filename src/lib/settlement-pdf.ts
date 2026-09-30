@@ -2,6 +2,26 @@ import { formatCents } from './money'
 import { assemblePdf, pdfString, winAnsi } from './pdf'
 
 // ---------------------------------------------------------------------------
+// NO LONGER SERVED OVER HTTP. Retired as a route on 2026-09-30.
+//
+// THERE WERE TWO SETTLEMENT PDFs and one settlement, which is how the owner
+// came to report "the statement PDF is a stub — gross and net only, no
+// lines". It was true of THIS one, and the workbench's Export PDF pointed at
+// it while the batch detail page had been linking the full Datatruck-layout
+// renderer (`statement-pdf.ts`) all along. The route is gone; the link now
+// goes where the batch page's already went.
+//
+// WHAT IT IS STILL FOR: `tests/integration/settlements.test.ts` renders a
+// settlement through it twice — before and after a driver's raise — to assert
+// that the document does not change, which is the observable form of "a
+// frozen snapshot is frozen". `statement-pdf.ts` cannot take that job today
+// because it needs a batch and those settlements come from the older
+// per-driver path, which makes none.
+//
+// So it survives as that comparator and NOT as a document anybody is handed.
+// Do not link it. If the per-driver path ever gains a batch, this and its
+// test go together.
+//
 // THE SETTLEMENT PDF.
 //
 // The document a driver is handed on Friday, and the one they bring back in

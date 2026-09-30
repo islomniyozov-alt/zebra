@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
@@ -579,5 +579,48 @@ describe('every path out of DRAFT mints a number', () => {
 
   it('finaliseBatch already did, and still does', () => {
     expect(batchLib).toMatch(/const statementNumber = statementNumberOf\(/)
+  })
+})
+
+describe('Export PDF points at the statement, not the retired stub', () => {
+  it('links the Datatruck-layout route', () => {
+    // Owner, 2026-09-30: "the statement PDF is a stub". It was — this button
+    // linked a SECOND, older renderer while the batch detail page had been
+    // linking the full one all along. One settlement, two documents.
+    expect(page).toMatch(
+      /href=\{`\/api\/settlements\/statement\/\$\{settlement\.id\}`\}/,
+    )
+  })
+
+  it('never links the retired route again', () => {
+    // ON THE href, NOT ON THE STRING. The first version of this guard matched
+    // `/pdf\`` and failed against the COMMENT above the link, which quotes
+    // the retired path in backticks to explain why it is retired. A negative
+    // guard that fires on prose is a guard that gets deleted.
+    expect(page).not.toMatch(/href=\{`\/api\/settlements\/\$\{[^}]+\}\/pdf`\}/)
+  })
+
+  it('is absent on a draft, because that route answers 409 for one', () => {
+    // A draft's lines are thrown away and rebuilt on every refresh, so a PDF
+    // of one is a figure that will be different tomorrow. The batch page
+    // hides the same link for the same reason.
+    expect(page).toMatch(/settlement\.status !== 'DRAFT' \? \(/)
+  })
+
+  it('and the route it used is gone from the tree', () => {
+    expect(
+      existsSync(
+        join(
+          process.cwd(),
+          'src',
+          'app',
+          'api',
+          'settlements',
+          '[id]',
+          'pdf',
+          'route.ts',
+        ),
+      ),
+    ).toBe(false)
   })
 })

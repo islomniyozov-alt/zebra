@@ -426,3 +426,136 @@ describe('the Pay to line', () => {
     expect(withAddress.length).toBe(without.length + 1)
   })
 })
+
+// ---------------------------------------------------------------------------
+// EVERY FIGURE, NOT EVERY LABEL.
+//
+// Owner's ruling, 2026-09-30: "a test that renders a fixture and checks every
+// figure appears in the PDF text".
+//
+// THE CASES ABOVE CHECK THE LABELS THOROUGHLY AND THE NUMBERS PARTIALLY — a
+// load line was asserted by its number and its amount, so its GROSS, its
+// MILES, its two dates and its two places could all have gone missing and
+// every test would have passed. A charge was asserted by type and
+// description, so quantity, rate and total were unguarded. That is a test
+// suite that proves the document has the right words on it.
+//
+// SO THIS ASSERTS THE VALUES, EXHAUSTIVELY, and it is deliberately dumb: take
+// every number the input carries, render it the way the document renders it,
+// and require it in the drawn text. No sampling, no "spot check the totals".
+// ---------------------------------------------------------------------------
+
+describe('every figure the input carries reaches the page', () => {
+  const input = inputFor()
+  const pdf = renderStatementPdf(input)
+  const text = drawn(pdf)
+  const joined = text.join('\n')
+
+  /** Named, so a failure says WHICH figure rather than "expected true". */
+  const printed = (value: string, what: string) => {
+    expect(joined, what).toContain(value)
+  }
+
+  it('prints the five header values, not just their labels', () => {
+    printed(input.statementNumber, 'settlement number')
+    printed(input.batchNumber, 'batch number')
+    printed(input.driverName, 'driver name')
+    printed(input.unitNumber!, 'unit number')
+    printed(input.payTariffLabel!, 'payment tariff')
+    printed(input.company.name, 'letterhead name')
+    printed(input.company.address, 'letterhead address')
+  })
+
+  it('prints all three dates', () => {
+    printed(usDate(input.statementDate), 'statement date')
+    printed(usDate(input.periodStart), 'period start')
+    printed(usDate(input.periodEnd), 'period end')
+    printed(usDate(input.checkDate), 'check date')
+  })
+
+  it('prints every column of every earnings line', () => {
+    for (const load of input.loads) {
+      printed(load.loadNumber, `${load.loadNumber} number`)
+      printed(load.puPlace, `${load.loadNumber} PU`)
+      printed(load.delPlace, `${load.loadNumber} DEL`)
+      printed(usDate(load.puDate), `${load.loadNumber} PU date`)
+      printed(usDate(load.delDate), `${load.loadNumber} DEL date`)
+      printed(statementMoney(load.grossCents), `${load.loadNumber} load gross`)
+      printed(
+        statementMiles(load.milesHundredths),
+        `${load.loadNumber} total miles`,
+      )
+      printed(statementMoney(load.amountCents), `${load.loadNumber} amount`)
+    }
+  })
+
+  it('prints all three earnings totals', () => {
+    printed(statementMoney(input.totals.grossCents), 'totals gross')
+    printed(statementMiles(input.totals.milesHundredths), 'totals miles')
+    printed(statementMoney(input.totals.amountCents), 'totals amount')
+  })
+
+  it('prints every column of every deduction', () => {
+    for (const row of input.deductions) {
+      printed(row.type, `${row.type} type`)
+      if (row.description) printed(row.description, `${row.type} description`)
+      printed(String(row.quantity), `${row.type} quantity`)
+      printed(statementMoney(row.rateCents), `${row.type} rate`)
+      printed(statementMoney(row.totalCents), `${row.type} total`)
+    }
+  })
+
+  it('prints every column of every other-pay row', () => {
+    // THE SECTION THE OLD CASE CHECKED BY GREPPING FOR THE WORDS "truck wash".
+    expect(input.otherPay.length).toBeGreaterThan(0)
+    for (const row of input.otherPay) {
+      printed(row.type, `${row.type} type`)
+      if (row.description) printed(row.description, `${row.type} description`)
+      printed(String(row.quantity), `${row.type} quantity`)
+      printed(statementMoney(row.rateCents), `${row.type} rate`)
+      printed(statementMoney(row.totalCents), `${row.type} total`)
+    }
+  })
+
+  it('prints all six summary figures', () => {
+    for (const [key, cents] of Object.entries(input.summary)) {
+      printed(statementMoney(cents), `summary ${key}`)
+    }
+  })
+
+  it('prints all six YTD figures', () => {
+    // THE COLUMN THE ARTEFACT PUTS BESIDE EVERY SUMMARY ROW, and the one a
+    // driver checks a year against. Unasserted until now.
+    for (const [key, cents] of Object.entries(input.ytd)) {
+      printed(statementMoney(cents), `ytd ${key}`)
+    }
+  })
+
+  it('leaves nothing in the input unaccounted for', () => {
+    // A BACKSTOP AGAINST THIS TEST GOING STALE. Every money field anywhere in
+    // the input, collected by walking the object rather than by listing them
+    // — so a figure added to `StatementPdfInput` next year is required on the
+    // page by default instead of quietly joining the unchecked.
+    const cents: number[] = []
+    const walk = (value: unknown, path: string) => {
+      if (Array.isArray(value)) {
+        value.forEach((item, index) => walk(item, `${path}[${index}]`))
+        return
+      }
+      if (value && typeof value === 'object') {
+        for (const [key, inner] of Object.entries(value)) {
+          walk(inner, path ? `${path}.${key}` : key)
+        }
+        return
+      }
+      if (typeof value === 'number' && /Cents$/.test(path)) {
+        cents.push(value)
+      }
+    }
+    walk(input, '')
+    expect(cents.length).toBeGreaterThan(20)
+    for (const value of cents) {
+      expect(joined, `${value} cents`).toContain(statementMoney(value))
+    }
+  })
+})

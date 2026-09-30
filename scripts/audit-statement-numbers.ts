@@ -114,6 +114,24 @@ ISSUED NUMBERS (${issued.length}): ` +
 const counters = await db.$queryRawUnsafe<{ key: string; value: number }[]>(`
   SELECT key, value FROM "SeriesCounter" ORDER BY key
 `)
+// WHICH SETTLEMENTS HAVE NO BATCH. The statement PDF route refuses those with
+// a 409, so they are the rows that would have no document at all if the older
+// renderer were retired. Counted rather than assumed before anything is
+// deleted.
+const batchless = await db.$queryRawUnsafe<
+  { settlementNumber: string; status: string }[]
+>(`
+  SELECT "settlementNumber", status FROM "Settlement"
+   WHERE "deletedAt" IS NULL AND "batchId" IS NULL
+   ORDER BY "settlementNumber"
+`)
+console.log(
+  `
+NO BATCH (${batchless.length}): ` +
+    (batchless.map((r) => `${r.settlementNumber}/${r.status}`).join(', ') ||
+      '(none)'),
+)
+
 console.log(
   'SERIES COUNTERS: ' +
     (counters.map((r) => `${r.key}=${r.value}`).join(', ') || '(none)'),

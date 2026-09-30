@@ -591,15 +591,31 @@ export default async function SettlementPage({
                 }}
               />
             ) : null}
-            <a
-              href={`/api/settlements/${settlement.id}/pdf`}
-              target="_blank"
-              rel="noopener"
-            >
-              <Button variant="secondary" size="compact">
-                {t('workbench.exportPdf')}
-              </Button>
-            </a>
+            {/* ── EXPORT PDF POINTS AT THE STATEMENT, NOT THE OLD STUB ────
+             *
+             * Owner, 2026-09-30: "the statement PDF is a stub — gross and net
+             * only, no lines". It was, because this button linked
+             * `/api/settlements/{id}/pdf` — a SECOND renderer, older and
+             * thinner, while the batch detail page had been linking the real
+             * Datatruck-layout one all along. Two documents for one
+             * settlement, and the workbench was showing the wrong one.
+             *
+             * ABSENT ON A DRAFT rather than disabled. That route answers 409
+             * for a draft on a recorded ruling — a draft's lines are thrown
+             * away and rebuilt on every refresh, so a PDF of one is a figure
+             * that will be different tomorrow — and the batch page already
+             * hides the same link for the same reason. */}
+            {settlement.status !== 'DRAFT' ? (
+              <a
+                href={`/api/settlements/statement/${settlement.id}`}
+                target="_blank"
+                rel="noopener"
+              >
+                <Button variant="secondary" size="compact">
+                  {t('workbench.exportPdf')}
+                </Button>
+              </a>
+            ) : null}
           </div>
         }
       />
