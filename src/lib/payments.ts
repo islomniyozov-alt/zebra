@@ -744,3 +744,173 @@ export async function findPaymentDrift(tx: TxClient): Promise<PaymentDrift[]> {
 
   return drift
 }
+
+// ---------------------------------------------------------------------------
+// APPLYING ONE PAYMENT ACROSS SEVERAL OPEN ITEMS (§6.2.5).
+//
+// Owner's ruling, 2026-09-30. Money arrives as one wire against several open
+// items; until it is applied it sits unapplied and nothing it paid for looks
+// paid.
+//
+// ── ALL OR NOTHING, AND THAT IS THE OPPOSITE OF THE BULK GRIDS ───────────
+//
+// Bulk Change status and bulk Mark sent apply per row and report refusals by
+// name, because those are INDEPENDENT ACTS on independent rows — finalising
+// four batches and failing the fifth is four real outcomes.
+//
+// This is one person DIVIDING ONE PAYMENT. Applying three of their five
+// allocations and refusing two leaves a split nobody chose, against a wire
+// whose remainder is now wrong in a way only they could untangle. So the
+// whole allocation stands or falls together, and every refusal is named so
+// they can fix the set and resubmit it.
+//
+// The caller owns the transaction, so this REPORTS rather than rolls back:
+// `ok: false` with refusals, and the action throws to undo the writes. That
+// keeps the rollback where the transaction is.
+// ---------------------------------------------------------------------------
+
+export type AllocationKind = 'invoice' | 'load'
+
+export interface Allocation {
+  kind: AllocationKind
+  id: string
+  amountCents: number
+}
+
+export interface AllocationRefusal {
+  kind: AllocationKind
+  /** What the reader calls it: `INV-1002`, `DT-015095`. */
+  label: string
+  reason: ApplyFailure | LoadApplyFailure
+}
+
+export type ApplyAllocationsResult =
+  | {
+      ok: true
+      appliedCents: number
+      /** What is left on the payment. Often, correctly, not zero. */
+      unappliedCents: number
+    }
+  | { ok: false; refusals: AllocationRefusal[] }
+
+/**
+ * Apply a payment across a chosen set of invoices and direct-settled loads.
+ *
+ * EVERY ALLOCATION GOES THROUGH THE EXISTING RULE for its kind —
+ * `applyToInvoice` and `applyToLoads` — so the carrier check, the factoring
+ * check, the balance ceiling and the unapplied ceiling all still hold. This
+ * orchestrates; it does not reimplement, and it has no fast path.
+ */
+export async function applyAllocations(
+  tx: TxClient,
+  paymentId: string,
+  allocations: readonly Allocation[],
+): Promise<ApplyAllocationsResult> {
+  const refusals: AllocationRefusal[] = []
+  if (allocations.length === 0) {
+    return { ok: false, refusals }
+  }
+
+  // NAMES FIRST, so a refusal can say `INV-1002` even when the reason is
+  // "not found" — an id in an error message is the thing the reader then has
+  // to go and look up.
+  const invoiceIds = allocations
+    .filter((row) => row.kind === 'invoice')
+    .map((row) => row.id)
+  const loadIds = allocations
+    .filter((row) => row.kind === 'load')
+    .map((row) => row.id)
+
+  const [invoices, loads] = await Promise.all([
+    invoiceIds.length > 0
+      ? tx.invoice.findMany({
+          where: { id: { in: invoiceIds } },
+          select: { id: true, invoiceNumber: true },
+        })
+      : Promise.resolve([]),
+    loadIds.length > 0
+      ? tx.load.findMany({
+          where: { id: { in: loadIds } },
+          select: { id: true, loadNumber: true },
+        })
+      : Promise.resolve([]),
+  ])
+  const nameOf = new Map<string, string>([
+    ...invoices.map((row) => [row.id, row.invoiceNumber] as const),
+    ...loads.map((row) => [row.id, row.loadNumber] as const),
+  ])
+  const label = (id: string) => nameOf.get(id) ?? id.slice(0, 8)
+
+  let appliedCents = 0
+
+  // ── INVOICES, ONE AT A TIME ────────────────────────────────────────────
+  //
+  // `applyToInvoice` writes one `PaymentApplication` per call. One at a time
+  // rather than a `createMany` of its own, because the audit extension
+  // reports `createMany` as an unfollowable operation — a bulk insert would
+  // move money with no audit trail behind it.
+  for (const allocation of allocations) {
+    if (allocation.kind !== 'invoice') continue
+    const outcome = await applyToInvoice(
+      tx,
+      paymentId,
+      allocation.id,
+      allocation.amountCents,
+    )
+    if (outcome.ok) appliedCents += outcome.appliedCents
+    else {
+      refusals.push({
+        kind: 'invoice',
+        label: label(allocation.id),
+        reason: outcome.reason,
+      })
+    }
+  }
+
+  // ── AND THE DIRECT-SETTLED LOADS, IN ONE CALL ──────────────────────────
+  //
+  // `applyToLoads` takes the whole set because it checks the shares against
+  // the payment's remaining unapplied TOGETHER — calling it per load would
+  // let each one pass a ceiling the set as a whole breaks.
+  const shares = allocations
+    .filter((row) => row.kind === 'load')
+    .map((row) => ({ loadId: row.id, amountCents: row.amountCents }))
+
+  if (shares.length > 0) {
+    const outcome = await applyToLoads(tx, paymentId, shares)
+    if (outcome.ok) appliedCents += outcome.appliedCents
+    else {
+      // NAMED PER LOAD WHERE THE RULE NAMES THEM, and against the set where
+      // it does not — `exceeds_unapplied` is a fact about the whole
+      // allocation and pinning it on one load would be a guess.
+      const named = outcome.loadNumbers ?? []
+      if (named.length > 0) {
+        for (const loadNumber of named) {
+          refusals.push({
+            kind: 'load',
+            label: loadNumber,
+            reason: outcome.reason,
+          })
+        }
+      } else {
+        refusals.push({
+          kind: 'load',
+          label: shares.map((share) => label(share.loadId)).join(', '),
+          reason: outcome.reason,
+        })
+      }
+    }
+  }
+
+  if (refusals.length > 0) return { ok: false, refusals }
+
+  const payment = await tx.payment.findFirst({
+    where: { id: paymentId },
+    select: { unappliedCents: true },
+  })
+  return {
+    ok: true,
+    appliedCents,
+    unappliedCents: payment?.unappliedCents ?? 0,
+  }
+}

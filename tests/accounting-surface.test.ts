@@ -617,3 +617,62 @@ describe('Invoices finishes a week (§6.2, v10.8)', () => {
     expect(bulk).toMatch(/refusals\.push/)
   })
 })
+
+describe('applying a payment (§6.2.5)', () => {
+  const lib = readFileSync(
+    join(process.cwd(), 'src', 'lib', 'payments.ts'),
+    'utf8',
+  )
+  const action = readFileSync(join(APP, 'payments', 'actions.ts'), 'utf8')
+  const form = readFileSync(
+    join(APP, 'payments', '[id]', 'OpenItems.tsx'),
+    'utf8',
+  )
+  const detail = readFileSync(join(APP, 'payments', '[id]', 'page.tsx'), 'utf8')
+
+  it('lists both kinds of open item in one list', () => {
+    // The question is "what does this payer owe us", and two tables would
+    // make somebody add up two subtotals to see whether the wire is covered.
+    expect(detail).toMatch(/const openItems: OpenItem\[\] = \[/)
+    expect(detail).toMatch(/kind: 'invoice',/)
+    expect(detail).toMatch(/kind: 'load',/)
+    // And the panels it replaced are gone, not merely unused.
+    expect(detail).not.toMatch(/<ApplyToInvoice\b/)
+    expect(detail).not.toMatch(/<ApplyStatement\b/)
+  })
+
+  it('prefills every amount to that item balance', () => {
+    expect(form).toMatch(/\(item\.balanceCents \/ 100\)\.toFixed\(2\)/)
+  })
+
+  it('goes through the existing rule for each kind', () => {
+    // The carrier check, the factoring check and both ceilings live in
+    // `applyToInvoice` and `applyToLoads`. This orchestrates; it must not
+    // reimplement, and it must have no fast path.
+    expect(lib).toMatch(/await applyToInvoice\(\s*tx,\s*paymentId,/)
+    expect(lib).toMatch(/await applyToLoads\(tx, paymentId, shares\)/)
+    expect(lib).not.toMatch(/paymentApplication\.createMany/)
+  })
+
+  it('is all or nothing, with the rollback where the transaction is', () => {
+    // One person dividing one payment: applying three of five allocations
+    // leaves a split nobody chose. The lib reports; the action throws.
+    expect(lib).toMatch(
+      /if \(refusals\.length > 0\) return \{ ok: false, refusals \}/,
+    )
+    expect(action).toMatch(/throw new Refused\(result\.refusals\)/)
+    expect(action).toMatch(/error instanceof Refused/)
+  })
+
+  it('names every refusal rather than counting them', () => {
+    expect(lib).toMatch(/label: label\(allocation\.id\)/)
+    expect(action).toMatch(/refusals: error\.refusals\.map/)
+  })
+
+  it('leaves the remainder unapplied instead of forcing it', () => {
+    // Unapplied money is a real state. A screen that always zeroed it would
+    // be inventing an allocation nobody made.
+    expect(lib).toMatch(/unappliedCents: payment\?\.unappliedCents \?\? 0/)
+    expect(action).not.toMatch(/unappliedCents: 0,/)
+  })
+})

@@ -37,6 +37,20 @@ const en = {
   'nav.group.fleet': 'Fleet',
   'nav.group.money': 'Money',
   'nav.group.accounting': 'Accounting',
+  'payments.error.notFound': 'That payment no longer exists.',
+  'payments.error.nothingChosen':
+    'Nothing to apply — every amount was left blank or zero.',
+  'payments.applyOpenItems': 'Open items',
+  'payments.applyHint':
+    'Amounts are prefilled to each balance. Change any of them; what you do not apply stays unapplied on the payment.',
+  'payments.applyAllOrNothing':
+    'Applied together. If any line is refused, none of them are applied.',
+  'payments.remainsUnapplied': 'remains unapplied',
+  'payments.openItem.invoice': 'Invoice',
+  'payments.openItem.load': 'Direct-settled load',
+  'payments.noOpenItems': 'This payer has nothing open',
+  'payments.noOpenItemsHint':
+    'Every invoice and direct-settled load for them is settled. The payment stays unapplied until something is raised.',
   'invoices.channel.email': 'Email',
   'invoices.channel.portal': 'Broker portal',
   'invoices.channel.edi': 'EDI',
@@ -2677,6 +2691,20 @@ const ru: Dictionary = {
   'nav.group.fleet': 'Автопарк',
   'nav.group.money': 'Финансы',
   'nav.group.accounting': 'Бухгалтерия',
+  'payments.error.notFound': 'Этот платёж больше не существует.',
+  'payments.error.nothingChosen':
+    'Нечего применить — все суммы пусты или нулевые.',
+  'payments.applyOpenItems': 'Открытые позиции',
+  'payments.applyHint':
+    'Суммы подставлены по остатку. Измените любую; неприменённое останется на платеже.',
+  'payments.applyAllOrNothing':
+    'Применяются вместе. Если хотя бы одна строка отклонена, не применяется ни одна.',
+  'payments.remainsUnapplied': 'осталось неприменённым',
+  'payments.openItem.invoice': 'Счёт',
+  'payments.openItem.load': 'Груз с прямым расчётом',
+  'payments.noOpenItems': 'У этого плательщика нет открытых позиций',
+  'payments.noOpenItemsHint':
+    'Все их счета и прямые грузы закрыты. Платёж останется неприменённым, пока не появится новая позиция.',
   'invoices.channel.email': 'Эл. почта',
   'invoices.channel.portal': 'Портал брокера',
   'invoices.channel.edi': 'EDI',
@@ -5306,6 +5334,20 @@ const fa: Dictionary = {
   'nav.group.fleet': 'ناوگان',
   'nav.group.money': 'مالی',
   'nav.group.accounting': 'حساب‌داری',
+  'payments.error.notFound': 'این پرداخت دیگر وجود ندارد.',
+  'payments.error.nothingChosen':
+    'چیزی برای اعمال نیست — همهٔ مبالغ خالی یا صفر بود.',
+  'payments.applyOpenItems': 'اقلام باز',
+  'payments.applyHint':
+    'مبالغ بر پایهٔ مانده پر شده‌اند. هرکدام را می‌توانید تغییر دهید؛ آنچه اعمال نشود روی پرداخت باقی می‌ماند.',
+  'payments.applyAllOrNothing':
+    'با هم اعمال می‌شوند. اگر هر سطری رد شود، هیچ‌کدام اعمال نمی‌شوند.',
+  'payments.remainsUnapplied': 'اعمال‌نشده باقی می‌ماند',
+  'payments.openItem.invoice': 'فاکتور',
+  'payments.openItem.load': 'بار با تسویهٔ مستقیم',
+  'payments.noOpenItems': 'این پرداخت‌کننده قلم بازی ندارد',
+  'payments.noOpenItemsHint':
+    'همهٔ فاکتورها و بارهای مستقیم آن‌ها تسویه شده است. پرداخت تا پیدا شدن قلم تازه اعمال‌نشده می‌ماند.',
   'invoices.channel.email': 'رایانامه',
   'invoices.channel.portal': 'درگاه کارگزار',
   'invoices.channel.edi': 'EDI',

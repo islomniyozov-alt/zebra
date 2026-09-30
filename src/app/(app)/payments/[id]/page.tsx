@@ -3,10 +3,9 @@ import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { invoiceCandidates, statementCandidates } from '@/lib/payments'
-import { centsToInput, formatCents } from '@/lib/money'
+import { formatCents } from '@/lib/money'
 import { StatusBadge } from '@/components/ui/StatusBadge'
-import { ApplyToInvoice, type OpenInvoice } from './ApplyToInvoice'
-import { ApplyStatement, type StatementLoad } from './ApplyStatement'
+import { OpenItems, type OpenItem } from './OpenItems'
 import type { MessageKey } from '@/lib/i18n'
 
 // One payment: what landed, what it has been said to pay, and what is left.
@@ -103,29 +102,37 @@ export default async function PaymentPage({
   const day = (value: Date) => value.toISOString().slice(0, 10)
   const translate = Object.fromEntries(ERROR_KEYS.map((key) => [key, t(key)]))
 
-  const openInvoices: OpenInvoice[] = data.invoices.map((invoice) => ({
-    invoiceId: invoice.invoiceId,
-    invoiceNumber: invoice.invoiceNumber,
-    due: invoice.dueDate ? day(invoice.dueDate) : '—',
-    balanceCents: invoice.balanceCents,
-    balance: formatCents(invoice.balanceCents, locale),
-    // The common case in one click: settle the balance, or as much of it as
-    // this payment has left.
-    suggested: centsToInput(
-      Math.min(invoice.balanceCents, payment.unappliedCents),
+  // ── THE PAYER'S OPEN ITEMS, BOTH KINDS IN ONE LIST (§6.2.5) ───────────
+  //
+  // The question this page answers is "what does this payer owe us". Two
+  // mappings into two tables made somebody add up two subtotals to see
+  // whether the wire was covered, so the kind is a COLUMN here rather than a
+  // heading.
+  //
+  // ORDERED BY WHAT IS OWED, LARGEST FIRST, and deliberately not grouped by
+  // kind — a grouping would reintroduce the two lists this one replaces.
+  const openItems: OpenItem[] = [
+    ...data.invoices.map(
+      (invoice): OpenItem => ({
+        kind: 'invoice',
+        id: invoice.invoiceId,
+        label: invoice.invoiceNumber,
+        when: invoice.dueDate ? day(invoice.dueDate) : '—',
+        balanceCents: invoice.balanceCents,
+      }),
     ),
-  }))
-
-  const statementLoads: StatementLoad[] = data.loads
-    .filter((load) => load.outstandingCents > 0)
-    .map((load) => ({
-      loadId: load.loadId,
-      loadNumber: load.loadNumber,
-      booked: day(load.bookedAt),
-      outstandingCents: load.outstandingCents,
-      outstanding: formatCents(load.outstandingCents, locale),
-      revenue: formatCents(load.totalRevenueCents, locale),
-    }))
+    ...data.loads
+      .filter((load) => load.outstandingCents > 0)
+      .map(
+        (load): OpenItem => ({
+          kind: 'load',
+          id: load.loadId,
+          label: load.loadNumber,
+          when: day(load.bookedAt),
+          balanceCents: load.outstandingCents,
+        }),
+      ),
+  ].sort((left, right) => right.balanceCents - left.balanceCents)
 
   const appliedCents = payment.amountCents - payment.unappliedCents
 
@@ -234,47 +241,42 @@ export default async function PaymentPage({
             )}
           </section>
 
-          {mayApply && payment.unappliedCents > 0 && openInvoices.length > 0 ? (
-            <section className="rounded-card border border-border bg-surface p-z4">
-              <ApplyToInvoice
-                paymentId={payment.id}
-                invoices={openInvoices}
-                translate={translate}
-                labels={{
-                  heading: t('payments.applyToInvoice'),
-                  hint: t('payments.applyToInvoiceHint'),
-                  invoice: t('payments.invoice'),
-                  amount: t('payments.amount'),
-                  apply: t('payments.apply'),
-                  unapplied: t('payments.unapplied'),
-                }}
-              />
-            </section>
-          ) : null}
-
+          {/* ── APPLY, ONE LIST, ONE TRANSACTION (§6.2.5) ──────────────
+           *
+           * This replaced two panels — one for invoices, one for
+           * direct-settled loads — each applying in its own transaction. Two
+           * tables made somebody add up two subtotals to see whether the
+           * wire was covered, and two transactions meant a person dividing
+           * one payment could get half of their split.
+           *
+           * SHOWN WHENEVER THERE IS MONEY LEFT, even with nothing open: the
+           * empty state says the payer has nothing outstanding, which is an
+           * answer somebody came here for. */}
           {mayApply && payment.unappliedCents > 0 ? (
             <section className="rounded-card border border-border bg-surface p-z4">
-              <ApplyStatement
+              <OpenItems
                 paymentId={payment.id}
-                loads={statementLoads}
+                items={openItems}
                 unappliedCents={payment.unappliedCents}
                 locale={locale}
-                translate={translate}
                 labels={{
-                  heading: t('payments.statement'),
-                  hint: t('payments.statementHint'),
-                  load: t('payments.load'),
-                  outstanding: t('payments.outstanding'),
+                  heading: t('payments.applyOpenItems'),
+                  hint: t('payments.applyHint'),
+                  allOrNothing: t('payments.applyAllOrNothing'),
+                  item: t('payments.invoice'),
+                  when: t('invoices.due'),
+                  balance: t('payments.outstanding'),
                   amount: t('payments.amount'),
-                  propose: t('payments.propose'),
-                  apply: t('payments.applyStatement'),
-                  selected: t('payments.selected'),
-                  empty: t('payments.statementEmpty'),
-                  remainder: t('payments.remainder'),
-                  remainderHint: t('payments.remainderHint'),
-                  shortfall: t('payments.shortfall'),
-                  overpaid: t('payments.overpaid'),
+                  apply: t('payments.apply'),
+                  applied: t('payments.applied'),
+                  remains: t('payments.remainsUnapplied'),
+                  unapplied: t('payments.unapplied'),
+                  emptyTitle: t('payments.noOpenItems'),
+                  emptyBody: t('payments.noOpenItemsHint'),
+                  kindInvoice: t('payments.openItem.invoice'),
+                  kindLoad: t('payments.openItem.load'),
                 }}
+                reasons={translate}
               />
             </section>
           ) : null}
