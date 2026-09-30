@@ -37,53 +37,9 @@ await Promise.all([
   page.click('button[type="submit"]'),
 ])
 
-// A settlement that is NOT a draft — the route refuses a draft by ruling, so
-// a draft would prove only that the refusal works.
-await page.goto(`${BASE}/payroll/statements`, { waitUntil: 'domcontentloaded' })
-await page.waitForTimeout(1500)
-const candidates = await page.evaluate(() =>
-  [...document.querySelectorAll('a[href^="/settlements/"]')]
-    .map((a) => new URL(a.href).pathname.split('/').pop())
-    .filter((id, index, all) => id && all.indexOf(id) === index)
-    .slice(0, 12),
-)
-
-let found = null
-const refusals = []
-for (const id of candidates) {
-  const response = await context.request.get(
-    `${origin}/api/settlements/statement/${id}`,
-  )
-  if (response.status() === 200) {
-    found = { id, body: Buffer.from(await response.body()) }
-    break
-  }
-  // WHY, NOT JUST "NO". A run that reports "nothing to fetch" leaves the
-  // reader unable to tell an empty database from a route refusing everything,
-  // and those are different problems.
-  refusals.push(`${id} -> ${response.status()}`)
-}
-
-if (!found) {
-  console.error(`NO STATEMENT PDF AVAILABLE. ${refusals.length} tried:`)
-  for (const line of refusals) console.error(`  ${line}`)
-  await browser.close()
-  process.exit(1)
-}
-
-const raw = found.body.toString('latin1')
-const drawn = [...raw.matchAll(/\(((?:\\.|[^\\()])*)\)\s*Tj/g)].map((hit) =>
-  hit[1].replace(/\\([()\\])/g, '$1'),
-)
-const text = drawn.join('\n')
-
-console.log(`settlement ${found.id}`)
-console.log(`bytes      ${found.body.length}`)
-console.log(`is a PDF   ${raw.startsWith('%PDF-')}`)
-console.log(`strings    ${drawn.length}\n`)
-
-// The labels off `corpus/datatruck/ST-005562.pdf`. Present or the deployed
-// document is not the layout the owner asked for.
+// The labels off `corpus/datatruck/ST-005562.pdf`. Present on BOTH documents
+// or the deployed sheet is not the layout the owner asked for — a draft is
+// missing its number and nothing else.
 const REQUIRED = [
   'Statement Date:',
   'Period Start:',
@@ -105,18 +61,80 @@ const REQUIRED = [
   'YTD Net Pay:',
 ]
 
-let missing = 0
-for (const label of REQUIRED) {
-  const ok = text.includes(label)
-  if (!ok) missing += 1
-  console.log(`  ${ok ? 'ok  ' : 'MISS'}  ${label}`)
+await page.goto(`${BASE}/payroll/statements`, { waitUntil: 'domcontentloaded' })
+await page.waitForTimeout(1500)
+const candidates = await page.evaluate(() =>
+  [...document.querySelectorAll('a[href^="/settlements/"]')]
+    .map((a) => new URL(a.href).pathname.split('/').pop())
+    .filter((id, index, all) => id && all.indexOf(id) === index)
+    .slice(0, 12),
+)
+
+// ── ONE FINALISED AND ONE DRAFT (owner's ruling, 2026-09-30) ────────────
+//
+// Both, because they are different claims. The finalised one proves the
+// document renders with its number; the draft proves the route no longer
+// refuses, that the watermark is on it, and that the placeholder id is NOT.
+// Checking only the first would leave the whole ruling unverified.
+const fetched = []
+const refusals = []
+for (const id of candidates) {
+  const response = await context.request.get(
+    `${origin}/api/settlements/statement/${id}`,
+  )
+  if (response.status() !== 200) {
+    // WHY, NOT JUST "NO". A run reporting "nothing to fetch" cannot tell an
+    // empty database from a route refusing everything.
+    refusals.push(`${id} -> ${response.status()}`)
+    continue
+  }
+  const body = Buffer.from(await response.body())
+  const drawnHere = [
+    ...body.toString('latin1').matchAll(/\(((?:\\.|[^\\()])*)\)\s*Tj/g),
+  ].map((hit) => hit[1].replace(/\\([()\\])/g, '$1'))
+  fetched.push({ id, body, text: drawnHere.join('\n') })
+  if (fetched.length >= 12) break
 }
 
-console.log('')
-if (!raw.startsWith('%PDF-') || missing > 0) {
-  console.log(`${missing} OF ${REQUIRED.length} LABELS MISSING — NOT OK.`)
+const finalised = fetched.find((row) => !row.text.includes('DRAFT'))
+const draft = fetched.find((row) => row.text.includes('DRAFT'))
+
+if (!finalised || !draft) {
+  console.error(
+    `NEED ONE FINALISED AND ONE DRAFT. fetched ${fetched.length}, ` +
+      `finalised ${finalised ? 'yes' : 'no'}, draft ${draft ? 'yes' : 'no'}.`,
+  )
+  for (const line of refusals) console.error(`  refused ${line}`)
   await browser.close()
   process.exit(1)
 }
-console.log(`ALL ${REQUIRED.length} LABELS PRESENT IN THE DEPLOYED PDF — OK.`)
+
+let bad = 0
+
+for (const [label, row] of [
+  ['FINALISED', finalised],
+  ['DRAFT    ', draft],
+]) {
+  const isDraft = label.trim() === 'DRAFT'
+  console.log('')
+  console.log(`${label}  ${row.id}   ${row.body.length} bytes`)
+  const checks = [
+    ['is a PDF', row.body.toString('latin1').startsWith('%PDF-')],
+    ['has the watermark', row.text.includes('DRAFT') === isDraft],
+    ['no placeholder id on the page', !/DRAFT-[a-z0-9]{4}/.test(row.text)],
+    ...REQUIRED.map((label_) => [label_, row.text.includes(label_)]),
+  ]
+  for (const [what, ok] of checks) {
+    if (!ok) bad += 1
+    console.log(`  ${ok ? 'ok  ' : 'MISS'}  ${what}`)
+  }
+}
+
+console.log('')
+if (bad > 0) {
+  console.log(`${bad} CHECKS FAILED — NOT OK.`)
+  await browser.close()
+  process.exit(1)
+}
+console.log('BOTH DOCUMENTS PASS EVERY CHECK — OK.')
 await browser.close()

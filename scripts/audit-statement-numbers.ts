@@ -137,4 +137,26 @@ console.log(
     (counters.map((r) => `${r.key}=${r.value}`).join(', ') || '(none)'),
 )
 
+// THE BATCHES, because a statement's exportability is decided by its batch's
+// status and nothing else.
+const batches = await db.$queryRawUnsafe<
+  { batchNumber: string | null; status: string; periodStart: Date; n: bigint }[]
+>(`
+  SELECT b."batchNumber", b.status, b."periodStart",
+         COUNT(s.id) AS n
+    FROM "SettlementBatch" b
+    LEFT JOIN "Settlement" s ON s."batchId" = b.id AND s."deletedAt" IS NULL
+   WHERE b."deletedAt" IS NULL
+   GROUP BY b."batchNumber", b.status, b."periodStart"
+   ORDER BY b."periodStart"
+`)
+console.log('')
+console.log('BATCHES')
+for (const row of batches) {
+  console.log(
+    `  ${(row.batchNumber ?? '(none)').padEnd(10)} ${row.status.padEnd(6)} ` +
+      `${row.periodStart.toISOString().slice(0, 10)}  ${row.n} settlements`,
+  )
+}
+
 await db.$disconnect()
