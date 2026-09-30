@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
+**Status:** v10.3 — §8 forbids an internal id in a heading and §6.2.2 gives the statement its title rule 2026-09-30 (owner’s ruling); v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -417,6 +417,18 @@ Top to bottom, four parts:
 **1. The action row**, top-right, belonging to the page (§7.1.6): Add trips ·
 Add charges · Recalculate · Send to driver · Post · Export PDF.
 
+**1a. The title.** _Owner's ruling, 2026-09-30._ The settlement number where
+one has been issued; otherwise `Draft — <driver> · <period>`. Never the
+placeholder id (§8).
+
+**A STATEMENT NUMBER IS MINTED WHEN THE DOCUMENT STOPS BEING A DRAFT**, which
+is the rule the title is only the visible half of. `finaliseBatch` already
+mints one per settlement; posting a single statement did not, so a batch draft
+posted on its own kept `DRAFT-<batch>-<driver>` through APPROVED and into PAID
+— and a paid statement carrying a row id is a document somebody was paid on
+that cannot be cited. Both paths mint now, and marking paid mints as a
+backstop for rows approved before this ruling.
+
 **2. The header box.** One dense block of label:value pairs at body size, in the
 artefact's own order and grouping:
 
@@ -775,6 +787,24 @@ Bottom-leading corner, 4 seconds, one at a time, queued. Success is quiet. Error
 **Money.** `$` prefix, thousands separators, always two decimals, right-aligned, mono, tabular. Negative figures take a leading minus and `--z-danger` — not parentheses. Dispatchers are not accountants and parentheses read as a footnote.
 
 **Rate per mile.** Two decimals, no dollar sign in table columns headed `RPM`.
+
+**A heading never carries an internal id.** _Owner's ruling, 2026-09-30._
+
+A cuid, a row id, or a placeholder built out of one — `DRAFT-g8hsz3mk-jcyy2u78`
+— is a database fact, not a name. It tells the reader nothing, it cannot be
+read aloud, and it appears at the top of the page where the name belongs.
+
+- **When the thing has an issued number, the heading is that number.**
+  `ST-005562`, `SB-000449`, `INV-001204`.
+- **When it does not yet, the heading DESCRIBES the thing** in the words its
+  reader would use: `Draft — Chapan Odiljon · 2026-08-30 – 2026-09-05`. Two
+  people and a week, which is what somebody scanning a browser tab actually
+  needs to tell one draft from another.
+- **The id may still appear in the body**, in mono, as a field — that is where
+  a value somebody might have to quote belongs.
+- **And a document that has been PAID must have a real number.** A placeholder
+  on a paid statement is not a display problem, it is a numbering bug showing
+  through: see §6.2.2.
 
 **Miles.** Integer, thousands separator, right-aligned. Deadhead shown in `--z-ink-2` next to loaded miles, never summed into the same figure.
 
