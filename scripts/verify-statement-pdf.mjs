@@ -50,25 +50,61 @@ const REQUIRED = [
   'Batch ID:',
   'Driver:',
   'Unit Number:',
-  'Payment tariff:',
   'Earnings',
   'Load number',
   'Load gross',
   'Total miles',
   'Total amount',
   'Net Pay:',
-  'YTD Earnings:',
-  'YTD Net Pay:',
 ]
 
-await page.goto(`${BASE}/payroll/statements`, { waitUntil: 'domcontentloaded' })
-await page.waitForTimeout(1500)
-const candidates = await page.evaluate(() =>
-  [...document.querySelectorAll('a[href^="/settlements/"]')]
-    .map((a) => new URL(a.href).pathname.split('/').pop())
-    .filter((id, index, all) => id && all.indexOf(id) === index)
-    .slice(0, 12),
-)
+// ── TWO LABELS THAT ARE CONDITIONAL BY DESIGN ──────────────────────────
+//
+// The first version of this list demanded both unconditionally and reported
+// three failures against two documents that were correct. The instrument had
+// inherited an assumption from the corpus — every Datatruck statement in
+// `corpus/` happens to have a tariff and a full year behind it — which is
+// the "count the thing you are claiming" trap with a checklist instead of a
+// query.
+//
+//   `Payment tariff:` is drawn only when there IS one. A bold label with
+//   nothing after it is worse than its absence.
+//
+//   The YTD column is headed `YTD Earnings:` only when an opening balance
+//   backs the year. Without one it reads `Earnings since 08/09:`, because
+//   printing YTD over a partial figure would be a claim about a year that
+//   the number is not. Finalising SB-000001 is what moved one of these
+//   documents from the first form to the second.
+const ytdLabel = (word, text) =>
+  text.includes(`YTD ${word}:`) || new RegExp(`${word} since `).test(text)
+
+// ── BOTH ENDS OF THE LIST, NOT THE FIRST PAGE ──────────────────────────
+//
+// The statements grid opens on the newest period, fifty to a page, and every
+// recent batch is a draft — so scanning page one found fifty drafts and
+// reported that dev had no finalised statement, minutes after one had been
+// finalised. The finalised week is the OLDEST one.
+//
+// So the run reads the list sorted both ways and merges. It is the same grid
+// and the same filter, addressed by URL, which is the property §7.4 gives
+// these pages and the reason this needs no new endpoint.
+const idsFrom = async (query) => {
+  await page.goto(`${BASE}/payroll/statements${query}`, {
+    waitUntil: 'domcontentloaded',
+  })
+  await page.waitForTimeout(1500)
+  return page.evaluate(() =>
+    [...document.querySelectorAll('a[href^="/settlements/"]')]
+      .map((a) => new URL(a.href).pathname.split('/').pop())
+      .filter((id, index, all) => id && all.indexOf(id) === index),
+  )
+}
+
+const oldestFirst = await idsFrom('?sort=period&dir=asc')
+const newestFirst = await idsFrom('')
+const candidates = [...oldestFirst, ...newestFirst]
+  .filter((id, index, all) => all.indexOf(id) === index)
+  .slice(0, 60)
 
 // ── ONE FINALISED AND ONE DRAFT (owner's ruling, 2026-09-30) ────────────
 //
@@ -93,7 +129,14 @@ for (const id of candidates) {
     ...body.toString('latin1').matchAll(/\(((?:\\.|[^\\()])*)\)\s*Tj/g),
   ].map((hit) => hit[1].replace(/\\([()\\])/g, '$1'))
   fetched.push({ id, body, text: drawnHere.join('\n') })
-  if (fetched.length >= 12) break
+  // STOP WHEN BOTH KINDS ARE IN HAND, not after a fixed count. The statements
+  // list opens on the newest period and every recent batch is a draft, so a
+  // twelve-row scan found twelve drafts and reported no finalised statement
+  // on dev — four minutes after one had been finalised.
+  const haveBoth =
+    fetched.some((row) => row.text.includes('DRAFT')) &&
+    fetched.some((row) => !row.text.includes('DRAFT'))
+  if (haveBoth) break
 }
 
 const finalised = fetched.find((row) => !row.text.includes('DRAFT'))
@@ -123,10 +166,32 @@ for (const [label, row] of [
     ['has the watermark', row.text.includes('DRAFT') === isDraft],
     ['no placeholder id on the page', !/DRAFT-[a-z0-9]{4}/.test(row.text)],
     ...REQUIRED.map((label_) => [label_, row.text.includes(label_)]),
+    ['YTD or since-date Earnings', ytdLabel('Earnings', row.text)],
+    ['YTD or since-date Net Pay', ytdLabel('Net Pay', row.text)],
+    // THE RULING ITSELF, not a proxy for it. A finalised sheet carries an
+    // issued number; a draft's Settlement line is empty and the watermark
+    // explains why.
+    [
+      isDraft ? 'no number on the draft' : 'carries an issued ST- number',
+      isDraft ? !/\bST-\d{6}\b/.test(row.text) : /\bST-\d{6}\b/.test(row.text),
+    ],
   ]
+  let missedHere = 0
   for (const [what, ok] of checks) {
-    if (!ok) bad += 1
+    if (!ok) {
+      bad += 1
+      missedHere += 1
+    }
     console.log(`  ${ok ? 'ok  ' : 'MISS'}  ${what}`)
+  }
+  // ON A MISS, SHOW THE SHEET. A checklist that says what is absent and not
+  // what IS there sends the reader back to fetch the document by hand, which
+  // is the step this script exists to remove.
+  if (missedHere > 0) {
+    console.log('  --- first 30 strings drawn ---')
+    for (const line of row.text.split(String.fromCharCode(10)).slice(0, 30)) {
+      console.log(`      ${JSON.stringify(line)}`)
+    }
   }
 }
 
