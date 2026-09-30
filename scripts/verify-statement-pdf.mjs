@@ -112,6 +112,17 @@ const candidates = [...oldestFirst, ...newestFirst]
 // document renders with its number; the draft proves the route no longer
 // refuses, that the watermark is on it, and that the placeholder id is NOT.
 // Checking only the first would leave the whole ruling unverified.
+// THE CELL AFTER THE `Total amount` HEADER is the first load's Load number;
+// with an empty Earnings table that cell is the `Total:` row instead. Defined
+// here because both the scan and the selection need it, and a scan whose exit
+// test disagrees with the selection stops before it has what it needs.
+const firstLoadCell = (text) => {
+  const lines = text.split(String.fromCharCode(10))
+  const cell = lines[lines.indexOf('Total amount') + 1]
+  return cell === undefined || cell === 'Total:' ? null : cell
+}
+const hasLoadRows = (text) => firstLoadCell(text) !== null
+
 const fetched = []
 const refusals = []
 for (const id of candidates) {
@@ -133,18 +144,36 @@ for (const id of candidates) {
   // list opens on the newest period and every recent batch is a draft, so a
   // twelve-row scan found twelve drafts and reported no finalised statement
   // on dev — four minutes after one had been finalised.
-  const haveBoth =
-    fetched.some((row) => row.text.includes('DRAFT')) &&
-    fetched.some((row) => !row.text.includes('DRAFT'))
-  if (haveBoth) break
+  // THE SAME CONDITION THE SELECTION USES, or the loop stops before it has
+  // what the selection needs. It stopped at five documents, none of which had
+  // earnings rows, and then reported that none did — a scan whose exit test
+  // disagrees with its purpose.
+  const usable = (wantDraft) =>
+    fetched.some(
+      (r) => r.text.includes('DRAFT') === wantDraft && hasLoadRows(r.text),
+    )
+  if (usable(true) && usable(false)) break
 }
 
-const finalised = fetched.find((row) => !row.text.includes('DRAFT'))
-const draft = fetched.find((row) => row.text.includes('DRAFT'))
+// ── BOTH DOCUMENTS MUST HAVE EARNINGS ROWS ──────────────────────────────
+//
+// The first pass of this picked two statements with NO load lines — an old
+// per-driver STL- row and a batch-less draft — and reported every check
+// green. It was green over nothing: a statement with an empty Earnings table
+// cannot demonstrate the Load number column, which is the thing the ruling of
+// 2026-09-30 changed.
+//
+// A DOCUMENT IS ONLY EVIDENCE FOR WHAT IT ACTUALLY SHOWS. The cell after the
+// `Total amount` header is the first load's Load number; when the table is
+// empty that cell is the `Total:` row instead, which is how this is told.
+const withLoads = fetched.filter((row) => hasLoadRows(row.text))
+const finalised = withLoads.find((row) => !row.text.includes('DRAFT'))
+const draft = withLoads.find((row) => row.text.includes('DRAFT'))
 
 if (!finalised || !draft) {
   console.error(
-    `NEED ONE FINALISED AND ONE DRAFT. fetched ${fetched.length}, ` +
+    `NEED ONE FINALISED AND ONE DRAFT, EACH WITH EARNINGS ROWS. ` +
+      `fetched ${fetched.length}, with load lines ${withLoads.length}, ` +
       `finalised ${finalised ? 'yes' : 'no'}, draft ${draft ? 'yes' : 'no'}.`,
   )
   for (const line of refusals) console.error(`  refused ${line}`)
@@ -160,7 +189,14 @@ for (const [label, row] of [
 ]) {
   const isDraft = label.trim() === 'DRAFT'
   console.log('')
-  console.log(`${label}  ${row.id}   ${row.body.length} bytes`)
+  // THE NUMBER AND THE FIRST LOAD CELL, so the report reads as evidence
+  // rather than as a row of ticks somebody has to take on trust.
+  const numbered = row.text.match(/\b(?:ST|STL)-\d+\b/)
+  console.log(
+    `${label}  ${row.id}   ${row.body.length} bytes   ` +
+      `number ${numbered ? numbered[0] : '(none)'}   ` +
+      `first load cell ${JSON.stringify(firstLoadCell(row.text))}`,
+  )
   const checks = [
     ['is a PDF', row.body.toString('latin1').startsWith('%PDF-')],
     ['has the watermark', row.text.includes('DRAFT') === isDraft],
@@ -172,8 +208,17 @@ for (const [label, row] of [
     // issued number; a draft's Settlement line is empty and the watermark
     // explains why.
     [
-      isDraft ? 'no number on the draft' : 'carries an issued ST- number',
-      isDraft ? !/\bST-\d{6}\b/.test(row.text) : /\bST-\d{6}\b/.test(row.text),
+      isDraft ? 'no number on the draft' : 'carries an issued number',
+      // BOTH ISSUED SERIES, which is the allowlist `settlement-number.ts`
+      // already defines: `ST-` is the organization-wide one and `STL-` is the
+      // older per-driver path that still owns two paid rows on dev. The first
+      // version demanded `ST-\d{6}` and failed against STL-1001 — a correct
+      // document with a legitimately issued number, reported as missing one.
+      // Third time an instrument in this file has been narrower than the
+      // thing it measures.
+      isDraft
+        ? !/\b(ST|STL)-\d+\b/.test(row.text)
+        : /\b(ST|STL)-\d+\b/.test(row.text),
     ],
   ]
   let missedHere = 0
