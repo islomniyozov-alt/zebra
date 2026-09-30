@@ -575,6 +575,31 @@ Recorded rather than resolved, per Phase 1's discipline.
     DQF warning speak for the whole file, which loses “which one” from the
     list view. Left as it is, flagged rather than decided unilaterally.
 
+38. **The workbench brief asks for eleven trip columns and §7.1 allows nine.**
+    Owner's brief, 2026-09-29: "trips grid — trip, load, unit, total pay,
+    driver gross, status, dates, pickup, delivery, miles". Counted out that is
+    eleven columns, and `Table` THROWS above nine — the limit has been enforced
+    in code since Phase 1, not merely written down.
+
+    It was found the way it should be: the page 500'd on dev, the screenshot
+    run refused to report a pass, and the stack named §7.1's own error. Nothing
+    subtle — the guard did exactly what it exists for, on the first render.
+
+    `AGENTS.md` says the design system wins and the contradiction gets flagged
+    rather than silently resolved, so: **eleven columns behind a chooser, nine
+    shown by default.** Hidden by default are `Load ID` — the broker's own
+    reference, which is a lookup key rather than something read down a column —
+    and `Unit`, because Zebra freezes ONE truck per settlement and that column
+    repeats the same number on every row. Unit returns to the header box, which
+    is where `ST-005562.pdf` prints it.
+
+    THE ALTERNATIVE WAS TO RAISE THE LIMIT, and it is worth saying why not. The
+    number nine is a claim about a 1080p screen, which is what the office uses;
+    eleven columns fit only by truncating two places into uselessness. Datatruck
+    shows eleven AND ships a `Columns` control in the same toolbar, so the
+    artefact is not actually arguing for a wider table — it is arguing for a
+    chooser, which §7.1.4 already specifies.
+
 ---
 
 ## 8. How each acceptance box closed
