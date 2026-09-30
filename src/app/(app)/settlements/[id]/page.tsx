@@ -17,6 +17,7 @@ import {
 } from '@/lib/statement-workbench'
 import { sumCents, totalsLabel } from '@/lib/list-view'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { PageHeader } from '../../_grid/PageHeader'
 import { ColumnsChooser } from '../../_grid/ColumnsChooser'
 import { keepColumns } from '../../_grid/grid-page'
@@ -396,23 +397,31 @@ export default async function SettlementPage({
     {
       key: 'trip',
       header: t('workbench.trip'),
+      // THE BROKER'S NUMBER, FALLING BACK TO ZEBRA'S (§6.2.2, v10.6). The
+      // statement PDF leads with the reference because the artefact does, and
+      // a grid leading with DT-016018 beside a sheet leading with 116RX75DK
+      // would make the two look like different weeks.
+      //
+      // `||` AND NOT `??`, so a load carrying an empty string for a reference
+      // falls back too instead of rendering an empty anchor cell — the first
+      // cell is the row's accessible name (§7.1).
       render: (row) => (
         <span className="z-identifier font-mono" dir="ltr">
-          {row.loadNumber}
+          {row.load?.referenceNumber || row.loadNumber}
         </span>
       ),
     },
     {
       key: 'load',
       header: t('workbench.loadId'),
-      render: (row) =>
-        row.load?.referenceNumber ? (
-          <span className="font-mono text-xs text-ink-2" dir="ltr">
-            {row.load.referenceNumber}
-          </span>
-        ) : (
-          <span className="text-ink-3">—</span>
-        ),
+      // ZEBRA'S OWN NUMBER, behind the chooser. It is what the load is called
+      // everywhere else here, so somebody reconciling against a load page
+      // needs it — and it is frozen, unlike the reference above.
+      render: (row) => (
+        <span className="font-mono text-xs text-ink-2" dir="ltr">
+          {row.loadNumber}
+        </span>
+      ),
     },
     {
       key: 'unit',
@@ -548,10 +557,12 @@ export default async function SettlementPage({
              * rows — two places to fix when the rule changes. An anchor is
              * honest about that: it takes you to the one control.
              *
-             * ADD TRIPS IS ABSENT WHEN THERE IS NOTHING TO ADD rather than
-             * disabled, which is this codebase's rule — "you cannot do that
-             * yet" is better said by the control not being there. */}
-            {mayAdd && addable.length > 0 ? (
+             * BOTH ARE PRESENT WHENEVER THE STATEMENT CAN BE EDITED. Add
+             * trips used to be gated on there BEING trips, which made an
+             * empty week look like one where trips cannot be added at all.
+             * The panel answers that question with an empty state instead;
+             * the button's job is to take you to it. */}
+            {mayAdd ? (
               <a href="#trips-to-add">
                 <Button variant="secondary" size="compact">
                   {t('settlements.addTrips')}
@@ -871,11 +882,23 @@ export default async function SettlementPage({
            * add-row writes a figure somebody typed, and this offers a LIST of
            * this driver's unsettled freight with the held ones marked. There
            * is nothing to type. */}
-          {mayAdd && addable.length > 0 ? (
+          {/* RENDERED WHENEVER THE STATEMENT IS EDITABLE, empty or not
+           * (§6.2.2, v10.6). It used to appear only when there was freight
+           * to add, so a week with nothing outstanding looked like a week
+           * where trips could not be added — a control restating a condition
+           * instead of answering it. Confirming nothing is missing is an
+           * answer somebody needs to reach. */}
+          {mayAdd ? (
             <section
               id="trips-to-add"
               className="scroll-mt-z4 rounded-card border border-border bg-surface p-z4"
             >
+              {addable.length === 0 ? (
+                <EmptyState
+                  title={t('workbench.noAddableTrips')}
+                  body={t('workbench.noAddableTripsHint')}
+                />
+              ) : null}
               <AddTrips
                 settlementId={settlement.id}
                 trips={addable.map((trip) => ({

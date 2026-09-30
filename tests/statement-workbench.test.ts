@@ -697,3 +697,38 @@ describe('the statement route refuses nothing', () => {
     expect(route).toMatch(/settlement\.batch\?\.checkDate \?\?/)
   })
 })
+
+describe('the Trip column follows the paper', () => {
+  it('leads with the broker reference, falling back to Zebra number', () => {
+    // §6.2.2 v10.6. The statement PDF leads with the reference because the
+    // artefact does; a grid leading with DT-016018 beside a sheet leading
+    // with 116RX75DK would make the two look like different weeks.
+    //
+    // `||` AND NOT `??`, so an empty-string reference falls back too rather
+    // than rendering an empty first cell — which is the row's accessible
+    // name (§7.1).
+    expect(page).toMatch(
+      /\{row\.load\?\.referenceNumber \|\| row\.loadNumber\}/,
+    )
+  })
+
+  it('keeps Zebra own number as a column behind the chooser', () => {
+    expect(page).toMatch(/key: 'load',/)
+    expect(page).toMatch(/key !== 'load' && key !== 'unit'/)
+  })
+})
+
+describe('Add trips is present whenever the statement can be edited', () => {
+  it('is not gated on there being trips to add', () => {
+    // It used to read `mayAdd && addable.length > 0`, so a week with nothing
+    // outstanding looked like a week where trips could not be added at all —
+    // a control restating a condition instead of answering it.
+    expect(page).not.toMatch(/mayAdd && addable\.length > 0/)
+  })
+
+  it('answers the empty case with an empty state, not an absence', () => {
+    expect(page).toMatch(/addable\.length === 0 \? \(/)
+    expect(page).toMatch(/workbench\.noAddableTrips/)
+    expect(page).toMatch(/workbench\.noAddableTripsHint/)
+  })
+})
