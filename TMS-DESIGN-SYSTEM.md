@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v10.5 — §6.2.2: every statement exports, a draft’s PDF is watermarked 2026-09-30 (owner’s ruling, reversing the same day’s refusal); v10.4 — §8’s heading rule decides by an allowlist of issued series 2026-09-30; v10.3 — §8 forbids an internal id in a heading and §6.2.2 gives the statement its title rule 2026-09-30 (owner’s ruling); v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
+**Status:** v10.6 — §6.2.2: the Trip column is the broker’s reference and Add trips is unconditional 2026-09-30; v10.5 — §6.2.2: every statement exports, a draft’s PDF is watermarked 2026-09-30 (owner’s ruling, reversing the same day’s refusal); v10.4 — §8’s heading rule decides by an allowlist of issued series 2026-09-30; v10.3 — §8 forbids an internal id in a heading and §6.2.2 gives the statement its title rule 2026-09-30 (owner’s ruling); v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -417,6 +417,14 @@ Top to bottom, four parts:
 **1. The action row**, top-right, belonging to the page (§7.1.6): Add trips ·
 Add charges · Recalculate · Send to driver · Post · Export PDF.
 
+**Add trips is present whenever the statement can be edited, even with
+nothing to add.** _Owner's ruling, 2026-09-30._ It was the one action gated on
+its own contents — shown only when unsettled freight existed — so a week with
+nothing outstanding looked like a week where trips could not be added at all.
+The panel it opens renders with an empty state instead, which §10 makes an
+invitation rather than a dead end: it is where somebody looks to confirm that
+nothing is missing, and that is an answer worth being able to reach.
+
 **Export PDF is offered on EVERY statement, drafts included, and a draft's PDF
 is watermarked.** _Owner's ruling, 2026-09-30, reversing the same day's
 "absent on a draft"._
@@ -477,7 +485,23 @@ default**, because §7.1 caps a table at nine and enforces it by throwing.
 
 | Default                                                                                                  | Behind the chooser |
 | -------------------------------------------------------------------------------------------------------- | ------------------ |
-| Trip · Total pay · Driver gross · Status · Delivery date · Pickup date · Pickup · Delivery · Total miles | Load ID · Unit     |
+| Trip · Total pay · Driver gross · Status · Delivery date · Pickup date · Pickup · Delivery · Total miles | Load number · Unit |
+
+**The Trip column is the BROKER's reference, falling back to Zebra's own load
+number; Zebra's number keeps a column of its own behind the chooser.**
+_Owner's ruling, 2026-09-30, the screen following the paper._
+
+The statement PDF prints the broker's reference in its Load number column for
+the reason the artefact does — `ST-005562` lists `116RX75DK`, and a driver
+checking a line against his own paperwork has that number in front of him. A
+grid that led with `DT-016018` while the sheet beside it led with the
+reference would make the two documents look like different weeks.
+
+- **The fallback is the frozen number**, so a trip is identifiable when the
+  reference is missing, empty, or later moved.
+- **Zebra's number is still a column**, behind the chooser, because it is what
+  the load is called everywhere else in this system and somebody reconciling
+  against a load page needs it.
 
 _Corrected 2026-09-29, an hour after this section was written. The brief named
 eleven columns, this section copied them, and the page threw §7.1's own error
@@ -485,11 +509,13 @@ on its first render — found by the screenshot run refusing to report a pass.
 `AGENTS.md`: the design system wins and the contradiction is flagged, not
 silently resolved. See `PHASE-5-BRIEF.md` flag 38._
 
-- **`Load ID` and `Unit` are the two that go**, and neither is arbitrary. The
-  Load ID is the BROKER's reference — a key somebody looks a load up by, not a
-  column anybody reads down. The Unit repeats: Zebra freezes one truck per
-  settlement, so that column is the same number on every row, and it belongs in
-  the header box where `ST-005562.pdf` prints it.
+- **`Load number` and `Unit` are the two that go**, and neither is arbitrary.
+  Zebra's own number is a key somebody looks a load up by rather than a column
+  anybody reads down — and since 2026-09-30 the Trip column already falls back
+  to it, so it is only hidden where the reference makes it redundant. The Unit
+  repeats: Zebra freezes one truck per settlement, so that column is the same
+  number on every row, and it belongs in the header box where `ST-005562.pdf`
+  prints it.
 - **The artefact is not arguing for a wider table.** Datatruck shows eleven and
   ships a `Columns` control in the same toolbar. What it is arguing for is the
   chooser, which §7.1.4 already specifies.
