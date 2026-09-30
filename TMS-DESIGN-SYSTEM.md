@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v10.7 — §6.2.4 standing charges specified and held for migration 61, 2026-09-30; v10.6 — §6.2.2: the Trip column is the broker’s reference and Add trips is unconditional 2026-09-30; v10.5 — §6.2.2: every statement exports, a draft’s PDF is watermarked 2026-09-30 (owner’s ruling, reversing the same day’s refusal); v10.4 — §8’s heading rule decides by an allowlist of issued series 2026-09-30; v10.3 — §8 forbids an internal id in a heading and §6.2.2 gives the statement its title rule 2026-09-30 (owner’s ruling); v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
+**Status:** v10.8 — §6.2: Invoices gains a Factored tab, a status filter and bulk Mark sent 2026-09-30; v10.7 — §6.2.4 standing charges specified and held for migration 61, 2026-09-30; v10.6 — §6.2.2: the Trip column is the broker’s reference and Add trips is unconditional 2026-09-30; v10.5 — §6.2.2: every statement exports, a draft’s PDF is watermarked 2026-09-30 (owner’s ruling, reversing the same day’s refusal); v10.4 — §8’s heading rule decides by an allowlist of issued series 2026-09-30; v10.3 — §8 forbids an internal id in a heading and §6.2.2 gives the statement its title rule 2026-09-30 (owner’s ruling); v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -309,14 +309,14 @@ entries to reach the one their afternoon was about._
 
 _**Each destination is tabs over one grid** (§7.1.6):_
 
-| Destination | Tabs                                         |
-| ----------- | -------------------------------------------- |
-| Invoices    | Invoices · Ready to invoice · Direct-settled |
-| Payments    | Payments · Unapplied                         |
-| Batches     | Batches · Balances                           |
-| Statements  | Driver statements                            |
-| Charges     | Scheduled · One-time · This week             |
-| Reports     | By authority · By week · By driver           |
+| Destination | Tabs                                                    |
+| ----------- | ------------------------------------------------------- |
+| Invoices    | Invoices · Ready to invoice · Factored · Direct-settled |
+| Payments    | Payments · Unapplied                                    |
+| Batches     | Batches · Balances                                      |
+| Statements  | Driver statements                                       |
+| Charges     | Scheduled · One-time · This week                        |
+| Reports     | By authority · By week · By driver                      |
 
 _**What moved, and nothing was deleted.** The five Payroll TABS became three
 Payroll DESTINATIONS plus two tabs. Batches and Balances stay together because
@@ -379,6 +379,19 @@ screenshots:_
 | **`+ Deduction tariff`** on the workbench                                          | **Not built**                                                 | It creates a STANDING rule from inside one statement. Zebra's standing rules live on Payroll → Charges where they are visible across every driver; a rule created from one statement is how a deduction nobody can find gets onto forty cheques.                                                                                               |
 | **`Dispatcher salary` tab**                                                        | **Not built**                                                 | Recorded already at the five-tabs row; repeated here because the workbench's tab bar shows seven and the difference is now visible on two screens.                                                                                                                                                                                             |
 | **Fuel: four show-and-deduct modes**                                               | **Specified in §6.2.3, unbuilt**                              | Needs a migration, and a migration needs the ritual in `AGENTS.md`. Production is behind a dispatch awaiting review, so the model is specified here and built when that clears. This is the change the held migration 61 was waiting for.                                                                                                      |
+
+_**Factored is a tab and not a chip**, added 2026-09-30 by ruling. A factored
+invoice is SOLD — the factor collects it, so it is not our receivable and it
+does not age on our books. That is a different question about the same rows
+rather than a narrowing of the list, which is what §7.1.6 makes a tab. The
+status filter beside it IS a chip, because "show me the disputed ones" is a
+narrowing of the question already asked._
+
+_**Mark sent is a BULK action on the selection**, through the same
+`markInvoiceSent` per invoice, refusals named rather than counted — the same
+argument as bulk Change status on batches (§6.2.1). Finishing a week means
+sending twenty invoices, and a path that sent them one detail page at a time
+would be the reason somebody stops using the screen._
 
 _**Receivables folds into Invoices.** Aging is a view of the invoice list, not a
 second list of the same rows — §7.4 already makes a filter a URL, so "over 60
