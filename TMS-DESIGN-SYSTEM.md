@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v10.4 — §8’s heading rule decides by an allowlist of issued series 2026-09-30; v10.3 — §8 forbids an internal id in a heading and §6.2.2 gives the statement its title rule 2026-09-30 (owner’s ruling); v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
+**Status:** v10.5 — §6.2.2: every statement exports, a draft’s PDF is watermarked 2026-09-30 (owner’s ruling, reversing the same day’s refusal); v10.4 — §8’s heading rule decides by an allowlist of issued series 2026-09-30; v10.3 — §8 forbids an internal id in a heading and §6.2.2 gives the statement its title rule 2026-09-30 (owner’s ruling); v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -416,6 +416,27 @@ Top to bottom, four parts:
 
 **1. The action row**, top-right, belonging to the page (§7.1.6): Add trips ·
 Add charges · Recalculate · Send to driver · Post · Export PDF.
+
+**Export PDF is offered on EVERY statement, drafts included, and a draft's PDF
+is watermarked.** _Owner's ruling, 2026-09-30, reversing the same day's
+"absent on a draft"._
+
+The earlier rule came from the route, which refused a draft with a 409 on the
+reasoning that a draft's lines are rebuilt on every refresh, so a PDF of one is
+a figure that will be different tomorrow. That reasoning is sound and it is an
+argument for SAYING SO ON THE PAGE, not for withholding the page — the people
+who need a draft on paper are the ones checking it before it is posted, which
+is the whole job the workbench exists for.
+
+- **The watermark is the disclosure**, diagonal across the sheet, and it is the
+  reason the refusal is no longer needed: a document that says DRAFT on its
+  face cannot be mistaken for the one somebody was paid on.
+- **No number until one is issued.** The Settlement line prints empty on a
+  draft rather than showing the placeholder id (§8) — the same rule as the
+  heading, on the same reasoning, and the watermark already says why it is
+  blank.
+- **A settlement with no batch renders too.** Batch ID prints empty and the
+  dates come from the settlement's own frozen fields.
 
 **1a. The title.** _Owner's ruling, 2026-09-30._ The settlement number where
 one has been issued; otherwise `Draft — <driver> · <period>`. Never the
