@@ -316,6 +316,21 @@ const MAINTENANCE_READERS = [
   // Idempotent by asking, per step, whether it has already happened. A
   // half-finished money change that doubles on re-run is the failure being
   // designed against.
+  // ADDED 2026-09-30. It WRITES — to dev, never to production: with
+  // `--production` it reads and prints, and `--production --apply` is REFUSED
+  // rather than ignored, because a flag silently dropped is how somebody
+  // believes they have written when they have not.
+  //
+  // IT IS IN THIS LIST AND NOT THE READ-ONLY ONE because that list forbids
+  // the word UPDATE anywhere in the file, and this file contains two: the dev
+  // repair, and the statement it PRINTS for a human to run on production. The
+  // guard is right to make no distinction — a checker that tried to tell a
+  // write from a string containing one would be parsing SQL out of comments.
+  //
+  // It reads production to answer what dev cannot: does production hold the
+  // CRLF checksum too. It does — the migration was applied there from the
+  // same Windows working tree — so the statement it prints is needed.
+  'repair-migration-checksum.ts',
   'add-julia-and-rate-change.ts',
   // ADDED 2026-09-24, by ruling, and it WRITES on --apply. Sets
   // `Driver.kind = 'PAYEE'` on four rows named by DATATRUCK ID — 119, 136, 866

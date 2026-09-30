@@ -48,8 +48,29 @@ const nameAt = args.indexOf('--name')
 const NAME = nameAt === -1 ? null : args[nameAt + 1]
 const APPLY = args.includes('--apply')
 
+// ── READING PRODUCTION IS ALLOWED; WRITING IT IS NOT ─────────────────────
+//
+// Owner's ruling, 2026-09-30: print the exact statement for production so
+// Islom can run it. Printing it requires KNOWING WHETHER IT IS NEEDED —
+// production may already hold the LF hash, in which case the honest output is
+// "nothing to run" and handing somebody an UPDATE would be telling them to
+// repair something that is not broken.
+//
+// So `--production` reads and reports and never writes: `--apply` with it is
+// refused rather than ignored, because a flag that is silently dropped is how
+// somebody believes they have written when they have not.
+const PRODUCTION = args.includes('--production')
+
 if (!NAME) {
-  console.error('usage: --name <migration_directory> [--apply]')
+  console.error('usage: --name <migration_directory> [--apply] [--production]')
+  process.exit(1)
+}
+
+if (PRODUCTION && APPLY) {
+  console.error(
+    'REFUSED. --production is read-only: it prints the statement for a ' +
+      'human to run. It will not write to production itself.',
+  )
   process.exit(1)
 }
 
@@ -64,10 +85,20 @@ const crlf = Buffer.from(lf.toString('utf8').replace(/\n/g, '\r\n'), 'utf8')
 
 // DIRECT, NOT POOLED: this is DDL bookkeeping and the direct url is what
 // every other migration-touching script here uses.
-const url = process.env.DIRECT_DATABASE_URL
-if (!url) throw new Error('No DIRECT_DATABASE_URL. Refusing to guess one.')
-if (/production/i.test(url)) {
-  throw new Error('That url looks like production. This script is dev-only.')
+const url = PRODUCTION
+  ? process.env.PROD_DIRECT_DATABASE_URL
+  : process.env.DIRECT_DATABASE_URL
+if (!url) {
+  throw new Error(
+    PRODUCTION
+      ? 'No PROD_DIRECT_DATABASE_URL. Refusing to guess one.'
+      : 'No DIRECT_DATABASE_URL. Refusing to guess one.',
+  )
+}
+if (!PRODUCTION && /production/i.test(url)) {
+  throw new Error(
+    'That url looks like production. Pass --production to read it.',
+  )
 }
 const db = createPrismaClient(url)
 
@@ -115,6 +146,37 @@ console.log(
   '\nPROVEN COSMETIC: the recorded hash is exactly this file with CRLF\n' +
     'endings, so the SQL bytes are untouched.',
 )
+
+// ── THE STATEMENT, FOR A HUMAN TO RUN ON PRODUCTION ────────────────────
+//
+// Printed with its read-back, because an UPDATE reporting "1 row" has said
+// nothing about what is now IN the row. The SELECT compares rather than
+// prints a hash, so the answer is a boolean somebody can act on instead of
+// forty characters to check by eye at the end of a deploy.
+if (PRODUCTION) {
+  const hash = sha(lf)
+  console.log('')
+  console.log('RUN ON PRODUCTION, IN ONE TRANSACTION:')
+  console.log('')
+  console.log('  BEGIN;')
+  console.log(`  UPDATE _prisma_migrations SET checksum = '${hash}'`)
+  console.log(`   WHERE migration_name = '${NAME}';`)
+  console.log('')
+  console.log('  SELECT migration_name,')
+  console.log(`         checksum = '${hash}' AS is_now_correct`)
+  console.log('    FROM _prisma_migrations')
+  console.log(`   WHERE migration_name = '${NAME}';`)
+  console.log('')
+  console.log('  -- is_now_correct must be t, over exactly one row.')
+  console.log('  COMMIT;   -- or ROLLBACK; if it is not')
+  console.log('')
+  console.log(
+    'MORE THAN ONE ROW UPDATED means the WHERE reached something this ' +
+      'script did not look at. Roll back rather than reason about it.',
+  )
+  await db.$disconnect()
+  process.exit(0)
+}
 
 if (!APPLY) {
   console.log('\nDRY RUN. Re-run with --apply to write.')
