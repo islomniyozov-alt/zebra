@@ -3964,6 +3964,98 @@ model RecurringDeduction {
   @@index([organizationId])
 }
 
+// ---------------------------------------------------------------------------
+// STANDING CHARGES — SPECIFIED, NOT YET A TABLE. MIGRATION 61.
+//
+// Owner's ruling, 2026-09-30: an ORG-LEVEL recurring deduction. Ifta and Admin
+// Fee are the cases — every driver pays them, nobody signs up individually,
+// and a driver hired on Tuesday pays one on Friday without anybody adding a
+// row. See TMS-DESIGN-SYSTEM §6.2.4 for the surface.
+//
+// ── WHY `RecurringDeduction` ABOVE CANNOT CARRY IT ────────────────────────
+//
+// The ruling asked for this to be built against the existing shape if it
+// could hold it — "driverId nullable = all" — and it cannot. Three of the six
+// fields have no home:
+//
+//   `driverId` is String NOT NULL with a REQUIRED relation, so there is no
+//   way to express "no particular driver".
+//
+//   There is no column for the applies-to scope. `Driver.employmentType`
+//   answers it for a DRIVER; the RULE needs to state which kinds it covers,
+//   and that is a property of the rule.
+//
+//   There is nowhere to record an exemption. "This driver does not pay Ifta"
+//   is a decision somebody made and should be able to explain, so it is a row
+//   and not an absence.
+//
+// ── THE WORKAROUND THAT FITS TODAY, AND WHY IT IS REFUSED ─────────────────
+//
+// One `RecurringDeduction` per driver, fanned out at creation. It needs no
+// migration and it is a different feature: editing would mean superseding N
+// rows, a driver hired next week would not pick the charge up at all, and
+// "applies to owner-operators" would be a filter frozen at creation rather
+// than a property of the rule. Recorded here so the next person reaches for
+// it and finds the answer already written.
+//
+// ── WHAT GOES IN, BUNDLED WITH `Payment.isAdjustment` ─────────────────────
+//
+//   model StandingCharge {
+//     id             String @id @default(cuid())
+//     organizationId String
+//     organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+//
+//     /// The printed label, same vocabulary as RecurringDeduction.type and a
+//     /// string for the same reason — a new kind of charge is a label, never
+//     /// a migration.
+//     type        String
+//     description String?
+//
+//     /// The instalment per settlement period, positive. The engine applies
+//     /// the sign, as it does for every other charge.
+//     amountCents Int
+//     cadence     DeductionCadence
+//
+//     /// Which drivers it reaches. `ALL`, or one `OwnershipType` — the same
+//     /// vocabulary `Driver.employmentType` already uses, so the scope and
+//     /// the driver are compared in one currency rather than two.
+//     appliesTo String
+//
+//     /// SUPERSEDED, NEVER EDITED, like DriverPayRule and RecurringDeduction:
+//     /// these land on statements handed to a person.
+//     effectiveFrom DateTime
+//     effectiveTo   DateTime?
+//     notes         String?
+//
+//     exemptions StandingChargeExemption[]
+//     createdAt  DateTime @default(now())
+//
+//     @@index([organizationId, effectiveFrom])
+//   }
+//
+//   model StandingChargeExemption {
+//     id               String @id @default(cuid())
+//     organizationId   String // denormalized — convention 9
+//     standingChargeId String
+//     standingCharge   StandingCharge @relation(fields: [standingChargeId], references: [id], onDelete: Cascade)
+//     driverId         String
+//     driver           Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+//
+//     /// WHY, and it is required. An exemption nobody can explain is one
+//     /// nobody can review.
+//     reason    String
+//     createdAt DateTime @default(now())
+//
+//     @@unique([standingChargeId, driverId])
+//     @@index([organizationId])
+//   }
+//
+// BOTH CARRY `organizationId`, so both need a row in
+// `tests/integration/fixtures.ts` IN THE SAME COMMIT — `isolation-coverage`
+// fails by name otherwise, and "sees no rows from the other organization" is
+// true of an empty table, which is the comfortable way to be wrong.
+// ---------------------------------------------------------------------------
+
 /// A one-off charge or credit on one settlement.
 ///
 /// "Charge for late Del Load#111VS62GS" and a truck-wash reimbursement are THE

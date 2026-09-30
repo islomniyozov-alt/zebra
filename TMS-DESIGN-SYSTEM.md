@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v10.6 — §6.2.2: the Trip column is the broker’s reference and Add trips is unconditional 2026-09-30; v10.5 — §6.2.2: every statement exports, a draft’s PDF is watermarked 2026-09-30 (owner’s ruling, reversing the same day’s refusal); v10.4 — §8’s heading rule decides by an allowlist of issued series 2026-09-30; v10.3 — §8 forbids an internal id in a heading and §6.2.2 gives the statement its title rule 2026-09-30 (owner’s ruling); v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
+**Status:** v10.7 — §6.2.4 standing charges specified and held for migration 61, 2026-09-30; v10.6 — §6.2.2: the Trip column is the broker’s reference and Add trips is unconditional 2026-09-30; v10.5 — §6.2.2: every statement exports, a draft’s PDF is watermarked 2026-09-30 (owner’s ruling, reversing the same day’s refusal); v10.4 — §8’s heading rule decides by an allowlist of issued series 2026-09-30; v10.3 — §8 forbids an internal id in a heading and §6.2.2 gives the statement its title rule 2026-09-30 (owner’s ruling); v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -585,6 +585,56 @@ model, and `DEDUCTION_TOLL`.
   its export — so it declares its required headers, fails closed on an
   unrecognised file, and says which header it could not find. A named refusal is
   a working importer for a format nobody has seen yet; a guess is not.
+
+#### 6.2.4 Standing charges — _specified 2026-09-30, unbuilt_
+
+_Owner's ruling, 2026-09-30. A fourth tab on Payroll → Charges, joining
+`Scheduled · One-time · This week` when the migration below lands._
+
+_The tab table in §6.2 still reads three, and deliberately: it describes the
+surface that EXISTS, and `tests/accounting-surface.test.ts` checks the code
+against it by name. Writing the fourth tab there while the page has three
+would put the guard in the position of enforcing a plan._
+
+A **scheduled** charge belongs to one driver. A **standing** charge belongs to
+the ORGANIZATION and materialises onto whichever drivers the week produces —
+which is the difference that makes it a separate thing rather than a filter on
+the existing list. `Ifta` and `Admin Fee` are the cases: every driver pays
+them, nobody signs up for them individually, and a driver hired on Tuesday
+pays one on Friday without anybody adding a row.
+
+**The rule:** kind · weekly amount · applies to (company drivers /
+owner-operators / all) · effective from · effective to · per-driver exemptions.
+
+- **It materialises at REFRESH, one line per settlement**, for every driver
+  with freight in the week. Not a view computed at render: the line is a real
+  `SettlementDeductionLine` like any other, so it shows on the workbench, it
+  prints on the PDF, and it is frozen at FINAL with everything else.
+- **A driver with no freight that week gets no line.** The charge follows the
+  work, not the roster — billing a week somebody did not drive is the failure
+  this sentence exists to prevent.
+- **Editing the rule never touches a FINAL or PAID statement.** Same posture as
+  `DriverPayRule` and `RecurringDeduction`, and the same reason: those
+  documents were handed to a person. A change closes the old row with
+  `effectiveTo` and opens a new one; only DRAFT statements pick it up, and they
+  pick it up at the next refresh like everything else.
+- **An exemption is a row, not a blank.** "This driver does not pay Ifta" is a
+  fact somebody decided and should be able to explain, so it is recorded
+  against the rule and the driver rather than inferred from an absence.
+
+**HELD FOR MIGRATION 61, and the reason is a finding rather than a
+preference.** The existing `RecurringDeduction` cannot carry this: `driverId`
+is `String` NOT NULL with a required relation, there is no column for the
+applies-to scope, and there is nowhere to record an exemption. Three of the
+six fields have no home. See the schema, where the columns are written beside
+`Payment.isAdjustment` in the same bundle.
+
+_The workaround that fits today's schema is rejected on purpose: fanning the
+rule out into one `RecurringDeduction` per driver at creation. Editing would
+then mean superseding N rows, a driver hired next week would not pick the
+charge up, and "applies to owner-operators" would be a filter frozen at
+creation rather than a property of the rule. That is a different feature
+wearing this one's name._
 
 ### 6.3 Company filter
 
