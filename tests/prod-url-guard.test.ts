@@ -271,6 +271,20 @@ const INSPECTION_READERS = [
   // It also refuses to count a re-download twice — the folder holds 23 files for
   // 18 settlements — and reports any duplicate whose twin parses differently.
   'bulk-parse-statements.ts',
+  // ADDED 2026-09-30, read-only, SELECT and nothing else. Counts the
+  // settlements carrying an internal id instead of an issued number — owner's
+  // ruling that day, "a settlement marked PAID must carry a number".
+  //
+  // IT READS PRODUCTION BECAUSE THE QUESTION IS ABOUT PRODUCTION. "How many
+  // rows break this" has a different answer on each database and the repair is
+  // scoped by that answer; asking dev and assuming production matches is the
+  // baseline-you-supplied failure AGENTS.md opens with. It answered zero, which
+  // is why no production repair was written.
+  //
+  // COUNTED PER STATUS, never in total: a DRAFT holding a placeholder is the
+  // system working and a PAID one is the defect, and one number over both is
+  // the superset that hides the row that matters.
+  'audit-statement-numbers.ts',
 ]
 
 /**

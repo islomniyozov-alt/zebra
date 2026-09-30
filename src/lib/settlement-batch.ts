@@ -1,5 +1,15 @@
 import type { Prisma } from '@/generated/prisma/client'
 import { settleableInPeriod } from './settlements'
+import {
+  allocateSeries,
+  batchNumberOf,
+  BATCH_SERIES,
+  draftNumberFor,
+  ensureStatementNumber,
+  isPlaceholderNumber,
+  statementNumberOf,
+  STATEMENT_SERIES,
+} from './settlement-number'
 import { isReferralPayee } from './driver-kind'
 import {
   checkDateFor,
@@ -51,52 +61,6 @@ type TxClient = Prisma.TransactionClient
  * literal even when the literal is right.
  */
 export const SETTLEMENT_BATCH_TIMEOUT_MS = 60_000
-
-export const BATCH_SERIES = 'SETTLEMENT_BATCH'
-export const STATEMENT_SERIES = 'SETTLEMENT_STATEMENT'
-
-/** Where a fresh series starts. Datatruck's was already in the five thousands. */
-const SERIES_START = 0
-
-/**
- * Take the next number in an ORGANIZATION-WIDE series.
- *
- * One run across both carriers — the artefact interleaves SB-000436 (RAM),
- * SB-000437 (Dolphins), SB-000438 (RAM). Behind row-level security, so a
- * transaction with no tenant set updates nothing and this throws, which is the
- * correct outcome rather than an inconvenience.
- */
-export async function allocateSeries(
-  tx: TxClient,
-  organizationId: string,
-  key: string,
-): Promise<number> {
-  const incremented = await tx.$queryRaw<{ value: number }[]>`
-    UPDATE "SeriesCounter" SET value = value + 1, "updatedAt" = now()
-      WHERE "organizationId" = ${organizationId} AND key = ${key}
-      RETURNING value
-  `
-  const existing = incremented[0]?.value
-  if (typeof existing === 'number') return existing
-
-  const created = await tx.$queryRaw<{ value: number }[]>`
-    INSERT INTO "SeriesCounter" ("id", "organizationId", "key", "value", "updatedAt")
-    VALUES (gen_random_uuid()::text, ${organizationId}, ${key}, ${SERIES_START + 1}, now())
-    ON CONFLICT ("organizationId", "key")
-      DO UPDATE SET value = "SeriesCounter".value + 1, "updatedAt" = now()
-    RETURNING value
-  `
-  const value = created[0]?.value
-  if (typeof value !== 'number') {
-    throw new Error(`Could not allocate ${key}; the operation must fail.`)
-  }
-  return value
-}
-
-export const batchNumberOf = (value: number) =>
-  `SB-${String(value).padStart(6, '0')}`
-export const statementNumberOf = (value: number) =>
-  `ST-${String(value).padStart(6, '0')}`
 
 // ── reading what a week owes ──────────────────────────────────────────────
 
@@ -730,7 +694,7 @@ export async function refreshDraft(
         driverId: settlement.driverId,
         // NO NUMBER ON A DRAFT. A number issued to something that may never
         // exist is a gap in a series nobody can explain later.
-        settlementNumber: `DRAFT-${batch.id.slice(-8)}-${settlement.driverId.slice(-8)}`,
+        settlementNumber: draftNumberFor(batch.id, settlement.driverId),
         periodStart: period.start,
         periodEnd: period.end,
         unitNumber: settlement.unitNumber,
@@ -917,6 +881,25 @@ export async function markBatchPaid(
     where: { id: batchId },
     data: { status: 'PAID', paidAt: new Date(), paidByUserId: userId },
   })
+  // EVERY PATH OUT OF DRAFT MINTS (owner's ruling, 2026-09-30). A FINAL batch
+  // has been through `finaliseBatch`, which numbers each settlement, so this
+  // finds nothing in the normal course — it is here because the invariant is
+  // "a paid statement carries a number" and this is one of the three places a
+  // statement becomes PAID. An invariant enforced at two of three doors is a
+  // habit, not an invariant.
+  // FILTERED BY THE PREDICATE, NOT BY A PREFIX IN A WHERE CLAUSE. `DRAFT-` is
+  // one placeholder shape and dev turned up a second nobody wrote down; a SQL
+  // `startsWith` here would silently be a third definition of "has no name".
+  const inBatch = await tx.settlement.findMany({
+    where: { batchId },
+    select: { id: true, organizationId: true, settlementNumber: true },
+  })
+  for (const settlement of inBatch) {
+    if (isPlaceholderNumber(settlement.settlementNumber)) {
+      await ensureStatementNumber(tx, settlement)
+    }
+  }
+
   await tx.settlement.updateMany({
     where: { batchId },
     data: { status: 'PAID', paidAt: new Date() },

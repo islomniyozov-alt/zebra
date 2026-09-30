@@ -1,11 +1,10 @@
 import { neonConfig } from '@neondatabase/serverless'
 import { createPrismaClient } from '@/lib/db'
 import {
-  BATCH_SERIES,
-  batchNumberOf,
   refreshDraft,
   SETTLEMENT_BATCH_TIMEOUT_MS,
 } from '@/lib/settlement-batch'
+import { BATCH_SERIES, batchNumberOf } from '@/lib/settlement-number'
 import { checkDateFor } from '@/lib/settlement-week'
 import { assertTenancy } from './datatruck-tenancy'
 

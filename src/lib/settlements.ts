@@ -14,6 +14,7 @@ import {
   chargeTotalCents,
   isValidQuantity,
 } from './settlement-charge'
+import { ensureStatementNumber } from './settlement-number'
 import {
   amountFromSnapshot,
   payFor,
@@ -663,7 +664,13 @@ export async function approveSettlement(
 ): Promise<TransitionResult> {
   const settlement = await tx.settlement.findFirst({
     where: { id: settlementId, deletedAt: null },
-    select: { id: true, status: true, netCents: true },
+    select: {
+      id: true,
+      status: true,
+      netCents: true,
+      organizationId: true,
+      settlementNumber: true,
+    },
   })
   if (!settlement) return { ok: false, reason: 'not_found' }
   if (settlement.status !== 'DRAFT') return { ok: false, reason: 'not_draft' }
@@ -672,6 +679,18 @@ export async function approveSettlement(
   // Refused here because approving it would produce a PDF asking the driver
   // for money, which is a conversation and not a document.
   if (settlement.netCents < 0) return { ok: false, reason: 'negative_net' }
+
+  // ── THE NUMBER IS MINTED HERE, NOT LEFT TO THE BATCH ─────────────────
+  //
+  // Owner's ruling, 2026-09-30. `finaliseBatch` mints one per settlement, so
+  // the batch path was covered and THIS one was not: a batch draft posted on
+  // its own kept `DRAFT-<batch>-<driver>` through APPROVED and into PAID. Dev
+  // held exactly one such row, and a paid statement carrying a row id is a
+  // document somebody was paid on that they cannot quote back at anybody.
+  //
+  // BEFORE THE STATUS CHANGES, in the same transaction, so there is no instant
+  // at which an APPROVED settlement exists without a name.
+  await ensureStatementNumber(tx, settlement)
 
   await tx.settlement.update({
     where: { id: settlement.id },
@@ -703,13 +722,25 @@ export async function markSettlementPaid(
 
   const settlement = await tx.settlement.findFirst({
     where: { id: settlementId, deletedAt: null },
-    select: { id: true, status: true },
+    select: {
+      id: true,
+      status: true,
+      organizationId: true,
+      settlementNumber: true,
+    },
   })
   if (!settlement) return { ok: false, reason: 'not_found' }
   if (settlement.status === 'PAID') return { ok: false, reason: 'already_paid' }
   if (settlement.status !== 'APPROVED') {
     return { ok: false, reason: 'not_approved' }
   }
+
+  // THE BACKSTOP, AND IT IS NOT DEAD CODE. Approving mints the number now, so
+  // nothing approved from here on arrives holding a placeholder — but rows
+  // approved BEFORE the ruling of 2026-09-30 are sitting in the database
+  // already, and refusing them would strand a legitimately approved statement
+  // over a name. Minting is the repair that lets the payment proceed.
+  await ensureStatementNumber(tx, settlement)
 
   await tx.settlement.update({
     where: { id: settlement.id },

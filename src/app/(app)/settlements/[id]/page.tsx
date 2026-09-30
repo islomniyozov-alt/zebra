@@ -6,6 +6,7 @@ import { isDeduction } from '@/lib/settlements'
 import { basisSentence, type BasisTemplates } from '@/lib/settlement-view'
 import { readSnapshot } from '@/lib/driver-pay'
 import { readCharge } from '@/lib/settlement-charge'
+import { statementTitle } from '@/lib/settlement-number'
 import { formatCents } from '@/lib/money'
 import { Button } from '@/components/ui/Button'
 import { Table, type Column } from '@/components/ui/Table'
@@ -510,10 +511,24 @@ export default async function SettlementPage({
 
   const driverName = `${settlement.driver.firstName} ${settlement.driver.lastName}`
 
+  // ── THE TITLE IS A NAME, NOT A ROW ID (§8, §6.2.2) ────────────────────
+  //
+  // Owner's ruling, 2026-09-30. A draft has no issued number yet, and the
+  // placeholder it carries is two cuid fragments — unreadable, unquotable, and
+  // sitting exactly where the name belongs. So a draft is titled by the two
+  // things that tell one apart from another: who it pays and for which week.
+  const title = statementTitle({
+    settlementNumber: settlement.settlementNumber,
+    driverName,
+    periodStart: settlement.periodStart,
+    periodEnd: settlement.periodEnd,
+    draftTemplate: t('workbench.draftTitle'),
+  })
+
   return (
     <>
       <PageHeader
-        title={settlement.settlementNumber}
+        title={title}
         breadcrumb={[t('nav.group.payroll'), t('nav.statements')]}
         action={
           // ── THE ACTION ROW (§6.2.2) ────────────────────────────────
@@ -605,6 +620,9 @@ export default async function SettlementPage({
                     label={t('workbench.previous')}
                     glyph="‹"
                   />
+                  {/* THE ID MAY APPEAR HERE (§8): a field in mono is where
+                   * a value somebody might have to quote belongs. It is the
+                   * HEADING that must be a name. */}
                   <span className="font-mono text-ink" dir="ltr">
                     {settlement.settlementNumber}
                   </span>

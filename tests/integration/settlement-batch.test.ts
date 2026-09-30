@@ -6,14 +6,13 @@ import { transitionOperational } from '@/lib/load-status'
 import { createLoad } from '@/lib/loads'
 import {
   batchInputForOrg,
-  batchNumberOf,
   finaliseBatch,
   markBatchPaid,
   refreshDraft,
-  statementNumberOf,
   SETTLEMENT_BATCH_TIMEOUT_MS,
   openBatch,
 } from '@/lib/settlement-batch'
+import { batchNumberOf, statementNumberOf } from '@/lib/settlement-number'
 import { weekOf } from '@/lib/settlement-week'
 import { renderStatementPdf } from '@/lib/statement-pdf'
 import type { PrismaClient } from '@/generated/prisma/client'

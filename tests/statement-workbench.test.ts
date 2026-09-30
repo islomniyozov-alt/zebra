@@ -10,6 +10,11 @@ import {
 } from '@/lib/settlement-charge'
 import { readSnapshot } from '@/lib/driver-pay'
 import { parseFuelCsv, REQUIRED_COLUMNS } from '@/lib/fuel-import'
+import {
+  draftNumberFor,
+  isPlaceholderNumber,
+  statementTitle,
+} from '@/lib/settlement-number'
 import { statementMessage, sendStatementToDriver } from '@/lib/statement-send'
 
 // ---------------------------------------------------------------------------
@@ -442,5 +447,137 @@ describe('the frozen tariff label carries its own direction', () => {
     expect(page).toMatch(
       /<span dir="ltr">\{settlement\.payTariffLabel\}<\/span>/,
     )
+  })
+})
+
+describe('a heading is a name, not a row id', () => {
+  const period = {
+    periodStart: new Date('2026-08-30T00:00:00.000Z'),
+    periodEnd: new Date('2026-09-05T00:00:00.000Z'),
+  }
+  const draftTemplate = 'Draft — {driver} · {period}'
+
+  it('is the settlement number once one has been issued', () => {
+    expect(
+      statementTitle({
+        settlementNumber: 'ST-005562',
+        driverName: 'Shuhrat Sharipov',
+        draftTemplate,
+        ...period,
+      }),
+    ).toBe('ST-005562')
+  })
+
+  it('describes the draft when the number is a placeholder', () => {
+    expect(
+      statementTitle({
+        settlementNumber: 'DRAFT-g8hsz3mk-jcyy2u78',
+        driverName: 'Chapan Odiljon',
+        draftTemplate,
+        ...period,
+      }),
+    ).toBe('Draft — Chapan Odiljon · 2026-08-30 – 2026-09-05')
+  })
+
+  it('never lets the id through', () => {
+    const title = statementTitle({
+      settlementNumber: 'DRAFT-g8hsz3mk-jcyy2u78',
+      driverName: 'Chapan Odiljon',
+      draftTemplate,
+      ...period,
+    })
+    expect(title).not.toContain('DRAFT-')
+    expect(title).not.toContain('g8hsz3mk')
+  })
+
+  it('leaves the older STL- series alone', () => {
+    // The per-driver path predates batches and issues `STL-4`. It is a real
+    // number and must not be mistaken for a placeholder.
+    expect(
+      statementTitle({
+        settlementNumber: 'STL-4',
+        driverName: 'X',
+        draftTemplate,
+        ...period,
+      }),
+    ).toBe('STL-4')
+  })
+
+  it('the page titles itself with the helper, not the raw column', () => {
+    expect(page).toMatch(/title=\{title\}/)
+    expect(page).toMatch(/\bstatementTitle\(\{/)
+    expect(page).not.toMatch(/title=\{settlement\.settlementNumber\}/)
+  })
+})
+
+describe('a placeholder is told apart by its prefix, in one place', () => {
+  it('accepts only the two prefixes a statement is issued under', () => {
+    expect(isPlaceholderNumber('ST-005562')).toBe(false)
+    expect(isPlaceholderNumber('STL-4')).toBe(false)
+    expect(isPlaceholderNumber(null)).toBe(false)
+    expect(isPlaceholderNumber(undefined)).toBe(false)
+  })
+
+  it('treats every other shape as an id, including ones nobody predicted', () => {
+    expect(isPlaceholderNumber('DRAFT-abc-def')).toBe(true)
+    // FOUND BY AUDITING DEV, not by knowing: four drafts carry an epoch
+    // timestamp and nothing in this repository or its history writes that
+    // prefix. It is the reason the predicate is an allowlist.
+    expect(isPlaceholderNumber('TMP-1788982650101')).toBe(true)
+    expect(isPlaceholderNumber('cmuk2et0s0007qkvs')).toBe(true)
+    // A BATCH number is not a statement number. `SB-000449` naming a
+    // settlement would itself be the bug.
+    expect(isPlaceholderNumber('SB-000449')).toBe(true)
+  })
+
+  it('builds one the predicate agrees with', () => {
+    const built = draftNumberFor(
+      'cmuga82ji0000qkvslwyibodv',
+      'cmuk2et0s0007qkvs',
+    )
+    expect(isPlaceholderNumber(built)).toBe(true)
+  })
+})
+
+describe('every path out of DRAFT mints a number', () => {
+  // AN INVARIANT ENFORCED AT TWO OF THREE DOORS IS A HABIT. These are source
+  // checks over the three functions that change a settlement's status, which
+  // is the claim being made — that none of them can leave a non-draft holding
+  // a placeholder.
+  const settlementsLib = readFileSync(
+    join(process.cwd(), 'src', 'lib', 'settlements.ts'),
+    'utf8',
+  )
+  const batchLib = readFileSync(
+    join(process.cwd(), 'src', 'lib', 'settlement-batch.ts'),
+    'utf8',
+  )
+
+  it('approveSettlement mints', () => {
+    const body = settlementsLib.slice(
+      settlementsLib.indexOf('export async function approveSettlement'),
+      settlementsLib.indexOf('export interface MarkPaidInput'),
+    )
+    expect(body).toMatch(/await ensureStatementNumber\(tx, settlement\)/)
+  })
+
+  it('markSettlementPaid mints, as a backstop for rows approved before', () => {
+    const body = settlementsLib.slice(
+      settlementsLib.indexOf('export async function markSettlementPaid'),
+    )
+    expect(body.slice(0, 2500)).toMatch(
+      /await ensureStatementNumber\(tx, settlement\)/,
+    )
+  })
+
+  it('markBatchPaid mints', () => {
+    const body = batchLib.slice(
+      batchLib.indexOf('export async function markBatchPaid'),
+    )
+    expect(body).toMatch(/await ensureStatementNumber\(tx, settlement\)/)
+  })
+
+  it('finaliseBatch already did, and still does', () => {
+    expect(batchLib).toMatch(/const statementNumber = statementNumberOf\(/)
   })
 })
