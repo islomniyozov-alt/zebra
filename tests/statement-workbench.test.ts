@@ -671,13 +671,19 @@ describe('the statement route refuses nothing', () => {
     expect(route).toMatch(/draft: isDraft,/)
   })
 
-  it('prints the broker reference in the Load number column', () => {
-    // ST-005562 lists Amazon's references. Read live, because the snapshot
-    // freezes the load number and not the reference — flagged at the call
-    // site, and the frozen DT- number remains the fallback.
+  it('prints the broker reference in the Load number column, FROZEN', () => {
+    // ST-005562 lists Amazon's references. This guard used to assert the LIVE
+    // read and a comment that called it a flagged compromise; migration 61
+    // froze the column, so the frozen value comes FIRST.
+    //
+    // THE RELATION IS STILL READ, and the guard still says so: every line
+    // written before 2026-10-01 has a null `referenceNumber` and no frozen
+    // value to recover, so those fall through to the load. Dropping the
+    // fallback would blank the Load number column on every statement in the
+    // archive.
     expect(route).toMatch(/load: \{ select: \{ referenceNumber: true \} \}/)
     expect(route).toMatch(
-      /referenceNumber: line\.load\?\.referenceNumber \?\? null/,
+      /referenceNumber:\s*line\.referenceNumber \?\? line\.load\?\.referenceNumber \?\? null/,
     )
   })
 
@@ -707,8 +713,13 @@ describe('the Trip column follows the paper', () => {
     // `||` AND NOT `??`, so an empty-string reference falls back too rather
     // than rendering an empty first cell — which is the row's accessible
     // name (§7.1).
+    //
+    // THREE TERMS SINCE MIGRATION 61: the frozen column, then the live
+    // relation for rows written before it existed, then Zebra's own number.
+    // The order is the whole point — frozen first, or an issued statement
+    // still drifts.
     expect(page).toMatch(
-      /\{row\.load\?\.referenceNumber \|\| row\.loadNumber\}/,
+      /\{row\.referenceNumber \|\| row\.load\?\.referenceNumber \|\| row\.loadNumber\}/,
     )
   })
 

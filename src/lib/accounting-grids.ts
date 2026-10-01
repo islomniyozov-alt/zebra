@@ -2,6 +2,7 @@ import { Prisma } from '@/generated/prisma/client'
 import { companyScopeFilter } from './tenancy'
 import { listPayments, type PaymentRow } from './payments'
 import { listCharges, type ChargeRow } from './driver-deductions'
+import type { StandingChargeListRow } from './standing-charges'
 import { agingBucketFor, type AgingBucket } from './factoring'
 import type { ListShape } from './list-view'
 
@@ -766,6 +767,38 @@ export const scheduledShape: ListShape<ChargeRow> = {
     to: (row) => row.effectiveTo?.getTime() ?? null,
   },
   defaultSort: 'driver',
+}
+
+/**
+ * Payroll → Charges → Standing (§6.2.4, migration 61).
+ *
+ * ── NO `companyIdOf`, AND THAT IS THE MODEL RATHER THAN AN OMISSION ───────
+ *
+ * Every other shape in this file carries one, because every other row belongs to
+ * an operating authority. A standing charge belongs to the ORGANIZATION and has
+ * no `companyId` column at all — it is the group's rule, which is the whole
+ * reason it is not on the Scheduled tab. Supplying a company accessor here would
+ * mean inventing one, and the company chip would then filter a list by a field
+ * nobody set.
+ *
+ * SORTED BY TYPE, not by a driver there is none of. `Admin Fee` beside `Ifta`
+ * beside `Insurance` is how somebody reads this list: it is short, and the
+ * question is what the organization charges.
+ */
+export const standingShape: ListShape<StandingChargeListRow> = {
+  searchText: (row) =>
+    `${row.type} ${row.description ?? ''} ${row.appliesTo} ${row.notes ?? ''}`,
+  dateOf: (row) => row.effectiveFrom,
+  sorts: {
+    type: (row) => row.type,
+    appliesTo: (row) => row.appliesTo,
+    amount: (row) => row.amountCents,
+    cadence: (row) => row.cadence,
+    exempt: (row) => row.exemptCount,
+    from: (row) => row.effectiveFrom.getTime(),
+    to: (row) => row.effectiveTo?.getTime() ?? null,
+  },
+  defaultSort: 'type',
 }
 
 /**

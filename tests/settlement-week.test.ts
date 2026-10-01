@@ -70,6 +70,11 @@ const loadsOf = (fixture: StatementFixture): SettleableLoad[] =>
   fixture.loads.map((row, index) => ({
     id: `load-${String(index)}`,
     loadNumber: row.loadNumber,
+    // NULL, BECAUSE THE SIX STATEMENTS ARE THE TRUTH SET AND THEY PRINT THE
+    // LOAD NUMBER. Migration 61 froze the broker reference onto the line, and
+    // feeding one in here would make these fixtures stop reproducing the paper
+    // they are graded against.
+    referenceNumber: null,
     // ONE AUTHORITY PER STATEMENT IN THE ARTEFACT. Settlement is org-wide now
     // and a statement CAN span companies, but none of the six does — each of
     // these drivers pulled for one authority that week, which is why all six
@@ -279,6 +284,112 @@ function inputFor(fixture: StatementFixture): DriverSettlementInput {
     firstSettledPeriodStart: null,
   }
 }
+
+// ── THE FUEL AND TOLL LINES REACH NET (migration 61, §6.2.3) ──────────────
+//
+// THIS IS THE ONE GUARD ON THAT WIRING THAT IS ABOUT MONEY RATHER THAN SHAPE.
+// `fuel-charge.ts` prices the lines and has its own suite; what nothing else
+// watches is that they arrive BEFORE the sign split. A line appended after it
+// would print on the statement and be absent from `deductionsCents`, so the
+// Deductions total and the net would both be short by the fuel charge — and
+// every figure on the page would still look internally consistent, which is why
+// this failure would survive a reading.
+describe('a priced charge line lands in the totals, not only on the page', () => {
+  const base = inputFor(DATATRUCK_STATEMENTS[0]!)
+  const plain = computeDriverSettlement(base)
+
+  const withFuel = computeDriverSettlement({
+    ...base,
+    extraDeductionLines: [
+      {
+        ruleId: null,
+        type: 'Fuel',
+        description: 'Fuel 08/09/2026 to 08/15/2026 — card invoice',
+        quantity: 2,
+        rateCents: 28443,
+        totalCents: -28443,
+      },
+    ],
+  })
+
+  it('shows on the statement', () => {
+    expect(withFuel.deductionLines.map((line) => line.type)).toContain('Fuel')
+  })
+
+  it('and is counted in Deductions', () => {
+    expect(withFuel.deductionsCents).toBe(plain.deductionsCents - 28443)
+  })
+
+  it('and therefore in net pay', () => {
+    expect(withFuel.netCents).toBe(plain.netCents - 28443)
+  })
+
+  // A POSITIVE EXTRA LINE IS OTHER PAY, through the same split. Nothing here
+  // decides which is which — a charge and a credit are one object pointing two
+  // ways, and the sign is the only thing that says so.
+  it('and a positive one lands in other pay instead', () => {
+    const credit = computeDriverSettlement({
+      ...base,
+      extraDeductionLines: [
+        {
+          ruleId: null,
+          type: 'Fuel',
+          description: 'fuel credit, card double-posted',
+          quantity: 1,
+          rateCents: 5000,
+          totalCents: 5000,
+        },
+      ],
+    })
+    expect(credit.deductionsCents).toBe(plain.deductionsCents)
+    expect(credit.netCents).toBe(plain.netCents + 5000)
+  })
+})
+
+// THE FROZEN REFERENCE (migration 61). The line carries what the load said when
+// the statement was built, so a reference corrected next year cannot change it.
+describe('the broker reference is frozen onto the line', () => {
+  it('carries through from the load to the line', () => {
+    const base = inputFor(DATATRUCK_STATEMENTS[0]!)
+    const settlement = computeDriverSettlement({
+      ...base,
+      loads: base.loads.map((load) => ({
+        ...load,
+        referenceNumber: '116RX75DK',
+      })),
+    })
+    expect(settlement.lines[0]?.referenceNumber).toBe('116RX75DK')
+  })
+
+  it('and null stays null rather than becoming the load number', () => {
+    // A LINE CLAIMING A REFERENCE IT DOES NOT HAVE would print Zebra's own id
+    // in the column the driver checks against his paperwork, with nothing to
+    // say it was a substitution. The fallback belongs at the RENDER, where the
+    // reader can be told; freezing it here would make the substitution
+    // permanent.
+    const settlement = computeDriverSettlement(
+      inputFor(DATATRUCK_STATEMENTS[0]!),
+    )
+    expect(settlement.lines[0]?.referenceNumber).toBeNull()
+  })
+})
+
+// THE FUEL POLICY, FROZEN (§6.2.3). Null where nothing was deducted, because
+// writing `RETAIL` on a statement that charged no fuel claims a decision nobody
+// made.
+describe('the fuel mode is frozen on the settlement', () => {
+  const base = inputFor(DATATRUCK_STATEMENTS[0]!)
+
+  it('carries the mode it was built under', () => {
+    expect(
+      computeDriverSettlement({ ...base, fuelMode: 'INVOICE' }).fuelMode,
+    ).toBe('INVOICE')
+  })
+
+  it('and is null when none was supplied', () => {
+    expect(computeDriverSettlement(base).fuelMode).toBeNull()
+  })
+})
 
 describe('the six Datatruck statements, reproduced line by line', () => {
   for (const fixture of DATATRUCK_STATEMENTS) {
@@ -615,6 +726,7 @@ describe('which gross a load settles on', () => {
   ): SettleableLoad => ({
     id: 'l1',
     loadNumber: 'AMZ1',
+    referenceNumber: null,
     companyId: 'co-1',
     companyName: 'Amazon Co',
     puPlace: 'A',
@@ -684,6 +796,7 @@ describe('a held load contributes nothing to the statement', () => {
   const amazonLoad = (outcome: 'short' | 'none'): SettleableLoad => ({
     id: 'held-1',
     loadNumber: 'AMZ-HELD',
+    referenceNumber: null,
     companyId: 'co-1',
     companyName: 'Held Co',
     puPlace: 'A',
@@ -844,6 +957,7 @@ describe('the tariff label', () => {
     const load: SettleableLoad = {
       id: 'held-tariff',
       loadNumber: 'AMZ-HELD',
+      referenceNumber: null,
       companyId: 'co-1',
       companyName: 'Held Co',
       puPlace: 'A',

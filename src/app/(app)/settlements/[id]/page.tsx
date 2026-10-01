@@ -85,6 +85,10 @@ const OTHER_PAY_TYPES: SettlementLineType[] = ['REIMBURSEMENT', 'BONUS']
 const DEDUCTION_TYPES: SettlementLineType[] = [
   'DEDUCTION_ADVANCE',
   'DEDUCTION_FUEL',
+  // Migration 61, §6.2.3. Offered on the add-row because a toll charged by
+  // hand is the normal case until the toll import exists — `TollTransaction`
+  // has a model and no importer.
+  'DEDUCTION_TOLL',
   'DEDUCTION_INSURANCE',
   'DEDUCTION_EQUIPMENT',
   'DEDUCTION_VIOLATION',
@@ -246,12 +250,17 @@ export default async function SettlementPage({
             grossCents: true,
             milesHundredths: true,
             amountCents: true,
-            // THE TWO LIVE FIELDS ON THIS PAGE, AND NEITHER IS MONEY. The
-            // artefact's grid carries a broker reference and an operational
-            // status, and the snapshot freezes neither — correctly, because
-            // both are facts about the LOAD TODAY rather than about what was
-            // paid. They are read through the relation and nothing on the
-            // statement depends on them.
+            // THE FROZEN REFERENCE (migration 61). This was read live through
+            // the relation below until 2026-10-01, which meant a broker
+            // reference corrected next year changed the Trip column on a
+            // statement somebody had already been paid on — the exact drift
+            // this table exists to prevent.
+            referenceNumber: true,
+            // STILL LIVE, AND CORRECTLY SO. The operational status is a fact
+            // about the LOAD TODAY rather than about what was paid, and the
+            // grid shows it so somebody working a batch can see a trip that
+            // moved. `referenceNumber` stays in this select as the FALLBACK for
+            // rows written before the column existed — see the Trip column.
             load: {
               select: { referenceNumber: true, operationalStatus: true },
             },
@@ -405,9 +414,16 @@ export default async function SettlementPage({
       // `||` AND NOT `??`, so a load carrying an empty string for a reference
       // falls back too instead of rendering an empty anchor cell — the first
       // cell is the row's accessible name (§7.1).
+      //
+      // ── FROZEN FIRST, LIVE AS A FALLBACK, THEN THE DT- ID ──────────────
+      //
+      // Migration 61 froze the reference onto the line. Rows written before it
+      // have none and there is no frozen value to show, so those fall through
+      // to the relation — which is what they have always shown and is the only
+      // honest answer for them. A new statement never reaches the second term.
       render: (row) => (
         <span className="z-identifier font-mono" dir="ltr">
-          {row.load?.referenceNumber || row.loadNumber}
+          {row.referenceNumber || row.load?.referenceNumber || row.loadNumber}
         </span>
       ),
     },

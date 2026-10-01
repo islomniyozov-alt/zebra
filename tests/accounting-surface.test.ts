@@ -307,7 +307,10 @@ describe('each destination has the tabs §6.2 says it has', () => {
     reports: ['company', 'week', 'driver'],
     batches: ['batches', 'balances'],
     statements: ['statements'],
-    charges: ['scheduled', 'oneTime', 'thisWeek'],
+    // FOUR SINCE MIGRATION 61 (§6.2.4). `standing` sits second, and the order
+    // here is the order on screen — a page that reordered its tabs without
+    // reordering §6.2's table would fail this, which is the point.
+    charges: ['scheduled', 'standing', 'oneTime', 'thisWeek'],
   }
 
   it.each(Object.keys(EXPECTED))('%s declares its tab list', (name) => {
@@ -325,7 +328,7 @@ describe('each destination has the tabs §6.2 says it has', () => {
   it('and the design system still says the same thing', () => {
     // If §6.2's table is edited, this is the line that notices the code was not.
     const doc = readFileSync('TMS-DESIGN-SYSTEM.md', 'utf8')
-    expect(doc).toContain('Scheduled · One-time · This week')
+    expect(doc).toContain('Scheduled · Standing · One-time · This week')
     expect(doc).toContain('Batches · Balances')
     expect(doc).toContain(
       'Invoices · Ready to invoice · Factored · Direct-settled',

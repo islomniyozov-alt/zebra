@@ -39,6 +39,10 @@ export const GRID_IDS = [
   'payroll.oneTime',
   'payroll.scheduled',
   'charges.scheduled',
+  // §6.2.4, migration 61. Nine columns, which is exactly §7.1's cap — so the
+  // chooser here hides rather than reveals, and `Table` would throw if a tenth
+  // were added without one going behind it.
+  'charges.standing',
   'charges.oneTime',
   'reports.driver',
   // THE WORKBENCH'S TRIPS GRID. Eleven columns, nine shown — §6.2.2 as

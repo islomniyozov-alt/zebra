@@ -27,8 +27,10 @@ import {
   readScheduled,
   readStatements,
   scheduledShape,
+  standingShape,
   statementShape,
 } from '@/lib/accounting-grids'
+import { listStandingCharges } from '@/lib/standing-charges'
 import { isGridId, type GridId } from '@/lib/grid-columns'
 import type { Action, Resource } from '@/lib/permissions'
 
@@ -96,6 +98,7 @@ const GUARD: Record<GridId, { action: Action; resource: Resource }> = {
   'payroll.oneTime': { action: 'read', resource: 'driver.pay' },
   'payroll.scheduled': { action: 'read', resource: 'driver.pay' },
   'charges.scheduled': { action: 'read', resource: 'driver.pay' },
+  'charges.standing': { action: 'read', resource: 'driver.pay' },
   'charges.oneTime': { action: 'read', resource: 'driver.pay' },
   'reports.driver': { action: 'read', resource: 'driver.pay' },
 }
@@ -412,6 +415,44 @@ export async function GET(request: Request): Promise<Response> {
                 row.targetCents === null ? '' : csvMoney(row.targetCents),
                 csvDay(row.effectiveFrom),
                 csvDay(row.effectiveTo),
+                row.inForceToday ? 'yes' : 'no',
+              ]),
+            )
+          }
+
+          case 'charges.standing': {
+            // NO DRIVER AND NO AUTHORITY COLUMN, unlike the case above. A
+            // standing charge belongs to the organization; emitting an empty
+            // `driver` column would invite a reader to pivot on a field that is
+            // blank by construction. `exempt_count` is the column that answers
+            // "who does this not reach", and the names behind it are a second
+            // export nobody has asked for yet.
+            const rows = applyList(
+              await listStandingCharges(tx),
+              params,
+              standingShape,
+            )
+            return toCsv(
+              [
+                'type',
+                'applies_to',
+                'weekly_amount',
+                'cadence',
+                'description',
+                'effective_from',
+                'effective_to',
+                'exempt_count',
+                'in_force_today',
+              ],
+              rows.map((row) => [
+                row.type,
+                row.appliesTo,
+                csvMoney(row.amountCents),
+                row.cadence,
+                row.description ?? '',
+                csvDay(row.effectiveFrom),
+                csvDay(row.effectiveTo),
+                String(row.exemptCount),
                 row.inForceToday ? 'yes' : 'no',
               ]),
             )

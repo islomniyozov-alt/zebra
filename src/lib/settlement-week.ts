@@ -229,6 +229,15 @@ export interface SettleableLoad {
   id: string
   /** As printed in the Load number column. */
   loadNumber: string
+  /**
+   * The broker's own reference, FROZEN onto the line (migration 61).
+   *
+   * The workbench's Trip column and the statement PDF printed this read LIVE
+   * through `Load` from 2026-09-30, which meant a reference corrected next year
+   * would change what an issued statement said. Null where the load carries
+   * none, which is most broker freight.
+   */
+  referenceNumber: string | null
   /** Which authority's freight this is. One statement can now carry several. */
   companyId: string
   companyName: string
@@ -363,6 +372,8 @@ export function payOnSettledGross(
 export interface LoadLine {
   loadId: string
   loadNumber: string
+  /** The broker's reference as it was when the statement was built. */
+  referenceNumber: string | null
   companyId: string
   companyName: string
   puPlace: string
@@ -454,6 +465,34 @@ export interface DriverSettlementInput {
   collectedToDateCents?: Readonly<Record<string, number>>
   fuelCents?: number | null
   /**
+   * Fuel and toll charge lines, already priced (migration 61, §6.2.3).
+   *
+   * ── WHY THEY ARRIVE AS LINES AND NOT AS AMOUNTS ─────────────────────────
+   *
+   * `fuelCents` above is the OLD shape: one number, consumed by the `Fuel`
+   * branch in `computeDeductions`, which needs a stored `RecurringDeduction` of
+   * type `Fuel` to hang it on. That branch stays for the rules that use it, but
+   * it cannot express the charge side: four modes, a fees column, a nullable
+   * invoice amount, a fallback that has to be said out loud, and a toll line
+   * governed by a SEPARATE boolean.
+   *
+   * So `fuel-charge.ts` prices them and they arrive finished. THEY JOIN
+   * `deductions.lines` BEFORE THE SIGN SPLIT, which is the whole reason they
+   * come through the input rather than being appended by the caller after the
+   * fact: `deductionsCents` and `netCents` are computed from the split, and a
+   * line added afterwards would print on the statement and not be in the total.
+   * That is the money bug this parameter exists to make impossible.
+   */
+  extraDeductionLines?: readonly DeductionLine[]
+  /**
+   * `CompanySettings.fuelMode`, FROZEN onto the settlement.
+   *
+   * Which of the four amounts a deducted fuel line charged. Recorded per
+   * statement because §6.2.3 says changing it silently restates what somebody
+   * was paid — the same argument as the pay rule snapshot, one level up.
+   */
+  fuelMode?: string | null
+  /**
    * The driver's own payout lag, in whole weeks.
    *
    * A STATED PROPERTY, superseded rather than edited, like the pay rule. Zero
@@ -499,6 +538,11 @@ export interface DriverSettlement extends YtdTotals {
   payToAddress: string | null
   letterheadCompanyId: string
   period: Week
+  /**
+   * The fuel policy this statement was built under, or null where fuel is not
+   * deducted at all. Frozen — see the input's note.
+   */
+  fuelMode: string | null
   /** Batch check date plus the driver's lag. This is what prints. */
   payoutDate: Date
   /** "88% from gross", printed verbatim. Null when no rule applied. */
@@ -655,6 +699,7 @@ export function computeDriverSettlement(
     lines.push({
       loadId: load.id,
       loadNumber: load.loadNumber,
+      referenceNumber: load.referenceNumber,
       companyId: load.companyId,
       companyName: load.companyName,
       puPlace: load.puPlace,
@@ -698,8 +743,13 @@ export function computeDriverSettlement(
   // pointing opposite ways — `SettlementCharge` is stored that way for the same
   // reason — and the statement prints them as two sections because that is what
   // the artefact does, not because they are two kinds of thing.
-  const deductionLines = deductions.lines.filter((line) => line.totalCents < 0)
-  const otherPayLines = deductions.lines.filter((line) => line.totalCents > 0)
+  //
+  // THE FUEL AND TOLL LINES JOIN HERE, BEFORE THE SPLIT, so they are counted in
+  // `deductionsCents` and therefore in `netCents`. See the input's own note:
+  // appending them after this point is the money bug.
+  const allLines = [...deductions.lines, ...(input.extraDeductionLines ?? [])]
+  const deductionLines = allLines.filter((line) => line.totalCents < 0)
+  const otherPayLines = allLines.filter((line) => line.totalCents > 0)
 
   const earningsCents = lines.reduce((sum, line) => sum + line.amountCents, 0)
   const grossCents = lines.reduce((sum, line) => sum + line.grossCents, 0)
@@ -758,6 +808,7 @@ export function computeDriverSettlement(
     payToAddress: input.payToAddress,
     letterheadCompanyId: input.letterheadCompanyId,
     period: input.period,
+    fuelMode: input.fuelMode ?? null,
     payoutDate: payoutDateFor(input.checkDate, input.payoutLagWeeks),
     payTariffLabel,
     lines,

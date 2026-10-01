@@ -60,6 +60,10 @@ const DEDUCTION_TYPES: readonly SettlementLineType[] = [
   'DEDUCTION_ESCROW',
   'DEDUCTION_EQUIPMENT',
   'DEDUCTION_VIOLATION',
+  // Migration 61. A toll was `DEDUCTION_OTHER` until this value existed, so
+  // rows already stored carry that — this list decides the SIGN of new ones,
+  // and both values are money off, so nothing changes for the old rows.
+  'DEDUCTION_TOLL',
   'DEDUCTION_OTHER',
 ]
 

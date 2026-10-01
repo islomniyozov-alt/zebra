@@ -11,6 +11,9 @@ import {
   STATEMENT_SERIES,
 } from './settlement-number'
 import { isReferralPayee } from './driver-kind'
+import { readStandingChargesForRun, standingRulesFor } from './standing-charges'
+import { fuelChargeFor, fuelModeOf, tollChargeFor } from './fuel-charge'
+import type { DeductionLine } from './deductions'
 import {
   checkDateFor,
   computeBatch,
@@ -197,6 +200,11 @@ export async function batchInputForOrg(
     select: {
       id: true,
       loadNumber: true,
+      // THE BROKER'S REFERENCE, read here so it can be FROZEN onto the line
+      // (migration 61). The workbench's Trip column and the PDF read it live
+      // until today, which meant a correction next year changed an issued
+      // statement.
+      referenceNumber: true,
       driverId: true,
       // THE SECOND CREW MEMBER. A team load belongs to both of them and is
       // read ONCE here — the split into two lines happens per driver below,
@@ -264,6 +272,77 @@ export async function batchInputForOrg(
 
   if (driverIds.length === 0) return []
 
+  // ── STANDING CHARGES, FUEL AND TOLLS (migration 61) ───────────────────
+  //
+  // THREE READS, ALL BEHIND `netPay`, for the reason the option's own note
+  // gives: the Tuesday screen shows gross and must not pay for the four reads
+  // that turn gross into net. These are the fifth, sixth and seventh.
+  //
+  // THE SETTINGS COME PER AUTHORITY, not per organization: fuel policy is a
+  // property of the company whose letterhead the statement goes out under
+  // (§6.2.3 — "a policy on the authority"), and this fleet has six of them
+  // settling differently.
+  const standing = netPay
+    ? await readStandingChargesForRun(tx)
+    : { charges: [], exemptions: [] }
+
+  const [settingsRows, fuelRows, tollRows] = netPay
+    ? await Promise.all([
+        tx.companySettings.findMany({
+          select: {
+            companyId: true,
+            deductFuel: true,
+            deductTolls: true,
+            fuelMode: true,
+          },
+        }),
+        // UNCLAIMED ONLY. `settlementId` is how a transaction records that it
+        // has already been charged (§6.2.3 — pending and added are states of
+        // the transaction, not two tables), so a row already on a FINAL
+        // statement must not be charged a second time by a later draft.
+        //
+        // INCLUSIVE AT BOTH ENDS, as `fuelAndTollsFor` is: the period end is
+        // stored as the Saturday itself and a Saturday fill-up belongs to the
+        // week it happened in.
+        tx.fuelTransaction.findMany({
+          where: {
+            driverId: { in: driverIds },
+            deletedAt: null,
+            settlementId: null,
+            purchasedAt: { gte: input.period.start, lte: input.period.end },
+          },
+          select: {
+            id: true,
+            driverId: true,
+            companyId: true,
+            purchasedAt: true,
+            totalCents: true,
+            invoiceCents: true,
+            feesCents: true,
+          },
+        }),
+        tx.tollTransaction.findMany({
+          where: {
+            driverId: { in: driverIds },
+            deletedAt: null,
+            settlementId: null,
+            incurredAt: { gte: input.period.start, lte: input.period.end },
+          },
+          select: {
+            id: true,
+            driverId: true,
+            companyId: true,
+            incurredAt: true,
+            totalCents: true,
+            invoiceCents: true,
+            feesCents: true,
+          },
+        }),
+      ])
+    : [[], [], []]
+
+  const settingsOf = new Map(settingsRows.map((row) => [row.companyId, row]))
+
   const year = input.period.start.getUTCFullYear()
   const [drivers, payRules, charges, escrow, collected, opening, prior] =
     await Promise.all([
@@ -278,6 +357,10 @@ export async function batchInputForOrg(
           // split below needs no second query — every crew member is already
           // in `driverIds` by construction.
           kind: true,
+          // WHICH STANDING CHARGES REACH THEM. `appliesTo` on a `StandingCharge`
+          // carries this same `OwnershipType` vocabulary, so the scope and the
+          // driver are compared in one currency — see `standing-charges.ts`.
+          employmentType: true,
           payToName: true,
           payToAddress: true,
           payoutLagWeeks: true,
@@ -413,6 +496,67 @@ export async function batchInputForOrg(
         openingMine[row.category as YtdCategory] = row.amountCents
       }
 
+      // ── THE ORGANIZATION'S STANDING CHARGES, AS RULES ────────────────
+      //
+      // §6.2.4. The engine is not changed, only fed: these are appended to the
+      // driver's own recurring rules and `computeDeductions` decides in-force,
+      // cadence and sign exactly as it does for the rest. `standingRulesFor`
+      // returns NOTHING for a driver with no freight this week — the charge
+      // follows the work, and billing somebody an admin fee for a week they did
+      // not drive is a negative net on a document handed to a person.
+      const standingMine = standingRulesFor({
+        charges: standing.charges,
+        exemptions: standing.exemptions,
+        driver: {
+          id: driver.id,
+          employmentType: driver.employmentType,
+          hasFreight: mine.length > 0,
+        },
+      })
+
+      // ── FUEL AND TOLLS, UNDER THE AUTHORITY'S OWN POLICY ─────────────
+      //
+      // §6.2.3, migration 61. THE LETTERHEAD DECIDES: the settings come from
+      // the company the statement goes out under, which is the truck's
+      // authority and not the driver's home company when they differ. A driver
+      // on a RAM truck pulling Dolphins freight is settled on RAM's fuel
+      // policy, because RAM's name is on the paper.
+      const letterheadCompanyId =
+        driver.assignedTruck?.companyId ?? driver.companyId
+      const settings = settingsOf.get(letterheadCompanyId)
+      // NO SETTINGS ROW MEANS NO CHARGE. An authority that has never had its
+      // fuel policy set has not decided to deduct, and defaulting to "charge
+      // them" would take money off a cheque on the strength of a missing row.
+      const mode = fuelModeOf(settings?.fuelMode)
+      const fuelCharge = fuelChargeFor({
+        transactions: fuelRows
+          .filter((row) => row.driverId === driver.id)
+          .map((row) => ({
+            id: row.id,
+            purchasedAt: row.purchasedAt,
+            totalCents: row.totalCents,
+            invoiceCents: row.invoiceCents,
+            feesCents: row.feesCents,
+          })),
+        mode,
+        period: input.period,
+        deduct: settings?.deductFuel ?? false,
+      })
+      const tollCharge = tollChargeFor({
+        transactions: tollRows
+          .filter((row) => row.driverId === driver.id)
+          .map((row) => ({
+            id: row.id,
+            incurredAt: row.incurredAt,
+            totalCents: row.totalCents,
+            invoiceCents: row.invoiceCents,
+            feesCents: row.feesCents,
+          })),
+        mode,
+        period: input.period,
+        deduct: settings?.deductTolls ?? false,
+      })
+
       return {
         driverId: driver.id,
         // AS THE STATEMENT PRINTS IT. "JERRY ROBERT MCKANE", first then last.
@@ -461,6 +605,7 @@ export async function batchInputForOrg(
           return {
             id: load.id,
             loadNumber: load.loadNumber,
+            referenceNumber: load.referenceNumber,
             companyId: load.companyId,
             companyName: load.company.name,
             puPlace: placeOf(pickup),
@@ -487,8 +632,25 @@ export async function batchInputForOrg(
           }
         }),
         payRules: payRules.filter((rule) => rule.driverId === driver.id),
-        recurring: recurringAll.filter((rule) => rule.driverId === driver.id),
+        // THE DRIVER'S OWN RULES, THEN THE ORGANIZATION'S. One list, because
+        // `computeDeductions` treats them identically by design — see
+        // `standing-charges.ts` on why selection and pricing are separate.
+        recurring: [
+          ...recurringAll.filter((rule) => rule.driverId === driver.id),
+          ...standingMine,
+        ],
         charges: charges.filter((charge) => charge.driverId === driver.id),
+        // Priced by `fuel-charge.ts` and joined before the sign split, so they
+        // land in `deductionsCents` and therefore in net. `filter` rather than a
+        // conditional spread because either or both may be absent.
+        extraDeductionLines: [fuelCharge.line, tollCharge.line].filter(
+          (line): line is DeductionLine => line !== null,
+        ),
+        // FROZEN ONLY WHEN SOMETHING WAS CHARGED. A statement that deducted no
+        // fuel has no fuel policy to record, and writing `RETAIL` on it would
+        // claim a decision nobody made.
+        fuelMode:
+          fuelCharge.line === null && tollCharge.line === null ? null : mode,
         escrowHeldCents: escrowOf.get(driver.id) ?? 0,
         // Only this driver's rules, so one driver's cap cannot be read against
         // another's collections.
@@ -706,6 +868,11 @@ export async function refreshDraft(
         payToName: settlement.payToName,
         payToAddress: settlement.payToAddress,
         payTariffLabel: settlement.payTariffLabel,
+        // WHICH OF THE FOUR FUEL AMOUNTS THIS STATEMENT CHARGED, frozen beside
+        // the pay tariff and for the same argument (§6.2.3): the authority's
+        // policy can move and the document cannot. Null where nothing was
+        // deducted — see the builder.
+        fuelMode: settlement.fuelMode,
         payoutDate: settlement.payoutDate,
         grossCents: settlement.grossCents,
         milesHundredths: settlement.milesHundredths,
@@ -725,6 +892,9 @@ export async function refreshDraft(
             driverId: settlement.driverId,
             loadId: line.loadId,
             loadNumber: line.loadNumber,
+            // THE BROKER'S REFERENCE, FROZEN (migration 61). The workbench's
+            // Trip column and the PDF printed this live until today.
+            referenceNumber: line.referenceNumber,
             // FROZEN, so a statement carrying two authorities keeps its
             // grouping even if a load is later moved between them.
             companyId: line.companyId,
@@ -849,6 +1019,46 @@ export async function finaliseBatch(
     },
     data: { settledAt: new Date() },
   })
+
+  // ── THE FUEL AND TOLL TRANSACTIONS THIS BATCH CHARGED ─────────────────
+  //
+  // §6.2.3: pending and added are states of the transaction, not two tables.
+  // `settlementId` is the record that a row has been charged once, and it is
+  // what stops a later batch charging it again — `batchInputForOrg` reads only
+  // rows where it is null.
+  //
+  // AT FINAL AND ONLY AT FINAL, the same rule as escrow one block up and for
+  // the same reason inverted: a draft that claimed its transactions would make
+  // the NEXT refresh of that same draft find nothing and drop the line it had
+  // just printed. Refreshing a draft three times would leave the fuel charge
+  // on the first pass and gone from the third.
+  //
+  // PER SETTLEMENT, so the row points at the statement that charged it rather
+  // than at the batch — a driver asking which statement took a fill-up is
+  // asking about one document.
+  for (const settlement of settlements) {
+    const claim = {
+      driverId: settlement.driverId,
+      deletedAt: null,
+      settlementId: null,
+    }
+    await Promise.all([
+      tx.fuelTransaction.updateMany({
+        where: {
+          ...claim,
+          purchasedAt: { gte: batch.periodStart, lte: batch.periodEnd },
+        },
+        data: { settlementId: settlement.id },
+      }),
+      tx.tollTransaction.updateMany({
+        where: {
+          ...claim,
+          incurredAt: { gte: batch.periodStart, lte: batch.periodEnd },
+        },
+        data: { settlementId: settlement.id },
+      }),
+    ])
+  }
 
   await tx.settlementBatch.update({
     where: { id: batchId },

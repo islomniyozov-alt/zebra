@@ -74,9 +74,9 @@ export async function GET(
           },
           loadLines: {
             orderBy: { sortOrder: 'asc' },
-            // THE BROKER'S OWN NUMBER, read through the relation because the
-            // snapshot does not freeze it. See the mapping below for what
-            // that costs and why it is still the right column to print.
+            // THE BROKER'S OWN NUMBER. Frozen on the line since migration 61;
+            // the relation is still read as the fallback for rows written
+            // before that. See the mapping below.
             include: { load: { select: { referenceNumber: true } } },
           },
           deductionLines: { orderBy: { sortOrder: 'asc' } },
@@ -187,17 +187,20 @@ export async function GET(
         // the broker's number in front of him; DT-016018 is Zebra's internal
         // id and means nothing outside this system.
         //
-        // READ LIVE, WHICH IS A COMPROMISE AND IS FLAGGED AS ONE.
-        // `SettlementLoadLine` freezes the load number and not the
-        // reference, so a broker reference corrected next year would change
-        // what an issued statement prints — the exact drift §7's freeze
-        // exists to prevent. The proper fix is a frozen column on the
-        // snapshot, which is a migration, and the migration is held. Until
-        // then the DT- number remains frozen underneath as the fallback, so
-        // a line can always be identified even if the reference moves.
+        // FROZEN, AS OF MIGRATION 61. This comment used to record the
+        // compromise: the reference was read live, so one corrected next year
+        // would change what an issued statement printed. The column exists now
+        // and the flag is discharged.
+        //
+        // THE RELATION IS STILL READ, FOR THE ROWS THAT PREDATE THE COLUMN.
+        // Every line written before 2026-10-01 has `referenceNumber` null and
+        // no frozen value to recover, so they fall through to the load — which
+        // is exactly what they printed yesterday, and the only answer available
+        // for them. The DT- number stays underneath as the last fallback.
         loads: settlement.loadLines.map((line) => ({
           ...line,
-          referenceNumber: line.load?.referenceNumber ?? null,
+          referenceNumber:
+            line.referenceNumber ?? line.load?.referenceNumber ?? null,
         })),
         totals: {
           grossCents: settlement.grossCents,

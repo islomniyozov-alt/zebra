@@ -15,8 +15,15 @@ import {
   readOneTimeCharges,
   scheduledForWeek,
   scheduledShape,
+  standingShape,
   type OneTimeGridRow,
 } from '@/lib/accounting-grids'
+import {
+  listStandingCharges,
+  STANDING_SCOPES,
+  type StandingChargeListRow,
+  type StandingScope,
+} from '@/lib/standing-charges'
 import { payWeekFor } from '@/lib/settlement-week'
 import { recentWeeks, weekFromParam } from '@/lib/payroll'
 import { WeekPicker } from '../batches/WeekPicker'
@@ -31,7 +38,9 @@ import { GridToolbar } from '../../_grid/GridToolbar'
 import { GridFooterNav } from '../../_grid/GridFooterNav'
 import { gridView, keepColumns, pagedFooterLabel } from '../../_grid/grid-page'
 import { AddCharge } from './AddCharge'
+import { AddStanding } from './AddStanding'
 import { ChargeRowForm } from './ChargeRowForm'
+import { StandingRowForm } from './StandingRowForm'
 import type { MessageKey } from '@/lib/i18n'
 
 // ACCOUNTING → CHARGES (§6.2, §7.1.6): two tabs over one grid.
@@ -63,11 +72,38 @@ const ERROR_KEYS: MessageKey[] = [
   'deduction.error.badTarget',
   'deduction.error.badDates',
   'deduction.error.overlaps',
+  // ONE OBJECT FOR BOTH TABS' FORMS. A client component cannot call `t`, so
+  // every sentence either form can be handed is translated here — and a key
+  // missing from this list renders as the key itself, which is how the first
+  // version of `AddCharge` was found by photographing a screen.
+  'standing.error.badType',
+  'standing.error.badScope',
+  'standing.error.overlaps',
+  'standing.error.noReason',
+  'standing.error.alreadyExempt',
 ]
 
-// THREE TABS (§6.2). `thisWeek` is the same table as `scheduled`, scoped to the
+/**
+ * The scope in the office's words (§10).
+ *
+ * `OWNER_OPERATOR` is a column value and "Owner-operators" is what people say.
+ * FOUR ENTRIES, because `Driver.employmentType` has three members and `ALL` is
+ * not one of them — see `standing-charges.ts` on why §6.2.4's two were one short.
+ */
+const SCOPE_LABELS: Record<StandingScope, MessageKey> = {
+  ALL: 'standing.scope.all',
+  OWNED: 'standing.scope.owned',
+  LEASED: 'standing.scope.leased',
+  OWNER_OPERATOR: 'standing.scope.ownerOperator',
+}
+
+// FOUR TABS (§6.2). `thisWeek` is the same table as `scheduled`, scoped to the
 // run on screen — the distinction that keeps this page from being two pages.
-const TABS = ['scheduled', 'oneTime', 'thisWeek'] as const
+//
+// `standing` IS A DIFFERENT TABLE (§6.2.4, migration 61), and it sits second
+// rather than last: Scheduled and Standing together answer "what comes off a
+// cheque", while One-time and This week are both about a particular week.
+const TABS = ['scheduled', 'standing', 'oneTime', 'thisWeek'] as const
 type Tab = (typeof TABS)[number]
 
 const SCHEDULED_COLUMNS: readonly string[] = [
@@ -88,6 +124,17 @@ const ONE_TIME_COLUMNS: readonly string[] = [
   'appliesOn',
   'load',
   'settled',
+]
+const STANDING_COLUMNS: readonly string[] = [
+  'type',
+  'appliesTo',
+  'amount',
+  'description',
+  'from',
+  'to',
+  'exempt',
+  'live',
+  'act',
 ]
 
 const PATH = '/accounting/charges'
@@ -138,9 +185,14 @@ export default async function ChargesPage({
     'driver.pay',
     async (tx, session) => {
       const scope = companyScopeFilter(session.companyScopes)
-      const [charges, oneTime, drivers, companies, columns] = await Promise.all(
-        [
+      const [charges, standing, oneTime, drivers, companies, columns] =
+        await Promise.all([
           listCharges(tx, scope),
+          // NO SCOPE ARGUMENT, AND THAT IS THE MODEL. A standing charge belongs
+          // to the organization and carries no `companyId`, so there is nothing
+          // to narrow — row-level security is the whole fence. See
+          // `listStandingCharges`.
+          listStandingCharges(tx),
           readOneTimeCharges(tx, scope),
           tx.driver.findMany({
             where: { deletedAt: null, ...scope },
@@ -155,20 +207,39 @@ export default async function ChargesPage({
             orderBy: { name: 'asc' },
             select: { id: true, name: true },
           }),
+          // ONE CHOOSER PER GRID, keyed by the tab on screen. Three keys for
+          // four tabs: `thisWeek` shares `payroll.scheduled` with the toolbar
+          // it already renders, because it is the same columns over the same
+          // table narrowed to a week.
           readGridColumns(
             tx,
             session.userId,
-            tab === 'scheduled' ? 'charges.scheduled' : 'charges.oneTime',
-            tab === 'scheduled' ? SCHEDULED_COLUMNS : ONE_TIME_COLUMNS,
+            tab === 'standing'
+              ? 'charges.standing'
+              : tab === 'oneTime'
+                ? 'charges.oneTime'
+                : 'charges.scheduled',
+            tab === 'standing'
+              ? STANDING_COLUMNS
+              : tab === 'oneTime'
+                ? ONE_TIME_COLUMNS
+                : SCHEDULED_COLUMNS,
           ),
-        ],
-      )
+        ])
       // THE WEEK-SCOPED SET IS THE SAME ROWS, NARROWED — not a second query.
       // `scheduledForWeek` takes the overlap, because a rule starting or ending
       // mid-week still applies to that week, which is what the engine's
       // `ruleInForce` decides for a period.
       const thisWeek = scheduledForWeek(charges, chosen)
-      return { charges, oneTime, thisWeek, drivers, companies, columns }
+      return {
+        charges,
+        standing,
+        oneTime,
+        thisWeek,
+        drivers,
+        companies,
+        columns,
+      }
     },
   )
 
@@ -213,7 +284,31 @@ export default async function ChargesPage({
         title={t('accounting.charges.title')}
         breadcrumb={[t('nav.group.payroll'), t('accounting.charges.title')]}
         action={
-          mayEdit && tab === 'scheduled' ? (
+          mayEdit && tab === 'standing' ? (
+            // THE ORGANIZATION'S CHARGE, SO NO DRIVER FIELD. See `AddStanding`
+            // on why that absence is the feature.
+            <AddStanding
+              types={DEDUCTION_TYPES}
+              scopes={STANDING_SCOPES.map((scope) => ({
+                value: scope,
+                label: t(SCOPE_LABELS[scope]),
+              }))}
+              labels={{
+                add: t('standing.add'),
+                cancel: t('charges.cancel'),
+                save: t('charges.save'),
+                type: t('charges.type'),
+                cadence: t('charges.cadence'),
+                weekly: t('charges.cadenceWeekly'),
+                monthlySplit: t('charges.cadenceMonthly'),
+                amount: t('charges.weekly'),
+                appliesTo: t('standing.appliesTo'),
+                description: t('charges.description'),
+                from: t('charges.from'),
+              }}
+              errors={errors}
+            />
+          ) : mayEdit && tab === 'scheduled' ? (
             <AddCharge
               drivers={data.drivers.map((driver) => ({
                 id: driver.id,
@@ -248,6 +343,11 @@ export default async function ChargesPage({
             count: data.charges.length,
           },
           {
+            key: 'standing',
+            label: t('charges.tab.standing'),
+            count: data.standing.length,
+          },
+          {
             key: 'oneTime',
             label: t('charges.tab.oneTime'),
             count: data.oneTime.length,
@@ -264,6 +364,233 @@ export default async function ChargesPage({
       />
     </>
   )
+
+  // ── STANDING CHARGES (§6.2.4, migration 61) ──────────────────────────────
+  //
+  // THE ORGANIZATION'S RULES. A scheduled charge belongs to one driver; these
+  // materialise onto whoever the week produces, which is why there is no driver
+  // column, no company chip and no driver to link a row to.
+  if (tab === 'standing') {
+    // THE FUNNEL IS APPLIED, not only offered. `applyList` handles search, range
+    // and sort; in-force is computed per row rather than stored, so it is
+    // narrowed here — the same shape the Scheduled tab uses, and the same reason
+    // it cannot live in the shape's `sorts`.
+    const live = typeof raw.live === 'string' ? raw.live : null
+    const narrowedStanding = data.standing.filter((row) => {
+      if (live === 'yes' && !row.inForceToday) return false
+      if (live === 'no' && row.inForceToday) return false
+      return true
+    })
+    const view = gridView(narrowedStanding, raw, standingShape, applyList)
+    const columns: Column<StandingChargeListRow>[] = [
+      {
+        key: 'type',
+        header: t('charges.type'),
+        sortable: true,
+        render: (row) => row.type,
+      },
+      {
+        key: 'appliesTo',
+        header: t('standing.appliesTo'),
+        sortable: true,
+        // THE SCOPE IN WORDS, NOT THE STORED ENUM. `OWNER_OPERATOR` is a column
+        // value; "Owner-operators" is what the office calls them (§10). An
+        // UNRECOGNISED value renders as itself rather than as a blank, because a
+        // scope nobody recognises matches nobody and that is worth seeing.
+        render: (row) =>
+          row.appliesTo in SCOPE_LABELS ? (
+            t(SCOPE_LABELS[row.appliesTo as StandingScope])
+          ) : (
+            <span className="z-identifier font-mono text-xs" dir="ltr">
+              {row.appliesTo}
+            </span>
+          ),
+      },
+      {
+        key: 'amount',
+        header: t('charges.weekly'),
+        align: 'end',
+        sortable: true,
+        render: (row) => money(row.amountCents),
+        foot: (shown) => money(sumCents(shown, (row) => row.amountCents)),
+      },
+      {
+        key: 'description',
+        header: t('charges.description'),
+        truncate: true,
+        render: (row) =>
+          row.description === null ? (
+            <span className="text-ink-3">—</span>
+          ) : (
+            row.description
+          ),
+      },
+      {
+        key: 'from',
+        header: t('charges.from'),
+        sortable: true,
+        render: (row) => (
+          <span className="font-mono text-xs" dir="ltr">
+            {day(row.effectiveFrom)}
+          </span>
+        ),
+      },
+      {
+        key: 'to',
+        header: t('charges.to'),
+        sortable: true,
+        render: (row) => (
+          <span className="font-mono text-xs" dir="ltr">
+            {day(row.effectiveTo)}
+          </span>
+        ),
+      },
+      {
+        key: 'exempt',
+        header: t('standing.exemptCount'),
+        align: 'end',
+        sortable: true,
+        // ZERO IS THE NORMAL CASE and reads as `—`, not `0` (§8): an exemption
+        // count of zero is an absence of decisions, and a column of zeros would
+        // make the one row carrying a 3 harder to find rather than easier.
+        render: (row) =>
+          row.exemptCount === 0 ? (
+            <span className="text-ink-3">—</span>
+          ) : (
+            <span className="font-mono tabular-nums">
+              {String(row.exemptCount)}
+            </span>
+          ),
+      },
+      {
+        key: 'live',
+        header: t('charges.state'),
+        render: (row) => (
+          <StatusBadge
+            tone={row.inForceToday ? 'success' : 'muted'}
+            label={
+              row.inForceToday ? t('charges.inForce') : t('charges.dormant')
+            }
+          />
+        ),
+      },
+      // ONLY WHERE IT WOULD WORK, as the Scheduled tab's edit column is: a
+      // column of buttons that 403 is worse than no column (§10).
+      ...(mayEdit
+        ? [
+            {
+              key: 'act',
+              header: t('charges.edit'),
+              render: (row: StandingChargeListRow) => (
+                <StandingRowForm
+                  standingChargeId={row.id}
+                  drivers={data.drivers.map((driver) => ({
+                    id: driver.id,
+                    name: `${driver.lastName}, ${driver.firstName}`,
+                  }))}
+                  labels={{
+                    stop: t('charges.stop'),
+                    stopOn: t('charges.stopOn'),
+                    exempt: t('standing.exempt'),
+                    driver: t('charges.driver'),
+                    reason: t('standing.reason'),
+                    save: t('charges.save'),
+                    cancel: t('charges.cancel'),
+                  }}
+                  errors={errors}
+                />
+              ),
+            } satisfies Column<StandingChargeListRow>,
+          ]
+        : []),
+    ]
+
+    return (
+      <>
+        {header}
+        <p className="border-b border-border bg-surface-2 px-gutter py-z2 text-xs text-ink-2">
+          {t('standing.hint')}
+        </p>
+        <FilterBar
+          groups={[
+            {
+              param: 'live',
+              label: t('charges.state'),
+              choices: [
+                {
+                  value: 'yes',
+                  label: t('charges.inForce'),
+                  count: data.standing.filter((row) => row.inForceToday).length,
+                },
+                {
+                  value: 'no',
+                  label: t('charges.dormant'),
+                  count: data.standing.filter((row) => !row.inForceToday)
+                    .length,
+                },
+              ],
+            },
+          ]}
+          search={{
+            param: 'q',
+            label: t('accounting.search'),
+            placeholder: t('standing.searchHint'),
+          }}
+          clearLabel={t('filter.clear')}
+          moreLabel={t('filter.more')}
+        />
+        {/* NO `CompanyChips`. These rows carry no authority — see the data read. */}
+        <div className="flex items-center justify-end gap-z2 border-b border-border bg-surface px-gutter py-z2">
+          <GridToolbar
+            grid="charges.standing"
+            columns={columns.map((column) => ({
+              key: column.key,
+              header: column.header,
+            }))}
+            visible={data.columns}
+            search={search}
+            labels={toolbarLabels}
+            errors={gridErrors}
+          />
+        </div>
+        <Table
+          columns={keepColumns(columns, data.columns)}
+          rows={view.paged.rows}
+          footRows={view.filtered}
+          rowKey={(row) => row.id}
+          // NO `rowHref`, for the Scheduled tab's reason: this row's detail IS
+          // the row, and the forms inside it would sit under a stretched link
+          // that swallowed their buttons.
+          stripeTone={(row) => (row.inForceToday ? 'success' : 'muted')}
+          caption={t('charges.tab.standing')}
+          sort={{
+            key: view.sort.key,
+            dir: view.sort.dir,
+            hrefFor: view.sortFor(PATH),
+            label: t('accounting.sortBy'),
+          }}
+          totals={{
+            label: pagedFooterLabel(
+              t('accounting.weeklyTotal'),
+              t('grid.rows'),
+              view.paged,
+            ),
+          }}
+          empty={
+            <EmptyState title={t('standing.empty')} body={t('standing.hint')} />
+          }
+        />
+        <GridFooterNav
+          paged={view.paged}
+          per={view.params.per}
+          path={PATH}
+          search={search}
+          hrefForPage={view.hrefForPage(PATH)}
+          labels={footerLabels}
+        />
+      </>
+    )
+  }
 
   // ── ONE-TIME CHARGES ─────────────────────────────────────────────────────
   if (tab === 'oneTime') {
