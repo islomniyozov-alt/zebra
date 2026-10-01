@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v10.10 — §6.2.6 the statements grid 2026-10-01: Deductions is every net-reducing line, status and batch filters, bulk Post and Mark paid; v10.9 — §6.2.5 applying a payment 2026-09-30, and §7.5’s six-field cap applied against a brief asking for a modal; v10.8 — §6.2: Invoices gains a Factored tab, a status filter and bulk Mark sent 2026-09-30; v10.7 — §6.2.4 standing charges specified and held for migration 61, 2026-09-30; v10.6 — §6.2.2: the Trip column is the broker’s reference and Add trips is unconditional 2026-09-30; v10.5 — §6.2.2: every statement exports, a draft’s PDF is watermarked 2026-09-30 (owner’s ruling, reversing the same day’s refusal); v10.4 — §8’s heading rule decides by an allowlist of issued series 2026-09-30; v10.3 — §8 forbids an internal id in a heading and §6.2.2 gives the statement its title rule 2026-09-30 (owner’s ruling); v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
+**Status:** v10.11 — migration 61 lands 2026-10-01: §6.2.4 standing charges built and the Charges tab table goes to four, §6.2.3's deduct side built with the fuel mode frozen per statement, and the scope offered is the schema's three ownership types rather than the two §6.2.4 first named; v10.10 — §6.2.6 the statements grid 2026-10-01: Deductions is every net-reducing line, status and batch filters, bulk Post and Mark paid; v10.9 — §6.2.5 applying a payment 2026-09-30, and §7.5’s six-field cap applied against a brief asking for a modal; v10.8 — §6.2: Invoices gains a Factored tab, a status filter and bulk Mark sent 2026-09-30; v10.7 — §6.2.4 standing charges specified and held for migration 61, 2026-09-30; v10.6 — §6.2.2: the Trip column is the broker’s reference and Add trips is unconditional 2026-09-30; v10.5 — §6.2.2: every statement exports, a draft’s PDF is watermarked 2026-09-30 (owner’s ruling, reversing the same day’s refusal); v10.4 — §8’s heading rule decides by an allowlist of issued series 2026-09-30; v10.3 — §8 forbids an internal id in a heading and §6.2.2 gives the statement its title rule 2026-09-30 (owner’s ruling); v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -315,7 +315,7 @@ _**Each destination is tabs over one grid** (§7.1.6):_
 | Payments    | Payments · Unapplied                                    |
 | Batches     | Batches · Balances                                      |
 | Statements  | Driver statements                                       |
-| Charges     | Scheduled · One-time · This week                        |
+| Charges     | Scheduled · Standing · One-time · This week             |
 | Reports     | By authority · By week · By driver                      |
 
 _**What moved, and nothing was deleted.** The five Payroll TABS became three
@@ -329,6 +329,13 @@ Scheduled is org-wide and every week; This week is what comes off the run on
 screen. The distinction this section has recorded since it was built survives the
 move — two tabs of one page rather than two pages, which is the honest shape for
 two views of one table._
+
+_**Standing is the second tab and reads a different table**, which is what keeps
+it from being a filter on the first. Scheduled rows belong to a driver; Standing
+rows belong to the organization and materialise onto whoever the week produces.
+It sits beside Scheduled rather than at the end because the two together answer
+"what comes off a cheque", and One-time and This week are both about a particular
+week. See §6.2.4._
 
 _**Charges → Scheduled and Charges → This week read the same table and are not
 the same grid**, which is the one place this structure could collapse into a
@@ -378,7 +385,7 @@ screenshots:_
 | **`Send to driver`**                                                               | **Built, and it refuses by name**                             | One channel exists (`sendEmail`, Resend) and `Driver.email` is nullable. A driver with no address gets a named refusal. It sends from production only: a dev deploy holds real drivers' real addresses, and a rehearsal that reaches one of them is not a rehearsal.                                                                           |
 | **`+ Deduction tariff`** on the workbench                                          | **Not built**                                                 | It creates a STANDING rule from inside one statement. Zebra's standing rules live on Payroll → Charges where they are visible across every driver; a rule created from one statement is how a deduction nobody can find gets onto forty cheques.                                                                                               |
 | **`Dispatcher salary` tab**                                                        | **Not built**                                                 | Recorded already at the five-tabs row; repeated here because the workbench's tab bar shows seven and the difference is now visible on two screens.                                                                                                                                                                                             |
-| **Fuel: four show-and-deduct modes**                                               | **Specified in §6.2.3, unbuilt**                              | Needs a migration, and a migration needs the ritual in `AGENTS.md`. Production is behind a dispatch awaiting review, so the model is specified here and built when that clears. This is the change the held migration 61 was waiting for.                                                                                                      |
+| **Fuel: four show-and-deduct modes**                                               | **Built 2026-10-01, migration 61**                            | All four, and the mode is FROZEN on the statement rather than read from the authority at render — §6.2.3. The row stays in this table because the two still diverge: Datatruck's mode is a live setting, and a Zebra statement records the one it was built under, so re-opening an August statement after a policy change shows August's.     |
 
 _**Factored is a tab and not a chip**, added 2026-09-30 by ruling. A factored
 invoice is SOLD — the factor collects it, so it is not our receivable and it
@@ -574,8 +581,31 @@ charge** — nothing on a statement changes, and the figure is labelled as what
 was BURNED rather than what was deducted, because those are not the same number
 until somebody rules which of the four modes applies.
 
-**Waits for the migration:** every column below, the deduct side, the toll
-model, and `DEDUCTION_TOLL`.
+**~~Waits for the migration:~~ landed 2026-10-01** — every column below, the
+deduct side, the `TollTransaction` model and `DEDUCTION_TOLL` are in migration 61. What the charge side does with them:
+
+- **`Settlement.fuelMode` is frozen at refresh** from `CompanySettings.fuelMode`,
+  and null where nothing was deducted — writing `RETAIL` on a statement that
+  charged no fuel would claim a decision nobody made.
+- **One line, not one per fill-up.** The corpus prints
+  `Fuel · 1 · $1,234.56` and the detail lives on the workbench's Review panel.
+  Twenty fill-ups as twenty statement lines would bury the figure the driver is
+  checking.
+- **The line says which amount it charged** — `retail`, `retail + fees` or
+  `card invoice`. A driver comparing a deduction against the receipts in his cab
+  needs to know he is looking at the card invoice, or the two numbers read as an
+  error.
+- **An INVOICE mode on a row with no invoice amount charges RETAIL and says so
+  on the statement.** `invoiceCents` is nullable because it arrives from the
+  import; charging zero would be a gift, and charging retail silently would
+  produce a number the mode does not describe.
+- **`settlementId` on the transaction is the record that it was charged, and it
+  is written at FINAL only.** A draft that claimed its transactions would make
+  the next refresh of that same draft find nothing and drop the line it had just
+  printed.
+- **The toll importer does not exist.** `TollTransaction` has a model, RLS, a
+  fixture row and a charge path; nothing writes it but the add-row. The fuel
+  importer is still the stub that names its columns.
 
 - **Show and deduct are two booleans, not one.** The artefact has "Show fuel
   transactions" and "Add to calculate Fuel transactions" as separate checkboxes,
@@ -658,15 +688,30 @@ is covered.
   The audit extension reports `createMany` as an unfollowable operation, so a
   bulk insert would apply money with no audit trail behind it.
 
-#### 6.2.4 Standing charges — _specified 2026-09-30, unbuilt_
+#### 6.2.4 Standing charges — _specified 2026-09-30, built 2026-10-01_
 
-_Owner's ruling, 2026-09-30. A fourth tab on Payroll → Charges, joining
-`Scheduled · One-time · This week` when the migration below lands._
+_Owner's ruling, 2026-09-30. The second tab on Payroll → Charges, joining
+`Scheduled · One-time · This week`. Migration 61 landed on 2026-10-01 and the
+tab table in §6.2 now reads four._
 
-_The tab table in §6.2 still reads three, and deliberately: it describes the
-surface that EXISTS, and `tests/accounting-surface.test.ts` checks the code
-against it by name. Writing the fourth tab there while the page has three
-would put the guard in the position of enforcing a plan._
+_Until that migration this section said the table "still reads three, and
+deliberately", so the guard would not be put in the position of enforcing a
+plan. It reads four now because the page has four, and the two were amended in
+the same commit — which is the whole discipline that sentence was protecting._
+
+**The scope offers four values, not the three this section first named.**
+`company drivers / owner-operators / all` leaves `LEASED` reachable by nothing
+but `ALL`, because `Driver.employmentType` is an `OwnershipType` and that enum
+has three members. A charge aimed at company drivers would silently skip every
+leased driver. The schema's vocabulary wins (`AGENTS.md`) and the divergence is
+recorded in `PHASE-5-BRIEF.md` §7 rather than resolved in this file.
+
+**Two charges of one type cannot both be live, and `ALL` clashes with every
+scope of its type.** `Ifta` for all drivers beside `Ifta` for owner-operators
+charges the owner-operators twice — which is what somebody reaches for when they
+mean "everyone pays $20, owner-operators pay $35". That is two rules with a
+precedence nobody has specified, so it is refused by name rather than silently
+summed.
 
 A **scheduled** charge belongs to one driver. A **standing** charge belongs to
 the ORGANIZATION and materialises onto whichever drivers the week produces —
