@@ -59,8 +59,9 @@
     "20260921230000_dqf_types",
     "20260922010000_accident_register",
     "20260922180000_random_testing_programme",
-    "20260924230000_driver_kind_referral_payee"
+    "20260924230000_driver_kind_referral_payee",
+    "20261001010000_migration_61"
   ],
-  "recordedAt": "2026-09-24",
+  "recordedAt": "2026-10-01",
   "verified": true
 }
