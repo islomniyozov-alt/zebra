@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v10.9 — §6.2.5 applying a payment 2026-09-30, and §7.5’s six-field cap applied against a brief asking for a modal; v10.8 — §6.2: Invoices gains a Factored tab, a status filter and bulk Mark sent 2026-09-30; v10.7 — §6.2.4 standing charges specified and held for migration 61, 2026-09-30; v10.6 — §6.2.2: the Trip column is the broker’s reference and Add trips is unconditional 2026-09-30; v10.5 — §6.2.2: every statement exports, a draft’s PDF is watermarked 2026-09-30 (owner’s ruling, reversing the same day’s refusal); v10.4 — §8’s heading rule decides by an allowlist of issued series 2026-09-30; v10.3 — §8 forbids an internal id in a heading and §6.2.2 gives the statement its title rule 2026-09-30 (owner’s ruling); v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
+**Status:** v10.10 — §6.2.6 the statements grid 2026-10-01: Deductions is every net-reducing line, status and batch filters, bulk Post and Mark paid; v10.9 — §6.2.5 applying a payment 2026-09-30, and §7.5’s six-field cap applied against a brief asking for a modal; v10.8 — §6.2: Invoices gains a Factored tab, a status filter and bulk Mark sent 2026-09-30; v10.7 — §6.2.4 standing charges specified and held for migration 61, 2026-09-30; v10.6 — §6.2.2: the Trip column is the broker’s reference and Add trips is unconditional 2026-09-30; v10.5 — §6.2.2: every statement exports, a draft’s PDF is watermarked 2026-09-30 (owner’s ruling, reversing the same day’s refusal); v10.4 — §8’s heading rule decides by an allowlist of issued series 2026-09-30; v10.3 — §8 forbids an internal id in a heading and §6.2.2 gives the statement its title rule 2026-09-30 (owner’s ruling); v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -598,6 +598,37 @@ model, and `DEDUCTION_TOLL`.
   its export — so it declares its required headers, fails closed on an
   unrecognised file, and says which header it could not find. A named refusal is
   a working importer for a format nobody has seen yet; a guess is not.
+
+#### 6.2.6 The statements grid — _added 2026-10-01_
+
+_Owner's ruling. The grid one person uses to finish a payroll week._
+
+**The Deductions column is EVERY NET-REDUCING LINE, computed from the lines
+and not read off the settlement.** `Settlement.deductionsCents` is written by
+two paths that disagree about its sign — the batch engine sums
+`SettlementDeductionLine.totalCents`, which is negative, while `refreshTotals`
+sums `-amountCents` from `SettlementLine`, which is positive. Dev holds both
+today: one settlement at `-45000` beside two at `+45000`. A column rendering
+that field shows `-$450.00` beside `$450.00` for the same kind of charge, and
+its footer SUMS THEM AGAINST EACH OTHER.
+
+- **One definition, applied to both line tables.** A settlement's charges live
+  in one table or the other depending on which path made it, never both, so
+  the figure is the sum over both of whatever is negative — rendered as a
+  positive magnitude under a column headed Deductions.
+- **The stored field is left alone.** It feeds the statement PDF and the
+  workbench header, where it is used consistently within each path; changing
+  it is a migration over money and a separate ruling. The grid stops trusting
+  it; nothing else changes.
+
+**Status and batch are column filters** (§6.2.1's funnels), and the batch one
+filters on the NUMBER a reader knows — `SB-000001` — not on an id.
+
+**Post and Mark paid act on a selection**, per statement through
+`approveSettlement` and `markSettlementPaid`, blockers intact, refusals named.
+Marking paid asks once for the method and the reference, as the invoice
+channel does and for the same reason: one wire pays a run, and "how was it
+paid" is the question answered wrong from memory a month later.
 
 #### 6.2.5 Applying a payment — _added 2026-09-30_
 
