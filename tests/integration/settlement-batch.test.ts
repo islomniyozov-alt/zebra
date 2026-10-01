@@ -429,8 +429,32 @@ describe('a week of freight becomes a batch', () => {
 
     // THREE LOADS, ONE PER LINE, and the section's own total.
     expect(settlement.loadLines).toHaveLength(3)
+
+    // ── THE FROZEN REFERENCE, END TO END (migration 61) ──────────────────
+    //
+    // THIS ASSERTION USED TO BE `toContain(line.loadNumber)` AND IT WAS
+    // PASSING BY ACCIDENT. The Load number column prints the BROKER's
+    // reference, not Zebra's `DT-` id (§6.2.2 v10.6) — and before the freeze it
+    // read that reference live through the relation, which this test does not
+    // include. So the field arrived undefined, the render fell back to the load
+    // number, and the test asserted the fallback.
+    //
+    // The gate caught it the moment the column was populated. It now asserts
+    // the thing that acts: the reference on the LINE, written by the real batch
+    // engine from the real load, is what the PDF prints.
+    const loads = await owner.load.findMany({
+      where: { id: { in: settlement.loadLines.map((line) => line.loadId!) } },
+      select: { id: true, referenceNumber: true },
+    })
+    const referenceOf = new Map(
+      loads.map((load) => [load.id, load.referenceNumber]),
+    )
     for (const line of settlement.loadLines) {
-      expect(text).toContain(line.loadNumber)
+      // FROZEN AT GENERATION, equal to what the load said at the time. A
+      // reference corrected next year cannot move this.
+      expect(line.referenceNumber).toBe(referenceOf.get(line.loadId!))
+      expect(line.referenceNumber).not.toBeNull()
+      expect(text).toContain(line.referenceNumber!)
     }
   }, 300_000)
 
