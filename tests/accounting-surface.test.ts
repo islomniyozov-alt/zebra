@@ -374,6 +374,73 @@ describe('bulk status and the column funnels', () => {
     expect(action).toContain('batch: name')
   })
 
+  // ── THE TWO HALVES OF THE SELECTOR MUST AGREE ───────────────────────────
+  //
+  // Every bulk bar depends on a string matching across two files. The page
+  // passes `selection={{ name: 'batch' }}` to `Table`, which renders
+  // `<input name="batch">`; the wrapper then HARDCODES
+  // `input[name="batch"]:checked` in a `querySelectorAll` to count what is
+  // ticked.
+  //
+  // RENAME EITHER SIDE AND THE BAR SIMPLY NEVER APPEARS. The count stays 0, the
+  // `count > 0 ?` branch never renders, nothing throws, and the screen looks
+  // exactly like one where nothing is selected. There is no error to find,
+  // which puts it in the same family as the `sed` that matched nothing and the
+  // `tail` that returned 0: the failure wears success's clothes.
+  //
+  // THE TESTS ABOVE DO NOT CATCH IT. They assert `<BulkStatus` is present and
+  // `selection={{ name: 'batch'` is present — two literals that both stay true
+  // after the wrapper's selector is changed to something else.
+  //
+  // SO THIS EXTRACTS RATHER THAN ASSERTS A LITERAL. The name is read out of the
+  // page and looked for in the wrapper, so a deliberate rename of BOTH sides
+  // passes — as it should, it is still correct — and a rename of one fails.
+  // Asserting `'batch'` on both sides would turn every legitimate rename into
+  // a test edit, which is how a guard becomes something people switch off.
+  describe('a bulk bar counts the checkbox its own grid renders', () => {
+    const PAIRS = [
+      ['batches', join(PAYROLL, 'batches', 'BulkStatus.tsx')],
+      ['statements', join(PAYROLL, 'statements', 'BulkPostPaid.tsx')],
+      ['invoices', join(ACCOUNTING, 'invoices', 'BulkMarkSent.tsx')],
+    ] as const
+
+    it.each(PAIRS)('%s', (page, wrapper) => {
+      const source = pageSource(page)
+      // BOTH SPELLINGS. `batches` passes the prop directly; `statements` and
+      // `invoices` pass it through a conditional spread because the column only
+      // exists for a role that may act. A regex matching only `selection={{`
+      // finds one of the three and reports the other two as having no
+      // selection at all — which is the mistake this very check was written
+      // after making by hand.
+      const match = /selection[=:]\s*\{\{?\s*name:\s*'([^']+)'/.exec(source)
+      expect(match, `${page} passes no selection name to Table`).not.toBeNull()
+      const name = match![1]!
+
+      // EVERY OCCURRENCE, NOT "CONTAINS IT SOMEWHERE". The first version of
+      // this asserted `toContain('input[name="batch"]')` and `watch-guard`
+      // refused to accept it: breaking the COUNTING selector in `BulkStatus`
+      // left the CLEAR-ALL selector untouched three lines below, the string was
+      // still present in the file, and the guard passed.
+      //
+      // A broken counter with an intact clear-all is the exact failure — no
+      // bar, no error — so "the name appears in this file" was never the claim
+      // worth making. The claim is that every selector in the wrapper names the
+      // checkbox the grid renders, and that is what is asserted.
+      const client = readFileSync(wrapper, 'utf8')
+      const selectors = [...client.matchAll(/input\[name="([^"]+)"\]/g)].map(
+        (hit) => hit[1],
+      )
+      expect(
+        selectors.length,
+        `${wrapper} queries no input[name=…] at all, so its bar can never count anything`,
+      ).toBeGreaterThan(0)
+      expect(
+        [...new Set(selectors)],
+        `${page}'s grid renders input[name="${name}"]; its bulk bar queries a different selector`,
+      ).toEqual([name])
+    })
+  })
+
   it('gives the funnel-able columns something to match on', () => {
     // A column marked `filterable` whose key has no entry in the shape's
     // `columnFilters` renders a control that narrows nothing — which looks
