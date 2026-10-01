@@ -297,10 +297,13 @@ describe('resolving a selection', () => {
     )
     expect(resolved.outcome).toBe('TESTED')
     expect(resolved.testedAt).toEqual(new Date('2026-03-02'))
-    expect(resolved.complianceItemId).toBeNull()
-
-    // AND NOTHING APPEARED IN ComplianceItem. Counting before and after is
-    // the check; asserting the null column alone would pass if the row had
+    // THE COLUMN IS GONE — dropped in migration 61, 2026-10-01, because it
+    // was null on every row in every environment and nothing read it. The
+    // assertion that it was null went with it, and this comment already
+    // said that assertion was the weaker half:
+    //
+    // NOTHING APPEARED IN ComplianceItem. Counting before and after is the
+    // check; asserting a null column alone would have passed if the row had
     // been written and simply not linked.
     const after = await owner.complianceItem.count({
       where: { driverId: selection.driverId, type: 'DRUG_TEST' },

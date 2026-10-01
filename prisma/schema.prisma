@@ -194,6 +194,9 @@ model Organization {
   randomPoolEntries        RandomPoolEntry[]
   randomDraws              RandomDraw[]
   randomSelections         RandomSelection[]
+  standingCharges          StandingCharge[]
+  standingChargeExemptions StandingChargeExemption[]
+  tollTransactions         TollTransaction[]
 }
 
 enum PlanTier {
@@ -292,6 +295,7 @@ model Company {
   settlementLoadLines SettlementLoadLine[]
   randomPoolEntries   RandomPoolEntry[]
   randomDraws         RandomDraw[]
+  tollTransactions    TollTransaction[]
 
   @@unique([organizationId, dotNumber])
   @@index([organizationId, isActive])
@@ -312,10 +316,30 @@ model CompanySettings {
 
   // Default assumptions used by the profitability engine. These are settings,
   // not constants — §30 requires the math be configurable.
-  defaultFuelCostPerMileCents Int     @default(55)
-  defaultMpg                  Decimal @default(6.5) @db.Decimal(5, 2)
-  factoringFeeBps             Int     @default(300)
-  dispatchFeeBps              Int     @default(0)
+  defaultFuelCostPerMileCents Int @default(55)
+
+  // ── HOW THIS AUTHORITY SETTLES FUEL AND TOLLS (§6.2.3, migration 61) ───
+  //
+  // SHOW AND DEDUCT ARE TWO BOOLEANS BECAUSE THEY ARE TWO QUESTIONS. A
+  // company-fuel driver is shown what was burned in his truck and charged
+  // nothing for it; the artefact has "Show fuel transactions" and "Add to
+  // calculate Fuel transactions" as separate checkboxes for exactly that.
+  showFuelOnStatement  Boolean @default(true)
+  deductFuel           Boolean @default(false)
+  showTollsOnStatement Boolean @default(true)
+  deductTolls          Boolean @default(false)
+
+  /// Which amount a deducted fuel line charges, and what it prints beside.
+  ///
+  /// `RETAIL` | `RETAIL_PLUS_FEES` | `INVOICE` | `INVOICE_SHOW_BOTH`, the
+  /// artefact's four modes. A string rather than an enum because a fifth
+  /// mode is a provider's billing habit, not a schema change — and because
+  /// the value is frozen onto each statement, where an enum narrowed later
+  /// would invalidate rows nobody can reissue.
+  fuelMode        String  @default("RETAIL")
+  defaultMpg      Decimal @default(6.5) @db.Decimal(5, 2)
+  factoringFeeBps Int     @default(300)
+  dispatchFeeBps  Int     @default(0)
 
   // Notification lead times (days)
   complianceWarnDays  Int @default(30)
@@ -707,19 +731,20 @@ model Truck {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  drivers         Driver[]
-  loads           Load[]
-  assignments     LoadAssignment[]
-  assetHistory    AssetAssignment[]
-  documents       Document[]
-  expenses        Expense[]
-  fuelTxns        FuelTransaction[]
-  maintenance     MaintenanceRecord[]
-  iftaMileage     IftaMileage[]
-  complianceItems ComplianceItem[]
-  inspections     RoadsideInspection[]
-  claims          Claim[]
-  accidents       Accident[]
+  drivers          Driver[]
+  loads            Load[]
+  assignments      LoadAssignment[]
+  assetHistory     AssetAssignment[]
+  documents        Document[]
+  expenses         Expense[]
+  fuelTxns         FuelTransaction[]
+  maintenance      MaintenanceRecord[]
+  iftaMileage      IftaMileage[]
+  complianceItems  ComplianceItem[]
+  inspections      RoadsideInspection[]
+  claims           Claim[]
+  accidents        Accident[]
+  tollTransactions TollTransaction[]
 
   // UNIQUENESS IS PARTIAL AND LIVES IN SQL. Prisma cannot express a `WHERE`
   // predicate on an index, so `truck_unit_per_company` is created by hand in
@@ -960,30 +985,32 @@ model Driver {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  payRules            DriverPayRule[]
-  loads               Load[]                 @relation("LoadDriver")
+  payRules                 DriverPayRule[]
+  loads                    Load[]                    @relation("LoadDriver")
   /// Loads where this driver is the SECOND crew member. Named separately
   /// because `loads` must keep meaning "loads I am the driver of" — a single
   /// merged relation would quietly double every count that reads it.
-  coDriverLoads       Load[]                 @relation("LoadCoDriver")
-  settlementLoadLines SettlementLoadLine[]
-  assignments         LoadAssignment[]
-  assetHistory        AssetAssignment[]
-  settlements         Settlement[]
-  openingBalances     DriverOpeningBalance[]
-  recurringDeductions RecurringDeduction[]
-  settlementCharges   SettlementCharge[]
-  escrowEntries       DriverEscrowEntry[]
-  documents           Document[]
-  expenses            Expense[]
-  fuelTxns            FuelTransaction[]
-  complianceItems     ComplianceItem[]
-  inspections         RoadsideInspection[]
-  claims              Claim[]
-  accidents           Accident[]
-  communications      Communication[]
-  randomPoolEntries   RandomPoolEntry[]
-  randomSelections    RandomSelection[]
+  coDriverLoads            Load[]                    @relation("LoadCoDriver")
+  settlementLoadLines      SettlementLoadLine[]
+  assignments              LoadAssignment[]
+  assetHistory             AssetAssignment[]
+  settlements              Settlement[]
+  openingBalances          DriverOpeningBalance[]
+  recurringDeductions      RecurringDeduction[]
+  settlementCharges        SettlementCharge[]
+  escrowEntries            DriverEscrowEntry[]
+  documents                Document[]
+  expenses                 Expense[]
+  fuelTxns                 FuelTransaction[]
+  complianceItems          ComplianceItem[]
+  inspections              RoadsideInspection[]
+  claims                   Claim[]
+  accidents                Accident[]
+  communications           Communication[]
+  randomPoolEntries        RandomPoolEntry[]
+  randomSelections         RandomSelection[]
+  standingChargeExemptions StandingChargeExemption[]
+  tollTransactions         TollTransaction[]
 
   @@unique([organizationId, externalId])
   @@index([companyId, status])
@@ -1074,8 +1101,7 @@ model ComplianceItem {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  documents        Document[]
-  randomSelections RandomSelection[]
+  documents Document[]
 
   @@index([companyId, expiresAt])
   @@index([companyId, type, expiresAt])
@@ -2449,7 +2475,9 @@ model Document {
   deletedAt DateTime?
   updatedAt DateTime  @updatedAt
 
-  corrections ExtractionCorrection[]
+  corrections       ExtractionCorrection[]
+  tollTransaction   TollTransaction?       @relation(fields: [tollTransactionId], references: [id])
+  tollTransactionId String?
 
   @@index([companyId, type])
   @@index([inboundEmailId])
@@ -2717,17 +2745,9 @@ model Payment {
   unappliedCents Int      @default(0)
 
   /// AND `notes` IS CARRYING A FLAG IT SHOULD NOT BE — see `isAdjustment` below.
-  notes          String?
+  notes String?
 
-  /// NOT A COLUMN YET, AND THE REASON IS THE SAME AS
-  /// `RandomSelection.complianceItemId`'s.
-  ///
-  /// Owner's ruling, 2026-09-28: `isAdjustment Boolean @default(false)` goes into
-  /// MIGRATION 61, bundled with the `RandomSelection.complianceItemId` drop,
-  /// whenever a code change next needs the deploy ritual — not as a migration of
-  /// its own.
-  ///
-  /// ── WHAT IS STANDING IN FOR IT MEANWHILE ────────────────────────────────
+  /// ── WHAT STOOD IN FOR IT BEFORE MIGRATION 61 ───────────────────────────
   ///
   /// `ADJUSTMENT_NOTE_PREFIX` in src/lib/amazon/remittance-write.ts, matched
   /// against `notes` by the money screen. A STRING STANDING IN FOR A BOOLEAN: it
@@ -2749,9 +2769,13 @@ model Payment {
   /// Keying on the absence of applications was tried and broke the earlier
   /// ruling's own guard on the first run.
   ///
-  /// WHEN THE COLUMN LANDS, the money screen's second membership arm reads it
-  /// instead of the prefix, and `ADJUSTMENT_NOTE_PREFIX` goes back to being only
-  /// what it looks like — the first words of a human-readable note.
+  /// THE COLUMN LANDED IN MIGRATION 61, 2026-10-01. The money screen's second
+  /// membership arm reads this instead of the note prefix;
+  /// `ADJUSTMENT_NOTE_PREFIX` goes back to being only what it looks like —
+  /// the first words of a human-readable note. The existing rows keep their
+  /// prefix and the reader still accepts it, because a payment booked last
+  /// month does not get a flag retroactively from a migration.
+  isAdjustment Boolean @default(false)
 
   recordedByUserId String?
   recordedBy       User?   @relation(fields: [recordedByUserId], references: [id])
@@ -3060,6 +3084,16 @@ model Settlement {
   /// Check Date the statement prints — see `Driver.payoutLagWeeks`.
   payoutDate DateTime?
 
+  /// The fuel mode this statement was built under, FROZEN like the tariff.
+  ///
+  /// Added in migration 61, 2026-10-01. Which amount a fuel line charged is
+  /// a policy on the authority, and policies change: reading
+  /// `Company.fuelMode` back at render time would restate a statement
+  /// somebody was already paid on the day somebody switched from retail to
+  /// invoice. Null on every statement cut before the column existed, which
+  /// is a fact about those statements rather than a missing value.
+  fuelMode String?
+
   /// The Earnings section's Total row. `grossCents` is what the percentage was
   /// taken OF; `earningsCents` is the sum of the per-line rounded amounts, and
   /// the two are not a fixed ratio of each other because rounding is per line.
@@ -3069,10 +3103,12 @@ model Settlement {
   /// Hundredths — the statements print 3.75 and 465.85 miles.
   milesHundredths Int @default(0)
 
-  lines          SettlementLine[]
-  loadLines      SettlementLoadLine[]
-  deductionLines SettlementDeductionLine[]
-  documents      Document[]
+  lines            SettlementLine[]
+  loadLines        SettlementLoadLine[]
+  deductionLines   SettlementDeductionLine[]
+  documents        Document[]
+  fuelTransactions FuelTransaction[]
+  tollTransactions TollTransaction[]
 
   /// ST- IS ONE SERIES ACROSS THE ORGANIZATION, so the unique is too. Keyed on
   /// the company it would have permitted two ST-000441s in different
@@ -3155,10 +3191,25 @@ model SettlementLoadLine {
   /// re-reading the load next year to render it would let a corrected city or
   /// a re-numbered load change what a cheque said.
   loadNumber String
-  puPlace    String
-  delPlace   String
-  puDate     DateTime
-  delDate    DateTime
+
+  /// The BROKER's number for this load — `116RX75DK` — frozen like the rest.
+  ///
+  /// Added in migration 61, 2026-10-01. The statement's Load number column
+  /// prints this because the artefact does and because a driver checking a
+  /// line against his own paperwork has the broker's number in front of him.
+  /// It was READ LIVE through `Load` from 2026-09-30, which meant a
+  /// reference corrected next year would change what an issued statement
+  /// printed — the drift this whole table exists to prevent.
+  ///
+  /// NULLABLE, because a load can carry no broker reference and because
+  /// every row written before this column existed has none. `loadNumber`
+  /// above stays the fallback.
+  referenceNumber String?
+
+  puPlace  String
+  delPlace String
+  puDate   DateTime
+  delDate  DateTime
 
   /// The gross the percentage was applied to. For Amazon freight this is the
   /// REMITTED figure, never the booked rate — §3, and `settledBasis` says which.
@@ -3261,6 +3312,8 @@ enum SettlementLineType {
   DEDUCTION_ESCROW
   DEDUCTION_EQUIPMENT
   DEDUCTION_VIOLATION
+  /// Added in migration 61, 2026-10-01 — see `TollTransaction`.
+  DEDUCTION_TOLL
   DEDUCTION_OTHER
 }
 
@@ -3354,10 +3407,47 @@ model FuelTransaction {
   // Gallons are genuinely fractional. Decimal, not cents.
   gallons             Decimal @db.Decimal(10, 3)
   pricePerGallonCents Int?
-  totalCents          Int
-  odometer            Int?
-  fuelCardLast4       String?
-  isDef               Boolean @default(false)
+
+  /// What the pump charged. The RETAIL figure (§6.2.3).
+  totalCents Int
+
+  // ── THE CHARGE SIDE, MIGRATION 61, 2026-10-01 ──────────────────────────
+  //
+  // RETAIL AND INVOICE ARE TWO AMOUNTS AND THE DIFFERENCE IS NOT ROUNDING:
+  // $339.92 at the pump, $284.43 on the fuel-card invoice, on the same
+  // gallon of diesel. Which one a driver is charged is a policy, recorded on
+  // the authority and frozen onto the statement — see `Company.fuelMode`.
+
+  /// What the card provider billed the carrier. Null until an import that
+  /// carries it; the four modes that need it say so by refusing.
+  invoiceCents Int?
+
+  /// Transaction fees, where the provider itemises them.
+  feesCents Int @default(0)
+
+  /// `Diesel`, `DEF`, `Reefer` — the artefact prints a Product column. A
+  /// string for the same reason a deduction type is: a new product is a
+  /// label, never a migration.
+  product String?
+
+  /// Whether this may be charged to anyone at all.
+  ///
+  /// SEPARATE FROM THE AUTHORITY'S POLICY. "Make transactions billable" is a
+  /// decision about THIS purchase — a repair-shop fill on a company card is
+  /// not billable however the authority settles fuel.
+  isBillable Boolean @default(false)
+
+  /// The statement that charged it. Null means PENDING (§6.2.3).
+  ///
+  /// PENDING AND ADDED ARE STATES OF THE TRANSACTION, NOT TWO TABLES, and
+  /// this column is what makes "charged once" checkable: a transaction with
+  /// a statement cannot be picked up by another.
+  settlementId String?
+  settlement   Settlement? @relation(fields: [settlementId], references: [id], onDelete: SetNull)
+
+  odometer      Int?
+  fuelCardLast4 String?
+  isDef         Boolean @default(false)
 
   deletedAt DateTime?
   createdAt DateTime  @default(now())
@@ -3368,6 +3458,52 @@ model FuelTransaction {
   @@index([companyId, purchasedAt])
   @@index([companyId, truckId, purchasedAt])
   @@index([companyId, state, purchasedAt])
+  /// The pending set, which is what the statement reads.
+  @@index([driverId, settlementId])
+}
+
+/// A toll, with the same shape as a fuel purchase and no gallons.
+///
+/// Added in migration 61, 2026-10-01. Tolls existed only as
+/// `ExpenseCategory.TOLLS` on `Expense`, which records what the CARRIER
+/// spent and carries no notion of charging it on — the artefact has a Toll
+/// transactions tab beside the fuel one and settles them the same way.
+model TollTransaction {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId      String
+  company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  incurredAt DateTime
+  truckId    String?
+  truck      Truck?   @relation(fields: [truckId], references: [id])
+  driverId   String?
+  driver     Driver?  @relation(fields: [driverId], references: [id])
+
+  /// The plaza or agency, and the state for the same IFTA-adjacent reason
+  /// fuel carries one.
+  vendorName String?
+  state      String?
+
+  totalCents   Int
+  invoiceCents Int?
+  feesCents    Int  @default(0)
+
+  isBillable Boolean @default(false)
+
+  settlementId String?
+  settlement   Settlement? @relation(fields: [settlementId], references: [id], onDelete: SetNull)
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  documents Document[]
+
+  @@index([companyId, incurredAt])
+  @@index([driverId, settlementId])
+  @@index([organizationId])
 }
 
 model MaintenanceRecord {
@@ -3964,97 +4100,78 @@ model RecurringDeduction {
   @@index([organizationId])
 }
 
-// ---------------------------------------------------------------------------
-// STANDING CHARGES — SPECIFIED, NOT YET A TABLE. MIGRATION 61.
-//
-// Owner's ruling, 2026-09-30: an ORG-LEVEL recurring deduction. Ifta and Admin
-// Fee are the cases — every driver pays them, nobody signs up individually,
-// and a driver hired on Tuesday pays one on Friday without anybody adding a
-// row. See TMS-DESIGN-SYSTEM §6.2.4 for the surface.
-//
-// ── WHY `RecurringDeduction` ABOVE CANNOT CARRY IT ────────────────────────
-//
-// The ruling asked for this to be built against the existing shape if it
-// could hold it — "driverId nullable = all" — and it cannot. Three of the six
-// fields have no home:
-//
-//   `driverId` is String NOT NULL with a REQUIRED relation, so there is no
-//   way to express "no particular driver".
-//
-//   There is no column for the applies-to scope. `Driver.employmentType`
-//   answers it for a DRIVER; the RULE needs to state which kinds it covers,
-//   and that is a property of the rule.
-//
-//   There is nowhere to record an exemption. "This driver does not pay Ifta"
-//   is a decision somebody made and should be able to explain, so it is a row
-//   and not an absence.
-//
-// ── THE WORKAROUND THAT FITS TODAY, AND WHY IT IS REFUSED ─────────────────
-//
-// One `RecurringDeduction` per driver, fanned out at creation. It needs no
-// migration and it is a different feature: editing would mean superseding N
-// rows, a driver hired next week would not pick the charge up at all, and
-// "applies to owner-operators" would be a filter frozen at creation rather
-// than a property of the rule. Recorded here so the next person reaches for
-// it and finds the answer already written.
-//
-// ── WHAT GOES IN, BUNDLED WITH `Payment.isAdjustment` ─────────────────────
-//
-//   model StandingCharge {
-//     id             String @id @default(cuid())
-//     organizationId String
-//     organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-//
-//     /// The printed label, same vocabulary as RecurringDeduction.type and a
-//     /// string for the same reason — a new kind of charge is a label, never
-//     /// a migration.
-//     type        String
-//     description String?
-//
-//     /// The instalment per settlement period, positive. The engine applies
-//     /// the sign, as it does for every other charge.
-//     amountCents Int
-//     cadence     DeductionCadence
-//
-//     /// Which drivers it reaches. `ALL`, or one `OwnershipType` — the same
-//     /// vocabulary `Driver.employmentType` already uses, so the scope and
-//     /// the driver are compared in one currency rather than two.
-//     appliesTo String
-//
-//     /// SUPERSEDED, NEVER EDITED, like DriverPayRule and RecurringDeduction:
-//     /// these land on statements handed to a person.
-//     effectiveFrom DateTime
-//     effectiveTo   DateTime?
-//     notes         String?
-//
-//     exemptions StandingChargeExemption[]
-//     createdAt  DateTime @default(now())
-//
-//     @@index([organizationId, effectiveFrom])
-//   }
-//
-//   model StandingChargeExemption {
-//     id               String @id @default(cuid())
-//     organizationId   String // denormalized — convention 9
-//     standingChargeId String
-//     standingCharge   StandingCharge @relation(fields: [standingChargeId], references: [id], onDelete: Cascade)
-//     driverId         String
-//     driver           Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
-//
-//     /// WHY, and it is required. An exemption nobody can explain is one
-//     /// nobody can review.
-//     reason    String
-//     createdAt DateTime @default(now())
-//
-//     @@unique([standingChargeId, driverId])
-//     @@index([organizationId])
-//   }
-//
-// BOTH CARRY `organizationId`, so both need a row in
-// `tests/integration/fixtures.ts` IN THE SAME COMMIT — `isolation-coverage`
-// fails by name otherwise, and "sees no rows from the other organization" is
-// true of an empty table, which is the comfortable way to be wrong.
-// ---------------------------------------------------------------------------
+/// An ORG-LEVEL recurring deduction — Ifta, Admin Fee (§6.2.4).
+///
+/// Landed in migration 61, 2026-10-01. `RecurringDeduction` above belongs to
+/// ONE DRIVER and could not carry this: `driverId` is NOT NULL with a
+/// required relation, there was no column for the applies-to scope, and
+/// nowhere to record an exemption.
+///
+/// ── WHY NOT ONE `RecurringDeduction` PER DRIVER ──────────────────────────
+///
+/// That needed no migration and is a different feature. Editing would mean
+/// superseding N rows, a driver hired next week would not pick the charge up
+/// at all, and "applies to owner-operators" would be a filter frozen at
+/// creation rather than a property of the rule.
+///
+/// ── SUPERSEDED, NEVER EDITED ─────────────────────────────────────────────
+///
+/// Same posture as `DriverPayRule` and `RecurringDeduction`, for the same
+/// reason: these land on statements that have been handed to a person. A
+/// change closes the old row with `effectiveTo` and opens a new one.
+model StandingCharge {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  /// The printed label, same vocabulary as `RecurringDeduction.type` and a
+  /// string for the same reason — a new kind of charge is a label, never a
+  /// migration.
+  type        String
+  description String?
+
+  /// The instalment per settlement period, POSITIVE. The engine applies the
+  /// sign, as it does for every other charge.
+  amountCents Int
+  cadence     DeductionCadence
+
+  /// Which drivers it reaches: `ALL`, or one `OwnershipType` value.
+  ///
+  /// A STRING CARRYING THE SAME VOCABULARY `Driver.employmentType` USES, so
+  /// the scope and the driver are compared in one currency rather than two.
+  /// Not an enum, because `ALL` is not an ownership type and an enum holding
+  /// both would be a type that means two things.
+  appliesTo String @default("ALL")
+
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  notes         String?
+
+  exemptions StandingChargeExemption[]
+  createdAt  DateTime                  @default(now())
+
+  @@index([organizationId, effectiveFrom])
+}
+
+/// One driver this standing charge does not reach.
+model StandingChargeExemption {
+  id               String         @id @default(cuid())
+  organizationId   String // denormalized from StandingCharge — convention 9
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  standingChargeId String
+  standingCharge   StandingCharge @relation(fields: [standingChargeId], references: [id], onDelete: Cascade)
+  driverId         String
+  driver           Driver         @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  /// WHY, and it is REQUIRED. An exemption nobody can explain is one nobody
+  /// can review — and "this driver does not pay Ifta" is a decision somebody
+  /// made, not an absence to be inferred.
+  reason    String
+  createdAt DateTime @default(now())
+
+  @@unique([standingChargeId, driverId])
+  @@index([organizationId])
+}
 
 /// A one-off charge or credit on one settlement.
 ///
@@ -4338,13 +4455,9 @@ model RandomSelection {
   /// DEAD SINCE THE RULING OF 2026-09-22, AND KEPT ONLY BECAUSE DROPPING IT
   /// IS A MIGRATION.
   ///
-  /// A random test writes no `ComplianceItem` — the outcome is an event on
-  /// this row. Nothing reads or writes this column and nothing should; it
-  /// is null on every row in every environment. Removing it is one
-  /// migration whenever the next one is going out anyway, which is why it
-  /// was not bundled into a deploy that had to ship today.
-  complianceItemId String?
-  complianceItem   ComplianceItem? @relation(fields: [complianceItemId], references: [id])
+  /// `complianceItemId` WAS DROPPED IN MIGRATION 61, 2026-10-01. A random
+  /// test writes no `ComplianceItem` — the outcome is an event on this row —
+  /// and the column was null on every row in every environment.
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

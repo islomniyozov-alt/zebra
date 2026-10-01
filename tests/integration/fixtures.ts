@@ -575,6 +575,48 @@ export async function seedOrganization(
       },
     }),
   )
+  // ── MIGRATION 61'S THREE NEW TENANT TABLES ──────────────────────────
+  //
+  // `isolation-coverage` fails by name for any tenant model this fixture
+  // never seeds, and it is right to: "sees no rows from the other
+  // organization" is true of an empty table, which is the most comfortable
+  // way to be wrong about row-level security.
+  record(
+    'tollTransaction',
+    await db.tollTransaction.create({
+      data: {
+        organizationId,
+        companyId,
+        incurredAt: new Date('2026-07-03'),
+        truckId: truck.id,
+        vendorName: 'Illinois Tollway',
+        state: 'IL',
+        totalCents: 1850,
+      },
+    }),
+  )
+  const standingCharge = await db.standingCharge.create({
+    data: {
+      organizationId,
+      type: 'Ifta',
+      amountCents: 2500,
+      cadence: 'WEEKLY',
+      appliesTo: 'ALL',
+      effectiveFrom: new Date('2026-01-01'),
+    },
+  })
+  record('standingCharge', standingCharge)
+  record(
+    'standingChargeExemption',
+    await db.standingChargeExemption.create({
+      data: {
+        organizationId,
+        standingChargeId: standingCharge.id,
+        driverId: driver.id,
+        reason: 'Owner-operator pays IFTA directly',
+      },
+    }),
+  )
   record(
     'maintenanceRecord',
     await db.maintenanceRecord.create({
