@@ -600,6 +600,67 @@ Recorded rather than resolved, per Phase 1's discipline.
     artefact is not actually arguing for a wider table — it is arguing for a
     chooser, which §7.1.4 already specifies.
 
+39. **§6.2.4 names two scopes for a standing charge; the schema's vocabulary has
+    three, so `LEASED` would have been unreachable.** The section asks for
+    "applies to (company drivers / owner-operators / all)".
+    `Driver.employmentType` is an `OwnershipType`, and that enum is `OWNED`,
+    `LEASED`, `OWNER_OPERATOR`.
+
+    Under the two §6.2.4 names, a leased driver matches `ALL` and nothing else.
+    An `Admin Fee` aimed at company drivers would skip every leased driver in
+    the group, silently and indefinitely — and the only symptom is a deduction
+    MISSING from a cheque, which nobody audits upward. An overcharge gets a
+    phone call; this would not.
+
+    `AGENTS.md` says the schema wins and the contradiction gets flagged, so:
+    **four scope values — `ALL`, `OWNED`, `LEASED`, `OWNER_OPERATOR`.**
+    `TMS-DESIGN-SYSTEM.md` was amended in its own commit (v10.11) to say the
+    same thing and to say why, and `scopeCovers('OWNED', 'LEASED')` is false
+    with a test on it.
+
+    THE ALTERNATIVE WAS TO MAP `LEASED` ONTO `OWNED`, and it is worth saying why
+    not. "Company drivers" plausibly means "everybody who is not an
+    owner-operator", which is how the brief's two values could have been read.
+    But a lease-purchase driver's deduction schedule is precisely what differs
+    from a company driver's in this fleet — it is why the column has three
+    values rather than two — so folding them would encode away the one
+    distinction the data exists to make.
+
+40. **Two standing charges of one type cannot both be live, so "everyone pays
+    $20, owner-operators pay $35" has no representation.** `saveStandingCharge`
+    refuses `Ifta`/`ALL` beside `Ifta`/`OWNER_OPERATOR`, because `ALL` reaches
+    the owner-operators too and both rules firing charges them $55.
+
+    The refusal is right: the alternative is two rules with a precedence nobody
+    has specified, and `computeDeductions` would silently sum them. But it means
+    a tiered charge — a real thing an office asks for — must be written as three
+    rules with disjoint scopes (`OWNED` $20, `LEASED` $20, `OWNER_OPERATOR` $35)
+    rather than a base plus an override.
+
+    NOT BUILT, AND NOT A DEFECT TO FIX QUIETLY. "The narrowest scope wins" is a
+    decision about somebody's pay and belongs to the owner, not to whoever next
+    notices the gap. Recorded so the workaround is written down and the refusal
+    is not mistaken for an oversight.
+
+41. **A `StandingCharge` has no `companyId`, so Payroll → Charges → Standing has
+    no company filter and shows every authority's rules to a reader scoped to
+    one.** Not a divergence from a brief — a consequence of §6.2.4's own model,
+    recorded because it is the kind of thing that reads as a tenancy bug on
+    first sight.
+
+    `listCharges` scopes THROUGH the driver, because a recurring deduction
+    belongs to one. A standing charge belongs to the ORGANIZATION; there is no
+    company to narrow to, so row-level security is the whole fence and the
+    `CompanyChips` control is absent from that tab rather than present and
+    inert.
+
+    WHAT IT MEANS IN PRACTICE: somebody scoped to Dolphins sees the group's
+    standing charges, including ones that reach drivers they cannot see. That is
+    the honest rendering of an org-level rule, and it is the trade §6.2.4 took
+    when it put these on the organization rather than fanning them out per
+    authority. If it ever needs narrowing, the fix is a scope column and a
+    migration, not a filter over a field nobody set.
+
 ---
 
 ## 8. How each acceptance box closed
