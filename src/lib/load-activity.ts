@@ -1,3 +1,4 @@
+import type { DocumentType } from '@/generated/prisma/client'
 import { newestFirst, type Timed } from './load-timeline'
 
 // ---------------------------------------------------------------------------
@@ -195,8 +196,25 @@ export interface ActivityDocumentSource {
   id: string
   uploadedAt: Date
   filename: string
-  type: string
+  /** THE ENUM, not a string: the label map is exhaustive over it. */
+  type: DocumentType
   uploadedBy: { name: string | null } | null
+  /**
+   * When it was removed, or null while it is current.
+   *
+   * ── A DELETED DOCUMENT YIELDS TWO ROWS, NOT ZERO AND NOT ONE ───────────
+   *
+   * Owner's ruling, 2026-10-01. The upload HAPPENED, at `uploadedAt`, and the
+   * deletion happened at `deletedAt` — they are two events about one row and a
+   * log that collapsed them would be answering "what happened to this load"
+   * with the one event most likely to be asked about.
+   *
+   * THERE IS NO `deletedBy` COLUMN, so the actor comes from the `AuditLog` row
+   * for the delete. That is passed in as `deletedBy` rather than looked up
+   * here, because this function does no I/O — and because the caller already
+   * holds those rows for the field-edit stream.
+   */
+  deletedAt: Date | null
 }
 
 /** A note — a `Communication` row of type NOTE. */
@@ -256,7 +274,20 @@ export type ActivityItem =
       at: Date
       actor: string | null
       filename: string
-      documentType: string
+      documentType: DocumentType
+    }
+  | {
+      /**
+       * A document that was removed. ITS OWN KIND, not a flag on `document`:
+       * the two rows sit at different times with different actors, and a
+       * boolean on one entry could only render at one of them.
+       */
+      kind: 'documentDeleted'
+      id: string
+      at: Date
+      actor: string | null
+      filename: string
+      documentType: DocumentType
     }
   | { kind: 'note'; id: string; at: Date; actor: string | null; body: string }
 
@@ -277,6 +308,15 @@ export function mergeActivity(input: {
   statuses: readonly ActivityStatusSource[]
   documents: readonly ActivityDocumentSource[]
   notes: readonly ActivityNoteSource[]
+  /**
+   * Who deleted each document, by document id.
+   *
+   * `Document` has no `deletedBy`, so this comes from the `AuditLog` DELETE row
+   * and the caller supplies it — this function does no I/O. A document id that
+   * is absent means we have no audit row for the delete, and the entry then
+   * names nobody. See `fromDeletions`.
+   */
+  deletedBy?: Readonly<Record<string, string | null>>
   /** Translates a status event's own note when it is one of our message keys. */
   renderNote?: (note: string) => string
 }): ActivityItem[] {
@@ -343,6 +383,36 @@ export function mergeActivity(input: {
     },
   }))
 
+  // ── AND A SECOND ROW FOR EACH ONE THAT WAS REMOVED ───────────────────
+  //
+  // `flatMap` over the same list rather than a second input, so the two rows
+  // cannot disagree about the filename or the type — they are one row read
+  // twice, which is what they are.
+  //
+  // THE ACTOR COMES FROM THE AUDIT ROW because `Document` has no `deletedBy`.
+  // `deletedBy` below is keyed by document id, built by the caller from the
+  // audit rows it already holds; absent means we did not record who, and the
+  // entry says nothing rather than naming the uploader by accident — which is
+  // the one wrong answer available here, since the uploader is right there on
+  // the row.
+  const fromDeletions: Timed<ActivityItem>[] = input.documents.flatMap((doc) =>
+    doc.deletedAt === null
+      ? []
+      : [
+          {
+            at: doc.deletedAt,
+            value: {
+              kind: 'documentDeleted' as const,
+              id: doc.id,
+              at: doc.deletedAt,
+              actor: input.deletedBy?.[doc.id] ?? null,
+              filename: doc.filename,
+              documentType: doc.type,
+            },
+          },
+        ],
+  )
+
   const fromNotes: Timed<ActivityItem>[] = input.notes.map((note) => ({
     at: note.occurredAt,
     value: {
@@ -354,7 +424,13 @@ export function mergeActivity(input: {
     },
   }))
 
-  return newestFirst(fromAudit, fromStatuses, fromDocuments, fromNotes)
+  return newestFirst(
+    fromAudit,
+    fromStatuses,
+    fromDocuments,
+    fromDeletions,
+    fromNotes,
+  )
 }
 
 /**

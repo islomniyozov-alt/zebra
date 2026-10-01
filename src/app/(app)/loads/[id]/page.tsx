@@ -26,6 +26,7 @@ import {
   humaniseField,
   mergeActivity,
 } from '@/lib/load-activity'
+import { documentTypeLabels } from '@/lib/document-types'
 import { Prisma } from '@/generated/prisma/client'
 import {
   ACCESSORIAL_TYPES,
@@ -200,6 +201,20 @@ export default async function LoadDetailPage({
             isBillable: true,
           },
         },
+        // ── IDS ONLY, SO THE AUDIT FILTER HAS THEM IN TIME ──────────────
+        //
+        // `Document.deletedAt` records THAT a document was removed and there is
+        // no `deletedBy` column, so the actor comes from the audit row — and an
+        // `AuditLog` row is found by `entityType` and `entityId`, with no
+        // `loadId` to filter on. The ids therefore have to exist BEFORE the
+        // `Promise.all` below, which is exactly why `stopIds` is read off this
+        // query too.
+        //
+        // NOT A NINTH QUERY: `relationJoins` is on app-wide, so this is one
+        // more lateral join on a query that already joins stops and
+        // accessorials. The full rows are still read once, in the
+        // `Promise.all`.
+        documents: { select: { id: true } },
       },
     })
     if (!load) return null
@@ -212,6 +227,7 @@ export default async function LoadDetailPage({
     // made. `assertAssignable` would not catch it either — it asks about
     // double-booking, not about authority.
     const stopIds = load.stops.map((stop) => stop.id)
+    const documentIds = load.documents.map((document) => document.id)
 
     const [events, documents, notes, clockWrites, auditRows, trucks, drivers] =
       await Promise.all([
@@ -220,8 +236,19 @@ export default async function LoadDetailPage({
           orderBy: { occurredAt: 'desc' },
           include: { changedBy: { select: { name: true } } },
         }),
+        // DELETED ONES TOO, AND FILTERED IN MEMORY BELOW (§7.10).
+        //
+        // This had `deletedAt: null`, which was right for the Documents panel
+        // and wrong for a LOG: a document somebody removed was still uploaded,
+        // and a history that drops it answers "what happened to this load" with
+        // the one event most likely to be asked about missing.
+        //
+        // ONE QUERY STILL. `visibleDocuments` below is this list narrowed, so
+        // the panel sees exactly what it saw before and the timeline sees all
+        // of it. Widening the filter rather than adding a second read keeps the
+        // screen at eight queries.
         tx.document.findMany({
-          where: { loadId: id, deletedAt: null },
+          where: { loadId: id },
           orderBy: { uploadedAt: 'desc' },
           include: { uploadedBy: { select: { name: true } } },
         }),
@@ -275,6 +302,12 @@ export default async function LoadDetailPage({
             OR: [
               { entityType: 'Load', entityId: id },
               { entityType: 'LoadStop', entityId: { in: stopIds } },
+              // THE DOCUMENTS, FOR WHO DELETED ONE. `Document` has no
+              // `deletedBy`, so the actor on a deletion row is only here.
+              // `activityEntries` drops these from the field-edit stream by the
+              // same money filter it applies to everything else; what
+              // `mergeActivity` takes from them is the actor.
+              { entityType: 'Document', entityId: { in: documentIds } },
             ],
           },
           orderBy: { createdAt: 'desc' },
@@ -584,27 +617,50 @@ export default async function LoadDetailPage({
   // NOTES ARE IN IT FOR EVERY LOAD NOW, not only the direct-settled ones. Which
   // history a reader got used to depend on the customer, which is not a
   // property of a history.
+  // THE PANEL'S LIST AND THE LOG'S LIST, out of one query. §7.8 shows what is
+  // on file; §7.10 logs what happened, and a removed document happened.
+  const visibleDocuments = documents.filter(
+    (document) => document.deletedAt === null,
+  )
+
+  // WHO DELETED EACH DOCUMENT, out of the audit rows already fetched.
+  //
+  // `Document` has no `deletedBy`, so this is the only place the actor exists.
+  // THE RAW ROWS, NOT `activity`: `activityEntries` applies the money filter
+  // and drops a row that loses every field, which is right for the field-edit
+  // stream and wrong here — the actor on a deletion is not a money fact, and a
+  // document row emptied by that filter would silently become "nobody".
+  //
+  // `auditRows` is newest-first, so the FIRST delete row for a document is the
+  // most recent one. A document deleted, restored and deleted again has one
+  // `deletedAt`, and this is the actor who set it.
+  const deletedBy: Record<string, string | null> = {}
+  for (const row of auditRows) {
+    if (row.entityType !== 'Document' || row.action !== 'DELETE') continue
+    if (row.entityId in deletedBy) continue
+    deletedBy[row.entityId] = row.user?.name ?? null
+  }
+
   const activityStream = mergeActivity({
     entries: activity,
     statuses: events,
     documents,
     notes,
+    deletedBy,
     // Ours gets translated; a human's is shown exactly as typed. §12: the
     // system's own words are chrome and belong in the reader's language; a
     // dispatcher's sentence is evidence and belongs verbatim.
     renderNote: (note) => (isMessageKey(note) ? t(note) : note),
   })
 
-  // ONLY THE TYPES ON THIS LOAD'S DOCUMENTS. A map over the whole enum would
-  // need a message key for each, and a `DocumentType` added next month would
-  // render as nothing; the component falls back to the stored value, so an
-  // untranslated type reads as `WEIGHT_TICKET` rather than as a blank badge.
-  const documentTypeLabels = Object.fromEntries(
-    [...new Set(documents.map((doc) => doc.type))].map((type) => {
-      const key = `documents.type.${type}`
-      return [type, isMessageKey(key) ? t(key) : type]
-    }),
-  )
+  // ONE EXHAUSTIVE MAP, from `document-types.ts`. This was built here, over
+  // only the types present on THIS load, with an `isMessageKey` fallback to the
+  // stored value — which meant an untranslated type rendered as
+  // `WEIGHT_TICKET`. That is better than a blank badge and worse than a
+  // compiler error, and the compiler can have this one: the map is
+  // `satisfies Record<DocumentType, MessageKey>`, so a new enum member fails to
+  // build until it has a label in all three locales.
+  const docTypeLabels = documentTypeLabels(t)
 
   // §7.8 — grouped by type, and "required" means required AT THIS STAGE. A
   // rate confirmation is always expected; a POD only once the load is
@@ -641,7 +697,9 @@ export default async function LoadDetailPage({
     type,
     label,
     required,
-    documents: documents
+    // `visibleDocuments`, NOT `documents`. The query now returns soft-deleted
+    // rows so the timeline can log them; the panel shows what it always showed.
+    documents: visibleDocuments
       .filter((document) => document.type === type)
       .map((document) => ({
         id: document.id,
@@ -657,10 +715,15 @@ export default async function LoadDetailPage({
       })),
   })
 
+  // THE SAME MAP THE TIMELINE AND THE DOCUMENTS LIST READ. These three slots
+  // had their own vocabulary — `documents.type.*`, three keys — and the same
+  // enum member therefore carried two labels that could drift. They had: in
+  // Russian `documents.type.POD` read "Документ о доставке" and
+  // `docType.POD` read "POD". One map, one label.
   const slots: DocumentSlot[] = [
-    slotFor('RATE_CONFIRMATION', t('documents.type.RATE_CONFIRMATION'), true),
-    slotFor('POD', t('documents.type.POD'), podRequired),
-    slotFor('BOL', t('documents.type.BOL'), false),
+    slotFor('RATE_CONFIRMATION', docTypeLabels.RATE_CONFIRMATION, true),
+    slotFor('POD', docTypeLabels.POD, podRequired),
+    slotFor('BOL', docTypeLabels.BOL, false),
   ]
 
   return (
@@ -1310,7 +1373,7 @@ export default async function LoadDetailPage({
               entries={activityStream}
               truncated={activityTruncated}
               statusLabels={statusLabels}
-              documentTypeLabels={documentTypeLabels}
+              documentTypeLabels={docTypeLabels}
               locale={locale}
               timeZone={zone}
               {...(mayUpdate
@@ -1333,6 +1396,7 @@ export default async function LoadDetailPage({
                 created: t('loads.activityCreated'),
                 deleted: t('loads.activityDeleted'),
                 uploaded: t('loads.activityUploaded'),
+                documentDeleted: t('loads.activityDocumentDeleted'),
                 via: t('loads.activityVia'),
                 truncated: t('loads.activityTruncated'),
                 manual: t('loads.source.manual'),

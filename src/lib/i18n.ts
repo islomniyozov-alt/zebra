@@ -1332,6 +1332,7 @@ const en = {
   'loads.activityEmpty': 'Nothing recorded on this load yet.',
   'loads.activityCreated': 'Created',
   'loads.activityUploaded': 'uploaded',
+  'loads.activityDocumentDeleted': 'removed',
   'loads.activityDeleted': 'Deleted',
   'loads.activityVia': 'Integration',
   'loads.activityTruncated':
@@ -1407,9 +1408,6 @@ const en = {
   'stop.PICKUP': 'Pickup',
   'stop.DELIVERY': 'Delivery',
   'stop.INTERMEDIATE': 'Stop',
-  'documents.type.RATE_CONFIRMATION': 'Rate confirmation',
-  'documents.type.POD': 'POD',
-  'documents.type.BOL': 'BOL',
 
   'views.all': 'All loads',
   'views.save': 'Save view',
@@ -2246,6 +2244,12 @@ const en = {
   'docType.CDL_COPY': 'CDL',
   'docType.MEDICAL_CARD': 'Medical card',
   'docType.ACCIDENT_REPORT': 'Accident report',
+  // The three DQF documents from item 13. They had NO label until 2026-10-01:
+  // `documents/page.tsx` looked every type up through `as MessageKey`, so the
+  // cast accepted them and the screen printed the key.
+  'docType.EMPLOYMENT_APPLICATION': 'Employment application',
+  'docType.EMPLOYMENT_VERIFICATION': 'Employment verification',
+  'docType.ROAD_TEST_CERTIFICATE': 'Road test certificate',
   'docType.PHOTO': 'Photo',
   'docType.OTHER': 'Other',
   'claims.new.truck': 'Truck',
@@ -4013,6 +4017,7 @@ const ru: Dictionary = {
   'loads.activityEmpty': 'По этому грузу пока ничего не записано.',
   'loads.activityCreated': 'Создан',
   'loads.activityUploaded': 'загружен',
+  'loads.activityDocumentDeleted': 'удалён',
   'loads.activityDeleted': 'Удалён',
   'loads.activityVia': 'Интеграция',
   'loads.activityTruncated':
@@ -4088,9 +4093,6 @@ const ru: Dictionary = {
   'stop.PICKUP': 'Погрузка',
   'stop.DELIVERY': 'Выгрузка',
   'stop.INTERMEDIATE': 'Промежуточная',
-  'documents.type.RATE_CONFIRMATION': 'Подтверждение ставки',
-  'documents.type.POD': 'Документ о доставке',
-  'documents.type.BOL': 'Товарная накладная',
 
   'views.all': 'Все грузы',
   'views.save': 'Сохранить вид',
@@ -4926,6 +4928,9 @@ const ru: Dictionary = {
   'docType.CDL_COPY': 'CDL',
   'docType.MEDICAL_CARD': 'Медсправка',
   'docType.ACCIDENT_REPORT': 'Отчёт о ДТП',
+  'docType.EMPLOYMENT_APPLICATION': 'Заявление о приёме на работу',
+  'docType.EMPLOYMENT_VERIFICATION': 'Подтверждение стажа',
+  'docType.ROAD_TEST_CERTIFICATE': 'Свидетельство о дорожном тесте',
   'docType.PHOTO': 'Фото',
   'docType.OTHER': 'Другое',
   'claims.new.truck': 'Тягач',
@@ -6662,6 +6667,7 @@ const fa: Dictionary = {
   'loads.activityEmpty': 'هنوز چیزی برای این بار ثبت نشده است.',
   'loads.activityCreated': 'ایجاد شد',
   'loads.activityUploaded': 'بارگذاری شد',
+  'loads.activityDocumentDeleted': 'حذف شد',
   'loads.activityDeleted': 'حذف شد',
   'loads.activityVia': 'یکپارچگی',
   'loads.activityTruncated':
@@ -6737,9 +6743,6 @@ const fa: Dictionary = {
   'stop.PICKUP': 'بارگیری',
   'stop.DELIVERY': 'تحویل',
   'stop.INTERMEDIATE': 'توقف',
-  'documents.type.RATE_CONFIRMATION': 'تأییدیهٔ نرخ',
-  'documents.type.POD': 'رسید تحویل',
-  'documents.type.BOL': 'بارنامه',
 
   'views.all': 'همهٔ بارها',
   'views.save': 'ذخیرهٔ نما',
@@ -7570,6 +7573,9 @@ const fa: Dictionary = {
   'docType.CDL_COPY': 'CDL',
   'docType.MEDICAL_CARD': 'کارت پزشکی',
   'docType.ACCIDENT_REPORT': 'گزارش تصادف',
+  'docType.EMPLOYMENT_APPLICATION': 'درخواست استخدام',
+  'docType.EMPLOYMENT_VERIFICATION': 'تأیید سابقهٔ کار',
+  'docType.ROAD_TEST_CERTIFICATE': 'گواهی آزمون رانندگی',
   'docType.PHOTO': 'عکس',
   'docType.OTHER': 'سایر',
   'claims.new.truck': 'کامیون',

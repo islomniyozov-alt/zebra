@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { cx } from '@/lib/cx'
+import type { DocumentType } from '@/generated/prisma/client'
 import type { ActivityItem } from '@/lib/load-activity'
 
 // ---------------------------------------------------------------------------
@@ -50,7 +51,12 @@ interface Props {
   /** True when older audit rows exist beyond the window the page fetched. */
   truncated: boolean
   statusLabels: Record<string, string>
-  documentTypeLabels: Record<string, string>
+  /**
+   * EXHAUSTIVE BY TYPE, from `document-types.ts`, so there is no `??` fallback
+   * below. A `Record<string, string>` would accept a partial map and render a
+   * blank badge for whatever was missing.
+   */
+  documentTypeLabels: Record<DocumentType, string>
   /** The note box. §7.10: adding a note is its own control, always present. */
   composer?: ReactNode
   locale: string
@@ -61,6 +67,8 @@ interface Props {
     created: string
     deleted: string
     uploaded: string
+    /** A document that was removed. Its own row, at its own time (§7.10). */
+    documentDeleted: string
     via: string
     truncated: string
     manual: string
@@ -144,19 +152,23 @@ export function ActivityTimeline({
                     <p className="text-base text-ink">{entry.body}</p>
                     {stamp(entry.at, entry.actor)}
                   </>
-                ) : entry.kind === 'document' ? (
+                ) : entry.kind === 'document' ||
+                  entry.kind === 'documentDeleted' ? (
                   <>
                     <div className="flex flex-wrap items-center gap-z2">
                       <StatusBadge
-                        tone="neutral"
-                        variant="outlined"
-                        label={
-                          documentTypeLabels[entry.documentType] ??
-                          entry.documentType
+                        tone={
+                          entry.kind === 'documentDeleted'
+                            ? 'danger'
+                            : 'neutral'
                         }
+                        variant="outlined"
+                        label={documentTypeLabels[entry.documentType]}
                       />
                       <span className="text-sm text-ink">
-                        {labels.uploaded}
+                        {entry.kind === 'documentDeleted'
+                          ? labels.documentDeleted
+                          : labels.uploaded}
                       </span>
                       {/* A FILENAME IS AN IDENTIFIER, so it stays LTR even in
                        * an RTL layout (§12) — `invoice-0012.pdf` reversed is a
@@ -253,13 +265,19 @@ function Rail({ entry }: { entry: ActivityItem }) {
   const shape =
     entry.kind === 'document'
       ? 'h-z2 w-z2 rounded-[2px] border border-border-strong bg-surface-2'
-      : entry.kind === 'status'
-        ? entry.outcome === 'REFUSED_STALE'
-          ? 'h-z2 w-z2 rounded-full border border-danger bg-surface'
-          : 'h-z2 w-z2 rounded-full border border-progress bg-progress'
-        : entry.kind === 'note'
-          ? 'h-z2 w-z2 rounded-full border border-border bg-surface'
-          : 'h-z2 w-z2 rounded-full border border-border-strong bg-surface-2'
+      : // A REMOVAL IS A SQUARE TOO — it is about a document — but HOLLOW
+        // DANGER, the same way a refused transition is hollow danger. The shape
+        // says which kind of thing, the fill says whether it took something
+        // away.
+        entry.kind === 'documentDeleted'
+        ? 'h-z2 w-z2 rounded-[2px] border border-danger bg-surface'
+        : entry.kind === 'status'
+          ? entry.outcome === 'REFUSED_STALE'
+            ? 'h-z2 w-z2 rounded-full border border-danger bg-surface'
+            : 'h-z2 w-z2 rounded-full border border-progress bg-progress'
+          : entry.kind === 'note'
+            ? 'h-z2 w-z2 rounded-full border border-border bg-surface'
+            : 'h-z2 w-z2 rounded-full border border-border-strong bg-surface-2'
 
   return (
     <div className="flex flex-col items-center pt-[5px]">

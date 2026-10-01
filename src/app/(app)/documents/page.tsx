@@ -4,6 +4,7 @@ import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyScopeFilter } from '@/lib/tenancy'
 import { normalizeTypedDate } from '@/lib/typed-date'
+import { documentTypeLabels } from '@/lib/document-types'
 import {
   browseDocuments,
   browserFacets,
@@ -53,6 +54,7 @@ export default async function DocumentsPage({
 
   const params = await searchParams
   const { t, locale } = await getLocaleContext()
+  const docTypeLabels = documentTypeLabels(t)
 
   const typeParam =
     typeof params['type'] === 'string'
@@ -127,7 +129,12 @@ export default async function DocumentsPage({
       key: 'type',
       header: t('docs.column.type'),
       truncate: true,
-      render: (row) => t(`docType.${row.type}` as MessageKey),
+      // THE EXHAUSTIVE MAP, NOT A TEMPLATE AND A CAST. `as MessageKey` told
+      // the compiler to stop asking, and the compiler was the only thing that
+      // knew the three DQF types had no label — they printed
+      // `docType.EMPLOYMENT_APPLICATION` in this very column. See
+      // `document-types.ts`.
+      render: (row) => docTypeLabels[row.type],
     },
     {
       key: 'entity',
@@ -205,7 +212,7 @@ export default async function DocumentsPage({
               (type) => (counts.type[type] ?? 0) > 0 || type === typeParam,
             ).map((type) => ({
               value: type,
-              label: t(`docType.${type}` as MessageKey),
+              label: docTypeLabels[type],
               count: counts.type[type] ?? 0,
             })),
           },

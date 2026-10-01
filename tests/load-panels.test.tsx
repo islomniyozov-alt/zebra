@@ -8,6 +8,7 @@ import { StopsTable } from '@/app/(app)/loads/[id]/StopsTable'
 import { MilesSummary } from '@/app/(app)/loads/[id]/MilesSummary'
 import { PipelineStrip } from '@/app/(app)/loads/[id]/PipelineStrip'
 import { LoadFacts } from '@/app/(app)/loads/[id]/LoadFacts'
+import { documentTypeLabels } from '@/lib/document-types'
 import {
   activityEntries,
   humaniseField,
@@ -52,11 +53,15 @@ const timelineLabels = {
   set: 'set',
   cleared: 'cleared',
   changed: 'changed',
+  documentDeleted: 'removed',
   field: humaniseField,
 }
 
 const statusLabels = { DELIVERED: 'Delivered' }
-const documentTypeLabels = { POD: 'POD' }
+// THE REAL MAP, not a one-entry stub. It is exhaustive over `DocumentType`,
+// so a fixture cannot quietly omit the type it asserts on — and
+// `documentTypeLabels` is the same function the three screens call.
+const docTypeLabels = documentTypeLabels((key) => key.replace('docType.', ''))
 
 const timeline = (
   entries: readonly ActivityItem[],
@@ -67,7 +72,7 @@ const timeline = (
       entries={entries}
       truncated={extra.truncated ?? false}
       statusLabels={statusLabels}
-      documentTypeLabels={documentTypeLabels}
+      documentTypeLabels={docTypeLabels}
       locale="en-US"
       timeZone="America/Chicago"
       {...(extra.composer ? { composer: extra.composer } : {})}
@@ -120,6 +125,7 @@ describe('the activity timeline holds every source', () => {
             uploadedAt: new Date('2026-09-05T13:00:00Z'),
             filename: 'pod-4471.pdf',
             type: 'POD',
+            deletedAt: null,
             uploadedBy,
           },
         ],
@@ -164,6 +170,153 @@ describe('the activity timeline holds every source', () => {
   // checked. Four sources with four different time columns is exactly where a
   // merge gets one of them wrong, so this asserts the rendered order rather
   // than trusting `mergeActivity`'s own unit tests.
+  // ── A DELETED DOCUMENT IS TWO ROWS, NOT ZERO AND NOT ONE ─────────────
+  //
+  // The upload HAPPENED. A log that drops it because the file was later removed
+  // answers "what happened to this load" with the event most likely to be asked
+  // about — and a log that shows only the deletion claims a file appeared from
+  // nowhere.
+  it('logs a deleted document twice: uploaded then removed', () => {
+    timeline(
+      mergeActivity({
+        entries: [],
+        statuses: [],
+        documents: [
+          {
+            id: 'd1',
+            uploadedAt: new Date('2026-09-05T10:00:00Z'),
+            filename: 'pod-4471.pdf',
+            type: 'POD',
+            deletedAt: new Date('2026-09-06T16:30:00Z'),
+            uploadedBy: { name: 'Aziz' },
+          },
+        ],
+        // THE ACTOR COMES FROM THE AUDIT ROW, because `Document` has no
+        // `deletedBy` column.
+        notes: [],
+        deletedBy: { d1: 'Islom' },
+      }),
+    )
+
+    const removed = screen.getByText('removed')
+    const uploaded = screen.getByText('uploaded')
+
+    // BOTH ROWS, BY LABEL.
+    expect(removed).toBeTruthy()
+    expect(uploaded).toBeTruthy()
+    // AND THE FILENAME ON EACH, so neither row is a bare verb.
+    expect(screen.getAllByText('pod-4471.pdf')).toHaveLength(2)
+
+    // NEWEST FIRST: removed 06 Sep › uploaded 05 Sep. The two rows are one
+    // database row read twice, so an implementation that emitted them from one
+    // `at` would put them adjacent in the wrong order or collapse them.
+    expect(removed.compareDocumentPosition(uploaded) & 4).toBeTruthy()
+
+    // EACH WITH ITS OWN ACTOR. The uploader is on the Document row and the
+    // deleter is only in the audit log; naming the uploader on both is the one
+    // wrong answer available here, since that name is right there.
+    expect(screen.getByText('Aziz')).toBeTruthy()
+    expect(screen.getByText('Islom')).toBeTruthy()
+  })
+
+  it('says nothing about who removed it when no audit row recorded that', () => {
+    timeline(
+      mergeActivity({
+        entries: [],
+        statuses: [],
+        documents: [
+          {
+            id: 'd1',
+            uploadedAt: new Date('2026-09-05T10:00:00Z'),
+            filename: 'pod-4471.pdf',
+            type: 'POD',
+            deletedAt: new Date('2026-09-06T16:30:00Z'),
+            uploadedBy: { name: 'Aziz' },
+          },
+        ],
+        notes: [],
+        // No `deletedBy` at all — the delete predates auditing, or the row is
+        // past the window.
+      }),
+    )
+    expect(screen.getByText('removed')).toBeTruthy()
+    // THE UPLOADER IS NOT BORROWED for the deletion row. One "Aziz" on the
+    // page, on the upload, and the removal names nobody.
+    expect(screen.getAllByText('Aziz')).toHaveLength(1)
+  })
+
+  // ── A TIE ON THE SAME SECOND ─────────────────────────────────────────
+  //
+  // Not hypothetical: a status event and the note explaining it are written in
+  // ONE TRANSACTION and land on the same millisecond, and an upload stamped by
+  // the same request joins them. `newestFirst` relies on `Array.prototype.sort`
+  // being stable, so a tie keeps the order the groups were passed in — audit,
+  // status, document, deletion, note. This pins that order, because "stable"
+  // is a property of the language that a comparator could silently stop
+  // relying on.
+  it('orders a four-way tie on the same second by source, not at random', () => {
+    const sameInstant = new Date('2026-09-05T12:00:00.000Z')
+    timeline(
+      mergeActivity({
+        entries: activityEntries(
+          [
+            {
+              id: 'a1',
+              createdAt: sameInstant,
+              action: 'UPDATE',
+              entityType: 'Load',
+              entityId: 'l1',
+              userAgent: null,
+              user: { name: 'Islom' },
+              changes: { dispatchedMiles: { from: 100, to: 420 } },
+            },
+          ],
+          { maySeeMoney: true },
+        ),
+        statuses: [
+          {
+            id: 's1',
+            occurredAt: sameInstant,
+            fromStatus: null,
+            toStatus: 'DELIVERED',
+            outcome: 'APPLIED',
+            source: 'MANUAL',
+            note: null,
+            changedBy: { name: 'Aziz' },
+          },
+        ],
+        documents: [
+          {
+            id: 'd1',
+            uploadedAt: sameInstant,
+            filename: 'pod-4471.pdf',
+            type: 'POD',
+            deletedAt: null,
+            uploadedBy: null,
+          },
+        ],
+        notes: [
+          {
+            id: 'n1',
+            occurredAt: sameInstant,
+            body: 'Trailer swapped at DFW7',
+            user: { name: 'Islom' },
+          },
+        ],
+      }),
+    )
+
+    const field = screen.getByText('Dispatched miles')
+    const status = screen.getByText('Delivered')
+    const doc = screen.getByText('pod-4471.pdf')
+    const note = screen.getByText('Trailer swapped at DFW7')
+
+    // audit › status › document › note, every one on the same instant.
+    expect(field.compareDocumentPosition(status) & 4).toBeTruthy()
+    expect(status.compareDocumentPosition(doc) & 4).toBeTruthy()
+    expect(doc.compareDocumentPosition(note) & 4).toBeTruthy()
+  })
+
   it('interleaves all four sources by time, newest first', () => {
     const merged = mergeActivity({
       entries: activityEntries(
@@ -199,6 +352,7 @@ describe('the activity timeline holds every source', () => {
           uploadedAt: new Date('2026-09-05T13:00:00Z'),
           filename: 'pod-4471.pdf',
           type: 'POD',
+          deletedAt: null,
           uploadedBy: null,
         },
       ],
