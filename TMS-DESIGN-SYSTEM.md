@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v10.12 — §6.2.1’s batches row reworded 2026-10-01: the bar is `checkbox selection · Finalise · Mark paid`, not a control called Change status; v10.11 — migration 61 lands 2026-10-01: §6.2.4 standing charges built and the Charges tab table goes to four, §6.2.3's deduct side built with the fuel mode frozen per statement, and the scope offered is the schema's three ownership types rather than the two §6.2.4 first named; v10.10 — §6.2.6 the statements grid 2026-10-01: Deductions is every net-reducing line, status and batch filters, bulk Post and Mark paid; v10.9 — §6.2.5 applying a payment 2026-09-30, and §7.5’s six-field cap applied against a brief asking for a modal; v10.8 — §6.2: Invoices gains a Factored tab, a status filter and bulk Mark sent 2026-09-30; v10.7 — §6.2.4 standing charges specified and held for migration 61, 2026-09-30; v10.6 — §6.2.2: the Trip column is the broker’s reference and Add trips is unconditional 2026-09-30; v10.5 — §6.2.2: every statement exports, a draft’s PDF is watermarked 2026-09-30 (owner’s ruling, reversing the same day’s refusal); v10.4 — §8’s heading rule decides by an allowlist of issued series 2026-09-30; v10.3 — §8 forbids an internal id in a heading and §6.2.2 gives the statement its title rule 2026-09-30 (owner’s ruling); v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
+**Status:** v10.13 — §7.10 added 2026-10-01: a record's history is ONE activity timeline, six kinds of entry that do not dress alike, a document's upload read from the `Document` row rather than its audit row, and adding a note is its own control; v10.12 — §6.2.1’s batches row reworded 2026-10-01: the bar is `checkbox selection · Finalise · Mark paid`, not a control called Change status; v10.11 — migration 61 lands 2026-10-01: §6.2.4 standing charges built and the Charges tab table goes to four, §6.2.3's deduct side built with the fuel mode frozen per statement, and the scope offered is the schema's three ownership types rather than the two §6.2.4 first named; v10.10 — §6.2.6 the statements grid 2026-10-01: Deductions is every net-reducing line, status and batch filters, bulk Post and Mark paid; v10.9 — §6.2.5 applying a payment 2026-09-30, and §7.5’s six-field cap applied against a brief asking for a modal; v10.8 — §6.2: Invoices gains a Factored tab, a status filter and bulk Mark sent 2026-09-30; v10.7 — §6.2.4 standing charges specified and held for migration 61, 2026-09-30; v10.6 — §6.2.2: the Trip column is the broker’s reference and Add trips is unconditional 2026-09-30; v10.5 — §6.2.2: every statement exports, a draft’s PDF is watermarked 2026-09-30 (owner’s ruling, reversing the same day’s refusal); v10.4 — §8’s heading rule decides by an allowlist of issued series 2026-09-30; v10.3 — §8 forbids an internal id in a heading and §6.2.2 gives the statement its title rule 2026-09-30 (owner’s ruling); v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -1003,6 +1003,57 @@ Each document row: type badge, filename, size, uploader, timestamp, and actions.
 ### 7.9 Toasts
 
 Bottom-leading corner, 4 seconds, one at a time, queued. Success is quiet. Errors do not auto-dismiss and carry a retry where retrying is meaningful. The toast repeats the verb from the button: **Publish** produces "Published."
+
+### 7.10 The activity timeline — _added 2026-10-01_
+
+_Owner's ruling. A record's history is **ONE stream**, not a panel per source
+table._
+
+The load detail page had two: a status timeline (`LoadStatusEvent` + notes) and
+an Activity panel (`AuditLog` field edits). Both were correct and neither was
+the answer to "what happened to this load" — that question was answered by
+reading two lists and interleaving them by eye, which is the work the screen
+exists to do.
+
+**One list, newest first, sorted while the times are still `Date`s.** A rendered
+time is a string, and sorting `"Sep 2, 8:04 PM"` is alphabetical order wearing a
+chronology's clothes — stable, plausible and wrong. The merge happens on the
+server and the rendered string is never the sort key.
+
+**Six kinds of entry, and they do not dress alike:**
+
+| kind         | source                               | reads as                                 |
+| ------------ | ------------------------------------ | ---------------------------------------- |
+| **created**  | `AuditLog` CREATE                    | one sentence, never its 24 field values  |
+| **field**    | `AuditLog` UPDATE                    | `label: old → new`                       |
+| **status**   | `LoadStatusEvent`                    | badge, `from → to`, source, refusals too |
+| **document** | `Document.uploadedAt` / `uploadedBy` | type badge and filename                  |
+| **note**     | `Communication` of type NOTE         | the sentence, verbatim                   |
+| **deleted**  | `AuditLog` DELETE                    | one sentence                             |
+
+**A note is not a status and a document is not a field edit.** "Somebody wrote
+this down", "the load moved" and "a file arrived" are different kinds of fact; a
+timeline that dressed them alike would invite the misreading it exists to
+prevent. The rail carries the distinction, not the copy.
+
+**Every entry names an actor and a time to the minute**, in the company's zone.
+Where no actor was recorded the row says nothing about how it happened — not
+"manually", not "system". We did not record it; we do not know, and inventing
+an agent is worse than the gap.
+
+**A document's upload is read from the `Document` row, not from its audit
+row.** The row carries `uploadedAt` and `uploadedBy` already, so it is the
+artefact rather than a claim about the artefact — and it still answers for
+documents uploaded before the write was audited.
+
+**The money rule is the same rule.** Permission is decided in
+`load-activity.ts`, field by field and by omission: a reader without
+`load.financials` never receives a rate change, and a row left empty by that
+filter is dropped whole rather than rendered as "Owner updated this load" —
+which still says money moved and when.
+
+**Adding a note is its own control, always present**, never only a row in the
+stream. Reading history and writing to it are different acts.
 
 ---
 
