@@ -4,7 +4,12 @@ import { getLocaleContext } from '@/lib/locale'
 import { companyScopeFilter } from '@/lib/tenancy'
 import { formatCents } from '@/lib/money'
 import { readGridColumns } from '@/lib/grid-columns'
-import { applyList, sumCents, type RawParams } from '@/lib/list-view'
+import {
+  applyList,
+  columnFilterParam,
+  sumCents,
+  type RawParams,
+} from '@/lib/list-view'
 import {
   readStatements,
   statementShape,
@@ -17,6 +22,8 @@ import { FilterBar } from '@/components/ui/FilterBar'
 import { Tabs } from '@/components/ui/Tabs'
 import { PageHeader } from '../../_grid/PageHeader'
 import { GridToolbar } from '../../_grid/GridToolbar'
+import { ColumnFunnel } from '../../_grid/ColumnFunnel'
+import { BulkPostPaid } from './BulkPostPaid'
 import { GridFooterNav } from '../../_grid/GridFooterNav'
 import { gridView, keepColumns, pagedFooterLabel } from '../../_grid/grid-page'
 import type { MessageKey } from '@/lib/i18n'
@@ -66,8 +73,22 @@ const COLUMN_KEYS: readonly string[] = [
   'gross',
   'deductions',
   'net',
+  'batch',
   'status',
 ]
+
+/** Offered on bulk Mark paid. The value is stored; the label is translated. */
+const PAY_METHODS = ['ACH', 'CHECK', 'WIRE', 'ZELLE', 'CASH'] as const
+
+/** Every refusal these two paths can produce, so the client can say which. */
+const BULK_REASON_KEYS = [
+  'settlements.error.notFound',
+  'settlements.error.notDraft',
+  'settlements.error.notApproved',
+  'settlements.error.alreadyPaid',
+  'settlements.error.negativeNet',
+  'settlements.error.noReference',
+] as const
 
 const PATH = '/payroll/statements'
 
@@ -79,6 +100,9 @@ export default async function StatementsPage({
   // `driver.pay`, NOT `settlement`. One statement is one person's money, and a
   // role that may read a run's total does not thereby read every driver's.
   if (!(await currentUserCan('read', 'driver.pay'))) notFound()
+  // POSTING IS ITS OWN PERMISSION. Signing off on what a person is paid is a
+  // different act from preparing it — permissions.ts decides, this only asks.
+  const mayApprove = await currentUserCan('approve', 'settlement')
 
   const raw = await searchParams
   const { t, locale } = await getLocaleContext()
@@ -114,6 +138,24 @@ export default async function StatementsPage({
   const day = (value: Date) => value.toISOString().slice(0, 10)
   const money = (cents: number) => (
     <span className="font-mono tabular-nums">{formatCents(cents, locale)}</span>
+  )
+
+  // ONE CLIENT ISLAND PER HEADER, so `Table` stays server-rendered and only
+  // the popover is interactive.
+  const funnelFor = (columnKey: string, header: string) => (
+    <ColumnFunnel
+      param={columnFilterParam(columnKey)}
+      column={header}
+      labels={{
+        open: t('grid.filterColumn'),
+        apply: t('grid.filterApply'),
+        clear: t('grid.filterClear'),
+      }}
+    />
+  )
+
+  const bulkReasons = Object.fromEntries(
+    BULK_REASON_KEYS.map((key) => [key, t(key)]),
   )
 
   const columns: Column<StatementGridRow>[] = [
@@ -168,9 +210,26 @@ export default async function StatementsPage({
       foot: (shown) => money(sumCents(shown, (row) => row.netCents)),
     },
     {
+      key: 'batch',
+      header: t('batches.batch'),
+      sortable: true,
+      // §6.2.6 — the filter narrows on the NUMBER a reader knows the run by.
+      // An id in a filter chip is something nobody can type or recognise.
+      filterable: true,
+      render: (row) =>
+        row.batchNumber === null ? (
+          <span className="text-ink-3">—</span>
+        ) : (
+          <span className="z-identifier font-mono text-xs" dir="ltr">
+            {row.batchNumber}
+          </span>
+        ),
+    },
+    {
       key: 'status',
       header: t('payroll.status'),
       sortable: true,
+      filterable: true,
       render: (row) => {
         const state = statusOf(row.status)
         return (
@@ -247,35 +306,55 @@ export default async function StatementsPage({
           }}
         />
       </div>
-      <Table
-        columns={keepColumns(columns, data.columns)}
-        rows={view.paged.rows}
-        footRows={view.filtered}
-        rowKey={(row) => row.id}
-        rowHref={(row) => `/settlements/${row.id}`}
-        stripeTone={(row) => statusOf(row.status).tone}
-        isCancelled={(row) => row.status === 'VOID'}
-        caption={t('payroll.tab.statements')}
-        sort={{
-          key: view.sort.key,
-          dir: view.sort.dir,
-          hrefFor: view.sortFor(PATH),
-          label: t('accounting.sortBy'),
+      <BulkPostPaid
+        methods={PAY_METHODS.map((method) => ({
+          value: method,
+          label: t(`payments.method.${method}` as MessageKey),
+        }))}
+        labels={{
+          selected: t('grid.selected'),
+          post: t('workbench.post'),
+          markPaid: t('settlements.markPaid'),
+          method: t('settlements.paymentMethod'),
+          reference: t('settlements.paymentReference'),
+          done: t('statements.bulkDone'),
         }}
-        totals={{
-          label: pagedFooterLabel(
-            t('accounting.total'),
-            t('grid.rows'),
-            view.paged,
-          ),
-        }}
-        empty={
-          <EmptyState
-            title={t('statements.empty')}
-            body={t('accounting.emptyHint')}
-          />
-        }
-      />
+        reasons={bulkReasons}
+      >
+        <Table
+          columns={keepColumns(columns, data.columns)}
+          rows={view.paged.rows}
+          footRows={view.filtered}
+          rowKey={(row) => row.id}
+          rowHref={(row) => `/settlements/${row.id}`}
+          funnelFor={funnelFor}
+          {...(mayApprove
+            ? { selection: { name: 'statement', label: t('grid.select') } }
+            : {})}
+          stripeTone={(row) => statusOf(row.status).tone}
+          isCancelled={(row) => row.status === 'VOID'}
+          caption={t('payroll.tab.statements')}
+          sort={{
+            key: view.sort.key,
+            dir: view.sort.dir,
+            hrefFor: view.sortFor(PATH),
+            label: t('accounting.sortBy'),
+          }}
+          totals={{
+            label: pagedFooterLabel(
+              t('accounting.total'),
+              t('grid.rows'),
+              view.paged,
+            ),
+          }}
+          empty={
+            <EmptyState
+              title={t('statements.empty')}
+              body={t('accounting.emptyHint')}
+            />
+          }
+        />
+      </BulkPostPaid>
       <GridFooterNav
         paged={view.paged}
         per={view.params.per}

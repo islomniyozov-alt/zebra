@@ -37,6 +37,7 @@ const en = {
   'nav.group.fleet': 'Fleet',
   'nav.group.money': 'Money',
   'nav.group.accounting': 'Accounting',
+  'statements.bulkDone': 'changed',
   'payments.error.notFound': 'That payment no longer exists.',
   'payments.error.nothingChosen':
     'Nothing to apply — every amount was left blank or zero.',
@@ -2691,6 +2692,7 @@ const ru: Dictionary = {
   'nav.group.fleet': 'Автопарк',
   'nav.group.money': 'Финансы',
   'nav.group.accounting': 'Бухгалтерия',
+  'statements.bulkDone': 'изменено',
   'payments.error.notFound': 'Этот платёж больше не существует.',
   'payments.error.nothingChosen':
     'Нечего применить — все суммы пусты или нулевые.',
@@ -5334,6 +5336,7 @@ const fa: Dictionary = {
   'nav.group.fleet': 'ناوگان',
   'nav.group.money': 'مالی',
   'nav.group.accounting': 'حساب‌داری',
+  'statements.bulkDone': 'تغییر کرد',
   'payments.error.notFound': 'این پرداخت دیگر وجود ندارد.',
   'payments.error.nothingChosen':
     'چیزی برای اعمال نیست — همهٔ مبالغ خالی یا صفر بود.',

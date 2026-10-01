@@ -406,6 +406,8 @@ export interface StatementGridRow {
   deductionsCents: number
   otherPayCents: number
   netCents: number
+  /** `SB-000001`, or null for a settlement that belongs to no run. */
+  batchNumber: string | null
   /**
    * THE BATCH'S STATUS WHERE THERE IS A BATCH, AND THE SETTLEMENT'S WHERE THERE
    * IS NOT.
@@ -458,9 +460,62 @@ export async function readStatements(
       periodStart: true,
       periodEnd: true,
       status: true,
-      batch: { select: { id: true, status: true } },
+      // THE NUMBER, NOT JUST THE ID. The batch filter narrows on what a
+      // reader knows the run by — `SB-000001` — and an id in a filter chip
+      // is something nobody can type or recognise.
+      batch: { select: { id: true, status: true, batchNumber: true } },
     },
   })
+
+  // ── DEDUCTIONS: EVERY NET-REDUCING LINE, COMPUTED (§6.2.6) ───────────
+  //
+  // NOT `Settlement.deductionsCents`, which two paths write with OPPOSITE
+  // SIGNS. The batch engine sums `SettlementDeductionLine.totalCents` and
+  // those are negative; `refreshTotals` sums `-amountCents` from
+  // `SettlementLine` and those are positive. Dev holds both — one settlement
+  // at -45000 beside two at +45000 — so a column rendering that field shows
+  // `-$450.00` beside `$450.00` for the same kind of charge, and its footer
+  // sums them AGAINST each other.
+  //
+  // THE TWO TABLES NEVER BOTH CARRY ROWS for one settlement — a settlement's
+  // charges live in one or the other depending on which path made it, 0 of
+  // 142 on dev have both — so summing across both cannot double-count. That
+  // was checked before this was written, because a fix that double-counted
+  // would be worse than the sign bug it replaced.
+  //
+  // TWO GROUPED QUERIES, NOT A JOIN PER ROW. The grid takes 2000
+  // settlements; reading their lines individually is the N+1 this codebase
+  // has been bitten by before.
+  const ids = rows.map((row) => row.id)
+  const [lineSums, chargeSums] =
+    ids.length === 0
+      ? [[], []]
+      : await Promise.all([
+          tx.settlementLine.groupBy({
+            by: ['settlementId'],
+            where: { settlementId: { in: ids }, amountCents: { lt: 0 } },
+            _sum: { amountCents: true },
+          }),
+          tx.settlementDeductionLine.groupBy({
+            by: ['settlementId'],
+            where: { settlementId: { in: ids }, totalCents: { lt: 0 } },
+            _sum: { totalCents: true },
+          }),
+        ])
+
+  const reducing = new Map<string, number>()
+  for (const group of lineSums) {
+    reducing.set(
+      group.settlementId,
+      (reducing.get(group.settlementId) ?? 0) - (group._sum.amountCents ?? 0),
+    )
+  }
+  for (const group of chargeSums) {
+    reducing.set(
+      group.settlementId,
+      (reducing.get(group.settlementId) ?? 0) - (group._sum.totalCents ?? 0),
+    )
+  }
 
   return rows.map((row) => ({
     id: row.id,
@@ -471,11 +526,14 @@ export async function readStatements(
     periodStart: row.periodStart,
     periodEnd: row.periodEnd,
     grossCents: row.earningsCents,
-    deductionsCents: row.deductionsCents,
+    // A POSITIVE MAGNITUDE UNDER A COLUMN HEADED DEDUCTIONS. The heading
+    // carries the direction; a minus sign as well would read as a credit.
+    deductionsCents: reducing.get(row.id) ?? 0,
     otherPayCents: row.otherPayCents,
     netCents: row.netCents,
     status: row.batch?.status ?? row.status,
     batchId: row.batch?.id ?? null,
+    batchNumber: row.batch?.batchNumber ?? null,
   }))
 }
 
@@ -491,6 +549,13 @@ export const statementShape: ListShape<StatementGridRow> = {
     deductions: (row) => row.deductionsCents,
     net: (row) => row.netCents,
     status: (row) => row.status,
+    batch: (row) => row.batchNumber,
+  },
+  // §6.2.6 — funnels that write the same parameter the filter bar renders as
+  // a chip, so a narrowed grid stays a link somebody can send.
+  columnFilters: {
+    status: (row) => row.status,
+    batch: (row) => row.batchNumber,
   },
   defaultSort: 'period',
   defaultDir: 'desc',

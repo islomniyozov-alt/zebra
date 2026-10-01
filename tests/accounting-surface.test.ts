@@ -676,3 +676,68 @@ describe('applying a payment (§6.2.5)', () => {
     expect(action).not.toMatch(/unappliedCents: 0,/)
   })
 })
+
+describe('the statements grid finishes a week (§6.2.6)', () => {
+  const grids = readFileSync(
+    join(process.cwd(), 'src', 'lib', 'accounting-grids.ts'),
+    'utf8',
+  )
+  const page = readFileSync(join(PAYROLL, 'statements', 'page.tsx'), 'utf8')
+  const bulk = readFileSync(
+    join(PAYROLL, 'statements', 'bulk-actions.ts'),
+    'utf8',
+  )
+
+  it('computes Deductions from the lines, not from the two-signed field', () => {
+    // `Settlement.deductionsCents` is written NEGATIVE by the batch engine
+    // and POSITIVE by refreshTotals. Dev holds both. A column rendering it
+    // shows -$450.00 beside $450.00 and sums them against each other.
+    expect(grids).toMatch(/tx\.settlementLine\.groupBy\(\{/)
+    expect(grids).toMatch(/tx\.settlementDeductionLine\.groupBy\(\{/)
+    expect(grids).toMatch(/deductionsCents: reducing\.get\(row\.id\) \?\? 0,/)
+    expect(grids).not.toMatch(/deductionsCents: row\.deductionsCents,/)
+  })
+
+  it('counts only what reduces net, from both tables', () => {
+    expect(grids).toMatch(/amountCents: \{ lt: 0 \}/)
+    expect(grids).toMatch(/totalCents: \{ lt: 0 \}/)
+  })
+
+  it('filters on status and on the batch NUMBER', () => {
+    // An id in a filter chip is something nobody can type or recognise.
+    // INSIDE `columnFilters`, NOT ANYWHERE IN THE FILE. The same line
+    // appears in `sorts` too, so a loose match passed while a break moved
+    // the filter to `batchId` — the guard was reading the wrong one of two
+    // identical lines.
+    const filters = grids.slice(
+      grids.indexOf('export const statementShape'),
+      grids.indexOf(
+        'defaultSort',
+        grids.indexOf('export const statementShape'),
+      ),
+    )
+    const columnFilters = filters.slice(filters.indexOf('columnFilters: {'))
+    expect(columnFilters).toMatch(/batch: \(row\) => row\.batchNumber,/)
+    expect(columnFilters).not.toMatch(/batch: \(row\) => row\.batchId,/)
+    expect(page).toMatch(/key: 'batch',/)
+    expect(page).toMatch(/funnelFor=\{funnelFor\}/)
+  })
+
+  it('posts and pays per statement, through the real functions', () => {
+    // A bulk route writing `status = 'PAID'` would be a way to pay a
+    // negative statement from a checkbox.
+    expect(bulk).toMatch(/await approveSettlement\(tx, id, session\.userId\)/)
+    expect(bulk).toMatch(
+      /await markSettlementPaid\(tx, id, \{ method, reference \}\)/,
+    )
+    expect(bulk).not.toMatch(/updateMany/)
+  })
+
+  it('names refusals, and names a draft by its driver', () => {
+    // A draft has no issued number yet, so the id would be the only handle —
+    // and an id in an error message is the thing the reader has to look up.
+    expect(bulk).toMatch(/isPlaceholderNumber\(settlement\.settlementNumber\)/)
+    expect(bulk).toMatch(/driver\.firstName/)
+    expect(bulk).toMatch(/refusals\.push/)
+  })
+})
