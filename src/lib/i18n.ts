@@ -1331,6 +1331,7 @@ const en = {
   'loads.activityTitle': 'Activity',
   'loads.activityEmpty': 'Nothing recorded on this load yet.',
   'loads.activityCreated': 'Created',
+  'loads.activityUploaded': 'uploaded',
   'loads.activityDeleted': 'Deleted',
   'loads.activityVia': 'Integration',
   'loads.activityTruncated':
@@ -4011,6 +4012,7 @@ const ru: Dictionary = {
   'loads.activityTitle': 'Активность',
   'loads.activityEmpty': 'По этому грузу пока ничего не записано.',
   'loads.activityCreated': 'Создан',
+  'loads.activityUploaded': 'загружен',
   'loads.activityDeleted': 'Удалён',
   'loads.activityVia': 'Интеграция',
   'loads.activityTruncated':
@@ -6659,6 +6661,7 @@ const fa: Dictionary = {
   'loads.activityTitle': 'فعالیت',
   'loads.activityEmpty': 'هنوز چیزی برای این بار ثبت نشده است.',
   'loads.activityCreated': 'ایجاد شد',
+  'loads.activityUploaded': 'بارگذاری شد',
   'loads.activityDeleted': 'حذف شد',
   'loads.activityVia': 'یکپارچگی',
   'loads.activityTruncated':

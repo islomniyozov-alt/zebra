@@ -12,7 +12,6 @@ import {
 } from '@/lib/status'
 import type { StatusTone } from '@/lib/status'
 import { formatAddress } from '@/lib/locations'
-import { newestFirst } from '@/lib/load-timeline'
 import { attributionLabel, stopAttribution } from '@/lib/stop-attribution'
 import { milesSummary } from '@/lib/load-miles'
 import {
@@ -22,7 +21,11 @@ import {
 } from '@/lib/dispatch-fields'
 import { pipelineStage } from '@/lib/load-pipeline'
 import { isAssigned } from '@/lib/load-readiness'
-import { activityEntries } from '@/lib/load-activity'
+import {
+  activityEntries,
+  humaniseField,
+  mergeActivity,
+} from '@/lib/load-activity'
 import { Prisma } from '@/generated/prisma/client'
 import {
   ACCESSORIAL_TYPES,
@@ -47,9 +50,8 @@ import { setPaymentTypeAction } from './payment-type-actions'
 import { PAYMENT_TYPES } from '@/lib/payment-types'
 import { filePacketAction, markFactoredPaidAction } from './factoring-actions'
 import { filingStateFor } from '@/lib/factoring-filing'
-import { StatusTimeline, type TimelineEntry } from './StatusTimeline'
 import { LoadDocuments, type DocumentSlot } from './LoadDocuments'
-import { LoadActions, LoadNotes } from './LoadActions'
+import { LoadActions } from './LoadActions'
 import { LoadAssignment } from './LoadAssignment'
 import { NoteComposer } from './NoteComposer'
 import { Copyable } from './Copyable'
@@ -59,7 +61,7 @@ import { StopsTable, type StopRow } from './StopsTable'
 import { MilesSummary } from './MilesSummary'
 import { PipelineStrip } from './PipelineStrip'
 import { LoadFacts, type Fact } from './LoadFacts'
-import { ActivityPanel, humaniseField } from './ActivityPanel'
+import { ActivityTimeline } from './ActivityTimeline'
 import {
   addNoteAction,
   assignLoadAction,
@@ -570,64 +572,38 @@ export default async function LoadDetailPage({
     ...ALL_BILLING.map((status) => [status, t(billingLabelKey(status))]),
   ])
 
-  // ITEM 8 — ONE TIMELINE, sorted while the times are still Dates.
+  // ── ONE STREAM (§7.10) ───────────────────────────────────────────────
   //
-  // Notes are `Communication` rows carrying `occurredAt` and a `user`, so they
-  // interleave with the status events on the same axis with nothing invented —
-  // no migration, no backfill, no entry with a made-up time. The sort happens
-  // HERE because by the time an entry reaches the component its `at` is a
-  // rendered string, and sorting rendered strings is alphabetical order
-  // wearing a chronology's clothes.
+  // Audit rows, status events, document uploads and notes, merged in
+  // `mergeActivity` — in `src/lib/`, where the ORDER can be tested, which is
+  // the thing that silently goes wrong. The sort key is a `Date` on every
+  // branch; by the time an entry reaches the component its time is rendered
+  // text, and sorting that is alphabetical order wearing a chronology's
+  // clothes.
   //
-  // Both lists arrive `occurredAt: 'desc'` from the query, so this is a merge
-  // rather than a sort; it is written as a sort anyway, because relying on two
-  // queries staying ordered the same way is the kind of coupling that survives
-  // exactly until somebody adds a `take`.
-  const statusEntries: TimelineEntry[] = events.map((event) => ({
-    kind: 'status' as const,
-    id: event.id,
-    fromStatus: event.fromStatus,
-    toStatus: event.toStatus,
-    outcome: event.outcome,
-    source: event.source,
-    at:
-      renderStopTime(event.occurredAt, null, {
-        fallbackZone: zone,
-        locale,
-      })?.text ?? '',
-    by: event.changedBy?.name ?? null,
+  // NOTES ARE IN IT FOR EVERY LOAD NOW, not only the direct-settled ones. Which
+  // history a reader got used to depend on the customer, which is not a
+  // property of a history.
+  const activityStream = mergeActivity({
+    entries: activity,
+    statuses: events,
+    documents,
+    notes,
     // Ours gets translated; a human's is shown exactly as typed. §12: the
     // system's own words are chrome and belong in the reader's language; a
     // dispatcher's sentence is evidence and belongs verbatim.
-    note: event.note && isMessageKey(event.note) ? t(event.note) : event.note,
-  }))
+    renderNote: (note) => (isMessageKey(note) ? t(note) : note),
+  })
 
-  const noteEntries: TimelineEntry[] = notes.map((note) => ({
-    kind: 'note' as const,
-    id: note.id,
-    at:
-      renderStopTime(note.occurredAt, null, {
-        fallbackZone: zone,
-        locale,
-      })?.text ?? '',
-    by: note.user?.name ?? null,
-    body: note.body,
-  }))
-
-  // Newest first, sorted while the times are still Dates. `newestFirst` is
-  // tested in tests/load-timeline.test.ts, including the case where text order
-  // and clock order disagree.
-  const timeline: TimelineEntry[] = newestFirst(
-    events.map((event, index) => ({
-      at: event.occurredAt,
-      value: statusEntries[index]!,
-    })),
-    view.notesInTimeline
-      ? notes.map((note, index) => ({
-          at: note.occurredAt,
-          value: noteEntries[index]!,
-        }))
-      : [],
+  // ONLY THE TYPES ON THIS LOAD'S DOCUMENTS. A map over the whole enum would
+  // need a message key for each, and a `DocumentType` added next month would
+  // render as nothing; the component falls back to the stored value, so an
+  // untranslated type reads as `WEIGHT_TICKET` rather than as a blank badge.
+  const documentTypeLabels = Object.fromEntries(
+    [...new Set(documents.map((doc) => doc.type))].map((type) => {
+      const key = `documents.type.${type}`
+      return [type, isMessageKey(key) ? t(key) : type]
+    }),
   )
 
   // §7.8 — grouped by type, and "required" means required AT THIS STAGE. A
@@ -1309,59 +1285,63 @@ export default async function LoadDetailPage({
             />
           ) : null}
 
-          <StatusTimeline
-            entries={timeline}
-            {...(view.notesInTimeline && mayUpdate
-              ? {
-                  composer: (
-                    <NoteComposer
-                      add={addNoteAction.bind(null, id)}
-                      labels={{
-                        label: t('loads.notes'),
-                        placeholder: t('loads.notePlaceholder'),
-                        post: t('loads.notePost'),
-                      }}
-                    />
-                  ),
-                }
-              : {})}
-            statusLabels={statusLabels}
-            labels={{
-              title: t('loads.timeline'),
-              manual: t('loads.source.manual'),
-              automatic: t('loads.source.automatic'),
-              driverPortal: t('loads.source.driverPortal'),
-              integration: t('loads.source.integration'),
-              refused: t('loads.source.refused'),
-              refusedBody: t('loads.refusedBody'),
-              by: t('loads.by'),
-              empty: t('loads.timelineEmpty'),
-            }}
-          />
-
-          {/* ITEM 8 — THE AUDIT LOG, SHOWN FOR THE FIRST TIME.
+          {/* ── ONE ACTIVITY TIMELINE (§7.10) ────────────────────────────
            *
-           * Below the status history and full width, because it is the same
-           * question asked at a finer grain: the history says the load moved,
-           * this says which field somebody changed and to what. Two panels
-           * rather than one merged feed — a status transition is a business
-           * event and a column write is a record of who typed something, and
-           * merging them would bury the first under the second.
+           * THIS WAS TWO PANELS AND THE COMMENT HERE ARGUED FOR TWO: "a status
+           * transition is a business event and a column write is a record of
+           * who typed something, and merging them would bury the first under
+           * the second." Overturned by the owner's ruling of 2026-10-01, which
+           * is recorded in §7.10 rather than only here.
            *
-           * WHAT IT MAY SHOW IS DECIDED IN load-activity.ts, not here. */}
+           * THE OLD CONCERN WAS REAL AND IS ANSWERED BY THE RAIL, not by
+           * ignoring it: a status transition carries a filled dot and a badge,
+           * a field edit carries a plain dot and a `label: old → new` list, a
+           * document carries a SQUARE. Six kinds that do not dress alike, so
+           * the business events stay findable in a stream that also holds every
+           * keystroke. What the two panels could not do is answer "what
+           * happened to this load" without somebody interleaving them by eye.
+           *
+           * FULL WIDTH, because it is now the whole history rather than half
+           * of it.
+           *
+           * WHAT IT MAY SHOW IS STILL DECIDED IN load-activity.ts. */}
           <div className="lg:col-span-2">
-            <ActivityPanel
-              entries={activity}
+            <ActivityTimeline
+              entries={activityStream}
               truncated={activityTruncated}
+              statusLabels={statusLabels}
+              documentTypeLabels={documentTypeLabels}
               locale={locale}
               timeZone={zone}
+              {...(mayUpdate
+                ? {
+                    composer: (
+                      <NoteComposer
+                        add={addNoteAction.bind(null, id)}
+                        labels={{
+                          label: t('loads.notes'),
+                          placeholder: t('loads.notePlaceholder'),
+                          post: t('loads.notePost'),
+                        }}
+                      />
+                    ),
+                  }
+                : {})}
               labels={{
                 title: t('loads.activityTitle'),
                 empty: t('loads.activityEmpty'),
                 created: t('loads.activityCreated'),
                 deleted: t('loads.activityDeleted'),
+                uploaded: t('loads.activityUploaded'),
                 via: t('loads.activityVia'),
                 truncated: t('loads.activityTruncated'),
+                manual: t('loads.source.manual'),
+                automatic: t('loads.source.automatic'),
+                driverPortal: t('loads.source.driverPortal'),
+                integration: t('loads.source.integration'),
+                refused: t('loads.source.refused'),
+                refusedBody: t('loads.refusedBody'),
+                by: t('loads.by'),
                 set: t('loads.activitySet'),
                 cleared: t('loads.activityCleared'),
                 changed: t('loads.activityChanged'),
@@ -1375,33 +1355,6 @@ export default async function LoadDetailPage({
               }}
             />
           </div>
-
-          {/* ITEM 8 — the separate Notes panel is gone on Amazon loads; its
-           * entries are in the timeline above and its box is inside that
-           * section. Broker freight keeps the panel, so `LoadNotes` stays. */}
-          {view.notesInTimeline ? null : (
-            <div className="lg:col-span-2">
-              <LoadNotes
-                notes={notes.map((note) => ({
-                  id: note.id,
-                  body: note.body,
-                  at:
-                    renderStopTime(note.occurredAt, null, {
-                      fallbackZone: zone,
-                      locale,
-                    })?.text ?? '',
-                  by: note.user?.name ?? null,
-                }))}
-                add={addNoteAction.bind(null, id)}
-                labels={{
-                  title: t('loads.notes'),
-                  placeholder: t('loads.notePlaceholder'),
-                  post: t('loads.notePost'),
-                  empty: t('loads.notesEmpty'),
-                }}
-              />
-            </div>
-          )}
         </div>
       </div>
     </>

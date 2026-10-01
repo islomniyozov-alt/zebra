@@ -3,19 +3,17 @@
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import {
-  StatusTimeline,
-  type TimelineEntry,
-} from '@/app/(app)/loads/[id]/StatusTimeline'
+import { ActivityTimeline } from '@/app/(app)/loads/[id]/ActivityTimeline'
 import { StopsTable } from '@/app/(app)/loads/[id]/StopsTable'
 import { MilesSummary } from '@/app/(app)/loads/[id]/MilesSummary'
 import { PipelineStrip } from '@/app/(app)/loads/[id]/PipelineStrip'
 import { LoadFacts } from '@/app/(app)/loads/[id]/LoadFacts'
 import {
-  ActivityPanel,
+  activityEntries,
   humaniseField,
-} from '@/app/(app)/loads/[id]/ActivityPanel'
-import { activityEntries } from '@/lib/load-activity'
+  mergeActivity,
+  type ActivityItem,
+} from '@/lib/load-activity'
 
 // ---------------------------------------------------------------------------
 // TWO CLAIMS ABOUT ORDER AND PRESENCE, WHICH REVIEW CANNOT SEE.
@@ -33,8 +31,17 @@ import { activityEntries } from '@/lib/load-activity'
 
 afterEach(cleanup)
 
+// ONE SET OF LABELS FOR THE ONE TIMELINE (§7.10). This used to be two —
+// `timelineLabels` for the status panel and `labels` for the activity panel —
+// because there were two components.
 const timelineLabels = {
-  title: 'Status history',
+  title: 'Activity',
+  empty: 'Nothing recorded on this load yet.',
+  created: 'Created',
+  deleted: 'Deleted',
+  uploaded: 'uploaded',
+  via: 'Integration',
+  truncated: 'Older activity exists and is not shown.',
   manual: 'Manually',
   automatic: 'Automatically',
   driverPortal: 'Driver portal',
@@ -42,31 +49,45 @@ const timelineLabels = {
   refused: 'Refused',
   refusedBody: 'refused',
   by: 'by',
-  empty: 'Nothing yet.',
+  set: 'set',
+  cleared: 'cleared',
+  changed: 'changed',
+  field: humaniseField,
 }
 
 const statusLabels = { DELIVERED: 'Delivered' }
+const documentTypeLabels = { POD: 'POD' }
 
-describe('the status history panel', () => {
-  const entry: TimelineEntry = {
+const timeline = (
+  entries: readonly ActivityItem[],
+  extra: { truncated?: boolean; composer?: React.ReactNode } = {},
+) =>
+  render(
+    <ActivityTimeline
+      entries={entries}
+      truncated={extra.truncated ?? false}
+      statusLabels={statusLabels}
+      documentTypeLabels={documentTypeLabels}
+      locale="en-US"
+      timeZone="America/Chicago"
+      {...(extra.composer ? { composer: extra.composer } : {})}
+      labels={timelineLabels}
+    />,
+  )
+
+describe('the activity timeline holds every source', () => {
+  const note: ActivityItem = {
     kind: 'note',
     id: 'n1',
-    at: '10:00',
-    by: 'Islom',
+    at: new Date('2026-09-05T15:00:00Z'),
+    actor: 'Islom',
     body: 'Trailer swapped at DFW7',
   }
 
   it('puts the note composer after the entries, not between them and the heading', () => {
-    render(
-      <StatusTimeline
-        entries={[entry]}
-        composer={<button type="button">Post note</button>}
-        statusLabels={statusLabels}
-        labels={timelineLabels}
-      />,
-    )
+    timeline([note], { composer: <button type="button">Post note</button> })
 
-    const heading = screen.getByText('Status history')
+    const heading = screen.getByText('Activity')
     const entryText = screen.getByText('Trailer swapped at DFW7')
     const composer = screen.getByRole('button', { name: 'Post note' })
 
@@ -76,14 +97,137 @@ describe('the status history panel', () => {
   })
 
   it('renders no composer for a role that may not write one', () => {
-    render(
-      <StatusTimeline
-        entries={[entry]}
-        statusLabels={statusLabels}
-        labels={timelineLabels}
-      />,
-    )
+    timeline([note])
     expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  // THE SOURCE THE TWO-PANEL VERSION COULD NOT SEE AT ALL. The old Activity
+  // query was scoped to `entityType: 'Load' | 'LoadStop'`, so an upload was
+  // invisible to it; §7.10 reads it off the `Document` row instead.
+  // THROUGH THE MERGE, NOT HANDED TO THE COMPONENT. The first version of this
+  // built an `ActivityItem` by hand, so `watch-guard` found it: dropping
+  // documents out of `mergeActivity` left this test passing and fired a
+  // different one. A document fixture that skips the merge tests the badge and
+  // not the path, and the path is where the source was missing for months.
+  const uploaded = (uploadedBy: { name: string | null } | null) =>
+    timeline(
+      mergeActivity({
+        entries: [],
+        statuses: [],
+        documents: [
+          {
+            id: 'd1',
+            uploadedAt: new Date('2026-09-05T13:00:00Z'),
+            filename: 'pod-4471.pdf',
+            type: 'POD',
+            uploadedBy,
+          },
+        ],
+        notes: [],
+      }),
+    )
+
+  it('shows a document upload, with its type and filename', () => {
+    uploaded({ name: 'Aziz' })
+    expect(screen.getByText('POD')).toBeTruthy()
+    expect(screen.getByText('pod-4471.pdf')).toBeTruthy()
+    expect(screen.getByText('Aziz')).toBeTruthy()
+  })
+
+  // A FILENAME IS AN IDENTIFIER (§12). `invoice-0012.pdf` reversed in an RTL
+  // layout is a different string.
+  it('keeps a filename left-to-right', () => {
+    uploaded(null)
+    expect(screen.getByText('pod-4471.pdf').getAttribute('dir')).toBe('ltr')
+  })
+
+  it('shows a refused transition, which is what a dispute turns on', () => {
+    timeline([
+      {
+        kind: 'status',
+        id: 's1',
+        at: new Date('2026-09-05T14:00:00Z'),
+        actor: 'Islom',
+        fromStatus: null,
+        toStatus: 'DELIVERED',
+        outcome: 'REFUSED_STALE',
+        source: 'MANUAL',
+        note: null,
+      },
+    ])
+    expect(screen.getByText('Refused')).toBeTruthy()
+  })
+
+  // ── THE ORDER IS THE THING THAT SILENTLY GOES WRONG ──────────────────
+  //
+  // Every entry present, every entry real, reading in a sequence nobody
+  // checked. Four sources with four different time columns is exactly where a
+  // merge gets one of them wrong, so this asserts the rendered order rather
+  // than trusting `mergeActivity`'s own unit tests.
+  it('interleaves all four sources by time, newest first', () => {
+    const merged = mergeActivity({
+      entries: activityEntries(
+        [
+          {
+            id: 'a1',
+            createdAt: new Date('2026-09-05T12:00:00Z'),
+            action: 'UPDATE',
+            entityType: 'Load',
+            entityId: 'l1',
+            userAgent: null,
+            user: { name: 'Islom' },
+            changes: { dispatchedMiles: { from: 100, to: 420 } },
+          },
+        ],
+        { maySeeMoney: true },
+      ),
+      statuses: [
+        {
+          id: 's1',
+          occurredAt: new Date('2026-09-05T14:00:00Z'),
+          fromStatus: null,
+          toStatus: 'DELIVERED',
+          outcome: 'APPLIED',
+          source: 'MANUAL',
+          note: null,
+          changedBy: { name: 'Aziz' },
+        },
+      ],
+      documents: [
+        {
+          id: 'd1',
+          uploadedAt: new Date('2026-09-05T13:00:00Z'),
+          filename: 'pod-4471.pdf',
+          type: 'POD',
+          uploadedBy: null,
+        },
+      ],
+      // THE SOURCE SHAPE, NOT THE RENDERED ONE. `ActivityNoteSource` carries
+      // `occurredAt` and a `user`; the `note` fixture above is the ITEM the
+      // merge produces, with `at` and `actor`. Passing that here left `at`
+      // undefined and `newestFirst` threw — which is the merge boundary doing
+      // its job, and the reason the two shapes are named differently.
+      notes: [
+        {
+          id: 'n1',
+          occurredAt: new Date('2026-09-05T15:00:00Z'),
+          body: 'Trailer swapped at DFW7',
+          user: { name: 'Islom' },
+        },
+      ],
+    })
+
+    timeline(merged)
+
+    // note 15:00 › status 14:00 › document 13:00 › field 12:00
+    const body = screen.getByText('Trailer swapped at DFW7')
+    const doc = screen.getByText('pod-4471.pdf')
+    const field = screen.getByText('Dispatched miles')
+    const status = screen.getByText('Delivered')
+
+    expect(body.compareDocumentPosition(status) & 4).toBeTruthy()
+    expect(status.compareDocumentPosition(doc) & 4).toBeTruthy()
+    expect(doc.compareDocumentPosition(field) & 4).toBeTruthy()
   })
 })
 
@@ -185,32 +329,21 @@ describe('the load tracker strip', () => {
   })
 })
 
-describe('the activity panel', () => {
-  const labels = {
-    title: 'Activity',
-    empty: 'Nothing recorded on this load yet.',
-    created: 'Created',
-    deleted: 'Deleted',
-    via: 'Integration',
-    truncated: 'Older activity exists and is not shown.',
-    set: 'set',
-    cleared: 'cleared',
-    changed: 'changed',
-    field: humaniseField,
-  }
-
+describe('the audit half of the timeline', () => {
+  // THE AUDIT ROWS GO THROUGH THE SAME MERGE THE PAGE USES, rather than being
+  // handed to the component as a hand-built `ActivityItem`. The thing worth
+  // testing is the whole path a row travels — `activityEntries` for permission,
+  // `mergeActivity` for the kind and the order, the component for the look —
+  // and a fixture that skipped the middle step would let a mis-mapped `action`
+  // through: a CREATE typed as `field` renders 24 diff lines and passes any
+  // test that only looked at the component.
   const panel = (
     entries: ReturnType<typeof activityEntries>,
     truncated = false,
   ) =>
-    render(
-      <ActivityPanel
-        entries={entries}
-        truncated={truncated}
-        locale="en-US"
-        timeZone="America/Chicago"
-        labels={labels}
-      />,
+    timeline(
+      mergeActivity({ entries, statuses: [], documents: [], notes: [] }),
+      { truncated },
     )
 
   const row = (over: Record<string, unknown> = {}) => ({
@@ -245,7 +378,7 @@ describe('the activity panel', () => {
     expect(container.textContent).not.toContain('Linehaul')
     // And the row is gone entirely — not an empty "Islom updated this load".
     expect(container.textContent).not.toContain('Islom')
-    expect(screen.getByText(labels.empty)).toBeTruthy()
+    expect(screen.getByText(timelineLabels.empty)).toBeTruthy()
   })
 
   it('says "created" instead of listing every column a new load set', () => {
@@ -289,10 +422,12 @@ describe('the activity panel', () => {
   it('says so when the window is full, and stays quiet when it is not', () => {
     const entries = activityEntries([row()], { maySeeMoney: true })
     const full = panel(entries, true)
-    expect(full.container.textContent).toContain(labels.truncated)
+    expect(full.container.textContent).toContain(timelineLabels.truncated)
     cleanup()
     const partial = panel(entries, false)
-    expect(partial.container.textContent).not.toContain(labels.truncated)
+    expect(partial.container.textContent).not.toContain(
+      timelineLabels.truncated,
+    )
   })
 
   it('never says how an unstamped write reached us', () => {
