@@ -561,6 +561,27 @@ const SEED_WRITERS = [
   'seed-datatruck-all-trucks.ts',
 ]
 
+/**
+ * ADDED 2026-10-01, from the ready-to-invoice rulings.
+ *
+ * `correct-direct-settled.ts` is the first script in this repository
+ * AUTHORISED TO WRITE TO PRODUCTION — two rows, one boolean, by load number,
+ * owner's ruling, with four named refusals and `--write` reserved to the owner.
+ * Every other `--production` mode here is read-only, so it is on this list as
+ * the exception rather than slipping in among the seeds.
+ *
+ * `breakdown-ready-to-invoice.ts` does NOT read this variable — it reads
+ * `PROD_READONLY_DATABASE_URL` and refuses to fall back. It is on the list
+ * because it NAMES the variable in its refusal message, and this fence matches
+ * on the string. That is the fence being blunt in the safe direction, and the
+ * entry is cheaper than wording the refusal around it: a message that cannot
+ * say which variable is wrong is a worse message.
+ */
+const RULING_SCRIPTS = [
+  'correct-direct-settled.ts',
+  'breakdown-ready-to-invoice.ts',
+]
+
 const ALLOWED = [
   ...CHECK_READERS,
   ...DEPLOY_READERS,
@@ -568,7 +589,34 @@ const ALLOWED = [
   ...MAINTENANCE_READERS,
   ...SEED_WRITERS,
   ...WALKTHROUGH_READERS,
+  ...RULING_SCRIPTS,
 ]
+
+/**
+ * THE READ-ONLY PRODUCTION CREDENTIAL, FENCED THE SAME WAY.
+ *
+ * ── A SECOND VARIABLE THE FENCE COULD NOT SEE ───────────────────────────
+ *
+ * `PROD_READONLY_DATABASE_URL` was introduced on 2026-10-01 so the
+ * ready-to-invoice breakdown could reach production through
+ * `zebra_ci_readonly` without falling back to the owner string. It is a
+ * production credential, and until this block existed NOTHING WATCHED IT: a
+ * script could have connected to the production branch through it and the
+ * fence above would have reported a clean allowlist.
+ *
+ * That is this file's own history repeating — it filtered on `.mjs` alone until
+ * 2026-09-06, so a TypeScript script could read the production URL unseen, and
+ * the gap was found only while writing the first one. Found the same way again:
+ * by the guard failing on a change that introduced the hole.
+ *
+ * READ-ONLY IS NOT A REASON TO SKIP THE FENCE. The role cannot write, but it
+ * carries BYPASSRLS — every tenant's rows, no boundary — so a script holding it
+ * can read anything. The question the fence asks is "who can reach production",
+ * and the answer has to include the credential that can see all of it.
+ */
+const READONLY_VARIABLE = 'PROD_READONLY_DATABASE_URL'
+
+const READONLY_ALLOWED = ['breakdown-ready-to-invoice.ts']
 
 /** Every script, since scripts are where a production URL would be used. */
 function sources(): { name: string; text: string }[] {
@@ -593,6 +641,14 @@ describe('the production URL has exactly the readers it was given', () => {
 
   it('is read by the allowlist and by nothing else', () => {
     expect([...readers].sort()).toEqual([...ALLOWED].sort())
+  })
+
+  // THE READ-ONLY CREDENTIAL, THE SAME QUESTION. See `READONLY_VARIABLE`.
+  it('and the read-only production credential has its own allowlist', () => {
+    const roReaders = sources()
+      .filter((file) => file.text.includes(READONLY_VARIABLE))
+      .map((file) => file.name)
+    expect([...roReaders].sort()).toEqual([...READONLY_ALLOWED].sort())
   })
 
   it('is never assigned into the variables the app connects with', () => {

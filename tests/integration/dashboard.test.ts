@@ -5,7 +5,14 @@ import { createBroker } from '@/lib/brokers'
 import { LOAD_WRITE_TIMEOUT_MS, createLoad } from '@/lib/loads'
 import { transitionOperational } from '@/lib/load-status'
 import { setLoadRate } from '@/lib/rates'
-import { actionQueue, fleetGlance, thisWeek } from '@/lib/dashboard'
+import {
+  actionQueue,
+  fleetGlance,
+  referenceCount,
+  thisWeek,
+} from '@/lib/dashboard'
+import { COUNTED_ROWS, needsYouCounts } from '@/lib/dashboard-counts'
+import { recordPayment } from '@/lib/payments'
 import type { AuthorizedSession } from '@/lib/permissions'
 import type { PrismaClient } from '@/generated/prisma/client'
 
@@ -424,5 +431,245 @@ describe('closed history is in no queue', () => {
 
     await archive(load.id)
     expect(await countOf('unassigned')).toBe(before)
+  }, 300_000)
+})
+
+// ── THE SQL AND THE PREDICATE AGREE, ONE CASE PER ROW, BY NAME ─────────────
+//
+// Owner's ruling 3 asks that each filter be "the same predicate function its
+// screen uses (tested equal by name)". IT CANNOT LITERALLY BE THE SAME: the
+// screens hold Prisma `where` objects and `needsYouCounts` holds SQL. Two
+// expressions of one rule is flag 88, and the mitigation is the one
+// `by-company.ts` already uses — run both and require the same number.
+//
+// ONE CASE PER ROW, NAMED, because a single assertion over a total would let
+// two filters drift in opposite directions and still sum correctly. A test
+// called "readyToInvoice" that fails tells somebody which rule moved.
+//
+// RUN AGAINST WHATEVER THIS FILE HAS SEEDED. The numbers are not asserted —
+// only the agreement is — so these cases keep working as the fixtures above
+// change, and they are meaningful precisely because the earlier describes have
+// left real rows in several of these states.
+describe('the one statement agrees with each row own predicate', () => {
+  it.each([...COUNTED_ROWS])(
+    '%s',
+    async (key) => {
+      const [reference, sql] = await inOrg(async (tx) => {
+        const ref = await referenceCount(tx, key, {
+          companyId: { in: [betaId] },
+        })
+        const one = await needsYouCounts(tx, [betaId])
+        return [ref, one] as const
+      })
+
+      expect(sql.counts[key]).toBe(reference.count)
+    },
+    300_000,
+  )
+
+  // THE TWO AMOUNTS TOO. A count that agrees while its amount does not is the
+  // shape that puts "$14,200 not applied" beside a count of three payments
+  // that total something else.
+  it('and on the amounts, which are summed from the same filter', async () => {
+    const { ref, sql } = await inOrg(async (tx) => ({
+      ref: {
+        unapplied: await referenceCount(tx, 'unapplied', {
+          companyId: { in: [betaId] },
+        }),
+        unassignedFinished: await referenceCount(tx, 'unassignedFinished', {
+          companyId: { in: [betaId] },
+        }),
+      },
+      sql: await needsYouCounts(tx, [betaId]),
+    }))
+
+    expect(sql.amounts.unapplied).toBe(ref.unapplied.amountCents)
+    expect(sql.amounts.unassignedFinished).toBe(
+      ref.unassignedFinished.amountCents,
+    )
+  }, 300_000)
+
+  // AN EMPTY SCOPE MEANS EVERY AUTHORITY, in both expressions.
+  //
+  // This is the one disagreement that would look like good news: an empty array
+  // rendered as `= ANY('{}')` matches nothing, so an unscoped owner would see
+  // an empty queue and read it as a clear morning. `companyScopeFilter` gives
+  // `{}` for no scopes and `needsYouCounts` takes `[]`, and they have to mean
+  // the same thing.
+  it('and an unscoped read means all authorities, not none', async () => {
+    const { ref, sql } = await inOrg(async (tx) => ({
+      ref: await referenceCount(tx, 'unassigned', {}),
+      sql: await needsYouCounts(tx, []),
+    }))
+
+    expect(sql.counts.unassigned).toBe(ref.count)
+    // AND IT IS NOT ZERO, or the assertion above is satisfied by two empty
+    // answers — the most comfortable way to be wrong.
+    expect(ref.count).toBeGreaterThan(0)
+  }, 300_000)
+})
+
+// ── A DIRECT-SETTLED LOAD, SO THAT CLAUSE IS ACTUALLY EXERCISED ───────────
+//
+// `watch-guard` refused the break that deleted `directSettled = false` from
+// the ready-to-invoice filter: the count did not move, because nothing in this
+// file was direct-settled and the clause had no work to do. An agreement test
+// over data that exercises eight clauses and not the ninth agrees about eight
+// clauses.
+//
+// So one load is booked under a customer that settles directly, taken to POD
+// with a rate on it — which satisfies every other clause of
+// `readyToInvoiceWhere` — and must therefore be kept out by `directSettled`
+// alone, in BOTH expressions of the rule.
+describe('the ready-to-invoice filter excludes direct-settled freight', () => {
+  it('and both expressions agree that it does', async () => {
+    const relay = await inOrg((tx) =>
+      createBroker(tx, organizationId, { name: `Relay ${nonce}` }),
+    )
+    // `createBroker` does not take the flag — it is a property of the terms,
+    // set on the customer — so it is set here directly.
+    await owner.customer.update({
+      where: { id: relay.id },
+      data: { settlesDirectly: true },
+    })
+
+    const load = await inOrg((tx) =>
+      createLoad(
+        tx,
+        organizationId,
+        {
+          companyId: betaId,
+          customerId: relay.id,
+          stops: [
+            {
+              type: 'PICKUP',
+              city: 'Joliet',
+              state: 'IL',
+              scheduledAt: new Date(Date.UTC(2026, 10, 20)),
+            },
+            {
+              type: 'DELIVERY',
+              city: 'Memphis',
+              state: 'TN',
+              scheduledAt: new Date(Date.UTC(2026, 10, 21)),
+            },
+          ],
+        },
+        { byUserId: userId },
+      ),
+    )
+
+    for (const to of ['DELIVERED', 'POD_RECEIVED'] as const) {
+      await inOrg((tx) =>
+        transitionOperational(tx, load.id, to, { source: 'MANUAL', userId }),
+      )
+    }
+    await inOrg((tx) =>
+      setLoadRate(tx, load.id, { linehaul: '2100', fuelSurcharge: '0' }),
+    )
+
+    // THE FLAG IS COPIED AT BOOKING, so this asserts the booking path did it
+    // rather than assuming — if it were false the fixture would be testing
+    // nothing and the clause would still have no work.
+    const stored = await owner.load.findUniqueOrThrow({
+      where: { id: load.id },
+      select: { directSettled: true },
+    })
+    expect(stored.directSettled).toBe(true)
+
+    const { reference, sql } = await inOrg(async (tx) => ({
+      reference: await referenceCount(tx, 'readyToInvoice', {
+        companyId: { in: [betaId] },
+      }),
+      sql: await needsYouCounts(tx, [betaId]),
+    }))
+
+    // NEITHER COUNTS IT, and they agree on the number — which is the pair of
+    // claims the break can now move.
+    expect(sql.counts.readyToInvoice).toBe(reference.count)
+  }, 300_000)
+})
+
+// ── THE TWO AMOUNTS, OVER DATA THAT MAKES THEM NON-ZERO ───────────────────
+//
+// `watch-guard` refused two breaks here — summing the wrong column, and
+// summing under a filter different from the one that counted — because BOTH
+// AMOUNTS WERE ZERO IN BOTH EXPRESSIONS. This file seeds no payments at all,
+// and its one unassigned-finished load is archived by the test above, so every
+// assertion about the amounts was 0 === 0.
+//
+// That is the comfortable way to be wrong this codebase keeps naming: two
+// expressions of a money rule, agreeing, over nothing. So the amounts are
+// given something to sum and the test asserts they are NOT ZERO before it
+// asserts they agree — the control that makes the agreement mean something.
+describe('the two amounts agree, over amounts that exist', () => {
+  it('sums each from the same filter that counted it', async () => {
+    // AN UNAPPLIED PAYMENT. `recordPayment` leaves the whole amount unapplied,
+    // which is the state the row is about.
+    const paid = await inOrg((tx) =>
+      recordPayment(tx, organizationId, {
+        companyId: betaId,
+        customerId: brokerId,
+        method: 'ACH',
+        referenceNumber: `DASH-${nonce}`,
+        receivedAt: new Date(Date.UTC(2026, 10, 12)),
+        amountCents: 412_500,
+      }),
+    )
+    expect(paid.ok).toBe(true)
+
+    // PARTIALLY APPLIED, SET DIRECTLY, AND THE SHORTCUT IS THE POINT.
+    //
+    // `recordPayment` leaves the whole amount unapplied, so `unappliedCents`
+    // EQUALS `amountCents` — and `watch-guard` refused the break that summed
+    // `amountCents` instead, because over this data the two columns hold the
+    // same number and the wrong one is indistinguishable from the right one.
+    //
+    // A real partial application would need an invoice and an allocation,
+    // which is `payments.test.ts`'s subject and not this file's. The column is
+    // therefore set to represent the state, which is what makes the two sums
+    // tell apart.
+    await owner.payment.updateMany({
+      where: { referenceNumber: `DASH-${nonce}` },
+      data: { unappliedCents: 150_000 },
+    })
+
+    // AND FINISHED FREIGHT ATTACHED TO NOBODY, left that way — not archived,
+    // unlike the fixture in the closed-history describe above.
+    const orphan = await bookLoad(betaId, 14)
+    for (const to of ['DELIVERED', 'POD_RECEIVED'] as const) {
+      await inOrg((tx) =>
+        transitionOperational(tx, orphan.id, to, { source: 'MANUAL', userId }),
+      )
+    }
+    await inOrg((tx) =>
+      setLoadRate(tx, orphan.id, { linehaul: '3150', fuelSurcharge: '0' }),
+    )
+    await owner.load.update({
+      where: { id: orphan.id },
+      data: { driverId: null, truckId: null },
+    })
+
+    const { ref, sql } = await inOrg(async (tx) => ({
+      ref: {
+        unapplied: await referenceCount(tx, 'unapplied', {
+          companyId: { in: [betaId] },
+        }),
+        finished: await referenceCount(tx, 'unassignedFinished', {
+          companyId: { in: [betaId] },
+        }),
+      },
+      sql: await needsYouCounts(tx, [betaId]),
+    }))
+
+    // THE CONTROL FIRST. Without these four the assertions below are satisfied
+    // by two empty sums, which is what refused the breaks.
+    expect(ref.unapplied.amountCents).toBeGreaterThan(0)
+    expect(ref.finished.amountCents).toBeGreaterThan(0)
+    expect(sql.amounts.unapplied).toBeGreaterThan(0)
+    expect(sql.amounts.unassignedFinished).toBeGreaterThan(0)
+
+    expect(sql.amounts.unapplied).toBe(ref.unapplied.amountCents)
+    expect(sql.amounts.unassignedFinished).toBe(ref.finished.amountCents)
   }, 300_000)
 })

@@ -2,6 +2,7 @@ import type { Prisma } from '@/generated/prisma/client'
 import type { CompanyScopeFilter, TxClient } from './tenancy'
 import { readyToInvoiceWhere } from './invoices'
 import { complianceCount } from './compliance'
+import { needsYouCounts, type CountedRow } from './dashboard-counts'
 import { NOT_CLOSED_HISTORY } from './billing-status'
 import type { AuthorizedSession, Resource } from './permissions'
 import { can } from './permissions'
@@ -80,8 +81,26 @@ interface ActionSpec {
   resource: Resource
   href: string
   tone: ActionRow['tone']
+  /**
+   * The row's predicate in Prisma — THE REFERENCE EXPRESSION, and since
+   * 2026-10-01 not the path the screen takes.
+   *
+   * ── DO NOT DELETE THIS AS DEAD CODE ─────────────────────────────────────
+   *
+   * `actionQueue` reads `needsYouCounts`, one SQL statement, because nine
+   * round trips once expired a transaction in production. The SQL is therefore
+   * a SECOND EXPRESSION of each rule, which is flag 88, and this is the first
+   * — kept so `tests/integration/dashboard.test.ts` can run both over the same
+   * seeded rows and require the same number, one case per row, by name.
+   *
+   * `by-company.ts` made the same trade and says the same thing about it: the
+   * mitigation is that the agreement is TESTED rather than assumed. A reference
+   * nobody calls in production is still the thing the fast path is checked
+   * against, and removing it would leave the SQL as the only statement of the
+   * rule with nothing to disagree with.
+   */
   count: (tx: TxClient, scope: CompanyScopeFilter) => Promise<number>
-  /** Optional second query, for rows whose point is an amount. */
+  /** The same, for rows whose point is an amount. Also a reference. */
   amount?: (tx: TxClient, scope: CompanyScopeFilter) => Promise<number>
 }
 
@@ -296,23 +315,80 @@ export async function actionQueue(
     can(session, 'read', action.resource),
   )
 
-  const counted = await Promise.all(
-    permitted.map(async (action) => {
-      const [count, amountCents] = await Promise.all([
-        action.count(tx, scope),
-        action.amount ? action.amount(tx, scope) : Promise.resolve(undefined),
-      ])
-      return {
-        key: action.key,
-        href: action.href,
-        tone: action.tone,
-        count,
-        ...(amountCents === undefined ? {} : { amountCents }),
-      }
-    }),
-  )
+  // ── ONE STATEMENT FOR EIGHT ROWS, AND COMPLIANCE KEEPS ITS OWN ────────
+  //
+  // Owner's ruling 3. Nine `count` calls were nine round trips on the first
+  // screen of the day, serialised by Prisma on one connection — Phase 5 §7
+  // flag 31, the transaction that expired at 6034ms in production.
+  //
+  // THE PERMISSION FILTER STILL COMES FIRST AND STILL MEANS WHAT IT MEANT. A
+  // row the session cannot read is dropped from `permitted` above, and this is
+  // where the change needs stating: the single statement counts ALL EIGHT
+  // whatever the session may see, so a dispatcher's request now computes a
+  // figure for unpaid invoices that is then discarded.
+  //
+  // THAT IS A REAL LOSS AND IT IS BOUNDED. The old shape "does not count and
+  // then hide; it does not ask", which is stronger. What replaces it is: the
+  // number is computed inside one scan, never leaves the server, and never
+  // reaches the payload — `permitted` decides what is RETURNED. The §0 rule is
+  // about what the client receives, and that is still absolute. Trading it for
+  // nine round trips on a screen that has already failed in production is the
+  // ruling's call; the cost is written here rather than left to be rediscovered.
+  const needsOne = permitted.some((action) => action.key !== 'compliance')
+  const [counted, compliance] = await Promise.all([
+    needsOne
+      ? needsYouCounts(tx, scope.companyId?.in ?? [])
+      : Promise.resolve(null),
+    // STILL ITS OWN READ. `complianceCount` builds rows through
+    // `complianceQueue` — per-authority warn-day horizons and the policies a
+    // truck inherits from its carrier — so folding it into the SQL would be a
+    // second expression of a DOT rule to save one round trip. See
+    // `dashboard-counts.ts`.
+    permitted.some((action) => action.key === 'compliance')
+      ? complianceCount(tx, scope).then((result) => result.count)
+      : Promise.resolve(null),
+  ])
 
-  return counted.filter((row) => row.count > 0)
+  const rows: ActionRow[] = permitted.map((action) => {
+    const count =
+      action.key === 'compliance'
+        ? (compliance ?? 0)
+        : (counted?.counts[action.key as CountedRow] ?? 0)
+    const amountCents =
+      action.key === 'unapplied'
+        ? counted?.amounts.unapplied
+        : action.key === 'unassignedFinished'
+          ? counted?.amounts.unassignedFinished
+          : undefined
+    return {
+      key: action.key,
+      href: action.href,
+      tone: action.tone,
+      count,
+      ...(amountCents === undefined ? {} : { amountCents }),
+    }
+  })
+
+  return rows.filter((row) => row.count > 0)
+}
+
+/**
+ * One row's predicate, counted the REFERENCE way. For the agreement test.
+ *
+ * Exported so `tests/integration/dashboard.test.ts` can put the Prisma
+ * expression and `needsYouCounts`' SQL side by side per row. Not called by any
+ * screen — see `ActionSpec.count` on why it still exists.
+ */
+export async function referenceCount(
+  tx: TxClient,
+  key: string,
+  scope: CompanyScopeFilter = {},
+): Promise<{ count: number; amountCents?: number }> {
+  const action = ACTIONS.find((candidate) => candidate.key === key)
+  if (!action) throw new Error(`referenceCount: no such row: ${key}`)
+  const count = await action.count(tx, scope)
+  if (!action.amount) return { count }
+  return { count, amountCents: await action.amount(tx, scope) }
 }
 
 /** Which rows a session would be offered, before any counting. For tests. */
