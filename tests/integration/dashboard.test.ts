@@ -312,3 +312,117 @@ describe('this week, per authority', () => {
     expect(beta?.revenueCents).toBe(0)
   }, 300_000)
 })
+
+// ── CLOSED HISTORY IS IN NO QUEUE ──────────────────────────────────────────
+//
+// 13,517 loads on dev ran, were billed and were paid in Datatruck before this
+// system existed. `billing-status.ts` says what that cost once already: the
+// `podMissing` row counted them and read "14,346 delivered, waiting on a POD",
+// which is not a queue anybody can work.
+//
+// ONE SEEDED CLOSED-HISTORY LOAD PER ROW, EACH SHAPED TO QUALIFY IF THE
+// PREDICATE LET IT. That is the whole design of these three: the load is set up
+// to satisfy every other clause, so the only thing keeping it out of the count
+// is the closed-history exclusion. A fixture that failed on some other clause
+// would pass whether or not the exclusion existed.
+//
+// TWO OF THE THREE ALREADY EXCLUDED IT and one did not. Measured on dev
+// 2026-10-01: all three counts are the same number before and after, because
+// the 18 archived AVAILABLE/BOOKED loads all happen to carry both a driver and
+// a truck. That is the coincidence `billing-status.ts` warns about, and these
+// tests are what turn it into a rule.
+// ── CLOSED HISTORY IS IN NO QUEUE ──────────────────────────────────────────
+//
+// 13,517 loads on dev ran, were billed and were paid in Datatruck before this
+// system existed. `billing-status.ts` records what that cost once already: the
+// `podMissing` row counted them and read "14,346 delivered, waiting on a POD",
+// which is not a queue anybody can work.
+//
+// ── EACH FIXTURE IS SHAPED TO QUALIFY IF THE PREDICATE LET IT ──────────────
+//
+// That is the whole design: the load satisfies every other clause of its row,
+// so the only thing keeping it out is the closed-history exclusion. A fixture
+// that failed on some other clause would pass whether or not the exclusion
+// existed.
+//
+// ── AND EACH IS MEASURED AS A DELTA, NOT AN ABSOLUTE ──────────────────────
+//
+// The first version asserted `toBeUndefined()` and `count === 1`. Both failed,
+// and they were right to: earlier describes in this file leave BOOKED loads on
+// `betaId`, so the row is not empty before these tests start and an absolute
+// count measures the file's history as well as the fixture. Counting before
+// and after asks the question these tests are actually about — does THIS load
+// change the number — and gives the same answer whatever else is seeded.
+describe('closed history is in no queue', () => {
+  const countOf = async (key: string) =>
+    (await rowFor(key, { companyId: betaId }))?.count ?? 0
+
+  /** Book one, then mark it as freight another system already closed. */
+  const archive = async (loadId: string) => {
+    await owner.load.update({
+      where: { id: loadId },
+      data: { billingStatus: 'CLOSED_IN_DATATRUCK' },
+    })
+  }
+
+  it('adds nothing to Ready to invoice', async () => {
+    const before = await countOf('readyToInvoice')
+
+    const load = await bookLoad(betaId, 2)
+    for (const to of ['DELIVERED', 'POD_RECEIVED'] as const) {
+      await inOrg((tx) =>
+        transitionOperational(tx, load.id, to, { source: 'MANUAL', userId }),
+      )
+    }
+    await inOrg((tx) =>
+      setLoadRate(tx, load.id, { linehaul: '1900', fuelSurcharge: '0' }),
+    )
+
+    // THE CONTROL FIRST. Every other clause is satisfied, so this load IS in
+    // the queue — which is what makes the next assertion mean something.
+    expect(await countOf('readyToInvoice')).toBe(before + 1)
+
+    // ARCHIVED LAST, because the transitions and the rate both rewrite
+    // `billingStatus`. Stamping it earlier would test a load that had since
+    // stopped being archived.
+    await archive(load.id)
+    expect(await countOf('readyToInvoice')).toBe(before)
+  }, 300_000)
+
+  it('adds nothing to Finished with no driver or truck', async () => {
+    const before = await countOf('unassignedFinished')
+
+    const load = await bookLoad(betaId, 4)
+    for (const to of ['DELIVERED', 'POD_RECEIVED'] as const) {
+      await inOrg((tx) =>
+        transitionOperational(tx, load.id, to, { source: 'MANUAL', userId }),
+      )
+    }
+    await inOrg((tx) =>
+      setLoadRate(tx, load.id, { linehaul: '1900', fuelSurcharge: '0' }),
+    )
+    await owner.load.update({
+      where: { id: load.id },
+      data: { driverId: null, truckId: null },
+    })
+
+    expect(await countOf('unassignedFinished')).toBe(before + 1)
+
+    await archive(load.id)
+    expect(await countOf('unassignedFinished')).toBe(before)
+  }, 300_000)
+
+  it('adds nothing to Booked with no truck or driver', async () => {
+    // THE ROW THAT DID NOT HAVE THE EXCLUSION until 2026-10-01. A freshly
+    // booked load is AVAILABLE/BOOKED with neither a driver nor a truck, which
+    // is the entire predicate — so before the fix this counted archived
+    // freight from another system into today's dispatch queue.
+    const before = await countOf('unassigned')
+
+    const load = await bookLoad(betaId, 6)
+    expect(await countOf('unassigned')).toBe(before + 1)
+
+    await archive(load.id)
+    expect(await countOf('unassigned')).toBe(before)
+  }, 300_000)
+})

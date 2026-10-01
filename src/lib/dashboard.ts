@@ -260,6 +260,17 @@ const ACTIONS: ActionSpec[] = [
       tx.load.count({
         where: {
           ...scope,
+          // THE ONLY ROW THAT DID NOT HAVE THIS, and it was safe by
+          // COINCIDENCE — which `billing-status.ts` names as the thing not to
+          // leave holding a dashboard up.
+          //
+          // MEASURED ON DEV, 2026-10-01: 13,517 loads are closed history, 18
+          // of them are AVAILABLE or BOOKED, and all 18 happen to carry both a
+          // driver and a truck — so they fail the `OR` below and the count is
+          // 38 either way. The coincidence is that the import filled both
+          // columns. One imported load missing a truck would have put archived
+          // freight from another system into today's dispatch queue.
+          ...NOT_CLOSED_HISTORY,
           deletedAt: null,
           isCancelled: false,
           operationalStatus: { in: ['AVAILABLE', 'BOOKED'] },
