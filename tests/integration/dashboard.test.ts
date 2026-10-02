@@ -13,6 +13,7 @@ import {
 } from '@/lib/dashboard'
 import { COUNTED_ROWS, needsYouCounts } from '@/lib/dashboard-counts'
 import { recordPayment } from '@/lib/payments'
+import { readyToInvoiceWhere } from '@/lib/invoices'
 import type { AuthorizedSession } from '@/lib/permissions'
 import type { PrismaClient } from '@/generated/prisma/client'
 
@@ -450,7 +451,85 @@ describe('closed history is in no queue', () => {
 // only the agreement is — so these cases keep working as the fixtures above
 // change, and they are meaningful precisely because the earlier describes have
 // left real rows in several of these states.
-describe('the one statement agrees with each row own predicate', () => {
+// ── THE ONE ROW WHOSE SCREEN SHARES ITS PREDICATE ─────────────────────────
+//
+// Owner's ruling, 2026-10-01: the filter must be compared against the
+// predicate THE ROW'S TARGET SCREEN LISTS WITH, not against `ActionSpec.count`
+// — "a reference nothing runs is rule 7, the shared dead name agrees with
+// itself." Exactly right, and it is why this case is alone.
+//
+// `readyToInvoice` is the only row of the eight whose destination lists
+// through a SHARED FUNCTION: `readyToInvoiceWhere()`, used by
+// `accounting/invoices/page.tsx:156` and by `loads/page.tsx:151` and `:279`.
+// So this asks the real question — does the SQL filter select what the invoice
+// queue selects — and the answer is checked against the function the screen
+// itself calls.
+//
+// THE OTHER SEVEN HAVE NO SUCH FUNCTION, and three of them demonstrably
+// disagree with their own links. Measured on dev 2026-10-01:
+//
+//   podMissing          counts     1   /loads?status=DELIVERED      lists 13,500
+//   noRate              counts     0   /loads?status=POD_RECEIVED   lists    858
+//   unassignedFinished  counts   101   /loads?status=POD_RECEIVED   lists    858
+//
+// The loads list filters on `operationalStatus` alone — no closed-history
+// clause, no `isCancelled`, no revenue test — so clicking "1 delivered,
+// waiting on a POD" lands on thirteen and a half thousand rows. That is
+// `dashboard.ts`'s own warning coming true: "a dashboard whose numbers are
+// computed a second way is a dashboard that eventually disagrees with the
+// screen it sends you to, and the person stops believing both."
+//
+// IT IS REPORTED, NOT PAPERED OVER. Writing a screen-agreement test for those
+// seven would mean inventing the shared predicate they do not have, and the
+// honest fix — named predicates on the loads list, or hrefs that carry the
+// filter — changes what the first screen of the day promises and is the
+// owner's call.
+describe('the filter selects what the invoice queue selects', () => {
+  it('readyToInvoice, against the function the screen lists with', async () => {
+    // ONE LOAD THAT IS ACTUALLY READY, SEEDED HERE.
+    //
+    // The control below (`screen > 0`) failed without this, and it was right
+    // to: the closed-history describe above archives the only ready-to-invoice
+    // load on this authority, so both expressions answered 0 and the agreement
+    // was two empty sets matching. That is the shape this whole file keeps
+    // catching, and it caught it in the test written to catch it.
+    const ready = await bookLoad(betaId, 16)
+    for (const to of ['DELIVERED', 'POD_RECEIVED'] as const) {
+      await inOrg((tx) =>
+        transitionOperational(tx, ready.id, to, { source: 'MANUAL', userId }),
+      )
+    }
+    await inOrg((tx) =>
+      setLoadRate(tx, ready.id, { linehaul: '2750', fuelSurcharge: '0' }),
+    )
+
+    const { screen, sql } = await inOrg(async (tx) => ({
+      // THE SCREEN'S OWN PREDICATE, called here exactly as
+      // `invoices/page.tsx` calls it.
+      screen: await tx.load.count({
+        where: { ...readyToInvoiceWhere(), companyId: { in: [betaId] } },
+      }),
+      sql: await needsYouCounts(tx, [betaId]),
+    }))
+
+    expect(sql.counts.readyToInvoice).toBe(screen)
+    // AND NOT ZERO, or two empty answers satisfy it.
+    expect(screen).toBeGreaterThan(0)
+  }, 300_000)
+})
+
+// ── THE SQL IS A FAITHFUL TRANSLATION OF THE PRISMA EXPRESSION ────────────
+//
+// NOT a screen-agreement test, and the name no longer claims to be one. What
+// this catches is a SQL translation error — a clause dropped, an operator
+// inverted, a scope that means nothing instead of everything — by running the
+// Prisma expression of the same rule beside it.
+//
+// That is worth having and it is NOT the stronger claim. For seven of these
+// eight rows the Prisma expression is a reference no screen runs, so this
+// proves the two expressions agree with each other and says nothing about the
+// destination. See the block above for the three that disagree with theirs.
+describe('the one statement translates each Prisma predicate faithfully', () => {
   it.each([...COUNTED_ROWS])(
     '%s',
     async (key) => {
