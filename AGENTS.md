@@ -147,6 +147,35 @@ Rules about instruments, which are the ones that cost whole sessions:
   status. Run `--check` and read what it prints. A wrapper that cannot even
   start its command still exits cleanly, having done its job.
 
+- **A GATE THAT DIES BETWEEN t+500s AND t+640s IS THE SOCKET, NOT THE CODE —
+  observed four times on 2026-10-02 and recorded rather than fixed.** Owner
+  measurement, logged here because the next person to meet it will otherwise
+  spend an afternoon reading a diff.
+
+      14:17  clean
+      16:25  dropped Neon sockets, t+500..640s
+      17:25  dropped Neon sockets, t+500..640s
+      18:11  dropped Neon sockets, t+500..640s
+
+  THREE EVENING RUNS, ONE CLEAN AFTERNOON RUN, NO CODE CHANGE BETWEEN THEM.
+  The window is narrow and repeatable, which is what makes it a property of
+  the connection rather than of the suite: a real failure does not wait for
+  the same eight-minute mark three times running, and does not skip the run
+  that happened at lunchtime.
+
+  SO THE READING IS: re-run it, and read the status file. What this does NOT
+  license is treating any red gate as the socket. `tests/socket-rename.test.ts`,
+  `tests/socket-crash-guard.test.ts` and
+  `tests/integration/socket-retry.test.ts` exist because the retry path is code
+  with real bugs, and a dropped socket inside a TRANSACTION still loses the
+  work. The claim is about the gate dying mid-run at a known elapsed time, not
+  about failures in general.
+
+  NOT FIXED, AND NOT TO BE FIXED BY RETRY HERE. A gate that retried until it
+  passed would be a gate that reports green for a tree nobody tested — the
+  exact thing the receipt mechanism exists to prevent. If this needs solving
+  it is solved at the connection, not at the verdict.
+
 - **The deploy order is: fix, dispatch production, THEN push the next
   migration.** Owner’s ruling, 2026-09-22, and it replaces the shorter
   version it grew out of ("dispatch production before pushing the next
