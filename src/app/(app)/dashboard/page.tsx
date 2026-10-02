@@ -17,6 +17,9 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { TONE_STRIPE } from '@/lib/status'
 import { CompanyChips } from '../_grid/CompanyChips'
 import { PeriodPicker } from './PeriodPicker'
+import { WeekBars } from './WeekBars'
+import { Donut } from './Donut'
+import { DayBars } from './DayBars'
 import type { RawParams } from '@/lib/list-view'
 import type { MessageKey } from '@/lib/i18n'
 
@@ -156,7 +159,98 @@ export default async function DashboardPage({
             )}
 
             {/* ── FOUR PANELS, EMPTY IN PART 1 ───────────────────────── */}
-            {PANELS.map((panel) => (
+            {/* ── CHARTS, FILLED (part 2) ──────────────────────────────
+             *
+             * Four cuts of the series `dashboardFor` already returns — no
+             * extra query, which is why this panel costs nothing it did not
+             * cost empty. All four are server-rendered inline SVG with a
+             * `<title>` for hover and a visually hidden table of the same
+             * figures (§6.1.1, §13).
+             *
+             * MONEY ROLES ONLY, like the strip: `money` is null for a
+             * dispatcher and the panel is not rendered rather than rendered
+             * empty — the query did not run either. */}
+            {money === null ? null : (
+              <section className="rounded-card border border-border bg-surface p-z4">
+                <h2 className="text-md font-medium text-ink">
+                  {t('dash.panel.charts')}
+                </h2>
+
+                {/* THE SERIES IS THIRTEEN WEEKS WHATEVER THE PICKER SAYS, and
+                 * its own heading says so — §6.1.1 permits two windows on one
+                 * screen exactly here, and only because each names its own. */}
+                <div className="mt-z3">
+                  <WeekBars
+                    weeks={money.weeks}
+                    locale={locale}
+                    labels={{
+                      heading: t('dash.chart.weeks'),
+                      week: t('dash.chart.week'),
+                      gross: t('dash.kpi.gross'),
+                      afterDriverPay: t('dash.kpi.afterDriverPay'),
+                      notSettled: t('dash.chart.notSettled'),
+                    }}
+                  />
+                </div>
+
+                <div className="mt-z5 grid gap-z5 lg:grid-cols-2">
+                  <Donut
+                    slices={money.byCompany.map((row) => ({
+                      key: row.companyId,
+                      label: row.companyName,
+                      cents: row.grossCents,
+                    }))}
+                    locale={locale}
+                    labels={{
+                      heading: t('dash.chart.byCompany'),
+                      other: (count) =>
+                        `${t('dash.chart.other')} (${String(count)})`,
+                      name: t('accounting.company'),
+                      value: t('dash.kpi.gross'),
+                      share: t('dash.chart.share'),
+                      empty: t('dash.chart.noRevenue'),
+                    }}
+                  />
+                  <Donut
+                    slices={money.byCustomer.map((row) => ({
+                      key: row.customerId || '__none',
+                      // A LOAD WITH NO CUSTOMER STILL EARNED MONEY, and
+                      // `customerRows` LEFT JOINs for that reason. An empty
+                      // name would render a blank legend row.
+                      label: row.customerName || t('dash.chart.noCustomer'),
+                      cents: row.grossCents,
+                    }))}
+                    locale={locale}
+                    labels={{
+                      heading: t('dash.chart.byCustomer'),
+                      other: (count) =>
+                        `${t('dash.chart.other')} (${String(count)})`,
+                      name: t('loads.column.customer'),
+                      value: t('dash.kpi.gross'),
+                      share: t('dash.chart.share'),
+                      empty: t('dash.chart.noRevenue'),
+                    }}
+                  />
+                </div>
+
+                <div className="mt-z5">
+                  <DayBars
+                    days={money.perDay}
+                    period={window}
+                    labels={{
+                      heading: t('dash.chart.perDay'),
+                      day: t('dash.chart.day'),
+                      loads: t('dash.kpi.loads'),
+                      empty: t('dash.chart.noRevenue'),
+                    }}
+                  />
+                </div>
+              </section>
+            )}
+
+            {/* THE THREE STILL TO COME. `charts` is filled above, so it is
+             * excluded here rather than listed and skipped. */}
+            {PANELS.filter((panel) => panel !== 'charts').map((panel) => (
               <section
                 key={panel}
                 className="rounded-card border border-border bg-surface p-z4"
