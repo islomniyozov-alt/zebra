@@ -76,13 +76,10 @@ await runInOrg(
     for (const label of ['warm-up (ignored)', 'measured'] as const) {
       statements = 0
       const started = Date.now()
-      const board = await dashboardFor(
-        tx,
-        tenancy.organizationId,
-        null,
-        { from, to },
-        { now: to },
-      )
+      const board = await dashboardFor(tx, tenancy.organizationId, null, {
+        from,
+        to,
+      })
       const ms = Date.now() - started
 
       if (label === 'warm-up (ignored)') continue
@@ -129,7 +126,7 @@ await runInOrg(
       tenancy.organizationId,
       null,
       { from, to },
-      { now: to, weeks: 1 },
+      {},
     )
     void mine
 

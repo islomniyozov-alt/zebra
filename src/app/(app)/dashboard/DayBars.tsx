@@ -1,4 +1,5 @@
 import type { DayRow } from '@/lib/dashboard-kpis'
+import { ChartLegend } from './ChartLegend'
 
 // ---------------------------------------------------------------------------
 // LOADS DELIVERED PER DAY. §6.1.1's chart contract, dashboard part 2.
@@ -67,9 +68,16 @@ export function DayBars({ days, period, labels }: Props) {
   )
 
   if (axis.length === 0) {
+    // THE EMPTY CASE KEEPS ITS LEGEND (owner review): a blank panel is
+    // indistinguishable from a broken one. There is no axis to keep when the
+    // window itself is empty, so the sentence carries it.
     return (
       <div>
         <h3 className="text-sm font-medium text-ink">{labels.heading}</h3>
+        <ChartLegend
+          moneyOnly={false}
+          labels={{ gross: labels.loads, driverPay: '', unrecorded: '' }}
+        />
         <p className="mt-z2 text-sm text-ink-3">{labels.empty}</p>
       </div>
     )
@@ -85,6 +93,17 @@ export function DayBars({ days, period, labels }: Props) {
   return (
     <div>
       <h3 className="text-sm font-medium text-ink">{labels.heading}</h3>
+      {/* EVERY CHART CARRIES ONE (§6.1.1). This one counts loads rather than
+       * money, so the pay entries are omitted — a legend naming a series the
+       * chart does not draw is worse than none. */}
+      <ChartLegend
+        moneyOnly={false}
+        labels={{
+          gross: labels.loads,
+          driverPay: '',
+          unrecorded: '',
+        }}
+      />
 
       <svg
         viewBox={`0 0 ${String(width)} ${String(HEIGHT)}`}

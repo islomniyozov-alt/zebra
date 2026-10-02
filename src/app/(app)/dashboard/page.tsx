@@ -17,7 +17,8 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { TONE_STRIPE } from '@/lib/status'
 import { CompanyChips } from '../_grid/CompanyChips'
 import { PeriodPicker } from './PeriodPicker'
-import { WeekBars } from './WeekBars'
+import { BarChart } from './BarChart'
+import { Sparkline } from './Sparkline'
 import { Donut } from './Donut'
 import { DayBars } from './DayBars'
 import type { RawParams } from '@/lib/list-view'
@@ -59,6 +60,52 @@ import type { MessageKey } from '@/lib/i18n'
 // 4 statements and 986 ms over Jul–Sep 2026 across 2,133 loads.
 // ---------------------------------------------------------------------------
 
+// ── BUCKET LABELS, ONE DEFINITION FOR EVERY CHART ─────────────────────────
+//
+// "Sep 20" under a weekly bar, "Oct 2" under a daily one — owner's review. The
+// three helpers are here rather than in the components because the components
+// take strings: a chart that formatted its own dates would need the locale, the
+// grain and a second opinion about which week a Sunday opens.
+
+/** Stable per bucket, and never a rendered date — §7.1.1's sort-key rule. */
+const bucketKey = (at: Date) => at.toISOString().slice(0, 10)
+
+/** Under the bar. Short, because forty of them sit side by side. */
+const bucketLabel = (at: Date, grain: 'day' | 'week', locale: string) =>
+  new Intl.DateTimeFormat(locale, {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  }).format(at)
+
+/**
+ * In the tooltip and the hidden table. SAYS WHAT THE BUCKET COVERS.
+ *
+ * A weekly bar labelled "Sep 20" is ambiguous about whether it means that day
+ * or that week, and the tooltip is where that question gets asked. So the week
+ * case prints the span and the day case prints the weekday — which is the thing
+ * a dispatcher actually wants from a daily bar.
+ */
+const bucketDetail = (at: Date, grain: 'day' | 'week', locale: string) => {
+  if (grain === 'day') {
+    return new Intl.DateTimeFormat(locale, {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'UTC',
+    }).format(at)
+  }
+  const end = new Date(at)
+  end.setUTCDate(end.getUTCDate() + 6)
+  const short = (value: Date) =>
+    new Intl.DateTimeFormat(locale, {
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'UTC',
+    }).format(value)
+  return `${short(at)} – ${short(end)}`
+}
+
 /** Every panel §6.1.1 names, in its order. Empty in part 1. */
 const PANELS = ['charts', 'fleet', 'cash', 'compliance'] as const
 
@@ -82,9 +129,17 @@ export default async function DashboardPage({
   const period: PeriodKey =
     typeof raw.period === 'string' && isPeriodKey(raw.period)
       ? raw.period
-      : 'month'
+      : // THIS QUARTER, not this month. Owner's review 2026-10-02: on the 2nd of
+        // October 'this month' rendered an empty dashboard — a correct answer to
+        // a question nobody opens the screen to ask.
+        'quarter'
   const companyParam = typeof raw.company === 'string' ? raw.company : null
-  const window = periodWindow(period, new Date())
+  const now = new Date()
+  const window = periodWindow(period, now)
+  // UTC MIDNIGHT TODAY, so a bucket is future only if its whole day is.
+  const today = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  )
 
   const [money, queue, companies] = await Promise.all([
     maySeeMoney
@@ -117,6 +172,22 @@ export default async function DashboardPage({
   ])
 
   const day = (value: Date) => value.toISOString().slice(0, 10)
+
+  // ONE LABEL SET FOR BOTH BAR CHARTS, so the legend cannot say one thing on
+  // the money chart and another on the loads chart.
+  const barLabels = {
+    heading: t('dash.chart.weeks'),
+    gross: t('dash.kpi.gross'),
+    driverPay: t('dash.kpi.driverPay'),
+    unrecorded: t('dash.chart.unrecorded'),
+    afterDriverPay: t('dash.kpi.afterDriverPay'),
+    loads: t('dash.kpi.loads'),
+    empty: t('dash.chart.noRevenue'),
+    bucket:
+      money === null || money.grain === 'day'
+        ? t('dash.chart.day')
+        : t('dash.chart.week'),
+  }
 
   return (
     <>
@@ -176,23 +247,33 @@ export default async function DashboardPage({
                   {t('dash.panel.charts')}
                 </h2>
 
-                {/* THE SERIES IS THIRTEEN WEEKS WHATEVER THE PICKER SAYS, and
-                 * its own heading says so — §6.1.1 permits two windows on one
-                 * screen exactly here, and only because each names its own. */}
+                {/* ONE WINDOW. The picker drives this chart, the donuts and
+                 * the day strip alike — v10.14 let the bars ignore it and
+                 * v10.16 revoked that, because a quarter of bars beside a
+                 * month of donuts is one screen saying two things. */}
                 <div className="mt-z3">
-                  <WeekBars
-                    weeks={money.weeks}
+                  <BarChart
+                    bars={money.weeks.map((point) => ({
+                      key: bucketKey(point.weekStart),
+                      label: bucketLabel(point.weekStart, money.grain, locale),
+                      detail: bucketDetail(
+                        point.weekStart,
+                        money.grain,
+                        locale,
+                      ),
+                      grossCents: point.grossCents,
+                      driverPayCents: point.driverPayCents,
+                      marginCents: point.marginCents,
+                      loads: point.loads,
+                      // A BUCKET AFTER TODAY HAS NOT HAPPENED. The week view runs
+                      // Sunday to Sunday so the axis is always seven columns;
+                      // the tail draws as gaps rather than as zeroes.
+                      future: point.weekStart > today,
+                    }))}
                     locale={locale}
-                    labels={{
-                      heading: t('dash.chart.weeks'),
-                      week: t('dash.chart.week'),
-                      gross: t('dash.kpi.gross'),
-                      afterDriverPay: t('dash.kpi.afterDriverPay'),
-                      notSettled: t('dash.chart.notSettled'),
-                    }}
+                    labels={barLabels}
                   />
                 </div>
-
                 <div className="mt-z5 grid gap-z5 lg:grid-cols-2">
                   <Donut
                     slices={money.byCompany.map((row) => ({
@@ -353,11 +434,37 @@ function KpiStrip({
   const money = (cents: number | null) =>
     cents === null ? '—' : formatCents(cents, locale)
 
-  const cells: { key: string; label: MessageKey; value: string }[] = [
+  // ── SIX CELLS, SIX SPARKLINES ──────────────────────────────────────────
+  //
+  // Owner's review, 2026-10-02. The strip had five cells and no sparklines; the
+  // sixth is DRIVER PAY, which was only ever visible as the thing subtracted
+  // inside "after driver pay". A reader asking "what did we pay out" had to do
+  // the arithmetic from two other cells.
+  //
+  // EACH SERIES COMES FROM THE SAME BUCKETS THE BARS DRAW, so a cell and the
+  // chart below it cannot disagree about the shape of the quarter.
+  //
+  // A NULL POINT IS A GAP, NOT A ZERO, on the two pay series: a bucket whose
+  // driver pay was never recorded contributes no bar rather than a bar at the
+  // floor, because a cliff that never happened is the same wrong number the
+  // hatch exists to prevent.
+  const cells: {
+    key: string
+    label: MessageKey
+    value: string
+    points: (number | null)[]
+  }[] = [
     {
       key: 'gross',
       label: 'dash.kpi.gross',
       value: money(board.kpis.grossCents),
+      points: board.weeks.map((point) => point.grossCents),
+    },
+    {
+      key: 'driverPay',
+      label: 'dash.kpi.driverPay',
+      value: money(board.kpis.driverPayCents),
+      points: board.weeks.map((point) => point.driverPayCents),
     },
     {
       key: 'afterPay',
@@ -365,16 +472,19 @@ function KpiStrip({
       // Nothing but driver pay has been subtracted.
       label: 'dash.kpi.afterDriverPay',
       value: money(board.kpis.marginCents),
+      points: board.weeks.map((point) => point.marginCents),
     },
     {
       key: 'loads',
       label: 'dash.kpi.loads',
       value: String(board.kpis.loads),
+      points: board.weeks.map((point) => point.loads),
     },
     {
       key: 'miles',
       label: 'dash.kpi.miles',
       value: board.kpis.miles.toLocaleString(locale),
+      points: board.weeks.map((point) => point.miles),
     },
     {
       key: 'perMile',
@@ -383,12 +493,19 @@ function KpiStrip({
         board.kpis.centsPerMile === null
           ? '—'
           : formatCents(board.kpis.centsPerMile, locale),
+      // PER MILE IS A RATIO, SO IT IS COMPUTED PER BUCKET rather than carried.
+      // Dividing the period's gross by the period's miles would draw one flat
+      // line; dividing each bucket's own figures shows the rate moving, which
+      // is the only reason to plot a ratio at all.
+      points: board.weeks.map((point) =>
+        point.miles <= 0 ? null : Math.round(point.grossCents / point.miles),
+      ),
     },
   ]
 
   return (
     <section>
-      <dl className="grid grid-cols-2 gap-z3 md:grid-cols-5">
+      <dl className="grid grid-cols-2 gap-z3 md:grid-cols-3 xl:grid-cols-6">
         {cells.map((cell) => (
           <div
             key={cell.key}
@@ -400,6 +517,9 @@ function KpiStrip({
             <dd className="mt-z1 font-mono text-lg tabular-nums text-ink">
               {cell.value}
             </dd>
+            {/* THE SHAPE BESIDE THE FIGURE. §6.1.1: a figure without a
+             * direction is half an answer. */}
+            <Sparkline points={cell.points} label={t(cell.label)} />
           </div>
         ))}
       </dl>

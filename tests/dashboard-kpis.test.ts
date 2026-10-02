@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   assembleDashboard,
+  bucketsIn,
+  grainFor,
   recentSundays,
   sundayOf,
   type WeekCompanyRow,
@@ -45,6 +47,7 @@ const assemble = (
     weeks: over.weeks ?? [SUNDAY],
     payKnownFrom:
       over.payKnownFrom === undefined ? new Date(0) : over.payKnownFrom,
+    grain: 'week',
   })
 
 describe('the settlement week boundary', () => {
@@ -203,5 +206,96 @@ describe('by company', () => {
     ])
     expect(board.byCompany[1]?.grossCents).toBe(20_000)
     expect(board.byCompany[1]?.loads).toBe(8)
+  })
+})
+
+// ── THE PICKER DRIVES THE GRANULARITY (owner ruling 2026-10-02) ────────────
+//
+// v10.14 let the bars show thirteen weeks whatever the picker said. On the
+// screen that meant a quarter of bars beside a month of donuts — one dashboard
+// saying two things — and the permission was revoked.
+describe('the grain follows the window, not the preset name', () => {
+  const win = (from: Date, to: Date) => ({ from, to })
+
+  it('a week of days', () => {
+    expect(
+      grainFor(
+        win(new Date(Date.UTC(2026, 8, 6)), new Date(Date.UTC(2026, 8, 13))),
+      ),
+    ).toBe('day')
+  })
+
+  it('a month of days', () => {
+    expect(
+      grainFor(
+        win(new Date(Date.UTC(2026, 8, 1)), new Date(Date.UTC(2026, 9, 1))),
+      ),
+    ).toBe('day')
+  })
+
+  it('a quarter of weeks', () => {
+    expect(
+      grainFor(
+        win(new Date(Date.UTC(2026, 6, 1)), new Date(Date.UTC(2026, 9, 1))),
+      ),
+    ).toBe('week')
+  })
+
+  it('a year to date of weeks', () => {
+    expect(
+      grainFor(
+        win(new Date(Date.UTC(2026, 0, 1)), new Date(Date.UTC(2026, 9, 2))),
+      ),
+    ).toBe('week')
+  })
+
+  // THE SPAN, NOT THE LABEL. "This quarter" on its second day is two days long,
+  // and two days deserve daily bars — one lonely weekly bar on the 2nd of
+  // October is the shape that started this review.
+  it('gives a two-day-old quarter daily bars, despite its name', () => {
+    expect(
+      grainFor(
+        win(new Date(Date.UTC(2026, 9, 1)), new Date(Date.UTC(2026, 9, 3))),
+      ),
+    ).toBe('day')
+  })
+})
+
+describe('bucketsIn generates the axis, including the empty buckets', () => {
+  it('gives one bucket per day', () => {
+    const buckets = bucketsIn(
+      {
+        from: new Date(Date.UTC(2026, 9, 1)),
+        to: new Date(Date.UTC(2026, 9, 8)),
+      },
+      'day',
+    )
+    expect(buckets).toHaveLength(7)
+  })
+
+  // A WEEKLY AXIS STARTS ON THE SUNDAY THAT CONTAINS THE PERIOD'S OPEN DAY,
+  // because that is the bucket SQL grouped the freight into. Starting on the
+  // period's own Wednesday would leave that week's row with nowhere to land.
+  it('snaps a weekly axis back to the Sunday the period opens inside', () => {
+    // 2026-10-01 is a Thursday; the week opened Sunday 2026-09-27.
+    const buckets = bucketsIn(
+      {
+        from: new Date(Date.UTC(2026, 9, 1)),
+        to: new Date(Date.UTC(2026, 9, 20)),
+      },
+      'week',
+    )
+    expect(buckets[0]?.toISOString().slice(0, 10)).toBe('2026-09-27')
+  })
+
+  it('caps an absurd window rather than generating thousands', () => {
+    const buckets = bucketsIn(
+      {
+        from: new Date(Date.UTC(1990, 0, 1)),
+        to: new Date(Date.UTC(2026, 0, 1)),
+      },
+      'day',
+    )
+    expect(buckets.length).toBeLessThanOrEqual(400)
   })
 })

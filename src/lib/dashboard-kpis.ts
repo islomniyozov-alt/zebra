@@ -144,7 +144,22 @@ const INVOICED = Prisma.sql`
  * rather than rewritten, because two expressions of "which week" is two
  * answers.
  */
-const WEEK_START = Prisma.sql`(date_trunc('week', d.del_date + interval '1 day') - interval '1 day')`
+/**
+ * Which bucket a delivery falls in, for the grain on screen.
+ *
+ * OWNER RULING 2026-10-02: the period picker drives the granularity — a week
+ * shows seven days, a quarter shows weeks. Two expressions rather than one with
+ * a variable in it, because the WEEK case has to shift a day in and back out:
+ * `date_trunc('week')` is MONDAY in Postgres and a settlement week opens on a
+ * SUNDAY (MONEY-DESIGN §0). The day case needs no such thing, and hiding that
+ * difference behind an argument is how the Sunday boundary gets lost.
+ */
+export type Grain = 'day' | 'week'
+
+const bucketOf = (grain: Grain) =>
+  grain === 'week'
+    ? Prisma.sql`(date_trunc('week', d.del_date + interval '1 day') - interval '1 day')`
+    : Prisma.sql`date_trunc('day', d.del_date)`
 
 export interface WeekCompanyRow {
   weekStart: Date
@@ -182,8 +197,15 @@ export interface DayRow {
  */
 export async function weekCompanyRows(
   tx: TxClient,
-  input: { from: Date; to: Date; companyId: string | null },
+  input: {
+    from: Date
+    to: Date
+    companyId: string | null
+    /** Daily or weekly buckets. Owner ruling: the picker decides. */
+    grain: Grain
+  },
 ): Promise<WeekCompanyRow[]> {
+  const bucket = bucketOf(input.grain)
   const rows = await tx.$queryRaw<
     {
       week_start: Date
@@ -199,7 +221,7 @@ export async function weekCompanyRows(
     priced AS (
       SELECT
         d."companyId",
-        ${WEEK_START} AS week_start,
+        ${bucket} AS week_start,
         ${GROSS_CENTS} AS gross,
         COALESCE(pay.amount, 0) AS pay,
         d.miles AS miles
@@ -372,6 +394,8 @@ export interface Dashboard {
    * in a sentence rather than leaving a reader to wonder about the dashes.
    */
   payKnownFrom: Date | null
+  /** Daily or weekly, so a chart can label its axis correctly. */
+  grain: Grain
 }
 
 /** Gross per mile, or null. One definition, used by the KPI and the series. */
@@ -429,6 +453,8 @@ export function assembleDashboard(input: {
    * batch", which makes every figure unknown.
    */
   payKnownFrom: Date | null
+  /** Which bucket size the series is in, carried through to the charts. */
+  grain: Grain
 }): Dashboard {
   /** Was Zebra settling by this week? */
   const payKnown = (week: Date) =>
@@ -536,6 +562,7 @@ export function assembleDashboard(input: {
     byCustomer: [...input.customers],
     perDay: [...input.days],
     payKnownFrom: input.payKnownFrom,
+    grain: input.grain,
   }
 }
 
@@ -568,65 +595,120 @@ export interface DashboardPeriod {
  * has not opened its transaction properly — which is worth a throw rather than
  * a silent whole-table scan.
  */
+/**
+ * How many days a window spans, inclusive of its open day.
+ *
+ * ON THE WINDOW, NOT ON THE PRESET'S NAME. A quarter is 90-odd days and a month
+ * is 28 to 31, but "this quarter" on its second day is two days long — and two
+ * days deserve daily bars whatever the picker is called. Reading the span rather
+ * than the label is what stops "This quarter" drawing one lonely weekly bar on
+ * the 2nd of October, which is the shape that started this review.
+ */
+export function spanDays(period: DashboardPeriod): number {
+  return Math.max(
+    1,
+    Math.round((period.to.getTime() - period.from.getTime()) / 86_400_000),
+  )
+}
+
+/**
+ * Daily or weekly buckets for a window. Owner ruling, 2026-10-02.
+ *
+ * The ruling names the four presets — week and month give days, quarter and
+ * year-to-date give weeks — and the boundary it implies is ABOUT 5 WEEKS: a
+ * month is the longest thing drawn daily. So the rule is expressed as the span
+ * rather than as a list of preset names, which also answers for a quarter that
+ * is two days old.
+ */
+export function grainFor(period: DashboardPeriod): Grain {
+  return spanDays(period) > 35 ? 'week' : 'day'
+}
+
+/**
+ * Every bucket in the window, oldest first, INCLUDING the empty ones.
+ *
+ * A bucket with no freight returns no row from SQL, so a series built from rows
+ * draws a dense week where there was a sparse one and labels none of it. This
+ * generates the axis and the rows are looked up into it — the same argument
+ * `recentSundays` was written for, generalised to both grains.
+ *
+ * WEEKLY BUCKETS ARE SUNDAYS, including the one the period opens inside: a
+ * period starting on a Wednesday belongs to the week that opened on the Sunday
+ * before it, because that is the bucket SQL will have grouped it into. Starting
+ * the axis on the Wednesday would leave that week's row with nowhere to land.
+ */
+export function bucketsIn(period: DashboardPeriod, grain: Grain): Date[] {
+  const out: Date[] = []
+  const cursor =
+    grain === 'week'
+      ? sundayOf(period.from)
+      : new Date(
+          Date.UTC(
+            period.from.getUTCFullYear(),
+            period.from.getUTCMonth(),
+            period.from.getUTCDate(),
+          ),
+        )
+  // A CAP, because a year-to-date in weeks is 52 and a mistake is thousands.
+  while (cursor < period.to && out.length < 400) {
+    out.push(new Date(cursor))
+    cursor.setUTCDate(cursor.getUTCDate() + (grain === 'week' ? 7 : 1))
+  }
+  return out
+}
+
 export async function dashboardFor(
   tx: TxClient,
   orgId: string,
   companyId: string | null,
   period: DashboardPeriod,
-  options: { weeks?: number; now?: Date } = {},
+  options: { grain?: Grain } = {},
 ): Promise<Dashboard> {
   if (orgId.trim() === '') {
     throw new Error('dashboardFor: no organization id. RLS would be unset.')
   }
 
-  const count = options.weeks ?? 13
-  const weeks = recentSundays(options.now ?? period.to, count)
-  const seriesFrom = weeks[0] ?? period.from
+  // ── ONE WINDOW. OWNER RULING 2026-10-02 ────────────────────────────────
+  //
+  // This used to widen the scan to thirteen weeks whatever the picker said,
+  // return the KPIs for the period and the series for the quarter, and call
+  // that honest because each had a heading. On the screen it was not: the bars
+  // showed a quarter beside donuts showing the month, and nothing marked which.
+  //
+  // Now every figure on the page answers for `period`, and the only thing the
+  // picker also decides is the BUCKET SIZE — `grainFor` below, overridable only
+  // so tests can pin one.
+  const grain = options.grain ?? grainFor(period)
 
-  // THE WIDER OF THE TWO WINDOWS, so one scan serves both.
-  const from = seriesFrom < period.from ? seriesFrom : period.from
-
-  // FOUR STATEMENTS, NOT THREE. The fourth asks when Zebra started settling,
-  // and it earns its place: without it every period before that date reports a
-  // confident margin made of unknown driver pay. Measured on dev, that was
-  // $2,571,007.51 against $184,774.65 of pay actually recorded.
   const [rows, customers, days, payKnownFrom] = await Promise.all([
-    weekCompanyRows(tx, { from, to: period.to, companyId }),
+    weekCompanyRows(tx, {
+      from: period.from,
+      to: period.to,
+      companyId,
+      grain,
+    }),
     customerRows(tx, { from: period.from, to: period.to, companyId }),
     dayRows(tx, { from: period.from, to: period.to, companyId }),
+    // THE FOURTH STATEMENT EARNS ITS PLACE: without it every period before
+    // Zebra started settling reports a confident margin made of unknown driver
+    // pay. Measured on dev, $2,571,007.51 against $184,774.65 actually
+    // recorded.
     firstSettledPeriodStart(tx),
   ])
 
-  // THE KPIs ARE THE PERIOD'S, THE SERIES IS THE THIRTEEN WEEKS'. `rows` was
-  // widened to cover the series, so the totals are narrowed back here or the
-  // strip would report a quarter while the picker says a week.
-  //
-  // NARROWED BY THE WEEK'S START, which is how the rows are grouped. A period
-  // that opens mid-week therefore takes that whole week — stated rather than
-  // hidden, because the alternative is a per-load window that cannot come off
-  // a grouped scan, and a KPI strip that disagreed with the chart by a few
-  // days would be worse than one that says which weeks it covers.
-  const inPeriod = rows.filter(
-    (row) =>
-      row.weekStart >= sundayOf(period.from) && row.weekStart < period.to,
-  )
+  // EVERY BUCKET IN THE WINDOW, including the ones that earned nothing — a
+  // bucket with no freight returns no row, and a series driven only by rows
+  // draws a dense week where there was a sparse one.
+  const buckets = bucketsIn(period, grain)
 
-  const totals = assembleDashboard({
-    rows: inPeriod,
+  return assembleDashboard({
+    rows,
     customers,
     days,
-    weeks,
+    weeks: buckets,
     payKnownFrom,
+    grain,
   })
-  const series = assembleDashboard({
-    rows,
-    customers: [],
-    days: [],
-    weeks,
-    payKnownFrom,
-  })
-
-  return { ...totals, weeks: series.weeks }
 }
 
 /**
@@ -674,7 +756,22 @@ export function periodWindow(
   const to = new Date(day)
   to.setUTCDate(to.getUTCDate() + 1)
 
-  if (key === 'week') return { from: sundayOf(now), to }
+  // ── THE WEEK IS THE WHOLE SETTLEMENT WEEK, SUNDAY TO SUNDAY ──────────
+  //
+  // Owner's ruling: 'Week -> 7 daily bars'. Closing this window at today+1
+  // like the others gave DAYS ELAPSED — one bar on a Sunday, six on a Friday —
+  // so the week preset runs to the next Sunday and the axis is always seven.
+  //
+  // THE DAYS THAT HAVE NOT HAPPENED RENDER AS GAPS, NOT ZEROES. A zero bar for
+  // Saturday on a Wednesday claims Saturday earned nothing, which is a claim
+  // about a day that does not exist yet — the same error as a zero-height
+  // driver-pay bar, drawn one column over. The chart marks them from `now`.
+  if (key === 'week') {
+    const open = sundayOf(now)
+    const close = new Date(open)
+    close.setUTCDate(close.getUTCDate() + 7)
+    return { from: open, to: close }
+  }
   if (key === 'month') {
     return {
       from: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),

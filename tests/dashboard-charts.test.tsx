@@ -3,10 +3,10 @@
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import { WeekBars } from '@/app/(app)/dashboard/WeekBars'
+import { BarChart, type Bar } from '@/app/(app)/dashboard/BarChart'
+import { Sparkline } from '@/app/(app)/dashboard/Sparkline'
 import { Donut } from '@/app/(app)/dashboard/Donut'
 import { DayBars } from '@/app/(app)/dashboard/DayBars'
-import { recentSundays, type WeekPoint } from '@/lib/dashboard-kpis'
 
 // ---------------------------------------------------------------------------
 // THE THREE CHARTS. §6.1.1's contract, asserted against a DOM.
@@ -26,102 +26,189 @@ import { recentSundays, type WeekPoint } from '@/lib/dashboard-kpis'
 
 afterEach(cleanup)
 
-const SUNDAY = new Date(Date.UTC(2026, 8, 6))
+const barLabels = {
+  heading: 'Gross by week',
+  gross: 'Gross',
+  driverPay: 'Driver pay',
+  unrecorded: 'driver pay not yet recorded in Zebra',
+  afterDriverPay: 'After driver pay',
+  loads: 'Loads',
+  empty: 'No freight delivered in this period.',
+  bucket: 'Week',
+}
 
-const week = (over: Partial<WeekPoint> = {}): WeekPoint => ({
-  weekStart: SUNDAY,
-  grossCents: 100_000,
-  driverPayCents: 30_000,
-  marginCents: 70_000,
+const bar = (over: Partial<Bar> = {}): Bar => ({
+  key: '2026-09-06',
+  label: 'Sep 6',
+  detail: 'Sep 6 – Sep 12',
+  grossCents: 1_240_000,
+  driverPayCents: 300_000,
+  marginCents: 940_000,
   loads: 4,
-  miles: 1_000,
   ...over,
 })
 
-const weekLabels = {
-  heading: 'Gross by week',
-  week: 'Week',
-  gross: 'Gross',
-  afterDriverPay: 'After driver pay',
-  notSettled: 'not settled in Zebra',
-}
-
-describe('WeekBars draws every week, including the empty ones', () => {
-  it('draws thirteen bars for thirteen weeks with one week of freight', () => {
-    const weeks = recentSundays(SUNDAY, 13).map((weekStart) =>
-      weekStart.getTime() === SUNDAY.getTime()
-        ? week()
-        : week({
-            weekStart,
-            grossCents: 0,
-            driverPayCents: 0,
-            marginCents: 0,
-            loads: 0,
-            miles: 0,
-          }),
-    )
-    const { container } = render(
-      <WeekBars weeks={weeks} locale="en-US" labels={weekLabels} />,
-    )
-
-    // THIRTEEN ROWS IN THE TABLE, which is the readable rendering and the one
-    // that must not silently drop a quiet week.
-    expect(container.querySelectorAll('tbody tr')).toHaveLength(13)
-  })
-
-  // AN UNSETTLED WEEK IS HATCHED, NOT ZEROED. A zero-height pay bar would say
-  // that week's freight cost nothing to drive — §6.1.1 calls that the most
-  // expensive wrong number on the page.
-  it('hatches a week whose driver pay is unknown', () => {
-    const { container } = render(
-      <WeekBars
-        weeks={[week({ driverPayCents: null, marginCents: null })]}
-        locale="en-US"
-        labels={weekLabels}
-      />,
-    )
-    const hatched = container.querySelectorAll(
-      'rect[fill="url(#zebra-unsettled)"]',
-    )
-    expect(hatched).toHaveLength(1)
-  })
-
-  it('and says so in the table rather than printing a figure', () => {
-    render(
-      <WeekBars
-        weeks={[week({ driverPayCents: null, marginCents: null })]}
-        locale="en-US"
-        labels={weekLabels}
-      />,
-    )
-    expect(screen.getByText('not settled in Zebra')).toBeTruthy()
-  })
-
-  it('draws no hatch and a pay bar where the week is settled', () => {
-    const { container } = render(
-      <WeekBars weeks={[week()]} locale="en-US" labels={weekLabels} />,
-    )
+describe('BarChart owes the reader four things (owner review 2026-10-02)', () => {
+  // 1 — A LEGEND, IN WORDS. "No chart ships without one."
+  it('names every series in words, including what the hatch means', () => {
+    render(<BarChart bars={[bar()]} locale="en-US" labels={barLabels} />)
+    // getAllByText, NOT getByText: each label appears in the legend AND in the
+    // hidden table's header, which is correct — both are renderings of the same
+    // series — so the assertion is about presence rather than uniqueness.
+    expect(screen.getAllByText('Gross').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Driver pay').length).toBeGreaterThan(0)
     expect(
-      container.querySelectorAll('rect[fill="url(#zebra-unsettled)"]'),
-    ).toHaveLength(0)
-    expect(screen.queryByText('not settled in Zebra')).toBeNull()
+      screen.getAllByText('driver pay not yet recorded in Zebra').length,
+    ).toBeGreaterThan(0)
   })
 
-  it('survives a quarter with no freight rather than dividing by zero', () => {
-    const weeks = recentSundays(SUNDAY, 13).map((weekStart) =>
-      week({
-        weekStart,
-        grossCents: 0,
-        driverPayCents: 0,
-        marginCents: 0,
-        loads: 0,
-        miles: 0,
-      }),
-    )
+  // 2 — THE VALUE ABOVE EACH BAR, abbreviated as the ruling asked ($12.4k).
+  it('prints the value above the bar', () => {
+    // SCOPED TO THE BAR, not to the document. `$12.4k` also appears as the top
+    // y-axis tick, because the scale's peak IS this bar — so a document-wide
+    // assertion passed with the bar label deleted, and `watch-guard` refused
+    // the break that deleted it. The question is whether the BAR carries its
+    // value, so the query asks the bar.
     const { container } = render(
-      <WeekBars weeks={weeks} locale="en-US" labels={weekLabels} />,
+      <BarChart bars={[bar()]} locale="en-US" labels={barLabels} />,
     )
-    expect(container.querySelectorAll('tbody tr')).toHaveLength(13)
+    const columns = container.querySelectorAll('ol li')
+    expect(columns.length).toBeGreaterThan(0)
+    const onTheBar = [...columns].some((node) =>
+      (node.textContent ?? '').includes('$12.4k'),
+    )
+    expect(onTheBar).toBe(true)
+  })
+
+  it('and the period label below it', () => {
+    render(<BarChart bars={[bar()]} locale="en-US" labels={barLabels} />)
+    expect(screen.getByText('Sep 6')).toBeTruthy()
+  })
+
+  // THE GRIDLINES AND THEIR MONEY TICKS.
+  it('draws gridlines with money ticks', () => {
+    const { container } = render(
+      <BarChart bars={[bar()]} locale="en-US" labels={barLabels} />,
+    )
+    // Five ticks for four intervals, top down.
+    const axis = container.querySelectorAll('ul li')
+    expect(axis.length).toBeGreaterThanOrEqual(5)
+    expect(screen.getByText('$0.00')).toBeTruthy()
+  })
+
+  // 3 — A VISIBLE TOOLTIP, not only a <title>. It carries all five figures.
+  it('carries a real tooltip element with week, gross, pay, margin and loads', () => {
+    const { container } = render(
+      <BarChart bars={[bar()]} locale="en-US" labels={barLabels} />,
+    )
+    const tip = container.querySelector('[role="tooltip"]')
+    expect(tip).toBeTruthy()
+    const text = tip?.textContent ?? ''
+    expect(text).toContain('Sep 6 – Sep 12')
+    expect(text).toContain('$12,400.00')
+    expect(text).toContain('$3,000.00')
+    expect(text).toContain('$9,400.00')
+    expect(text).toContain('4')
+  })
+
+  it('reveals the tooltip by CSS, with no script', () => {
+    const { container } = render(
+      <BarChart bars={[bar()]} locale="en-US" labels={barLabels} />,
+    )
+    const tip = container.querySelector('[role="tooltip"]')
+    // HIDDEN BY DEFAULT, SHOWN ON HOVER — and `group-hover` is the mechanism,
+    // so a reviewer can see there is no event handler anywhere.
+    expect(tip?.className).toContain('hidden')
+    expect(tip?.className).toContain('group-hover:block')
+  })
+
+  // THE HATCH, AND NO ZERO-HEIGHT PAY BAR.
+  it('hatches a bucket whose driver pay was never recorded', () => {
+    const { container } = render(
+      <BarChart
+        bars={[bar({ driverPayCents: null, marginCents: null })]}
+        locale="en-US"
+        labels={barLabels}
+      />,
+    )
+    const hatched = [...container.querySelectorAll('span')].filter((node) =>
+      (node as HTMLElement).style.backgroundImage.includes(
+        'repeating-linear-gradient',
+      ),
+    )
+    // The bar itself plus the legend swatch.
+    expect(hatched.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('and its tooltip says so rather than printing a zero', () => {
+    const { container } = render(
+      <BarChart
+        bars={[bar({ driverPayCents: null, marginCents: null })]}
+        locale="en-US"
+        labels={barLabels}
+      />,
+    )
+    const text = container.querySelector('[role="tooltip"]')?.textContent ?? ''
+    expect(text).toContain('—')
+    expect(text).not.toContain('$0.00')
+  })
+
+  // 4 — AN EMPTY PERIOD KEEPS ITS AXIS AND LEGEND. Never a blank panel.
+  it('keeps the legend and the ticks when nothing was delivered', () => {
+    render(<BarChart bars={[]} locale="en-US" labels={barLabels} />)
+    expect(
+      screen.getByText('No freight delivered in this period.'),
+    ).toBeTruthy()
+    // The legend survives.
+    expect(screen.getAllByText('Gross').length).toBeGreaterThan(0)
+    // And so does the axis: five ticks, all $0.00 at a zero scale.
+    expect(screen.getAllByText('$0.00').length).toBeGreaterThanOrEqual(5)
+    // NOT "No data available" (§14).
+    expect(screen.queryByText(/No data available/i)).toBeNull()
+  })
+
+  it('shows one bar per bucket, including the empty ones', () => {
+    const bars = [
+      bar({ key: 'a', label: 'Sep 6' }),
+      bar({ key: 'b', label: 'Sep 13', grossCents: 0, loads: 0 }),
+      bar({ key: 'c', label: 'Sep 20' }),
+    ]
+    const { container } = render(
+      <BarChart bars={bars} locale="en-US" labels={barLabels} />,
+    )
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(3)
+    expect(screen.getByText('Sep 13')).toBeTruthy()
+  })
+})
+
+describe('Sparkline', () => {
+  it('draws one column per bucket', () => {
+    const { container } = render(
+      <Sparkline points={[1, 2, 3, 4]} label="Gross" />,
+    )
+    expect(container.querySelectorAll('span')).toHaveLength(4)
+  })
+
+  // A NULL IS A GAP. A bucket whose pay was never recorded must not draw a bar
+  // at the floor — that is a cliff that never happened.
+  it('leaves a gap for a bucket that was never recorded', () => {
+    const { container } = render(
+      <Sparkline points={[100, null, 100]} label="Driver pay" />,
+    )
+    const columns = [...container.querySelectorAll('span')]
+    expect(columns).toHaveLength(3)
+    expect((columns[1] as HTMLElement).style.height).toBe('0px')
+    expect((columns[1] as HTMLElement).style.opacity).toBe('0')
+  })
+
+  it('still renders a baseline with no points at all', () => {
+    const { container } = render(<Sparkline points={[]} label="Gross" />)
+    expect(container.querySelectorAll('span')).toHaveLength(1)
+  })
+
+  it('names what the shape is of, for a reader who cannot see it', () => {
+    render(<Sparkline points={[1, 2]} label="Miles" />)
+    expect(screen.getByRole('img', { name: 'Miles' })).toBeTruthy()
   })
 })
 
