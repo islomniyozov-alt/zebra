@@ -35,6 +35,7 @@ const barLabels = {
   loads: 'Loads',
   empty: 'No freight delivered in this period.',
   bucket: 'Week',
+  partial: 'week still running',
 }
 
 const bar = (over: Partial<Bar> = {}): Bar => ({
@@ -377,5 +378,62 @@ describe('DayBars draws the calendar, not the busy days', () => {
     expect(container.querySelectorAll('tbody tr').length).toBeLessThanOrEqual(
       120,
     )
+  })
+})
+
+// ── THE PARTIAL CURRENT BUCKET (owner ruling 2026-10-02) ───────────────────
+//
+// Every window ends with the current settlement week, drawn as far as today. So
+// the last bar is short because the week is unfinished — and a reader comparing
+// it to the twelve beside it sees a decline that did not happen.
+//
+// IT IS DRAWN AND MARKED, not hidden: the freight is real and belongs in the
+// total. Same family of lie as a zero-height driver-pay bar, same treatment.
+describe('the partial current bucket is marked, not hidden', () => {
+  it('still draws its bar, because the freight is real', () => {
+    const { container } = render(
+      <BarChart
+        bars={[bar({ partial: true })]}
+        locale="en-US"
+        labels={barLabels}
+      />,
+    )
+    const filled = [...container.querySelectorAll('ol li span')].filter(
+      (node) => (node as HTMLElement).style.height.endsWith('%'),
+    )
+    expect(filled.length).toBeGreaterThan(0)
+  })
+
+  it('marks it so it is not read as a decline', () => {
+    const { container } = render(
+      <BarChart
+        bars={[bar({ partial: true })]}
+        locale="en-US"
+        labels={barLabels}
+      />,
+    )
+    const dashed = container.querySelector('.border-dashed')
+    expect(dashed).toBeTruthy()
+  })
+
+  it('and says why on hover', () => {
+    const { container } = render(
+      <BarChart
+        bars={[bar({ partial: true })]}
+        locale="en-US"
+        labels={barLabels}
+      />,
+    )
+    const tip = container.querySelector('[role="tooltip"]')?.textContent ?? ''
+    expect(tip).toContain('week still running')
+  })
+
+  it('and marks nothing when the bucket is complete', () => {
+    const { container } = render(
+      <BarChart bars={[bar()]} locale="en-US" labels={barLabels} />,
+    )
+    expect(container.querySelector('.border-dashed')).toBeNull()
+    const tip = container.querySelector('[role="tooltip"]')?.textContent ?? ''
+    expect(tip).not.toContain('week still running')
   })
 })

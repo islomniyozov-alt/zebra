@@ -45,13 +45,25 @@ export interface Bar {
   marginCents: number | null
   loads: number
   /**
-   * A bucket that has not happened yet — the tail of the current week.
+   * The current bucket, still running. Always the last one.
    *
-   * DRAWN AS A GAP, NOT A ZERO. A zero bar for Saturday on a Wednesday says
-   * Saturday earned nothing, which is a claim about a day that does not exist
-   * yet — the same error as a zero-height driver-pay bar, one column over.
+   * ── DRAWN, BUT MARKED ───────────────────────────────────────────────────
+   *
+   * Owner's ruling 2026-10-02: the window ends with the current settlement week
+   * and that week is drawn as far as today. So the last bar is SHORT BECAUSE
+   * THE WEEK IS UNFINISHED, and a reader comparing it to the twelve beside it
+   * sees a decline that did not happen.
+   *
+   * It is not hidden — the freight is real and belongs in the total — and it is
+   * not left to look like the others. Hatched edge, dimmed, and the tooltip
+   * says the week is still running. Same family of lie as a zero-height
+   * driver-pay bar, same treatment.
+   *
+   * THIS REPLACED `future`, which marked buckets that had not happened at all.
+   * A rolling window never reaches past today, so there is nothing left to
+   * mark that way and the flag would have been unreachable.
    */
-  future?: boolean
+  partial?: boolean
 }
 
 interface Props {
@@ -66,6 +78,8 @@ interface Props {
     loads: string
     empty: string
     bucket: string
+    /** Said on the current bucket's tooltip: the week is unfinished. */
+    partial: string
   }
 }
 
@@ -153,19 +167,22 @@ export function BarChart({ bars, locale, labels }: Props) {
                   >
                     {/* THE VALUE, ABOVE THE BAR. Owner's review. */}
                     <span className="pointer-events-none absolute inset-x-0 -top-z3 text-center font-mono text-[10px] tabular-nums text-ink-2">
-                      {bar.grossCents > 0 && !bar.future
+                      {bar.grossCents > 0
                         ? compact(bar.grossCents, locale)
                         : ''}
                     </span>
 
                     <span
-                      className="w-full rounded-t-[2px]"
+                      className={
+                        // THE PARTIAL BUCKET IS DRAWN AND MARKED. A dashed top
+                        // edge says the bar is not finished — the shape a reader
+                        // needs before comparing it to the ones beside it.
+                        bar.partial
+                          ? 'w-full rounded-t-[2px] border-t-2 border-dashed border-accent'
+                          : 'w-full rounded-t-[2px]'
+                      }
                       style={{
-                        // A FUTURE BUCKET DRAWS NOTHING. Its label stays on the
-                        // axis so the week is still seven columns wide.
-                        height: bar.future
-                          ? '0'
-                          : `${String(height(bar.grossCents))}%`,
+                        height: `${String(height(bar.grossCents))}%`,
                         backgroundColor: 'var(--color-accent)',
                         // HATCHED WHERE PAY IS UNRECORDED, and dimmed, so the
                         // bar reads as "cannot be compared" rather than as
@@ -237,6 +254,14 @@ export function BarChart({ bars, locale, labels }: Props) {
                       {bar.driverPayCents === null ? (
                         <p className="mt-z1 text-xs text-ink-3">
                           {labels.unrecorded}
+                        </p>
+                      ) : null}
+                      {/* THE SHORT LAST BAR, EXPLAINED WHERE IT IS ASKED ABOUT.
+                       * A reader hovering it wants to know whether the week
+                       * collapsed or has not finished. */}
+                      {bar.partial ? (
+                        <p className="mt-z1 text-xs text-ink-3">
+                          {labels.partial}
                         </p>
                       ) : null}
                     </div>

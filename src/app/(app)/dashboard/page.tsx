@@ -6,6 +6,9 @@ import { companyIdScopeFilter, companyScopeFilter } from '@/lib/tenancy'
 import { actionQueue } from '@/lib/dashboard'
 import {
   dashboardFor,
+  DEFAULT_PERIOD,
+  grainOf,
+  isPartialBucket,
   isPeriodKey,
   periodWindow,
   type Dashboard,
@@ -129,17 +132,14 @@ export default async function DashboardPage({
   const period: PeriodKey =
     typeof raw.period === 'string' && isPeriodKey(raw.period)
       ? raw.period
-      : // THIS QUARTER, not this month. Owner's review 2026-10-02: on the 2nd of
-        // October 'this month' rendered an empty dashboard — a correct answer to
-        // a question nobody opens the screen to ask.
-        'quarter'
+      : // LAST 13 WEEKS. Owner's ruling 2026-10-02: calendar windows are out,
+        // because each is empty for the first days of whatever it names — "this
+        // quarter" on 2 October was two days long and $0 on dev, which is the
+        // same defect the previous default was changed to avoid.
+        DEFAULT_PERIOD
   const companyParam = typeof raw.company === 'string' ? raw.company : null
   const now = new Date()
   const window = periodWindow(period, now)
-  // UTC MIDNIGHT TODAY, so a bucket is future only if its whole day is.
-  const today = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-  )
 
   const [money, queue, companies] = await Promise.all([
     maySeeMoney
@@ -147,7 +147,11 @@ export default async function DashboardPage({
           'read',
           'dashboard',
           (tx, ctx) =>
-            dashboardFor(tx, ctx.organizationId, companyParam, window),
+            dashboardFor(tx, ctx.organizationId, companyParam, window, {
+              // THE PRESET DECIDES, not the span. Omitting this is how `w4`
+              // (28 days) would have been drawn DAILY against the ruling.
+              grain: grainOf(period),
+            }),
           { timeoutMs: 10_000 },
         )
       : Promise.resolve(null),
@@ -183,6 +187,7 @@ export default async function DashboardPage({
     afterDriverPay: t('dash.kpi.afterDriverPay'),
     loads: t('dash.kpi.loads'),
     empty: t('dash.chart.noRevenue'),
+    partial: t('dash.chart.partial'),
     bucket:
       money === null || money.grain === 'day'
         ? t('dash.chart.day')
@@ -212,10 +217,10 @@ export default async function DashboardPage({
         <PeriodPicker
           legend={t('dash.period')}
           labels={{
-            week: t('dash.period.week'),
-            month: t('dash.period.month'),
-            quarter: t('dash.period.quarter'),
-            ytd: t('dash.period.ytd'),
+            d7: t('dash.period.d7'),
+            w4: t('dash.period.w4'),
+            w13: t('dash.period.w13'),
+            w52: t('dash.period.w52'),
           }}
         />
       </div>
@@ -268,7 +273,16 @@ export default async function DashboardPage({
                       // A BUCKET AFTER TODAY HAS NOT HAPPENED. The week view runs
                       // Sunday to Sunday so the axis is always seven columns;
                       // the tail draws as gaps rather than as zeroes.
-                      future: point.weekStart > today,
+                      // THE LAST BUCKET IS THE CURRENT WEEK, STILL RUNNING. Its
+                      // bar is short because the week is unfinished, not because
+                      // the business fell off, so it is MARKED. A rolling window
+                      // never reaches past today, so there is no future bucket
+                      // left to draw as a gap.
+                      partial: isPartialBucket(
+                        point.weekStart,
+                        money.grain,
+                        window.to,
+                      ),
                     }))}
                     locale={locale}
                     labels={barLabels}

@@ -596,35 +596,6 @@ export interface DashboardPeriod {
  * a silent whole-table scan.
  */
 /**
- * How many days a window spans, inclusive of its open day.
- *
- * ON THE WINDOW, NOT ON THE PRESET'S NAME. A quarter is 90-odd days and a month
- * is 28 to 31, but "this quarter" on its second day is two days long — and two
- * days deserve daily bars whatever the picker is called. Reading the span rather
- * than the label is what stops "This quarter" drawing one lonely weekly bar on
- * the 2nd of October, which is the shape that started this review.
- */
-export function spanDays(period: DashboardPeriod): number {
-  return Math.max(
-    1,
-    Math.round((period.to.getTime() - period.from.getTime()) / 86_400_000),
-  )
-}
-
-/**
- * Daily or weekly buckets for a window. Owner ruling, 2026-10-02.
- *
- * The ruling names the four presets — week and month give days, quarter and
- * year-to-date give weeks — and the boundary it implies is ABOUT 5 WEEKS: a
- * month is the longest thing drawn daily. So the rule is expressed as the span
- * rather than as a list of preset names, which also answers for a quarter that
- * is two days old.
- */
-export function grainFor(period: DashboardPeriod): Grain {
-  return spanDays(period) > 35 ? 'week' : 'day'
-}
-
-/**
  * Every bucket in the window, oldest first, INCLUDING the empty ones.
  *
  * A bucket with no freight returns no row from SQL, so a series built from rows
@@ -662,7 +633,11 @@ export async function dashboardFor(
   orgId: string,
   companyId: string | null,
   period: DashboardPeriod,
-  options: { grain?: Grain } = {},
+  // REQUIRED, with no fallback. It used to default to a SPAN rule — daily under
+  // about five weeks — and that rule contradicts the ruling for `w4`: 28 days
+  // would be drawn daily where the preset says weekly. A caller that has a
+  // preset has the grain; one that does not should not be guessing.
+  options: { grain: Grain },
 ): Promise<Dashboard> {
   if (orgId.trim() === '') {
     throw new Error('dashboardFor: no organization id. RLS would be unset.')
@@ -678,7 +653,7 @@ export async function dashboardFor(
   // Now every figure on the page answers for `period`, and the only thing the
   // picker also decides is the BUCKET SIZE — `grainFor` below, overridable only
   // so tests can pin one.
-  const grain = options.grain ?? grainFor(period)
+  const grain = options.grain
 
   const [rows, customers, days, payKnownFrom] = await Promise.all([
     weekCompanyRows(tx, {
@@ -729,15 +704,14 @@ export async function dashboardFor(
  * put a Sunday load in a different week from the statement that paid it.
  */
 /**
- * The four windows a dashboard answers for.
+ * The four windows a dashboard answers for. ROLLING, never calendar.
  *
- * HERE AND NOT IN THE PICKER, because the period is a domain vocabulary and
- * not a UI control: the server reads it from the URL, resolves it with
- * periodWindow below, and the component only renders the choice. A lib that
- * imported this from a client component would have the dependency backwards
- * and would drag React into every test of the arithmetic.
+ * Owner's ruling, 2026-10-02. A calendar window is empty for the first days of
+ * whatever it names — "this quarter" on 2 October was two days long and $0 — so
+ * the presets are spans backwards from today and are the same size every day
+ * they are opened.
  */
-export const PERIODS = ['week', 'month', 'quarter', 'ytd'] as const
+export const PERIODS = ['d7', 'w4', 'w13', 'w52'] as const
 
 export type PeriodKey = (typeof PERIODS)[number]
 
@@ -745,45 +719,80 @@ export function isPeriodKey(value: string): value is PeriodKey {
   return (PERIODS as readonly string[]).includes(value)
 }
 
+/** The default. A quarter of trading, always populated. */
+export const DEFAULT_PERIOD: PeriodKey = 'w13'
+
+/**
+ * The grain a preset draws in. A PROPERTY OF THE PRESET, not of the span.
+ *
+ * The span rule this replaces — daily under about five weeks, weekly above —
+ * existed only because a calendar quarter could be two days old. Rolling windows
+ * have a fixed size, so the reason is gone.
+ *
+ * `w4` IS WEEKLY THOUGH IT IS 28 DAYS, where the span rule would have drawn it
+ * daily. Four weekly bars is the comparison that preset is for, and this is the
+ * one place the two rules visibly disagree.
+ */
+export function grainOf(key: PeriodKey): Grain {
+  return key === 'd7' ? 'day' : 'week'
+}
+
+/** How many buckets a preset shows, including the partial current one. */
+const BUCKETS: Record<PeriodKey, number> = {
+  d7: 7,
+  w4: 4,
+  w13: 13,
+  w52: 52,
+}
+
+/**
+ * The window a preset means, in UTC.
+ *
+ * ── IT ENDS WITH THE CURRENT SETTLEMENT WEEK, DRAWN AS FAR AS TODAY ──────
+ *
+ * `to` is EXCLUSIVE and is tomorrow's midnight, so everything delivered today
+ * counts and the answer is stable for the rest of the day. The final bucket is
+ * therefore PARTIAL — the week is still running — which the chart marks, because
+ * a short last bar otherwise reads as a decline that did not happen.
+ *
+ * ── THE WEEKLY PRESETS OPEN ON A SUNDAY ─────────────────────────────────
+ *
+ * MONEY-DESIGN §0, and the same boundary the SQL groups on: counting back in
+ * sevens from an arbitrary weekday would put each bucket's start mid-week, and
+ * the rows SQL grouped into Sundays would have nowhere to land.
+ */
 export function periodWindow(
   key: PeriodKey,
   now: Date,
 ): { from: Date; to: Date } {
-  const day = new Date(
+  const today = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
   )
-  // EXCLUSIVE, so today counts. See the note above.
-  const to = new Date(day)
+  const to = new Date(today)
   to.setUTCDate(to.getUTCDate() + 1)
 
-  // ── THE WEEK IS THE WHOLE SETTLEMENT WEEK, SUNDAY TO SUNDAY ──────────
-  //
-  // Owner's ruling: 'Week -> 7 daily bars'. Closing this window at today+1
-  // like the others gave DAYS ELAPSED — one bar on a Sunday, six on a Friday —
-  // so the week preset runs to the next Sunday and the axis is always seven.
-  //
-  // THE DAYS THAT HAVE NOT HAPPENED RENDER AS GAPS, NOT ZEROES. A zero bar for
-  // Saturday on a Wednesday claims Saturday earned nothing, which is a claim
-  // about a day that does not exist yet — the same error as a zero-height
-  // driver-pay bar, drawn one column over. The chart marks them from `now`.
-  if (key === 'week') {
-    const open = sundayOf(now)
-    const close = new Date(open)
-    close.setUTCDate(close.getUTCDate() + 7)
-    return { from: open, to: close }
+  if (key === 'd7') {
+    const from = new Date(today)
+    from.setUTCDate(from.getUTCDate() - (BUCKETS.d7 - 1))
+    return { from, to }
   }
-  if (key === 'month') {
-    return {
-      from: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),
-      to,
-    }
-  }
-  if (key === 'quarter') {
-    const firstMonth = Math.floor(now.getUTCMonth() / 3) * 3
-    return {
-      from: new Date(Date.UTC(now.getUTCFullYear(), firstMonth, 1)),
-      to,
-    }
-  }
-  return { from: new Date(Date.UTC(now.getUTCFullYear(), 0, 1)), to }
+
+  // BACK FROM THE SUNDAY THAT OPENED THIS WEEK, so the last bucket is the
+  // current partial week and the first is a whole one.
+  const from = sundayOf(today)
+  from.setUTCDate(from.getUTCDate() - (BUCKETS[key] - 1) * 7)
+  return { from, to }
+}
+
+/**
+ * Does `to` fall inside the bucket that starts at `start`?
+ *
+ * THE PARTIAL BUCKET, which is always the last one: the week is unfinished, so
+ * its bar is short for a reason that is about the calendar rather than about the
+ * freight. The chart marks it and says so on hover.
+ */
+export function isPartialBucket(start: Date, grain: Grain, to: Date): boolean {
+  const end = new Date(start)
+  end.setUTCDate(end.getUTCDate() + (grain === 'week' ? 7 : 1))
+  return to < end
 }

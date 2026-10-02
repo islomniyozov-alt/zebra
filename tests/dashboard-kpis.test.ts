@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   assembleDashboard,
+  DEFAULT_PERIOD,
   bucketsIn,
-  grainFor,
+  grainOf,
+  isPartialBucket,
+  periodWindow,
+  type PeriodKey,
   recentSundays,
   sundayOf,
   type WeekCompanyRow,
@@ -214,88 +218,131 @@ describe('by company', () => {
 // v10.14 let the bars show thirteen weeks whatever the picker said. On the
 // screen that meant a quarter of bars beside a month of donuts — one dashboard
 // saying two things — and the permission was revoked.
-describe('the grain follows the window, not the preset name', () => {
-  const win = (from: Date, to: Date) => ({ from, to })
-
-  it('a week of days', () => {
-    expect(
-      grainFor(
-        win(new Date(Date.UTC(2026, 8, 6)), new Date(Date.UTC(2026, 8, 13))),
-      ),
-    ).toBe('day')
+// ── ROLLING WINDOWS (owner ruling 2026-10-02) ──────────────────────────────
+//
+// Calendar windows are out. Each preset is a span backwards from today, so it is
+// the same size every day it is opened — "this quarter" on 2 October was two days
+// long and $0, which is the defect the previous default was changed to avoid.
+//
+// THE SPAN-BASED GRAIN RULE IS GONE WITH THEM. It existed only because a calendar
+// quarter could be two days old; its tests went with it rather than being left to
+// pin a rule nothing uses.
+describe('the grain is a property of the preset', () => {
+  it('7 days is daily', () => {
+    expect(grainOf('d7')).toBe('day')
   })
 
-  it('a month of days', () => {
-    expect(
-      grainFor(
-        win(new Date(Date.UTC(2026, 8, 1)), new Date(Date.UTC(2026, 9, 1))),
-      ),
-    ).toBe('day')
+  // 28 DAYS AND WEEKLY, where the span rule would have drawn it daily. Four
+  // weekly bars is the comparison that preset exists for, and this is the one
+  // place the old rule and the new one visibly disagree.
+  it('4 weeks is weekly despite being 28 days', () => {
+    expect(grainOf('w4')).toBe('week')
   })
 
-  it('a quarter of weeks', () => {
-    expect(
-      grainFor(
-        win(new Date(Date.UTC(2026, 6, 1)), new Date(Date.UTC(2026, 9, 1))),
-      ),
-    ).toBe('week')
-  })
-
-  it('a year to date of weeks', () => {
-    expect(
-      grainFor(
-        win(new Date(Date.UTC(2026, 0, 1)), new Date(Date.UTC(2026, 9, 2))),
-      ),
-    ).toBe('week')
-  })
-
-  // THE SPAN, NOT THE LABEL. "This quarter" on its second day is two days long,
-  // and two days deserve daily bars — one lonely weekly bar on the 2nd of
-  // October is the shape that started this review.
-  it('gives a two-day-old quarter daily bars, despite its name', () => {
-    expect(
-      grainFor(
-        win(new Date(Date.UTC(2026, 9, 1)), new Date(Date.UTC(2026, 9, 3))),
-      ),
-    ).toBe('day')
+  it('13 and 52 weeks are weekly', () => {
+    expect(grainOf('w13')).toBe('week')
+    expect(grainOf('w52')).toBe('week')
   })
 })
 
-describe('bucketsIn generates the axis, including the empty buckets', () => {
-  it('gives one bucket per day', () => {
-    const buckets = bucketsIn(
-      {
-        from: new Date(Date.UTC(2026, 9, 1)),
-        to: new Date(Date.UTC(2026, 9, 8)),
-      },
-      'day',
-    )
-    expect(buckets).toHaveLength(7)
+describe('every window ends with the current settlement week', () => {
+  // A Friday, so the current week is genuinely partial.
+  const FRIDAY = new Date(Date.UTC(2026, 9, 2))
+
+  it('closes tomorrow, so today counts and the answer is stable all day', () => {
+    const w = periodWindow('w13', FRIDAY)
+    expect(w.to.toISOString().slice(0, 10)).toBe('2026-10-03')
   })
 
-  // A WEEKLY AXIS STARTS ON THE SUNDAY THAT CONTAINS THE PERIOD'S OPEN DAY,
-  // because that is the bucket SQL grouped the freight into. Starting on the
-  // period's own Wednesday would leave that week's row with nowhere to land.
-  it('snaps a weekly axis back to the Sunday the period opens inside', () => {
-    // 2026-10-01 is a Thursday; the week opened Sunday 2026-09-27.
-    const buckets = bucketsIn(
-      {
-        from: new Date(Date.UTC(2026, 9, 1)),
-        to: new Date(Date.UTC(2026, 9, 20)),
-      },
-      'week',
-    )
-    expect(buckets[0]?.toISOString().slice(0, 10)).toBe('2026-09-27')
+  it('gives exactly the bucket count each preset names', () => {
+    const counts: [PeriodKey, number][] = [
+      ['d7', 7],
+      ['w4', 4],
+      ['w13', 13],
+      ['w52', 52],
+    ]
+    for (const [key, expected] of counts) {
+      const w = periodWindow(key, FRIDAY)
+      expect(bucketsIn(w, grainOf(key)), key).toHaveLength(expected)
+    }
   })
 
-  it('caps an absurd window rather than generating thousands', () => {
-    const buckets = bucketsIn(
-      {
-        from: new Date(Date.UTC(1990, 0, 1)),
-        to: new Date(Date.UTC(2026, 0, 1)),
-      },
-      'day',
-    )
-    expect(buckets.length).toBeLessThanOrEqual(400)
+  // THE WEEKLY PRESETS OPEN ON A SUNDAY, which is the boundary SQL groups on.
+  // Counting back in sevens from a Friday would start every bucket mid-week and
+  // leave the rows nowhere to land.
+  it('opens the weekly presets on a Sunday', () => {
+    for (const key of ['w4', 'w13', 'w52'] as PeriodKey[]) {
+      expect(periodWindow(key, FRIDAY).from.getUTCDay(), key).toBe(0)
+    }
+  })
+
+  it('and the 7-day preset simply ends today', () => {
+    const w = periodWindow('d7', FRIDAY)
+    expect(w.from.toISOString().slice(0, 10)).toBe('2026-09-26')
+  })
+
+  // THE SAME SIZE WHATEVER THE DATE. This is the whole point of the ruling: a
+  // calendar window asked on the 1st of a quarter is one day long.
+  it('is the same size on the first of a quarter as on the last', () => {
+    for (const day of [
+      new Date(Date.UTC(2026, 9, 1)),
+      new Date(Date.UTC(2026, 11, 31)),
+    ]) {
+      expect(bucketsIn(periodWindow('w13', day), 'week')).toHaveLength(13)
+    }
+  })
+})
+
+describe('the last bucket is partial, and nothing else is', () => {
+  const FRIDAY = new Date(Date.UTC(2026, 9, 2))
+
+  it('marks the current week', () => {
+    const w = periodWindow('w13', FRIDAY)
+    const buckets = bucketsIn(w, 'week')
+    const last = buckets.at(-1)!
+    expect(isPartialBucket(last, 'week', w.to)).toBe(true)
+  })
+
+  it('and no earlier one', () => {
+    const w = periodWindow('w13', FRIDAY)
+    const buckets = bucketsIn(w, 'week')
+    for (const bucket of buckets.slice(0, -1)) {
+      expect(isPartialBucket(bucket, 'week', w.to)).toBe(false)
+    }
+  })
+
+  // ON A SATURDAY THE WEEK IS COMPLETE, so nothing is partial — the window ends
+  // at the week's own boundary.
+  it('marks nothing on the last day of the week', () => {
+    const saturday = new Date(Date.UTC(2026, 9, 3))
+    const w = periodWindow('w13', saturday)
+    const last = bucketsIn(w, 'week').at(-1)!
+    expect(isPartialBucket(last, 'week', w.to)).toBe(false)
+  })
+})
+
+// ── THE DEFAULT IS A REQUIREMENT, SO IT IS PINNED ──────────────────────────
+//
+// `watch-guard` refused the break that changed `DEFAULT_PERIOD` to `d7`: nothing
+// asserted it, so the default could have been switched to the one preset that
+// reads $0 on dev and no test would have objected. "Default = Last 13 weeks" is
+// as much a requirement as the window arithmetic.
+describe('the default period', () => {
+  it('is Last 13 weeks', () => {
+    expect(DEFAULT_PERIOD).toBe('w13')
+  })
+
+  // AND IT IS THE POPULATED ONE. The ruling exists because the previous two
+  // defaults rendered an empty dashboard; a default is only correct if it shows
+  // something on the day it is opened.
+  it('and gives thirteen weekly buckets, whatever the date', () => {
+    for (const day of [
+      new Date(Date.UTC(2026, 9, 1)),
+      new Date(Date.UTC(2026, 9, 2)),
+      new Date(Date.UTC(2027, 0, 1)),
+    ]) {
+      const window = periodWindow(DEFAULT_PERIOD, day)
+      expect(bucketsIn(window, grainOf(DEFAULT_PERIOD))).toHaveLength(13)
+    }
   })
 })

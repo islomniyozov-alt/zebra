@@ -2,7 +2,12 @@
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { cx } from '@/lib/cx'
-import { PERIODS, isPeriodKey, type PeriodKey } from '@/lib/dashboard-kpis'
+import {
+  DEFAULT_PERIOD,
+  PERIODS,
+  isPeriodKey,
+  type PeriodKey,
+} from '@/lib/dashboard-kpis'
 
 interface Props {
   labels: Record<PeriodKey, string>
@@ -41,14 +46,14 @@ export function PeriodPicker({ labels, legend }: Props) {
   const params = useSearchParams()
   const selected = params.get('period')
   const active: PeriodKey =
-    selected !== null && isPeriodKey(selected) ? selected : 'month'
+    selected !== null && isPeriodKey(selected) ? selected : DEFAULT_PERIOD
 
   const go = (key: PeriodKey) => {
     const next = new URLSearchParams(params)
     // THE DEFAULT IS AN ABSENT PARAM, not `?period=month`. A canonical URL for
     // the default view means one cache entry and one thing to read in a bug
     // report, rather than two spellings of the same screen.
-    if (key === 'month') next.delete('period')
+    if (key === DEFAULT_PERIOD) next.delete('period')
     else next.set('period', key)
     const query = next.toString()
     router.push(query === '' ? pathname : `${pathname}?${query}`)
