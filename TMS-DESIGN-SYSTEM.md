@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v10.15 — §6.1.1 gains the chart contract 2026-10-02: server-rendered inline SVG with no library and nothing that could animate, hover detail as a <title>, the palette an ACCENT RAMP rather than the status hues §3.3 fixes to meanings, and the same figures as a visually hidden table under every chart; v10.14 — §6.1.1 added 2026-10-01 (dashboard redesign part 1): chips and period govern the whole page, "after driver pay" is an em dash for any period Zebra was not settling, closed history counts in totals and appears in no queue, Needs-you becomes a right rail. _The brief for this said "Design system v10.2"; the file was already at v10.13, so this is v10.14 and the discrepancy is flagged rather than resolved — see `PHASE-5-BRIEF.md` §7 flag 42._ v10.13 — §7.10 added 2026-10-01: a record's history is ONE activity timeline, six kinds of entry that do not dress alike, a document's upload read from the `Document` row rather than its audit row, and adding a note is its own control; v10.12 — §6.2.1’s batches row reworded 2026-10-01: the bar is `checkbox selection · Finalise · Mark paid`, not a control called Change status; v10.11 — migration 61 lands 2026-10-01: §6.2.4 standing charges built and the Charges tab table goes to four, §6.2.3's deduct side built with the fuel mode frozen per statement, and the scope offered is the schema's three ownership types rather than the two §6.2.4 first named; v10.10 — §6.2.6 the statements grid 2026-10-01: Deductions is every net-reducing line, status and batch filters, bulk Post and Mark paid; v10.9 — §6.2.5 applying a payment 2026-09-30, and §7.5’s six-field cap applied against a brief asking for a modal; v10.8 — §6.2: Invoices gains a Factored tab, a status filter and bulk Mark sent 2026-09-30; v10.7 — §6.2.4 standing charges specified and held for migration 61, 2026-09-30; v10.6 — §6.2.2: the Trip column is the broker’s reference and Add trips is unconditional 2026-09-30; v10.5 — §6.2.2: every statement exports, a draft’s PDF is watermarked 2026-09-30 (owner’s ruling, reversing the same day’s refusal); v10.4 — §8’s heading rule decides by an allowlist of issued series 2026-09-30; v10.3 — §8 forbids an internal id in a heading and §6.2.2 gives the statement its title rule 2026-09-30 (owner’s ruling); v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
+**Status:** v10.16 — owner review of the charts on dev 2026-10-02: the period picker drives EVERY chart and the two-window permission is REVOKED, default period becomes This quarter, every chart carries a worded legend, every bar its value and label with gridlines and a visible CSS tooltip, every KPI a sparkline, and an empty period keeps its axis and legend; bars and sparklines become HTML/CSS while rings stay SVG; v10.15 — §6.1.1 gains the chart contract 2026-10-02: server-rendered inline SVG with no library and nothing that could animate, hover detail as a <title>, the palette an ACCENT RAMP rather than the status hues §3.3 fixes to meanings, and the same figures as a visually hidden table under every chart; v10.14 — §6.1.1 added 2026-10-01 (dashboard redesign part 1): chips and period govern the whole page, "after driver pay" is an em dash for any period Zebra was not settling, closed history counts in totals and appears in no queue, Needs-you becomes a right rail. _The brief for this said "Design system v10.2"; the file was already at v10.13, so this is v10.14 and the discrepancy is flagged rather than resolved — see `PHASE-5-BRIEF.md` §7 flag 42._ v10.13 — §7.10 added 2026-10-01: a record's history is ONE activity timeline, six kinds of entry that do not dress alike, a document's upload read from the `Document` row rather than its audit row, and adding a note is its own control; v10.12 — §6.2.1’s batches row reworded 2026-10-01: the bar is `checkbox selection · Finalise · Mark paid`, not a control called Change status; v10.11 — migration 61 lands 2026-10-01: §6.2.4 standing charges built and the Charges tab table goes to four, §6.2.3's deduct side built with the fuel mode frozen per statement, and the scope offered is the schema's three ownership types rather than the two §6.2.4 first named; v10.10 — §6.2.6 the statements grid 2026-10-01: Deductions is every net-reducing line, status and batch filters, bulk Post and Mark paid; v10.9 — §6.2.5 applying a payment 2026-09-30, and §7.5’s six-field cap applied against a brief asking for a modal; v10.8 — §6.2: Invoices gains a Factored tab, a status filter and bulk Mark sent 2026-09-30; v10.7 — §6.2.4 standing charges specified and held for migration 61, 2026-09-30; v10.6 — §6.2.2: the Trip column is the broker’s reference and Add trips is unconditional 2026-09-30; v10.5 — §6.2.2: every statement exports, a draft’s PDF is watermarked 2026-09-30 (owner’s ruling, reversing the same day’s refusal); v10.4 — §8’s heading rule decides by an allowlist of issued series 2026-09-30; v10.3 — §8 forbids an internal id in a heading and §6.2.2 gives the statement its title rule 2026-09-30 (owner’s ruling); v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -307,22 +307,66 @@ whole dashboard; it becomes a column beside the money. Rows that count zero are
 dropped — a queue of noughts is a queue nobody reads — and a row the session
 cannot read is never COUNTED, not counted and hidden.
 
-**The thirteen-week series is always thirteen weeks, whatever the period
-picker says.** A sparkline over a four-day period is four points and tells
-nobody whether the business is growing. The strip answers for the period and
-the chart for the quarter, and the chart says so in its own heading — which is
-the one place two windows on one screen is honest, because the heading names
-each.
+**~~The thirteen-week series is always thirteen weeks, whatever the period
+picker says.~~ REVOKED 2026-10-02, owner's review of the charts on dev.** This
+said two windows on one screen were honest "because the heading names each". On
+the screen they were not: the bars showed a quarter while the donuts beside them
+showed the month, so one dashboard stated two things at once and nothing marked
+which. A heading is not enough when two panels disagree at a glance.
+
+**THE PERIOD PICKER DRIVES EVERY CHART, and the granularity follows it:**
+
+| period       | buckets      |
+| ------------ | ------------ |
+| This week    | 7 daily bars |
+| This month   | daily        |
+| This quarter | weekly       |
+| Year to date | weekly       |
+
+The strip, the bars, the donuts and the per-day strip all answer for the same
+window. Nothing on the dashboard answers for a window the picker does not show.
+
+**The default period is THIS QUARTER.** This month was the default until
+2026-10-02 and on the 2nd of October it rendered an empty dashboard — a correct
+answer to a question nobody opens the screen to ask.
+
+**Every KPI carries a sparkline** over the same buckets, so a figure is never a
+number without a direction. Six cells, six sparklines: gross, driver pay, after
+driver pay, loads, miles, per mile.
+
+**Every chart carries a legend, in words.** Not a colour a reader has to infer:
+solid is gross, grey is driver pay, hatched is "driver pay not yet recorded in
+Zebra". A chart with no legend does not ship.
+
+**Every bar carries its value above it and its period below it**, and the plot
+carries horizontal gridlines with money ticks. `$12.4k` above, `Sep 20` or
+`Oct 2` beneath. Hover shows the full set — week, gross, driver pay, after
+driver pay, loads — as a VISIBLE tooltip and not only a `<title>`: a native
+tooltip is slow, unstyled, and absent on touch.
+
+**An empty period keeps its axis, its ticks and its legend.** It says no freight
+was delivered and shows the shape of the thing that is empty. A blank panel is
+indistinguishable from a broken one, which is the same objection §14 makes to
+"No data available".
 
 **Panels, in this order:** Charts, Fleet, Cash, Compliance. Part 1 renders them
 as empty cards with headings; nothing animates and nothing says "No data
 available" (§14).
 
-**Charts are server-rendered inline SVG.** No charting library, no client
-JavaScript, nothing that _could_ animate — §14 forbids charts that animate on
-every render, and the cheapest way to obey that is to have nothing capable of
-it. Hover detail is a `<title>` child, which is the browser's own tooltip and
-needs no script.
+**Charts carry no charting library and no client JavaScript.** §14 forbids
+charts that animate on every render, and the cheapest way to obey that is to
+have nothing capable of it.
+
+**BARS AND SPARKLINES ARE HTML AND CSS; RINGS ARE SVG.** _Amended 2026-10-02 —
+this said inline SVG for everything._ A bar chart that must carry a value above
+each bar, a label beneath it, gridlines behind it and a styled tooltip on hover
+is a layout problem, and HTML does layout. The SVG version needed hand-placed
+text at computed coordinates for all four, and a native `<title>` for the
+tooltip — which is slow to appear, cannot be styled, and does not exist on
+touch. A ring has no HTML equivalent and stays SVG.
+
+The tooltip is a sibling element revealed by `:hover` on the bar's group. CSS,
+not script.
 
 **A chart's palette is the ACCENT RAMP, never the status hues.** §3.3 fixes
 `--color-success`, `--color-warning`, `--color-danger` and `--color-progress` to
