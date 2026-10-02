@@ -3,7 +3,7 @@ import { createPrismaClient } from '@/lib/db'
 import { runInOrg } from '@/lib/tenancy'
 import { unattributed } from '@/lib/audit'
 import { readyToInvoiceWhere } from '@/lib/invoices'
-import { unassignedFinishedWhere } from '@/lib/dashboard'
+import { unassignedFinishedWhere } from '@/lib/load-views'
 import { NOT_CLOSED_HISTORY } from '@/lib/billing-status'
 import { assertTenancy } from './datatruck-tenancy'
 

@@ -1,9 +1,13 @@
-import type { Prisma } from '@/generated/prisma/client'
 import type { CompanyScopeFilter, TxClient } from './tenancy'
 import { readyToInvoiceWhere } from './invoices'
 import { complianceCount } from './compliance'
 import { needsYouCounts, type CountedRow } from './dashboard-counts'
-import { NOT_CLOSED_HISTORY } from './billing-status'
+import {
+  noRateWhere,
+  podMissingWhere,
+  unassignedFinishedWhere,
+  unassignedWhere,
+} from './load-views'
 import type { AuthorizedSession, Resource } from './permissions'
 import { can } from './permissions'
 import { PERSON_DRIVER } from './driver-kind'
@@ -36,27 +40,18 @@ import { PERSON_DRIVER } from './driver-kind'
 // ---------------------------------------------------------------------------
 
 /** A row in the action queue: what needs doing, how many, and where. */
-/**
- * Finished, billable, and attached to nobody.
- *
- * THE SAME SHAPE `isReady` NOW REFUSES, asked as a question instead of an
- * answer: these are the loads whose badge dropped off Ready to invoice, and
- * the reason they must be counted somewhere is that dropping off a queue is
- * not the same as being noticed.
- */
-export function unassignedFinishedWhere(): Prisma.LoadWhereInput {
-  return {
-    ...NOT_CLOSED_HISTORY,
-    deletedAt: null,
-    isCancelled: false,
-    operationalStatus: 'POD_RECEIVED',
-    totalRevenueCents: { gt: 0 },
-    // Either half missing is the alarm. Driver is the one that stops the pay;
-    // truck is the owner's ruling and the evidence that a POD arrived for a
-    // movement nobody witnessed. See `isAssigned`.
-    OR: [{ driverId: null }, { truckId: null }],
-  }
-}
+//
+// ── THE LOAD PREDICATES LIVE IN `load-views.ts` NOW ──────────────────────
+//
+// `unassignedFinishedWhere` was defined HERE and exported, and no screen ever
+// read it — which is exactly how its row came to link at
+// `/loads?status=POD_RECEIVED` and list 858 rows against a count of 101. A
+// predicate only the thing that counts can see is a predicate the destination
+// cannot keep.
+//
+// Owner's ruling, 2026-10-01: one named view per row, resolved by the loads
+// list through the same function. They moved out whole; nothing here redefines
+// them.
 
 export interface ActionRow {
   key: string
@@ -130,36 +125,21 @@ const ACTIONS: ActionSpec[] = [
     // Delivered, no POD. The load cannot be billed and the clock is running.
     key: 'podMissing',
     resource: 'load',
-    href: '/loads?status=DELIVERED',
+    href: '/loads?view=podMissing',
     tone: 'danger',
+    // THE VIEW'S OWN FUNCTION, which the loads list resolves ?view=podMissing
+    // through. One predicate, three readers.
     count: (tx, scope) =>
-      tx.load.count({
-        where: {
-          ...scope,
-          ...NOT_CLOSED_HISTORY,
-          deletedAt: null,
-          isCancelled: false,
-          operationalStatus: 'DELIVERED',
-        },
-      }),
+      tx.load.count({ where: { ...podMissingWhere(), ...scope } }),
   },
   {
     // POD in, no rate. Nobody can invoice it and nobody is looking at it.
     key: 'noRate',
     resource: 'load.financials',
-    href: '/loads?status=POD_RECEIVED',
+    href: '/loads?view=noRate',
     tone: 'danger',
     count: (tx, scope) =>
-      tx.load.count({
-        where: {
-          ...scope,
-          ...NOT_CLOSED_HISTORY,
-          deletedAt: null,
-          isCancelled: false,
-          operationalStatus: 'POD_RECEIVED',
-          totalRevenueCents: { lte: 0 },
-        },
-      }),
+      tx.load.count({ where: { ...noRateWhere(), ...scope } }),
   },
   {
     // The SAME predicate the invoice screen's ready queue uses, from the same
@@ -195,7 +175,7 @@ const ACTIONS: ActionSpec[] = [
     // The loads list, narrowed to the status they are all sitting at. It does
     // not filter on assignment — that would be a query parameter invented for
     // one dashboard row — so this lands on a short list a human can scan.
-    href: '/loads?status=POD_RECEIVED',
+    href: '/loads?view=unassignedFinished',
     // DANGER, not warning. The scale on this dashboard is "danger for money
     // going stale"; a driver not being paid for finished work is exactly that,
     // and it goes stale silently rather than aging into a report.
@@ -204,7 +184,6 @@ const ACTIONS: ActionSpec[] = [
       tx.load.count({
         where: {
           ...unassignedFinishedWhere(),
-          ...NOT_CLOSED_HISTORY,
           ...scope,
         },
       }),
@@ -212,7 +191,6 @@ const ACTIONS: ActionSpec[] = [
       const total = await tx.load.aggregate({
         where: {
           ...unassignedFinishedWhere(),
-          ...NOT_CLOSED_HISTORY,
           ...scope,
         },
         _sum: { totalRevenueCents: true },
@@ -276,26 +254,16 @@ const ACTIONS: ActionSpec[] = [
     href: '/dispatch',
     tone: 'neutral',
     count: (tx, scope) =>
-      tx.load.count({
-        where: {
-          ...scope,
-          // THE ONLY ROW THAT DID NOT HAVE THIS, and it was safe by
-          // COINCIDENCE — which `billing-status.ts` names as the thing not to
-          // leave holding a dashboard up.
-          //
-          // MEASURED ON DEV, 2026-10-01: 13,517 loads are closed history, 18
-          // of them are AVAILABLE or BOOKED, and all 18 happen to carry both a
-          // driver and a truck — so they fail the `OR` below and the count is
-          // 38 either way. The coincidence is that the import filled both
-          // columns. One imported load missing a truck would have put archived
-          // freight from another system into today's dispatch queue.
-          ...NOT_CLOSED_HISTORY,
-          deletedAt: null,
-          isCancelled: false,
-          operationalStatus: { in: ['AVAILABLE', 'BOOKED'] },
-          OR: [{ driverId: null }, { truckId: null }],
-        },
-      }),
+      // CLOSED HISTORY EXCLUDED, in the view rather than here. It was the
+      // only row without the clause and it was safe by COINCIDENCE: measured
+      // 2026-10-01, 18 archived loads are AVAILABLE or BOOKED and all 18 carry
+      // both a driver and a truck, so they fail the OR either way. One imported
+      // load missing a truck would have put another system's archive into
+      // today's dispatch queue.
+      //
+      // ITS HREF STAYS `/dispatch` by ruling — that is where the work is done —
+      // so this is the one view whose name is not also a link.
+      tx.load.count({ where: { ...unassignedWhere(), ...scope } }),
   },
 ]
 

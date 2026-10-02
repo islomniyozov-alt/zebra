@@ -13,7 +13,7 @@ import {
 } from '@/lib/dashboard'
 import { COUNTED_ROWS, needsYouCounts } from '@/lib/dashboard-counts'
 import { recordPayment } from '@/lib/payments'
-import { readyToInvoiceWhere } from '@/lib/invoices'
+import { isLoadViewName, viewWhere } from '@/lib/load-views'
 import type { AuthorizedSession } from '@/lib/permissions'
 import type { PrismaClient } from '@/generated/prisma/client'
 
@@ -452,83 +452,200 @@ describe('closed history is in no queue', () => {
 // change, and they are meaningful precisely because the earlier describes have
 // left real rows in several of these states.
 // ── THE ONE ROW WHOSE SCREEN SHARES ITS PREDICATE ─────────────────────────
+// ── EVERY ROW COUNTS WHAT ITS DESTINATION LISTS ────────────────────────────
 //
-// Owner's ruling, 2026-10-01: the filter must be compared against the
-// predicate THE ROW'S TARGET SCREEN LISTS WITH, not against `ActionSpec.count`
-// — "a reference nothing runs is rule 7, the shared dead name agrees with
-// itself." Exactly right, and it is why this case is alone.
+// Owner's ruling, 2026-10-01: compare each filter against the predicate THE
+// ROW'S TARGET SCREEN LISTS WITH — not against `ActionSpec.count`, because "a
+// reference nothing runs is rule 7, the shared dead name agrees with itself."
 //
-// `readyToInvoice` is the only row of the eight whose destination lists
-// through a SHARED FUNCTION: `readyToInvoiceWhere()`, used by
-// `accounting/invoices/page.tsx:156` and by `loads/page.tsx:151` and `:279`.
-// So this asks the real question — does the SQL filter select what the invoice
-// queue selects — and the answer is checked against the function the screen
-// itself calls.
+// Before the named views, only `readyToInvoice` could answer that. Measured on
+// dev the day the ruling was written:
 //
-// THE OTHER SEVEN HAVE NO SUCH FUNCTION, and three of them demonstrably
-// disagree with their own links. Measured on dev 2026-10-01:
+//   podMissing          counted     1   /loads?status=DELIVERED      listed 13,500
+//   noRate              counted     0   /loads?status=POD_RECEIVED   listed    858
+//   unassignedFinished  counted   101   /loads?status=POD_RECEIVED   listed    858
 //
-//   podMissing          counts     1   /loads?status=DELIVERED      lists 13,500
-//   noRate              counts     0   /loads?status=POD_RECEIVED   lists    858
-//   unassignedFinished  counts   101   /loads?status=POD_RECEIVED   lists    858
+// `load-views.ts` now holds one named predicate per row; the row's href is
+// `?view=<name>`; the loads list resolves that name through the same function;
+// `needsYouCounts` translates it into SQL. All eight pairs agree on dev.
 //
-// The loads list filters on `operationalStatus` alone — no closed-history
-// clause, no `isCancelled`, no revenue test — so clicking "1 delivered,
-// waiting on a POD" lands on thirteen and a half thousand rows. That is
-// `dashboard.ts`'s own warning coming true: "a dashboard whose numbers are
-// computed a second way is a dashboard that eventually disagrees with the
-// screen it sends you to, and the person stops believing both."
+// ── THE SECOND SIDE IS THE DESTINATION, NOT A REFERENCE ──────────────────
 //
-// IT IS REPORTED, NOT PAPERED OVER. Writing a screen-agreement test for those
-// seven would mean inventing the shared predicate they do not have, and the
-// honest fix — named predicates on the loads list, or hrefs that carry the
-// filter — changes what the first screen of the day promises and is the
-// owner's call.
-describe('the filter selects what the invoice queue selects', () => {
-  it('readyToInvoice, against the function the screen lists with', async () => {
-    // ONE LOAD THAT IS ACTUALLY READY, SEEDED HERE.
-    //
-    // The control below (`screen > 0`) failed without this, and it was right
-    // to: the closed-history describe above archives the only ready-to-invoice
-    // load on this authority, so both expressions answered 0 and the agreement
-    // was two empty sets matching. That is the shape this whole file keeps
-    // catching, and it caught it in the test written to catch it.
-    const ready = await bookLoad(betaId, 16)
+// For the five Load rows that is `viewWhere(key)`, which is literally what the
+// loads page calls. For the three others it is the predicate their own screen
+// lists with — receivables, the payments Unapplied tab, the settlements list —
+// written out here because those pages build it inline.
+//
+// ── AND THE CONTROL IS ON EVERY ROW ──────────────────────────────────────
+//
+// Both sides greater than zero, per the ruling. Without it a row whose seed
+// failed compares nothing to nothing and reports agreement — which is how the
+// first version of this file's direct-settled case passed while proving nothing,
+// and how three `watch-guard` breaks came back NOT OK.
+describe('every Needs-you row counts what its destination lists', () => {
+  /** Seeded once for the whole describe, so each row has something to count. */
+  let seeded = false
+
+  const seedOnePerRow = async () => {
+    if (seeded) return
+    seeded = true
+
+    // podMissing — DELIVERED, no POD.
+    const delivered = await bookLoad(betaId, 2)
+    await inOrg((tx) =>
+      transitionOperational(tx, delivered.id, 'DELIVERED', {
+        source: 'MANUAL',
+        userId,
+      }),
+    )
+
+    // noRate — POD in, nothing on it. `bookLoad` sets no rate, so reaching
+    // POD_RECEIVED is the whole fixture.
+    const unrated = await bookLoad(betaId, 4)
     for (const to of ['DELIVERED', 'POD_RECEIVED'] as const) {
       await inOrg((tx) =>
-        transitionOperational(tx, ready.id, to, { source: 'MANUAL', userId }),
+        transitionOperational(tx, unrated.id, to, { source: 'MANUAL', userId }),
+      )
+    }
+
+    // unassignedFinished AND readyToInvoice — POD in, a rate on it, nobody on
+    // it. ONE LOAD SATISFIES BOTH, which is worth saying: the two rows overlap
+    // by design and the dashboard shows both, because "finished and unbilled"
+    // and "finished and unattached" are different jobs for different people.
+    const finished = await bookLoad(betaId, 6)
+    for (const to of ['DELIVERED', 'POD_RECEIVED'] as const) {
+      await inOrg((tx) =>
+        transitionOperational(tx, finished.id, to, {
+          source: 'MANUAL',
+          userId,
+        }),
       )
     }
     await inOrg((tx) =>
-      setLoadRate(tx, ready.id, { linehaul: '2750', fuelSurcharge: '0' }),
+      setLoadRate(tx, finished.id, { linehaul: '1850', fuelSurcharge: '0' }),
+    )
+    await owner.load.update({
+      where: { id: finished.id },
+      data: { driverId: null, truckId: null },
+    })
+
+    // unassigned — booked, nothing on it. `bookLoad` leaves it that way.
+    await bookLoad(betaId, 8)
+
+    // unapplied — a payment with money left on it.
+    await inOrg((tx) =>
+      recordPayment(tx, organizationId, {
+        companyId: betaId,
+        customerId: brokerId,
+        method: 'ACH',
+        referenceNumber: `EIGHT-${nonce}`,
+        receivedAt: new Date(Date.UTC(2026, 10, 10)),
+        amountCents: 250_000,
+      }),
     )
 
-    const { screen, sql } = await inOrg(async (tx) => ({
-      // THE SCREEN'S OWN PREDICATE, called here exactly as
-      // `invoices/page.tsx` calls it.
-      screen: await tx.load.count({
-        where: { ...readyToInvoiceWhere(), companyId: { in: [betaId] } },
-      }),
-      sql: await needsYouCounts(tx, [betaId]),
-    }))
+    // A DRIVER FOR THE DRAFT SETTLEMENT. `Settlement.driverId` is required and
+    // this file keeps no shared driver id, so one is made here.
+    const payee = await owner.driver.create({
+      data: {
+        organizationId,
+        companyId: betaId,
+        firstName: 'Eight',
+        lastName: `Rows ${nonce}`,
+      },
+    })
 
-    expect(sql.counts.readyToInvoice).toBe(screen)
-    // AND NOT ZERO, or two empty answers satisfy it.
-    expect(screen).toBeGreaterThan(0)
-  }, 300_000)
+    // draftSettlements — a DRAFT settlement on this authority.
+    await owner.settlement.create({
+      data: {
+        organizationId,
+        companyId: betaId,
+        driverId: payee.id,
+        status: 'DRAFT',
+        periodStart: new Date(Date.UTC(2026, 10, 8)),
+        periodEnd: new Date(Date.UTC(2026, 10, 14)),
+        settlementNumber: `DRAFT-EIGHT-${nonce}`,
+      },
+    })
+
+    // overdue — an invoice past its due date with a balance.
+    await owner.invoice.create({
+      data: {
+        organizationId,
+        companyId: betaId,
+        customerId: brokerId,
+        invoiceNumber: `OD-${nonce}`,
+        status: 'SENT',
+        issueDate: new Date(Date.UTC(2026, 8, 1)),
+        dueDate: new Date(Date.UTC(2026, 8, 15)),
+        subtotalCents: 190_000,
+        totalCents: 190_000,
+        balanceCents: 190_000,
+      },
+    })
+  }
+
+  /** What each row's DESTINATION lists, scoped to this describe's authority. */
+  const destinationCount = async (key: string): Promise<number> => {
+    const scope = { companyId: { in: [betaId] } }
+    return inOrg(async (tx) => {
+      if (isLoadViewName(key)) {
+        // EXACTLY WHAT `loads/page.tsx` DOES: `base` is `deletedAt: null` plus
+        // the scope, and the named view on top.
+        return tx.load.count({
+          where: { deletedAt: null, ...scope, ...viewWhere(key) },
+        })
+      }
+      if (key === 'overdue') {
+        // `/receivables`.
+        return tx.invoice.count({
+          where: {
+            ...scope,
+            deletedAt: null,
+            isFactored: false,
+            balanceCents: { gt: 0 },
+            status: { notIn: ['DRAFT', 'VOID', 'WRITTEN_OFF'] },
+            dueDate: { lt: new Date() },
+          },
+        })
+      }
+      if (key === 'unapplied') {
+        // The payments Unapplied tab: `unappliedCents > 0` over live payments.
+        return tx.payment.count({
+          where: { ...scope, deletedAt: null, unappliedCents: { gt: 0 } },
+        })
+      }
+      // `/settlements`, the drafts.
+      return tx.settlement.count({
+        where: { ...scope, deletedAt: null, status: 'DRAFT' },
+      })
+    })
+  }
+
+  it.each([...COUNTED_ROWS])(
+    '%s',
+    async (key) => {
+      await seedOnePerRow()
+
+      const counted = await inOrg((tx) => needsYouCounts(tx, [betaId]))
+      const listed = await destinationCount(key)
+
+      // THE CONTROL, ON EVERY ROW, per the ruling.
+      expect(
+        listed,
+        `${key}: its destination lists nothing, so the agreement below is two empty sets`,
+      ).toBeGreaterThan(0)
+      expect(counted.counts[key]).toBeGreaterThan(0)
+
+      expect(
+        counted.counts[key],
+        `${key}: count and destination disagree`,
+      ).toBe(listed)
+    },
+    300_000,
+  )
 })
 
-// ── THE SQL IS A FAITHFUL TRANSLATION OF THE PRISMA EXPRESSION ────────────
-//
-// NOT a screen-agreement test, and the name no longer claims to be one. What
-// this catches is a SQL translation error — a clause dropped, an operator
-// inverted, a scope that means nothing instead of everything — by running the
-// Prisma expression of the same rule beside it.
-//
-// That is worth having and it is NOT the stronger claim. For seven of these
-// eight rows the Prisma expression is a reference no screen runs, so this
-// proves the two expressions agree with each other and says nothing about the
-// destination. See the block above for the three that disagree with theirs.
 describe('the one statement translates each Prisma predicate faithfully', () => {
   it.each([...COUNTED_ROWS])(
     '%s',

@@ -10,6 +10,7 @@ import { LoadsTable, type LoadRow } from './LoadsTable'
 import { billingLabelKey, operationalLabelKey } from '@/lib/status'
 import { loadSearchWhere } from '@/lib/loads'
 import { readyToInvoiceWhere } from '@/lib/invoices'
+import { viewWhere } from '@/lib/load-views'
 import { DENSITIES, readDensity, readSavedViews } from '@/lib/preferences'
 import { SavedViews } from './SavedViews'
 import type {
@@ -88,6 +89,21 @@ export default async function LoadsPage({
   // to Amazon, and until now the only way to answer was to read the list.
   const referenceParam =
     typeof params['ref'] === 'string' ? params['ref'].trim() : ''
+  // ── A NAMED VIEW, RESOLVED THROUGH THE SAME FUNCTION THAT COUNTS IT ────
+  //
+  // Owner's ruling, 2026-10-01. The dashboard's Needs-you rows link here with
+  // `?view=<name>` and NOT with raw filter params, so the number on the row and
+  // the rows on this page come from one predicate in `load-views.ts`.
+  //
+  // MEASURED BEFORE IT EXISTED: `podMissing` counted 1 and its old link —
+  // `?status=DELIVERED` — listed 13,500, because this page filtered on the
+  // status column alone while the row excluded closed history, cancellations
+  // and unrated freight.
+  //
+  // NO VIEW MEANS TODAY'S BEHAVIOUR, archive included (ruling 3). Closed
+  // history is excluded only where a view's own predicate says so.
+  const viewParam =
+    typeof params['view'] === 'string' ? params['view'] : undefined
 
   const {
     rows,
@@ -136,6 +152,7 @@ export default async function LoadsPage({
       ...(companyParam ? { companyId: companyParam } : {}),
       ...searchWhere,
     }
+    const namedView = viewWhere(viewParam)
     const statusWhere = statusParam
       ? { operationalStatus: statusParam as LoadOperationalStatus }
       : {}
@@ -156,11 +173,14 @@ export default async function LoadsPage({
     // The total under the CURRENT filter, so the footer can say "101–200 of
     // 2,156" rather than leaving somebody to guess whether there is more.
     const matching = await tx.load.count({
-      where: { ...base, ...statusWhere, ...billingWhere },
+      where: { ...base, ...statusWhere, ...billingWhere, ...namedView },
     })
 
     const loads = await tx.load.findMany({
-      where: { ...base, ...statusWhere, ...billingWhere },
+      // THE SAME WHERE THE COUNT ABOVE USES, `namedView` included. The footer
+      // saying "1-50 of 13,500" over a list of 101 rows is the disagreement
+      // this ruling exists to stop, one level down.
+      where: { ...base, ...statusWhere, ...billingWhere, ...namedView },
       orderBy: { bookedAt: 'desc' },
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
