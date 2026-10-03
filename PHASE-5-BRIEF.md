@@ -804,6 +804,23 @@ Recorded rather than resolved, per Phase 1's discipline.
     written twice on purpose, in two languages, and that the only thing holding
     them together is a test somebody could delete.
 
+47. **The login fix was briefed as "one commit, doc-first", and AGENTS.md says a
+    doc amendment is its own commit. It is two.** Not a disagreement about
+    substance — "doc-first" and "amend the design system in its own commit,
+    with the reason, BEFORE changing code to match it" want the same thing in
+    the same order. They differ only on whether the doc change travels with the
+    code, and the standing rule is the specific one.
+
+    WHY IT MATTERS ENOUGH TO SPLIT: the reason the rule exists is that a doc
+    change buried in a code commit is invisible in review and unrevertable on
+    its own. §7.5.1 is a rule about every form in the product, not only about
+    sign-in; somebody disagreeing with it should be able to revert the rule
+    without reverting a fix to a login people use.
+
+    So: `TMS-DESIGN-SYSTEM.md` v10.20 plus the `zebra_session` rule in
+    `AGENTS.md` in one commit, the code and its tests in the next, and the
+    brief's "one commit" is the thing being flagged rather than obeyed.
+
 ---
 
 ## 8. How each acceptance box closed

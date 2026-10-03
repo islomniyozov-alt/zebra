@@ -82,6 +82,23 @@ Rules that are cheap to state and expensive to rediscover:
   `PHASE-6-BRIEF.md` flag 97.
 - Never send a field to the client that the role cannot see. Leave it out of
   the payload — hiding it in CSS is the same bug as not checking at all.
+- **`zebra_session` carries NO `Domain`, and that is the setting, not an
+  omission.** A cookie with no `Domain` is host-only: the browser sends it back
+  to the exact origin that set it and nowhere else. So the session is correct
+  per origin for free — `zebra-dev`, `zebra`, and `zebratms.com` when it lands,
+  each hold their own, and moving to the custom domain costs one fresh sign-in
+  and leaks nothing.
+
+  ADDING A `Domain` IS THE FAILURE MODE, and it will look like a convenience:
+  `Domain=zebratms.com` sends the operator session to every subdomain that name
+  ever acquires, including whatever a marketing page or a staging box is served
+  from. `tests/auth-cookie.test.ts` fails by name if the attribute appears.
+
+  The rest of the attributes are fixed too — `HttpOnly`, `SameSite=Lax`,
+  `Path=/`, `Max-Age` from `SESSION_TTL_MS` — and `Secure` is keyed to
+  `NODE_ENV` rather than to the host, which is right: it is off only where the
+  origin is `http://localhost`.
+
 - Money is an integer of cents, percentages are integer basis points.
 - Logical CSS properties only — `margin-inline-start`, never `margin-left`.
 - No hex colour outside the token block. Grep before deleting a token.
