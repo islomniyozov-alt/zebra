@@ -249,6 +249,42 @@ export type CompanyScopeFilter = { companyId?: { in: string[] } }
  * does not exist. Use `companyIdScopeFilter` there. The two are separated
  * because spreading the wrong one is invisible — see the note on it.
  */
+/**
+ * The company list a reader should use once the AUTHORITY CHIP is applied.
+ *
+ * ── WHY THIS IS NOT JUST `[companyId]` AT THE CALL SITE ──────────────────
+ *
+ * §6.1.1 and §6.2.7: "the chips and the period govern everything below them",
+ * and a strip answering for one authority beside a panel answering for the
+ * group is two true numbers answering different questions with nothing on
+ * screen looking broken. That is exactly what shipped in dashboard part 3 —
+ * `dashboardFor` took the chip and the three new panels took the session scope,
+ * so selecting RAM Haulage changed the KPIs and left the fleet, cash and
+ * compliance figures on the whole group.
+ *
+ * ── AN EMPTY LIST MEANS EVERY AUTHORITY, WHICH IS THE TRAP ───────────────
+ *
+ * Every reader here treats `[]` as "no narrowing" rather than "nothing", so a
+ * mistake widens instead of emptying. The chip therefore returns a ONE-element
+ * list and never an empty one.
+ *
+ * AND IT NEVER WIDENS. A chip naming an authority outside the session's scope
+ * is IGNORED — the scope is returned unchanged — rather than honoured or turned
+ * into a sentinel. `CompanyChips` only renders authorities in scope, so this is
+ * a URL-tampering path; row-level security would refuse the rows anyway, and
+ * ignoring the parameter keeps the figures consistent with the chips on screen.
+ */
+export function narrowCompanyScope(
+  companyScopes: readonly string[],
+  companyId: string | null,
+): string[] {
+  if (companyId === null) return [...companyScopes]
+  if (companyScopes.length > 0 && !companyScopes.includes(companyId)) {
+    return [...companyScopes]
+  }
+  return [companyId]
+}
+
 export function companyScopeFilter(
   companyScopes: readonly string[],
 ): CompanyScopeFilter {

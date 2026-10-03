@@ -1,4 +1,4 @@
-import type { Prisma } from '@/generated/prisma/client'
+import { Prisma } from '@/generated/prisma/client'
 import type { TxClient } from './tenancy'
 import { apportionCents, factoringSplit } from './money'
 
@@ -455,6 +455,98 @@ export function agingBucketFor(daysPastDue: number): AgingBucket {
   if (daysPastDue <= 60) return 'd31_60'
   if (daysPastDue <= 90) return 'd61_90'
   return 'd90_plus'
+}
+
+/**
+ * WHICH INVOICES AGE AT ALL. One predicate, two expressions below it.
+ *
+ * Not deleted, not factored (sold — see §3.3), something still outstanding,
+ * and actually issued: a DRAFT has been shown to nobody, a VOID was withdrawn
+ * and a WRITTEN_OFF has been given up on, so none of the three is money
+ * anybody is chasing.
+ */
+export const AGING_INVOICE: Prisma.InvoiceWhereInput = {
+  deletedAt: null,
+  isFactored: false,
+  balanceCents: { gt: 0 },
+  status: { notIn: ['DRAFT', 'VOID', 'WRITTEN_OFF'] },
+}
+
+/**
+ * The four bucket sums, as SQL, for a statement that cannot afford a round
+ * trip per screen.
+ *
+ * ── WHY THIS IS HERE AND NOT WHEREVER IT IS USED ─────────────────────────
+ *
+ * `agingBucketFor` above is the authority and `directAging` below applies it in
+ * TypeScript. The dashboard's panel statement needs the same four sums inside
+ * one SELECT (§6.1.1's budget), and /accounting/reports needs them again
+ * (§6.2.7). That is a money rule in two languages, which is flag 88's shape —
+ * so the two live four lines apart, in the file named after the rule, where
+ * somebody changing one can SEE the other.
+ *
+ * IT WAS OFF BY ONE FOR A DAY, which is the whole argument for the adjacency.
+ * Part 3 wrote `dueDate > now - interval '30 days'` in a different file: that
+ * is `daysPastDue < 30`, so an invoice exactly thirty days past due was
+ * "current" on the invoices screen and "31–60" on the dashboard. Flag 46.
+ *
+ * ── DAYS ARE WHOLE DAYS, BY DATE SUBTRACTION ─────────────────────────────
+ *
+ * `date - date` in Postgres is an integer count of days, which is exactly what
+ * `agingBucketFor` takes and exactly what the invoices list computes against
+ * midnight. Comparing timestamps instead would make a bucket depend on the
+ * time of day somebody opened the screen.
+ */
+export function agingSumsSql(scope: Prisma.Sql, now: Date): Prisma.Sql {
+  // ONE SCAN, FOUR FILTERED SUMS, as a scalar subquery per bucket so the whole
+  // thing drops into a bigger SELECT's column list — which is what the
+  // dashboard's one-statement budget needs.
+  const days = Prisma.sql`(${now}::date - i."dueDate"::date)`
+  const bucket = (test: Prisma.Sql, alias: string) => Prisma.sql`
+    (SELECT COALESCE(SUM(i."balanceCents"), 0)::bigint
+     FROM "Invoice" i
+     WHERE i."deletedAt" IS NULL
+       AND i."isFactored" = false
+       AND i."balanceCents" > 0
+       AND i."status" NOT IN ('DRAFT', 'VOID', 'WRITTEN_OFF')
+       AND i."dueDate" IS NOT NULL
+       ${scope}
+       AND ${test}) AS ${Prisma.raw(alias)}`
+
+  // EACH TEST IS THE MIRROR OF ONE LINE IN `agingBucketFor`, in its order.
+  return Prisma.join(
+    [
+      bucket(Prisma.sql`${days} <= 30`, 'd0_30'),
+      bucket(Prisma.sql`${days} > 30 AND ${days} <= 60`, 'd31_60'),
+      bucket(Prisma.sql`${days} > 60 AND ${days} <= 90`, 'd61_90'),
+      bucket(Prisma.sql`${days} > 90`, 'd90plus'),
+    ],
+    ',',
+  )
+}
+
+/** The four bucket sums on their own, for a screen that wants only these. */
+export async function agingSums(
+  tx: TxClient,
+  scope: Prisma.Sql,
+  now: Date,
+): Promise<{
+  d0_30: number
+  d31_60: number
+  d61_90: number
+  d90plus: number
+}> {
+  const rows = await tx.$queryRaw<
+    { d0_30: bigint; d31_60: bigint; d61_90: bigint; d90plus: bigint }[]
+  >`SELECT ${agingSumsSql(scope, now)}`
+  const row = rows[0]
+  if (!row) throw new Error('agingSums: no row from a single-row SELECT.')
+  return {
+    d0_30: Number(row.d0_30),
+    d31_60: Number(row.d31_60),
+    d61_90: Number(row.d61_90),
+    d90plus: Number(row.d90plus),
+  }
 }
 
 export interface AgingRow {

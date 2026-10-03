@@ -2,7 +2,11 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { companyIdScopeFilter, companyScopeFilter } from '@/lib/tenancy'
+import {
+  companyIdScopeFilter,
+  companyScopeFilter,
+  narrowCompanyScope,
+} from '@/lib/tenancy'
 import { actionQueue } from '@/lib/dashboard'
 import {
   dqfSplit,
@@ -202,9 +206,18 @@ export default async function DashboardPage({
           'read',
           'dashboard',
           (tx, ctx) =>
-            panelFigures(tx, ctx.companyScopes, window, now, {
-              cash: maySeeMoney,
-            }),
+            panelFigures(
+              tx,
+              // THE CHIP, NOT JUST THE SESSION SCOPE. §6.1.1: the chips
+              // govern everything below them. This read took
+              // `ctx.companyScopes` for one commit, so picking an authority
+              // moved the KPI strip and left all three panels on the whole
+              // group — two true numbers, one screen, nothing looking broken.
+              narrowCompanyScope(ctx.companyScopes, companyParam),
+              window,
+              now,
+              { cash: maySeeMoney },
+            ),
           { timeoutMs: 10_000 },
         )
       : Promise.resolve(null),
@@ -214,7 +227,12 @@ export default async function DashboardPage({
       ? withCurrentOrg(
           'read',
           'dashboard',
-          (tx, ctx) => topDriversByGross(tx, ctx.companyScopes, window),
+          (tx, ctx) =>
+            topDriversByGross(
+              tx,
+              narrowCompanyScope(ctx.companyScopes, companyParam),
+              window,
+            ),
           { timeoutMs: 10_000 },
         )
       : Promise.resolve(null),
@@ -231,7 +249,12 @@ export default async function DashboardPage({
       ? withCurrentOrg(
           'read',
           'dashboard',
-          (tx, ctx) => dqfSplit(tx, ctx.companyScopes, now),
+          (tx, ctx) =>
+            dqfSplit(
+              tx,
+              narrowCompanyScope(ctx.companyScopes, companyParam),
+              now,
+            ),
           { timeoutMs: 10_000 },
         )
       : Promise.resolve(null),

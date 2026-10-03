@@ -1,5 +1,6 @@
 import { Prisma } from '@/generated/prisma/client'
 import { companyScopeFilter } from '@/lib/tenancy'
+import { agingSumsSql } from '@/lib/factoring'
 import {
   dqfChecklist,
   dqfFactsForDrivers,
@@ -364,41 +365,17 @@ export async function panelFigures(
   // the first role that cannot see money.
   const cashColumns = options.cash
     ? Prisma.sql`
-      -- ── CASH: AGING, INVOICED AND UNPAID AND NOT FACTORED ───────────
+      -- ── CASH: AGING, FROM THE SHARED FRAGMENT ───────────────────────
       --
-      -- FACTORED PAPER IS THE FACTOR'S RECEIVABLE, not the carrier's. Including
-      -- it would show money the carrier has already been advanced as money it
-      -- is waiting for, which is the one number an owner would act on wrongly.
-      --
-      -- AGED ON THE DUE DATE AND AGAINST TODAY, not against the picker's
-      -- window: an invoice is sixty days late today whatever period is on
-      -- screen.
-      (SELECT COALESCE(SUM(i."balanceCents"), 0)::bigint FROM "Invoice" i
-       WHERE i."deletedAt" IS NULL AND i."isFactored" = false
-         AND i."balanceCents" > 0
-         AND i."status" NOT IN ('DRAFT', 'VOID', 'WRITTEN_OFF')
-         ${sc('i')}
-         AND i."dueDate" > ${now}::timestamp - interval '30 days') AS d0_30,
-      (SELECT COALESCE(SUM(i."balanceCents"), 0)::bigint FROM "Invoice" i
-       WHERE i."deletedAt" IS NULL AND i."isFactored" = false
-         AND i."balanceCents" > 0
-         AND i."status" NOT IN ('DRAFT', 'VOID', 'WRITTEN_OFF')
-         ${sc('i')}
-         AND i."dueDate" <= ${now}::timestamp - interval '30 days'
-         AND i."dueDate" > ${now}::timestamp - interval '60 days') AS d31_60,
-      (SELECT COALESCE(SUM(i."balanceCents"), 0)::bigint FROM "Invoice" i
-       WHERE i."deletedAt" IS NULL AND i."isFactored" = false
-         AND i."balanceCents" > 0
-         AND i."status" NOT IN ('DRAFT', 'VOID', 'WRITTEN_OFF')
-         ${sc('i')}
-         AND i."dueDate" <= ${now}::timestamp - interval '60 days'
-         AND i."dueDate" > ${now}::timestamp - interval '90 days') AS d61_90,
-      (SELECT COALESCE(SUM(i."balanceCents"), 0)::bigint FROM "Invoice" i
-       WHERE i."deletedAt" IS NULL AND i."isFactored" = false
-         AND i."balanceCents" > 0
-         AND i."status" NOT IN ('DRAFT', 'VOID', 'WRITTEN_OFF')
-         ${sc('i')}
-         AND i."dueDate" <= ${now}::timestamp - interval '90 days') AS d90plus,
+      -- agingSumsSql lives in factoring.ts, four lines from
+      -- agingBucketFor, which is the authority on where a bucket ends.
+      -- (NO BACKTICKS: this is inside a tagged template. Third time in this
+      -- file, and the header already warns about it twice.)
+      -- This file carried its own copy for one day and the copy was OFF BY
+      -- ONE: it compared a 30-day interval with >, which is
+      -- daysPastDue < 30, so an invoice exactly thirty days past due was
+      -- current on the invoices screen and 31-60 here. Flag 46.
+      ${agingSumsSql(sc('i'), now)},
 
       -- ── CASH: THE SETTLEMENT PIPELINE FOR THE WINDOW ────────────────
       --

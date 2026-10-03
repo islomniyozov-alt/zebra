@@ -1,4 +1,5 @@
 import { Prisma } from '@/generated/prisma/client'
+import { bucketExprSql } from './week-sql'
 
 /** Plain transaction client, as the other reporting modules declare it. */
 type TxClient = Prisma.TransactionClient
@@ -101,7 +102,7 @@ export async function grossByCompany(
   // with a variable in it.
   const period =
     unit === 'week'
-      ? Prisma.sql`(date_trunc('week', d.del_date + interval '1 day') - interval '1 day')`
+      ? bucketExprSql(Prisma.sql`d.del_date`, 'week')
       : Prisma.sql`date_trunc('month', d.del_date)`
 
   const rows = await tx.$queryRaw<
@@ -219,7 +220,7 @@ export async function driverPayByCompany(
   const unit = input.grouping === 'week' ? 'week' : 'month'
   const period =
     unit === 'week'
-      ? Prisma.sql`(date_trunc('week', d.del_date + interval '1 day') - interval '1 day')`
+      ? bucketExprSql(Prisma.sql`d.del_date`, 'week')
       : Prisma.sql`date_trunc('month', d.del_date)`
 
   const rows = await tx.$queryRaw<
@@ -304,6 +305,17 @@ export interface ReportCell {
    * expensive wrong number this page could print.
    */
   afterDriverPayCents: number | null
+  /**
+   * What the drivers were paid for this company's freight in this period, or
+   * NULL on the same rule as `afterDriverPayCents` above.
+   *
+   * CARRIED RATHER THAN DERIVED. §6.2.7's chart draws gross, pay and after-pay
+   * as three bars, and the only other way to get pay out of this cell is
+   * `gross - afterDriverPay` at the call site — algebra that is exact today
+   * and silently wrong the moment anything else is ever subtracted from the
+   * after-pay figure. The assembler has the number; it hands it over.
+   */
+  driverPayCents: number | null
 }
 
 export interface ReportPeriod {
@@ -367,6 +379,7 @@ export function assembleReport(input: {
             grossCents: row.grossCents,
             atRateCents: row.atRateCents,
             afterDriverPayCents: known ? row.grossCents - pay : null,
+            driverPayCents: known ? pay : null,
           }
         })
         .sort((a, b) => a.companyName.localeCompare(b.companyName))
@@ -386,6 +399,9 @@ export function assembleReport(input: {
           // into a number would invent the very figure the dash refuses to.
           afterDriverPayCents: known
             ? sum((cell) => cell.afterDriverPayCents ?? 0)
+            : null,
+          driverPayCents: known
+            ? sum((cell) => cell.driverPayCents ?? 0)
             : null,
         },
       }

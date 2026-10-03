@@ -235,7 +235,41 @@ describe('the controls each list carries', () => {
     // because the driver cut is a list and the other two cuts are a matrix.
     expect(source).toContain('pagedFooterLabel(')
     expect(source).toMatch(/\n\s+sort=\{\{/)
-    expect(source).toMatch(/\n\s+range=\{\{/)
+  })
+
+  // ── THE WINDOW ON REPORTS IS THE ROLLING PICKER, NOT A RANGE ───────────
+  //
+  // THIS ASSERTION USED TO BE `range={{` AND IT FAILED ON PURPOSE. §6.2.7
+  // (v10.19) puts the dashboard's picker on this screen and removes the
+  // from/to range with it: v10.16 revoked the two-window arrangement, so a
+  // picker beside a range would be one screen answering for two periods.
+  //
+  // The guard is not deleted, because "this screen has a window control" is
+  // still the thing worth pinning — it is repointed at the control that now
+  // provides it, and the weekly/monthly toggle is asserted GONE so the two
+  // cannot quietly come back together. Flag 45 records what that costs.
+  it('reports takes its window from the rolling picker, not a date range', () => {
+    const source = pageSource('reports')
+    expect(source).toContain('<PeriodPicker')
+    expect(source).toContain('<CompanyChips')
+    expect(source).not.toMatch(/\n\s+range=\{\{/)
+    // THE TOGGLE IS GONE TOO: a month is not a whole number of settlement
+    // weeks, so it cannot be drawn on an axis aligned to them (v10.17).
+    expect(source).not.toContain("t('reports.monthly')")
+  })
+
+  // AND THE FOUR CHARTED SECTIONS §6.2.7 NAMES ARE ON IT. Asserted by the
+  // component rather than by a heading, because a heading with no chart under
+  // it is exactly the failure this would otherwise miss.
+  it('reports carries the four charted sections', () => {
+    const source = pageSource('reports')
+    // By company: the money series, with its hatch for unrecorded pay.
+    expect(source).toContain('<BarChart')
+    // Receivables: the shared aging bar, plus invoiced/factored/collected.
+    expect(source).toContain('<AgingBar')
+    expect(source).toContain('<SeriesBars')
+    // Settlements: deductions by category.
+    expect(source).toContain('<Donut')
   })
 })
 

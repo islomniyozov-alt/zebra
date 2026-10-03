@@ -1,4 +1,5 @@
 import { Prisma } from '@/generated/prisma/client'
+import { bucketExprSql } from './week-sql'
 import { bucketsIn, type Grain, type PeriodWindow } from '@/lib/rolling-period'
 import { firstSettledPeriodStart } from './by-company'
 
@@ -157,7 +158,7 @@ const INVOICED = Prisma.sql`
  */
 const bucketOf = (grain: Grain) =>
   grain === 'week'
-    ? Prisma.sql`(date_trunc('week', d.del_date + interval '1 day') - interval '1 day')`
+    ? bucketExprSql(Prisma.sql`d.del_date`, 'week')
     : Prisma.sql`date_trunc('day', d.del_date)`
 
 export interface WeekCompanyRow {

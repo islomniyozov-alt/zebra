@@ -43,7 +43,16 @@ export interface Bar {
   /** Null means NOT RECORDED, which is why it is not zero. */
   driverPayCents: number | null
   marginCents: number | null
-  loads: number
+  /**
+   * NULL MEANS THIS REPORT DOES NOT COUNT LOADS, and the tooltip then leaves
+   * the row out entirely.
+   *
+   * Zero would be a figure, and a wrong one: §6.2.7's by-company chart is built
+   * from item 7's readers, which group MONEY by authority and period and have
+   * never counted loads. "Loads 0" beside a week of real gross is the kind of
+   * number somebody repeats in a meeting.
+   */
+  loads: number | null
   /**
    * The current bucket, still running. Always the last one.
    *
@@ -241,12 +250,14 @@ export function BarChart({ bars, locale, labels }: Props) {
                               : formatCents(bar.marginCents, locale)}
                           </dd>
                         </div>
-                        <div className="flex justify-between gap-z2">
-                          <dt className="text-ink-2">{labels.loads}</dt>
-                          <dd className="font-mono tabular-nums text-ink">
-                            {String(bar.loads)}
-                          </dd>
-                        </div>
+                        {bar.loads === null ? null : (
+                          <div className="flex justify-between gap-z2">
+                            <dt className="text-ink-2">{labels.loads}</dt>
+                            <dd className="font-mono tabular-nums text-ink">
+                              {String(bar.loads)}
+                            </dd>
+                          </div>
+                        )}
                       </dl>
                       {/* THE DASHES ARE EXPLAINED HERE TOO, not only in the
                        * legend — a reader hovering a hatched bar is asking
