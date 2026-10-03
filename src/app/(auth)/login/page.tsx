@@ -23,10 +23,16 @@ export default async function LoginPage() {
           password: t('auth.password'),
           forgot: t('auth.forgot'),
         }}
+        // EVERY KEY THE ACTION CAN RETURN, because the form falls back to
+        // `auth.invalid` for one it was not given — which would tell somebody
+        // their password was wrong when the database was unreachable.
+        // `tests/auth-action.test.ts` asserts this map covers the action's whole
+        // failure set.
         errors={{
           'auth.invalid': t('auth.invalid'),
           'auth.rateLimited': t('auth.rateLimited'),
           'auth.noMembership': t('auth.noMembership'),
+          'auth.unavailable': t('auth.unavailable'),
         }}
       />
     </div>

@@ -189,15 +189,32 @@ describe('login', () => {
   })
 
   it('records the attempt either way', async () => {
+    // RECORDED AT THE TIME, which is what this has always been about: the row is
+    // written whether or not the password was right.
     await login(app, { email, password: 'wrong' })
+    expect(
+      await owner.loginAttempt.count({ where: { email, succeeded: false } }),
+    ).toBe(1)
+
     await login(app, { email, password: PASSWORD })
 
+    // ── AND THEN THE SUCCESS CLEARS THE FAILURE. OWNER'S RULING 2026-10-04 ──
+    //
+    // THIS ASSERTION USED TO BE `[false, true]` — both rows surviving — and the
+    // ruling changed it: a success deletes that email's failures in the window,
+    // because otherwise five wrong tries left a correct password refused.
+    //
+    // WHAT IT COSTS, recorded here because this test is where somebody will meet
+    // it: the log no longer shows "five failures, then a success" for one
+    // address inside one window, which is precisely the signature of a GUESS
+    // THAT WORKED. Flag 48. The per-ip rows for other addresses survive, and the
+    // fix if the trail is wanted is a cleared-at column rather than a delete.
     const attempts = await owner.loginAttempt.findMany({
       where: { email },
       orderBy: { createdAt: 'asc' },
       select: { succeeded: true },
     })
-    expect(attempts.map((a) => a.succeeded)).toEqual([false, true])
+    expect(attempts.map((a) => a.succeeded)).toEqual([true])
   })
 
   it('stamps lastLoginAt', async () => {
@@ -238,6 +255,63 @@ describe('rate limiting', () => {
     const locked = await login(app, { email, password: PASSWORD })
     expect(locked).toMatchObject({ ok: false, reason: 'rate_limited' })
     expect(await owner.session.count({ where: { userId } })).toBe(0)
+  })
+
+  // ── A SUCCESS CLEARS THE EMAIL'S FAILURES IN THE WINDOW ─────────────────
+  //
+  // Owner's ruling, 2026-10-04, against the reported bug: a correct password
+  // refused. Nothing cleared the rows, and the counter reads `succeeded: false`,
+  // so four wrong tries followed by the right one left the account one failure
+  // from a lockout it had already earned its way out of.
+  it('four wrong then right, and the next wrong attempt starts from one', async () => {
+    for (let attempt = 0; attempt < RATE_LIMIT.perEmail - 1; attempt++) {
+      await login(app, { email, password: 'wrong' })
+    }
+    expect(
+      await owner.loginAttempt.count({ where: { email, succeeded: false } }),
+    ).toBe(RATE_LIMIT.perEmail - 1)
+
+    expect(await login(app, { email, password: PASSWORD })).toMatchObject({
+      ok: true,
+    })
+
+    // THE FAILURES ARE GONE, and the success row remains — the log still says
+    // what happened, the LIMIT just stops counting a lockout that is spent.
+    expect(
+      await owner.loginAttempt.count({ where: { email, succeeded: false } }),
+    ).toBe(0)
+    expect(
+      await owner.loginAttempt.count({ where: { email, succeeded: true } }),
+    ).toBe(1)
+  })
+
+  it('five wrong, then right, is accepted once the lock has expired', async () => {
+    // THE REPORTED SYMPTOM, END TO END. Five failures lock the email; the rows
+    // are aged out of the window as the test above does rather than waiting
+    // fifteen minutes; the right password is then accepted AND clears nothing it
+    // should not — the aged rows are outside the window and already harmless.
+    for (let attempt = 0; attempt < RATE_LIMIT.perEmail; attempt++) {
+      await login(app, { email, password: 'wrong' })
+    }
+    expect(await login(app, { email, password: PASSWORD })).toMatchObject({
+      ok: false,
+      reason: 'rate_limited',
+    })
+
+    await owner.loginAttempt.updateMany({
+      where: { email },
+      data: { createdAt: new Date(Date.now() - RATE_LIMIT.windowMs - 60_000) },
+    })
+
+    const result = await login(app, { email, password: PASSWORD })
+    expect(result).toMatchObject({ ok: true })
+
+    // AND THE AGED ROWS SURVIVE, because the delete is scoped to the window.
+    // Deleting the lot would erase the history of an attack that had just
+    // happened, which is the opposite of what a login log is for.
+    expect(
+      await owner.loginAttempt.count({ where: { email, succeeded: false } }),
+    ).toBe(RATE_LIMIT.perEmail + 1)
   })
 
   it('counts attempts made while locked, so hammering extends the lockout', async () => {

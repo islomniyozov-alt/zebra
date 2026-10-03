@@ -75,7 +75,7 @@ export type LoginFailure =
   | { reason: 'no_membership' }
 
 export type LoginResult =
-  | ({ ok: true } & IssuedSession)
+  | ({ ok: true; locale: string | null } & IssuedSession)
   | ({ ok: false } & LoginFailure)
 
 export function normalizeEmail(email: string): string {
@@ -153,7 +153,18 @@ export async function login(
 
   const user = await db.user.findUnique({
     where: { email },
-    select: { id: true, passwordHash: true, isActive: true },
+    // THE LOCALE COMES BACK WITH THE CREDENTIAL CHECK, in this query, because
+    // §7.5.1 forbids anything fallible after the cookie is set. The action used
+    // to read it in a SECOND query AFTER `createSession` and
+    // `setSessionCookie`: a dropped socket there threw, the form showed nothing,
+    // and the person was signed in anyway — one defect producing two complaints
+    // that sounded unrelated. One column on a query that already runs.
+    select: {
+      id: true,
+      passwordHash: true,
+      isActive: true,
+      locale: true,
+    },
   })
 
   // A user with no password set (invited, never activated) and a user that
@@ -215,9 +226,33 @@ export async function login(
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
     }),
+    // ── A SUCCESS CLEARS THIS EMAIL'S FAILURES IN THE WINDOW ─────────────
+    //
+    // Owner's ruling, 2026-10-04. Nothing used to clear them, and the counter
+    // reads `succeeded: false` — so five wrong tries followed by the RIGHT
+    // password left the account refused for the rest of the fifteen minutes.
+    // That is the reported bug: a correct password refused, and it is refused
+    // BEFORE the password is ever checked.
+    //
+    // DELETED RATHER THAN IGNORED, because "ignore failures older than the last
+    // success" is a second expression of the limit — a condition the counting
+    // query would also have to learn, and the two would drift.
+    //
+    // THE PER-IP LIMIT IS UNCHANGED AND THIS SLIGHTLY HELPS IT, which is worth
+    // stating: those rows carried an ip too, so clearing five of one email's
+    // failures also removes five from the shared office address's thirty. An
+    // attacker who guesses one password therefore buys a little room against
+    // the ip limit. The alternative is a column and a migration; the owner's
+    // ruling is the delete, and the ip threshold is six times the email one
+    // precisely because it is the coarse fence.
+    db.loginAttempt.deleteMany({
+      where: { email, succeeded: false, createdAt: { gte: since } },
+    }),
   ])
 
-  return { ok: true, ...issued }
+  // THE LOCALE TRAVELS WITH THE RESULT so the caller needs no second read. See
+  // the `select` above.
+  return { ok: true, locale: user.locale, ...issued }
 }
 
 export async function logout(

@@ -616,7 +616,23 @@ const ALLOWED = [
  */
 const READONLY_VARIABLE = 'PROD_READONLY_DATABASE_URL'
 
-const READONLY_ALLOWED = ['breakdown-ready-to-invoice.ts']
+const READONLY_ALLOWED = [
+  'breakdown-ready-to-invoice.ts',
+  // ADDED 2026-10-04, deliberately, which is the whole point of this list.
+  //
+  // `audit-login-attempts.ts` counts login attempts by outcome and computes
+  // whether the next attempt would be refused by the rate limit. The owner
+  // reported a correct password refused on production and dev held no evidence
+  // — one attempt, one success, zero failures — so the question can only be
+  // answered where the attempts are.
+  //
+  // IT READS AND NOTHING ELSE: counts, two `findFirst`s and a session list. It
+  // refuses any role that is not `zebra_ci_readonly` and has NO fallback to
+  // another variable, because a fallback is how a read-only tool ends up
+  // authenticated as the owner. The refusal was watched firing before the
+  // script was committed.
+  'audit-login-attempts.ts',
+]
 
 /** Every script, since scripts are where a production URL would be used. */
 function sources(): { name: string; text: string }[] {

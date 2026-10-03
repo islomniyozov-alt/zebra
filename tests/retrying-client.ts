@@ -1,5 +1,29 @@
 import { createPrismaClient } from '@/lib/db'
+import {
+  isDroppedSocket,
+  renamedDrop,
+  resetRetryCount,
+  retryCount,
+  withSocketRetry,
+} from '@/lib/socket-retry'
 import type { PrismaClient } from '@/generated/prisma/client'
+
+// ── THE CONDITION AND THE ONE-RETRY WRAPPER NOW LIVE IN src/lib ──────────
+//
+// Moved 2026-10-04 for §7.5.1: the application has to tell a dropped socket
+// from a wrong password, because a form that cannot shows the same nothing for
+// both. The RECOGNITION is a fact about an error and belongs in one place; the
+// POLICY — what may be repeated — stays at each call site, which is why this
+// file still owns the Proxy and its refusal to retry a transaction.
+//
+// Re-exported so the suites that assert on the counters keep their import.
+export {
+  isDroppedSocket,
+  renamedDrop,
+  resetRetryCount,
+  retryCount,
+  withSocketRetry,
+}
 
 // ---------------------------------------------------------------------------
 // ONE RETRY, LOUDLY, ON A DROPPED NEON SOCKET.
@@ -30,115 +54,6 @@ import type { PrismaClient } from '@/generated/prisma/client'
 //      how a flaky suite becomes a suite nobody believes. Same reasoning as
 //      the audit failures in Phase 1 §8 — continue, but never quietly.
 // ---------------------------------------------------------------------------
-
-/** The shapes a dropped Neon WebSocket arrives in. */
-export function isDroppedSocket(error: unknown): boolean {
-  const text =
-    error instanceof Error
-      ? `${error.name} ${error.message} ${error.stack ?? ''}`
-      : String(error)
-
-  return (
-    /onSocketClose|ECONNRESET|socket hang up|Connection terminated|kind: Closed|Closed connection/i.test(
-      text,
-    ) ||
-    // Prisma wraps driver failures; P1001/P1017 are "can't reach" and
-    // "server closed the connection".
-    /\bP1001\b|\bP1017\b/.test(text)
-  )
-}
-
-let retries = 0
-
-/** How many retries this run has spent. Asserted on, so it cannot creep. */
-export function retryCount(): number {
-  return retries
-}
-
-export function resetRetryCount(): void {
-  retries = 0
-}
-
-/**
- * Rename a dropped socket so a retry condition can match it — WITHOUT losing
- * the stack that other code matches on.
- *
- * ── THE REGRESSION THIS EXISTS TO PREVENT, WHICH I SHIPPED ───────────────
- *
- * The first version threw a bare `new Error(...)`. A new Error carries a NEW
- * stack, and `isStartTransactionFailure` in `retry-transaction.ts` recognises
- * these by the frame `PrismaNeonAdapter.startTransaction` — so renaming turned
- * a recognised start failure into an unrecognised one and DISABLED the
- * application's own three-attempt retry. Measured directly: the original
- * returns true, the renamed one returned false.
- *
- * So the cause's stack is appended rather than replaced. Both readers get what
- * they match on: vitest reads `message`, `isStartTransactionFailure` reads
- * message and stack together.
- */
-function renamedDrop(label: string, error: unknown): Error {
-  const detail =
-    error instanceof Error && error.message
-      ? error.message
-      : 'no message; see cause'
-  const renamed = new Error(`dropped Neon socket in ${label}: ${detail}`, {
-    cause: error,
-  })
-  if (error instanceof Error && error.stack) {
-    renamed.stack = `${renamed.stack ?? ''}
-Caused by: ${error.stack}`
-  }
-  return renamed
-}
-
-/**
- * Run `operation`, and if the socket dropped, run it exactly once more.
- *
- * Anything that is not a dropped socket rethrows immediately — a retry that
- * swallows a unique-constraint violation would turn a real bug into a
- * flake, which is the opposite of the point.
- */
-export async function withSocketRetry<T>(
-  label: string,
-  operation: () => Promise<T>,
-): Promise<T> {
-  try {
-    return await operation()
-  } catch (error) {
-    if (!isDroppedSocket(error)) throw error
-
-    retries += 1
-    console.warn(
-      '[zebra.test.socket-retry]',
-      JSON.stringify({
-        label,
-        attempt: 2,
-        totalRetriesThisRun: retries,
-        message: error instanceof Error ? error.message : String(error),
-      }),
-    )
-
-    // A fresh call, not a fresh client: the pool reconnects on demand, and
-    // building a second client per retry leaks sockets over a long suite.
-    //
-    // ── AND IF THE SECOND ATTEMPT DIES TOO, THE ERROR IS NAMED ───────────
-    //
-    // This used to rethrow the ORIGINAL, whose message is EMPTY — the cause
-    // lives only in `stack`. Vitest's retry condition reads `error.message`
-    // and nothing else, so a test that lost its socket twice produced an error
-    // the test-level retry could not match, and did not get its one re-run.
-    //
-    // MEASURED, TWICE, ON 2026-09-18. Two production deploys refused: 45 tests
-    // across five files in bursts of 36-in-2-seconds, then 18 more — and both
-    // runs reported `RETRIES 1`, the one being a simulated test. Every real
-    // drop went unretried. A burst is exactly when both attempts fail, so it
-    // is exactly when the rename was missing.
-    return operation().catch((second: unknown) => {
-      if (!isDroppedSocket(second)) throw second
-      throw renamedDrop(`${label}, twice`, second)
-    })
-  }
-}
 
 /**
  * A client whose queries survive one dropped socket.

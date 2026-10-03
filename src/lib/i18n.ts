@@ -686,6 +686,8 @@ const en = {
   'auth.password': 'Password',
   'auth.forgot': 'Forgot your password?',
   'auth.invalid': 'That email and password do not match.',
+  'auth.unavailable':
+    "Zebra couldn't reach its database — try again in a moment.",
   'auth.rateLimited': 'Too many attempts. Try again in fifteen minutes.',
   'auth.noMembership': 'That account is not attached to an organization.',
   'auth.reset.title': 'Reset your password',
@@ -3471,6 +3473,8 @@ const ru: Dictionary = {
   'auth.password': 'Пароль',
   'auth.forgot': 'Забыли пароль?',
   'auth.invalid': 'Электронная почта и пароль не совпадают.',
+  'auth.unavailable':
+    'Zebra не смогла связаться с базой данных — попробуйте ещё раз через минуту.',
   'auth.rateLimited':
     'Слишком много попыток. Повторите через пятнадцать минут.',
   'auth.noMembership': 'Эта учётная запись не привязана к организации.',
@@ -6226,6 +6230,8 @@ const fa: Dictionary = {
   'auth.password': 'گذرواژه',
   'auth.forgot': 'گذرواژه را فراموش کرده‌اید؟',
   'auth.invalid': 'ایمیل و گذرواژه مطابقت ندارند.',
+  'auth.unavailable':
+    'Zebra نتوانست به پایگاه داده خود دسترسی پیدا کند — لحظه‌ای بعد دوباره تلاش کنید.',
   'auth.rateLimited': 'تلاش‌های بیش از حد. پانزده دقیقه دیگر دوباره تلاش کنید.',
   'auth.noMembership': 'این حساب به هیچ سازمانی متصل نیست.',
   'auth.reset.title': 'بازنشانی گذرواژه',

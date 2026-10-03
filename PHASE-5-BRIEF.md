@@ -821,6 +821,32 @@ Recorded rather than resolved, per Phase 1's discipline.
     `AGENTS.md` in one commit, the code and its tests in the next, and the
     brief's "one commit" is the thing being flagged rather than obeyed.
 
+48. **Clearing failed login attempts on success erases the signature of a guess
+    that worked.** Owner's ruling, 2026-10-04: a successful login deletes that
+    email's failed rows inside the rate-limit window, because nothing cleared
+    them and five wrong tries therefore left a CORRECT password refused for the
+    rest of fifteen minutes. That defect is real and the fix is right.
+
+    THE COST IS AN AUDIT TRAIL, and it is the most interesting part of the trail.
+    "Five failures then a success, one address, one window" is exactly what a
+    brute force that succeeded looks like, and after this it reads as a single
+    clean sign-in. `tests/integration/auth.test.ts` had an assertion that both
+    rows survive — `[false, true]` — and the ruling made it false; it now asserts
+    the clearing, with this flag named in it.
+
+    TWO SMALLER CONSEQUENCES, stated so neither is a surprise. The deleted rows
+    carried an `ip`, so clearing five of one email's failures also removes five
+    from that address's thirty — a guesser who lands one password buys a little
+    room against the per-ip limit, which is six times the per-email one precisely
+    because it is the coarse fence. And `deleteMany` is scoped to the window, so
+    failures older than fifteen minutes survive and the long-range history is
+    intact.
+
+    THE ALTERNATIVE IS A COLUMN, NOT AN ARGUMENT: a `clearedAt` on
+    `LoginAttempt`, set instead of deleting, with the counter ignoring cleared
+    rows. That keeps the trail and costs a migration, which is why it is a flag
+    rather than a silent substitution for what was ruled.
+
 ---
 
 ## 8. How each acceptance box closed

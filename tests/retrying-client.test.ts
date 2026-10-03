@@ -123,7 +123,12 @@ describe('withSocketRetry', () => {
     }
 
     expect(seen).toHaveLength(1)
-    expect(JSON.stringify(seen[0])).toContain('zebra.test.socket-retry')
+    // `zebra.socket-retry`, NOT `zebra.test.socket-retry`, since 2026-10-04: the
+    // wrapper moved to `src/lib/socket-retry.ts` so the application could tell a
+    // dropped socket from a wrong password (§7.5.1). A prefix claiming to be a
+    // test would then be a lie in the production logs. The PROPERTY this test is
+    // about — a retry is never silent — is unchanged.
+    expect(JSON.stringify(seen[0])).toContain('zebra.socket-retry')
     expect(JSON.stringify(seen[0])).toContain('driver.findMany')
   })
 })

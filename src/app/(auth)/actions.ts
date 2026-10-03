@@ -10,6 +10,7 @@ import {
   clearSessionCookie,
 } from '@/lib/auth-context'
 import { SESSION_COOKIE } from '@/lib/session'
+import { withSocketRetry } from '@/lib/socket-retry'
 import { logout } from '@/lib/auth'
 import { LOCALE_COOKIE } from '@/lib/locale'
 import { isLocale } from '@/lib/i18n'
@@ -48,15 +49,46 @@ export async function signInAction(
 
   const store = await cookies()
   const db = client()
-  const result = await login(db, {
-    email,
-    password,
-    // Session rotation: whatever session arrived with the request is revoked
-    // before a new one is minted, so a token planted before authentication is
-    // worthless after it.
-    currentToken: store.get(SESSION_COOKIE)?.value ?? null,
-    metadata: await requestMetadata(),
-  })
+
+  // ── THE ACTION DOES NOT THROW. §7.5.1 ─────────────────────────────────
+  //
+  // Everything fallible is inside this try, and every failure leaves with
+  // WORDS. A thrown server action shows whatever the framework shows, which is
+  // not a sentence about this form — and the owner's report on 2026-10-03 was
+  // exactly that: a correct password, refused, with nothing said.
+  //
+  // ONE RETRY FIRST, on a dropped Neon socket and nothing else. A message for
+  // something a retry would have fixed teaches people to distrust the message.
+  //
+  // WHAT A REPEAT CAN DUPLICATE, named as `withSocketRetry` requires: a second
+  // `LoginAttempt` row for one attempt, and at most one extra `Session` row
+  // whose token nothing holds. Both are harmless here and both are bounded —
+  // attempt rows for this email are deleted on the next success, and a session
+  // nobody holds expires. It is NOT a transaction, so there is no partial write
+  // to replay.
+  // READ ONCE, OUTSIDE THE RETRY. It reads request headers rather than the
+  // database, so it cannot fail from a dropped socket and must not be re-read
+  // per attempt.
+  const metadata = await requestMetadata()
+
+  let result: Awaited<ReturnType<typeof login>>
+  try {
+    result = await withSocketRetry('signInAction.login', () =>
+      login(db, {
+        email,
+        password,
+        // Session rotation: whatever session arrived with the request is revoked
+        // before a new one is minted, so a token planted before authentication is
+        // worthless after it.
+        currentToken: store.get(SESSION_COOKIE)?.value ?? null,
+        metadata,
+      }),
+    )
+  } catch {
+    // THE ROW EVERYBODY FORGETS: the request was fine and the system was not.
+    // It says the system failed, not the person, and it says the remedy.
+    return { error: 'auth.unavailable' }
+  }
 
   if (!result.ok) {
     // Three outcomes, three messages, and none of them says which half was
@@ -72,20 +104,22 @@ export async function signInAction(
     }
   }
 
-  await setSessionCookie(result.token)
-
-  // From here the interface speaks the language the user chose, without a
-  // database read per render.
-  const user = await db.user.findUnique({
-    where: { id: result.context.userId },
-    select: { locale: true },
-  })
-  if (isLocale(user?.locale)) {
-    store.set(LOCALE_COOKIE, user.locale, {
+  // ── FROM HERE NOTHING CAN FAIL BUT THE REDIRECT. §7.5.1 ───────────────
+  //
+  // The locale arrived WITH the credential check — one column on a query that
+  // already ran — so there is no second read to drop a socket on. It used to be
+  // fetched here, after the cookie, and that read was the defect: it threw, the
+  // form said nothing, and the session it had just minted was live.
+  //
+  // Both writes below are cookie-store writes, which cannot reach the network.
+  if (isLocale(result.locale)) {
+    store.set(LOCALE_COOKIE, result.locale, {
       path: '/',
       maxAge: 60 * 60 * 24 * 365,
     })
   }
+
+  await setSessionCookie(result.token)
 
   // THE FIRST SCREEN OF THE DAY, and signing in is the start of it. This was
   // /loads until Step B, which left the two arrival routes disagreeing: the
