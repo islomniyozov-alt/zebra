@@ -761,6 +761,49 @@ Recorded rather than resolved, per Phase 1's discipline.
     and the ORDER BY — plus a label that is not the word "gross", and §6.1.1
     would want a sentence spelling the definition out. Not done on a guess.
 
+45. **Accounting → Reports loses its `from`/`to` range and its weekly/monthly
+    toggle, and that is a working control being removed.** The brief for
+    accounting polish part 1 asks for "the same rolling picker as the
+    dashboard" on this screen. It does not say what happens to the two window
+    controls already there, and all three cannot coexist: v10.16 revoked the
+    two-window arrangement, so a screen with a picker AND a range is one screen
+    answering for two periods with nothing looking broken.
+
+    MONTHLY GROUPING GOES WITH IT, which is the part worth an owner's eye. The
+    presets are settlement-week aligned and a calendar month is not a whole
+    number of settlement weeks, so "monthly" cannot be drawn on this axis
+    without either overlapping buckets or a second window rule. v10.17 already
+    settled the general case — grain is a property of the preset, not a control
+    — and this is that rule meeting an existing feature.
+
+    WHAT IS LOST, PLAINLY: somebody who wanted "January to March by month" now
+    gets thirteen weeks ending today. A month cut is a real question and the
+    answer is not "use weeks"; if it comes back, it comes back as its own
+    preset with its own alignment rule, not as a toggle beside a rolling
+    window.
+
+46. **The dashboard's aging buckets were off by one against the authoritative
+    aging rule, for a day, and nothing could have noticed.** `agingBucketFor`
+    in `factoring.ts` is where the aging boundary is decided —
+    `daysPastDue <= 30` is current — and `directAging` is the reader the
+    invoices screen's chips and totals come from. Part 3's `panelFigures`
+    expressed the same rule again in SQL, as a 30-day interval compared with
+    `>` rather than `>=`, which is `daysPastDue < 30`: an invoice exactly thirty
+    days past due was current on one screen and 31–60 on the other.
+
+    IT IS THE SAME TRADE `by-company.ts` TOOK AND DOCUMENTED, and it is kept
+    for the same reason: the dashboard's budget is one statement for every
+    panel figure, and calling `directAging` would add a round trip to the first
+    screen of the day — and a reader capped at 500 invoices, which is wrong
+    exactly when the business is busy. So the duplication stays and the
+    mitigation is a test rather than a promise: boundary invoices at 29, 30,
+    31, 60, 61, 90 and 91 days past due, asserted to land in the same bucket
+    under both expressions, with a guard watched failing on the comparison.
+
+    THE OFF-BY-ONE ITSELF IS FIXED. What is flagged is that a money rule is now
+    written twice on purpose, in two languages, and that the only thing holding
+    them together is a test somebody could delete.
+
 ---
 
 ## 8. How each acceptance box closed

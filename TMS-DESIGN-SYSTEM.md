@@ -1,7 +1,7 @@
 # TMS-DESIGN-SYSTEM.md
 
 **Project:** Zebra — Transportation Management System
-**Status:** v10.18 — dashboard part 3 fills the Fleet, Cash and Compliance panels 2026-10-02: top drivers credits BOTH crew seats, receivables aging is invoiced-unpaid-non-factored only, Cash is money-roles-only, and the 30/60/90 compliance counts are a DIFFERENT question from the Needs-you warn-days row rather than a second expression of it; v10.17 — owner ruling 2026-10-02: CALENDAR WINDOWS ARE OUT, the picker becomes Last 7 days / Last 4 weeks / Last 13 weeks / Last 52 weeks, each ending with the current settlement week with the partial week drawn as far as today AND MARKED, grain is a property of the preset rather than the span, default Last 13 weeks; v10.16 — owner review of the charts on dev 2026-10-02: the period picker drives EVERY chart and the two-window permission is REVOKED, default period becomes This quarter, every chart carries a worded legend, every bar its value and label with gridlines and a visible CSS tooltip, every KPI a sparkline, and an empty period keeps its axis and legend; bars and sparklines become HTML/CSS while rings stay SVG; v10.15 — §6.1.1 gains the chart contract 2026-10-02: server-rendered inline SVG with no library and nothing that could animate, hover detail as a <title>, the palette an ACCENT RAMP rather than the status hues §3.3 fixes to meanings, and the same figures as a visually hidden table under every chart; v10.14 — §6.1.1 added 2026-10-01 (dashboard redesign part 1): chips and period govern the whole page, "after driver pay" is an em dash for any period Zebra was not settling, closed history counts in totals and appears in no queue, Needs-you becomes a right rail. _The brief for this said "Design system v10.2"; the file was already at v10.13, so this is v10.14 and the discrepancy is flagged rather than resolved — see `PHASE-5-BRIEF.md` §7 flag 42._ v10.13 — §7.10 added 2026-10-01: a record's history is ONE activity timeline, six kinds of entry that do not dress alike, a document's upload read from the `Document` row rather than its audit row, and adding a note is its own control; v10.12 — §6.2.1’s batches row reworded 2026-10-01: the bar is `checkbox selection · Finalise · Mark paid`, not a control called Change status; v10.11 — migration 61 lands 2026-10-01: §6.2.4 standing charges built and the Charges tab table goes to four, §6.2.3's deduct side built with the fuel mode frozen per statement, and the scope offered is the schema's three ownership types rather than the two §6.2.4 first named; v10.10 — §6.2.6 the statements grid 2026-10-01: Deductions is every net-reducing line, status and batch filters, bulk Post and Mark paid; v10.9 — §6.2.5 applying a payment 2026-09-30, and §7.5’s six-field cap applied against a brief asking for a modal; v10.8 — §6.2: Invoices gains a Factored tab, a status filter and bulk Mark sent 2026-09-30; v10.7 — §6.2.4 standing charges specified and held for migration 61, 2026-09-30; v10.6 — §6.2.2: the Trip column is the broker’s reference and Add trips is unconditional 2026-09-30; v10.5 — §6.2.2: every statement exports, a draft’s PDF is watermarked 2026-09-30 (owner’s ruling, reversing the same day’s refusal); v10.4 — §8’s heading rule decides by an allowlist of issued series 2026-09-30; v10.3 — §8 forbids an internal id in a heading and §6.2.2 gives the statement its title rule 2026-09-30 (owner’s ruling); v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
+**Status:** v10.19 — §6.2.7 added 2026-10-03 (accounting polish part 1): /accounting/reports gains four charted sections on §6.1.1's contract, the rolling picker and authority chips become ONE shared pair of components rather than a copy, the from/to range and the weekly/monthly toggle are REMOVED because v10.17 makes grain a property of the preset, factored paper is its own series and never inside collected, the four deduction categories are assembled with SOURCE BEATING LABEL since the schema stores no category, and every figure ties to the cent to the screen it summarises — with the list caps named as the limit of that claim; v10.18 — dashboard part 3 fills the Fleet, Cash and Compliance panels 2026-10-02: top drivers credits BOTH crew seats, receivables aging is invoiced-unpaid-non-factored only, Cash is money-roles-only, and the 30/60/90 compliance counts are a DIFFERENT question from the Needs-you warn-days row rather than a second expression of it; v10.17 — owner ruling 2026-10-02: CALENDAR WINDOWS ARE OUT, the picker becomes Last 7 days / Last 4 weeks / Last 13 weeks / Last 52 weeks, each ending with the current settlement week with the partial week drawn as far as today AND MARKED, grain is a property of the preset rather than the span, default Last 13 weeks; v10.16 — owner review of the charts on dev 2026-10-02: the period picker drives EVERY chart and the two-window permission is REVOKED, default period becomes This quarter, every chart carries a worded legend, every bar its value and label with gridlines and a visible CSS tooltip, every KPI a sparkline, and an empty period keeps its axis and legend; bars and sparklines become HTML/CSS while rings stay SVG; v10.15 — §6.1.1 gains the chart contract 2026-10-02: server-rendered inline SVG with no library and nothing that could animate, hover detail as a <title>, the palette an ACCENT RAMP rather than the status hues §3.3 fixes to meanings, and the same figures as a visually hidden table under every chart; v10.14 — §6.1.1 added 2026-10-01 (dashboard redesign part 1): chips and period govern the whole page, "after driver pay" is an em dash for any period Zebra was not settling, closed history counts in totals and appears in no queue, Needs-you becomes a right rail. _The brief for this said "Design system v10.2"; the file was already at v10.13, so this is v10.14 and the discrepancy is flagged rather than resolved — see `PHASE-5-BRIEF.md` §7 flag 42._ v10.13 — §7.10 added 2026-10-01: a record's history is ONE activity timeline, six kinds of entry that do not dress alike, a document's upload read from the `Document` row rather than its audit row, and adding a note is its own control; v10.12 — §6.2.1’s batches row reworded 2026-10-01: the bar is `checkbox selection · Finalise · Mark paid`, not a control called Change status; v10.11 — migration 61 lands 2026-10-01: §6.2.4 standing charges built and the Charges tab table goes to four, §6.2.3's deduct side built with the fuel mode frozen per statement, and the scope offered is the schema's three ownership types rather than the two §6.2.4 first named; v10.10 — §6.2.6 the statements grid 2026-10-01: Deductions is every net-reducing line, status and batch filters, bulk Post and Mark paid; v10.9 — §6.2.5 applying a payment 2026-09-30, and §7.5’s six-field cap applied against a brief asking for a modal; v10.8 — §6.2: Invoices gains a Factored tab, a status filter and bulk Mark sent 2026-09-30; v10.7 — §6.2.4 standing charges specified and held for migration 61, 2026-09-30; v10.6 — §6.2.2: the Trip column is the broker’s reference and Add trips is unconditional 2026-09-30; v10.5 — §6.2.2: every statement exports, a draft’s PDF is watermarked 2026-09-30 (owner’s ruling, reversing the same day’s refusal); v10.4 — §8’s heading rule decides by an allowlist of issued series 2026-09-30; v10.3 — §8 forbids an internal id in a heading and §6.2.2 gives the statement its title rule 2026-09-30 (owner’s ruling); v10.2 — §6.2.2’s trips grid corrected to nine columns behind a chooser 2026-09-29 (it named eleven and §7.1 throws above nine); §6.2.2 (the settlement workbench) and §6.2.3 (fuel and tolls) added 2026-09-29, with eleven more rows in §6.2.1, against `ST-005562.pdf` and six workbench screenshots; §2's stripe gloss removed from page headers 2026-09-29; §6.2 split into Accounting and Payroll 2026-09-28 (the artefact’s shape, owner’s ruling); §6.2.1 added and §7.1.2/§7.1.3's footer scope corrected from the artefact 2026-09-28; §7.1.3–§7.1.6 added 2026-09-28 (the grid contract: columns chooser, export, tabs over one grid); §6.2, §7.1, §7.4 amended 2026-09-28 (the Accounting section; sort, totals row, date range, company filter on financial lists); §5.1 amended 2026-08-01 (density moves the cell padding); §8 amended 2026-07-31 (midnight-local bare dates); §6.3 amended 2026-07-29 (company switcher → company filter)
 **Scope:** the operator application (desktop/tablet), the driver portal (phone), and the wall-display dispatch board.
 
 This file is the source of truth. If a component in the codebase disagrees with this document, the component is wrong. Amend the document deliberately, in a commit of its own, before changing the code.
@@ -900,6 +900,97 @@ then mean superseding N rows, a driver hired next week would not pick the
 charge up, and "applies to owner-operators" would be a filter frozen at
 creation rather than a property of the rule. That is a different feature
 wearing this one's name._
+
+#### 6.2.7 Accounting → Reports: the charts — _added 2026-10-03_
+
+Reports was three tables. It becomes the same three tables under four charted
+sections, on §6.1.1's chart contract and §6.1.1's window.
+
+**ONE WINDOW CONTROL ON THE SCREEN, AND IT IS THE ROLLING PICKER.** Last 7 days
+/ Last 4 weeks / Last 13 weeks / Last 52 weeks, each ending with the current
+settlement week, partial week drawn as far as today and marked, default Last 13
+weeks (§6.1.1, v10.17). The picker and the authority chips are the SAME
+components the dashboard uses — not copies. A second date control beside them
+would be the two-window arrangement v10.16 revoked: one screen saying two
+things, with nothing looking broken.
+
+_This REPLACES the `from`/`to` range and the weekly/monthly toggle this screen
+carried. Monthly grouping is no longer offered, because v10.17 makes grain a
+property of the preset rather than a control — and a month that is not a whole
+number of settlement weeks cannot be drawn on an axis aligned to them. A
+removed control is recorded rather than quietly dropped: `PHASE-5-BRIEF.md` §7
+flag 45._
+
+**BY COMPANY** — weekly bars per authority: gross, driver pay, after driver pay,
+with the hatch for a bucket whose pay was never recorded (§6.1.1). The matrix
+table stays underneath, totals row included: the chart answers "which way is
+this going" and the table answers "what exactly", and neither replaces the
+other. Closed history is INCLUDED in gross here and excluded everywhere else,
+which is item 7's rule and the reason this page exists.
+
+**RECEIVABLES** — two charts.
+
+1. The aging stacked bar, 0–30 / 31–60 / 61–90 / 90+, the SAME component and
+   the SAME reader as §6.1.1's Cash panel.
+2. Invoiced vs collected per week.
+
+**FACTORED PAPER IS ITS OWN SERIES AND IS NEVER INSIDE COLLECTED.** A factored
+invoice is sold — the factor collects it — so it is neither a receivable (it is
+out of the aging bar, §3.3) nor money the carrier collected. For the same
+reason COLLECTED excludes payments whose method is a factoring method: counting
+a factoring advance as collection, beside the invoice it advanced against,
+double-counts the same freight.
+
+**SETTLEMENTS** — paid-per-week bars, gross against net, over batches that have
+been PAID; and a deductions-by-category donut for the window.
+
+**THE FOUR DEDUCTION CATEGORIES ARE ASSEMBLED, NOT STORED, AND THE PRECEDENCE
+IS PART OF THE CONTRACT.** `SettlementDeductionLine` has no category column: it
+carries a printed `type` label and the id of the rule or one-off that produced
+it. So the four buckets are derived, in this order, first match winning:
+
+| bucket           | rule                                                       |
+| ---------------- | ---------------------------------------------------------- |
+| Standing charges | `recurringDeductionId` matches a `StandingCharge`          |
+| Fuel & tolls     | `type` is `Fuel` or `Toll`                                 |
+| Advances         | `type` is `Advance`                                        |
+| Other            | everything else — insurance, escrow, equipment, violations |
+
+Precedence matters because the categories overlap: an org-wide fuel charge is
+both standing and fuel, and a donut whose slices overlap is not a share of
+anything. SOURCE BEATS LABEL, because "what did the organization's own rules
+take off these cheques" is the question somebody asks of this chart.
+
+**ONLY NEGATIVE LINES.** `totalCents` is signed and Other Pay shares the table;
+a donut of "deductions" that included reimbursements would net two opposite
+things into one slice.
+
+**EVERY FIGURE TIES TO THE CENT TO THE SCREEN IT SUMMARISES** — invoiced to the
+invoices list, collected to the payments list, paid-per-week to the batches
+grid, aging to the Cash panel — and there is one agreement test per figure with
+both sides seeded above zero. A test where both sides are empty agrees about
+nothing, which is the most comfortable way to be wrong.
+
+**THE CHARTS DO NOT READ THE LIST READERS, BECAUSE THE LISTS ARE CAPPED.**
+`readInvoices` takes 2000, `listPayments` takes 300, `directAging` takes 500. A
+52-week aggregate built on a reader that stops at 300 rows is wrong exactly
+when the business is busy, and silently. So the charts aggregate in SQL and the
+agreement tests hold over a window where the list is not truncated — which is a
+real limit of the claim above, stated here rather than discovered later.
+
+**ONE AGING RULE.** `agingBucketFor` in `factoring.ts` is the authority — a
+bucket boundary is `daysPastDue <= 30`, inclusive — and any SQL expression of
+it must agree at the boundary, with a test that seeds 29, 30, 31, 60, 61, 90
+and 91 days past due. The dashboard's panel statement was off by one against it
+until 2026-10-03; see flag 46.
+
+**NO NEW CHART COMPONENT.** `BarChart` carries the weekly money bars, the
+invoiced/collected bars and the paid-per-week bars; `Donut` carries the
+deductions; the aging bar becomes a shared component extracted from the Cash
+panel. `Sparkline` is not used on this screen — a figure here always has its
+bars beside it, so a second shape of the same series would be decoration.
+
+**EMPTY KEEPS THE AXIS AND THE LEGEND**, per §6.1.1, on all four sections.
 
 ### 6.3 Company filter
 
