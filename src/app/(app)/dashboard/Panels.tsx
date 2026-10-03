@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { formatCents } from '@/lib/money'
-import { ChartLegend } from './ChartLegend'
+import { ChartLegend } from '../_charts/ChartLegend'
+import { AgingBar } from '../_charts/AgingBar'
 import type { DriverGrossRow, PanelFigures } from '@/lib/dashboard-counts'
 
 // ---------------------------------------------------------------------------
@@ -228,94 +229,30 @@ export function CashPanel({
     empty: string
   }
 }) {
-  const buckets = [
-    { key: 'd0_30', label: labels.d0_30, cents: aging.d0_30, opacity: 0.4 },
-    { key: 'd31_60', label: labels.d31_60, cents: aging.d31_60, opacity: 0.6 },
-    { key: 'd61_90', label: labels.d61_90, cents: aging.d61_90, opacity: 0.8 },
-    { key: 'd90plus', label: labels.d90plus, cents: aging.d90plus, opacity: 1 },
-  ]
-  const total = buckets.reduce((sum, bucket) => sum + bucket.cents, 0)
-
   return (
     <section className="rounded-card border border-border bg-surface p-z4">
       <h2 className="text-md font-medium text-ink">{labels.heading}</h2>
 
+      {/* THE AGING BAR IS THE SHARED COMPONENT (§6.2.7). It was eighty lines
+       * of markup here until /accounting/reports needed the same chart; two
+       * copies drawn from one reader is how 0-30 ends up a different boundary
+       * on two screens quoting the same number. */}
       <div className="mt-z3">
-        <h3 className="text-sm font-medium text-ink">{labels.aging}</h3>
-        {/* FACTORED PAPER IS THE FACTOR'S RECEIVABLE, not the carrier's, so it
-         * is excluded — and the panel says so, because "receivables" that
-         * silently omitted a third of the book would be the wrong number to
-         * take to a bank. */}
-        <p className="mt-z1 text-xs text-ink-3">{labels.agingNote}</p>
-
-        {/* ONE STACKED BAR, OLDEST DARKEST. The ramp carries the age so the
-         * eye reads severity without a second axis (§6.1.1: intensity, never
-         * the status hues, which mean something else). */}
-        <div className="mt-z2 flex h-z4 w-full overflow-hidden rounded-[2px] border border-border">
-          {total <= 0 ? (
-            <span aria-hidden className="h-full w-full bg-surface-3" />
-          ) : (
-            buckets.map((bucket) => (
-              <span
-                key={bucket.key}
-                aria-hidden
-                className="h-full"
-                style={{
-                  width: `${String((bucket.cents / total) * 100)}%`,
-                  backgroundColor: 'var(--color-accent)',
-                  opacity: bucket.opacity,
-                }}
-              />
-            ))
-          )}
-        </div>
-
-        {/* THE VALUE ON EVERY BUCKET, as part 2b requires of every bar. A
-         * stacked segment two pixels wide is unreadable; the figure is not. */}
-        <ul className="mt-z2 grid grid-cols-2 gap-z2 md:grid-cols-4">
-          {buckets.map((bucket) => (
-            <li key={bucket.key} className="flex items-center gap-z2 text-xs">
-              <span
-                aria-hidden
-                className="h-z2 w-z2 shrink-0 rounded-[2px]"
-                style={{
-                  backgroundColor: 'var(--color-accent)',
-                  opacity: bucket.opacity,
-                }}
-              />
-              <span className="min-w-0">
-                <span className="block truncate text-ink-2">
-                  {bucket.label}
-                </span>
-                <span className="font-mono tabular-nums text-ink">
-                  {formatCents(bucket.cents, locale)}
-                </span>
-              </span>
-            </li>
-          ))}
-        </ul>
-
-        {total <= 0 ? (
-          <p className="mt-z2 text-sm text-ink-3">{labels.empty}</p>
-        ) : null}
-
-        <table className="sr-only">
-          <caption>{labels.aging}</caption>
-          <thead>
-            <tr>
-              <th scope="col">{labels.bucket}</th>
-              <th scope="col">{labels.amount}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {buckets.map((bucket) => (
-              <tr key={bucket.key}>
-                <th scope="row">{bucket.label}</th>
-                <td>{formatCents(bucket.cents, locale)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <AgingBar
+          aging={aging}
+          locale={locale}
+          labels={{
+            heading: labels.aging,
+            note: labels.agingNote,
+            d0_30: labels.d0_30,
+            d31_60: labels.d31_60,
+            d61_90: labels.d61_90,
+            d90plus: labels.d90plus,
+            bucket: labels.bucket,
+            amount: labels.amount,
+            empty: labels.empty,
+          }}
+        />
       </div>
 
       <dl className="mt-z5 grid grid-cols-2 gap-z3 md:grid-cols-4">

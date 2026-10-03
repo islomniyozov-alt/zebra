@@ -3,10 +3,10 @@
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import { BarChart, type Bar } from '@/app/(app)/dashboard/BarChart'
-import { Sparkline } from '@/app/(app)/dashboard/Sparkline'
-import { Donut } from '@/app/(app)/dashboard/Donut'
-import { DayBars } from '@/app/(app)/dashboard/DayBars'
+import { BarChart, type Bar } from '@/app/(app)/_charts/BarChart'
+import { Sparkline } from '@/app/(app)/_charts/Sparkline'
+import { Donut } from '@/app/(app)/_charts/Donut'
+import { DayBars } from '@/app/(app)/_charts/DayBars'
 
 // ---------------------------------------------------------------------------
 // THE THREE CHARTS. §6.1.1's contract, asserted against a DOM.

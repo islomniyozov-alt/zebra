@@ -9,27 +9,26 @@ import {
   panelFigures,
   topDriversByGross,
 } from '@/lib/dashboard-counts'
+import { dashboardFor, type Dashboard } from '@/lib/dashboard-kpis'
 import {
-  dashboardFor,
   DEFAULT_PERIOD,
   grainOf,
   isPartialBucket,
   isPeriodKey,
   periodWindow,
-  type Dashboard,
   type PeriodKey,
-} from '@/lib/dashboard-kpis'
+} from '@/lib/rolling-period'
 import { formatCents } from '@/lib/money'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { TONE_STRIPE } from '@/lib/status'
 import { CompanyChips } from '../_grid/CompanyChips'
-import { PeriodPicker } from './PeriodPicker'
+import { PeriodPicker } from '../_charts/PeriodPicker'
 import { CashPanel, CompliancePanel, FleetPanel } from './Panels'
-import { BarChart } from './BarChart'
-import { Sparkline } from './Sparkline'
-import { Donut } from './Donut'
-import { DayBars } from './DayBars'
+import { BarChart } from '../_charts/BarChart'
+import { Sparkline } from '../_charts/Sparkline'
+import { Donut } from '../_charts/Donut'
+import { DayBars } from '../_charts/DayBars'
 import type { RawParams } from '@/lib/list-view'
 import type { MessageKey } from '@/lib/i18n'
 

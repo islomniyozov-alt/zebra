@@ -1,16 +1,15 @@
 import { describe, expect, it } from 'vitest'
+import { assembleDashboard, type WeekCompanyRow } from '@/lib/dashboard-kpis'
 import {
-  assembleDashboard,
   DEFAULT_PERIOD,
   bucketsIn,
   grainOf,
   isPartialBucket,
   periodWindow,
-  type PeriodKey,
   recentSundays,
   sundayOf,
-  type WeekCompanyRow,
-} from '@/lib/dashboard-kpis'
+  type PeriodKey,
+} from '@/lib/rolling-period'
 
 // ---------------------------------------------------------------------------
 // THE DASHBOARD'S DERIVATIONS, WITHOUT A DATABASE.

@@ -10,12 +10,8 @@ import {
   panelFigures,
   topDriversByGross,
 } from '@/lib/dashboard-counts'
-import {
-  dashboardFor,
-  DEFAULT_PERIOD,
-  grainOf,
-  periodWindow,
-} from '@/lib/dashboard-kpis'
+import { dashboardFor } from '@/lib/dashboard-kpis'
+import { DEFAULT_PERIOD, grainOf, periodWindow } from '@/lib/rolling-period'
 
 // ---------------------------------------------------------------------------
 // WHAT THE DASHBOARD COSTS, READ BY READ, ON DEV.

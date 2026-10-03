@@ -3,14 +3,14 @@ import { PrismaNeon } from '@prisma/adapter-neon'
 import { PrismaClient } from '@/generated/prisma/client'
 import { runInOrg } from '@/lib/tenancy'
 import { unattributed } from '@/lib/audit'
+import { dashboardFor } from '@/lib/dashboard-kpis'
 import {
   PERIODS,
   bucketsIn,
-  dashboardFor,
   grainOf,
   isPartialBucket,
   periodWindow,
-} from '@/lib/dashboard-kpis'
+} from '@/lib/rolling-period'
 import { grossByCompany, driverPayByCompany } from '@/lib/by-company'
 
 // ---------------------------------------------------------------------------

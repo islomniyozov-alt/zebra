@@ -7,7 +7,7 @@ import {
   PERIODS,
   isPeriodKey,
   type PeriodKey,
-} from '@/lib/dashboard-kpis'
+} from '@/lib/rolling-period'
 
 interface Props {
   labels: Record<PeriodKey, string>
