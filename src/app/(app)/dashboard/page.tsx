@@ -5,6 +5,11 @@ import { getLocaleContext } from '@/lib/locale'
 import { companyIdScopeFilter, companyScopeFilter } from '@/lib/tenancy'
 import { actionQueue } from '@/lib/dashboard'
 import {
+  dqfSplit,
+  panelFigures,
+  topDriversByGross,
+} from '@/lib/dashboard-counts'
+import {
   dashboardFor,
   DEFAULT_PERIOD,
   grainOf,
@@ -20,6 +25,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { TONE_STRIPE } from '@/lib/status'
 import { CompanyChips } from '../_grid/CompanyChips'
 import { PeriodPicker } from './PeriodPicker'
+import { CashPanel, CompliancePanel, FleetPanel } from './Panels'
 import { BarChart } from './BarChart'
 import { Sparkline } from './Sparkline'
 import { Donut } from './Donut'
@@ -109,9 +115,6 @@ const bucketDetail = (at: Date, grain: 'day' | 'week', locale: string) => {
   return `${short(at)} – ${short(end)}`
 }
 
-/** Every panel §6.1.1 names, in its order. Empty in part 1. */
-const PANELS = ['charts', 'fleet', 'cash', 'compliance'] as const
-
 export default async function DashboardPage({
   searchParams,
 }: {
@@ -129,6 +132,20 @@ export default async function DashboardPage({
   const maySeeMoney = await currentUserCan('read', 'load.financials')
   const mayBookLoad = await currentUserCan('create', 'load')
 
+  // ── THE THREE PANELS ANSWER TO THREE PERMISSIONS, NOT ONE ──────────────
+  //
+  // §6.1.1 makes CASH money-roles-only and says nothing of the sort about Fleet
+  // or Compliance. For one commit all three hung off `maySeeMoney`, which left a
+  // dispatcher — who holds `FLEET_READ`, reads trucks, drivers and compliance,
+  // and whose actual job is idle equipment — looking at a page with no fleet on
+  // it. The doc wins over the convenience of one flag (AGENTS.md).
+  //
+  // NEITHER CHECK COSTS A STATEMENT. `currentUserCan` reads the request's
+  // session, which is already resolved.
+  const maySeeFleet = await currentUserCan('read', 'truck')
+  const maySeeCompliance = await currentUserCan('read', 'compliance')
+  const maySeePanels = maySeeFleet || maySeeCompliance || maySeeMoney
+
   const period: PeriodKey =
     typeof raw.period === 'string' && isPeriodKey(raw.period)
       ? raw.period
@@ -141,7 +158,12 @@ export default async function DashboardPage({
   const now = new Date()
   const window = periodWindow(period, now)
 
-  const [money, queue, companies] = await Promise.all([
+  // THE ORDER IS THE ORDER OF THE CALLS BELOW, which is money, queue, the
+  // three panel reads, then companies — the new reads were inserted after
+  // `actionQueue`, not appended. Destructuring them in the order I wrote them
+  // in the report rather than the order they run put `panels` where
+  // `companies` was, and the compiler said so.
+  const [money, queue, panels, topDrivers, dqf, companies] = await Promise.all([
     maySeeMoney
       ? withCurrentOrg(
           'read',
@@ -161,6 +183,59 @@ export default async function DashboardPage({
       (tx, ctx) => actionQueue(tx, ctx, companyScopeFilter(ctx.companyScopes)),
       { timeoutMs: 10_000 },
     ),
+    // ── THE THREE PANELS (part 3) ───────────────────────────────────────
+    //
+    // ONE STATEMENT for every scalar figure across all three — the fleet
+    // tiles, the aging buckets, the pipeline and the three compliance
+    // horizons are all COUNTs and SUMs, so they are scalar subqueries in one
+    // SELECT. Only the two that return ROWS need statements of their own.
+    //
+    // CASH IS MONEY-ROLES-ONLY (§6.1.1), AND THE RULING IS THAT ITS QUERY DOES
+    // NOT RUN — not that its output is dropped. So `cash` is a parameter of the
+    // statement rather than a filter over its result: without it the seven
+    // aging and pipeline subqueries are not in the SELECT at all, and the fleet
+    // and compliance halves still arrive in ONE round trip for a dispatcher.
+    //
+    // The alternative was two statements, one per audience, which costs an
+    // extra round trip for every money role to spare one for a dispatcher.
+    maySeePanels
+      ? withCurrentOrg(
+          'read',
+          'dashboard',
+          (tx, ctx) =>
+            panelFigures(tx, ctx.companyScopes, window, now, {
+              cash: maySeeMoney,
+            }),
+          { timeoutMs: 10_000 },
+        )
+      : Promise.resolve(null),
+    // TOP DRIVERS BY GROSS IS MONEY INSIDE THE FLEET PANEL, so it needs both:
+    // the fleet to be visible and the figures to be permitted.
+    maySeeMoney && maySeeFleet
+      ? withCurrentOrg(
+          'read',
+          'dashboard',
+          (tx, ctx) => topDriversByGross(tx, ctx.companyScopes, window),
+          { timeoutMs: 10_000 },
+        )
+      : Promise.resolve(null),
+    // ── THE DQF DONUT, AND IT COSTS THREE STATEMENTS ────────────────────
+    //
+    // `dqfSplit` is in `dashboard-counts.ts` and the cost is written at its
+    // definition: a roster read plus `dqfFactsForDrivers`' two, because the
+    // checklist rule needs full facts per driver and the one-statement version
+    // would be that rule rewritten in SQL. Measured, reported, not hidden.
+    // NO MONEY IN A QUALIFICATION FILE, so this answers to `compliance` rather
+    // than to `load.financials`. A dispatcher reads compliance dates (§2.5) and
+    // the ring is as much theirs as the expiry counts beside it.
+    maySeeCompliance
+      ? withCurrentOrg(
+          'read',
+          'dashboard',
+          (tx, ctx) => dqfSplit(tx, ctx.companyScopes, now),
+          { timeoutMs: 10_000 },
+        )
+      : Promise.resolve(null),
     withCurrentOrg(
       'read',
       'dashboard',
@@ -343,24 +418,99 @@ export default async function DashboardPage({
               </section>
             )}
 
-            {/* THE THREE STILL TO COME. `charts` is filled above, so it is
-             * excluded here rather than listed and skipped. */}
-            {PANELS.filter((panel) => panel !== 'charts').map((panel) => (
-              <section
-                key={panel}
-                className="rounded-card border border-border bg-surface p-z4"
-              >
-                <h2 className="text-md font-medium text-ink">
-                  {t(`dash.panel.${panel}` as MessageKey)}
-                </h2>
-                {/* NOT "No data available" (§14). It says what will be here and
-                 * that it is not here yet, which is a true sentence; the
-                 * forbidden one claims the data is missing. */}
-                <p className="mt-z2 text-sm text-ink-3">
-                  {t('dash.panel.pending')}
-                </p>
-              </section>
-            ))}
+            {/* ── THE THREE PANELS, FILLED (part 3) ─────────────────────
+             *
+             * EACH ONE ANSWERS TO ITS OWN PERMISSION. All three figures ride in
+             * `panels`, but Fleet belongs to whoever reads trucks, Compliance to
+             * whoever reads compliance, and Cash to money roles only — so a
+             * dispatcher gets two of the three and the Cash figures were never
+             * computed for them. */}
+            {panels === null ? null : (
+              <>
+                {!maySeeFleet ? null : (
+                  <FleetPanel
+                    fleet={panels.fleet}
+                    // NULL, NOT AN EMPTY LIST, for a role without the figures:
+                    // the bars are absent rather than drawn at zero, which would
+                    // read as a fleet that earned nothing.
+                    drivers={topDrivers}
+                    locale={locale}
+                    labels={{
+                      heading: t('dash.panel.fleet'),
+                      trucksPaired: t('dash.fleet.trucksPaired'),
+                      trucksIdle: t('dash.fleet.trucksIdle'),
+                      driversPaired: t('dash.fleet.driversPaired'),
+                      driversIdle: t('dash.fleet.driversIdle'),
+                      movingNow: t('dash.fleet.inTransit'),
+                      topDrivers: t('dash.fleet.topDrivers'),
+                      driver: t('charges.driver'),
+                      gross: t('dash.kpi.gross'),
+                      loads: t('dash.kpi.loads'),
+                      other: (count) =>
+                        `${t('dash.chart.other')} (${String(count)})`,
+                      empty: t('dash.fleet.noDrivers'),
+                      teamNote: t('dash.fleet.teamNote'),
+                    }}
+                  />
+                )}
+
+                {panels.aging === null || panels.pipeline === null ? null : (
+                  <CashPanel
+                    aging={panels.aging}
+                    pipeline={panels.pipeline}
+                    unapplied={{
+                      // FROM THE NEEDS-YOU STATEMENT, which already counted and
+                      // summed these. Asking again would be a second round trip
+                      // for a figure already on the page.
+                      cents:
+                        queue.find((row) => row.key === 'unapplied')
+                          ?.amountCents ?? 0,
+                      count:
+                        queue.find((row) => row.key === 'unapplied')?.count ??
+                        0,
+                    }}
+                    locale={locale}
+                    labels={{
+                      heading: t('dash.panel.cash'),
+                      aging: t('dash.cash.aging'),
+                      agingNote: t('dash.cash.agingNote'),
+                      d0_30: t('dash.cash.d0_30'),
+                      d31_60: t('dash.cash.d31_60'),
+                      d61_90: t('dash.cash.d61_90'),
+                      d90plus: t('dash.cash.d90plus'),
+                      bucket: t('dash.cash.bucket'),
+                      amount: t('batches.amount'),
+                      unapplied: t('dash.cash.unapplied'),
+                      pipeline: t('dash.cash.pipeline'),
+                      draft: t('dash.cash.draft'),
+                      final: t('dash.cash.final'),
+                      paid: t('dash.cash.paid'),
+                      empty: t('dash.cash.noReceivables'),
+                    }}
+                  />
+                )}
+
+                {!maySeeCompliance || dqf === null ? null : (
+                  <CompliancePanel
+                    expiring={panels.expiring}
+                    dqf={dqf}
+                    labels={{
+                      heading: t('dash.panel.compliance'),
+                      expiring: t('dash.comp.expiring'),
+                      expiringNote: t('dash.comp.expiringNote'),
+                      d30: t('dash.comp.d30'),
+                      d60: t('dash.comp.d60'),
+                      d90: t('dash.comp.d90'),
+                      dqf: t('dash.comp.dqf'),
+                      complete: t('dash.comp.complete'),
+                      incomplete: t('dash.comp.incomplete'),
+                      horizon: t('dash.comp.horizon'),
+                      count: t('dash.comp.count'),
+                    }}
+                  />
+                )}
+              </>
+            )}
           </div>
 
           {/* ── NEEDS YOU, THE RIGHT RAIL ──────────────────────────────── */}

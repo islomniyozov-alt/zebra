@@ -661,6 +661,106 @@ Recorded rather than resolved, per Phase 1's discipline.
     authority. If it ever needs narrowing, the fix is a scope column and a
     migration, not a filter over a field nobody set.
 
+42. **The dashboard brief named a design-system version that was eleven
+    revisions behind, and `TMS-DESIGN-SYSTEM.md` has been citing this flag
+    number for it since v10.14.** Part 1's brief said "Design system v10.2"; the
+    file was already at v10.13, so the dashboard section landed as v10.14 and
+    the status line recorded the discrepancy with a pointer to "§7 flag 42".
+
+    THE FLAG IT POINTED AT DID NOT EXIST. §7 ended at 41 for a day, and the
+    next thing written here would have silently become the referent — which is
+    what nearly happened, and is why this entry is the version discrepancy
+    rather than the statement budget that was drafted into the slot first.
+    AGENTS.md's reason for transcribing briefs is that a rule nobody can cite
+    cannot be used in review; a citation pointing at the wrong rule is worse
+    than one pointing at nothing, because it reads as settled.
+
+    NOTHING IS WRONG WITH THE VERSION ITSELF. v10.14 is the honest number for a
+    file at v10.13, and the brief's "v10.2" was a stale reading rather than an
+    instruction. Recorded so the pointer resolves.
+
+43. **The dashboard's statement budget was computed from a count nobody had
+    measured, and the page cannot reach it without breaking an accepted
+    ruling.** Part 3's brief says "page ≤ 10 statements total (7 now)". The
+    seven was wrong, the ten was derived from it, and the measured answer is
+    fourteen.
+
+    WHERE THE SEVEN CAME FROM. `dashboard-counts.ts` says the page is
+    "4 + 1 + 1 + 1 = SEVEN", which was arithmetic over the reads as written.
+    `complianceCount` is not one statement: it calls `complianceQueue`, which
+    BUILDS rows out of three reads. So the page was NINE before part 3 ever
+    touched it. Nobody had asked the driver — the exact failure AGENTS.md names
+    as supplying the baseline you are testing.
+
+    WHAT PART 3 ADDS, measured by a `$on('query')` census on dev at w13
+    (`scripts/measure-dashboard-page.ts`):
+
+    | read                | who        | stmts |   ms |
+    | ------------------- | ---------- | ----: | ---: |
+    | `dashboardFor`      | money      |     4 | 1138 |
+    | `actionQueue`       | both       |     4 |  994 |
+    | `panelFigures`      | money      |     1 |  255 |
+    | `panelFigures`      | dispatcher |     1 |  251 |
+    | `topDriversByGross` | money      |     1 |  244 |
+    | `dqfSplit`          | both       |     3 |  758 |
+    | `company.findMany`  | both       |     1 |  240 |
+    | **money role**      | 6 reads    |    14 | 3831 |
+    | **dispatcher**      | 4 reads    |     9 | 2243 |
+
+    TWO TOTALS, BECAUSE THE PAGE IS NOT ONE PAGE. A dispatcher runs neither the
+    KPI series nor the gross bars, and gets the panel statement without its cash
+    columns — nine. Adding the two variants of `panelFigures` together is how
+    this census first printed 15 for a page nobody loads.
+
+    THE MILLISECONDS MOVE AND THE COUNTS DO NOT. A second run minutes later gave
+    `dqfSplit` 2245ms against 758ms and `actionQueue` 1827ms against 994ms on
+    identical data — evening variance on the same connection the socket note in
+    AGENTS.md records. Quote the counts; treat any single timing as an order of
+    magnitude.
+
+    THE ONLY ROUTE FROM 14 TO 10 IS THROUGH A RULING. Three of the four over
+    budget are `dqfSplit`, and the one-statement version of it is the DQF
+    checklist rewritten in SQL — which the owner ruled against for the Needs-you
+    compliance row on 2026-10-01 ("compliance keeps its own statement") and
+    which §6.1.1 records. The fourth would be folding `topDriversByGross` into
+    `panelFigures` with a `json_agg`, worth exactly one statement and coupling
+    two unrelated readers into one unreadable query. So the panels ship at 14
+    and the number is in the report rather than rounded down.
+
+    AND THE UNIT IS PROBABLY WRONG ANYWAY, which is the part worth carrying
+    forward. The budget exists because of flag 31: this screen expired a
+    transaction in production at 6034ms with EIGHTEEN statements inside ONE
+    lock. Fourteen statements spread across six concurrent transactions is not
+    that shape — the largest transaction on the page is four statements, and the
+    wall clock is the slowest of the six rather than the 3831ms serial sum. A
+    budget on statements-per-page counts something the incident was not about.
+    If this is re-litigated, the number to bound is statements per transaction.
+
+44. **"Top drivers by gross" had two readings and the schema picked one.** Part
+    3 asks the Fleet panel for "top drivers by gross for the window". On a
+    settlement, a driver's line carries BOTH `grossCents` — the freight the
+    percentage was taken of — and `amountCents`, what the driver was paid. The
+    first draft of `topDriversByGross` summed the second one under the first
+    one's name.
+
+    THE SCHEMA SETTLES IT, which is why this is recorded rather than asked.
+    `Settlement.grossCents` is documented as "what the percentage was taken OF"
+    and `earningsCents` as the pay, so Zebra's own vocabulary already fixes what
+    gross means on a driver's statement — and the dashboard's KPI strip uses the
+    same word for freight revenue eight inches above this chart. Summing pay
+    there would have put two meanings for one word on one screen. AGENTS.md:
+    where a brief and the schema disagree, the schema wins.
+
+    WHAT IT COSTS, SAID ON SCREEN: a team load credits its FULL gross to both
+    seats, so this column sums above the window's gross wherever teams ran. The
+    panel carries a line saying so, the integration test pins it (both seats at
+    100,000 on one 100,000 load, not 60/40), and a guard was watched failing on
+    the substitution.
+
+    IF THE OWNER MEANT PAY, it is one line — `line."amountCents"` in the SELECT
+    and the ORDER BY — plus a label that is not the word "gross", and §6.1.1
+    would want a sentence spelling the definition out. Not done on a guess.
+
 ---
 
 ## 8. How each acceptance box closed

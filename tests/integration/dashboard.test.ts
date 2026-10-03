@@ -11,7 +11,13 @@ import {
   referenceCount,
   thisWeek,
 } from '@/lib/dashboard'
-import { COUNTED_ROWS, needsYouCounts } from '@/lib/dashboard-counts'
+import {
+  COUNTED_ROWS,
+  dqfSplit,
+  needsYouCounts,
+  panelFigures,
+  topDriversByGross,
+} from '@/lib/dashboard-counts'
 import { recordPayment } from '@/lib/payments'
 import { isLoadViewName, viewWhere } from '@/lib/load-views'
 import type { AuthorizedSession } from '@/lib/permissions'
@@ -867,5 +873,294 @@ describe('the two amounts agree, over amounts that exist', () => {
 
     expect(sql.amounts.unapplied).toBe(ref.unapplied.amountCents)
     expect(sql.amounts.unassignedFinished).toBe(ref.finished.amountCents)
+  }, 300_000)
+})
+
+// ---------------------------------------------------------------------------
+// THE THREE PANELS (part 3), AGAINST REAL POSTGRES.
+//
+// All three readers are raw SQL over money and DOT data, which is exactly the
+// code a jsdom test cannot reach: `tests/dashboard-panels.test.tsx` proves the
+// panels RENDER what they are handed, and nothing there would notice if the
+// aging buckets summed factored paper or a team load paid one seat.
+//
+// EVERY ASSERTION IS A DELTA. An absolute count here is polluted by whatever
+// the describes above seeded into the same organization — the lesson from the
+// Needs-you tests, which asserted absolutes first and had to be rewritten.
+// ---------------------------------------------------------------------------
+
+describe('the three panels read real state (part 3)', () => {
+  const NOW = new Date(Date.UTC(2026, 9, 2))
+  const WINDOW = {
+    from: new Date(Date.UTC(2026, 6, 5)),
+    to: new Date(Date.UTC(2026, 9, 4)),
+  }
+  const PERIOD_START = new Date(Date.UTC(2026, 8, 6))
+  const PERIOD_END = new Date(Date.UTC(2026, 8, 12))
+
+  const newDriver = (first: string, extra: Record<string, unknown> = {}) => ({
+    organizationId,
+    companyId: alphaId,
+    firstName: first,
+    lastName: `Panel ${nonce}`,
+    hireDate: new Date(Date.UTC(2026, 0, 5)),
+    ...extra,
+  })
+
+  it('ages an invoice on its due date, and leaves factored paper out', async () => {
+    const before = await inOrg((tx) => panelFigures(tx, [alphaId], WINDOW, NOW))
+
+    await inOrg(async (tx) => {
+      // AGED ON THE DUE DATE, against NOW. A due date in the past by N days is
+      // an invoice overdue by N days, which is the only interesting direction.
+      const bill = (overdueDays: number, cents: number, over = {}) =>
+        tx.invoice.create({
+          data: {
+            organizationId,
+            companyId: alphaId,
+            customerId: brokerId,
+            invoiceNumber: `PANEL-${nonce}-${Math.random().toString(36).slice(2, 9)}`,
+            status: 'SENT',
+            issueDate: NOW,
+            dueDate: new Date(NOW.getTime() - overdueDays * 86_400_000),
+            totalCents: cents,
+            balanceCents: cents,
+            ...over,
+          },
+        })
+
+      await bill(5, 100_000)
+      await bill(45, 200_000)
+      await bill(75, 300_000)
+      await bill(200, 400_000)
+      // THE TWO THAT MUST NOT COUNT. A factored invoice is the factor's
+      // receivable, and a draft has not been sent to anybody.
+      await bill(5, 999_999, { isFactored: true })
+      await bill(5, 888_888, { status: 'DRAFT' })
+    })
+
+    const after = await inOrg((tx) => panelFigures(tx, [alphaId], WINDOW, NOW))
+
+    // THE CONTROL: both reads asked for cash, so neither side may be null. A
+    // null here would make every delta below `NaN - NaN`, which is not 0 and so
+    // would fail — but confusingly, naming the wrong cause.
+    if (before.aging === null || after.aging === null) {
+      throw new Error(
+        'cash figures were not computed; the reads asked for them',
+      )
+    }
+
+    expect(after.aging.d0_30 - before.aging.d0_30).toBe(100_000)
+    expect(after.aging.d31_60 - before.aging.d31_60).toBe(200_000)
+    expect(after.aging.d61_90 - before.aging.d61_90).toBe(300_000)
+    expect(after.aging.d90plus - before.aging.d90plus).toBe(400_000)
+  }, 300_000)
+
+  it('reports the cash figures as null when cash was not asked for', async () => {
+    // §6.1.1: Cash is money-roles-only. The figures come back null rather than
+    // zero, because zero is a claim about the carrier's receivables and null is
+    // a claim about the reader.
+    //
+    // THIS TEST DOES NOT PROVE THE QUERY DID NOT RUN, and used to be named as
+    // if it did. It reads the RESULT, which the return branch decides — watched
+    // under `watch-guard.mjs`, a `cashColumns` that always emitted the seven
+    // receivables subqueries left it green. The statement itself is asserted in
+    // `tests/dashboard-counts.test.ts`, off the composed SQL.
+    //
+    // WHAT IT DOES PROVE, against real rows: the fleet and compliance halves
+    // still arrive, which is the whole reason this is a parameter on one
+    // statement rather than two readers.
+    const withCash = await inOrg((tx) =>
+      panelFigures(tx, [alphaId], WINDOW, NOW, { cash: true }),
+    )
+    const without = await inOrg((tx) =>
+      panelFigures(tx, [alphaId], WINDOW, NOW, { cash: false }),
+    )
+
+    expect(without.aging).toBeNull()
+    expect(without.pipeline).toBeNull()
+    // AND NOT NULL THE OTHER WAY, which is the control — without it this test
+    // passes against a reader that returns null for everybody.
+    expect(withCash.aging).not.toBeNull()
+    expect(withCash.pipeline).not.toBeNull()
+    expect(without.fleet).toEqual(withCash.fleet)
+    expect(without.expiring).toEqual(withCash.expiring)
+  }, 300_000)
+
+  it('sums the settlement pipeline by batch status, inside the window', async () => {
+    const before = await inOrg((tx) => panelFigures(tx, [alphaId], WINDOW, NOW))
+
+    await inOrg(async (tx) => {
+      const driver = await tx.driver.create({
+        data: newDriver('Pipeline'),
+      })
+
+      const batchWith = async (
+        status: 'DRAFT' | 'FINAL' | 'PAID',
+        netCents: number,
+        start = PERIOD_START,
+        end = PERIOD_END,
+      ) => {
+        // A BATCH IS ORG-LEVEL AND HAS NO `companyId` — it can carry
+        // settlements from more than one authority. The scope the panel filters
+        // on lives on the SETTLEMENT, which is why the figure is summed there.
+        const batch = await tx.settlementBatch.create({
+          data: {
+            organizationId,
+            status,
+            periodStart: start,
+            periodEnd: end,
+            statementDate: end,
+            checkDate: end,
+          },
+        })
+        await tx.settlement.create({
+          data: {
+            organizationId,
+            companyId: alphaId,
+            driverId: driver.id,
+            batchId: batch.id,
+            settlementNumber: `PNL-${nonce}-${Math.random().toString(36).slice(2, 9)}`,
+            periodStart: start,
+            periodEnd: end,
+            netCents,
+          },
+        })
+      }
+
+      // BY THE STATUS OF THE BATCH, which is the thing that moves through draft,
+      // final and paid — a settlement's own status does not carry "paid".
+      await batchWith('DRAFT', 11_000)
+      await batchWith('FINAL', 22_000)
+      await batchWith('PAID', 33_000)
+
+      // AND ONE OUTSIDE THE WINDOW, which must change nothing. The pipeline is
+      // the only one of the four figures the picker governs.
+      await batchWith(
+        'FINAL',
+        777_777,
+        new Date(Date.UTC(2026, 0, 4)),
+        new Date(Date.UTC(2026, 0, 10)),
+      )
+    })
+
+    const after = await inOrg((tx) => panelFigures(tx, [alphaId], WINDOW, NOW))
+
+    if (before.pipeline === null || after.pipeline === null) {
+      throw new Error(
+        'cash figures were not computed; the reads asked for them',
+      )
+    }
+
+    expect(after.pipeline.draftCents - before.pipeline.draftCents).toBe(11_000)
+    expect(after.pipeline.finalCents - before.pipeline.finalCents).toBe(22_000)
+    expect(after.pipeline.paidCents - before.pipeline.paidCents).toBe(33_000)
+  }, 300_000)
+
+  it('credits both crew seats of a team load', async () => {
+    // THE WHOLE REASON `topDriversByGross` READS `SettlementLoadLine` rather
+    // than `Load`. A load has one `driverId` column; a team load pays two
+    // people, and a chart built off the load would show the co-driver nothing
+    // for a week of work.
+    const load = await bookLoad(alphaId, 9)
+
+    const { aId, bId } = await inOrg(async (tx) => {
+      const a = await tx.driver.create({ data: newDriver('CrewAaa') })
+      const b = await tx.driver.create({ data: newDriver('CrewBbb') })
+
+      const batch = await tx.settlementBatch.create({
+        data: {
+          organizationId,
+          status: 'FINAL',
+          periodStart: PERIOD_START,
+          periodEnd: PERIOD_END,
+          statementDate: PERIOD_END,
+          checkDate: PERIOD_END,
+        },
+      })
+
+      for (const [driver, amount] of [
+        [a, 60_000],
+        [b, 40_000],
+      ] as const) {
+        const settlement = await tx.settlement.create({
+          data: {
+            organizationId,
+            companyId: alphaId,
+            driverId: driver.id,
+            batchId: batch.id,
+            settlementNumber: `PNL-${nonce}-${Math.random().toString(36).slice(2, 9)}`,
+            periodStart: PERIOD_START,
+            periodEnd: PERIOD_END,
+            netCents: amount,
+          },
+        })
+        await tx.settlementLoadLine.create({
+          data: {
+            organizationId,
+            settlementId: settlement.id,
+            loadId: load.id,
+            driverId: driver.id,
+            companyId: alphaId,
+            companyName: `Alpha ${nonce}`,
+            loadNumber: load.loadNumber,
+            puPlace: 'Chicago,IL',
+            delPlace: 'Dallas,TX',
+            puDate: new Date(Date.UTC(2026, 8, 7)),
+            delDate: new Date(Date.UTC(2026, 8, 8)),
+            grossCents: 100_000,
+            milesHundredths: 50_000,
+            amountCents: amount,
+            settledBasis: 'rate',
+          },
+        })
+      }
+      return { aId: a.id, bId: b.id }
+    })
+
+    const { top } = await inOrg((tx) =>
+      topDriversByGross(tx, [alphaId], WINDOW, 50),
+    )
+    const a = top.find((row) => row.driverId === aId)
+    const b = top.find((row) => row.driverId === bId)
+
+    // BOTH SEATS PRESENT, each credited with the LOAD'S FULL GROSS — not with
+    // its own pay, which was 60k and 40k. `Settlement.grossCents` is "what the
+    // percentage was taken OF", so gross is the freight and the two seats both
+    // hauled all of it. The pay split is a different question and the
+    // settlement answers it.
+    expect(a?.grossCents).toBe(100_000)
+    expect(b?.grossCents).toBe(100_000)
+    // AND ONE LOAD EACH, which is why these counts sum to two against a window
+    // holding one load. The panel says so on screen.
+    expect(a?.loads).toBe(1)
+    expect(b?.loads).toBe(1)
+  }, 300_000)
+
+  it('counts only qualifiable drivers in the DQF split', async () => {
+    // THE DATATRUCK IMPORT BROUGHT 69 TERMINATED DRIVERS AND 39 APPLICANTS. A
+    // DQF figure counting them reports on nobody, so the roster filter is the
+    // claim under test: one driver who counts, two who must not.
+    const before = await inOrg((tx) => dqfSplit(tx, [alphaId], NOW))
+
+    await inOrg(async (tx) => {
+      await tx.driver.create({ data: newDriver('Qualifiable') })
+      await tx.driver.create({
+        data: newDriver('Gone', { status: 'INACTIVE' }),
+      })
+      // A REFERRAL PAYEE IS NOT A DRIVER. Owner's ruling 2026-09-24: a
+      // commission carried as a Driver row would inflate a figure read for
+      // insurance and CSA exposure.
+      await tx.driver.create({ data: newDriver('Payee', { kind: 'PAYEE' }) })
+    })
+
+    const after = await inOrg((tx) => dqfSplit(tx, [alphaId], NOW))
+
+    const total = (split: { complete: number; incomplete: number }) =>
+      split.complete + split.incomplete
+    // ONE ARRIVED, not three. A driver hired today has no file, so the one that
+    // counts lands on the incomplete side.
+    expect(total(after) - total(before)).toBe(1)
+    expect(after.incomplete - before.incomplete).toBe(1)
   }, 300_000)
 })
