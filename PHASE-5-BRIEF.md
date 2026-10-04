@@ -853,28 +853,37 @@ Recorded rather than resolved, per Phase 1's discipline.
     that has stopped being evidence. It now asserts `[false, true]` again and
     says why.
 
-49. **The summary strip on Invoices and Payments is windowed, so the oldest open
-    invoice — the one that matters most — is the one it does not show.** §6.2.8,
-    and a trade rather than a defect.
+49. **A balance was windowed, which hid the oldest unpaid invoice on the screen
+    whose job is to show what is owed. RESOLVED by the owner, 2026-10-04.**
 
-    WHY IT IS WINDOWED AT ALL: the brief requires every figure to tie to the cent
-    to the list its link opens, and the screens carry the rolling picker. A strip
-    computed as-of-now beside a list filtered to thirteen weeks does not tie to
-    anything, and the fifth preset that would fix it — "all time" — is exactly
-    what v10.17 removed when it took calendar windows out.
+    WHAT SHIPPED FIRST: every figure on the strip was computed over the picker's
+    window, because the brief required each one to tie to the cent to the list
+    its link opens and only a windowed figure could. The cost was recorded at the
+    time — an invoice issued five months ago and still unpaid is outside thirteen
+    weeks — and the mitigation offered was a link to the unwindowed aging bar on
+    Reports.
 
-    WHAT IT COSTS: an invoice issued five months ago and still unpaid is outside
-    a thirteen-week window. That is the invoice somebody needs to chase.
+    WHY THAT WAS THE WRONG TRADE: the mitigation asks the reader to go somewhere
+    else to see the number this screen exists for. A receivables screen that
+    under-reports what is owed is wrong in the direction nobody checks, because
+    the figure looks reasonable.
 
-    WHY IT IS ACCEPTABLE HERE: the unwindowed answer already exists and is one
-    click away. §6.2.7's aging bar has no period — it is every open,
-    non-factored invoice by age, and it is the number to take to a bank. The
-    strip says "in this window" on screen and links to it.
+    THE RULING: TWO KINDS OF FIGURE. A balance — open, overdue, factored,
+    unapplied — is AS OF TODAY with no date bound, labelled so, and its link
+    carries no period filter. A flow — invoiced in window, received in window —
+    carries the picker and says so. Never mixed, and two labels so one screen
+    carrying two different true numbers is readable.
 
-    IF THIS IS WRONG, the fix is not a wider default: it is a fifth figure that
-    is deliberately unwindowed — "open, all time" — sitting beside the four and
-    labelled as the exception. That is a decision about the screen rather than
-    about the window, which is why it is a flag and not a quiet choice.
+    AND THE AGREEMENT SURVIVES, which is what made the first version defensible
+    and is now satisfied properly: `?period=all` is a URL state meaning no date
+    filter, so a balance opens a list with no window and the figure is still the
+    sum of the rows underneath it. It is not a fifth preset — the picker offers
+    four, shows none active in that state, and the reader leaves by choosing one.
+
+    WHAT TO TAKE FROM IT: the first version satisfied every stated requirement
+    and was still wrong, because the requirement that mattered — show what is
+    owed — was not one of the stated ones. Recording the trade is what made the
+    reversal possible one day later instead of after somebody missed a payment.
 
 ---
 
