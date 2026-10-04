@@ -194,6 +194,17 @@ Each step assumes the ones above it.
 
    Both shell traps from _Rotating them_ below apply to every line here.
 
+   **Replacing these later is its own procedure:
+   [`docs/SECRET-ROTATION.md`](docs/SECRET-ROTATION.md).** Bringing a secret up
+   for the first time and rotating a live one are different jobs — the second has
+   an irreversible step, and the rule it turns on is that the old credential is
+   revoked only after the new one is confirmed working. One command answers
+   "confirmed":
+
+   ```bash
+   node scripts/verify-secrets.mjs --target=production
+   ```
+
 5. **Prove the R2 pair, then set it.** Same discipline as the connection
    string, and for a sharper reason: a wrong R2 key does not fail until
    somebody uploads a document, and then it fails in the BROWSER as
@@ -961,6 +972,13 @@ request fact: taken from the `Host` header, a worker reached through a preview
 URL would mint links back to the preview. The header is only the fallback.
 
 ### Rotating them
+
+> **This section is the DEV worker** — the bucket is `zebra-docs-dev` and the
+> `wrangler secret put` lines carry no `--env`. Production rotation is
+> [`docs/SECRET-ROTATION.md`](docs/SECRET-ROTATION.md), which adds the two
+> things production needs and dev does not: an order of operations with a named
+> outage window for the database password, and a verification step that must
+> pass before anything is revoked.
 
 **`zebra_app` database password.** Doable from here, because the migration owns
 the role:
