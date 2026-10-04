@@ -41,22 +41,34 @@ export interface SummaryFigure {
    * meanings, and "big" is not one of them.
    */
   alarming?: boolean
+  /**
+   * WHICH QUESTION THIS FIGURE ANSWERS, printed under it. §6.2.8, owner's
+   * ruling 2026-10-04.
+   *
+   * A `balance` is as of today and has no date bound; a `window` figure is a
+   * flow the picker moves; `all` is a flow with the picker set to every date.
+   *
+   * IT IS REQUIRED, not optional, because the whole point of the ruling is that
+   * two kinds of figure sit side by side and the only thing making them readable
+   * is saying which is which. A figure that forgot its scope would be the exact
+   * ambiguity this replaced.
+   */
+  scope: 'balance' | 'window' | 'all'
 }
 
 export function SummaryStrip({
   figures,
   locale,
-  windowNote,
-  windowHref,
-  windowHrefLabel,
+  scopeLabels,
 }: {
   figures: readonly SummaryFigure[]
   locale: string
-  /** "In this window" — §6.2.8 requires the scope on screen, not implied. */
-  windowNote: string
-  /** Where the UNWINDOWED answer lives. See flag 49. */
-  windowHref?: string
-  windowHrefLabel?: string
+  /**
+   * The three sentences, pre-translated: "as of today", "in this window", "all
+   * dates". §6.2.8 requires the scope on screen under each figure rather than
+   * once for the strip — one blanket note cannot be true of both kinds.
+   */
+  scopeLabels: Record<'balance' | 'window' | 'all', string>
 }) {
   return (
     <section className="border-b border-border bg-surface-2 px-gutter py-z3">
@@ -79,30 +91,21 @@ export function SummaryStrip({
             >
               {formatCents(figure.cents, locale)}
             </dd>
+            {/* THE SCOPE, UNDER EVERY FIGURE. §6.2.8: a balance and a flow sit
+             * side by side, and the label is the only thing that makes two
+             * different true numbers readable as different questions.
+             *
+             * ITALIC AND QUIET, because it is a qualifier rather than a second
+             * figure — but always present, never inferred from position. */}
+            <p className="mt-z1 text-xs italic text-ink-3">
+              {scopeLabels[figure.scope]}
+            </p>
             {figure.note === undefined ? null : (
-              <p className="mt-z1 text-xs text-ink-3">{figure.note}</p>
+              <p className="text-xs text-ink-3">{figure.note}</p>
             )}
           </Link>
         ))}
       </dl>
-
-      {/* THE SCOPE, SAID OUT LOUD, with the way out of it. §6.2.8 and flag 49:
-       * the strip answers for the window, which hides the oldest open invoice —
-       * so it names the screen that does not. */}
-      <p className="mt-z2 text-xs text-ink-3">
-        {windowNote}
-        {windowHref === undefined || windowHrefLabel === undefined ? null : (
-          <>
-            {' '}
-            <Link
-              href={windowHref}
-              className="text-accent underline underline-offset-2"
-            >
-              {windowHrefLabel}
-            </Link>
-          </>
-        )}
-      </p>
     </section>
   )
 }

@@ -219,6 +219,44 @@ describe('the controls each list carries', () => {
     },
   )
 
+  // ── A BALANCE LINKS WITH NO DATE FILTER (§6.2.8, ruling 2026-10-04) ─────
+  //
+  // The figure has no window, so the list it opens must not have one either, or
+  // the number above the rows is not the sum of the rows. `?period=all` is that
+  // state, and it is asserted at the source because the alternative — a figure
+  // quietly linking to a thirteen-week list — looks right in every screenshot.
+  it.each(['invoices', 'payments'] as const)(
+    '%s sends a balance figure to an unfiltered list',
+    (name) => {
+      const source = pageSource(name)
+      // THE WHOLE CONDITIONAL, not just the call. `toContain` on
+      // `next.set('period', ALL_DATES)` is satisfied by a line that can never
+      // run — `if (kind === 'balance' && false) next.set(...)` — which is what
+      // the break harness demonstrated. The reachability is the claim.
+      expect(source).toContain(
+        "if (kind === 'balance') next.set('period', ALL_DATES)",
+      )
+      // AND THE TWO KINDS ARE DISTINGUISHED rather than one rule applied to
+      // both: a flow keeps the picker.
+      expect(source).toMatch(/kind: 'balance' \| 'flow'/)
+    },
+  )
+
+  // ── AND EVERY FIGURE DECLARES WHICH KIND IT IS ─────────────────────────
+  //
+  // `SummaryFigure.scope` is required by the type, so a missing one is a build
+  // error — what this adds is that both VALUES are actually used on each screen.
+  // A strip of four balances would compile, satisfy every other guard here, and
+  // leave the picker decorative again.
+  it.each(['invoices', 'payments'] as const)(
+    '%s carries both a balance and a flow',
+    (name) => {
+      const source = pageSource(name)
+      expect(source).toContain("scope: 'balance'")
+      expect(source).toContain("scope: allDates ? 'all' : 'window'")
+    },
+  )
+
   // ── THE WEEK PICKER IS ON BATCHES, AND ONLY THERE ───────────────────────
   //
   // This read "payroll has a week picker instead of a range" when Payroll was one

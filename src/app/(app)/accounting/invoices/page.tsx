@@ -32,6 +32,7 @@ import { PeriodPicker } from '../../_charts/PeriodPicker'
 import { SummaryStrip } from '../../_grid/SummaryStrip'
 import { invoiceStrip } from '@/lib/accounting-reports'
 import { narrowCompanyScope } from '@/lib/tenancy'
+import { ALL_DATES, windowed } from '../../_grid/window-params'
 import {
   DEFAULT_PERIOD,
   isPeriodKey,
@@ -127,12 +128,18 @@ export default async function AccountingInvoicesPage({
   // The rolling picker replaces the from/to range here as it did on Reports:
   // v10.16 revoked the two-window arrangement, and a picker beside a range is
   // one screen answering for two periods.
+  // ── THE WINDOW, OR NONE AT ALL (§6.2.8, owner's ruling 2026-10-04) ───
+  //
+  // `?period=all` means NO date filter: it is the state a BALANCE figure links
+  // to, so the figure above the rows is the sum of the rows. It is not a fifth
+  // preset — the picker still offers four and shows none of them active here.
+  const allDates = raw.period === ALL_DATES
   const period: PeriodKey =
     typeof raw.period === 'string' && isPeriodKey(raw.period)
       ? raw.period
       : DEFAULT_PERIOD
   const now = new Date()
-  const window = periodWindow(period, now)
+  const window = allDates ? null : periodWindow(period, now)
   const companyParam = typeof raw.company === 'string' ? raw.company : null
 
   const wanted = typeof raw.tab === 'string' ? raw.tab : null
@@ -253,8 +260,18 @@ export default async function AccountingInvoicesPage({
    * page — because the figure is a claim about a state and anything left over
    * would narrow the rows below it without changing the number above.
    */
-  const listHref = (into: Record<string, string>) => {
+  const listHref = (
+    into: Record<string, string>,
+    /**
+     * A BALANCE LINKS WITH NO DATE FILTER (`?period=all`) and a FLOW keeps the
+     * picker's window — owner's ruling 2026-10-04. The figure above the rows has
+     * to be the sum of the rows, so the link carries whichever bound the figure
+     * was computed under.
+     */
+    kind: 'balance' | 'flow' = 'balance',
+  ) => {
     const next = new URLSearchParams(search)
+    if (kind === 'balance') next.set('period', ALL_DATES)
     // `f.`-PREFIXED, because that is what `applyList` reads
     // (`columnFilterParam`). Writing a bare `state=` wrote a parameter nothing
     // consumes, so every figure opened the unfiltered list.
@@ -403,7 +420,15 @@ export default async function AccountingInvoicesPage({
       ? population.filter((row) => row.bucket === age)
       : population
 
-  const view = gridView(narrowed, raw, invoiceShape, applyList)
+  // THE PICKER FILTERS THE LIST, by issue date, through the same `from`/`to`
+  // the removed range used to write. Without this the control moved the strip
+  // and left the rows alone — a control that appears to work.
+  const view = gridView(
+    narrowed,
+    windowed(raw, window),
+    invoiceShape,
+    applyList,
+  )
 
   const allColumns: Column<InvoiceGridRow>[] = [
     {
@@ -481,17 +506,22 @@ export default async function AccountingInvoicesPage({
       {header}
       <SummaryStrip
         locale={locale}
-        windowNote={t('strip.window')}
-        windowHref="/accounting/reports"
-        windowHrefLabel={t('strip.allTime')}
+        scopeLabels={{
+          balance: t('strip.asOfToday'),
+          window: t('strip.inWindow'),
+          all: t('strip.allDates'),
+        }}
         figures={[
+          // ── THREE BALANCES, AS OF TODAY ─────────────────────────────
           {
             key: 'open',
             label: t('strip.open'),
             cents: data.strip.openCents,
             note: t('strip.openNote'),
-            // THE LINK CARRIES THE SAME WINDOW AND AUTHORITY the figure was
-            // computed over, which is what makes them tie to the cent.
+            scope: 'balance',
+            // NO PERIOD ON THE LINK, because the figure has no date bound. The
+            // list it opens is unfiltered by date, so the number above the rows
+            // is the sum of the rows.
             href: listHref({ 'f.state': 'open' }),
           },
           {
@@ -499,6 +529,7 @@ export default async function AccountingInvoicesPage({
             label: t('strip.overdue'),
             cents: data.strip.overdueCents,
             note: t('strip.overdueNote'),
+            scope: 'balance',
             alarming: true,
             href: listHref({ 'f.state': 'overdue' }),
           },
@@ -507,7 +538,17 @@ export default async function AccountingInvoicesPage({
             label: t('strip.factored'),
             cents: data.strip.factoredCents,
             note: t('strip.factoredNote'),
+            scope: 'balance',
             href: listHref({ 'f.state': 'factored' }),
+          },
+          // ── AND ONE FLOW, WHICH IS WHAT THE PICKER MOVES ────────────
+          {
+            key: 'invoiced',
+            label: t('strip.invoiced'),
+            cents: data.strip.invoicedCents,
+            note: `${String(data.strip.invoicedCount)} ${t('strip.invoices')}`,
+            scope: allDates ? 'all' : 'window',
+            href: listHref({}, 'flow'),
           },
         ]}
       />

@@ -55,18 +55,31 @@ const inOrg = <T>(fn: Parameters<typeof withOrg<T>>[1]): Promise<T> =>
 const sum = <T>(rows: readonly T[], pick: (row: T) => number) =>
   rows.reduce((total, row) => total + pick(row), 0)
 
-/** The list, filtered exactly as the strip's link filters it. */
-const listedWith = async (params: Record<string, string>) => {
+/**
+ * The list, filtered exactly as the strip's link filters it.
+ *
+ * `scope: 'balance'` IS THE UNWINDOWED LIST — what `?period=all` opens. Owner's
+ * ruling 2026-10-04: a balance has no date bound, so its link must not impose
+ * one, or the figure above the rows stops being the sum of the rows.
+ *
+ * `scope: 'flow'` is the windowed list the picker produces, via the same
+ * `from`/`to` the page pushes in through `windowed()`.
+ */
+const listedWith = async (
+  params: Record<string, string>,
+  scope: 'balance' | 'flow' = 'balance',
+) => {
   const rows = await inOrg((tx) =>
     readInvoices(tx, { companyId: { in: [alphaId] } }, NOW),
   )
-  const raw = {
-    ...params,
-    // THE WINDOW THE LINK CARRIES. `applyList` reads `from`/`to` through
-    // `readListParams`, which is how the screen's own date filtering works.
-    from: WINDOW.from.toISOString().slice(0, 10),
-    to: new Date(WINDOW.to.getTime() - 1).toISOString().slice(0, 10),
-  }
+  const raw =
+    scope === 'balance'
+      ? { ...params }
+      : {
+          ...params,
+          from: WINDOW.from.toISOString().slice(0, 10),
+          to: new Date(WINDOW.to.getTime() - 1).toISOString().slice(0, 10),
+        }
   return applyList(rows, readListParams(raw), invoiceShape, raw)
 }
 
@@ -200,7 +213,7 @@ afterAll(async () => {
 
 describe('the Open figure is the list its link opens', () => {
   it('to the cent', async () => {
-    const strip = await inOrg((tx) => invoiceStrip(tx, [alphaId], WINDOW, NOW))
+    const strip = await inOrg((tx) => invoiceStrip(tx, [alphaId], null, NOW))
     const listed = await listedWith({ 'f.state': 'open' })
     const fromList = sum(listed, (row) => row.balanceCents)
 
@@ -236,7 +249,7 @@ describe('the Open figure is the list its link opens', () => {
 
 describe('the Overdue figure is the list its link opens', () => {
   it('to the cent, counting one day late as late', async () => {
-    const strip = await inOrg((tx) => invoiceStrip(tx, [alphaId], WINDOW, NOW))
+    const strip = await inOrg((tx) => invoiceStrip(tx, [alphaId], null, NOW))
     const listed = await listedWith({ 'f.state': 'overdue' })
     const fromList = sum(listed, (row) => row.balanceCents)
 
@@ -251,14 +264,14 @@ describe('the Overdue figure is the list its link opens', () => {
   }, 300_000)
 
   it('and is smaller than Open, which is what a subset means', async () => {
-    const strip = await inOrg((tx) => invoiceStrip(tx, [alphaId], WINDOW, NOW))
+    const strip = await inOrg((tx) => invoiceStrip(tx, [alphaId], null, NOW))
     expect(strip.overdueCents).toBeLessThan(strip.openCents)
   }, 300_000)
 })
 
 describe('the Factored figure is the Factored tab', () => {
   it('to the cent, and by count', async () => {
-    const strip = await inOrg((tx) => invoiceStrip(tx, [alphaId], WINDOW, NOW))
+    const strip = await inOrg((tx) => invoiceStrip(tx, [alphaId], null, NOW))
     const listed = await listedWith({ 'f.state': 'factored' })
     // THE WHOLE TOTAL, not the balance: what the factor took on is the invoice.
     const fromList = sum(listed, (row) => row.totalCents)
@@ -279,13 +292,14 @@ describe('the Unapplied figure is the payments list its link opens', () => {
     const { strip, listed } = await inOrg(async (tx) => {
       const scope = { companyId: { in: [alphaId] } }
       const rows = await readPayments(tx, scope)
-      const raw = {
-        state: 'unapplied',
-        from: WINDOW.from.toISOString().slice(0, 10),
-        to: new Date(WINDOW.to.getTime() - 1).toISOString().slice(0, 10),
-      }
+      // NO DATE BOUND, because Unapplied is a BALANCE and its link carries
+      // `?period=all`. The April payment's 999,999 belongs in both the figure
+      // and the rows — it is money sitting unapplied right now, which is the
+      // whole question. Windowed, this test compared 1,179,999 against 180,000
+      // and the figure was the one telling the truth.
+      const raw = { state: 'unapplied' }
       return {
-        strip: await paymentStrip(tx, [alphaId], WINDOW),
+        strip: await paymentStrip(tx, [alphaId], null),
         // THE SCREEN NARROWS BY STATE ITSELF, before applyList — so this does
         // the same, then runs the same date and sort pipeline.
         listed: applyList(
@@ -308,7 +322,7 @@ describe('the Unapplied figure is the payments list its link opens', () => {
     // THE CONTROL ON THE TWO CHIP COUNTS: they are now separate COUNT(*)s, and
     // two counts that are supposed to partition a set can both be wrong in the
     // same direction without anything noticing.
-    const strip = await inOrg((tx) => paymentStrip(tx, [alphaId], WINDOW))
+    const strip = await inOrg((tx) => paymentStrip(tx, [alphaId], null))
     expect(strip.unappliedCount).toBeGreaterThan(0)
     expect(strip.appliedCount).toBeGreaterThan(0)
     expect(strip.unappliedCount + strip.appliedCount).toBe(strip.totalCount)
@@ -316,23 +330,65 @@ describe('the Unapplied figure is the payments list its link opens', () => {
 })
 
 describe('the window and the authority govern the strip', () => {
-  it('excludes paper issued outside the window', async () => {
-    const inside = await inOrg((tx) => invoiceStrip(tx, [alphaId], WINDOW, NOW))
-    const wider = await inOrg((tx) =>
-      invoiceStrip(
-        tx,
-        [alphaId],
-        { from: new Date(Date.UTC(2026, 0, 1)), to: WINDOW.to },
-        NOW,
-      ),
+  // ── THE BALANCE IGNORES THE WINDOW, WHICH IS THE RULING ────────────────
+  it('reports the same Open figure whatever window it is given', async () => {
+    // FLAG 49 RESOLVED. The April invoice (777,777) is outside the thirteen-week
+    // window and MUST be in Open anyway — it is exactly the five-month-old unpaid
+    // invoice the windowed version hid, on the screen whose job is to show what
+    // is owed.
+    const unbounded = await inOrg((tx) =>
+      invoiceStrip(tx, [alphaId], null, NOW),
     )
-    // THE 777,777 INVOICE FROM APRIL is in the wider window and not the narrow
-    // one, which is flag 49 made visible: the strip does not show old paper.
-    expect(wider.openCents).toBe(inside.openCents + 777_777)
+    const windowedToo = await inOrg((tx) =>
+      invoiceStrip(tx, [alphaId], WINDOW, NOW),
+    )
+
+    expect(unbounded.openCents).toBeGreaterThan(0)
+    expect(windowedToo.openCents).toBe(unbounded.openCents)
+    expect(windowedToo.overdueCents).toBe(unbounded.overdueCents)
+    expect(windowedToo.factoredCents).toBe(unbounded.factoredCents)
+  }, 300_000)
+
+  it('and the April invoice is in it, which is what was hidden before', async () => {
+    const strip = await inOrg((tx) => invoiceStrip(tx, [alphaId], null, NOW))
+    const listed = await listedWith({ 'f.state': 'open' })
+    expect(listed.some((row) => row.totalCents === 777_777)).toBe(true)
+    expect(strip.openCents).toBe(sum(listed, (row) => row.balanceCents))
+  }, 300_000)
+
+  // ── AND THE FLOW IS THE ONE THE PICKER MOVES ───────────────────────────
+  it('the Invoiced figure is the window, and ties to the windowed list', async () => {
+    const strip = await inOrg((tx) => invoiceStrip(tx, [alphaId], WINDOW, NOW))
+    const listed = await listedWith({}, 'flow')
+    const billed = listed.filter(
+      (row) => row.status !== 'DRAFT' && row.status !== 'VOID',
+    )
+    const fromList = sum(billed, (row) => row.totalCents)
+
+    expect(strip.invoicedCents).toBeGreaterThan(0)
+    expect(strip.invoicedCents).toBe(fromList)
+    expect(strip.invoicedCount).toBe(billed.length)
+
+    // AND IT EXCLUDES THE APRIL INVOICE, which the balance includes — the two
+    // kinds of figure answering two questions, which is the ruling's point.
+    expect(strip.invoicedCents).toBeLessThan(
+      (await inOrg((tx) => invoiceStrip(tx, [alphaId], null, NOW)))
+        .invoicedCents,
+    )
+  }, 300_000)
+
+  it('the Received figure is the window, and Unapplied is not', async () => {
+    const windowed = await inOrg((tx) => paymentStrip(tx, [alphaId], WINDOW))
+    const everything = await inOrg((tx) => paymentStrip(tx, [alphaId], null))
+
+    // THE APRIL PAYMENT (999,999, fully unapplied) is outside the window.
+    expect(windowed.unappliedCents).toBe(everything.unappliedCents)
+    expect(windowed.receivedCents).toBeLessThan(everything.receivedCents)
+    expect(everything.receivedCents - windowed.receivedCents).toBe(999_999)
   }, 300_000)
 
   it('and an empty authority list means every authority, not none', async () => {
-    const mine = await inOrg((tx) => invoiceStrip(tx, [alphaId], WINDOW, NOW))
+    const mine = await inOrg((tx) => invoiceStrip(tx, [alphaId], null, NOW))
     const all = await inOrg((tx) => invoiceStrip(tx, [], WINDOW, NOW))
     expect(mine.openCents).toBeGreaterThan(0)
     expect(all.openCents).toBeGreaterThanOrEqual(mine.openCents)

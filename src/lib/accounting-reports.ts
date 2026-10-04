@@ -326,10 +326,24 @@ export async function deductionsByCategory(
 // is the aging bar on /accounting/reports. Flag 49.
 // ---------------------------------------------------------------------------
 
-/** Issued paper, partitioned. `factored` is NEVER inside `open` (§3.3). */
+/**
+ * Issued paper, partitioned. `factored` is NEVER inside `open` (§3.3).
+ *
+ * ── THREE BALANCES AND ONE FLOW, AND THE DIFFERENCE IS THE DATE BOUND ────
+ *
+ * Owner's ruling, 2026-10-04 (flag 49). `open`, `overdue` and `factored` are
+ * AS OF TODAY over every issued invoice — no window — because a balance is not a
+ * period question and windowing one hid the five-month-old unpaid invoice on the
+ * screen whose job is to show what is owed.
+ *
+ * `invoicedCents` IS THE FLOW: what was billed inside the window. It is the
+ * figure the picker moves, and it is labelled differently on screen so two true
+ * numbers answering different questions cannot be read as one.
+ */
 export interface InvoiceStrip {
+  /** AS OF TODAY. Issued, not factored, balance outstanding. */
   openCents: number
-  /** A SUBSET of open, not a fourth category. Said on the strip. */
+  /** A SUBSET of open, not a fourth category. Said on the strip. AS OF TODAY. */
   overdueCents: number
   factoredCents: number
   /**
@@ -338,14 +352,28 @@ export interface InvoiceStrip {
    * only while the number was small enough not to matter.
    */
   factoredCount: number
-  /** One entry per `InvoiceStatus` that occurs in the window. */
+  /**
+   * THE FLOW: invoice totals for paper ISSUED inside the window, or over every
+   * date when there is no window. Null never — an empty window is zero billed.
+   */
+  invoicedCents: number
+  invoicedCount: number
+  /**
+   * One entry per `InvoiceStatus` in the WINDOW, because the chips describe the
+   * LIST and the list is what the picker filters. They will therefore disagree
+   * with the balances above them, which is what the two labels are for.
+   */
   byStatus: { status: string; count: number }[]
 }
 
 export async function invoiceStrip(
   tx: TxClient,
   companyIds: readonly string[],
-  period: PeriodWindow,
+  /**
+   * NULL MEANS EVERY DATE — the `?period=all` state a balance's link carries.
+   * It bounds the FLOW figure and the chip counts, and never the balances.
+   */
+  period: PeriodWindow | null,
   now: Date = new Date(),
 ): Promise<InvoiceStrip> {
   const scope = scopeSql('i', companyIds)
@@ -353,14 +381,23 @@ export async function invoiceStrip(
   // ISSUED MEANS ISSUED: a DRAFT has been shown to nobody and a VOID was
   // withdrawn, so neither is money anybody is owed or owes. WRITTEN_OFF stays
   // out of `open` too — it was billed, and then given up on.
+  // ISSUED, AND NOTHING ABOUT WHEN. The balances are as of today.
   const issued = Prisma.sql`
     i."deletedAt" IS NULL
     AND i."issueDate" IS NOT NULL
     AND i."status" NOT IN ('DRAFT', 'VOID')
     ${scope}
-    AND i."issueDate" >= ${period.from}
-    AND i."issueDate" < ${period.to}
   `
+
+  // THE WINDOW, WHERE IT APPLIES: the flow figure and the chip counts. Empty
+  // when the caller passed none, which is `?period=all`.
+  const inWindow =
+    period === null
+      ? Prisma.empty
+      : Prisma.sql`
+          AND i."issueDate" >= ${period.from}
+          AND i."issueDate" < ${period.to}
+        `
 
   const rows = await tx.$queryRaw<
     {
@@ -368,6 +405,8 @@ export async function invoiceStrip(
       overdue: bigint
       factored: bigint
       factored_count: bigint
+      invoiced: bigint
+      invoiced_count: bigint
     }[]
   >`
     SELECT
@@ -388,7 +427,12 @@ export async function invoiceStrip(
       -- invoice, and its balance is being collected by somebody else.
       COALESCE(SUM(i."totalCents") FILTER (
         WHERE i."isFactored" = true), 0)::bigint AS factored,
-      COUNT(*) FILTER (WHERE i."isFactored" = true)::bigint AS factored_count
+      COUNT(*) FILTER (WHERE i."isFactored" = true)::bigint AS factored_count,
+      -- THE FLOW, in the same statement: what was billed inside the window.
+      -- The whole invoice, not the balance — billing is the event.
+      COALESCE(SUM(i."totalCents") FILTER (WHERE TRUE ${inWindow}), 0)::bigint
+        AS invoiced,
+      COUNT(*) FILTER (WHERE TRUE ${inWindow})::bigint AS invoiced_count
     FROM "Invoice" i
     WHERE ${issued}
   `
@@ -396,7 +440,7 @@ export async function invoiceStrip(
   const counts = await tx.$queryRaw<{ status: string; count: bigint }[]>`
     SELECT i."status"::text AS status, COUNT(*)::bigint AS count
     FROM "Invoice" i
-    WHERE ${issued}
+    WHERE ${issued} ${inWindow}
     GROUP BY 1
     ORDER BY 1
   `
@@ -409,6 +453,8 @@ export async function invoiceStrip(
     overdueCents: Number(row.overdue),
     factoredCents: Number(row.factored),
     factoredCount: Number(row.factored_count),
+    invoicedCents: Number(row.invoiced),
+    invoicedCount: Number(row.invoiced_count),
     byStatus: counts.map((entry) => ({
       status: entry.status,
       count: Number(entry.count),
@@ -417,11 +463,20 @@ export async function invoiceStrip(
 }
 
 export interface PaymentStrip {
-  /** Money received that is not against an invoice yet. */
+  /**
+   * AS OF TODAY, over every payment: money received that is not against an
+   * invoice yet. Owner's ruling 2026-10-04 — a balance carries no window.
+   */
   unappliedCents: number
   /** How many payments carry it — "$14,200 across 3 payments". */
   unappliedCount: number
-  /** Every payment in the window, and how many are fully applied. */
+  /** THE FLOW: what arrived inside the window, or over every date. */
+  receivedCents: number
+  receivedCount: number
+  /**
+   * Every payment in the WINDOW, and how many are fully applied — the chip
+   * counts, which describe the list rather than the balance above it.
+   */
   totalCount: number
   appliedCount: number
 }
@@ -429,26 +484,41 @@ export interface PaymentStrip {
 export async function paymentStrip(
   tx: TxClient,
   companyIds: readonly string[],
-  period: PeriodWindow,
+  /** NULL MEANS EVERY DATE — `?period=all`. Bounds the flow, not the balance. */
+  period: PeriodWindow | null,
 ): Promise<PaymentStrip> {
+  const inWindow =
+    period === null
+      ? Prisma.empty
+      : Prisma.sql`
+          AND p."receivedAt" >= ${period.from}
+          AND p."receivedAt" < ${period.to}
+        `
+
   const rows = await tx.$queryRaw<
     {
       unapplied: bigint
       unapplied_count: bigint
+      received: bigint
+      received_count: bigint
       total_count: bigint
       applied_count: bigint
     }[]
   >`
     SELECT
+      -- THE BALANCE: every unapplied dollar, whenever it arrived.
       COALESCE(SUM(p."unappliedCents"), 0)::bigint AS unapplied,
       COUNT(*) FILTER (WHERE p."unappliedCents" > 0)::bigint AS unapplied_count,
-      COUNT(*)::bigint AS total_count,
-      COUNT(*) FILTER (WHERE p."unappliedCents" = 0)::bigint AS applied_count
+      -- THE FLOW, and the two chip counts, which are windowed.
+      COALESCE(SUM(p."amountCents") FILTER (WHERE TRUE ${inWindow}), 0)::bigint
+        AS received,
+      COUNT(*) FILTER (WHERE TRUE ${inWindow})::bigint AS received_count,
+      COUNT(*) FILTER (WHERE TRUE ${inWindow})::bigint AS total_count,
+      COUNT(*) FILTER (
+        WHERE p."unappliedCents" = 0 ${inWindow})::bigint AS applied_count
     FROM "Payment" p
     WHERE p."deletedAt" IS NULL
       ${scopeSql('p', companyIds)}
-      AND p."receivedAt" >= ${period.from}
-      AND p."receivedAt" < ${period.to}
   `
 
   const row = rows[0]
@@ -457,6 +527,8 @@ export async function paymentStrip(
   return {
     unappliedCents: Number(row.unapplied),
     unappliedCount: Number(row.unapplied_count),
+    receivedCents: Number(row.received),
+    receivedCount: Number(row.received_count),
     totalCount: Number(row.total_count),
     appliedCount: Number(row.applied_count),
   }

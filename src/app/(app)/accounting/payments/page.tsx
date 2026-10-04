@@ -18,6 +18,7 @@ import { PeriodPicker } from '../../_charts/PeriodPicker'
 import { SummaryStrip } from '../../_grid/SummaryStrip'
 import { paymentStrip } from '@/lib/accounting-reports'
 import { narrowCompanyScope } from '@/lib/tenancy'
+import { ALL_DATES, windowed } from '../../_grid/window-params'
 import {
   DEFAULT_PERIOD,
   isPeriodKey,
@@ -76,11 +77,13 @@ export default async function AccountingPaymentsPage({
 
   // ONE WINDOW CONTROL, THE SHARED ONE (§6.2.8). The picker replaces the
   // from/to range, as on Invoices and Reports.
+  // `?period=all` — no date filter, the state a balance figure links to.
+  const allDates = raw.period === ALL_DATES
   const period: PeriodKey =
     typeof raw.period === 'string' && isPeriodKey(raw.period)
       ? raw.period
       : DEFAULT_PERIOD
-  const window = periodWindow(period, new Date())
+  const window = allDates ? null : periodWindow(period, new Date())
   const companyParam = typeof raw.company === 'string' ? raw.company : null
 
   const wanted = typeof raw.tab === 'string' ? raw.tab : null
@@ -141,7 +144,13 @@ export default async function AccountingPaymentsPage({
         ? data.payments.filter((row) => row.unappliedCents === 0)
         : data.payments
 
-  const view = gridView(narrowed, raw, paymentShape, applyList)
+  // THE PICKER FILTERS THE LIST, by received date. See the note on Invoices.
+  const view = gridView(
+    narrowed,
+    windowed(raw, window),
+    paymentShape,
+    applyList,
+  )
 
   const money = (cents: number) => (
     <span className="font-mono tabular-nums">{formatCents(cents, locale)}</span>
@@ -228,11 +237,18 @@ export default async function AccountingPaymentsPage({
    * are the same number, and clears the filters that would narrow the rows
    * without changing the figure above them.
    */
-  const stripHref = (state: string) => {
+  const stripHref = (
+    state: string | null,
+    kind: 'balance' | 'flow' = 'balance',
+  ) => {
     const next = new URLSearchParams(search)
     for (const key of ['q', 'page', 'sort', 'dir']) next.delete(key)
     next.set('tab', 'payments')
-    next.set('state', state)
+    // A BALANCE OPENS AN UNFILTERED LIST (owner's ruling 2026-10-04): the figure
+    // has no date bound, so neither may the rows it is the sum of.
+    if (kind === 'balance') next.set('period', ALL_DATES)
+    if (state === null) next.delete('state')
+    else next.set('state', state)
     return `${PATH}?${next}`
   }
 
@@ -285,8 +301,13 @@ export default async function AccountingPaymentsPage({
       />
       <SummaryStrip
         locale={locale}
-        windowNote={t('strip.window')}
+        scopeLabels={{
+          balance: t('strip.asOfToday'),
+          window: t('strip.inWindow'),
+          all: t('strip.allDates'),
+        }}
         figures={[
+          // A BALANCE: every unapplied dollar, whenever it arrived.
           {
             key: 'unapplied',
             label: t('strip.unapplied'),
@@ -294,7 +315,17 @@ export default async function AccountingPaymentsPage({
             // THE COUNT BESIDE THE MONEY: "$14,200 unapplied" is the fact,
             // "across 3 payments" is what says how long it takes to clear.
             note: `${String(data.strip.unappliedCount)} ${t('strip.payments')}`,
+            scope: 'balance',
             href: stripHref('unapplied'),
+          },
+          // AND THE FLOW: what arrived inside the picker's window.
+          {
+            key: 'received',
+            label: t('strip.received'),
+            cents: data.strip.receivedCents,
+            note: `${String(data.strip.receivedCount)} ${t('strip.payments')}`,
+            scope: allDates ? 'all' : 'window',
+            href: stripHref(null, 'flow'),
           },
         ]}
       />
