@@ -1,6 +1,11 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it } from 'vitest'
-import { analyticsEngine, ensureAuditSink } from '@/lib/audit-sink'
+import {
+  analyticsEngine,
+  ensureAuditSink,
+  resetSinkHealth,
+  sinkHealth,
+} from '@/lib/audit-sink'
 import { auditExtension, getAuditHealth, resetAuditHealth } from '@/lib/audit'
 
 // Standing rule 8: a guardrail nobody has watched fail might be misconfigured.
@@ -219,5 +224,60 @@ describe('ensureAuditSink', () => {
     // runtime with no Analytics Engine.
     await expect(provokeGap()).resolves.toBeUndefined()
     expect(getAuditHealth().gaps.noContext).toBe(1)
+  })
+
+  // ── AND THE SILENCE IS NO LONGER SILENT ────────────────────────────────
+  //
+  // The quiet return above is correct for tests and `next dev`, and it also
+  // covers a real production fault: the context symbol renamed, the binding
+  // dropped from one environment, a runtime where the context is not where we
+  // look. In that state failures and gaps stop being recorded fleet-wide and the
+  // only evidence is an ABSENCE of datapoints — indistinguishable from a clean
+  // week. So the absence is counted and announced once.
+  it('counts an event it could not record, and says so once', async () => {
+    resetSinkHealth()
+    const warnings: unknown[][] = []
+    const original = console.warn
+    console.warn = (...args: unknown[]) => void warnings.push(args)
+    try {
+      ensureAuditSink()
+      await provokeGap()
+      await provokeGap()
+    } finally {
+      console.warn = original
+    }
+
+    // BOTH DROPS COUNTED, so the number is the size of the problem.
+    expect(sinkHealth().dropped).toBe(2)
+    // ONE LINE, NOT TWO. A broken binding would otherwise print per audited
+    // write, which is how a log becomes unreadable and then ignored.
+    //
+    // FILTERED TO THE SINK'S OWN PREFIX: audit.ts warns about the GAP itself on
+    // every gap, so an unfiltered count is the gaps plus this, and the assertion
+    // was failing on somebody else's correct behaviour.
+    const mine = warnings.filter((args) =>
+      String(args[0]).includes('zebra.audit.sink'),
+    )
+    expect(mine).toHaveLength(1)
+    expect(JSON.stringify(mine[0])).toContain('no AUDIT_EVENTS dataset')
+    // AND IT SAYS THE TABLE IS FINE, because the first question somebody asks on
+    // reading it is whether the audit trail itself is broken. It is not.
+    expect(JSON.stringify(mine[0])).toContain('AuditLog table is')
+  })
+
+  it('and counts nothing when the binding is there', async () => {
+    resetSinkHealth()
+    const points: { indexes?: string[] }[] = []
+    const dataset = {
+      writeDataPoint: (point: { indexes?: string[] }) =>
+        void points.push(point),
+    }
+    ensureAuditSink()
+    await withContext({ AUDIT_EVENTS: dataset }, provokeGap)
+
+    expect(points).toHaveLength(1)
+    // THE CONTROL: without it, a counter that incremented on every event would
+    // pass the test above and report a healthy sink as broken.
+    expect(sinkHealth().dropped).toBe(0)
   })
 })

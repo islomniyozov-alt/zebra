@@ -39,6 +39,36 @@ interface AnalyticsEngineDataset {
 let registered = false
 
 /**
+ * Events that reached the sink and found no dataset to write to.
+ *
+ * ── THE ONE WAY THIS FILE COULD FAIL SILENTLY ────────────────────────────
+ *
+ * Every other branch here is deliberate: no binding in tests, none in
+ * `next dev`, and audit keeps working. But the SAME quiet return covers a real
+ * production fault — the context symbol renamed under us, the binding dropped
+ * from `wrangler.jsonc` for one environment, a runtime where the context is not
+ * parked where we look. In that state failures and gaps stop being recorded
+ * anywhere fleet-wide, and the only evidence is an absence of datapoints, which
+ * is indistinguishable from a clean week.
+ *
+ * So the absence is counted, and announced ONCE per isolate. A count nobody can
+ * read is the problem Phase 1 §8 already paid for; this one goes to the console,
+ * which is where somebody looking at a Worker is already looking.
+ */
+let dropped = 0
+let warned = false
+
+/** Read by `tests/audit-sink.test.ts`. Not a production surface. */
+export function sinkHealth(): { dropped: number } {
+  return { dropped }
+}
+
+export function resetSinkHealth(): void {
+  dropped = 0
+  warned = false
+}
+
+/**
  * Attach the sink, once per isolate.
  *
  * Called from `createPrismaClient` — the one place guaranteed to run before
@@ -53,7 +83,21 @@ export function ensureAuditSink(): void {
 
   onAuditEvent((event: AuditEvent) => {
     const dataset = analyticsEngine()
-    if (!dataset) return
+    if (!dataset) {
+      // COUNTED, AND SAID ONCE. Not per event: a broken binding would otherwise
+      // print a line per audited write, which is how a log becomes unreadable
+      // and then ignored.
+      dropped += 1
+      if (!warned) {
+        warned = true
+        console.warn(
+          '[zebra.audit.sink] no AUDIT_EVENTS dataset — audit failures and ' +
+            'gaps are NOT being recorded fleet-wide. The AuditLog table is ' +
+            'unaffected; this is the health signal, and it is off.',
+        )
+      }
+      return
+    }
 
     if (event.type === 'failure') {
       dataset.writeDataPoint({
@@ -89,9 +133,16 @@ export function ensureAuditSink(): void {
  * being resolved. The symbol is OpenNext's, and the coupling is the price of
  * not dragging a Workers-only import into every runtime.
  *
- * If OpenNext ever renames it, this returns null and the sink goes quiet —
- * which is why `npm run check` asserts the binding is reachable under the
- * workers pool rather than trusting the shape.
+ * If OpenNext ever renames it, this returns null and the sink goes quiet. TWO
+ * things watch for that, and this comment used to name neither accurately:
+ *
+ *   - `tests/audit-sink.test.ts` asserts the binding is declared in
+ *     `wrangler.jsonc` for EVERY environment, with its own dataset per
+ *     environment, and that resolution goes through this symbol. It reads the
+ *     file; it is not a workers-pool reachability check, which is what the
+ *     previous wording claimed.
+ *   - `dropped` above counts events that found no dataset at runtime, and says
+ *     so once per isolate. That is the half a config test cannot cover.
  */
 const CLOUDFLARE_CONTEXT = Symbol.for('__cloudflare-context__')
 

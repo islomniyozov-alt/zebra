@@ -343,7 +343,16 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     ...RECORDS_READ,
     ...RECORDS_WRITE,
     'report:export',
-    'auditLog:read',
+    // ── `auditLog:read` REMOVED FROM MANAGER, 2026-10-04 ─────────────────
+    //
+    // The grant existed and NOTHING read it: there was no audit screen, so it
+    // granted access to a resource with no surface. Giving it one made the
+    // question real, and the answer is OWNER and ADMIN — an audit trail is where
+    // you look to find out what an operator did, and a manager is an operator.
+    //
+    // RESTORING IT IS ONE LINE here if the owner wants managers to have it.
+    // Nothing else in the application reads this resource, so this narrowing
+    // cannot break a screen; what it changes is who may open /audit.
   ]),
 
   // The 6am user. Books loads, assigns trucks, chases PODs. Sees no margin,
@@ -674,6 +683,11 @@ export const NAVIGATION: readonly NavGroup[] = [
       // else does — settings decide invoice terms and the settlement week, and
       // both are the owner's call.
       item('settings', '/settings', 'organization'),
+      // Admin → Audit. UAT: there was no Owner-facing way to see "who did what"
+      // without a production connection string. `auditLog:read` already
+      // existed as a resource and nothing read it; this is the screen it was
+      // reserved for.
+      item('audit', '/audit', 'auditLog'),
     ],
   },
 ]
