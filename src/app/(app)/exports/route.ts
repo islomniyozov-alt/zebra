@@ -75,9 +75,25 @@ import type { Action, Resource } from '@/lib/permissions'
  * adds — the exhaustiveness that made this decision surface at all would be
  * the thing the fix destroyed. Narrowing keeps it.
  */
-type ExportableGrid = Exclude<GridId, 'settlements.trips'>
+type ExportableGrid = Exclude<
+  GridId,
+  'settlements.trips' | 'loads.loads' | 'trucks.trucks'
+>
 
-const NOT_EXPORTABLE = new Set<GridId>(['settlements.trips'])
+const NOT_EXPORTABLE = new Set<GridId>([
+  'settlements.trips',
+  // §7.1.7's two operational lists. They joined `GRID_IDS` for the columns
+  // chooser — the cure for a 500 — and §7.1.5's export is the ACCOUNTING grid
+  // contract: one shared reader, codes not labels, every page of the filter.
+  // Neither list has that reader, so the honest answer here is "cannot address
+  // this grid" rather than a second definition of what a load is.
+  //
+  // AND THIS IS THE EXHAUSTIVENESS WORKING. Adding two ids to `GRID_IDS` broke
+  // this file in two places — the GUARD map and the switch below — which is how
+  // the decision arrived instead of being buried.
+  'loads.loads',
+  'trucks.trucks',
+])
 
 const isExportable = (grid: GridId): grid is ExportableGrid =>
   !NOT_EXPORTABLE.has(grid)
@@ -101,6 +117,11 @@ const GUARD: Record<GridId, { action: Action; resource: Resource }> = {
   'charges.standing': { action: 'read', resource: 'driver.pay' },
   'charges.oneTime': { action: 'read', resource: 'driver.pay' },
   'reports.driver': { action: 'read', resource: 'driver.pay' },
+  // §7.1.7, and both are in NOT_EXPORTABLE above. The entries exist for the
+  // same reason `settlements.trips` has one: the map is exhaustive on purpose,
+  // and an exhaustive map is what forces the decision to be made out loud.
+  'loads.loads': { action: 'read', resource: 'load' },
+  'trucks.trucks': { action: 'read', resource: 'truck' },
 }
 
 const csv = (name: string, body: string): Response =>

@@ -12,6 +12,13 @@ import { loadSearchWhere } from '@/lib/loads'
 import { readyToInvoiceWhere } from '@/lib/invoices'
 import { viewWhere } from '@/lib/load-views'
 import { DENSITIES, readDensity, readSavedViews } from '@/lib/preferences'
+import { readGridColumns } from '@/lib/grid-columns'
+import {
+  columnKeysFor,
+  LOAD_COLUMN_KEYS,
+  LOAD_COLUMNS_HIDDEN,
+  visibleWithinCap,
+} from '@/lib/list-columns'
 import { SavedViews } from './SavedViews'
 import type {
   LoadBillingStatus,
@@ -112,6 +119,7 @@ export default async function LoadsPage({
     companyCount,
     savedViews,
     density,
+    storedColumns,
     statusCounts,
     billingCounts,
   } = await withCurrentOrg('read', 'load', async (tx, session) => {
@@ -302,6 +310,13 @@ export default async function LoadsPage({
 
     const savedViews = await readSavedViews(tx, session.userId)
     const density = await readDensity(tx, session.userId)
+    // §7.1.7, in the same transaction as the two preference reads above it.
+    const storedColumns = await readGridColumns(
+      tx,
+      session.userId,
+      'loads.loads',
+      columnKeysFor(LOAD_COLUMN_KEYS, companyCount > 1),
+    )
 
     return {
       rows,
@@ -310,6 +325,7 @@ export default async function LoadsPage({
       companyCount,
       savedViews,
       density,
+      storedColumns,
       statusCounts: Object.fromEntries(
         statusCounts.map((row) => [row.operationalStatus, row._count._all]),
       ) as Record<string, number>,
@@ -472,6 +488,17 @@ export default async function LoadsPage({
         // §6.3 as amended: the company column exists only where there is more
         // than one authority to tell apart.
         showCompanyColumn={companyCount > 1}
+        // §7.1.7. DECIDED HERE, not in the client component: the preference row
+        // is here, and so is the cap that keeps the count under §7.1's nine.
+        visible={visibleWithinCap(
+          columnKeysFor(LOAD_COLUMN_KEYS, companyCount > 1),
+          LOAD_COLUMNS_HIDDEN,
+          storedColumns,
+        )}
+        columnErrors={{
+          'grid.columns.errorEmpty': t('grid.columns.errorEmpty'),
+          'grid.columns.errorGrid': t('grid.columns.errorGrid'),
+        }}
         statusLabels={Object.fromEntries(
           ALL_OPERATIONAL.map((status) => [
             status,
@@ -502,6 +529,10 @@ export default async function LoadsPage({
           emptyFilteredTitle: t('loads.emptyFiltered.title'),
           emptyFilteredBody: t('loads.emptyFiltered.body'),
           clearFilters: t('loads.filter.clear'),
+          columns: t('grid.columns'),
+          columnsApply: t('grid.columns.apply'),
+          columnsCancel: t('grid.columns.cancel'),
+          columnsFirstLocked: t('grid.columns.firstLocked'),
         }}
       />
 

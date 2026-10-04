@@ -12,11 +12,24 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
 import { orDash } from '../_reference/shared'
 import { truckStatusKey } from './fields'
+import { ColumnsChooser } from '../_grid/ColumnsChooser'
+import { keepColumns } from '../_grid/grid-page'
+import { readGridColumns } from '@/lib/grid-columns'
+import {
+  columnKeysFor,
+  TRUCK_COLUMN_KEYS,
+  TRUCK_COLUMNS_HIDDEN,
+  visibleWithinCap,
+} from '@/lib/list-columns'
 import type { StatusTone } from '@/lib/status'
 import type { TruckStatus } from '@/generated/prisma/client'
 
-// §7.1 — eight columns at most here, and the authority column appears only
-// where there is more than one authority to tell apart (§6.3).
+// §7.1.7 — ELEVEN COLUMNS DECLARED, TWELVE WITH THE AUTHORITY ONE (§6.3), AND
+// NINE SHOWN. §7.1 caps a table at nine and `Table` throws above it, so this
+// page returned 500 for every organization from 2026-09-20 — when the warnings
+// column landed — until the chooser arrived. The comment here used to say "eight
+// columns at most", which was true when it was written and is how a count stops
+// being checked.
 //
 // The stripe means availability on this screen, and the header says so (§2).
 
@@ -67,7 +80,7 @@ export default async function TrucksPage({
   const needsAttention = params['attention'] === '1'
   const tagParam = typeof params['tag'] === 'string' ? params['tag'] : undefined
 
-  const { rows, companyCount } = await withCurrentOrg(
+  const { rows, companyCount, storedColumns } = await withCurrentOrg(
     'read',
     'truck',
     async (tx, session) => {
@@ -132,12 +145,27 @@ export default async function TrucksPage({
         agingDays: agingDaysFrom(statusChanged.get(truck.id) ?? null, now),
       }))
 
-      return { rows, companyCount }
+      // IN THE SAME TRANSACTION as the rows, not a second one. This is one
+      // `UserPreference` read; a round trip of its own for it would be a second
+      // RLS session variable set and a second socket turn for a list of strings.
+      const storedColumns = await readGridColumns(
+        tx,
+        session.userId,
+        'trucks.trucks',
+        columnKeysFor(TRUCK_COLUMN_KEYS, companyCount > 1),
+      )
+
+      return { rows, companyCount, storedColumns }
     },
   )
 
   const mayCreate = await currentUserCan('create', 'truck')
   const showCompany = companyCount > 1
+  const visible = visibleWithinCap(
+    columnKeysFor(TRUCK_COLUMN_KEYS, showCompany),
+    TRUCK_COLUMNS_HIDDEN,
+    storedColumns,
+  )
 
   const warningNames = warningLabels(t)
 
@@ -305,11 +333,34 @@ export default async function TrucksPage({
         >
           {showRetired ? t('ref.hideRetired') : t('ref.showRetired')}
         </Link>
+        {/* THE CHOOSER IS WHY THIS TABLE IS LEGAL (§7.1.7). Eleven columns,
+         * nine shown, and the specifications are a tick away rather than gone.
+         * `ms-auto` puts it at the end of the row the two filters start. */}
+        <div className="ms-auto">
+          <ColumnsChooser
+            grid="trucks.trucks"
+            columns={columns.map((column) => ({
+              key: column.key,
+              header: String(column.header),
+            }))}
+            visible={visible}
+            labels={{
+              open: t('grid.columns'),
+              apply: t('grid.columns.apply'),
+              cancel: t('grid.columns.cancel'),
+              firstLocked: t('grid.columns.firstLocked'),
+            }}
+            errors={{
+              'grid.columns.errorEmpty': t('grid.columns.errorEmpty'),
+              'grid.columns.errorGrid': t('grid.columns.errorGrid'),
+            }}
+          />
+        </div>
       </div>
 
       <Table
         caption={t('trucks.title')}
-        columns={columns}
+        columns={keepColumns(columns, visible)}
         rows={shown}
         rowKey={(row) => row.id}
         rowHref={(row) => `/trucks/${row.id}`}

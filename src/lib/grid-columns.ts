@@ -1,6 +1,7 @@
 import type { Prisma } from '@/generated/prisma/client'
 import { readPreference, writePreference } from './preferences'
 import { visibleColumns } from './list-view'
+import type { Resource } from './permissions'
 
 type TxClient = Prisma.TransactionClient
 
@@ -49,12 +50,53 @@ export const GRID_IDS = [
   // corrected in v10.2, because §7.1 caps a table at nine and throws above
   // it. This is the grid that found the cap.
   'settlements.trips',
+  // THE TWO OPERATIONAL LISTS, §7.1.7, added 2026-10-04. Not Accounting, and
+  // the first entries here that are not: ten and eleven columns respectively,
+  // both over the cap, both returning 500 until they got a chooser. See
+  // `src/lib/list-columns.ts`.
+  'loads.loads',
+  'trucks.trucks',
 ] as const
 
 export type GridId = (typeof GRID_IDS)[number]
 
 export function isGridId(value: string): value is GridId {
   return (GRID_IDS as readonly string[]).includes(value)
+}
+
+/**
+ * The resource whose `read` permission the chooser asks about.
+ *
+ * YOU MAY TIDY A GRID YOU MAY READ, and that is the whole rule. Hiding a column
+ * writes a `UserPreference` row belonging to the person who pressed it, so the
+ * question is only whether they are entitled to be looking at the grid at all.
+ *
+ * THIS IS HERE BECAUSE THE CHOOSER ASKED ABOUT `settlement` FOR EVERY GRID.
+ * True of the Accounting tabs it was built for, and false the moment §7.1.7 put
+ * one on `/loads` and `/trucks`: a DISPATCHER has `load:read` and `truck:read`
+ * and no settlement permission at all, so the control would have rendered,
+ * submitted, and thrown ForbiddenError for the role that lives on those screens.
+ */
+export function gridResource(grid: GridId): Resource {
+  if (grid === 'loads.loads') return 'load'
+  if (grid === 'trucks.trucks') return 'truck'
+  return 'settlement'
+}
+
+/**
+ * The path to revalidate after a choice is stored.
+ *
+ * A PREFERENCE IS PER USER AND NOT PER PAGE: the same grid may be open in
+ * another window. Accounting revalidates its whole layout because its tabs share
+ * one; the two operational lists are their own routes.
+ */
+export function gridRevalidate(grid: GridId): {
+  path: string
+  type: 'page' | 'layout'
+} {
+  if (grid === 'loads.loads') return { path: '/loads', type: 'page' }
+  if (grid === 'trucks.trucks') return { path: '/trucks', type: 'page' }
+  return { path: '/accounting', type: 'layout' }
 }
 
 const keyFor = (grid: GridId) => `columns.${grid}`

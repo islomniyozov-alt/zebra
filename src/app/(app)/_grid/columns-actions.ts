@@ -2,7 +2,12 @@
 
 import { revalidatePath } from 'next/cache'
 import { withCurrentOrg } from '@/lib/auth-context'
-import { saveGridColumns } from '@/lib/grid-columns'
+import {
+  gridResource,
+  gridRevalidate,
+  isGridId,
+  saveGridColumns,
+} from '@/lib/grid-columns'
 import type { ColumnsState } from './columns-state'
 
 // THE FORM READS, ONE LIB FUNCTION DECIDES, THE PAGE REVALIDATES.
@@ -15,8 +20,16 @@ import type { ColumnsState } from './columns-state'
 // and not tidy it. The row is scoped to `userId` by `writePreference`, so "their
 // own preference" is enforced by the key rather than by this check.
 //
+// ── AND `read` OF WHICH RESOURCE IS THE GRID'S OWN QUESTION ───────────────
+//
+// It used to be `settlement` for every grid, which was true of the Accounting
+// tabs this was built for and false the moment §7.1.7 put a chooser on `/loads`
+// and `/trucks`. `gridResource` decides, and it decides per grid: you may tidy a
+// grid you may read.
+//
 // The grid the columns belong to is validated in `grid-columns.ts` against a
-// closed list, so a forged `grid` field writes nothing.
+// closed list, so a forged `grid` field writes nothing — which is also what makes
+// it safe to look a resource up from it.
 
 export async function saveColumnsAction(
   grid: string,
@@ -33,8 +46,22 @@ export async function saveColumnsAction(
   const columns =
     first !== undefined && !ticked.includes(first) ? [first, ...ticked] : ticked
 
-  const outcome = await withCurrentOrg('read', 'settlement', (tx, session) =>
-    saveGridColumns(tx, session.organizationId, session.userId, grid, columns),
+  // THE ID IS CHECKED HERE TOO, before the transaction, because the permission
+  // to ask about is read off it. `saveGridColumns` checks it again — it is the
+  // one that must, being the thing that writes.
+  if (!isGridId(grid)) return { error: 'grid.columns.errorGrid' }
+
+  const outcome = await withCurrentOrg(
+    'read',
+    gridResource(grid),
+    (tx, session) =>
+      saveGridColumns(
+        tx,
+        session.organizationId,
+        session.userId,
+        grid,
+        columns,
+      ),
   )
 
   if (!outcome.ok) {
@@ -46,9 +73,11 @@ export async function saveColumnsAction(
     }
   }
 
-  // EVERY ACCOUNTING PATH, because a preference is per user and not per page: a
-  // column hidden on Payroll → Batches must not still be showing on a tab the
-  // person had open in another window.
-  revalidatePath('/accounting', 'layout')
+  // A PREFERENCE IS PER USER AND NOT PER PAGE: a column hidden on Payroll →
+  // Batches must not still be showing on a tab the person had open in another
+  // window. Accounting's tabs share a layout, so that is what it revalidates;
+  // §7.1.7's two lists are routes of their own.
+  const { path, type } = gridRevalidate(grid)
+  revalidatePath(path, type)
   return { error: null }
 }
