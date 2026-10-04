@@ -853,6 +853,29 @@ Recorded rather than resolved, per Phase 1's discipline.
     that has stopped being evidence. It now asserts `[false, true]` again and
     says why.
 
+49. **The summary strip on Invoices and Payments is windowed, so the oldest open
+    invoice — the one that matters most — is the one it does not show.** §6.2.8,
+    and a trade rather than a defect.
+
+    WHY IT IS WINDOWED AT ALL: the brief requires every figure to tie to the cent
+    to the list its link opens, and the screens carry the rolling picker. A strip
+    computed as-of-now beside a list filtered to thirteen weeks does not tie to
+    anything, and the fifth preset that would fix it — "all time" — is exactly
+    what v10.17 removed when it took calendar windows out.
+
+    WHAT IT COSTS: an invoice issued five months ago and still unpaid is outside
+    a thirteen-week window. That is the invoice somebody needs to chase.
+
+    WHY IT IS ACCEPTABLE HERE: the unwindowed answer already exists and is one
+    click away. §6.2.7's aging bar has no period — it is every open,
+    non-factored invoice by age, and it is the number to take to a bank. The
+    strip says "in this window" on screen and links to it.
+
+    IF THIS IS WRONG, the fix is not a wider default: it is a fifth figure that
+    is deliberately unwindowed — "open, all time" — sitting beside the four and
+    labelled as the exception. That is a decision about the screen rather than
+    about the window, which is why it is a flag and not a quiet choice.
+
 ---
 
 ## 8. How each acceptance box closed
