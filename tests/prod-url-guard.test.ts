@@ -105,6 +105,14 @@ const WALKTHROUGH_READERS = [
  * subject is not a question.
  */
 const INSPECTION_READERS = [
+  // ADDED 2026-10-04, read-only, and it is the reason this fence fired today.
+  // UAT-CHECKLIST.md's Tier 0 and its trail box are questions about `User`,
+  // `Membership` and `AuditLog` rows on production, and the session running the
+  // checklist was not permitted to read that database — so the boxes became one
+  // command the owner runs. Every statement in it is inside
+  // `BEGIN TRANSACTION READ ONLY`, which is Postgres refusing a write rather
+  // than this list trusting the author.
+  'uat-production-read.mjs',
   'inspect-relay-customer.mjs',
   // Counts loads that are finished, billable and attached to nobody, before
   // `isReady` learns to check assignment. SELECT only.
