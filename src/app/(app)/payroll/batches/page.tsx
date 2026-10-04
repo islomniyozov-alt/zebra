@@ -6,6 +6,7 @@ import { companyScopeFilter } from '@/lib/tenancy'
 import { payWeekFor } from '@/lib/settlement-week'
 import { recentWeeks, weekBatch, weekFromParam } from '@/lib/payroll'
 import { readGridColumns, type GridId } from '@/lib/grid-columns'
+import { BATCH_COLUMN_KEYS, BATCH_COLUMNS_HIDDEN } from '@/lib/list-columns'
 import {
   applyList,
   columnFilterParam,
@@ -113,19 +114,11 @@ const GRID_FOR: Record<Tab, GridId> = {
 // checks the two against each other, so a column added to one and not the other
 // fails rather than quietly becoming unhideable.
 const COLUMN_KEYS: Record<Tab, readonly string[]> = {
-  batches: [
-    'batchNumber',
-    'status',
-    'created',
-    'checkDate',
-    'period',
-    'statements',
-    'gross',
-    'deductions',
-    'amount',
-    'payCompany',
-    'notes',
-  ],
+  // ELEVEN, SO PAST §7.1's NINE — the list and what starts hidden both live in
+  // `src/lib/list-columns.ts` (§7.1.7), where one test counts every grid that
+  // runs past the cap. This page rendered a 500 from the moment §6.2.9 added
+  // gross, deductions and net to it.
+  batches: BATCH_COLUMN_KEYS,
   balances: [
     'driver',
     'weeks',
@@ -135,6 +128,12 @@ const COLUMN_KEYS: Record<Tab, readonly string[]> = {
     'ytd',
     'escrow',
   ],
+}
+
+/** §7.1.7. Only the tab that is over the cap names any. */
+const HIDDEN_BY_DEFAULT: Record<Tab, readonly string[]> = {
+  batches: BATCH_COLUMNS_HIDDEN,
+  balances: [],
 }
 
 const WEEKS_OFFERED = 12
@@ -231,6 +230,7 @@ export default async function PayrollPage({
         session.userId,
         GRID_FOR[tab],
         COLUMN_KEYS[tab],
+        HIDDEN_BY_DEFAULT[tab],
       )
 
       return {

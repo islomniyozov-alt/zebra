@@ -17,7 +17,6 @@ import {
   columnKeysFor,
   LOAD_COLUMN_KEYS,
   LOAD_COLUMNS_HIDDEN,
-  visibleWithinCap,
 } from '@/lib/list-columns'
 import { SavedViews } from './SavedViews'
 import type {
@@ -119,7 +118,7 @@ export default async function LoadsPage({
     companyCount,
     savedViews,
     density,
-    storedColumns,
+    visibleLoadColumns,
     statusCounts,
     billingCounts,
   } = await withCurrentOrg('read', 'load', async (tx, session) => {
@@ -311,11 +310,12 @@ export default async function LoadsPage({
     const savedViews = await readSavedViews(tx, session.userId)
     const density = await readDensity(tx, session.userId)
     // §7.1.7, in the same transaction as the two preference reads above it.
-    const storedColumns = await readGridColumns(
+    const visibleLoadColumns = await readGridColumns(
       tx,
       session.userId,
       'loads.loads',
       columnKeysFor(LOAD_COLUMN_KEYS, companyCount > 1),
+      LOAD_COLUMNS_HIDDEN,
     )
 
     return {
@@ -325,7 +325,7 @@ export default async function LoadsPage({
       companyCount,
       savedViews,
       density,
-      storedColumns,
+      visibleLoadColumns,
       statusCounts: Object.fromEntries(
         statusCounts.map((row) => [row.operationalStatus, row._count._all]),
       ) as Record<string, number>,
@@ -490,11 +490,7 @@ export default async function LoadsPage({
         showCompanyColumn={companyCount > 1}
         // §7.1.7. DECIDED HERE, not in the client component: the preference row
         // is here, and so is the cap that keeps the count under §7.1's nine.
-        visible={visibleWithinCap(
-          columnKeysFor(LOAD_COLUMN_KEYS, companyCount > 1),
-          LOAD_COLUMNS_HIDDEN,
-          storedColumns,
-        )}
+        visible={visibleLoadColumns}
         columnErrors={{
           'grid.columns.errorEmpty': t('grid.columns.errorEmpty'),
           'grid.columns.errorGrid': t('grid.columns.errorGrid'),

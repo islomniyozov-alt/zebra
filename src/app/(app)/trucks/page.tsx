@@ -19,7 +19,6 @@ import {
   columnKeysFor,
   TRUCK_COLUMN_KEYS,
   TRUCK_COLUMNS_HIDDEN,
-  visibleWithinCap,
 } from '@/lib/list-columns'
 import type { StatusTone } from '@/lib/status'
 import type { TruckStatus } from '@/generated/prisma/client'
@@ -80,7 +79,7 @@ export default async function TrucksPage({
   const needsAttention = params['attention'] === '1'
   const tagParam = typeof params['tag'] === 'string' ? params['tag'] : undefined
 
-  const { rows, companyCount, storedColumns } = await withCurrentOrg(
+  const { rows, companyCount, visible } = await withCurrentOrg(
     'read',
     'truck',
     async (tx, session) => {
@@ -148,24 +147,20 @@ export default async function TrucksPage({
       // IN THE SAME TRANSACTION as the rows, not a second one. This is one
       // `UserPreference` read; a round trip of its own for it would be a second
       // RLS session variable set and a second socket turn for a list of strings.
-      const storedColumns = await readGridColumns(
+      const visible = await readGridColumns(
         tx,
         session.userId,
         'trucks.trucks',
         columnKeysFor(TRUCK_COLUMN_KEYS, companyCount > 1),
+        TRUCK_COLUMNS_HIDDEN,
       )
 
-      return { rows, companyCount, storedColumns }
+      return { rows, companyCount, visible }
     },
   )
 
   const mayCreate = await currentUserCan('create', 'truck')
   const showCompany = companyCount > 1
-  const visible = visibleWithinCap(
-    columnKeysFor(TRUCK_COLUMN_KEYS, showCompany),
-    TRUCK_COLUMNS_HIDDEN,
-    storedColumns,
-  )
 
   const warningNames = warningLabels(t)
 

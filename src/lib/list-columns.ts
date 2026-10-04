@@ -109,6 +109,43 @@ export const TRUCK_COLUMN_KEYS = [
  */
 export const TRUCK_COLUMNS_HIDDEN = ['model', 'year', 'odometer'] as const
 
+// ── /payroll/batches, the batches tab ─────────────────────────────────────
+//
+// ELEVEN COLUMNS, AND IT HAD A CHOOSER ALL ALONG. §6.2.9 added gross,
+// deductions and net to this grid on 2026-10-04 and took it from eight to
+// eleven — past the cap, in the same session that fixed /loads and /trucks for
+// being past the cap, by the same hands. `tests/accounting-surface.test.ts`
+// checks this key list against the page's `Column` array and was green: it asks
+// whether the two agree, never how many there are.
+//
+// THE KEYS LIVE HERE AND NOT IN THE PAGE so that one test can count every grid
+// that runs past nine. The page's other tab (balances, seven columns) stays in
+// the page, because it is not one of them.
+
+export const BATCH_COLUMN_KEYS = [
+  'batchNumber',
+  'status',
+  'created',
+  'checkDate',
+  'period',
+  'statements',
+  'gross',
+  'deductions',
+  'amount',
+  'payCompany',
+  'notes',
+] as const
+
+/**
+ * §7.1.7: `created` is bookkeeping — the row's own age, next to a check date and
+ * a period that are the dates anybody asks about — and `notes` is free text that
+ * truncates to nothing useful in a column. Both a tick away.
+ *
+ * NOT `gross`, `deductions` OR `amount`: those three are why §6.2.9 touched this
+ * grid, and hiding them by default would answer a 500 by undoing the feature.
+ */
+export const BATCH_COLUMNS_HIDDEN = ['created', 'notes'] as const
+
 /**
  * The keys a list actually has this request.
  *

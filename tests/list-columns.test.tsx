@@ -4,7 +4,10 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
+import { readGridColumns } from '@/lib/grid-columns'
 import {
+  BATCH_COLUMN_KEYS,
+  BATCH_COLUMNS_HIDDEN,
   columnKeysFor,
   LOAD_COLUMN_KEYS,
   LOAD_COLUMNS_HIDDEN,
@@ -90,6 +93,16 @@ describe('the key lists match the columns the pages actually declare', () => {
     expect(TRUCK_COLUMN_KEYS.length).toBeGreaterThan(TABLE_COLUMN_CAP)
   })
 
+  it('and the batches page says which of its eleven start hidden', () => {
+    // WITHOUT THIS ARGUMENT the cap still holds — `readGridColumns` would keep
+    // the first nine — but the two it dropped would be whichever happened to be
+    // last, not the two §7.1.7 chose. Line-anchored, so a commented-out call
+    // does not satisfy it.
+    expect(
+      readFileSync('src/app/(app)/payroll/batches/page.tsx', 'utf8'),
+    ).toMatch(/^\s*HIDDEN_BY_DEFAULT\[tab\],$/m)
+  })
+
   it('and each page hands its columns through keepColumns', () => {
     // LINE-ANCHORED, NOT `toContain`. A commented-out call contains the string
     // too — twice this session a guard passed against source that had been
@@ -116,6 +129,15 @@ describe('whatever is stored, the table gets nine columns or fewer', () => {
       name: '/trucks',
       keys: TRUCK_COLUMN_KEYS,
       hidden: TRUCK_COLUMNS_HIDDEN,
+    },
+    {
+      // THE THIRD ONE, FOUND THE SAME DAY AND BY THE SAME PROBE. §6.2.9 took
+      // this grid from eight columns to eleven; it had the chooser already, and
+      // a chooser without a cap is a 500 on the first visit of every user who
+      // has never set a preference — which is all of them.
+      name: '/payroll/batches',
+      keys: BATCH_COLUMN_KEYS,
+      hidden: BATCH_COLUMNS_HIDDEN,
     },
   ]
 
@@ -174,6 +196,59 @@ describe('whatever is stored, the table gets nine columns or fewer', () => {
       'a',
       'c',
     ])
+  })
+})
+
+describe('the cap lives in readGridColumns, so no grid can get past it', () => {
+  // THE WHOLE POINT OF PUTTING IT THERE. Three pages each solved — or failed to
+  // solve — this on their own; a fourth will be written by somebody who has not
+  // read §7.1.7, and the only protection that survives that is the function they
+  // cannot avoid calling.
+  const txWith = (value: unknown) =>
+    ({
+      userPreference: {
+        findFirst: async () => (value === undefined ? null : { value }),
+      },
+    }) as never
+
+  it('with no stored row at all', async () => {
+    const visible = await readGridColumns(
+      txWith(undefined),
+      'u1',
+      'payroll.batches',
+      BATCH_COLUMN_KEYS,
+      BATCH_COLUMNS_HIDDEN,
+    )
+    expect(visible.length).toBe(9)
+    expect(visible).not.toContain('created')
+    // AND THE THREE §6.2.9 ADDED ARE STILL THERE, because a 500 answered by
+    // quietly dropping the feature's own columns is not a fix.
+    expect(visible).toContain('gross')
+    expect(visible).toContain('deductions')
+    expect(visible).toContain('amount')
+  })
+
+  it('and with a stored row naming eleven columns', async () => {
+    const visible = await readGridColumns(
+      txWith([...BATCH_COLUMN_KEYS]),
+      'u1',
+      'payroll.batches',
+      BATCH_COLUMN_KEYS,
+      BATCH_COLUMNS_HIDDEN,
+    )
+    expect(visible.length).toBeLessThanOrEqual(TABLE_COLUMN_CAP)
+  })
+
+  it('and a page that names nothing hidden still gets nine', async () => {
+    // THE DEFAULT PARAMETER, which is what a future page will use by omission.
+    // It loses its last columns rather than the request.
+    const visible = await readGridColumns(
+      txWith(undefined),
+      'u1',
+      'payroll.batches',
+      BATCH_COLUMN_KEYS,
+    )
+    expect(visible.length).toBe(TABLE_COLUMN_CAP)
   })
 })
 

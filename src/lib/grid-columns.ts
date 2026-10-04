@@ -1,6 +1,7 @@
 import type { Prisma } from '@/generated/prisma/client'
 import { readPreference, writePreference } from './preferences'
 import { visibleColumns } from './list-view'
+import { visibleWithinCap } from './list-columns'
 import type { Resource } from './permissions'
 
 type TxClient = Prisma.TransactionClient
@@ -107,16 +108,33 @@ const keyFor = (grid: GridId) => `columns.${grid}`
  * ORDER COMES FROM THE TABLE, NOT THE PREFERENCE. A stored list is a SET of
  * what to show; letting it reorder columns too would mean a five-phase-old
  * preference deciding that money sits left of a load number.
+ *
+ * ── AND IT NEVER RETURNS MORE THAN §7.1's NINE (§7.1.7) ───────────────────
+ *
+ * THE CAP IS HERE BECAUSE THREE PAGES PROVED IT CANNOT BE PER PAGE. A grid with
+ * no stored preference gets EVERYTHING back — correct for eight columns, a 500
+ * for eleven, since `Table` throws above nine. `/loads` and `/trucks` were down
+ * for two weeks that way; `/payroll/batches` joined them the day §6.2.9 added
+ * three columns to it, with a chooser already on the page and a guard already
+ * checking its key list against its `Column` array. Neither noticed, because
+ * both were asking a different question.
+ *
+ * So the one function every grid already calls is where the count gets bounded.
+ * `defaultHidden` is how a page says WHICH columns go first, and a page over the
+ * cap that does not say loses its last columns — visibly, and to a control that
+ * puts them back, rather than to a stack trace.
  */
 export async function readGridColumns(
   tx: TxClient,
   userId: string,
   grid: GridId,
   available: readonly string[],
+  defaultHidden: readonly string[] = [],
 ): Promise<string[]> {
-  return visibleColumns(
+  return visibleWithinCap(
     available,
-    await readPreference(tx, userId, keyFor(grid)),
+    defaultHidden,
+    visibleColumns(available, await readPreference(tx, userId, keyFor(grid))),
   )
 }
 
