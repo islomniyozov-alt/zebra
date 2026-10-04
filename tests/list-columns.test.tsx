@@ -4,7 +4,8 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import { readGridColumns } from '@/lib/grid-columns'
+import { gridResource, readGridColumns } from '@/lib/grid-columns'
+import { can } from '@/lib/permissions'
 import {
   BATCH_COLUMN_KEYS,
   BATCH_COLUMNS_HIDDEN,
@@ -249,6 +250,39 @@ describe('the cap lives in readGridColumns, so no grid can get past it', () => {
       BATCH_COLUMN_KEYS,
     )
     expect(visible.length).toBe(TABLE_COLUMN_CAP)
+  })
+})
+
+describe('the chooser asks about a permission the role on that screen holds', () => {
+  // THE DEFECT THIS IS ABOUT. `saveColumnsAction` asked for `settlement:read`
+  // for every grid — correct for the Accounting tabs it was built for, and a
+  // ForbiddenError on the two lists a DISPATCHER lives on. The control would
+  // have rendered, submitted and thrown, for the one role that cannot work
+  // around it by using a different screen.
+  const dispatcher = {
+    userId: 'u1',
+    organizationId: 'o1',
+    role: 'DISPATCHER' as const,
+    companyScopes: [],
+  }
+
+  it('loads and trucks ask about load and truck', () => {
+    expect(gridResource('loads.loads')).toBe('load')
+    expect(gridResource('trucks.trucks')).toBe('truck')
+  })
+
+  it('and the Accounting grids still ask what they always did', () => {
+    expect(gridResource('payroll.batches')).toBe('settlement')
+    expect(gridResource('invoices.invoices')).toBe('settlement')
+  })
+
+  it('so a dispatcher may tidy both lists, and could not have before', () => {
+    expect(can(dispatcher, 'read', gridResource('loads.loads'))).toBe(true)
+    expect(can(dispatcher, 'read', gridResource('trucks.trucks'))).toBe(true)
+    // THE OLD VALUE, ASSERTED AS FALSE. Without this line the three above would
+    // pass against a `gridResource` that returned `settlement` for everything in
+    // an organization whose dispatcher happened to hold it.
+    expect(can(dispatcher, 'read', 'settlement')).toBe(false)
   })
 })
 
