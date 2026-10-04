@@ -3,27 +3,34 @@
 **Run:** 2026-10-04, by Claude Code against `UAT-CHECKLIST.md` **Version 1**
 (2026-08-03).
 **Commits produced by this run:** `e912455`, `4307ac7`, `10b69ed`, `549472f`,
-`5ab4c5e`.
+`5ab4c5e`, `02bb83c`, `96e5114`, `d78049d` — all deployed to dev and
+production.
 
 ---
 
 ## Ready for first external customer: **NO**
 
 Three screens were returning **500** in production when this run started, and two
-of them are the screens a dispatcher spends the day on. They are fixed in the
-commits above, and the fix is not in production until a dispatch succeeds.
+of them are the screens a dispatcher spends the day on. They are fixed, and the
+fix is deployed — both workers now serve `sha-d78049d`, read from Cloudflare.
 
-| why not                                                                                                              | severity      |
-| -------------------------------------------------------------------------------------------------------------------- | ------------- |
-| The fixes for the three 500s are not deployed — production serves `sha-e961a9f`                                      | **1 — fatal** |
-| Tier 0 is not done: no Live Check account, so the paired production check has never run (11/12, best possible 11/12) | **1**         |
-| No dispatcher has ever signed in to production — every Tier 1 login box is unobserved                                | **1**         |
-| Tier 2's load lifecycle has not been run end to end by a person on a browser                                         | **2**         |
-| Tier 3 has not started: no real freight exists on production                                                         | **2**         |
+What remains is not about the code:
 
-Nothing here is a reason to doubt the application's _logic_ — the gate is green
-and the full integration project passes. The reasons are that the doors have not
-been opened by a human, and that what is deployed is older than what is fixed.
+| why not                                                                                                                    | severity |
+| -------------------------------------------------------------------------------------------------------------------------- | -------- |
+| Tier 0 is not done: no Live Check account, so the paired production check has never run (11/12, best possible 11/12)       | **1**    |
+| No dispatcher has ever signed in to production — every Tier 1 login box is unobserved                                      | **1**    |
+| Tier 2's load lifecycle has not been run end to end by a person on a browser                                               | **2**    |
+| Tier 3 has not started: no real freight has been booked on production                                                      | **2**    |
+| Three Tier 0/1 boxes are facts about production rows, and this session could not read them                                 | **2**    |
+| A rate confirmation's fuel surcharge and accessorials are saved as line haul, and 55 of 57 live pay rules pay on line haul | **1**    |
+
+**NO is a statement about the checklist, not about the application.** The gate
+passes, the full integration project passes, both workers serve HEAD, dev's live
+check is 18/18 and production's is 11/12 with the twelfth blocked on an account
+nobody has created. The reason to wait is that the doors have not been opened by a
+human — and that three of today's four defects were screens returning 500 that no
+instrument in this repository was watching.
 
 ---
 
@@ -34,14 +41,39 @@ been opened by a human, and that what is deployed is older than what is fixed.
 | Production worker        | `https://zebra.tajikcargollc.workers.dev`                                   |
 | Dev worker               | `https://zebra-dev.tajikcargollc.workers.dev`                               |
 | Both serving, at start   | `sha-e961a9f` — **8 commits behind HEAD**, 13 files under `src/` different  |
+| Both serving, at the end | `sha-d78049d` — **matches HEAD**                                            |
 | Read from                | Cloudflare, via `scripts/check-deploy-drift.mjs`, never from a local belief |
-| `npm run check`          | **EXIT CODE 0 — OK** (`.run-status/check.json`)                             |
-| Full integration project | **EXIT CODE 0 — OK**, 11m07s (`.run-status/integ-full.json`)                |
+| `npm run check`          | **EXIT CODE 0 — OK**, 86s (`.run-status/uat-check.json`)                    |
+| Full integration project | **EXIT CODE 0 — OK**, 11m34s (`.run-status/uat-integ.json`)                 |
+| Dev dispatch             | **EXIT CODE 0 — OK** (`.run-status/uat-dev.json`)                           |
+| Production dispatch      | **EXIT CODE 0 — OK** (`.run-status/uat-prod.json`)                          |
+| Dev live check           | **18/18**, with a session                                                   |
+| Production live check    | **11/12** — the twelfth needs a Live Check account                          |
 
-The drift reading is the important one: **both workers were serving the commit
-that broke `/payroll/batches`**, and neither had the audit screen, the production
-migration gate or the login fix. Those are Criticals #1–#3 from earlier today;
-they are committed and were never dispatched.
+The drift reading at the start is the one that mattered: **both workers were
+serving the commit that broke `/payroll/batches`**, and neither had the audit
+screen, the production migration gate or the login fix. Those are Criticals #1–#3
+from earlier today; they were committed and never dispatched. They are deployed
+now.
+
+### Three things about the instruments, which cost this run most of its time
+
+1. **A status file from 2026-09-27 nearly became today's verdict.** A chain of
+   mine reused the name `deploy-prod3`. The production dispatch never ran, and
+   `--check` printed a cheerful `EXIT CODE 0 — OK` out of a file eight days old;
+   only the timestamp gave it away. The final chain deletes its status files
+   first and uses names nothing else has used. This is the wrapper's own hazard
+   arriving through a third channel — not a pipe, not a notification, but a
+   reused name.
+2. **`npm run check` was red from `10b69ed` to `d78049d`**, and an earlier draft
+   of this document called it green on the strength of a run from before that
+   commit. `tests/prod-url-guard.test.ts` requires every script that reads
+   `PROD_DIRECT_DATABASE_URL` to be declared by name, and the hand-off script was
+   not. The fence worked; the claim about it did not.
+3. **One integration run was rejected for a reason that was mine:** "The working
+   tree MOVED during the run: started at 5ab4c5e, finished at 02bb83c. No receipt
+   written." All 766 cases passed. I committed mid-run, which is exactly what
+   AGENTS.md's "commit first, then run" exists to prevent.
 
 ---
 
@@ -82,14 +114,20 @@ and no settlement permission at all, so the control would have rendered,
 submitted and failed on the two lists they live on. `gridResource` now decides
 per grid.
 
-**Evidence after the fix**, every page probed with a real session:
+**Evidence after the fix**, every page probed with a real session **on the
+deployed dev worker** (`sha-d78049d`), not locally:
 
 ```
-200  /loads            Load | Authority | Broker | Pickup | Delivery | Truck | Status | Rate | Warnings
-200  /trucks           Unit number | Authority | Make | Plate | Status | Fleet status | Aging | Heading to | Warnings
-200  /payroll/batches  Batch | Status | Check date | Period | Statements | Gross | Deductions | Amount | Pay company
-200  /payroll/statements · /payroll/charges · /settlements · /accounting/payments · /audit · /dashboard
+200  /loads                9 cols  chooser  Load | Authority | Broker | Pickup | Delivery | Truck | Status | Rate | Warnings
+200  /trucks               9 cols  chooser  Unit number | Authority | Make | Plate | Status | Fleet status | Aging | Heading to | Warnings
+200  /payroll/batches      9 cols  chooser  Batch | Status | Check date | Period | Statements | Gross | Deductions | Amount | Pay company
+200  /payroll/statements   9 cols  chooser     200  /payroll/charges   8 cols  chooser
+200  /accounting/invoices  8 cols  chooser     200  /accounting/reports · /audit · /dashboard
 ```
+
+And the hidden columns are reachable, which is the half that makes this a fix
+rather than a deletion — the `/loads` popover offers `Billing` among the nine
+toggles, and `/trucks` offers model, year and odometer.
 
 **Why nothing caught any of it.** No test rendered any of those pages. The trips
 grid — the page that _found_ the nine-column cap in v10.2 — has a guard, and it
@@ -106,6 +144,73 @@ failing under `scripts/watch-guard.mjs`.
 trucks (12), batches (11), trips (11, capped since v10.2). The other eight are
 between five and nine. `/payroll/statements` is at exactly nine and has no room
 for another column without naming a default-hidden set.
+
+---
+
+## The finding this run cares most about: a rate confirmation's money collapses into one field
+
+**Not fixed. It needs a ruling, and it is the one thing here that should be
+settled before the first real load is settled rather than after.**
+
+`scripts/verify-upload-first.mjs` mints a rate confirmation that prints four
+figures and drives the create form with it:
+
+| the document prints | cents  |
+| ------------------- | ------ |
+| Line Haul           | 245000 |
+| Fuel Surcharge      | 38750  |
+| an accessorial      | 12000  |
+| **TOTAL**           | 295750 |
+
+The extraction reads all four correctly and keeps them apart —
+`src/lib/extraction/parse.ts` even checks that the parts agree with the printed
+total. Then `extractedRate` in `CreateLoadForm.tsx:1085` reads **`money.total`**
+into the rate field, deliberately and with a comment, and `createLoadAction`
+stores the posted rate as **`linehaulCents`** (`src/lib/loads.ts:401`).
+
+So the load is saved as:
+
+```
+linehaulCents 295750   fuelSurchargeCents 0   accessorialsCents 0   totalRevenueCents 295750
+```
+
+The total is right. The breakdown is gone, and the fuel surcharge and the
+accessorial are now line haul.
+
+**Why that is a money question and not a cosmetic one.** `src/lib/driver-pay.ts`
+line 156:
+
+```ts
+const basis = gross ? load.totalRevenueCents : load.linehaulCents
+```
+
+A `PERCENT_LINEHAUL` rule pays a percentage of `linehaulCents`. **On dev, 55 of
+57 live pay rules are `PERCENT_LINEHAUL`** — counted from the rows, not assumed.
+For a load created this way the basis is $2,957.50 where the document's line haul
+is $2,450.00: **20.7% high**, which at a 25% rule is $126.88 more per load. And
+because `fuelSurchargeCents` is zero, `totalRevenueCents` equals
+`linehaulCents`, so **`PERCENT_GROSS` and `PERCENT_LINEHAUL` cannot produce
+different answers on these loads** — the distinction the engine offers, and
+names in every pay snapshot, is not reaching the arithmetic.
+
+**Two checked-in artefacts disagree about the intent**, which is why this is a
+ruling and not a bug to quietly fix:
+
+- the form reads the **total** on purpose, with a comment explaining that the
+  rate is read and never computed;
+- the verification script asserts `linehaulCents === 245000`, the **line haul**,
+  and fails today with `295750 cents`.
+
+Both were written here. Either answer is defensible — paying "25% of the load"
+on the all-in rate is ordinary in trucking — but they cannot both be true, and
+the one that is true has to be the one the schema's four fields mean.
+
+**What a ruling would have to say:** whether a rate confirmation's fuel
+surcharge and accessorials land in their own columns (and the rate field means
+line haul), or whether the load's rate is the all-in payout (and then
+`PERCENT_LINEHAUL` needs to say what it now means, since it can no longer differ
+from `PERCENT_GROSS`). Severity **1 for the money path** — it does not stop
+anybody booking freight, and it changes what a driver is paid.
 
 ---
 
@@ -148,29 +253,49 @@ FAIL PAIRED CHECKS SKIPPED — PROD_CHECK_EMAIL / PROD_CHECK_PASSWORD not set
 
 ## Tier 2 — the working day (dev)
 
-Executed as far as a browser automation can carry it. **Every box below that is
-not Passed is Blocked on a human at a keyboard, not on a defect.**
+Run against the **deployed dev worker** at `sha-d78049d`, with a real session,
+using the verification scripts this repository already has for these claims.
+Nothing below is a reading of the code.
 
-| box                                             | status | evidence |
-| ----------------------------------------------- | ------ | -------- |
-| Broker create → edit → soft-delete              |        |          |
-| Truck + trailer + driver under RAM              |        |          |
-| Transfer the truck RAM → Dolphins               |        |          |
-| Pair driver ↔ truck, board shows the name      |        |          |
-| Create a load keyboard-only, stopwatch          |        |          |
-| Rate con during create: Preparing… / Uploading… |        |          |
-| Load appears: stripe, Booked, authority chip    |        |          |
-| Assign from the board → Dispatched, AUTOMATIC   |        |          |
-| Conflict refusals speak                         |        |          |
-| Mark Delivered                                  |        |          |
-| POD upload → POD received by itself             |        |          |
-| Download the POD back                           |        |          |
-| Cancel with a reason                            |        |          |
-| Saved view survives sign-out                    |        |          |
-| Density survives sign-out                       |        |          |
-| Russian reads, Farsi mirrors                    |        |          |
+| box                                             | status           | evidence                                                                                                                                                                                                                                                                                                                                                                                    |
+| ----------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Broker created → appears → edit → soft-delete   | **Passed, part** | `reference-walkthrough` 12/12: broker created through the UI. Edit and soft-delete were exercised on the truck in the same run — `deletedAt` set, row kept.                                                                                                                                                                                                                                 |
+| Truck + trailer + driver, right authority       | **Passed**       | Same run: `wtdhw77-T1`, `wtdhw77-R1`, `Walkthrough wtdhw77`, each created through the interface, counts before/after confirmed against the database.                                                                                                                                                                                                                                        |
+| Transfer the truck RAM → Dolphins               | **Passed**       | "transfer wrote a new open period — 2 period(s), last open: true", "the truck's own authority moved with it", and "a second open period is refused by Postgres".                                                                                                                                                                                                                            |
+| Pair driver ↔ truck, board shows the name      | **Not executed** | Belongs to `verify-board`, which cannot drive the create form today (below).                                                                                                                                                                                                                                                                                                                |
+| Create a load keyboard-only, stopwatch          | **Passed, part** | The create works on the deployed worker: `verify-pod` booked load **1175** through the form, and `verify-upload-first` booked one from a rate confirmation. The stopwatch is a claim about a person.                                                                                                                                                                                        |
+| Rate con during create, "Preparing…/Uploading…" | **Passed, part** | `verify-upload-first` 16/18: the offer filled broker, pickup, delivery and both dates, marked 8 fields as document-sourced, attached the rate con, carried the extraction across, saved the printed delivery window with two different ends, and left no orphan pending row. The two words being **visibly distinct** is a human observation. Its two failures are the money finding above. |
+| Load appears: stripe, Booked, authority chip    | **Passed, part** | `/loads` renders with Status and Authority columns and the booked load in it. The stripe's colour is by eye.                                                                                                                                                                                                                                                                                |
+| Assign from the board → Dispatched, AUTOMATIC   | **Not executed** | `verify-board` reached the board after its driver fixture was repaired, then failed at "two loads booked into the same window" — its own fixture never appeared. Cause not isolated; the form itself books loads, proven above. **Not evidence that the board is broken, and not evidence that it works.**                                                                                  |
+| Conflict refusals speak                         | **Passed, part** | The duplicate-unit refusal speaks in words — "That unit number is already in use under this authority." — with the positive control beside it (the same form saves once the number is unique). The overlapping-load and out-of-service refusals belong to `verify-board` and `verify-dispatch-warning`.                                                                                     |
+| Mark Delivered                                  | **Not executed** | `verify-pod` booked its load, clicked the control, then timed out for 60s on "no disabled submit button anywhere on the page" — a settling condition the page has outgrown.                                                                                                                                                                                                                 |
+| POD upload → POD received by itself             | **Not executed** | Same run, same stop.                                                                                                                                                                                                                                                                                                                                                                        |
+| Download the POD back                           | **Not executed** | `verify-upload` takes `--base` and `--load`; I ran it without them. My error, not a defect — it needs a load number, so it belongs with Tier 3.                                                                                                                                                                                                                                             |
+| Cancel with a reason                            | **Not executed** | No script covers it; it is a human click.                                                                                                                                                                                                                                                                                                                                                   |
+| Saved view survives sign-out                    | **Passed**       | `verify-views`: the save control appears only on a filtered table, the view is pinned as a chip carrying the query, **it is a row in the database and not localStorage**, and it is present in a second browser context with no shared storage.                                                                                                                                             |
+| Density survives sign-out                       | **Not executed** |                                                                                                                                                                                                                                                                                                                                                                                             |
+| Russian reads, Farsi mirrors right-to-left      | **Blocked**      | A claim about what a person sees. No instrument substitutes.                                                                                                                                                                                                                                                                                                                                |
 
----
+### What the Tier 2 run found about the instruments
+
+**Three of this repository's own verification scripts had quietly stopped
+working**, and that matters more than any single box: they are the Tier 2
+coverage, and nothing was watching them.
+
+- `/drivers/new` became the upload-first flow in Phase 5 — a drop zone with a
+  manual-entry link beside it, and **no form on the landing step**. Three scripts
+  created a driver by typing into the old blank form, so each died after 30
+  seconds on a fixture, before reaching anything it was written to test.
+  `reference-walkthrough.mjs` and `verify-board.mjs` are patched here to click
+  through the manual link, the way `verify-driver-form.mjs` already did; the
+  walkthrough went from **2 claims to 12/12**. Three more carry the same rot and
+  were left alone: `acceptance-phase2.mjs`, `screenshot-fixtures.mjs`,
+  `verify-settlements.mjs`.
+- `verify-views` and `verify-pod` each pass their first half and then stop on a
+  wait or a lookup that the screens have outgrown.
+
+None of this was visible from a green `npm run check`: these scripts run by hand,
+against a deployed worker, and nothing fails when they rot.
 
 ## Tier 3 — first real freight (production)
 
@@ -209,12 +334,14 @@ it is the artefact under test.
 
 ## To finish this, in order
 
-1. **Dispatch dev, then production.** The ritual's steps 3 and 4. Until then
-   production serves three broken screens.
+1. **Rule on the rate confirmation's money** (the section above). It decides
+   what a driver is paid on the first real load, and it is cheaper to settle now
+   than to correct a settlement later.
 2. **Create the Live Check ADMIN account** and put its password in `.env` as
    `PROD_CHECK_EMAIL` / `PROD_CHECK_PASSWORD`. Then the production live check can
    reach 18/18 — it is 11/12 by construction without it.
-3. **Run the hand-off**, which closes three Tier 0 boxes and the Tier 1 trail box:
+3. **Run the hand-off**, which closes three Tier 0 boxes and the Tier 1 trail
+   box:
 
    ```bash
    node -r dotenv/config scripts/uat-production-read.mjs --target=production
@@ -226,3 +353,18 @@ it is the artefact under test.
    "Preparing…/Uploading…" distinction and the right-to-left layout are all
    claims about what a person perceives.
 6. **Then Tier 3**, and send the load number.
+
+Already done by this run, so it is not on that list: both workers serve HEAD, the
+three 500s are fixed and verified on the deployed worker, and the Tier 2 parts a
+script can carry have been executed and are recorded above.
+
+### Loose ends this run created, deliberately left alone
+
+- **Dev carries fixture rows** from the scripts above — trucks, trailers, drivers,
+  brokers and a few loads with tag-shaped names (`wtdhw77-T1` and the like), plus
+  two from the runs that crashed mid-way. `scripts/sweep-test-rows.mjs` exists for
+  this. Nothing was deleted here: the checklist says dev data is disposable, not
+  that a UAT pass should decide when to dispose of it.
+- **Three more scripts carry the same stale driver path**
+  (`acceptance-phase2.mjs`, `screenshot-fixtures.mjs`, `verify-settlements.mjs`).
+  Only the two the checklist needed were patched.

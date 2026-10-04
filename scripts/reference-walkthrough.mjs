@@ -87,6 +87,16 @@ await save('/trailers')
 record('trailer created through the UI', true, `${TAG}-R1`)
 
 await page.goto(`${BASE}/drivers/new`, { waitUntil: 'domcontentloaded' })
+// THE MANUAL-ENTRY LINK, BECAUSE THE UPLOAD IS THE FRONT DOOR NOW (Phase 5).
+// `/drivers/new` landed as a blank form and is a drop zone with a manual link
+// beside it; there is NO form on the landing step, so a fill waits thirty
+// seconds for `firstName` and the whole script dies on a fixture. Located by
+// position rather than by its words, the way `verify-driver-form.mjs` does it,
+// because the words are translated.
+await page
+  .locator('[role="button"]:has(input[type="file"]) ~ button')
+  .first()
+  .click()
 await page.fill('input[name="firstName"]', 'Walkthrough')
 await page.fill('input[name="lastName"]', TAG)
 await page.fill('input[name="phone"]', '(425) 566-0763')
