@@ -3,6 +3,7 @@ import { neonConfig } from '@neondatabase/serverless'
 import { createPrismaClient } from '../src/lib/db'
 import { hashPassword } from '../src/lib/password'
 import { normalizeEmail } from '../src/lib/auth'
+import { assertProductionWrite, isProductionLabel } from './production-gate'
 import type { PrismaClient } from '../src/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -234,6 +235,22 @@ async function seedIsolationCounterpart(db: PrismaClient): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  // ── THE GATE, BEFORE ANYTHING OPENS A SOCKET ──────────────────────────
+  //
+  // THIS USED TO BE A SOFT SKIP AND THAT WAS NOT A GUARD. The seed ran happily
+  // against the production branch, wrote the operating group, and printed
+  // "skipping the isolation counterpart" — so the one organization it refused
+  // to create was the only thing it refused to do. Everything else it writes is
+  // an upsert into the carrier's live database.
+  //
+  // The same one-shot override as a migration, from the same module, because a
+  // seed is a write and `prisma db seed` is one keystroke from `prisma migrate`.
+  //
+  // FIRST, SO THE REFUSAL COSTS NOTHING. Before the URL check, before the
+  // client, before any connection: a refusal that has already opened a socket to
+  // production has already done the thing it was refusing.
+  assertProductionWrite(process.env, 'seed')
+
   const branch = process.env.NEON_BRANCH
   const url = process.env.DIRECT_DATABASE_URL
 
@@ -245,7 +262,11 @@ async function main(): Promise<void> {
     console.log(`Seeding the ${branch} branch.`)
     await seedOperatingGroup(db)
 
-    if (branch === 'production') {
+    // THE COUNTERPART IS STILL NEVER SEEDED INTO PRODUCTION. Reaching here with
+    // the production label now means somebody passed the override deliberately;
+    // the organization that exists to be the thing an isolation failure would
+    // expose still has no business in the carrier's own database.
+    if (isProductionLabel(process.env)) {
       console.log('  skipping the isolation counterpart — never in production')
     } else {
       await seedIsolationCounterpart(db)

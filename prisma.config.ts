@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import { defineConfig } from 'prisma/config'
+import { assertProductionWrite } from './prisma/production-gate'
 
 // ---------------------------------------------------------------------------
 // Prisma 7 moved the connection string out of schema.prisma. The schema engine
@@ -18,30 +19,19 @@ import { defineConfig } from 'prisma/config'
 // explicitly, and a missing declaration fails closed.
 // ---------------------------------------------------------------------------
 
-const target = process.env.NEON_BRANCH // 'dev' | 'production'
-const isProd = process.env.NODE_ENV === 'production'
 const url = process.env.DIRECT_DATABASE_URL
 
-if (!target) {
-  throw new Error(
-    'NEON_BRANCH is not set. Declare it as "dev" or "production" in .env — ' +
-      'this file refuses to guess which database it points at.',
-  )
-}
-
-if (target === 'production' && !isProd) {
-  throw new Error(
-    'Refusing to run: NEON_BRANCH=production while NODE_ENV is not production. ' +
-      'Set NEON_BRANCH=dev.',
-  )
-}
-
-if (target === 'production' && !process.env.ALLOW_PROD_MIGRATION) {
-  throw new Error(
-    'Production migrations require ALLOW_PROD_MIGRATION=1 on that command only. ' +
-      'Never put it in .env.',
-  )
-}
+// ── THE PRODUCTION GATE, FROM THE ONE PLACE IT LIVES ──────────────────────
+//
+// These were three `if`s here, which no test could reach without running the
+// Prisma CLI — and that is how `prisma/seed.ts` came to have a weaker rule than
+// this file for months: nothing could ask either of them what it would do. The
+// checks are unchanged in effect; they are now also asked by the seed, and
+// `tests/production-gate.test.ts` watches every branch of them.
+//
+// IT COVERS `migrate`, `db push`, `db execute`, `migrate reset` AND the seed,
+// because every one of them loads this file first.
+assertProductionWrite(process.env, 'migration')
 
 if (!url) {
   throw new Error('DIRECT_DATABASE_URL is not set.')
