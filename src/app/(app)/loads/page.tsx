@@ -4,6 +4,7 @@ import { warningLabels } from '@/components/WarningCell'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { Button } from '@/components/ui/Button'
 import { getLocaleContext } from '@/lib/locale'
+import type { MessageKey } from '@/lib/i18n'
 import { companyScopeFilter } from '@/lib/tenancy'
 import { FilterBar } from '@/components/ui/FilterBar'
 import { LoadsTable, type LoadRow } from './LoadsTable'
@@ -19,6 +20,7 @@ import {
   LOAD_COLUMNS_HIDDEN,
 } from '@/lib/list-columns'
 import { SavedViews } from './SavedViews'
+import { ColumnsChooser } from '../_grid/ColumnsChooser'
 import type {
   LoadBillingStatus,
   LoadOperationalStatus,
@@ -40,6 +42,29 @@ const READY = 'READY_TO_INVOICE'
 // It reads through `withCurrentOrg`, so the query is scoped by row-level
 // security and the permission check happened before the query did. ESLint
 // refuses `withOrg` and `prisma` under src/app, so there is no shorter path.
+
+/**
+ * The chooser's labels, keyed by column (§7.1.7).
+ *
+ * TYPED AGAINST `LOAD_COLUMN_KEYS`, so a column added to the list and not to this
+ * map is a type error rather than a checkbox labelled `undefined`. The headers
+ * themselves are the same message keys `LoadsTable` uses for the `<th>`, because
+ * a chooser that named a column differently from the table would be a puzzle.
+ */
+const loadColumnHeaders = (
+  t: (key: MessageKey) => string,
+): Record<(typeof LOAD_COLUMN_KEYS)[number], string> => ({
+  loadNumber: t('loads.column.load'),
+  company: t('loads.column.company'),
+  customer: t('loads.column.customer'),
+  pickup: t('loads.column.pickup'),
+  delivery: t('loads.column.delivery'),
+  truck: t('loads.column.truck'),
+  status: t('loads.column.status'),
+  billing: t('loads.column.billing'),
+  rate: t('loads.column.rate'),
+  warnings: t('warning.column'),
+})
 
 export default async function LoadsPage({
   searchParams,
@@ -384,6 +409,8 @@ export default async function LoadsPage({
     'PAID',
   ]
 
+  const headers = loadColumnHeaders(t)
+
   return (
     <>
       {/* Page title, then the filter bar directly under it — never in a
@@ -400,6 +427,27 @@ export default async function LoadsPage({
               </Button>
             </Link>
           ) : null}
+          {/* §7.1.7's chooser, IN THE HEADER THAT IS ALREADY THERE. A bar of
+           * its own would cost a row of freight on a 1080p screen, which
+           * standing rule 1 forbids — and this page already carries two bars.
+           * /trucks puts it in its filter row for the same reason. */}
+          <ColumnsChooser
+            grid="loads.loads"
+            columns={columnKeysFor(LOAD_COLUMN_KEYS, companyCount > 1).map(
+              (key) => ({ key, header: headers[key] }),
+            )}
+            visible={visibleLoadColumns}
+            labels={{
+              open: t('grid.columns'),
+              apply: t('grid.columns.apply'),
+              cancel: t('grid.columns.cancel'),
+              firstLocked: t('grid.columns.firstLocked'),
+            }}
+            errors={{
+              'grid.columns.errorEmpty': t('grid.columns.errorEmpty'),
+              'grid.columns.errorGrid': t('grid.columns.errorGrid'),
+            }}
+          />
         </div>
       </div>
 
@@ -491,10 +539,6 @@ export default async function LoadsPage({
         // §7.1.7. DECIDED HERE, not in the client component: the preference row
         // is here, and so is the cap that keeps the count under §7.1's nine.
         visible={visibleLoadColumns}
-        columnErrors={{
-          'grid.columns.errorEmpty': t('grid.columns.errorEmpty'),
-          'grid.columns.errorGrid': t('grid.columns.errorGrid'),
-        }}
         statusLabels={Object.fromEntries(
           ALL_OPERATIONAL.map((status) => [
             status,
@@ -525,10 +569,6 @@ export default async function LoadsPage({
           emptyFilteredTitle: t('loads.emptyFiltered.title'),
           emptyFilteredBody: t('loads.emptyFiltered.body'),
           clearFilters: t('loads.filter.clear'),
-          columns: t('grid.columns'),
-          columnsApply: t('grid.columns.apply'),
-          columnsCancel: t('grid.columns.cancel'),
-          columnsFirstLocked: t('grid.columns.firstLocked'),
         }}
       />
 

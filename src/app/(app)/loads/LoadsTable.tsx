@@ -8,7 +8,6 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
 import { useRouter, usePathname } from 'next/navigation'
-import { ColumnsChooser } from '../_grid/ColumnsChooser'
 import { keepColumns } from '../_grid/grid-page'
 import { billingTone, operationalTone, type StatusTone } from '@/lib/status'
 import type {
@@ -49,8 +48,10 @@ interface LoadsTableProps {
   showCompanyColumn: boolean
   /**
    * The columns this person keeps (§7.1.7). Decided on the server, where the
-   * preference row is — `visibleWithinCap` is also what guarantees it is nine or
-   * fewer, so this component never hands `Table` a count that throws.
+   * preference row is — and where the chooser that changes them is rendered,
+   * because a bar of its own here would cost a visible row (standing rule 1).
+   * `readGridColumns` is what guarantees this is nine or fewer, so this
+   * component never hands `Table` a count that throws.
    */
   visible: readonly string[]
   labels: {
@@ -75,17 +76,10 @@ interface LoadsTableProps {
     emptyFilteredTitle: string
     emptyFilteredBody: string
     clearFilters: string
-    /** §7.1.4's chooser: the button, the two buttons inside it, and the note. */
-    columns: string
-    columnsApply: string
-    columnsCancel: string
-    columnsFirstLocked: string
   }
   /** Pre-translated maps. Functions cannot cross to a client component. */
   statusLabels: Record<string, string>
   billingLabels: Record<string, string>
-  /** Keyed by the message key the action returns, as `ColumnsChooser` expects. */
-  columnErrors: Record<string, string>
 }
 
 export function LoadsTable({
@@ -95,7 +89,6 @@ export function LoadsTable({
   labels,
   statusLabels,
   billingLabels,
-  columnErrors,
 }: LoadsTableProps) {
   const params = useSearchParams()
   const router = useRouter()
@@ -211,59 +204,36 @@ export function LoadsTable({
     operationalTone(row.operationalStatus)
 
   return (
-    <>
-      {/* THE CHOOSER IS WHY THIS TABLE IS LEGAL (§7.1.7). Ten columns, nine
-       * shown, and billing status is a tick away rather than gone. It sits in a
-       * bar of its own because the two above it belong to the page: ViewsBar is
-       * saved views and density, FilterBar is what the URL selects. */}
-      <div className="flex items-center justify-end border-b border-border bg-surface-2 px-gutter py-z2">
-        <ColumnsChooser
-          grid="loads.loads"
-          columns={columns.map((column) => ({
-            key: column.key,
-            header: String(column.header),
-          }))}
-          visible={visible}
-          labels={{
-            open: labels.columns,
-            apply: labels.columnsApply,
-            cancel: labels.columnsCancel,
-            firstLocked: labels.columnsFirstLocked,
-          }}
-          errors={columnErrors}
-        />
-      </div>
-      <Table
-        columns={keepColumns(columns, visible)}
-        rows={rows}
-        rowKey={(row) => row.id}
-        rowHref={(row) => `/loads/${row.id}`}
-        stripeTone={stripeTone}
-        isCancelled={(row) => row.isCancelled}
-        caption={labels.caption}
-        empty={
-          // Two different sentences, because they are two different facts. An
-          // empty table because nothing exists yet is not an empty table because
-          // the filters exclude everything, and only the second has an obvious
-          // way out (§10).
-          filtered ? (
-            <EmptyState
-              title={labels.emptyFilteredTitle}
-              body={labels.emptyFilteredBody}
-              action={
-                <Button
-                  variant="secondary"
-                  onClick={() => router.replace(pathname, { scroll: false })}
-                >
-                  {labels.clearFilters}
-                </Button>
-              }
-            />
-          ) : (
-            <EmptyState title={labels.emptyTitle} body={labels.emptyBody} />
-          )
-        }
-      />
-    </>
+    <Table
+      columns={keepColumns(columns, visible)}
+      rows={rows}
+      rowKey={(row) => row.id}
+      rowHref={(row) => `/loads/${row.id}`}
+      stripeTone={stripeTone}
+      isCancelled={(row) => row.isCancelled}
+      caption={labels.caption}
+      empty={
+        // Two different sentences, because they are two different facts. An
+        // empty table because nothing exists yet is not an empty table because
+        // the filters exclude everything, and only the second has an obvious
+        // way out (§10).
+        filtered ? (
+          <EmptyState
+            title={labels.emptyFilteredTitle}
+            body={labels.emptyFilteredBody}
+            action={
+              <Button
+                variant="secondary"
+                onClick={() => router.replace(pathname, { scroll: false })}
+              >
+                {labels.clearFilters}
+              </Button>
+            }
+          />
+        ) : (
+          <EmptyState title={labels.emptyTitle} body={labels.emptyBody} />
+        )
+      }
+    />
   )
 }

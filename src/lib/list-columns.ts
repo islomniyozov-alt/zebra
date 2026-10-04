@@ -154,9 +154,13 @@ export const BATCH_COLUMNS_HIDDEN = ['created', 'notes'] as const
  * nine slots in the slice above — showing eight columns on a screen entitled to
  * nine, for no visible reason.
  */
-export function columnKeysFor(
-  all: readonly string[],
+export function columnKeysFor<Key extends string>(
+  all: readonly Key[],
   showCompany: boolean,
-): string[] {
+): Key[] {
+  // GENERIC, SO THE LITERAL UNION SURVIVES. `/loads` indexes an exhaustive
+  // header map with what this returns (§7.1.7), and a `string[]` here would make
+  // that an implicit `any` — which is the shape of a checkbox labelled
+  // `undefined`.
   return all.filter((key) => key !== 'company' || showCompany)
 }

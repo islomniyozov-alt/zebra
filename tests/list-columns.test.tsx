@@ -44,14 +44,10 @@ import {
 // Build the instrument from the artefact.
 // ---------------------------------------------------------------------------
 
-// THE CHOOSER IS STUBBED, and only the chooser. It imports a `'use server'`
-// module, which drags the Prisma client and the request context into a jsdom
-// test for a popover this test makes no claim about. The claim here is the
-// TABLE's column count — `Table`'s real throw, the real column list, the real
-// `keepColumns`.
-vi.mock('@/app/(app)/_grid/ColumnsChooser', () => ({
-  ColumnsChooser: () => null,
-}))
+// NO CHOOSER MOCK, AND THAT IS THE POINT NOW. The control moved to the page
+// header (standing rule 1: a bar of its own costs a row of freight), so
+// `LoadsTable` imports nothing that reaches a `'use server'` module and this
+// renders the real component with nothing stubbed.
 
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
@@ -362,10 +358,6 @@ describe('LoadsTable renders inside the cap with the authority column shown', ()
     emptyFilteredTitle: 'Nothing matches',
     emptyFilteredBody: 'Clear the filters.',
     clearFilters: 'Clear filters',
-    columns: 'Columns',
-    columnsApply: 'Apply',
-    columnsCancel: 'Cancel',
-    columnsFirstLocked: 'always shown',
   }
 
   async function renderList(visible: readonly string[]) {
@@ -378,7 +370,6 @@ describe('LoadsTable renders inside the cap with the authority column shown', ()
         labels={labels}
         statusLabels={{ IN_TRANSIT: 'In transit' }}
         billingLabels={{ UNINVOICED: 'Not invoiced' }}
-        columnErrors={{}}
       />,
     )
     return screen.getAllByRole('columnheader')
