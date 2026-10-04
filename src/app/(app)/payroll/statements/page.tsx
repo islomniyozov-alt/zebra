@@ -3,6 +3,9 @@ import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyScopeFilter } from '@/lib/tenancy'
 import { formatCents } from '@/lib/money'
+import { Sparkline } from '../../_charts/Sparkline'
+import { netPayByDriverWeek } from '@/lib/accounting-reports'
+import { recentSundays, sundayOf } from '@/lib/rolling-period'
 import { readGridColumns } from '@/lib/grid-columns'
 import {
   applyList,
@@ -73,9 +76,20 @@ const COLUMN_KEYS: readonly string[] = [
   'gross',
   'deductions',
   'net',
+  'trend',
   'batch',
   'status',
 ]
+
+/**
+ * How many settlement weeks the per-driver shape covers. §6.2.9.
+ *
+ * THIRTEEN, WHATEVER THE PICKER SAYS, and that is the only deliberate exception
+ * in the product to "the chips and the period govern everything below them": a
+ * sparkline over four points says nothing. The row's FIGURES are the window's;
+ * the shape beside them is the driver's own history.
+ */
+const TREND_WEEKS = 13
 
 /** Offered on bulk Mark paid. The value is stored; the label is translated. */
 const PAY_METHODS = ['ACH', 'CHECK', 'WIRE', 'ZELLE', 'CASH'] as const
@@ -129,13 +143,45 @@ export default async function StatementsPage({
         readStatements(tx, scope),
         readGridColumns(tx, session.userId, 'payroll.statements', COLUMN_KEYS),
       ])
-      return { statements, columns }
+
+      // ── THE SHAPE PER DRIVER, IN ONE STATEMENT ───────────────────────
+      //
+      // Every driver on screen at once. A query per row would be fifty round
+      // trips on a list of fifty, which is the shape flag 31 is about.
+      //
+      // DRIVEN BY THE ROWS WE HAVE, so a driver the list does not show costs
+      // nothing — and netPayByDriverWeek returns early for an empty list
+      // rather than asking Postgres about nobody.
+      const trendFrom = sundayOf(new Date())
+      trendFrom.setUTCDate(trendFrom.getUTCDate() - (TREND_WEEKS - 1) * 7)
+      const trends = await netPayByDriverWeek(
+        tx,
+        [...new Set(statements.map((row) => row.driverId))],
+        trendFrom,
+      )
+
+      return { statements, columns, trends, trendFrom }
     },
   )
 
   const view = gridView(data.statements, raw, statementShape, applyList)
 
   const day = (value: Date) => value.toISOString().slice(0, 10)
+
+  // ── THE AXIS, AND THE LOOKUP INTO IT ─────────────────────────────────────
+  //
+  // The weeks come from the CALENDAR rather than from the rows, so a driver who
+  // was paid in nine of thirteen weeks gets a shape with four gaps in the right
+  // places — not nine points squashed together, which is the misreading
+  // §6.1.1's `recentSundays` was written to prevent.
+  const weeks = recentSundays(new Date(), TREND_WEEKS)
+  const byDriver = (driverId: string) =>
+    new Map(
+      (data.trends.get(driverId) ?? []).map((point) => [
+        point.weekStart.getTime(),
+        point.netCents,
+      ]),
+    )
   const money = (cents: number) => (
     <span className="font-mono tabular-nums">{formatCents(cents, locale)}</span>
   )
@@ -208,6 +254,26 @@ export default async function StatementsPage({
       sortable: true,
       render: (row) => money(row.netCents),
       foot: (shown) => money(sumCents(shown, (row) => row.netCents)),
+    },
+    {
+      key: 'trend',
+      header: t('payroll.trend'),
+      // NOT SORTABLE. There is no order on a shape — sorting by "trend" would
+      // have to reduce it to one number, and whichever number that was would be
+      // a figure the column does not show.
+      render: (row) => (
+        <Sparkline
+          points={weeks.map(
+            (week) =>
+              byDriver(row.driverId).get(week.getTime()) ??
+              // A WEEK WITH NO SETTLEMENT IS A GAP, NEVER A ZERO (§6.2.9).
+              // Unpaid and not-yet-settled are different facts, and a zero
+              // would assert the first.
+              null,
+          )}
+          label={`${t('payroll.trend')}: ${row.driverName}`}
+        />
+      ),
     },
     {
       key: 'batch',

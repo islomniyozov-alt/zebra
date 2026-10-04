@@ -935,10 +935,20 @@ product. The row's figures are the window's; the shape beside them is the
 driver's. A week with no settlement is a GAP, never a zero: unpaid and
 not-yet-settled are different facts, and §6.1.1 already refuses that zero.
 
-**THE PICKER GOVERNS THE LISTS**, by the batch's period start and the
-settlement's. Batches keeps its week picker as well — that control chooses which
-week a run is FOR, which is a different question from which runs are listed, and
-§6.2.1 settled it.
+**THE PICKER GOVERNS THE LISTS, BY THE DATE EACH LIST ALREADY SORTS AND FILTERS
+ON** — the batch CHECK DATE, the settlement period start, the one-time charge’s
+apply date. Each shape names it in `dateOf`, and the picker writes the same
+`from`/`to` the removed range wrote, so the window means what the list already
+meant by a date.
+
+_This sentence said “by the batch’s period start” when §6.2.9 was written, which
+is not what `batchShape` filters on: it is the check date, and the range this
+replaces was labelled “Check date”. Corrected before the code rather than
+silently built to match the doc or the doc quietly bent to the code._
+
+**BATCHES KEEPS ITS WEEK PICKER AS WELL.** That control chooses which week a run
+is FOR; the period picker chooses which runs are listed. Two questions, two
+controls, and §6.2.1 settled that they are different.
 
 #### 6.2.8 The summary strip on Invoices and Payments — _added 2026-10-04_
 

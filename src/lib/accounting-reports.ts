@@ -533,3 +533,118 @@ export async function paymentStrip(
     appliedCount: Number(row.applied_count),
   }
 }
+
+// ---------------------------------------------------------------------------
+// PAYROLL: THE PIPELINE STRIP AND THE PER-DRIVER SERIES. §6.2.9.
+// ---------------------------------------------------------------------------
+
+/**
+ * Pay in flight, by the state of its run. AS OF TODAY — no window.
+ *
+ * §6.2.9: "how much is sitting in draft" is not a question about a period, and
+ * §6.2.8's ruling is that a balance carries no date bound.
+ *
+ * A PIPELINE, NOT A PARTITION. Draft can still change, FINAL IS APPROVED AND
+ * UNPAID — money the carrier owes this week — and paid has left the account.
+ * Merging any two of them would hide the only one with a deadline.
+ */
+export interface PipelineStrip {
+  draftCents: number
+  draftCount: number
+  finalCents: number
+  finalCount: number
+  paidCents: number
+  paidCount: number
+}
+
+export async function pipelineStrip(
+  tx: TxClient,
+  companyIds: readonly string[],
+): Promise<PipelineStrip> {
+  // SUMMED FROM THE SETTLEMENTS, grouped by the BATCH's status, because the
+  // batch is what moves through the three states — a settlement's own status
+  // does not carry "paid" (§6.2.7's note on the same join).
+  //
+  // SCOPED ON THE SETTLEMENT, which is where `companyId` lives: a batch is
+  // org-wide and carries none.
+  const rows = await tx.$queryRaw<
+    { status: string; cents: bigint; count: bigint }[]
+  >`
+    SELECT b."status"::text AS status,
+           COALESCE(SUM(s."netCents"), 0)::bigint AS cents,
+           COUNT(DISTINCT b."id")::bigint AS count
+    FROM "SettlementBatch" b
+    JOIN "Settlement" s ON s."batchId" = b."id" AND s."deletedAt" IS NULL
+    WHERE b."deletedAt" IS NULL
+      ${scopeSql('s', companyIds)}
+    GROUP BY 1
+  `
+
+  const of = (status: string) => rows.find((row) => row.status === status)
+  return {
+    draftCents: Number(of('DRAFT')?.cents ?? 0),
+    draftCount: Number(of('DRAFT')?.count ?? 0),
+    finalCents: Number(of('FINAL')?.cents ?? 0),
+    finalCount: Number(of('FINAL')?.count ?? 0),
+    paidCents: Number(of('PAID')?.cents ?? 0),
+    paidCount: Number(of('PAID')?.count ?? 0),
+  }
+}
+
+/**
+ * Net pay per driver per settlement week, for the sparkline on each row.
+ *
+ * ── THIRTEEN WEEKS, WHATEVER THE PICKER SAYS ─────────────────────────────
+ *
+ * §6.2.9, and the only deliberate exception in the product to "the chips and the
+ * period govern everything below them": a sparkline over four points says
+ * nothing. The row's FIGURES are the window's; the shape beside them is the
+ * driver's own history.
+ *
+ * ── A MISSING WEEK IS ABSENT, NOT ZERO ───────────────────────────────────
+ *
+ * Returned sparse, one entry per week that HAS a settlement, because unpaid and
+ * not-yet-settled are different facts and a zero would assert the first. The
+ * caller maps the weeks it wants onto this and leaves gaps where there is
+ * nothing — the same rule `Sparkline` already follows for a null point.
+ *
+ * ONE STATEMENT FOR EVERY DRIVER ON SCREEN. A query per row would be fifty round
+ * trips on a list of fifty.
+ */
+export async function netPayByDriverWeek(
+  tx: TxClient,
+  driverIds: readonly string[],
+  from: Date,
+): Promise<Map<string, { weekStart: Date; netCents: number }[]>> {
+  // NO DRIVERS, NO QUERY. `= ANY('{}')` matches nothing, so this would be a
+  // round trip to learn what the caller already knew.
+  if (driverIds.length === 0) return new Map()
+
+  const rows = await tx.$queryRaw<
+    { driver_id: string; week_start: Date; net: bigint }[]
+  >`
+    SELECT s."driverId" AS driver_id,
+           ${bucketExprSql(Prisma.sql`s."periodStart"`, 'week')} AS week_start,
+           COALESCE(SUM(s."netCents"), 0)::bigint AS net
+    FROM "Settlement" s
+    JOIN "SettlementBatch" b ON b."id" = s."batchId"
+    WHERE s."deletedAt" IS NULL
+      AND b."deletedAt" IS NULL
+      -- FINAL AND PAID ONLY, the same rule driverTotals applies: a DRAFT is
+      -- recomputed on every refresh, so a shape drawn from one changes under the
+      -- reader between two readings of the same screen.
+      AND b."status" IN ('FINAL', 'PAID')
+      AND s."driverId" = ANY(${[...driverIds]})
+      AND s."periodStart" >= ${from}
+    GROUP BY 1, 2
+    ORDER BY 2
+  `
+
+  const out = new Map<string, { weekStart: Date; netCents: number }[]>()
+  for (const row of rows) {
+    const mine = out.get(row.driver_id) ?? []
+    mine.push({ weekStart: row.week_start, netCents: Number(row.net) })
+    out.set(row.driver_id, mine)
+  }
+  return out
+}

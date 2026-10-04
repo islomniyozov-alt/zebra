@@ -237,7 +237,19 @@ export interface BatchGridRow {
   periodStart: Date
   periodEnd: Date
   statements: number
+  /** NET: what the cheques were written for. The column headed Amount. */
   amountCents: number
+  /**
+   * GROSS and DEDUCTIONS, for §6.2.9's three money columns.
+   *
+   * THEY ARE NOT AN EQUATION WITH `amountCents`:
+   * net = gross − deductions + reimbursements + other pay, so a reader
+   * subtracting two of these columns will be out by whatever was added back.
+   * The doc says so where somebody would check, and the columns are not placed
+   * side by side inviting the subtraction.
+   */
+  grossCents: number
+  deductionsCents: number
   /**
    * WHICH AUTHORITY CUTS THE CHEQUES — AND FOR ZEBRA THE ANSWER IS ALL OF THEM.
    *
@@ -311,6 +323,8 @@ export async function readBatches(
       notes: string | null
       statements: bigint
       amount: bigint
+      gross: bigint
+      deductions: bigint
     }[]
   >`
     SELECT
@@ -324,7 +338,10 @@ export async function readBatches(
       b."periodEnd"                            AS period_end,
       b."notes"                                AS notes,
       COUNT(st."id")::bigint                   AS statements,
-      COALESCE(SUM(st."netCents"), 0)::bigint  AS amount
+      COALESCE(SUM(st."netCents"), 0)::bigint  AS amount,
+      -- NO EXTRA QUERY: the same grouped read, two more sums. §6.2.9.
+      COALESCE(SUM(st."grossCents"), 0)::bigint AS gross,
+      COALESCE(SUM(st."deductionsCents"), 0)::bigint AS deductions
     FROM "SettlementBatch" b
     LEFT JOIN "Settlement" st
       ON st."batchId" = b."id" AND st."deletedAt" IS NULL
@@ -401,6 +418,8 @@ export async function readBatches(
     periodEnd: row.period_end,
     statements: Number(row.statements),
     amountCents: Number(row.amount),
+    grossCents: Number(row.gross),
+    deductionsCents: Number(row.deductions),
     // Always null: the row's answer is "all authorities" and the names are on
     // `breakdown`. See the field's own note.
     payCompanyName: null,

@@ -27,6 +27,9 @@ import { FilterBar } from '@/components/ui/FilterBar'
 import { Tabs } from '@/components/ui/Tabs'
 import { GridFooterNav } from '../../_grid/GridFooterNav'
 import { PageHeader } from '../../_grid/PageHeader'
+import { SummaryStrip } from '../../_grid/SummaryStrip'
+import { ALL_DATES } from '../../_grid/window-params'
+import { pipelineStrip } from '@/lib/accounting-reports'
 import { ColumnFunnel } from '../../_grid/ColumnFunnel'
 import { BulkStatus } from './BulkStatus'
 import { GridToolbar } from '../../_grid/GridToolbar'
@@ -110,6 +113,8 @@ const COLUMN_KEYS: Record<Tab, readonly string[]> = {
     'checkDate',
     'period',
     'statements',
+    'gross',
+    'deductions',
     'amount',
     'payCompany',
     'notes',
@@ -198,6 +203,19 @@ export default async function PayrollPage({
       // for on every page load, and the batches grid walks every settlement's
       // load lines to build the per-authority breakdown.
       const batches = tab === 'batches' ? await readBatches(tx, scope) : []
+      // ── THE PIPELINE, AS OF TODAY (§6.2.9) ───────────────────────────
+      //
+      // One statement, three states. NOT windowed: "how much pay is sitting in
+      // draft" is not a question about a period (§6.2.8's balance rule), and the
+      // one with a deadline is FINAL — approved and unpaid.
+      //
+      // ONLY ON THE BATCHES TAB, like the grid above it: Balances is a year's
+      // totals and a pipeline figure there would answer a question that tab is
+      // not asking.
+      const pipeline =
+        tab === 'batches'
+          ? await pipelineStrip(tx, session.companyScopes)
+          : null
       const balances =
         tab === 'balances' ? await readBalances(tx, scope, year) : []
 
@@ -213,6 +231,7 @@ export default async function PayrollPage({
         opened: opened.map((row) => row.periodStart.getTime()),
         batches,
         balances,
+        pipeline,
         columns,
       }
     },
@@ -340,6 +359,28 @@ export default async function PayrollPage({
       render: (row) => count(row.statements),
       foot: (shown) => count(sumCents(shown, (row) => row.statements)),
     },
+    // ── GROSS, DEDUCTIONS, NET — AND NOT AN EQUATION (§6.2.9) ──────────
+    //
+    // net = gross − deductions + reimbursements + other pay, so these three do
+    // NOT subtract to each other. Gross sits first and Net last with Deductions
+    // between them, in the order a statement reads, rather than gross and net
+    // adjacent inviting the subtraction.
+    {
+      key: 'gross',
+      header: t('payroll.gross'),
+      align: 'end',
+      sortable: true,
+      render: (row) => money(row.grossCents),
+      foot: (shown) => money(sumCents(shown, (row) => row.grossCents)),
+    },
+    {
+      key: 'deductions',
+      header: t('payroll.deductions'),
+      align: 'end',
+      sortable: true,
+      render: (row) => money(row.deductionsCents),
+      foot: (shown) => money(sumCents(shown, (row) => row.deductionsCents)),
+    },
     {
       key: 'amount',
       header: t('batches.amount'),
@@ -429,6 +470,25 @@ export default async function PayrollPage({
   ]
 
   // ── THE TAB STRIP ────────────────────────────────────────────────────────
+
+  /**
+   * Where a pipeline figure sends the reader: the batches grid, filtered to that
+   * status, with NO date filter.
+   *
+   * `?period=all` for the same reason as §6.2.8's balances — the figure counts
+   * every run in that state, so the list it opens must not be windowed, or the
+   * number above the rows is not the sum of the rows.
+   */
+  const pipelineHref = (status: string) => {
+    const next = new URLSearchParams(search)
+    for (const key of ['q', 'page', 'sort', 'dir', 'from', 'to']) {
+      next.delete(key)
+    }
+    next.set('tab', 'batches')
+    next.set('period', ALL_DATES)
+    next.set('f.status', status)
+    return `${PATH}?${next}`
+  }
 
   const tabHref = (key: string) => {
     const next = new URLSearchParams(search)
@@ -586,6 +646,46 @@ export default async function PayrollPage({
          * is where "which week, and who cannot be paid in it" belongs — and a
          * blocked driver has no settlement row, so the grid below cannot carry
          * them. */}
+        {data.pipeline === null ? null : (
+          <SummaryStrip
+            locale={locale}
+            scopeLabels={{
+              balance: t('strip.asOfToday'),
+              window: t('strip.inWindow'),
+              all: t('strip.allDates'),
+            }}
+            figures={[
+              {
+                key: 'draft',
+                label: t('batchStatus.DRAFT'),
+                cents: data.pipeline.draftCents,
+                note: `${String(data.pipeline.draftCount)} ${t('strip.runs')}`,
+                scope: 'balance',
+                href: pipelineHref('DRAFT'),
+              },
+              {
+                key: 'final',
+                label: t('batchStatus.FINAL'),
+                cents: data.pipeline.finalCents,
+                note: `${String(data.pipeline.finalCount)} ${t('strip.runs')}`,
+                // APPROVED AND UNPAID — the figure with a deadline, so it is the
+                // one drawn in the danger tone. §3.3's hues mean something, and
+                // "money owed this week" is what this one means.
+                alarming: data.pipeline.finalCents > 0,
+                scope: 'balance',
+                href: pipelineHref('FINAL'),
+              },
+              {
+                key: 'paid',
+                label: t('batchStatus.PAID'),
+                cents: data.pipeline.paidCents,
+                note: `${String(data.pipeline.paidCount)} ${t('strip.runs')}`,
+                scope: 'balance',
+                href: pipelineHref('PAID'),
+              },
+            ]}
+          />
+        )}
         {weekStrip}
         {blockers}
         <FilterBar
