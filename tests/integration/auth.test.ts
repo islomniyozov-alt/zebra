@@ -189,32 +189,27 @@ describe('login', () => {
   })
 
   it('records the attempt either way', async () => {
-    // RECORDED AT THE TIME, which is what this has always been about: the row is
-    // written whether or not the password was right.
     await login(app, { email, password: 'wrong' })
-    expect(
-      await owner.loginAttempt.count({ where: { email, succeeded: false } }),
-    ).toBe(1)
-
     await login(app, { email, password: PASSWORD })
 
-    // ── AND THEN THE SUCCESS CLEARS THE FAILURE. OWNER'S RULING 2026-10-04 ──
-    //
-    // THIS ASSERTION USED TO BE `[false, true]` — both rows surviving — and the
-    // ruling changed it: a success deletes that email's failures in the window,
-    // because otherwise five wrong tries left a correct password refused.
-    //
-    // WHAT IT COSTS, recorded here because this test is where somebody will meet
-    // it: the log no longer shows "five failures, then a success" for one
-    // address inside one window, which is precisely the signature of a GUESS
-    // THAT WORKED. Flag 48. The per-ip rows for other addresses survive, and the
-    // fix if the trail is wanted is a cleared-at column rather than a delete.
     const attempts = await owner.loginAttempt.findMany({
       where: { email },
       orderBy: { createdAt: 'asc' },
       select: { succeeded: true },
     })
-    expect(attempts.map((a) => a.succeeded)).toEqual([true])
+
+    // ── BOTH ROWS SURVIVE. RESTORED 2026-10-04 ──────────────────────────────
+    //
+    // For a few hours this read `[true]`, because the first fix for "a correct
+    // password is refused" DELETED the email's failures on success. The owner
+    // reversed it: the rows stay and the COUNTER moves instead — it counts
+    // failures since this email's last success. Same outcome at the keyboard,
+    // whole trail kept.
+    //
+    // THIS IS THE ASSERTION THAT PROTECTS THE TRAIL. "Five failures then a
+    // success, one address, one window" is the signature of a guess that WORKED;
+    // a log that erases it is a log that cannot show an account being taken.
+    expect(attempts.map((a) => a.succeeded)).toEqual([false, true])
   })
 
   it('stamps lastLoginAt', async () => {
@@ -275,14 +270,21 @@ describe('rate limiting', () => {
       ok: true,
     })
 
-    // THE FAILURES ARE GONE, and the success row remains — the log still says
-    // what happened, the LIMIT just stops counting a lockout that is spent.
+    // ── THE ROWS SURVIVE AND THE COUNTER STARTS AGAIN ───────────────────
+    //
+    // Owner's ruling 2026-10-04, reversing the delete: every failure is still on
+    // the record, and the LIMIT counts only what came after the last success.
     expect(
       await owner.loginAttempt.count({ where: { email, succeeded: false } }),
-    ).toBe(0)
-    expect(
-      await owner.loginAttempt.count({ where: { email, succeeded: true } }),
-    ).toBe(1)
+    ).toBe(RATE_LIMIT.perEmail - 1)
+
+    // AND THE COUNT THAT MATTERS IS ZERO, which is the thing the user feels:
+    // four more wrong tries are now available before the lockout, so the next
+    // one is not refused.
+    expect(await login(app, { email, password: 'wrong' })).toEqual({
+      ok: false,
+      reason: 'invalid_credentials',
+    })
   })
 
   it('five wrong, then right, is accepted once the lock has expired', async () => {
@@ -306,9 +308,8 @@ describe('rate limiting', () => {
     const result = await login(app, { email, password: PASSWORD })
     expect(result).toMatchObject({ ok: true })
 
-    // AND THE AGED ROWS SURVIVE, because the delete is scoped to the window.
-    // Deleting the lot would erase the history of an attack that had just
-    // happened, which is the opposite of what a login log is for.
+    // EVERY FAILURE IS STILL THERE — the five, plus the one the locked attempt
+    // recorded. Nothing is ever deleted on this path.
     expect(
       await owner.loginAttempt.count({ where: { email, succeeded: false } }),
     ).toBe(RATE_LIMIT.perEmail + 1)

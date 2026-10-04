@@ -92,15 +92,55 @@ export interface LoginInput {
   metadata?: RequestMetadata
 }
 
+/**
+ * Failures that still count, per email and per address.
+ *
+ * ── THE EMAIL'S COUNT STARTS AT ITS LAST SUCCESS ─────────────────────────
+ *
+ * Owner's ruling, 2026-10-04, reversing the delete that shipped hours earlier.
+ * The lockout has to end when the right password is typed — otherwise five
+ * wrong tries leave a CORRECT password refused for the rest of the window,
+ * which is the reported bug — and the first fix achieved that by DELETING the
+ * failed rows. That worked and cost the audit trail: "five failures then a
+ * success, one address, one window" is the signature of a guess that worked,
+ * and it read afterwards as one clean sign-in.
+ *
+ * SO THE ROWS STAY AND THE COUNTER MOVES. One extra clause: only failures AFTER
+ * this email's most recent success are counted. Same outcome for the person at
+ * the keyboard, whole history kept, and no migration — the ordering column was
+ * already there.
+ *
+ * THE PER-IP COUNT IS UNCHANGED, deliberately. It is the coarse fence, six
+ * times the per-email threshold because an office shares an address, and it must
+ * NOT reset on somebody else's success: a guesser who lands one account would
+ * otherwise clear the floor's count by signing in as the account they just took.
+ * That was a side effect of the delete; it is not reproduced here.
+ */
 async function countRecentFailures(
   db: AuthDb,
   email: string,
   ip: string | null,
   since: Date,
 ): Promise<{ byEmail: number; byIp: number }> {
+  const lastSuccess = await db.loginAttempt.findFirst({
+    where: { email, succeeded: true, createdAt: { gte: since } },
+    orderBy: { createdAt: 'desc' },
+    select: { createdAt: true },
+  })
+
+  // THE LATER OF THE TWO BOUNDS. The window still applies — a success older
+  // than the window cannot extend the counting backwards past it.
+  const from =
+    lastSuccess !== null && lastSuccess.createdAt > since
+      ? lastSuccess.createdAt
+      : since
+
   const [byEmail, byIp] = await Promise.all([
     db.loginAttempt.count({
-      where: { email, succeeded: false, createdAt: { gte: since } },
+      // `gt`, NOT `gte`: the success row itself is not a failure, and a bound of
+      // `gte` on its own timestamp would include any failure written in the same
+      // millisecond — which is the ordering nobody can reason about.
+      where: { email, succeeded: false, createdAt: { gt: from } },
     }),
     ip
       ? db.loginAttempt.count({
@@ -225,28 +265,6 @@ export async function login(
     db.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
-    }),
-    // ── A SUCCESS CLEARS THIS EMAIL'S FAILURES IN THE WINDOW ─────────────
-    //
-    // Owner's ruling, 2026-10-04. Nothing used to clear them, and the counter
-    // reads `succeeded: false` — so five wrong tries followed by the RIGHT
-    // password left the account refused for the rest of the fifteen minutes.
-    // That is the reported bug: a correct password refused, and it is refused
-    // BEFORE the password is ever checked.
-    //
-    // DELETED RATHER THAN IGNORED, because "ignore failures older than the last
-    // success" is a second expression of the limit — a condition the counting
-    // query would also have to learn, and the two would drift.
-    //
-    // THE PER-IP LIMIT IS UNCHANGED AND THIS SLIGHTLY HELPS IT, which is worth
-    // stating: those rows carried an ip too, so clearing five of one email's
-    // failures also removes five from the shared office address's thirty. An
-    // attacker who guesses one password therefore buys a little room against
-    // the ip limit. The alternative is a column and a migration; the owner's
-    // ruling is the delete, and the ip threshold is six times the email one
-    // precisely because it is the coarse fence.
-    db.loginAttempt.deleteMany({
-      where: { email, succeeded: false, createdAt: { gte: since } },
     }),
   ])
 

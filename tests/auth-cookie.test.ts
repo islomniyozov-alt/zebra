@@ -106,3 +106,53 @@ describe('zebra_session is host-only, by origin and not by literal host', () => 
     expect(cookieStore.delete).toHaveBeenCalledWith(SESSION_COOKIE)
   })
 })
+
+// ---------------------------------------------------------------------------
+// AND THE LOGIN PATH NEVER DELETES AN ATTEMPT ROW. Flag 48.
+//
+// The first fix for "a correct password is refused" deleted that email's failed
+// rows on success. It worked and it erased the signature of a guess that worked.
+// The ruling replaced it with a moved counter, and this is what stops the delete
+// coming back the next time somebody meets the lockout and reaches for the
+// obvious tool.
+//
+// `clearLoginFailures` KEEPS ITS DELETE and must: it is the operator action for
+// unlocking somebody who is genuinely locked out, deliberate and attributed.
+// What is forbidden is a delete on the path a stranger can trigger by typing a
+// password.
+// ---------------------------------------------------------------------------
+describe('the login success path deletes nothing', () => {
+  const AUTH = 'src/lib/auth.ts'
+
+  it('has no deleteMany between recording the success and returning it', () => {
+    const source = readFileSync(AUTH, 'utf8')
+    const from = source.indexOf('record(db, email, true')
+    const to = source.indexOf('return { ok: true')
+    expect(from).toBeGreaterThan(-1)
+    expect(to).toBeGreaterThan(from)
+    expect(source.slice(from, to)).not.toContain('deleteMany')
+  })
+
+  it('and the operator unlock still has one', () => {
+    // THE CONTROL. Without it this file would pass against an auth.ts that had
+    // lost the ability to unlock anybody at all.
+    const source = readFileSync(AUTH, 'utf8')
+    const from = source.indexOf('export async function clearLoginFailures')
+    expect(from).toBeGreaterThan(-1)
+    expect(source.slice(from)).toContain('deleteMany')
+  })
+
+  it('counts failures since the last success, not since the window opened', () => {
+    // THE MECHANISM THAT REPLACED THE DELETE, asserted at the source because the
+    // behaviour is covered against real Postgres in
+    // `tests/integration/auth.test.ts` and what can regress silently here is the
+    // CLAUSE: a `gte: since` would restore the bug without failing a type check.
+    const source = readFileSync(AUTH, 'utf8')
+    const counter = source.slice(
+      source.indexOf('async function countRecentFailures'),
+      source.indexOf('async function record('),
+    )
+    expect(counter).toContain('succeeded: true')
+    expect(counter).toContain('createdAt: { gt: from }')
+  })
+})
