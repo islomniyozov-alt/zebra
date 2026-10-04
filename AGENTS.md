@@ -193,13 +193,14 @@ Rules about instruments, which are the ones that cost whole sessions:
   exact thing the receipt mechanism exists to prevent. If this needs solving
   it is solved at the connection, not at the verdict.
 
-- **The deploy order is: fix, dispatch production, THEN push the next
-  migration.** Owner’s ruling, 2026-09-22, and it replaces the shorter
-  version it grew out of ("dispatch production before pushing the next
-  migration to main"), which did not say what to do when the tree was
-  already broken.
+- **The deploy order is: fix, dispatch DEV, dispatch PRODUCTION, THEN push
+  the next migration.** Owner’s rulings, 2026-09-22 and 2026-10-04. It
+  replaces two shorter versions: "dispatch production before pushing the next
+  migration to main", which did not say what to do when the tree was already
+  broken, and the four-step list that named production alone — which is how
+  production ended up a deploy ahead of dev.
 
-  Four steps, and each one is there because skipping it cost a run:
+  Five steps, and each one is there because skipping it cost a run:
   1. FIX whatever is red. A dispatch runs the same gate and the same
      integration suite as CI, so a broken tree cannot deploy anywhere — it
      can only fail twice.
@@ -217,8 +218,30 @@ Rules about instruments, which are the ones that cost whole sessions:
      seconds, and the refusal was nearly read as a pass because the wrapper
      exited 0 around it.
 
-  3. DISPATCH PRODUCTION and read the drift from Cloudflare.
-  4. ONLY THEN push the next migration.
+  3. DISPATCH DEV, and read its receipt. Owner's ruling, 2026-10-04: the
+     ritual always goes DEV → PROD, never prod alone.
+  4. DISPATCH PRODUCTION, on dev's receipt, and read the drift from
+     Cloudflare for BOTH workers.
+  5. ONLY THEN push the next migration.
+
+  **A REPORT THAT ENDS WITH DEV BEHIND IS INCOMPLETE.** Owner's ruling, and it
+  is a ruling because the previous version of this list said "dispatch
+  production" and nothing about dev — so on 2026-10-03 production went to
+  `b221c8c` while dev sat six commits back at `b4f994d`, and the report said so
+  as a footnote rather than treating it as unfinished work.
+
+  WHY THE ORDER IS DEV FIRST AND NOT EITHER. Dev is the worker that can be
+  wrong for free. It runs the same build, the same bundle and the same
+  `opennextjs-cloudflare` output as production against a database nobody
+  invoices from, so a build that is going to fail on workerd fails there — and
+  a deploy that dies half way through uploading assets has done it to the
+  worker that carries no freight. Dispatching production first spends the real
+  worker to learn what the free one would have told you.
+
+  AND DEV BEHIND IS NOT A COSMETIC PROBLEM. Every screenshot, every "it works
+  on dev", and every `verify:response` run reads a worker that is not the code
+  under discussion; `check:drift` prints the gap for exactly this reason, and a
+  gap nobody closes is a measurement nobody trusts.
 
   AND FROM THE MOMENT A MIGRATION IS APPLIED TO DEV, DEV AND `main`
   DISAGREE — so nothing may run CI until its file is pushed. Not a push of
