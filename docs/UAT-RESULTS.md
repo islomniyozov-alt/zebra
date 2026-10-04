@@ -36,19 +36,19 @@ instrument in this repository was watching.
 
 ## Environments
 
-| what                     | value                                                                       |
-| ------------------------ | --------------------------------------------------------------------------- |
-| Production worker        | `https://zebra.tajikcargollc.workers.dev`                                   |
-| Dev worker               | `https://zebra-dev.tajikcargollc.workers.dev`                               |
-| Both serving, at start   | `sha-e961a9f` — **8 commits behind HEAD**, 13 files under `src/` different  |
-| Both serving, at the end | `sha-d78049d` — **matches HEAD**                                            |
-| Read from                | Cloudflare, via `scripts/check-deploy-drift.mjs`, never from a local belief |
-| `npm run check`          | **EXIT CODE 0 — OK**, 86s (`.run-status/uat-check.json`)                    |
-| Full integration project | **EXIT CODE 0 — OK**, 11m34s (`.run-status/uat-integ.json`)                 |
-| Dev dispatch             | **EXIT CODE 0 — OK** (`.run-status/uat-dev.json`)                           |
-| Production dispatch      | **EXIT CODE 0 — OK** (`.run-status/uat-prod.json`)                          |
-| Dev live check           | **18/18**, with a session                                                   |
-| Production live check    | **11/12** — the twelfth needs a Live Check account                          |
+| what                     | value                                                                                            |
+| ------------------------ | ------------------------------------------------------------------------------------------------ |
+| Production worker        | `https://zebra.tajikcargollc.workers.dev`                                                        |
+| Dev worker               | `https://zebra-dev.tajikcargollc.workers.dev`                                                    |
+| Both serving, at start   | `sha-e961a9f` — **8 commits behind HEAD**, 13 files under `src/` different                       |
+| Both serving, at the end | **matches HEAD** at every reading — `sha-d78049d` for the fixes, `sha-a11f428` for this document |
+| Read from                | Cloudflare, via `scripts/check-deploy-drift.mjs`, never from a local belief                      |
+| `npm run check`          | **EXIT CODE 0 — OK**, 86s (`.run-status/uat-check.json`)                                         |
+| Full integration project | **EXIT CODE 0 — OK**, 11m34s (`.run-status/uat-integ.json`)                                      |
+| Dev dispatch             | **EXIT CODE 0 — OK** (`.run-status/uat-dev.json`)                                                |
+| Production dispatch      | **EXIT CODE 0 — OK** (`.run-status/uat-prod.json`)                                               |
+| Dev live check           | **18/18**, with a session                                                                        |
+| Production live check    | **11/12** — the twelfth needs a Live Check account                                               |
 
 The drift reading at the start is the one that mattered: **both workers were
 serving the commit that broke `/payroll/batches`**, and neither had the audit
