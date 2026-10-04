@@ -170,11 +170,20 @@ describe('the controls each list carries', () => {
     expect(source).toMatch(/totalsLabel\(|pagedFooterLabel\(/)
   })
 
-  // THE RANGE: three of the four have one. PAYROLL DOES NOT, and the reason is
-  // that the week IS the range — a second date control beside the week picker
-  // would be two answers to the same question, and §7.4.1 wants a range labelled
-  // with WHICH date, of which payroll has no other.
-  it.each(['invoices', 'payments', 'charges', 'statements'] as const)(
+  // ── THE WINDOW CONTROL: A RANGE, OR THE ROLLING PICKER ─────────────────
+  //
+  // THIS USED TO REQUIRE A RANGE ON INVOICES AND PAYMENTS AND IT FAILED ON
+  // PURPOSE. §6.2.8 (v10.21) gives both screens the rolling picker and removes
+  // the from/to range with it, for the reason v10.16 gave: a picker beside a
+  // range is one screen answering for two periods.
+  //
+  // The guard is not deleted, because "this list says WHICH dates it is showing"
+  // is still the thing worth pinning. It is split by which control provides it.
+  //
+  // PAYROLL HAS NEITHER, and the reason is unchanged: the week IS the range, and
+  // a second date control beside the week picker would be two answers to one
+  // question.
+  it.each(['charges', 'statements'] as const)(
     '%s has a labelled date range',
     (name) => {
       const source = pageSource(name)
@@ -184,6 +193,29 @@ describe('the controls each list carries', () => {
       expect(source).not.toMatch(
         /range=\{\{\s*\n?\s*label: t\('accounting\.date'\)/,
       )
+    },
+  )
+
+  it.each(['invoices', 'payments'] as const)(
+    '%s takes its window from the rolling picker instead',
+    (name) => {
+      const source = pageSource(name)
+      expect(source).toContain('<PeriodPicker')
+      // AND NOT BOTH. The two-window arrangement is what §6.2.8 forbids, so the
+      // absence is asserted rather than assumed from the presence above.
+      expect(source).not.toMatch(/\n\s+range=\{\{/)
+    },
+  )
+
+  // ── AND THE SUMMARY STRIP, WHICH IS WHY THE PICKER IS THERE (§6.2.8) ────
+  it.each(['invoices', 'payments'] as const)(
+    '%s carries a summary strip whose figures are links',
+    (name) => {
+      const source = pageSource(name)
+      expect(source).toContain('<SummaryStrip')
+      // EVERY FIGURE IS A LINK: the href is what makes it a control rather than
+      // a notification, and a strip of plain numbers would still render.
+      expect(source).toMatch(/href: (listHref|stripHref)\(/)
     },
   )
 

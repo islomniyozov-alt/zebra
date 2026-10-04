@@ -57,6 +57,16 @@ export interface InvoiceGridRow {
   isFactored: boolean
   /** Null when nothing is outstanding — a paid invoice has no age. */
   bucket: AgingBucket | null
+  /**
+   * PAST ITS DUE DATE AT ALL — one day counts.
+   *
+   * NOT `bucket !== 'current'`, which is the trap: `agingBucketFor` calls the
+   * first THIRTY days "current", so a bucket test would call an invoice eight
+   * days late on-time. §6.2.8's Overdue figure sums everything past due, and
+   * this is the row-level form of the same predicate so the strip and the list
+   * it links to cannot disagree.
+   */
+  isOverdue: boolean
 }
 
 export async function readInvoices(
@@ -110,6 +120,13 @@ export async function readInvoices(
             Math.floor((midnight - invoice.dueDate.getTime()) / 86_400_000),
           )
         : null,
+    // WHOLE DAYS FROM THE SAME MIDNIGHT, so this does not depend on the time of
+    // day somebody opened the screen — and matches the `::date` subtraction the
+    // strip's SQL does.
+    isOverdue:
+      invoice.balanceCents > 0 &&
+      invoice.dueDate !== null &&
+      Math.floor((midnight - invoice.dueDate.getTime()) / 86_400_000) > 0,
   }))
 }
 
@@ -139,6 +156,35 @@ export const invoiceShape: ListShape<InvoiceGridRow> = {
   // filter).
   columnFilters: {
     status: (row) => row.status,
+    // ── THE STATE THE SUMMARY STRIP LINKS BY (§6.2.8) ─────────────────────
+    //
+    // Each figure on the strip is a link, and the link has to open the rows the
+    // figure summed or the tie-to-the-cent claim is decoration.
+    //
+    // AN OVERDUE ROW ANSWERS TO BOTH 'open' AND 'overdue', which it does by
+    // returning both words: `applyList` matches a column filter with
+    // `includes`, so one row can belong to a state and to its subset. That is
+    // deliberate rather than clever — Overdue IS part of Open (§6.2.8), and a
+    // single-valued state would make `?state=open` exclude the overdue rows and
+    // under-report the figure it was linked from.
+    //
+    // 'settled' IS NOT ON THE STRIP and exists so the three states partition the
+    // list: a paid or written-off invoice is neither open nor factored.
+    // 'unissued' COMES FIRST AND IS NOT ON THE STRIP. A DRAFT has been shown to
+    // nobody and a VOID was withdrawn, so neither is money anybody owes — the
+    // strip's own predicate excludes both, and a state function that called them
+    // open made `?state=open` list a draft under a figure that did not count it.
+    // Found by the agreement test, by exactly the draft's 111,111.
+    state: (row) =>
+      row.status === 'DRAFT' || row.status === 'VOID'
+        ? 'unissued'
+        : row.isFactored
+          ? 'factored'
+          : row.balanceCents <= 0 || row.status === 'WRITTEN_OFF'
+            ? 'settled'
+            : row.isOverdue
+              ? 'open overdue'
+              : 'open',
   },
   defaultSort: 'issued',
   defaultDir: 'desc',

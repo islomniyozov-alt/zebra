@@ -28,6 +28,16 @@ import { FilterBar } from '@/components/ui/FilterBar'
 import { Tabs } from '@/components/ui/Tabs'
 import { ReadyQueue, type ReadyRow } from '../../invoices/ReadyQueue'
 import { CompanyChips } from '../../_grid/CompanyChips'
+import { PeriodPicker } from '../../_charts/PeriodPicker'
+import { SummaryStrip } from '../../_grid/SummaryStrip'
+import { invoiceStrip } from '@/lib/accounting-reports'
+import { narrowCompanyScope } from '@/lib/tenancy'
+import {
+  DEFAULT_PERIOD,
+  isPeriodKey,
+  periodWindow,
+  type PeriodKey,
+} from '@/lib/rolling-period'
 import { PageHeader } from '../../_grid/PageHeader'
 import { GridToolbar } from '../../_grid/GridToolbar'
 import { BulkMarkSent } from './BulkMarkSent'
@@ -112,6 +122,19 @@ export default async function AccountingInvoicesPage({
   // this writes a fact about it. permissions.ts decides; this only asks.
   const mayUpdate = await currentUserCan('update', 'invoice')
 
+  // ── ONE WINDOW CONTROL, THE SHARED ONE (§6.2.8) ──────────────────────
+  //
+  // The rolling picker replaces the from/to range here as it did on Reports:
+  // v10.16 revoked the two-window arrangement, and a picker beside a range is
+  // one screen answering for two periods.
+  const period: PeriodKey =
+    typeof raw.period === 'string' && isPeriodKey(raw.period)
+      ? raw.period
+      : DEFAULT_PERIOD
+  const now = new Date()
+  const window = periodWindow(period, now)
+  const companyParam = typeof raw.company === 'string' ? raw.company : null
+
   const wanted = typeof raw.tab === 'string' ? raw.tab : null
   const requested: Tab = (TABS as readonly string[]).includes(wanted ?? '')
     ? (wanted as Tab)
@@ -135,7 +158,7 @@ export default async function AccountingInvoicesPage({
 
   const data = await withCurrentOrg('read', 'invoice', async (tx, session) => {
     const scope = companyScopeFilter(session.companyScopes)
-    const [invoices, companies, ready, direct, readyCount, columns] =
+    const [invoices, companies, ready, direct, readyCount, columns, strip] =
       await Promise.all([
         readInvoices(tx, scope, new Date()),
         tx.company.findMany({
@@ -156,8 +179,20 @@ export default async function AccountingInvoicesPage({
           ? tx.load.count({ where: { ...readyToInvoiceWhere(), ...scope } })
           : Promise.resolve(0),
         readGridColumns(tx, session.userId, 'invoices.invoices', COLUMN_KEYS),
+        // ── THE STRIP, AND EVERY COUNT ON IT, IN ONE STATEMENT ───────────
+        //
+        // Same lesson as readyCount above, applied to the rest of the screen:
+        // the Factored tab read `invoices.filter(isFactored).length` over a
+        // reader capped at 2000, so it was right only while the number was
+        // small enough not to need. The chip counts come from here too.
+        invoiceStrip(
+          tx,
+          narrowCompanyScope(session.companyScopes, companyParam),
+          window,
+          now,
+        ),
       ])
-    return { invoices, companies, ready, direct, readyCount, columns }
+    return { invoices, companies, ready, direct, readyCount, columns, strip }
   })
 
   const money = (cents: number) => (
@@ -206,6 +241,39 @@ export default async function AccountingInvoicesPage({
     return `${PATH}?${next}`
   }
 
+  /**
+   * Where a summary figure sends the reader. §6.2.8.
+   *
+   * IT CARRIES THE WINDOW AND THE AUTHORITY FORWARD, which is what makes the
+   * figure and the list it opens the same number: both are computed over
+   * whatever `?period=` and `?company=` say, so a link that dropped them would
+   * open a list that disagrees with the figure it came from.
+   *
+   * AND IT CLEARS THE OTHER FILTERS — the age chip, a status chip, a search, a
+   * page — because the figure is a claim about a state and anything left over
+   * would narrow the rows below it without changing the number above.
+   */
+  const listHref = (into: Record<string, string>) => {
+    const next = new URLSearchParams(search)
+    // `f.`-PREFIXED, because that is what `applyList` reads
+    // (`columnFilterParam`). Writing a bare `state=` wrote a parameter nothing
+    // consumes, so every figure opened the unfiltered list.
+    for (const key of [
+      'age',
+      'f.status',
+      'f.state',
+      'q',
+      'page',
+      'sort',
+      'dir',
+    ]) {
+      next.delete(key)
+    }
+    next.set('tab', 'invoices')
+    for (const [key, value] of Object.entries(into)) next.set(key, value)
+    return `${PATH}?${next}`
+  }
+
   const header = (
     <>
       <PageHeader
@@ -226,8 +294,10 @@ export default async function AccountingInvoicesPage({
             : []),
           {
             key: 'factored',
+            // COUNTED IN SQL. This was `invoices.filter(...).length` over a
+            // reader that takes 2000 rows (§6.2.8).
             label: t('invoices.tab.factored'),
-            count: data.invoices.filter((row) => row.isFactored).length,
+            count: data.strip.factoredCount,
           },
           {
             key: 'direct',
@@ -409,6 +479,54 @@ export default async function AccountingInvoicesPage({
   return (
     <>
       {header}
+      <SummaryStrip
+        locale={locale}
+        windowNote={t('strip.window')}
+        windowHref="/accounting/reports"
+        windowHrefLabel={t('strip.allTime')}
+        figures={[
+          {
+            key: 'open',
+            label: t('strip.open'),
+            cents: data.strip.openCents,
+            note: t('strip.openNote'),
+            // THE LINK CARRIES THE SAME WINDOW AND AUTHORITY the figure was
+            // computed over, which is what makes them tie to the cent.
+            href: listHref({ 'f.state': 'open' }),
+          },
+          {
+            key: 'overdue',
+            label: t('strip.overdue'),
+            cents: data.strip.overdueCents,
+            note: t('strip.overdueNote'),
+            alarming: true,
+            href: listHref({ 'f.state': 'overdue' }),
+          },
+          {
+            key: 'factored',
+            label: t('strip.factored'),
+            cents: data.strip.factoredCents,
+            note: t('strip.factoredNote'),
+            href: listHref({ 'f.state': 'factored' }),
+          },
+        ]}
+      />
+      <div className="flex flex-wrap items-center justify-between gap-z3 border-b border-border bg-surface px-gutter py-z2">
+        <CompanyChips
+          companies={data.companies}
+          label={t('accounting.company')}
+          allLabel={t('accounting.allCompanies')}
+        />
+        <PeriodPicker
+          legend={t('dash.period')}
+          labels={{
+            d7: t('dash.period.d7'),
+            w4: t('dash.period.w4'),
+            w13: t('dash.period.w13'),
+            w52: t('dash.period.w52'),
+          }}
+        />
+      </div>
       <FilterBar
         groups={[
           {
@@ -426,11 +544,6 @@ export default async function AccountingInvoicesPage({
           param: 'q',
           label: t('accounting.search'),
           placeholder: t('accounting.invoices.searchHint'),
-        }}
-        range={{
-          label: t('invoices.issued'),
-          fromLabel: t('accounting.from'),
-          toLabel: t('accounting.to'),
         }}
         clearLabel={t('filter.clear')}
         moreLabel={t('filter.more')}

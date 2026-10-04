@@ -14,6 +14,16 @@ import { FilterBar } from '@/components/ui/FilterBar'
 import { Tabs } from '@/components/ui/Tabs'
 import { Button } from '@/components/ui/Button'
 import { CompanyChips } from '../../_grid/CompanyChips'
+import { PeriodPicker } from '../../_charts/PeriodPicker'
+import { SummaryStrip } from '../../_grid/SummaryStrip'
+import { paymentStrip } from '@/lib/accounting-reports'
+import { narrowCompanyScope } from '@/lib/tenancy'
+import {
+  DEFAULT_PERIOD,
+  isPeriodKey,
+  periodWindow,
+  type PeriodKey,
+} from '@/lib/rolling-period'
 import { PageHeader } from '../../_grid/PageHeader'
 import { GridToolbar } from '../../_grid/GridToolbar'
 import { GridFooterNav } from '../../_grid/GridFooterNav'
@@ -64,6 +74,15 @@ export default async function AccountingPaymentsPage({
   const { t, locale } = await getLocaleContext()
   const mayRecord = await currentUserCan('create', 'payment')
 
+  // ONE WINDOW CONTROL, THE SHARED ONE (§6.2.8). The picker replaces the
+  // from/to range, as on Invoices and Reports.
+  const period: PeriodKey =
+    typeof raw.period === 'string' && isPeriodKey(raw.period)
+      ? raw.period
+      : DEFAULT_PERIOD
+  const window = periodWindow(period, new Date())
+  const companyParam = typeof raw.company === 'string' ? raw.company : null
+
   const wanted = typeof raw.tab === 'string' ? raw.tab : null
   const tab: Tab = (TABS as readonly string[]).includes(wanted ?? '')
     ? (wanted as Tab)
@@ -84,7 +103,7 @@ export default async function AccountingPaymentsPage({
 
   const data = await withCurrentOrg('read', 'payment', async (tx, session) => {
     const scope = companyScopeFilter(session.companyScopes)
-    const [payments, companies, columns] = await Promise.all([
+    const [payments, companies, columns, strip] = await Promise.all([
       readPayments(tx, scope),
       tx.company.findMany({
         where: {
@@ -95,13 +114,19 @@ export default async function AccountingPaymentsPage({
         select: { id: true, name: true },
       }),
       readGridColumns(tx, session.userId, 'payments.payments', COLUMN_KEYS),
+      // COUNTED AND SUMMED IN SQL (§6.2.8). The unapplied tab's count was a
+      // `.length` over `listPayments`, which takes 300 rows.
+      paymentStrip(
+        tx,
+        narrowCompanyScope(session.companyScopes, companyParam),
+        window,
+      ),
     ])
-    return { payments, companies, columns }
+    return { payments, companies, columns, strip }
   })
 
-  const unappliedCount = data.payments.filter(
-    (row) => row.unappliedCents > 0,
-  ).length
+  // FROM SQL, over the window. See the reader above.
+  const unappliedCount = data.strip.unappliedCount
 
   const state =
     tab === 'unapplied'
@@ -196,6 +221,21 @@ export default async function AccountingPaymentsPage({
     },
   ]
 
+  /**
+   * Where the unapplied figure sends the reader. §6.2.8.
+   *
+   * CARRIES THE WINDOW AND THE AUTHORITY, so the figure and the list it opens
+   * are the same number, and clears the filters that would narrow the rows
+   * without changing the figure above them.
+   */
+  const stripHref = (state: string) => {
+    const next = new URLSearchParams(search)
+    for (const key of ['q', 'page', 'sort', 'dir']) next.delete(key)
+    next.set('tab', 'payments')
+    next.set('state', state)
+    return `${PATH}?${next}`
+  }
+
   const tabHref = (key: string) => {
     const next = new URLSearchParams(search)
     next.set('tab', key)
@@ -243,6 +283,37 @@ export default async function AccountingPaymentsPage({
         hrefFor={tabHref}
         label={t('grid.tabs')}
       />
+      <SummaryStrip
+        locale={locale}
+        windowNote={t('strip.window')}
+        figures={[
+          {
+            key: 'unapplied',
+            label: t('strip.unapplied'),
+            cents: data.strip.unappliedCents,
+            // THE COUNT BESIDE THE MONEY: "$14,200 unapplied" is the fact,
+            // "across 3 payments" is what says how long it takes to clear.
+            note: `${String(data.strip.unappliedCount)} ${t('strip.payments')}`,
+            href: stripHref('unapplied'),
+          },
+        ]}
+      />
+      <div className="flex flex-wrap items-center justify-between gap-z3 border-b border-border bg-surface px-gutter py-z2">
+        <CompanyChips
+          companies={data.companies}
+          label={t('accounting.company')}
+          allLabel={t('accounting.allCompanies')}
+        />
+        <PeriodPicker
+          legend={t('dash.period')}
+          labels={{
+            d7: t('dash.period.d7'),
+            w4: t('dash.period.w4'),
+            w13: t('dash.period.w13'),
+            w52: t('dash.period.w52'),
+          }}
+        />
+      </div>
       <FilterBar
         groups={
           tab === 'unapplied'
@@ -260,7 +331,7 @@ export default async function AccountingPaymentsPage({
                     {
                       value: 'applied',
                       label: t('accounting.payments.appliedOnly'),
-                      count: data.payments.length - unappliedCount,
+                      count: data.strip.appliedCount,
                     },
                   ],
                 },
@@ -270,11 +341,6 @@ export default async function AccountingPaymentsPage({
           param: 'q',
           label: t('accounting.search'),
           placeholder: t('accounting.payments.searchHint'),
-        }}
-        range={{
-          label: t('payments.received'),
-          fromLabel: t('accounting.from'),
-          toLabel: t('accounting.to'),
         }}
         clearLabel={t('filter.clear')}
         moreLabel={t('filter.more')}

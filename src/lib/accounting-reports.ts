@@ -307,3 +307,157 @@ export async function deductionsByCategory(
     lines: found.get(category)?.lines ?? 0,
   }))
 }
+
+// ---------------------------------------------------------------------------
+// THE SUMMARY STRIPS ON INVOICES AND PAYMENTS. §6.2.8.
+//
+// ── WHY THESE ARE NOT `.length` OVER THE LIST READERS ────────────────────
+//
+// Both screens already showed counts, and both computed them from the rows the
+// list reader had returned — `readInvoices` takes 2000, `listPayments` takes
+// 300. A tab reading "Factored 41" was therefore right only while the business
+// was small enough not to need the number, and wrong silently after that.
+//
+// ── THE WINDOW IS THE LIST'S WINDOW, WHICH IS THE WHOLE POINT ────────────
+//
+// Every figure here ties to the cent to the list its link opens: same window,
+// same authority, same predicate. §6.2.8 also records what that costs — an
+// invoice older than the window is not in the strip, and the unwindowed answer
+// is the aging bar on /accounting/reports. Flag 49.
+// ---------------------------------------------------------------------------
+
+/** Issued paper, partitioned. `factored` is NEVER inside `open` (§3.3). */
+export interface InvoiceStrip {
+  openCents: number
+  /** A SUBSET of open, not a fourth category. Said on the strip. */
+  overdueCents: number
+  factoredCents: number
+  /**
+   * How many invoices are factored. A COUNT, because the Factored tab read
+   * `rows.filter(isFactored).length` over a reader capped at 2000 — right
+   * only while the number was small enough not to matter.
+   */
+  factoredCount: number
+  /** One entry per `InvoiceStatus` that occurs in the window. */
+  byStatus: { status: string; count: number }[]
+}
+
+export async function invoiceStrip(
+  tx: TxClient,
+  companyIds: readonly string[],
+  period: PeriodWindow,
+  now: Date = new Date(),
+): Promise<InvoiceStrip> {
+  const scope = scopeSql('i', companyIds)
+
+  // ISSUED MEANS ISSUED: a DRAFT has been shown to nobody and a VOID was
+  // withdrawn, so neither is money anybody is owed or owes. WRITTEN_OFF stays
+  // out of `open` too — it was billed, and then given up on.
+  const issued = Prisma.sql`
+    i."deletedAt" IS NULL
+    AND i."issueDate" IS NOT NULL
+    AND i."status" NOT IN ('DRAFT', 'VOID')
+    ${scope}
+    AND i."issueDate" >= ${period.from}
+    AND i."issueDate" < ${period.to}
+  `
+
+  const rows = await tx.$queryRaw<
+    {
+      open: bigint
+      overdue: bigint
+      factored: bigint
+      factored_count: bigint
+    }[]
+  >`
+    SELECT
+      COALESCE(SUM(i."balanceCents") FILTER (
+        WHERE i."isFactored" = false
+          AND i."balanceCents" > 0
+          AND i."status" <> 'WRITTEN_OFF'), 0)::bigint AS open,
+      -- OVERDUE IS A SUBSET OF OPEN, by the same date arithmetic the aging
+      -- buckets use: whole days, by date, so the figure does not depend on the
+      -- time of day somebody opened the screen.
+      COALESCE(SUM(i."balanceCents") FILTER (
+        WHERE i."isFactored" = false
+          AND i."balanceCents" > 0
+          AND i."status" <> 'WRITTEN_OFF'
+          AND i."dueDate" IS NOT NULL
+          AND (${now}::date - i."dueDate"::date) > 0), 0)::bigint AS overdue,
+      -- SOLD. The whole total, not the balance: what the factor took on is the
+      -- invoice, and its balance is being collected by somebody else.
+      COALESCE(SUM(i."totalCents") FILTER (
+        WHERE i."isFactored" = true), 0)::bigint AS factored,
+      COUNT(*) FILTER (WHERE i."isFactored" = true)::bigint AS factored_count
+    FROM "Invoice" i
+    WHERE ${issued}
+  `
+
+  const counts = await tx.$queryRaw<{ status: string; count: bigint }[]>`
+    SELECT i."status"::text AS status, COUNT(*)::bigint AS count
+    FROM "Invoice" i
+    WHERE ${issued}
+    GROUP BY 1
+    ORDER BY 1
+  `
+
+  const row = rows[0]
+  if (!row) throw new Error('invoiceStrip: no row from a single-row SELECT.')
+
+  return {
+    openCents: Number(row.open),
+    overdueCents: Number(row.overdue),
+    factoredCents: Number(row.factored),
+    factoredCount: Number(row.factored_count),
+    byStatus: counts.map((entry) => ({
+      status: entry.status,
+      count: Number(entry.count),
+    })),
+  }
+}
+
+export interface PaymentStrip {
+  /** Money received that is not against an invoice yet. */
+  unappliedCents: number
+  /** How many payments carry it — "$14,200 across 3 payments". */
+  unappliedCount: number
+  /** Every payment in the window, and how many are fully applied. */
+  totalCount: number
+  appliedCount: number
+}
+
+export async function paymentStrip(
+  tx: TxClient,
+  companyIds: readonly string[],
+  period: PeriodWindow,
+): Promise<PaymentStrip> {
+  const rows = await tx.$queryRaw<
+    {
+      unapplied: bigint
+      unapplied_count: bigint
+      total_count: bigint
+      applied_count: bigint
+    }[]
+  >`
+    SELECT
+      COALESCE(SUM(p."unappliedCents"), 0)::bigint AS unapplied,
+      COUNT(*) FILTER (WHERE p."unappliedCents" > 0)::bigint AS unapplied_count,
+      COUNT(*)::bigint AS total_count,
+      COUNT(*) FILTER (WHERE p."unappliedCents" = 0)::bigint AS applied_count
+    FROM "Payment" p
+    WHERE p."deletedAt" IS NULL
+      ${scopeSql('p', companyIds)}
+      AND p."receivedAt" >= ${period.from}
+      AND p."receivedAt" < ${period.to}
+  `
+
+  const row = rows[0]
+  if (!row) throw new Error('paymentStrip: no row from a single-row SELECT.')
+
+  return {
+    unappliedCents: Number(row.unapplied),
+    unappliedCount: Number(row.unapplied_count),
+    totalCount: Number(row.total_count),
+    appliedCount: Number(row.applied_count),
+  }
+}
