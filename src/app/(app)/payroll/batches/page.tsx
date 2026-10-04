@@ -28,7 +28,14 @@ import { Tabs } from '@/components/ui/Tabs'
 import { GridFooterNav } from '../../_grid/GridFooterNav'
 import { PageHeader } from '../../_grid/PageHeader'
 import { SummaryStrip } from '../../_grid/SummaryStrip'
-import { ALL_DATES } from '../../_grid/window-params'
+import { PeriodPicker } from '../../_charts/PeriodPicker'
+import { ALL_DATES, windowed } from '../../_grid/window-params'
+import {
+  DEFAULT_PERIOD,
+  isPeriodKey,
+  periodWindow,
+  type PeriodKey,
+} from '@/lib/rolling-period'
 import { pipelineStrip } from '@/lib/accounting-reports'
 import { ColumnFunnel } from '../../_grid/ColumnFunnel'
 import { BulkStatus } from './BulkStatus'
@@ -490,6 +497,20 @@ export default async function PayrollPage({
     return `${PATH}?${next}`
   }
 
+  // ── ONE WINDOW CONTROL, THE SHARED ONE (§6.2.9) ──────────────────────
+  //
+  // The picker replaces the from/to range, as on Invoices and Payments. It
+  // filters by the date each list already sorts on — `dateOf` in the shape —
+  // so the window means what the list already meant by a date.
+  //
+  // `?period=all` IS NO DATE FILTER, which is what a balance figure links to.
+  const allDates = raw.period === ALL_DATES
+  const period: PeriodKey =
+    typeof raw.period === 'string' && isPeriodKey(raw.period)
+      ? raw.period
+      : DEFAULT_PERIOD
+  const listWindow = allDates ? null : periodWindow(period, new Date())
+
   const tabHref = (key: string) => {
     const next = new URLSearchParams(search)
     next.set('tab', key)
@@ -634,7 +655,12 @@ export default async function PayrollPage({
     ) : null
 
   if (tab === 'batches') {
-    const view = gridView(data.batches, raw, batchShape, applyList)
+    const view = gridView(
+      data.batches,
+      windowed(raw, listWindow),
+      batchShape,
+      applyList,
+    )
     const columns = keepColumns(batchColumns, data.columns)
     return (
       <>
@@ -686,6 +712,17 @@ export default async function PayrollPage({
             ]}
           />
         )}
+        <div className="flex flex-wrap items-center justify-end gap-z3 border-b border-border bg-surface px-gutter py-z2">
+          <PeriodPicker
+            legend={t('dash.period')}
+            labels={{
+              d7: t('dash.period.d7'),
+              w4: t('dash.period.w4'),
+              w13: t('dash.period.w13'),
+              w52: t('dash.period.w52'),
+            }}
+          />
+        </div>
         {weekStrip}
         {blockers}
         <FilterBar
@@ -694,11 +731,6 @@ export default async function PayrollPage({
             param: 'q',
             label: t('accounting.search'),
             placeholder: t('batches.batch'),
-          }}
-          range={{
-            label: t('batch.checkDate'),
-            fromLabel: t('accounting.from'),
-            toLabel: t('accounting.to'),
           }}
           clearLabel={t('filter.clear')}
           moreLabel={t('filter.more')}

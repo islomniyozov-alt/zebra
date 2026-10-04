@@ -183,20 +183,17 @@ describe('the controls each list carries', () => {
   // PAYROLL HAS NEITHER, and the reason is unchanged: the week IS the range, and
   // a second date control beside the week picker would be two answers to one
   // question.
-  it.each(['charges', 'statements'] as const)(
-    '%s has a labelled date range',
-    (name) => {
-      const source = pageSource(name)
-      expect(source).toMatch(/\n\s+range=\{\{/)
-      // LABELLED WITH THE FIELD, never a bare "Date". The label is the first
-      // thing in the descriptor and must not be a generic key.
-      expect(source).not.toMatch(
-        /range=\{\{\s*\n?\s*label: t\('accounting\.date'\)/,
-      )
-    },
-  )
+  it.each(['charges'] as const)('%s has a labelled date range', (name) => {
+    const source = pageSource(name)
+    expect(source).toMatch(/\n\s+range=\{\{/)
+    // LABELLED WITH THE FIELD, never a bare "Date". The label is the first
+    // thing in the descriptor and must not be a generic key.
+    expect(source).not.toMatch(
+      /range=\{\{\s*\n?\s*label: t\('accounting\.date'\)/,
+    )
+  })
 
-  it.each(['invoices', 'payments'] as const)(
+  it.each(['invoices', 'payments', 'batches', 'statements'] as const)(
     '%s takes its window from the rolling picker instead',
     (name) => {
       const source = pageSource(name)
