@@ -205,6 +205,26 @@ Both were written here. Either answer is defensible — paying "25% of the load"
 on the all-in rate is ordinary in trucking — but they cannot both be true, and
 the one that is true has to be the one the schema's four fields mean.
 
+### One load on dev, both figures — `1177`, kept for this ruling
+
+`node -r dotenv/config scripts/verify-upload-first.mjs` with `KEEP=1`, against the
+deployed dev worker. The load is still there; open it.
+
+|                               |                                                                                                      |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------- |
+| The rate confirmation printed | line haul **245000**, fuel **38750**, one accessorial **12000** (Detention, 2 hrs), total **295750** |
+| What the extraction concluded | `totalAgrees: true`, `differenceCents: 0` — it read the page correctly and kept the parts apart      |
+| What load 1177 stored         | `linehaul 295750 · fuel 0 · accessorials 0 · total 295750`                                           |
+
+Priced by `payFor` itself — not by arithmetic in this document — against a real
+live rule, **JASON RAY BRACE, `PERCENT_LINEHAUL` at 30%**:
+
+|                     | basis     | driver pay                   |
+| ------------------- | --------- | ---------------------------- |
+| **Today**           | $2,957.50 | **$887.25**                  |
+| **The alternative** | $2,450.00 | **$735.00**                  |
+| Difference          |           | **$152.25 on this one load** |
+
 **What a ruling would have to say:** whether a rate confirmation's fuel
 surcharge and accessorials land in their own columns (and the rate field means
 line haul), or whether the load's rate is the all-in payout (and then

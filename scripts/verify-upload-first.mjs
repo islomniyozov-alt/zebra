@@ -344,6 +344,30 @@ const load = saved
 await browser.close()
 
 // --- cleanup ---------------------------------------------------------------------
+//
+// KEEP=1 LEAVES THE LOAD BEHIND, for the one case where the artefact is the
+// point: a ruling about what the rate field means needs a load somebody can open
+// on dev and read. Everything this script asserts has already been asserted by
+// the time we get here, so keeping changes no verdict — and dev data is
+// disposable by the checklist's own rule.
+if (process.env.KEEP) {
+  console.log('')
+  console.log(
+    `KEEPING ${load?.loadNumber ?? '(nothing saved)'} — id ${load?.id ?? '—'}`,
+  )
+  console.log(
+    `  broker "${TRUTH.broker}", linehaulCents ${load?.linehaulCents ?? '—'}`,
+  )
+  console.log(
+    '  Nothing was deleted. Remove it by hand when the ruling is made.',
+  )
+  await pool.end()
+  const kept = results.filter((r) => !r.ok).length
+  console.log(`
+${results.length - kept}/${results.length} passed`)
+  process.exit(kept === 0 ? 0 : 1)
+}
+
 if (load) {
   await pool.query('delete from "Document" where "loadId" = $1', [load.id])
   await pool.query('delete from "LoadStatusEvent" where "loadId" = $1', [
