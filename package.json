@@ -33,6 +33,7 @@
     "verify:response": "node -r dotenv/config scripts/verify-response.mjs",
     "verify:driver-form": "node -r dotenv/config scripts/verify-driver-form.mjs",
     "check:unrouted": "node -r dotenv/config scripts/check-unrouted.mjs",
+    "sweep": "node -r dotenv/config scripts/sweep.mjs",
     "test:integration": "node scripts/integration-gate.mjs"
   },
   "dependencies": {
