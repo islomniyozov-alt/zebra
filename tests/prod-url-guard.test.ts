@@ -113,6 +113,12 @@ const INSPECTION_READERS = [
   // `BEGIN TRANSACTION READ ONLY`, which is Postgres refusing a write rather
   // than this list trusting the author.
   'uat-production-read.mjs',
+  // ADDED 2026-10-05, read-only. A production walk found drivers entered twice
+  // under one authority — the same person with two rows, two statement series and
+  // one truck. Which row to keep is decided by which carries the money, so this
+  // prints the statements per row and stops: a PREVIEW, with the merge left to the
+  // owner. Inside `BEGIN TRANSACTION READ ONLY` like its neighbour above.
+  'duplicate-drivers.mjs',
   'inspect-relay-customer.mjs',
   // Counts loads that are finished, billable and attached to nobody, before
   // `isReady` learns to check assignment. SELECT only.
