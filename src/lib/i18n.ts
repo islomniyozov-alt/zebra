@@ -672,6 +672,9 @@ const en = {
   'topbar.searchHint': 'Search loads, invoices, trucks',
   'topbar.allAuthorities': 'All authorities',
   'topbar.notifications': 'Notifications',
+  // §6.1.2. `{branch}` is substituted with what `NEON_BRANCH` actually held, so
+  // the ribbon names the database rather than asserting an environment.
+  'topbar.dataFrom': 'DATA: {branch}',
   'topbar.userMenu': 'Account',
   'topbar.signOut': 'Sign out',
 
@@ -3497,6 +3500,7 @@ const ru: Dictionary = {
   'topbar.searchHint': 'Поиск грузов, счетов, тягачей',
   'topbar.allAuthorities': 'Все перевозчики',
   'topbar.notifications': 'Уведомления',
+  'topbar.dataFrom': 'ДАННЫЕ: {branch}',
   'topbar.userMenu': 'Учётная запись',
   'topbar.signOut': 'Выйти',
 
@@ -6290,6 +6294,7 @@ const fa: Dictionary = {
   'topbar.searchHint': 'جستجوی بار، فاکتور، کامیون',
   'topbar.allAuthorities': 'همه شرکت‌ها',
   'topbar.notifications': 'اعلان‌ها',
+  'topbar.dataFrom': 'داده‌ها: {branch}',
   'topbar.userMenu': 'حساب کاربری',
   'topbar.signOut': 'خروج',
 

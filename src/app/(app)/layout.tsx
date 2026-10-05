@@ -6,6 +6,7 @@ import { navigationFor } from '@/lib/permissions'
 import { readDensity } from '@/lib/preferences'
 import { Sidebar, type SidebarGroup } from '@/components/shell/Sidebar'
 import { Topbar } from '@/components/shell/Topbar'
+import { ribbonBranch } from '@/lib/environment'
 import type { MessageKey } from '@/lib/i18n'
 
 // §6.1 — the app shell. Sidebar 224px, topbar 48px, content the only scrolling
@@ -21,6 +22,10 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   if (!session) redirect('/login')
 
   const { t } = await getLocaleContext()
+
+  // §6.1.2 — WHICH DATABASE THIS WORKER READS, from the binding, on the server.
+  // `null` on production, and the Topbar renders nothing at all for that.
+  const dataFrom = ribbonBranch(process.env)
 
   // Filtered by permission before it reaches the component. A dispatcher
   // without financial permission is not handed a Money group to hide — the
@@ -97,9 +102,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           // account or dispatch account; OW means nothing to anyone." A name
           // says the one thing the control needs to say — this is mine.
           accountName={account?.name?.trim() || account?.email || ''}
+          // §6.1.2. `null` on production, and the Topbar renders nothing for it.
+          dataFrom={dataFrom}
           labels={{
             notifications: t('topbar.notifications'),
             userMenu: t('topbar.userMenu'),
+            dataFrom: t('topbar.dataFrom').replace('{branch}', dataFrom ?? ''),
           }}
         />
         <div className="flex min-h-0 flex-1 flex-col">{children}</div>

@@ -27,14 +27,24 @@ import Link from 'next/link'
 interface TopbarProps {
   /** The person's name, or their email when they have not set one. */
   accountName: string
+  /**
+   * The database this worker reads, or `null` on production (§6.1.2).
+   *
+   * DECIDED ON THE SERVER by `ribbonBranch`, because the binding is not on the
+   * client and a value the browser could compute is a value the browser could be
+   * wrong about.
+   */
+  dataFrom: string | null
   /** Pre-translated. A translator closure cannot cross to a client component. */
   labels: {
     notifications: string
     userMenu: string
+    /** `DATA: {branch}`, already substituted. */
+    dataFrom: string
   }
 }
 
-export function Topbar({ accountName, labels }: TopbarProps) {
+export function Topbar({ accountName, dataFrom, labels }: TopbarProps) {
   return (
     <header className="flex h-topbar shrink-0 items-center gap-z4 border-b border-border bg-surface px-gutter">
       {/* SEARCH IS NOT BUILT, SO IT IS NOT SHOWN.
@@ -48,7 +58,25 @@ export function Topbar({ accountName, labels }: TopbarProps) {
        * The space is still reserved, so the shell does not rearrange around it
        * when the real thing lands. `topbar.searchHint` stays in i18n for the
        * same reason: three translations that would have to be written again. */}
-      <div aria-hidden className="flex-1" />
+      {/* §6.1.2 — WHICH DATABASE, IN THE SPACE THAT WAS ALREADY EMPTY.
+       *
+       * The reserved search region is where this goes, rather than a band of its
+       * own above the topbar: a band would cost a row of freight on every screen
+       * in the application, forever (standing rule 1), and this needs to be seen
+       * rather than to be large.
+       *
+       * PRODUCTION RENDERS THE PLAIN SPACER. Not an empty ribbon and not the word
+       * "production" — the absence is the signal, and an element that can print a
+       * label on production can print the wrong one. */}
+      {dataFrom === null ? (
+        <div aria-hidden className="flex-1" />
+      ) : (
+        <div className="flex flex-1 items-center">
+          <span className="rounded-control bg-warning-soft px-z2 py-[2px] text-xs font-medium uppercase tracking-[0.04em] text-warning">
+            {labels.dataFrom}
+          </span>
+        </div>
+      )}
 
       <button
         type="button"
