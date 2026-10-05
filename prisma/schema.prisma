@@ -144,59 +144,60 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  companies                Company[]
-  inboundEmails            InboundEmail[]
-  assetHistory             AssetAssignment[]
-  customers                Customer[]
-  locations                Location[]
-  factors                  FactoringCompany[]
-  auditLogs                AuditLog[]
-  calendarEvents           CalendarEvent[]
-  claims                   Claim[]
-  accidents                Accident[]
-  communications           Communication[]
-  complianceItems          ComplianceItem[]
-  inspections              RoadsideInspection[]
-  violations               InspectionViolation[]
-  dataQs                   DataQsChallenge[]
-  claimParties             ClaimParty[]
-  claimNotes               ClaimNote[]
-  customerAliases          CustomerAlias[]
-  corrections              ExtractionCorrection[]
-  extractionUsage          ExtractionUsage[]
-  counters                 Counter[]
-  documents                Document[]
-  drivers                  Driver[]
-  expenses                 Expense[]
-  fuelTxns                 FuelTransaction[]
-  iftaMileage              IftaMileage[]
-  integrations             Integration[]
-  invoices                 Invoice[]
-  loads                    Load[]
-  maintenance              MaintenanceRecord[]
-  memberships              Membership[]
-  notifications            Notification[]
-  payments                 Payment[]
-  pendingUploads           PendingUpload[]
-  settlements              Settlement[]
-  settlementBatches        SettlementBatch[]
-  seriesCounters           SeriesCounter[]
-  settlementLoadLines      SettlementLoadLine[]
-  settlementDeductionLines SettlementDeductionLine[]
-  openingBalances          DriverOpeningBalance[]
-  recurringDeductions      RecurringDeduction[]
-  settlementCharges        SettlementCharge[]
-  escrowEntries            DriverEscrowEntry[]
-  trailers                 Trailer[]
-  trucks                   Truck[]
-  preferences              UserPreference[]
-  randomRates              RandomTestingRate[]
-  randomPoolEntries        RandomPoolEntry[]
-  randomDraws              RandomDraw[]
-  randomSelections         RandomSelection[]
-  standingCharges          StandingCharge[]
-  standingChargeExemptions StandingChargeExemption[]
-  tollTransactions         TollTransaction[]
+  companies                 Company[]
+  inboundEmails             InboundEmail[]
+  assetHistory              AssetAssignment[]
+  customers                 Customer[]
+  locations                 Location[]
+  factors                   FactoringCompany[]
+  auditLogs                 AuditLog[]
+  calendarEvents            CalendarEvent[]
+  claims                    Claim[]
+  accidents                 Accident[]
+  communications            Communication[]
+  complianceItems           ComplianceItem[]
+  inspections               RoadsideInspection[]
+  violations                InspectionViolation[]
+  dataQs                    DataQsChallenge[]
+  claimParties              ClaimParty[]
+  claimNotes                ClaimNote[]
+  customerAliases           CustomerAlias[]
+  corrections               ExtractionCorrection[]
+  extractionUsage           ExtractionUsage[]
+  counters                  Counter[]
+  documents                 Document[]
+  drivers                   Driver[]
+  expenses                  Expense[]
+  fuelTxns                  FuelTransaction[]
+  iftaMileage               IftaMileage[]
+  integrations              Integration[]
+  invoices                  Invoice[]
+  loads                     Load[]
+  maintenance               MaintenanceRecord[]
+  memberships               Membership[]
+  notifications             Notification[]
+  payments                  Payment[]
+  pendingUploads            PendingUpload[]
+  settlements               Settlement[]
+  settlementBatches         SettlementBatch[]
+  seriesCounters            SeriesCounter[]
+  settlementLoadLines       SettlementLoadLine[]
+  settlementDeductionLines  SettlementDeductionLine[]
+  openingBalances           DriverOpeningBalance[]
+  recurringDeductions       RecurringDeduction[]
+  settlementCharges         SettlementCharge[]
+  escrowEntries             DriverEscrowEntry[]
+  trailers                  Trailer[]
+  trucks                    Truck[]
+  preferences               UserPreference[]
+  randomRates               RandomTestingRate[]
+  randomPoolEntries         RandomPoolEntry[]
+  randomDraws               RandomDraw[]
+  randomSelections          RandomSelection[]
+  standingCharges           StandingCharge[]
+  standingChargeExemptions  StandingChargeExemption[]
+  tollTransactions          TollTransaction[]
+  settlementBatchExclusions SettlementBatchExclusion[]
 }
 
 enum PlanTier {
@@ -296,6 +297,7 @@ model Company {
   randomPoolEntries   RandomPoolEntry[]
   randomDraws         RandomDraw[]
   tollTransactions    TollTransaction[]
+  settlementBatches   SettlementBatch[]
 
   @@unique([organizationId, dotNumber])
   @@index([organizationId, isActive])
@@ -383,30 +385,31 @@ model User {
   resetTokens    PasswordResetToken[]
   driverProfiles Driver[]
 
-  loadsBooked        Load[]
-  statusEvents       LoadStatusEvent[]
-  assignmentsMade    LoadAssignment[]
-  assetTransfers     AssetAssignment[]
-  documentsUploaded  Document[]
-  claimNotes         ClaimNote[]
-  aliasesLearned     CustomerAlias[]
-  correctionsMade    ExtractionCorrection[]
-  accessorialsOk     LoadAccessorial[]
-  paymentsRecorded   Payment[]
-  settlementsOk      Settlement[]
-  batchesFinalized   SettlementBatch[]      @relation("SettlementBatchFinalizedBy")
-  batchesPaid        SettlementBatch[]      @relation("SettlementBatchPaidBy")
-  loadGrossConfirmed Load[]                 @relation("LoadSettledGrossConfirmedBy")
-  openingBalances    DriverOpeningBalance[]
-  expensesCreated    Expense[]
-  communications     Communication[]
-  notifications      Notification[]
-  auditLogs          AuditLog[]
-  calendarEvents     CalendarEvent[]
-  pendingUploads     PendingUpload[]
-  inboundEmails      InboundEmail[]
-  preferences        UserPreference[]
-  randomDraws        RandomDraw[]
+  loadsBooked               Load[]
+  statusEvents              LoadStatusEvent[]
+  assignmentsMade           LoadAssignment[]
+  assetTransfers            AssetAssignment[]
+  documentsUploaded         Document[]
+  claimNotes                ClaimNote[]
+  aliasesLearned            CustomerAlias[]
+  correctionsMade           ExtractionCorrection[]
+  accessorialsOk            LoadAccessorial[]
+  paymentsRecorded          Payment[]
+  settlementsOk             Settlement[]
+  batchesFinalized          SettlementBatch[]          @relation("SettlementBatchFinalizedBy")
+  batchesPaid               SettlementBatch[]          @relation("SettlementBatchPaidBy")
+  loadGrossConfirmed        Load[]                     @relation("LoadSettledGrossConfirmedBy")
+  openingBalances           DriverOpeningBalance[]
+  expensesCreated           Expense[]
+  communications            Communication[]
+  notifications             Notification[]
+  auditLogs                 AuditLog[]
+  calendarEvents            CalendarEvent[]
+  pendingUploads            PendingUpload[]
+  inboundEmails             InboundEmail[]
+  preferences               UserPreference[]
+  randomDraws               RandomDraw[]
+  settlementBatchExclusions SettlementBatchExclusion[]
 
   @@index([isActive])
 }
@@ -1588,10 +1591,11 @@ model Load {
 
   // Money paid against the LOAD rather than against an invoice. Only ever
   // populated for direct-settled freight — see PaymentLoadApplication.
-  paymentApplications PaymentLoadApplication[]
-  settlementCharges   SettlementCharge[]
-  corrections         ExtractionCorrection[]
-  inboundEmails       InboundEmail[]
+  paymentApplications       PaymentLoadApplication[]
+  settlementCharges         SettlementCharge[]
+  corrections               ExtractionCorrection[]
+  inboundEmails             InboundEmail[]
+  settlementBatchExclusions SettlementBatchExclusion[]
 
   @@unique([companyId, loadNumber])
   @@unique([organizationId, externalId])
@@ -2923,19 +2927,28 @@ model SettlementBatch {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  // NO COMPANY. Islom's ruling of 2026-09-11: the sister companies are ONE
-  // operation and settlement is org-wide. One batch per period for the whole
-  // organization, one SB- number for the week, one statement per driver
-  // whatever authority the freight was pulled under.
-  //
-  // THIS SUPERSEDES item 3's "batch per company per week", which came from the
-  // artefact — SB-000438 covers both RAM drivers, and RAM and Dolphins had
-  // separate batches. Datatruck's shape is not the argument; how the business
-  // actually runs is, and it runs as one.
-  //
-  // INVOICES STAY PER AUTHORITY and so does `Counter`. An invoice carries an
-  // authority's MC and goes outside; a statement is internal paperwork. The
-  // two scopes now differ on purpose rather than by accident.
+  /// WHICH AUTHORITY THIS BATCH SETTLES, OR ALL OF THEM (§6.2.10, migration 62).
+  ///
+  /// NULL IS THE DEFAULT AND IT MEANS THE WHOLE ORGANIZATION — Islom's ruling of
+  /// 2026-09-11, unchanged: the sister companies are ONE operation, one batch per
+  /// period, one SB- number for the week, one statement per driver whatever
+  /// authority the freight was pulled under. That remains what the screen opens
+  /// unless somebody names a company.
+  ///
+  /// A NAMED COMPANY IS DATATRUCK'S SHAPE, available for the weeks the office
+  /// wants it (owner's ruling, 2026-10-05). It is not a migration of the other
+  /// reading and neither replaces it: `SB-000438` covers both RAM drivers, and
+  /// RAM and Dolphins also had separate batches. Both happened.
+  ///
+  /// IT SCOPES MORE THAN THE FREIGHT. A named company settles its own standing
+  /// charges and its own `recentWeeks`: a RAM batch must not carry Dolphins'
+  /// weekly insurance line, and the thirteen weeks beside it are RAM's thirteen.
+  ///
+  /// INVOICES STAY PER AUTHORITY and so does `Counter`. An invoice carries an
+  /// authority's MC and goes outside; a statement is internal paperwork. The two
+  /// scopes differ on purpose.
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   /// Inclusive UTC days. A Sunday and the Saturday after — MONEY-DESIGN §0.
   periodStart DateTime
@@ -2963,7 +2976,8 @@ model SettlementBatch {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  settlements Settlement[]
+  settlements               Settlement[]
+  settlementBatchExclusions SettlementBatchExclusion[]
 
   /// ONE SERIES ACROSS BOTH CARRIERS, so the unique is on the organization and
   /// not the company. Confirmed off the artefact: 436 RAM, 437 Dolphins, 438
@@ -2972,12 +2986,60 @@ model SettlementBatch {
   /// The money screen's lookup: is there a batch for this period yet.
   @@index([organizationId, periodStart])
   @@index([organizationId, status])
+  /// "Has this authority a batch for this week" — the per-company open check.
+  @@index([organizationId, companyId, periodStart])
 }
 
 enum SettlementBatchStatus {
   DRAFT
+  /// Some statements final, some not — the state the office actually works in
+  /// (§6.2.10 part 3, migration 62). Finalising is per statement, so a batch
+  /// spends real time here and the enum could not say so.
+  PARTIAL
   FINAL
   PAID
+}
+
+/// A TRIP THE OFFICE TOOK OUT OF A DRAFT BATCH (§6.2.10 part 2, migration 62).
+///
+/// ── AN EXCLUSION, NOT A SELECTION, AND THAT IS THE RULING ─────────────────
+///
+/// Owner's ruling, 2026-10-05. A draft is everything settleable in the week MINUS
+/// these rows. The alternative — storing what was picked — cannot tell "nobody
+/// chose this trip" from "this trip arrived after they chose", so a refresh either
+/// erases a decision or silently drops freight from somebody's pay.
+///
+/// Stored the other way round it is monotonic: `refreshDraft` can only ever ADD
+/// freight, and un-excluding is a deliberate act on the batch rather than a side
+/// effect of a recompute.
+///
+/// ── IT CARRIES WHO AND WHEN BECAUSE IT IS A DECISION ABOUT WAGES ──────────
+///
+/// "Why is this trip not on my statement" has to have an answer, and the answer
+/// is a person and a time, not an absence.
+model SettlementBatchExclusion {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  batchId String
+  batch   SettlementBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  loadId String
+  load   Load   @relation(fields: [loadId], references: [id], onDelete: Cascade)
+
+  excludedAt       DateTime @default(now())
+  excludedByUserId String?
+  excludedBy       User?    @relation(fields: [excludedByUserId], references: [id])
+
+  /// Free text, optional. The office is not required to justify a tick, and a
+  /// mandatory reason would be filled with a full stop.
+  reason String?
+
+  /// ONE ROW PER TRIP PER BATCH. Re-excluding an excluded trip is a no-op rather
+  /// than a second row, so the count on the screen is the number of decisions.
+  @@unique([batchId, loadId])
+  @@index([organizationId, batchId])
 }
 
 model Settlement {

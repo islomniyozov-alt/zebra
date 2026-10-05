@@ -485,6 +485,24 @@ export async function seedOrganization(
     }),
   )
 
+  // §6.2.10 part 2, migration 62. The exclusion set behind the trip ticks.
+  //
+  // SEEDED IN THE SAME COMMIT AS THE MIGRATION, for the reason stated above the
+  // batch: a policy on an empty table proves nothing, and
+  // `tests/isolation-coverage.test.ts` fails by name for any tenant model this
+  // fixture never reaches.
+  record(
+    'settlementBatchExclusion',
+    await db.settlementBatchExclusion.create({
+      data: {
+        organizationId,
+        batchId: batch.id,
+        loadId: load.id,
+        reason: 'Paid on next week by agreement',
+      },
+    }),
+  )
+
   const settlement = record(
     'settlement',
     await db.settlement.create({
