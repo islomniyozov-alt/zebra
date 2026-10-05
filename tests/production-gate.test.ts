@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   assertProductionWrite,
@@ -279,7 +279,18 @@ describe('the override names the migration being applied', () => {
     ).toBe(2)
     // AND AGAINST THE REAL DIRECTORY, so the number in the message is the number
     // on disk.
-    expect(readLatestMigrationNumber()).toBe(61)
+    //
+    // COUNTED A SECOND WAY rather than pinned to a literal. `toBe(61)` was right
+    // for one day and failed on the morning migration 62 landed — a test that
+    // has to be edited by every migration is a test people edit without reading.
+    // This counts the directories with a different method and compares, which is
+    // the claim that actually matters: the number in the refusal is the number on
+    // disk.
+    const onDisk = readdirSync('prisma/migrations').filter((name) =>
+      /^\d{14}_/.test(name),
+    ).length
+    expect(onDisk).toBeGreaterThanOrEqual(62)
+    expect(readLatestMigrationNumber()).toBe(onDisk)
   })
 })
 

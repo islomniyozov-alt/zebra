@@ -126,7 +126,29 @@ interface TableProps<Row> {
    * selection DOES is a money question, and a component that rendered its own
    * action would be deciding it.
    */
-  selection?: { name: string; label: string }
+  selection?: {
+    name: string
+    label: string
+    /**
+     * Start ticked (§6.2.10's trip picker).
+     *
+     * THE DEFAULT IS STILL UNTICKED, because a bulk bar acts on what somebody
+     * chose. A picker is the other shape: everything settleable in the week is in
+     * the batch unless the office takes it out, so its boxes start ticked and
+     * unticking is the decision.
+     */
+    defaultChecked?: boolean
+    /**
+     * Also post every row's key under this name, ticked or not.
+     *
+     * WHAT WAS ON THE SCREEN, WHICH IS NOT WHAT WAS TICKED. A picker that posted
+     * only ticks makes the caller recompute the full set to find the difference —
+     * and a trip that arrived between the render and the submit would then look
+     * unticked rather than new. Posting the shown set makes the complement exact
+     * and the race impossible.
+     */
+    alsoPost?: string
+  }
   /**
    * §7.1.2 — the sticky foot.
    *
@@ -332,9 +354,17 @@ export function Table<Row>({
                         type="checkbox"
                         name={selection.name}
                         value={rowKey(row)}
+                        defaultChecked={selection.defaultChecked ?? false}
                         aria-label={`${selection.label}: ${rowKey(row)}`}
                         className="size-[14px] accent-[var(--color-accent)]"
                       />
+                      {selection.alsoPost ? (
+                        <input
+                          type="hidden"
+                          name={selection.alsoPost}
+                          value={rowKey(row)}
+                        />
+                      ) : null}
                     </td>
                   ) : null}
                   {columns.map((column, index) => (

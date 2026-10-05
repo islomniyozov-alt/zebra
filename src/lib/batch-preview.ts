@@ -49,9 +49,40 @@ export interface PreviewTrip {
   companyId: string
   companyName: string
   driverName: string | null
+  /**
+   * WHO IS PAID, which is not always the driver's own name (§6.2.10).
+   * `Driver.payToName` is the name on the statement when one is set — a leasing
+   * company, a spouse, an owner-operator's LLC — and the driver's name otherwise.
+   * The trip picker shows the payee because that is the row the office is
+   * deciding about.
+   */
+  payeeName: string | null
+  /**
+   * Company driver or owner-operator, from `Driver.employmentType`.
+   *
+   * THE SCREEN SHOWS IT BECAUSE THE PAY RULE USUALLY FOLLOWS IT, and a batch
+   * with one owner-operator in the wrong week is the kind of mistake that is
+   * obvious on the row and invisible in the total.
+   */
+  driverType: string | null
+  /** The broker's own reference for the trip. Datatruck's "Load ref". */
+  referenceNumber: string | null
+  /** DELIVERED or POD_RECEIVED — the operational axis, as the office reads it. */
+  status: string
   /** When the POD landed, which is the date a week is decided by. */
   podAt: Date | null
   deliveredAt: Date | null
+  pickupAt: Date | null
+  /** `Chicago, IL → Dallas, TX`. One cell, because it is read as one fact. */
+  locations: string | null
+  /**
+   * THE LOAD'S REVENUE — what the percentage is taken OF, not the driver's cut.
+   *
+   * NAMED `grossCents` ON PURPOSE and not "load pay": `Settlement.grossCents`
+   * is the same quantity, and the agreement test for this screen is that the
+   * ticked trips sum to the BATCH's gross. A column called pay that held revenue
+   * is the error this project has already made once, in `topDriversByGross`.
+   */
   grossCents: number
   /** Null on an available trip; the bucket otherwise. */
   reason: UnavailableReason | null
@@ -107,6 +138,8 @@ export async function previewBatch(
     select: {
       id: true,
       loadNumber: true,
+      referenceNumber: true,
+      operationalStatus: true,
       companyId: true,
       driverId: true,
       totalRevenueCents: true,
@@ -115,17 +148,31 @@ export async function previewBatch(
         select: {
           firstName: true,
           lastName: true,
+          // THE PAYEE AND THE EMPLOYMENT, for the trip picker's columns
+          // (§6.2.10). Two scalars on a relation this query already reads.
+          payToName: true,
+          employmentType: true,
           // THE WHOLE RULE, because `ruleInForce` takes a `PayRule` and
           // deciding here which of its fields it "really" needs would be this
           // file knowing how pay rules work.
           payRules: true,
         },
       },
+      // ── BOTH ENDS NOW, NOT ONLY THE DELIVERY ──────────────────────────
+      //
+      // The picker shows pickup, delivery and the pair of places, so the filter
+      // on `type` is gone and the derivation below picks the ends out. Two or
+      // three rows per load against a `take: 2000` cap, on a screen that is read
+      // once a week.
       stops: {
-        where: { type: 'DELIVERY' },
-        orderBy: { sequence: 'desc' },
-        take: 1,
-        select: { scheduledAt: true },
+        orderBy: { sequence: 'asc' },
+        select: {
+          type: true,
+          scheduledAt: true,
+          city: true,
+          state: true,
+          name: true,
+        },
       },
       statusEvents: {
         where: {
@@ -150,8 +197,26 @@ export async function previewBatch(
   }
   const available: PreviewTrip[] = []
 
+  // `Chicago, IL`, or the facility name when a Relay import left no city — the
+  // same fallback the loads list uses, for the same reason.
+  const place = (stop: {
+    city: string | null
+    state: string | null
+    name: string | null
+  }) => {
+    const city = [stop.city, stop.state].filter(Boolean).join(', ')
+    return city === '' ? (stop.name ?? null) : city
+  }
+
   for (const load of loads) {
     const podAt = load.statusEvents[0]?.occurredAt ?? null
+    const pickup = load.stops.find((stop) => stop.type === 'PICKUP') ?? null
+    const deliveries = load.stops.filter((stop) => stop.type === 'DELIVERY')
+    const delivery = deliveries[deliveries.length - 1] ?? null
+    const ends = [pickup, delivery]
+      .map((stop) => (stop ? place(stop) : null))
+      .filter((text): text is string => text !== null)
+
     const trip: PreviewTrip = {
       loadId: load.id,
       loadNumber: load.loadNumber,
@@ -160,8 +225,21 @@ export async function previewBatch(
       driverName: load.driver
         ? `${load.driver.firstName} ${load.driver.lastName}`
         : null,
+      // THE PAYEE FALLS BACK TO THE DRIVER'S OWN NAME, because `payToName` is
+      // optional precisely so that it is not a second copy of a name already
+      // on the row (see the schema's comment on it).
+      payeeName:
+        load.driver?.payToName?.trim() ||
+        (load.driver
+          ? `${load.driver.firstName} ${load.driver.lastName}`
+          : null),
+      driverType: load.driver?.employmentType ?? null,
+      referenceNumber: load.referenceNumber,
+      status: load.operationalStatus,
       podAt,
-      deliveredAt: load.stops[0]?.scheduledAt ?? null,
+      deliveredAt: delivery?.scheduledAt ?? null,
+      pickupAt: pickup?.scheduledAt ?? null,
+      locations: ends.length === 0 ? null : ends.join(' → '),
       grossCents: load.totalRevenueCents,
       reason: null,
     }

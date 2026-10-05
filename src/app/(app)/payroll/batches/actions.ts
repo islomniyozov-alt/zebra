@@ -33,12 +33,29 @@ export async function openWeekAction(
   // and `openBatch` refuses again on its own account.
   if (week === null) return { error: t('batch.error.notAWeek') }
 
+  // ── THE AUTHORITY, AND THE TRIPS THE OFFICE DECLINED (§6.2.10) ─────────
+  //
+  // `shown` carries every trip the grid rendered and `trip` carries the ticked
+  // ones, so the difference IS the exclusion set — computed here rather than by
+  // re-reading the window, because a trip delivered between the render and this
+  // click is absent from `shown` and must therefore join the batch rather than
+  // look unticked. That is the monotonicity the exclusion design is for.
+  const companyId = String(formData.get('companyId') ?? '').trim()
+  const shown = formData.getAll('shown').map(String)
+  const ticked = new Set(formData.getAll('trip').map(String))
+  const excludeLoadIds = shown.filter((loadId) => !ticked.has(loadId))
+
   const outcome = await withCurrentOrg(
     'create',
     'settlement',
     (tx, session) =>
       openBatch(tx, {
         organizationId: session.organizationId,
+        // EMPTY MEANS THE WHOLE ORGANIZATION, which is the default and Islom's
+        // 2026-09-11 ruling. A named authority is Datatruck's shape.
+        companyId: companyId === '' ? null : companyId,
+        excludeLoadIds,
+        excludedByUserId: session.userId,
         period: week,
         // Today. §0 keeps the statement date an input, and this is the default
         // the batch screen can change — it is when the paperwork was cut.

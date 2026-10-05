@@ -172,6 +172,17 @@ export async function batchInputForOrg(
     period: Week
     statementDate: Date
     checkDate: Date
+    /**
+     * The authority this batch settles, or null for the whole organization
+     * (§6.2.10). Null is the default and the 2026-09-11 ruling.
+     */
+    companyId?: string | null
+    /**
+     * Trips the office unticked (§6.2.10 part 2). EXCLUSIONS, not selections:
+     * everything settleable goes in EXCEPT these, so freight that arrives after
+     * the decision is included rather than silently dropped.
+     */
+    excludeLoadIds?: readonly string[]
   },
   options: {
     /**
@@ -196,7 +207,15 @@ export async function batchInputForOrg(
 ): Promise<DriverSettlementInput[]> {
   const netPay = options.netPay !== false
   const loads = await tx.load.findMany({
-    where: settleableForBatch(null, input.period),
+    where: {
+      ...settleableForBatch(input.companyId ?? null, input.period),
+      // THE EXCLUSION SET, SUBTRACTED HERE AND NOWHERE ELSE, so every caller
+      // that computes a batch honours it: the draft refresh, the preview, and
+      // the agreement test all read one definition of "what is in this batch".
+      ...(input.excludeLoadIds && input.excludeLoadIds.length > 0
+        ? { id: { notIn: [...input.excludeLoadIds] } }
+        : {}),
+    },
     select: {
       id: true,
       loadNumber: true,
@@ -712,6 +731,18 @@ export async function openBatch(
     organizationId: string
     period: Week
     statementDate: Date
+    /**
+     * The authority to settle, or null for the whole organization (§6.2.10).
+     * Null is the default: Islom's 2026-09-11 ruling, unchanged.
+     */
+    companyId?: string | null
+    /**
+     * The trips the office unticked on the way in (§6.2.10 part 2). Written as
+     * exclusions before the first refresh, so the draft is built without them.
+     */
+    excludeLoadIds?: readonly string[]
+    /** Who unticked them. Null when nothing was unticked. */
+    excludedByUserId?: string | null
   },
 ): Promise<
   { ok: true; batchId: string } | { ok: false; reason: BatchRefusal }
@@ -731,11 +762,30 @@ export async function openBatch(
   //
   // So the action refuses BY NAME and hands back the batch that already covers
   // the week, so the screen can link to it instead of reporting a collision.
+  // ── AND THE CHECK IS SCOPE-AWARE, BUT NOT SCOPE-BLIND ─────────────────
+  //
+  // Two batches for one week are legitimate when they settle different
+  // authorities — that is Datatruck's shape. They are NOT legitimate when one of
+  // them is org-wide, because an org-wide batch and a RAM batch both reach for
+  // RAM's freight.
+  //
+  // So this looks for a batch whose scope OVERLAPS the one being asked for: the
+  // same company, or either side being the whole organization. The refusal
+  // carries the batch it found, so the screen links to it rather than reporting a
+  // collision the reader has to go and investigate.
+  //
+  // THE TRIP-LEVEL FENCE IS STILL THERE — `alreadyInBatch` means no load can be
+  // settled twice whatever happens here. This refusal exists so the office never
+  // has to rely on that: finding out by noticing a half-empty batch is not the
+  // same as being told.
   const existing = await tx.settlementBatch.findFirst({
     where: {
       organizationId: input.organizationId,
       deletedAt: null,
       periodStart: input.period.start,
+      ...(input.companyId == null
+        ? {}
+        : { OR: [{ companyId: input.companyId }, { companyId: null }] }),
     },
     select: { id: true, status: true, batchNumber: true },
   })
@@ -769,6 +819,8 @@ export async function openBatch(
   const batch = await tx.settlementBatch.create({
     data: {
       organizationId: input.organizationId,
+      // §6.2.10. Null is the whole organization and the default.
+      companyId: input.companyId ?? null,
       periodStart: input.period.start,
       periodEnd: input.period.end,
       statementDate: input.statementDate,
@@ -777,6 +829,26 @@ export async function openBatch(
     },
     select: { id: true },
   })
+
+  // ── THE UNTICKED TRIPS, BEFORE THE FIRST REFRESH ──────────────────────
+  //
+  // Written here rather than after `refreshDraft` so the draft is never
+  // momentarily correct-and-wrong: a batch that briefly contained freight the
+  // office had already declined would be a batch somebody could read in that
+  // state, and on a money screen a moment is long enough.
+  if (input.excludeLoadIds && input.excludeLoadIds.length > 0) {
+    await tx.settlementBatchExclusion.createMany({
+      data: [...new Set(input.excludeLoadIds)].map((loadId) => ({
+        organizationId: input.organizationId,
+        batchId: batch.id,
+        loadId,
+        excludedByUserId: input.excludedByUserId ?? null,
+      })),
+      // THE UNIQUE ON (batchId, loadId) IS THE POINT: a double-posted form is a
+      // no-op rather than a duplicate-key refusal in the middle of a create.
+      skipDuplicates: true,
+    })
+  }
 
   // DRAFTED ON CREATION, so the person who pressed the button lands on
   // something to read rather than on an empty batch they have to refresh.
@@ -830,11 +902,27 @@ export async function refreshDraft(
   // draft absent, which is exactly what recomputing it means.
   await tx.settlement.deleteMany({ where: { batchId } })
 
+  // ── THE SCOPE AND THE EXCLUSIONS COME OFF THE BATCH ───────────────────
+  //
+  // Not off the caller. A refresh is "recompute THIS batch as the rows are now",
+  // and a batch's company and its exclusions are part of what it is — passing
+  // them in would let one caller refresh a RAM batch as though it were org-wide.
+  //
+  // AND IT NEVER UN-EXCLUDES (§6.2.10 part 2). This reads the exclusion rows; it
+  // does not write or clear them. New freight appears because the settleable set
+  // grew, which is the monotonicity the exclusion design exists for.
+  const excluded = await tx.settlementBatchExclusion.findMany({
+    where: { batchId },
+    select: { loadId: true },
+  })
+
   const drivers = await batchInputForOrg(tx, {
     organizationId: batch.organizationId,
     period,
     statementDate: batch.statementDate,
     checkDate: batch.checkDate,
+    companyId: batch.companyId,
+    excludeLoadIds: excluded.map((row) => row.loadId),
   })
 
   const result = computeBatch({

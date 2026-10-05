@@ -730,11 +730,16 @@ describe('the open-batch flow', () => {
     expect(preview).toContain('podAt < input.from || podAt > input.to')
   })
 
-  it('says the batch is org-wide before the button is pressed', () => {
-    // Datatruck opens one batch per payer and Zebra does not (§6.2.1), so
-    // picking an authority and getting every authority's freight would be a
-    // surprise about money.
-    expect(page).toContain("t('preview.orgWide')")
+  it('says WHICH authority the batch will settle, before the button is pressed', () => {
+    // §6.2.10, 2026-10-05: the chip now scopes the BATCH and not only the grid,
+    // so the sentence has to name what Create will settle. It used to say
+    // "org-wide" unconditionally — true under the old ruling and a lie under
+    // this one, which is why this assertion changed rather than being deleted.
+    //
+    // BOTH BRANCHES, because a screen that only ever said one of them would pass
+    // a check for either string on its own.
+    expect(page).toContain("t('preview.forOrg')")
+    expect(page).toContain("t('preview.forCompany')")
     expect(page).toContain("t('preview.willOpen')")
   })
 })
