@@ -4,6 +4,7 @@ import { createPrismaClient } from '../src/lib/db'
 import { hashPassword } from '../src/lib/password'
 import { normalizeEmail } from '../src/lib/auth'
 import { assertProductionWrite, isProductionLabel } from './production-gate'
+import { readLatestMigrationNumber, readPersistedScopes } from './gate-readers'
 import type { PrismaClient } from '../src/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -249,7 +250,13 @@ async function main(): Promise<void> {
   // FIRST, SO THE REFUSAL COSTS NOTHING. Before the URL check, before the
   // client, before any connection: a refusal that has already opened a socket to
   // production has already done the thing it was refusing.
-  assertProductionWrite(process.env, 'seed')
+  // THE SAME TWO READINGS AS THE MIGRATION PATH. A seed against production
+  // names the schema it is seeding — the migration at the head of
+  // `prisma/migrations` — for the same reason: a number that expires.
+  assertProductionWrite(process.env, 'seed', {
+    expected: readLatestMigrationNumber(),
+    persisted: readPersistedScopes(),
+  })
 
   const branch = process.env.NEON_BRANCH
   const url = process.env.DIRECT_DATABASE_URL

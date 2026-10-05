@@ -1,6 +1,10 @@
 import 'dotenv/config'
 import { defineConfig } from 'prisma/config'
 import { assertProductionWrite } from './prisma/production-gate'
+import {
+  readLatestMigrationNumber,
+  readPersistedScopes,
+} from './prisma/gate-readers'
 
 // ---------------------------------------------------------------------------
 // Prisma 7 moved the connection string out of schema.prisma. The schema engine
@@ -31,7 +35,14 @@ const url = process.env.DIRECT_DATABASE_URL
 //
 // IT COVERS `migrate`, `db push`, `db execute`, `migrate reset` AND the seed,
 // because every one of them loads this file first.
-assertProductionWrite(process.env, 'migration')
+// THE TWO READINGS THE GATE WILL NOT TAKE ITSELF (owner's ruling 2026-10-05):
+// which migration is being applied, so the override names it and expires with
+// it, and whether either variable is sitting in a persistent Windows scope,
+// where it would outlive the terminal and leave the gate permanently open.
+assertProductionWrite(process.env, 'migration', {
+  expected: readLatestMigrationNumber(),
+  persisted: readPersistedScopes(),
+})
 
 if (!url) {
   throw new Error('DIRECT_DATABASE_URL is not set.')

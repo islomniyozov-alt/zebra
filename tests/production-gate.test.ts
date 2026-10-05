@@ -4,7 +4,14 @@ import {
   assertProductionWrite,
   checkProductionWrite,
   isProductionLabel,
+  latestMigrationNumber,
 } from '../prisma/production-gate'
+import {
+  PERSISTENT_NAMES,
+  readLatestMigrationNumber,
+  readPersistedScopes,
+  type ScopeRun,
+} from '../prisma/gate-readers'
 
 // ---------------------------------------------------------------------------
 // WHAT REFUSES A LOCAL WRITE TO THE PRODUCTION BRANCH, AND WHAT DOES NOT.
@@ -29,6 +36,20 @@ import {
 const env = (over: Record<string, string | undefined> = {}) => ({
   NEON_BRANCH: 'dev',
   NODE_ENV: 'development',
+  ...over,
+})
+
+/**
+ * The two readings a caller takes (owner's ruling 2026-10-05): which migration is
+ * being applied, and which variables sit in a persistent Windows scope.
+ *
+ * `persisted: []` IS NOT THE DEFAULT ANYWHERE IN THE GATE, deliberately — an
+ * absent reading is refused on the production path, so every test that wants a
+ * pass has to say out loud that the scopes were checked and were clean.
+ */
+const ctx = (over: Record<string, unknown> = {}) => ({
+  expected: 61,
+  persisted: [] as string[],
   ...over,
 })
 
@@ -70,9 +91,13 @@ describe('the production label refuses without the one-shot override', () => {
   })
 
   it('refuses when the override is absent, naming the variable', () => {
+    // `ctx()` SAYS THE SCOPES WERE CHECKED AND WERE CLEAN. Without it this
+    // refuses with `scopes_unknown` first, which is the fail-closed ordering
+    // working — and is how this test caught the new rule rather than ignoring it.
     const verdict = checkProductionWrite(
       env({ NEON_BRANCH: 'production', NODE_ENV: 'production' }),
       'seed',
+      ctx(),
     )
     expect(verdict.ok).toBe(false)
     if (verdict.ok) return
@@ -84,7 +109,7 @@ describe('the production label refuses without the one-shot override', () => {
     // THE 'MISSING:' LINE SPECIFICALLY. The example command underneath also
     // contains the variable name, so a message that stopped saying WHAT IS
     // MISSING still satisfied a bare toContain — watched, and fixed.
-    expect(verdict.message).toContain('MISSING: ALLOW_PROD_MIGRATION=1')
+    expect(verdict.message).toContain('MISSING: ALLOW_PROD_MIGRATION=61')
     expect(verdict.message).toContain('seed')
     expect(verdict.message).toContain('NEVER in .env')
   })
@@ -93,6 +118,7 @@ describe('the production label refuses without the one-shot override', () => {
     const verdict = checkProductionWrite(
       env({ NEON_BRANCH: 'production', NODE_ENV: 'production' }),
       'migration',
+      ctx(),
     )
     expect(verdict.ok).toBe(false)
     if (!verdict.ok) expect(verdict.message).toContain('migration')
@@ -138,25 +164,252 @@ describe('the label is folded before it is compared', () => {
 })
 
 describe('the deliberate one-shot production write is allowed', () => {
-  it('with the label, NODE_ENV and the override all present', () => {
+  it('with the label, NODE_ENV and the override naming the migration', () => {
     expect(
       checkProductionWrite(
         {
           NEON_BRANCH: 'production',
           NODE_ENV: 'production',
-          ALLOW_PROD_MIGRATION: '1',
+          ALLOW_PROD_MIGRATION: '61',
         },
         'migration',
+        ctx(),
       ),
     ).toEqual({ ok: true, production: true })
   })
 
   it('and the assertion throws for a refusal and returns for a pass', () => {
     expect(() =>
-      assertProductionWrite(env({ NEON_BRANCH: 'production' }), 'seed'),
+      assertProductionWrite(env({ NEON_BRANCH: 'production' }), 'seed', ctx()),
     ).toThrow(/NODE_ENV is not production/)
 
-    expect(() => assertProductionWrite(env(), 'seed')).not.toThrow()
+    expect(() => assertProductionWrite(env(), 'seed', ctx())).not.toThrow()
+  })
+})
+
+// ── THE VALUE IS THE MIGRATION NUMBER (owner's ruling 2026-10-05) ──────────
+//
+// `=1` is a value that stays true forever: set it once in a shell profile and the
+// gate is off from then on without anybody deciding that. A number expires on its
+// own, and naming it means reading what you are about to apply.
+describe('the override names the migration being applied', () => {
+  const prod = {
+    NEON_BRANCH: 'production',
+    NODE_ENV: 'production',
+  }
+
+  it('refuses the old value by name, because it is what everybody will type', () => {
+    const verdict = checkProductionWrite(
+      { ...prod, ALLOW_PROD_MIGRATION: '1' },
+      'migration',
+      ctx({ expected: 62 }),
+    )
+    expect(verdict.ok).toBe(false)
+    if (verdict.ok) return
+    expect(verdict.reason).toBe('stale_override')
+    expect(verdict.message).toContain('no longer accepted')
+    expect(verdict.message).toContain('ALLOW_PROD_MIGRATION=62')
+  })
+
+  it('refuses a number that has already landed', () => {
+    const verdict = checkProductionWrite(
+      { ...prod, ALLOW_PROD_MIGRATION: '61' },
+      'migration',
+      ctx({ expected: 62 }),
+    )
+    expect(verdict.ok).toBe(false)
+    if (verdict.ok) return
+    expect(verdict.reason).toBe('stale_override')
+    // THE SENTENCE THAT EXPLAINS THE SURPRISE: a terminal set up for last
+    // week's migration.
+    expect(verdict.message).toContain('already landed')
+  })
+
+  it('accepts the number being applied, and tolerates whitespace around it', () => {
+    for (const given of ['62', ' 62 ']) {
+      expect(
+        checkProductionWrite(
+          { ...prod, ALLOW_PROD_MIGRATION: given },
+          'migration',
+          ctx({ expected: 62 }),
+        ),
+      ).toEqual({ ok: true, production: true })
+    }
+  })
+
+  it('names the number in the message when the override is missing entirely', () => {
+    const verdict = checkProductionWrite(
+      { ...prod },
+      'migration',
+      ctx({ expected: 62 }),
+    )
+    expect(verdict.ok).toBe(false)
+    if (verdict.ok) return
+    expect(verdict.reason).toBe('missing_override')
+    expect(verdict.message).toContain('MISSING: ALLOW_PROD_MIGRATION=62')
+    expect(verdict.message).toContain('NOT 1')
+  })
+
+  it('and asks for the number rather than inventing one when it cannot be read', () => {
+    // A MISSING MIGRATIONS DIRECTORY IS NOT MIGRATION ZERO. `expected:
+    // undefined` must not become `ALLOW_PROD_MIGRATION=0`, which would be a
+    // forever-true value again by another route.
+    const verdict = checkProductionWrite(
+      { ...prod },
+      'migration',
+      ctx({ expected: undefined }),
+    )
+    expect(verdict.ok).toBe(false)
+    if (verdict.ok) return
+    expect(verdict.message).toContain('<the migration number being applied>')
+    expect(verdict.message).not.toContain('ALLOW_PROD_MIGRATION=0')
+  })
+
+  it('counts the migrations the way this repository numbers them', () => {
+    // 61 directories today and the newest is named `migration_61`. Counted from
+    // the listing, not parsed out of a prefix, because the ordinal is the number
+    // the owner and AGENTS.md both say out loud.
+    expect(
+      latestMigrationNumber([
+        '20260101010000_first',
+        '20260201010000_second',
+        'migration_lock.toml',
+        'README.md',
+      ]),
+    ).toBe(2)
+    // AND AGAINST THE REAL DIRECTORY, so the number in the message is the number
+    // on disk.
+    expect(readLatestMigrationNumber()).toBe(61)
+  })
+})
+
+// ── AND IT MUST NOT BE SET WHERE IT OUTLIVES THE TERMINAL ─────────────────
+describe('a persisted variable is a refusal', () => {
+  const prod = {
+    NEON_BRANCH: 'production',
+    NODE_ENV: 'production',
+    ALLOW_PROD_MIGRATION: '61',
+  }
+
+  it.each([...PERSISTENT_NAMES])(
+    'refuses when %s is in a Windows hive',
+    (name) => {
+      const verdict = checkProductionWrite(
+        prod,
+        'migration',
+        ctx({ persisted: [name] }),
+      )
+      expect(verdict.ok).toBe(false)
+      if (verdict.ok) return
+      expect(verdict.reason).toBe('persisted_variable')
+      expect(verdict.message).toContain(name)
+      // THE WAY OUT IS IN THE MESSAGE, because the registry is not somewhere
+      // anybody browses by habit.
+      expect(verdict.message).toContain('reg delete')
+    },
+  )
+
+  it('refuses before it looks at the value, so a correct number cannot excuse it', () => {
+    // A VALID OVERRIDE IN A PERMANENT PLACE IS STILL A PERMANENT OVERRIDE. If the
+    // order were reversed this would pass, and the operator would be told their
+    // setup was fine.
+    const verdict = checkProductionWrite(
+      { ...prod, ALLOW_PROD_MIGRATION: '61' },
+      'migration',
+      ctx({ persisted: ['ALLOW_PROD_MIGRATION'] }),
+    )
+    expect(verdict.ok).toBe(false)
+    if (verdict.ok) return
+    expect(verdict.reason).toBe('persisted_variable')
+  })
+
+  it('and refuses when the hives could not be read at all', () => {
+    // FAIL CLOSED. A check that did not happen must not read as a check that
+    // passed — the same rule `run-status --check` follows for a missing file.
+    const verdict = checkProductionWrite(
+      prod,
+      'migration',
+      ctx({ persisted: undefined }),
+    )
+    expect(verdict.ok).toBe(false)
+    if (verdict.ok) return
+    expect(verdict.reason).toBe('scopes_unknown')
+    expect(verdict.message).toContain('not a check that passed')
+  })
+
+  it('but says nothing about dev, where the override is not permission for anything', () => {
+    expect(
+      checkProductionWrite(
+        env({ ALLOW_PROD_MIGRATION: '1' }),
+        'seed',
+        ctx({ persisted: ['NEON_BRANCH'] }),
+      ),
+    ).toEqual({ ok: true, production: false })
+  })
+
+  it('and the reader fails closed on every way the shell can not answer', () => {
+    // THE BRANCH NO MACHINE REACHES. PowerShell works here, so this refusal is
+    // unreachable in practice — and a break that deleted it was watched NOT
+    // firing, which is how it got a test. Each shape means the hives were not
+    // read, and each must come back `undefined` rather than an empty list,
+    // because an empty list says "checked, clean".
+    const shapes: { name: string; run: () => ScopeRun }[] = [
+      { name: 'no shell at all', run: () => ({ error: new Error('ENOENT') }) },
+      { name: 'a non-zero exit', run: () => ({ status: 1, stdout: '' }) },
+      {
+        name: 'a killed process',
+        run: () => ({ status: null, stdout: undefined }),
+      },
+      { name: 'no output at all', run: () => ({ status: 0 }) },
+    ]
+    for (const shape of shapes) {
+      expect(
+        readPersistedScopes(['ALLOW_PROD_MIGRATION'], shape.run, 'win32'),
+        shape.name,
+      ).toBeUndefined()
+    }
+
+    // AND THE HAPPY PATH THROUGH THE SAME SEAM, so the test above is not just
+    // asserting that everything returns undefined.
+    expect(
+      readPersistedScopes(
+        ['ALLOW_PROD_MIGRATION'],
+        () => ({ status: 0, stdout: 'ALLOW_PROD_MIGRATION\r\n' }),
+        'win32',
+      ),
+    ).toEqual(['ALLOW_PROD_MIGRATION'])
+
+    // A NAME THE SHELL DID NOT ASK ABOUT IS IGNORED, so a chatty profile line
+    // cannot invent a refusal.
+    expect(
+      readPersistedScopes(
+        ['ALLOW_PROD_MIGRATION'],
+        () => ({ status: 0, stdout: 'Windows PowerShell\nCopyright\n' }),
+        'win32',
+      ),
+    ).toEqual([])
+  })
+
+  it('and off Windows there are no such hives, which is an answer not a failure', () => {
+    expect(
+      readPersistedScopes(
+        ['ALLOW_PROD_MIGRATION'],
+        () => ({ status: 0 }),
+        'linux',
+      ),
+    ).toEqual([])
+  })
+
+  it('and the reader actually sees a persisted variable, asked of one that is', () => {
+    // A POSITIVE CONTROL THAT MUTATES NOTHING. If this came back empty the reader
+    // cannot see the hives at all, and every refusal above would be unreachable
+    // in the only environment that has them. PATH is in the Machine hive on
+    // Windows; elsewhere there are no hives and the honest answer is none.
+    const found = readPersistedScopes(['PATH'])
+    if (process.platform === 'win32') expect(found).toEqual(['PATH'])
+    else expect(found).toEqual([])
+
+    expect(readPersistedScopes(['ZEBRA_NO_SUCH_VARIABLE'])).toEqual([])
   })
 })
 
@@ -182,18 +435,34 @@ describe('the gate is asked by every local path that can write', () => {
       // this guard green.
       expect(source).toMatch(
         new RegExp(
-          `^\\s*assertProductionWrite\\(process\\.env, '${operation}'\\)`,
+          `^\\s*assertProductionWrite\\(process\\.env, '${operation}', \\{`,
           'm',
         ),
       )
     },
   )
 
+  // ── AND IT HANDS OVER THE REAL READINGS, NOT A STUB ─────────────────────
+  //
+  // THIS IS THE GUARD THAT MATTERS NOW. `persisted: []` written literally at a
+  // call site would mean "the hives were checked and were clean" without anybody
+  // having looked — turning the 2026-10-05 rule off while every unit test above
+  // still passed, because those test the gate and this tests the caller.
+  it.each(callers)('$file takes both readings for real', ({ file }) => {
+    const source = readFileSync(file, 'utf8')
+    expect(source).toMatch(/^\s*expected: readLatestMigrationNumber\(\),$/m)
+    expect(source).toMatch(/^\s*persisted: readPersistedScopes\(\),$/m)
+    // AND NEITHER IS SPELLED OUT AS A LITERAL, which is the shortcut somebody
+    // takes when the registry read is slow or awkward on their machine.
+    expect(source).not.toMatch(/persisted:\s*\[/)
+    expect(source).not.toMatch(/expected:\s*\d/)
+  })
+
   it('and the seed asks BEFORE it builds a client or reads the URL', () => {
     // A REFUSAL THAT HAS ALREADY OPENED A SOCKET TO PRODUCTION has already done
     // the thing it was refusing. Order is the claim, so order is the assertion.
     const source = readFileSync('prisma/seed.ts', 'utf8')
-    const gate = source.indexOf("assertProductionWrite(process.env, 'seed')")
+    const gate = source.indexOf("assertProductionWrite(process.env, 'seed'")
     const client = source.indexOf('createPrismaClient(url)')
     expect(gate).toBeGreaterThan(-1)
     expect(client).toBeGreaterThan(gate)
@@ -212,7 +481,7 @@ describe('the gate is asked by every local path that can write', () => {
     const skip = source.indexOf(
       "console.log('  skipping the isolation counterpart",
     )
-    const gate = source.indexOf("assertProductionWrite(process.env, 'seed')")
+    const gate = source.indexOf("assertProductionWrite(process.env, 'seed'")
     expect(gate).toBeGreaterThan(-1)
     expect(skip).toBeGreaterThan(-1)
     expect(gate).toBeLessThan(skip)

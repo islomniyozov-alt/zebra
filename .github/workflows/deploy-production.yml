@@ -5,9 +5,15 @@ name: deploy production
 #
 # Production is never deployed by a push. `prisma migrate deploy` against the
 # production branch is a one-shot command run by a person, from a terminal,
-# with `ALLOW_PROD_MIGRATION=1` and a direct URL that must not outlive it —
-# see the README. This workflow is what happens AFTER that, and it refuses on
+# with `ALLOW_PROD_MIGRATION=<the migration number>` and a direct URL that must
+# not outlive it — the value is the number so the override expires rather than
+# being inherited by every future shell (owner's ruling 2026-10-05); see the
+# README. This workflow is what happens AFTER that, and it refuses on
 # its own if the marker says the schema is behind.
+#
+# PLACEHOLDER-FREE ON PURPOSE: this comment names no value, because a workflow
+# file is exactly the kind of committed file the rule says the override may never
+# live in.
 #
 # ── THE PRODUCTION CREDENTIAL HERE IS READ-ONLY ──────────────────────────
 #

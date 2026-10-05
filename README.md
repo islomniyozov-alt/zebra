@@ -115,13 +115,32 @@ Each step assumes the ones above it.
    branch name cannot pass the gate.
 
    ```bash
-   NEON_BRANCH=production NODE_ENV=production ALLOW_PROD_MIGRATION=1 \
+   # The value is the MIGRATION NUMBER being applied — 61 today, which is the
+   # count of directories in prisma/migrations. Not 1.
+   NEON_BRANCH=production NODE_ENV=production ALLOW_PROD_MIGRATION=61 \
      DIRECT_DATABASE_URL='<production DIRECT url>' npx prisma migrate deploy
    ```
 
-   `ALLOW_PROD_MIGRATION` goes on that command and never in `.env`;
-   `prisma.config.ts` refuses all three ways of getting this wrong (no branch
-   declared, branch and `NODE_ENV` disagreeing, pooled URL). Proof it worked is
+   **The value is the migration number, and that is the point** (owner's ruling,
+   2026-10-05). `ALLOW_PROD_MIGRATION=1` is true forever: set once in a shell
+   profile or a Windows User variable, and the gate is off from then on without
+   anybody deciding that. A number expires when the next migration lands, so the
+   override cannot be inherited by a terminal somebody opens next month — and
+   naming it means reading what you are about to apply. The refusal prints the
+   number it wants, so there is nothing to guess.
+
+   **And it must not be anywhere that outlives the command.** Not `.env`, not a
+   committed file, and not a Windows **User or Machine** environment variable —
+   `setx` and the System Properties dialog both write to the registry, where a
+   variable is in every future shell. `prisma/gate-readers.ts` asks PowerShell
+   about both hives for `ALLOW_PROD_MIGRATION` and `NEON_BRANCH`, and the
+   production write is refused if either is found there. If the hives cannot be
+   read at all, that is also a refusal: a check that did not happen must not read
+   as a check that passed.
+
+   `prisma.config.ts` refuses every way of getting this wrong (no branch
+   declared, branch and `NODE_ENV` disagreeing, pooled URL, a stale or forever
+   value, a persisted variable), and `prisma/seed.ts` asks the same gate. Proof it worked is
    `prisma migrate status` reporting 12 applied and the migrations' own `DO`
    blocks not raising — they assert RLS is enabled, forced and policied.
 
@@ -277,9 +296,9 @@ Each step assumes the ones above it.
 
    **Not `npm run db:seed`.** That goes through the Prisma CLI, which loads
    `prisma.config.ts`, which refuses `NEON_BRANCH=production` unless
-   `NODE_ENV=production` _and_ `ALLOW_PROD_MIGRATION=1` are set as well — and
-   setting a flag named for migrations in order to run a seed is the kind of
-   small lie that makes a guard worthless the next time it matters. The seed
+   `NODE_ENV=production` _and_ `ALLOW_PROD_MIGRATION=<migration number>` are set
+   as well — and setting a flag named for migrations in order to run a seed is
+   the kind of small lie that makes a guard worthless the next time it matters. The seed
    script reads `NEON_BRANCH` and `DIRECT_DATABASE_URL` itself and needs
    nothing from that config, so it is invoked directly. `dotenv/config` is
    still loaded, for `SEED_OWNER_EMAIL` and `SEED_OWNER_PASSWORD`; dotenv does
