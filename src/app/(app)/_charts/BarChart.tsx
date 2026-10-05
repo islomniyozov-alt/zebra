@@ -326,7 +326,14 @@ export function BarChart({ bars, locale, labels }: Props) {
                   ? labels.unrecorded
                   : formatCents(bar.marginCents, locale)}
               </td>
-              <td>{String(bar.loads)}</td>
+              {/* AN EM DASH, NOT THE WORD "null" (§8). `String(null)` is
+               * "null", and that is what the by-company report printed in
+               * production for every row: it passes `loads: null` deliberately,
+               * because item 7's readers group money rather than loads, and the
+               * TOOLTIP above honours that by leaving the row out. This table
+               * cannot leave a cell out — the column belongs to the shape — so
+               * it says the thing §8 says for "not recorded". */}
+              <td>{bar.loads === null ? '—' : String(bar.loads)}</td>
             </tr>
           ))}
         </tbody>

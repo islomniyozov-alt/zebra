@@ -49,6 +49,63 @@ const bar = (over: Partial<Bar> = {}): Bar => ({
   ...over,
 })
 
+// ── THE BY-COMPANY REPORT PASSES NO LOAD COUNT, AND SAID SO IN PRODUCTION ──
+//
+// Found on a production walk, 2026-10-05: the Reports screen printed the word
+// "null" in its Loads column, on every row of every authority.
+//
+// `loads: null` is deliberate — §6.2.7's by-company chart groups money, not
+// loads — and the TOOLTIP honoured it by leaving the row out entirely. The hidden
+// table could not do that, because the column belongs to the table's shape, and
+// it reached for `String(bar.loads)`. `String(null)` is "null".
+//
+// WHY NO TEST CAUGHT IT: every existing bar fixture carries a real count, so the
+// null path was never rendered. The assertion below is about the DOM, not the
+// source, because "the cell says null" is exactly what a reading of
+// `String(bar.loads)` looks like when you already believe it cannot be null.
+describe('a bar with no load count says so with a dash, never the word null', () => {
+  it('in the hidden table, which is the half that printed it', () => {
+    render(
+      <BarChart
+        bars={[bar({ loads: null })]}
+        locale="en-US"
+        labels={barLabels}
+      />,
+    )
+    const table = screen.getByRole('table')
+    // THE WHOLE TABLE, not one cell: the bug was one unguarded interpolation and
+    // the next one will be somewhere else in the same row.
+    expect(table.textContent).not.toContain('null')
+    expect(table.textContent).toContain('—')
+  })
+
+  it('and nowhere else in the chart either', () => {
+    const { container } = render(
+      <BarChart
+        bars={[bar({ loads: null, driverPayCents: null, marginCents: null })]}
+        locale="en-US"
+        labels={barLabels}
+      />,
+    )
+    // EVERY NULLABLE FIELD AT ONCE. A row with unknown pay, unknown margin and
+    // no count is a real row — it is what a week Zebra was not settling looks
+    // like on the by-company report — and not one of the three may print as a
+    // JavaScript value.
+    expect(container.textContent).not.toContain('null')
+    expect(container.textContent).not.toContain('undefined')
+    expect(container.textContent).not.toContain('NaN')
+  })
+
+  it('while a real count still prints as a number', () => {
+    // THE POSITIVE CONTROL. A fix that dashed every count would satisfy the two
+    // assertions above and destroy the column.
+    render(
+      <BarChart bars={[bar({ loads: 7 })]} locale="en-US" labels={barLabels} />,
+    )
+    expect(screen.getByRole('table').textContent).toContain('7')
+  })
+})
+
 describe('BarChart owes the reader four things (owner review 2026-10-02)', () => {
   // 1 — A LEGEND, IN WORDS. "No chart ships without one."
   it('names every series in words, including what the hatch means', () => {
