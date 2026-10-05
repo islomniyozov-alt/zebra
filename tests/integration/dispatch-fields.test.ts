@@ -3,7 +3,9 @@ import { retryingClient } from '../retrying-client'
 import { withOrg } from '@/lib/tenancy'
 import { createBroker } from '@/lib/brokers'
 import { LOAD_WRITE_TIMEOUT_MS, createLoad } from '@/lib/loads'
+import { readFileSync } from 'node:fs'
 import {
+  BOARD_LOAD,
   deliveryFactsForLoads,
   dispatchFactsForDrivers,
   dispatchStatusFrom,
@@ -171,6 +173,105 @@ async function seedLoad(over: {
   }
   return load.id
 }
+
+// ── WHAT THE BOARD IS ALLOWED TO SEE (§6.1.1's billing axis) ──────────────
+//
+// Found on a production walk, 2026-10-05: the Unassigned rail listed Datatruck
+// history. An imported load has no truck and was never cancelled, which is the
+// rail's whole test, so freight that finished before Zebra existed queued up
+// beside this morning's bookings.
+//
+// ASSERTED AGAINST ROWS, not against the filter's shape. `{ billingStatus: { not:
+// 'CLOSED_IN_DATATRUCK' } }` is a true thing to write in a test and proves
+// nothing about what Postgres returns — the question is whether the row comes
+// back.
+describe('the board reads no closed history', () => {
+  const bare = async (over: { billingStatus?: 'CLOSED_IN_DATATRUCK' } = {}) => {
+    // NO TRUCK, DELIBERATELY: that is what puts a load on the rail, and
+    // `seedLoad` above always attaches one.
+    const load = await inOrg((tx) =>
+      createLoad(
+        tx,
+        organizationId,
+        {
+          companyId,
+          customerId: brokerId,
+          referenceNumber: `B-${nonce}-${Math.random().toString(36).slice(2, 7)}`,
+          stops: [
+            {
+              type: 'PICKUP',
+              city: 'Whiteland',
+              state: 'IN',
+              scheduledAt: hours(-24),
+            },
+            {
+              type: 'DELIVERY',
+              city: 'Gastonia',
+              state: 'NC',
+              scheduledAt: hours(-2),
+            },
+          ],
+          linehaulCents: 100_000,
+        },
+        { byUserId: userId },
+      ),
+    )
+    if (over.billingStatus) {
+      await owner.load.update({
+        where: { id: load.id },
+        data: { billingStatus: over.billingStatus },
+      })
+    }
+    return load.id
+  }
+
+  it('returns the live load and not the imported one', async () => {
+    const live = await bare()
+    const closed = await bare({ billingStatus: 'CLOSED_IN_DATATRUCK' })
+
+    const ids = (
+      await inOrg((tx) =>
+        tx.load.findMany({
+          where: { ...BOARD_LOAD, companyId },
+          select: { id: true },
+        }),
+      )
+    ).map((row) => row.id)
+
+    // BOTH DIRECTIONS. Without the second assertion a predicate that returned
+    // nothing at all would pass; without the first, one that returned
+    // everything would.
+    expect(ids).toContain(live)
+    expect(ids).not.toContain(closed)
+  })
+
+  it('and still hides a deleted load, which the old filter was there for', async () => {
+    // `BOARD_LOAD` REPLACED `deletedAt: null` at the call site. The thing being
+    // added must not quietly remove the thing it replaced.
+    const gone = await bare()
+    await owner.load.update({
+      where: { id: gone },
+      data: { deletedAt: new Date() },
+    })
+    const ids = (
+      await inOrg((tx) =>
+        tx.load.findMany({
+          where: { ...BOARD_LOAD, companyId },
+          select: { id: true },
+        }),
+      )
+    ).map((row) => row.id)
+    expect(ids).not.toContain(gone)
+  })
+
+  it('and the board page asks with it, not with its own where', () => {
+    // THE OTHER HALF. The predicate can be perfect and unused; this is the
+    // assertion that would have failed before the fix. Line-anchored, so a
+    // commented-out spread does not satisfy it.
+    const page = readFileSync('src/app/(app)/dispatch/page.tsx', 'utf8')
+    expect(page).toMatch(/^\s*where: \{ \.\.\.where, \.\.\.BOARD_LOAD \},$/m)
+  })
+})
 
 describe('heading to', () => {
   it('is the destination of the load the truck is on', async () => {

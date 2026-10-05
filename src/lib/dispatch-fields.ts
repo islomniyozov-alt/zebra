@@ -1,5 +1,6 @@
 import { Prisma, type DriverStatus } from '@/generated/prisma/client'
 import { ACTIVE_ROSTER } from './driver-roster'
+import { NOT_CLOSED_HISTORY } from './billing-status'
 
 // ---------------------------------------------------------------------------
 // FOUR DISPATCH FIELDS, DERIVED. ONE FLAG, STORED.
@@ -53,6 +54,33 @@ export const ACTIVE_LOAD = {
   isCancelled: false,
   operationalStatus: { notIn: [...FINISHED] },
 } as const satisfies Prisma.LoadWhereInput
+
+/**
+ * Every load the board may read at all.
+ *
+ * ── CLOSED HISTORY IS NOT WORK, AND THE BILLING AXIS IS WHAT SAYS SO ──────
+ *
+ * Found on a production walk, 2026-10-05: the Unassigned rail was listing
+ * Datatruck history. An imported load has no truck on it and was never
+ * cancelled, which is the rail's entire test — so freight that finished before
+ * Zebra existed queued up beside this morning's bookings.
+ *
+ * `NOT_CLOSED_HISTORY` is the same predicate the dashboard counts spread
+ * everywhere for the same reason (`billing-status.ts`): a load closed in
+ * Datatruck is closed whatever its operational status, and one that somebody
+ * legitimately reopens stops being closed and starts appearing again — which
+ * falls out of asking the STATUS rather than asking where the row came from.
+ *
+ * AND IT IS ON THE QUERY, NOT ON THE RAIL'S FILTER. The board reads the 300
+ * most recently booked loads; with history in scope, that cap is spent on rows
+ * nobody can work, so the rail could be wrong by omission as well as by
+ * addition. Filtering after the fact would have fixed the list and left the
+ * budget broken.
+ */
+export const BOARD_LOAD: Prisma.LoadWhereInput = {
+  deletedAt: null,
+  ...NOT_CLOSED_HISTORY,
+}
 
 // ── (1) heading to ───────────────────────────────────────────────────────
 

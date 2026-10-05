@@ -5,7 +5,11 @@ import { companyScopeFilter } from '@/lib/tenancy'
 import { operationalTone } from '@/lib/status'
 import { KpiCard } from '@/components/ui/KpiCard'
 import { Board, type BoardLoad, type BoardTruck } from './Board'
-import { ACTIVE_LOAD, headingToForTrucks } from '@/lib/dispatch-fields'
+import {
+  ACTIVE_LOAD,
+  BOARD_LOAD,
+  headingToForTrucks,
+} from '@/lib/dispatch-fields'
 
 // §11 — the dispatch board. Zebra's own, not the wall display.
 //
@@ -76,7 +80,9 @@ export default async function DispatchPage({
         select: { id: true, firstName: true, lastName: true },
       }),
       tx.load.findMany({
-        where: { ...where, deletedAt: null },
+        // `BOARD_LOAD`, not `deletedAt: null`: closed Datatruck history is not
+        // work, and it was filling the Unassigned rail (§6.1.1's billing axis).
+        where: { ...where, ...BOARD_LOAD },
         orderBy: { bookedAt: 'desc' },
         take: 300,
         select: {
