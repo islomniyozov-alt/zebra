@@ -277,19 +277,29 @@ describe("the driver's sheet dates, frozen on the line", () => {
     )
   }, 300_000)
 
+  // THE TRIP ROW IS A `SettlementLoadLine` SINCE MIGRATION 69, and its sheet
+  // dates are `puDate`/`delDate` with the plan-or-record flags beside them.
+  // Read back under the sheet's own names so the assertions below say what
+  // they always said.
   const lineFor = async (settlementId: string) => {
     const rows = await inOrg((tx) =>
-      tx.settlementLine.findMany({
-        where: { settlementId, type: 'LOAD_PAY' },
+      tx.settlementLoadLine.findMany({
+        where: { settlementId },
         select: {
-          puAt: true,
-          delAt: true,
+          puDate: true,
+          delDate: true,
           puActual: true,
           delActual: true,
         },
       }),
     )
-    return rows[0]!
+    const row = rows[0]!
+    return {
+      puAt: row.puDate,
+      delAt: row.delDate,
+      puActual: row.puActual,
+      delActual: row.delActual,
+    }
   }
 
   const settle = async () => {
@@ -437,7 +447,8 @@ describe('generating the week', () => {
     expect(outcome.loadCount).toBe(2)
     expect(outcome.settlementNumber).toMatch(/^STL-\d+$/)
 
-    const lines = await owner.settlementLine.findMany({
+    // THE TRIPS ARE LOAD LINES (migration 69), one per load, in load order.
+    const lines = await owner.settlementLoadLine.findMany({
       where: { settlementId: outcome.settlementId },
       orderBy: { sortOrder: 'asc' },
       select: { loadId: true, amountCents: true, payRuleSnapshot: true },
@@ -777,15 +788,17 @@ describe('the drift check', () => {
   }, 300_000)
 
   it('finds a line somebody edited away from its snapshot', async () => {
-    const line = await owner.settlementLine.findFirst({
-      where: { type: 'LOAD_PAY', organizationId },
+    // A WORKBENCH TRIP ROW (migration 69) — the generate path's own, which
+    // the drift checker's snapshot arm reads on a workbench statement.
+    const line = await owner.settlementLoadLine.findFirst({
+      where: { organizationId, settlement: { batchId: null } },
       select: { id: true, amountCents: true, settlementId: true },
     })
     expect(line).not.toBeNull()
 
     // One cent, by hand. The smallest edit that makes a settlement stop
     // reproducing, and one nothing else would ever report.
-    await owner.settlementLine.update({
+    await owner.settlementLoadLine.update({
       where: { id: line!.id },
       data: { amountCents: line!.amountCents - 1 },
     })
@@ -801,7 +814,7 @@ describe('the drift check', () => {
       drift.some((row) => row.problem === 'totals_disagree_with_lines'),
     ).toBe(true)
 
-    await owner.settlementLine.update({
+    await owner.settlementLoadLine.update({
       where: { id: line!.id },
       data: { amountCents: line!.amountCents },
     })
@@ -1072,7 +1085,7 @@ describe('§7: a mixed-rule week, and Relay revenue', () => {
     expect(outcome).toMatchObject({ ok: true, earningsCents: 45000 })
     if (!outcome.ok) return
 
-    const line = await owner.settlementLine.findFirst({
+    const line = await owner.settlementLoadLine.findFirst({
       where: { settlementId: outcome.settlementId, loadId: load.id },
       select: { amountCents: true },
     })
@@ -1172,7 +1185,7 @@ describe('freight nobody drove', () => {
     if (outcome.ok) {
       // Whatever the week did contain, it did not contain this.
       const lines = await inOrg((tx) =>
-        tx.settlementLine.findMany({
+        tx.settlementLoadLine.findMany({
           where: { settlementId: outcome.settlementId },
           select: { loadId: true },
         }),
@@ -1279,7 +1292,7 @@ describe('freight another system already settled', () => {
     )
     if (outcome.ok) {
       const lines = await inOrg((tx) =>
-        tx.settlementLine.findMany({
+        tx.settlementLoadLine.findMany({
           where: { settlementId: outcome.settlementId },
           select: { loadId: true },
         }),

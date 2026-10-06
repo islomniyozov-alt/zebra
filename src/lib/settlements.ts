@@ -233,6 +233,17 @@ export interface SettleableLoad extends PayableLoad {
   podReceivedAt: Date | null
   /** The stops the sheet's PU and DEL dates are taken from. */
   stops: SheetStop[]
+  /** The broker's own reference, frozen onto the trip row (migration 69). */
+  referenceNumber: string | null
+  /** Whose freight it is — frozen onto the trip row with the authority's name. */
+  companyId: string
+  companyName: string
+  /** "PONTIAC,MI" — the batch's format, so both engines' rows read alike. */
+  puPlace: string
+  delPlace: string
+  /** The planned stop times, the fallback when the sheet dates have none. */
+  puScheduledAt: Date | null
+  delScheduledAt: Date | null
 }
 
 export async function settleableLoads(
@@ -247,6 +258,12 @@ export async function settleableLoads(
     select: {
       id: true,
       loadNumber: true,
+      // THE TRIP ROW'S OWN FIELDS (migration 69): the broker's reference, the
+      // authority and the places are frozen onto the `SettlementLoadLine`
+      // the generate path now writes, exactly as the batch freezes them.
+      referenceNumber: true,
+      companyId: true,
+      company: { select: { name: true } },
       linehaulCents: true,
       fuelSurchargeCents: true,
       accessorialsCents: true,
@@ -260,6 +277,8 @@ export async function settleableLoads(
         select: {
           sequence: true,
           type: true,
+          city: true,
+          state: true,
           scheduledAt: true,
           arrivedAt: true,
           departedAt: true,
@@ -278,18 +297,37 @@ export async function settleableLoads(
     },
   })
 
-  return loads.map((load) => ({
-    stops: load.stops,
-    id: load.id,
-    loadNumber: load.loadNumber,
-    linehaulCents: load.linehaulCents,
-    fuelSurchargeCents: load.fuelSurchargeCents,
-    accessorialsCents: load.accessorialsCents,
-    totalRevenueCents: load.totalRevenueCents,
-    actualMiles: load.actualMiles,
-    dispatchedMiles: load.dispatchedMiles,
-    podReceivedAt: load.statusEvents[0]?.occurredAt ?? null,
-  }))
+  // "PONTIAC,MI" — the batch's own format (`placeOf` in settlement-batch.ts),
+  // so a trip row reads the same whichever engine wrote it.
+  const placeOf = (
+    stop: { city: string | null; state: string | null } | undefined,
+  ) => (stop ? `${stop.city ?? ''},${stop.state ?? ''}` : '')
+
+  return loads.map((load) => {
+    const pickup = load.stops.find((stop) => stop.type === 'PICKUP')
+    const delivery = [...load.stops]
+      .reverse()
+      .find((stop) => stop.type === 'DELIVERY')
+    return {
+      stops: load.stops,
+      id: load.id,
+      loadNumber: load.loadNumber,
+      referenceNumber: load.referenceNumber,
+      companyId: load.companyId,
+      companyName: load.company.name,
+      puPlace: placeOf(pickup),
+      delPlace: placeOf(delivery),
+      puScheduledAt: pickup?.scheduledAt ?? null,
+      delScheduledAt: delivery?.scheduledAt ?? null,
+      linehaulCents: load.linehaulCents,
+      fuelSurchargeCents: load.fuelSurchargeCents,
+      accessorialsCents: load.accessorialsCents,
+      totalRevenueCents: load.totalRevenueCents,
+      actualMiles: load.actualMiles,
+      dispatchedMiles: load.dispatchedMiles,
+      podReceivedAt: load.statusEvents[0]?.occurredAt ?? null,
+    }
+  })
 }
 
 /**
@@ -343,8 +381,12 @@ export interface GenerateInput {
   driverId: string
   periodStart: Date
   periodEnd: Date
-  /** Line descriptions are written in the generating user's locale and frozen. */
-  labels: {
+  /**
+   * Unused since migration 69, kept optional so callers can stop passing it in
+   * their own time. A trip is a `SettlementLoadLine` now and prints the load's
+   * own number; it has no free-text description to write in anybody's locale.
+   */
+  labels?: {
     loadPay: (loadNumber: string) => string
   }
 }
@@ -394,9 +436,11 @@ export async function generateSettlement(
   })
 
   // --- compute, in memory ---------------------------------------------------
+  // ONE TRIP ROW PER LOAD (migration 69): the load itself is carried so the
+  // `SettlementLoadLine` below can freeze its reference, authority, places and
+  // billed total beside the pay — the batch's row, written by the workbench.
   const lines: ({
-    loadId: string
-    description: string
+    load: SettleableLoad
     amountCents: number
     snapshot: PaySnapshot
   } & SheetDates)[] = []
@@ -415,8 +459,7 @@ export async function generateSettlement(
     }
 
     lines.push({
-      loadId: load.id,
-      description: input.labels.loadPay(load.loadNumber),
+      load,
       amountCents: result.amountCents,
       snapshot: result.snapshot,
       // FROZEN HERE, beside the pay rule and for the same reason: a later
@@ -477,19 +520,37 @@ export async function generateSettlement(
       deductionsCents: 0,
       advancesCents: 0,
       netCents: earningsCents,
-      lines: {
+      // THE TRIPS, AS THE BATCH WRITES THEM (§6.2.2, migration 69): one
+      // `SettlementLoadLine` per load, freight under `grossCents`, the cut under
+      // `amountCents`, the rule frozen beside it, and the sheet dates with their
+      // plan-or-record flags. No `LOAD_PAY` line in `SettlementLine` — that
+      // table is for what is put on by hand.
+      loadLines: {
         create: lines.map((line, index) => ({
           organizationId,
-          loadId: line.loadId,
-          type: 'LOAD_PAY' as const,
-          description: line.description,
+          driverId: driver.id,
+          loadId: line.load.id,
+          loadNumber: line.load.loadNumber,
+          referenceNumber: line.load.referenceNumber,
+          companyId: line.load.companyId,
+          companyName: line.load.companyName,
+          puPlace: line.load.puPlace,
+          delPlace: line.load.delPlace,
+          // FROZEN HERE, beside the pay rule: the sheet's own date first, the
+          // planned stop time where the sheet recorded none, the period's edge
+          // where the load has no stop at all — a load line's dates are not
+          // nullable, and a row with no date is not a trip.
+          puDate: line.puAt ?? line.load.puScheduledAt ?? periodStart,
+          delDate: line.delAt ?? line.load.delScheduledAt ?? periodEnd,
+          puActual: line.puActual,
+          delActual: line.delActual,
+          grossCents: line.load.totalRevenueCents,
+          milesHundredths:
+            (line.load.actualMiles ?? line.load.dispatchedMiles ?? 0) * 100,
           amountCents: line.amountCents,
+          settledBasis: 'rate',
           payRuleSnapshot: line.snapshot as unknown as Prisma.InputJsonValue,
           sortOrder: index,
-          puAt: line.puAt,
-          puActual: line.puActual,
-          delAt: line.delAt,
-          delActual: line.delActual,
         })),
       },
     },
@@ -895,7 +956,14 @@ export async function voidSettlement(
   if (!settlement) return { ok: false, reason: 'not_found' }
   if (settlement.status === 'PAID') return { ok: false, reason: 'already_paid' }
 
+  // A VOIDED STATEMENT'S FREIGHT IS SETTLEABLE AGAIN. The trips are load
+  // lines since migration 69 (the hand-added ones since 67), and
+  // `settleableWhere` excludes a load on EITHER table — so both are released,
+  // or the next generation finds nothing to settle.
   await tx.settlementLine.deleteMany({ where: { settlementId: settlement.id } })
+  await tx.settlementLoadLine.deleteMany({
+    where: { settlementId: settlement.id },
+  })
   await tx.settlement.update({
     where: { id: settlement.id },
     data: {
@@ -1029,38 +1097,69 @@ export async function findSettlementDrift(
           load: { select: { totalRevenueCents: true } },
         },
       },
-      // A TRIP ADDED BY HAND LIVES HERE (migration 67), with no `LOAD_PAY`
-      // twin — so the totals arm below reads both tables, exactly as
-      // `refreshTotals` does, through the same `headerFromLines`.
-      loadLines: { select: { grossCents: true, amountCents: true } },
+      // EVERY WORKBENCH TRIP LIVES HERE (migration 69; the hand-added ones
+      // since 67) — so the snapshot arm reads these rows' snapshots and the
+      // totals arm reads both tables, exactly as `refreshTotals` does, through
+      // the same `headerFromLines`.
+      loadLines: {
+        select: {
+          id: true,
+          grossCents: true,
+          amountCents: true,
+          payRuleSnapshot: true,
+        },
+      },
     },
   })
 
   const drift: SettlementDrift[] = []
 
+  // ONE CHECK FOR A PRICED ROW, WHICHEVER TABLE IT IS IN. A `LOAD_PAY` line
+  // (the shape the generate path wrote before 69, and a row that somehow
+  // survived the move) and a workbench load line are held to the same test:
+  // the amount is what its own snapshot computes.
+  const checkSnapshot = (
+    settlement: { id: string; settlementNumber: string },
+    row: {
+      id: string
+      amountCents: number
+      payRuleSnapshot: Prisma.JsonValue | null
+    },
+    what: string,
+  ) => {
+    const snapshot = readSnapshot(row.payRuleSnapshot)
+    if (!snapshot) {
+      drift.push({
+        settlementId: settlement.id,
+        settlementNumber: settlement.settlementNumber,
+        problem: 'line_disagrees_with_snapshot',
+        detail: `${what} ${row.id} has no readable snapshot`,
+      })
+      return
+    }
+    const recomputed = amountFromSnapshot(snapshot)
+    if (recomputed !== row.amountCents) {
+      drift.push({
+        settlementId: settlement.id,
+        settlementNumber: settlement.settlementNumber,
+        problem: 'line_disagrees_with_snapshot',
+        detail: `${what} ${row.id}: stored ${row.amountCents}, snapshot computes ${recomputed}`,
+      })
+    }
+  }
+
   for (const settlement of settlements) {
     for (const line of settlement.lines) {
       if (line.type !== 'LOAD_PAY') continue
-
-      const snapshot = readSnapshot(line.payRuleSnapshot)
-      if (!snapshot) {
-        drift.push({
-          settlementId: settlement.id,
-          settlementNumber: settlement.settlementNumber,
-          problem: 'line_disagrees_with_snapshot',
-          detail: `line ${line.id} has no readable snapshot`,
-        })
-        continue
-      }
-
-      const recomputed = amountFromSnapshot(snapshot)
-      if (recomputed !== line.amountCents) {
-        drift.push({
-          settlementId: settlement.id,
-          settlementNumber: settlement.settlementNumber,
-          problem: 'line_disagrees_with_snapshot',
-          detail: `line ${line.id}: stored ${line.amountCents}, snapshot computes ${recomputed}`,
-        })
+      checkSnapshot(settlement, line, 'line')
+    }
+    // THE BATCH'S LOAD LINES ARE THE BATCH ENGINE'S, like its header below:
+    // a held load added by hand carries no snapshot by design, and a team
+    // split is the engine's own arithmetic. The workbench's rows are priced
+    // one load at a time by `payFor`, and every one of them carries the rule.
+    if (settlement.batchId === null) {
+      for (const row of settlement.loadLines) {
+        checkSnapshot(settlement, row, 'load line')
       }
     }
 

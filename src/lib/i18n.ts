@@ -152,7 +152,6 @@ const en = {
     'Nobody is seated on these, so there is nobody to pay. Assign a driver on the load.',
   'preview.hint.noRule':
     'The driver has no pay rule in force. Set one on the driver page and these join the batch.',
-  'settlements.group.loadPay': 'Load pay',
   'settlements.group.otherPay': 'Other pay',
   'settlements.group.deductions': 'Deductions',
   'settlements.group.balances': 'Balances',
@@ -3005,7 +3004,6 @@ const ru: Dictionary = {
     'На них нет водителя, платить некому. Назначьте водителя в грузе.',
   'preview.hint.noRule':
     'У водителя нет действующего правила оплаты. Задайте его на странице водителя.',
-  'settlements.group.loadPay': 'Оплата за грузы',
   'settlements.group.otherPay': 'Прочие начисления',
   'settlements.group.deductions': 'Удержания',
   'settlements.group.balances': 'Балансы',
@@ -5829,7 +5827,6 @@ const fa: Dictionary = {
     'کسی روی این‌ها نیست، پس کسی برای پرداخت نیست. در بار راننده تعیین کنید.',
   'preview.hint.noRule':
     'راننده قاعدهٔ پرداخت جاری ندارد. در صفحهٔ راننده یکی تعیین کنید.',
-  'settlements.group.loadPay': 'دستمزد بار',
   'settlements.group.otherPay': 'سایر پرداخت‌ها',
   'settlements.group.deductions': 'کسورات',
   'settlements.group.balances': 'مانده‌ها',

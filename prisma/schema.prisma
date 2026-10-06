@@ -3305,6 +3305,13 @@ model SettlementLoadLine {
   /// driver querying a line can be told which figure was used and why.
   settledBasis String
 
+  /// THE SHEET DATES' PLAN-OR-RECORD FLAGS (migration 69). True or false on a
+  /// workbench row, where `sheetDates` decided each; NULL on a batch row, which
+  /// records nothing the batch did not know rather than a default that reads
+  /// as "plan".
+  puActual  Boolean?
+  delActual Boolean?
+
   /// How the amount was reached — the rule, the basis, the result.
   payRuleSnapshot Json?
 

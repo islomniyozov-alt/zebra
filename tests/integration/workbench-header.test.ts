@@ -211,10 +211,12 @@ describe('a workbench statement, through every edit the workbench allows', () =>
     const id = generated.settlementId
 
     let h = await header(id)
-    // THE GENERATE PATH'S TRIPS ARE LOAD_PAY LINES, ONE EACH, AND NOWHERE ELSE.
-    const loadPay = h.lines.filter((l) => l.type === 'LOAD_PAY')
-    expect(loadPay.map((l) => l.loadId).sort()).toEqual([first, second].sort())
-    expect(h.loadLines).toHaveLength(0)
+    // THE GENERATE PATH'S TRIPS ARE LOAD LINES (migration 69), ONE EACH, AND
+    // NOTHING IN `SettlementLine` — that table is for what is put on by hand.
+    expect(h.loadLines.map((l) => l.loadId).sort()).toEqual(
+      [first, second].sort(),
+    )
+    expect(h.lines).toHaveLength(0)
     // FREIGHT UNDER GROSS, THE CUT UNDER EARNINGS.
     expect(h.grossCents).toBe(350_000)
     expect(h.earningsCents).toBe(cut(350_000))
@@ -264,8 +266,9 @@ describe('a workbench statement, through every edit the workbench allows', () =>
     expect(line!.grossCents).toBe(100_000)
     expect(line!.amountCents).toBe(cut(100_000))
     expect(line!.amountCents).toBeLessThan(line!.grossCents)
-    // NO LOAD_PAY TWIN for the added trip; the two generated ones are still there.
-    expect(h.lines.filter((l) => l.type === 'LOAD_PAY')).toHaveLength(2)
+    // THREE LOAD LINES NOW, AND STILL NO LOAD_PAY ROW ANYWHERE (migration 69).
+    expect(h.loadLines).toHaveLength(3)
+    expect(h.lines.filter((l) => l.type === 'LOAD_PAY')).toHaveLength(0)
     expect(h.lines.some((l) => l.loadId === third)).toBe(false)
     expect(h.grossCents).toBe(450_000)
     expect(h.earningsCents).toBe(cut(450_000))

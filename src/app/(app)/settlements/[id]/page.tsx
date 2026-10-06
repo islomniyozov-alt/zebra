@@ -381,9 +381,6 @@ export default async function SettlementPage({
   const balanceLines = settlement.lines.filter((line) =>
     balanceSet.has(line.type),
   )
-  const loadPayLines = settlement.lines.filter(
-    (line) => line.type === 'LOAD_PAY',
-  )
 
   const typeOptions = (types: readonly SettlementLineType[]) =>
     types.map((type) => ({
@@ -1006,58 +1003,11 @@ export default async function SettlementPage({
             />
           ) : null}
 
-          {/* LOAD PAY STAYS VISIBLE even though the trips grid shows the same
-           * freight: the grid is the SNAPSHOT and these are the LINES that
-           * make the total. Dropping them leaves the header's gross
-           * unexplained by anything on the page. */}
-          {loadPayLines.length > 0 ? (
-            <section className="rounded-card border border-border bg-surface p-z4">
-              <div className="flex items-baseline justify-between gap-z3">
-                <h2 className="text-md font-medium text-ink">
-                  {t('settlements.group.loadPay')}
-                </h2>
-                <span className="font-mono text-sm font-medium tabular-nums text-ink">
-                  {formatCents(
-                    loadPayLines.reduce(
-                      (sum, line) => sum + line.amountCents,
-                      0,
-                    ),
-                    locale,
-                  )}
-                </span>
-              </div>
-              <ul className="mt-z3 flex flex-col">
-                {loadPayLines.map((line) => (
-                  <li
-                    key={line.id}
-                    className="flex items-baseline gap-z3 border-b border-border py-z2 text-sm last:border-b-0"
-                  >
-                    {line.load ? (
-                      <Link
-                        href={`/loads/${line.load.id}`}
-                        className="z-identifier w-[70px] font-mono text-xs text-ink-3 hover:text-accent"
-                      >
-                        {line.load.loadNumber}
-                      </Link>
-                    ) : (
-                      <span className="w-[70px] text-xs text-ink-3" />
-                    )}
-                    <span className="text-ink">{line.description}</span>
-                    <span className="text-xs text-ink-3">
-                      {basisSentence(
-                        readSnapshot(line.payRuleSnapshot),
-                        locale,
-                        basisTemplates,
-                      )}
-                    </span>
-                    <span className="ms-auto font-mono tabular-nums text-ink">
-                      {formatCents(line.amountCents, locale)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
+          {/* THE SECOND LIST OF THE SAME FREIGHT WENT WITH MIGRATION 69. Every
+           * statement's trips are `SettlementLoadLine` rows now, and the trips
+           * grid above shows them for the workbench's statements as it always
+           * did for the batch's — Load gross, Driver gross, the dates and the
+           * places, off the same frozen row. */}
 
           {settlement.status === 'APPROVED' && mayEdit ? (
             <section className="rounded-card border border-border bg-surface p-z4">
