@@ -262,6 +262,38 @@ Rules about instruments, which are the ones that cost whole sessions:
   nothing broke; that is luck, and a rule that depends on luck is not a
   rule.
 
+- **FROM THE MOMENT THE INTEGRATION GATE STARTS UNTIL THE RITUAL'S LAST STEP
+  REPORTS: NO EDIT, NO COMMIT, NO WATCHER. Queue the change; start it after.**
+  Owner's ruling, 2026-10-05.
+
+  The receipt is tied to a commit AND a tree. The gate withholds it the moment
+  either moves — "The working tree MOVED during the run: started at 5ab4c5e,
+  finished at 02bb83c. No receipt written." — and it is right to: a receipt from
+  a tree the suite did not run against would vouch for code nobody tested. Every
+  case was green all three times this happened on 2026-10-05, and all three
+  receipts were correctly refused, so the twelve minutes were spent learning
+  nothing. THAT COST IS PAID BY PRODUCTION'S WAITING, not by the person who
+  moved the tree.
+
+  THREE WAYS IT WAS BROKEN IN ONE DAY, so none of them reads as the exception:
+  1. A COMMIT mid-run. "I'll just commit this test while the suite runs."
+  2. An EDIT mid-run. The tree was dirty when the dev dispatch read it, so the
+     receipt did not match and the dispatch re-ran the suite — which then
+     refused to start on the dirty tree.
+  3. A WATCHER mid-chain. `scripts/watch-guard.mjs` breaks a source file and
+     restores it by hash — that is an edit twice over, and the hash check
+     proves the file came back, not that nothing saw it changed.
+
+  "THE RITUAL'S LAST STEP" IS THE LAST THING IN THE CHAIN — the drift read,
+  or the sweep when one is chained after the dispatches — and not "the deploy
+  finished". A chain is one run until its final verdict prints.
+
+  THE MECHANISM IS A PLACE TO PUT THE WORK. The rule is followable only
+  because the scratchpad exists outside the repository: write the change you
+  want there — the patch script, the commit message, the breaks file — and
+  apply it when the chain reports. The first entry made under this rule was
+  this rule, written to the scratchpad while a chain ran and applied after.
+
 - **Edit source with the tool that refuses a missed anchor. Not `sed`.**
   `str.replace` returns the original string when it matches nothing, `sed`
   exits 0, and a filter that matches nothing prints nothing — so a silent
