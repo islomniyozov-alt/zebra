@@ -3178,6 +3178,11 @@ model Settlement {
   @@unique([organizationId, settlementNumber])
   @@index([companyId, driverId, periodEnd])
   @@index([companyId, status])
+  /// KEPT BY RULING (migration 63, 2026-10-05). The database has carried this
+  /// index all along and the schema never declared it, so `migrate dev` kept
+  /// proposing to DROP it — the batches screen reads statements by batch, and
+  /// the fix was the schema, not the database.
+  @@index([batchId])
 }
 
 enum SettlementStatus {
@@ -3326,6 +3331,10 @@ model SettlementLoadLine {
   @@unique([loadId, driverId])
   @@index([settlementId])
   @@index([organizationId])
+  /// KEPT BY RULING (migration 63), for the same reason as `Settlement.batchId`:
+  /// present in the database, absent from the schema, and about to be dropped by
+  /// a migration nobody had asked for.
+  @@index([companyId])
 }
 
 /// One deduction or one credit. Signed, so both sections come from one table.
