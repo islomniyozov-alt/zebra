@@ -4,6 +4,8 @@ import {
   UnauthenticatedError,
 } from '@/lib/auth-context'
 import { can } from '@/lib/permissions'
+import { transactionsInWindow } from '@/lib/transactions-report'
+import { DEFAULT_PERIOD, isPeriodKey, periodWindow } from '@/lib/rolling-period'
 import { companyIdScopeFilter, companyScopeFilter } from '@/lib/tenancy'
 import {
   applyList,
@@ -117,6 +119,9 @@ const GUARD: Record<GridId, { action: Action; resource: Resource }> = {
   'charges.standing': { action: 'read', resource: 'driver.pay' },
   'charges.oneTime': { action: 'read', resource: 'driver.pay' },
   'reports.driver': { action: 'read', resource: 'driver.pay' },
+  // §6.2.10 part 4. One person's money, line by line — `driver.pay`, like the
+  // statements grid it is a flattening of.
+  'reports.transactions': { action: 'read', resource: 'driver.pay' },
   // §7.1.7, and both are in NOT_EXPORTABLE above. The entries exist for the
   // same reason `settlements.trips` has one: the map is exhaustive on purpose,
   // and an exhaustive map is what forces the decision to be made out loud.
@@ -479,6 +484,47 @@ export async function GET(request: Request): Promise<Response> {
             )
           }
 
+          case 'reports.transactions': {
+            // §6.2.10 part 4. The report takes a WINDOW, not a row filter, so
+            // the CSV rebuilds the window the way the screen does — the same
+            // `period` key through the same `periodWindow` — and exports the
+            // same reader's rows. Codes not labels (§7.1.5): the kind is the
+            // code, the amount is signed cents as a decimal.
+            const period =
+              typeof raw.period === 'string' && isPeriodKey(raw.period)
+                ? raw.period
+                : DEFAULT_PERIOD
+            const { from, to } = periodWindow(period, new Date())
+            const rows = await transactionsInWindow(tx, {
+              from,
+              to,
+              companyId: typeof raw.company === 'string' ? raw.company : null,
+            })
+            return toCsv(
+              [
+                'period_end',
+                'driver',
+                'kind',
+                'category',
+                'description',
+                'load',
+                'statement',
+                'authority',
+                'amount',
+              ],
+              rows.map((row) => [
+                csvDay(row.periodEnd),
+                row.driverName,
+                row.kind,
+                row.category ?? '',
+                row.description,
+                row.loadNumber ?? '',
+                row.settlementNumber,
+                row.companyName,
+                csvMoney(row.amountCents),
+              ]),
+            )
+          }
           case 'reports.driver': {
             // Reports' by-driver cut is `driverTotals`, which takes a window
             // rather than a row filter — it is exported through the statements

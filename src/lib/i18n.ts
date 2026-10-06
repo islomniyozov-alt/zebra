@@ -281,6 +281,18 @@ const en = {
   'reports.tab.company': 'By authority',
   'reports.tab.week': 'By week',
   'reports.tab.driver': 'By driver',
+  // §6.2.10 part 4 — the transactions report.
+  'reports.tab.transactions': 'Transactions',
+  'reports.kind': 'Kind',
+  'reports.kind.tripPay': 'Trip pay',
+  'reports.kind.advance': 'Advance',
+  'reports.kind.deduction': 'Deduction',
+  'reports.kind.adjustment': 'Adjustment',
+  'reports.description': 'Description',
+  'reports.amount': 'Amount',
+  'reports.transactions.empty': 'No pay lines in this window',
+  'reports.transactions.emptyHint':
+    'Widen the period, or pick another authority. A statement with no lines contributes nothing here.',
   'batches.payCompanyMissing': 'not recorded',
 
   // ── ACCOUNTING (§6.2, amended 2026-09-28) ─────────────────────────────
@@ -3117,6 +3129,17 @@ const ru: Dictionary = {
   'reports.tab.company': 'По компаниям',
   'reports.tab.week': 'По неделям',
   'reports.tab.driver': 'По водителям',
+  'reports.tab.transactions': 'Транзакции',
+  'reports.kind': 'Тип',
+  'reports.kind.tripPay': 'Оплата рейса',
+  'reports.kind.advance': 'Аванс',
+  'reports.kind.deduction': 'Удержание',
+  'reports.kind.adjustment': 'Корректировка',
+  'reports.description': 'Описание',
+  'reports.amount': 'Сумма',
+  'reports.transactions.empty': 'В этом периоде нет строк оплаты',
+  'reports.transactions.emptyHint':
+    'Расширьте период или выберите другую компанию. Ведомость без строк здесь ничего не даёт.',
   'batches.payCompanyMissing': 'не задано',
 
   // ── ACCOUNTING (§6.2, amended 2026-09-28) ─────────────────────────────
@@ -5925,6 +5948,17 @@ const fa: Dictionary = {
   'reports.tab.company': 'بر پایهٔ شرکت',
   'reports.tab.week': 'بر پایهٔ هفته',
   'reports.tab.driver': 'بر پایهٔ راننده',
+  'reports.tab.transactions': 'تراکنش‌ها',
+  'reports.kind': 'نوع',
+  'reports.kind.tripPay': 'پرداخت سفر',
+  'reports.kind.advance': 'مساعده',
+  'reports.kind.deduction': 'کسر',
+  'reports.kind.adjustment': 'اصلاح',
+  'reports.description': 'شرح',
+  'reports.amount': 'مبلغ',
+  'reports.transactions.empty': 'در این بازه ردیف پرداختی نیست',
+  'reports.transactions.emptyHint':
+    'بازه را گسترش دهید یا شرکت دیگری را انتخاب کنید. صورت‌حساب بدون ردیف اینجا چیزی ندارد.',
   'batches.payCompanyMissing': 'ثبت نشده',
 
   // ── ACCOUNTING (§6.2, amended 2026-09-28) ─────────────────────────────

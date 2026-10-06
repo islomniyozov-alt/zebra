@@ -405,7 +405,8 @@ describe('each destination has the tabs §6.2 says it has', () => {
   const EXPECTED: Record<string, readonly string[]> = {
     invoices: ['invoices', 'ready', 'factored', 'direct'],
     payments: ['payments', 'unapplied'],
-    reports: ['company', 'week', 'driver'],
+    // FOUR SINCE §6.2.10 PART 4: the transactions cut sits last.
+    reports: ['company', 'week', 'driver', 'transactions'],
     batches: ['batches', 'balances'],
     statements: ['statements'],
     // FOUR SINCE MIGRATION 61 (§6.2.4). `standing` sits second, and the order
@@ -431,6 +432,7 @@ describe('each destination has the tabs §6.2 says it has', () => {
     const doc = readFileSync('TMS-DESIGN-SYSTEM.md', 'utf8')
     expect(doc).toContain('Scheduled · Standing · One-time · This week')
     expect(doc).toContain('Batches · Balances')
+    expect(doc).toContain('By authority · By week · By driver · Transactions')
     expect(doc).toContain(
       'Invoices · Ready to invoice · Factored · Direct-settled',
     )

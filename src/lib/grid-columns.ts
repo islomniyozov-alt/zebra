@@ -47,6 +47,8 @@ export const GRID_IDS = [
   'charges.standing',
   'charges.oneTime',
   'reports.driver',
+  // §6.2.10 part 4 — every pay line in a window, by driver. Added 2026-10-06.
+  'reports.transactions',
   // THE WORKBENCH'S TRIPS GRID. Eleven columns, nine shown — §6.2.2 as
   // corrected in v10.2, because §7.1 caps a table at nine and throws above
   // it. This is the grid that found the cap.

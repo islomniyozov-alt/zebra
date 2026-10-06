@@ -52,6 +52,10 @@ import { GridToolbar } from '../../_grid/GridToolbar'
 import { GridFooterNav } from '../../_grid/GridFooterNav'
 import { gridView, keepColumns, pagedFooterLabel } from '../../_grid/grid-page'
 import { readGridColumns } from '@/lib/grid-columns'
+import {
+  transactionsInWindow,
+  type TransactionRow,
+} from '@/lib/transactions-report'
 
 // ACCOUNTING → REPORTS (§6.2): the same money cut by company, week or driver.
 //
@@ -75,9 +79,24 @@ import { readGridColumns } from '@/lib/grid-columns'
 // never saw it. A zero would read as "this freight cost nothing to drive", which
 // is the most expensive wrong number this page can print. `—` and a sentence.
 
-export type Cut = 'company' | 'week' | 'driver'
+export type Cut = 'company' | 'week' | 'driver' | 'transactions'
 
-const CUTS: readonly Cut[] = ['company', 'week', 'driver']
+const CUTS: readonly Cut[] = ['company', 'week', 'driver', 'transactions']
+
+/**
+ * §6.2.10 part 4. Eight columns, one under §7.1's cap, so a ninth has room.
+ * The amount is signed as stored — a ledger is read down to a net (§6.2.10).
+ */
+const TRANSACTION_COLUMNS: readonly string[] = [
+  'period',
+  'driver',
+  'kind',
+  'description',
+  'load',
+  'statement',
+  'authority',
+  'amount',
+]
 
 const DRIVER_COLUMNS: readonly string[] = [
   'driver',
@@ -168,6 +187,23 @@ export default async function ReportsPage({
         }),
       }
 
+      if (cut === 'transactions') {
+        return {
+          kind: 'transactions' as const,
+          charts,
+          rows: await transactionsInWindow(tx, {
+            from,
+            to,
+            companyId: companyParam,
+          }),
+          columns: await readGridColumns(
+            tx,
+            session.userId,
+            'reports.transactions',
+            TRANSACTION_COLUMNS,
+          ),
+        }
+      }
       if (cut === 'driver') {
         return {
           kind: 'driver' as const,
@@ -233,6 +269,9 @@ export default async function ReportsPage({
           { key: 'company', label: t('reports.tab.company') },
           { key: 'week', label: t('reports.tab.week') },
           { key: 'driver', label: t('reports.tab.driver') },
+          // §6.2.10 part 4 — a different QUESTION about the same money (§7.1.6):
+          // not what each driver netted, but every line that made the net.
+          { key: 'transactions', label: t('reports.tab.transactions') },
         ]}
         active={cut}
         hrefFor={(key) => {
@@ -457,6 +496,177 @@ export default async function ReportsPage({
   )
 
   // ── BY DRIVER: A LIST, so it gets the four controls and a totals row ─────
+  if (data.kind === 'transactions') {
+    // ── EVERY LINE, SIGNED, SUMMING TO THE NET (§6.2.10 part 4) ────────────
+    const KIND_LABEL: Record<TransactionRow['kind'], MessageKey> = {
+      tripPay: 'reports.kind.tripPay',
+      advance: 'reports.kind.advance',
+      deduction: 'reports.kind.deduction',
+      adjustment: 'reports.kind.adjustment',
+    }
+    const shape: ListShape<TransactionRow> = {
+      searchText: (row) =>
+        `${row.driverName} ${row.description} ${row.loadNumber ?? ''} ${row.settlementNumber}`,
+      sorts: {
+        period: (row) => row.periodEnd.getTime(),
+        driver: (row) => row.driverName,
+        kind: (row) => row.kind,
+        amount: (row) => row.amountCents,
+        statement: (row) => row.settlementNumber,
+      },
+      defaultSort: 'period',
+      defaultDir: 'desc',
+    }
+    const view = gridView(data.rows, raw, shape, applyList)
+    const columns: Column<TransactionRow>[] = [
+      {
+        key: 'period',
+        header: t('reports.week'),
+        sortable: true,
+        render: (row) => (
+          <span className="font-mono text-xs" dir="ltr">
+            {row.periodEnd.toISOString().slice(0, 10)}
+          </span>
+        ),
+      },
+      {
+        key: 'driver',
+        header: t('payroll.driver'),
+        truncate: true,
+        sortable: true,
+        render: (row) => row.driverName,
+      },
+      {
+        key: 'kind',
+        header: t('reports.kind'),
+        sortable: true,
+        // THE CATEGORY RIDES WITH A DEDUCTION, in smaller type: §6.2.7's four
+        // words, from §6.2.7's own CASE, so the two screens agree.
+        render: (row) => (
+          <span className="flex flex-col">
+            <span>{t(KIND_LABEL[row.kind])}</span>
+            {row.category ? (
+              <span className="text-xs text-ink-3">
+                {t(`reports.deduction.${row.category}` as MessageKey)}
+              </span>
+            ) : null}
+          </span>
+        ),
+      },
+      {
+        key: 'description',
+        header: t('reports.description'),
+        truncate: true,
+        render: (row) => row.description,
+      },
+      {
+        key: 'load',
+        header: t('settlements.trip.load'),
+        render: (row) =>
+          row.loadNumber ? (
+            <span className="z-identifier font-mono" dir="ltr">
+              {row.loadNumber}
+            </span>
+          ) : (
+            <span className="text-ink-3">—</span>
+          ),
+      },
+      {
+        key: 'statement',
+        header: t('statements.statement'),
+        sortable: true,
+        render: (row) => (
+          <span className="z-identifier font-mono" dir="ltr">
+            {row.settlementNumber}
+          </span>
+        ),
+      },
+      {
+        key: 'authority',
+        header: t('accounting.company'),
+        truncate: true,
+        render: (row) => row.companyName,
+      },
+      {
+        key: 'amount',
+        header: t('reports.amount'),
+        align: 'end',
+        sortable: true,
+        render: (row) => money(row.amountCents),
+        // THE FOOT IS THE NET. Signed lines summed, which is what the statements
+        // netted — the agreement test's own arithmetic, on the screen.
+        foot: (shown) => money(sumCents(shown, (row) => row.amountCents)),
+      },
+    ]
+    return (
+      <>
+        {header}
+        {charts}
+        <div className="flex items-center justify-end gap-z2 border-b border-border bg-surface px-gutter py-z2">
+          <GridToolbar
+            grid="reports.transactions"
+            columns={columns.map((column) => ({
+              key: column.key,
+              header: column.header,
+            }))}
+            visible={data.columns}
+            search={search}
+            labels={{
+              export: t('grid.export'),
+              columns: t('grid.columns'),
+              apply: t('grid.columns.apply'),
+              cancel: t('grid.columns.cancel'),
+              firstLocked: t('grid.columns.firstLocked'),
+            }}
+            errors={{
+              'grid.columns.errorEmpty': t('grid.columns.errorEmpty'),
+              'grid.columns.errorGrid': t('grid.columns.errorGrid'),
+            }}
+          />
+        </div>
+        <Table
+          columns={keepColumns(columns, data.columns)}
+          rows={view.paged.rows}
+          footRows={view.filtered}
+          rowKey={(row) => `${row.source}:${row.lineId}`}
+          rowHref={(row) => `/settlements/${row.settlementId}`}
+          caption={t('reports.tab.transactions')}
+          sort={{
+            key: view.sort.key,
+            dir: view.sort.dir,
+            hrefFor: view.sortFor('/accounting/reports'),
+            label: t('accounting.sortBy'),
+          }}
+          totals={{
+            label: pagedFooterLabel(
+              t('reports.tab.transactions'),
+              t('grid.rows'),
+              view.paged,
+            ),
+          }}
+          empty={
+            <EmptyState
+              title={t('reports.transactions.empty')}
+              body={t('reports.transactions.emptyHint')}
+            />
+          }
+        />
+        <GridFooterNav
+          paged={view.paged}
+          per={view.params.per}
+          path="/accounting/reports"
+          search={search}
+          hrefForPage={view.hrefForPage('/accounting/reports')}
+          labels={{
+            of: t('grid.of'),
+            previous: t('grid.previous'),
+            next: t('grid.next'),
+            perPage: t('grid.perPage'),
+          }}
+        />
+      </>
+    )
+  }
   if (data.kind === 'driver') {
     const shape: ListShape<DriverTotalRow> = {
       searchText: (row) => row.driverName,
