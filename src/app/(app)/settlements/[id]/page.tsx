@@ -205,6 +205,7 @@ export default async function SettlementPage({
         paymentReference: true,
         unitNumber: true,
         payTariffLabel: true,
+        driverType: true,
         payoutDate: true,
         batchId: true,
         company: { select: { name: true } },
@@ -717,7 +718,9 @@ export default async function SettlementPage({
               </Fact>
               <Fact label={t('workbench.driverType')}>
                 {t(
-                  `drivers.employment.${settlement.driver.employmentType}` as MessageKey,
+                  // THE FROZEN COPY, falling back to the live row only for a
+                  // statement issued before migration 66 (§6.2.10 part 6).
+                  `drivers.employment.${settlement.driverType ?? settlement.driver.employmentType}` as MessageKey,
                 )}
               </Fact>
               <Fact label={t('settlements.tariff')}>

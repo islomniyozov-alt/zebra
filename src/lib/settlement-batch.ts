@@ -579,6 +579,7 @@ export async function batchInputForOrg(
 
       return {
         driverId: driver.id,
+        driverType: driver.employmentType,
         // AS THE STATEMENT PRINTS IT. "JERRY ROBERT MCKANE", first then last.
         driverName: `${driver.firstName} ${driver.lastName}`.trim(),
         unitNumber: driver.assignedTruck?.unitNumber ?? null,
@@ -944,6 +945,10 @@ export async function refreshDraft(
     drivers,
   })
 
+  // FROZEN BESIDE THE UNIT NUMBER (§6.2.10 part 6, migration 66): the type the
+  // driver had when this statement was made, off the same rows the engine
+  // was fed — no second query.
+  const typeOf = new Map(drivers.map((row) => [row.driverId, row.driverType]))
   for (const settlement of result.settlements) {
     await tx.settlement.create({
       data: {
@@ -954,6 +959,7 @@ export async function refreshDraft(
         companyId: settlement.letterheadCompanyId,
         batchId: batch.id,
         driverId: settlement.driverId,
+        driverType: typeOf.get(settlement.driverId) ?? null,
         // NO NUMBER ON A DRAFT. A number issued to something that may never
         // exist is a gap in a series nobody can explain later.
         settlementNumber: draftNumberFor(batch.id, settlement.driverId),

@@ -1,3 +1,4 @@
+import type { OwnershipType } from '@/generated/prisma/client'
 import { percentOfCents } from './money'
 import {
   payFor,
@@ -411,6 +412,8 @@ export interface DriverSettlementInput {
   driverId: string
   /** As printed: "JERRY ROBERT MCKANE". */
   driverName: string
+  /** Frozen onto the statement at generation (§6.2.10 part 6). */
+  driverType: OwnershipType
   /** Frozen onto the settlement at FINAL — see the header on `unitNumber`. */
   unitNumber: string | null
   /**

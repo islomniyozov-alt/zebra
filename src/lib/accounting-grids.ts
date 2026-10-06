@@ -465,7 +465,7 @@ export interface StatementGridRow {
   settlementNumber: string | null
   driverId: string
   driverName: string
-  /** §6.2.10 part 6 — the driver's CURRENT type; the frozen copy is migration 66. */
+  /** §6.2.10 part 6 — frozen at generation since migration 66; live before it. */
   driverType: OwnershipType
   unitNumber: string | null
   periodStart: Date
@@ -521,6 +521,7 @@ export async function readStatements(
       otherPayCents: true,
       netCents: true,
       driverId: true,
+      driverType: true,
       driver: {
         select: { firstName: true, lastName: true, employmentType: true },
       },
@@ -592,7 +593,8 @@ export async function readStatements(
     settlementNumber: row.settlementNumber,
     driverId: row.driverId,
     driverName: `${row.driver.firstName} ${row.driver.lastName}`,
-    driverType: row.driver.employmentType,
+    // THE FROZEN COPY (migration 66); the live row only for older statements.
+    driverType: row.driverType ?? row.driver.employmentType,
     unitNumber: row.unitNumber,
     periodStart: row.periodStart,
     periodEnd: row.periodEnd,

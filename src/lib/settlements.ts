@@ -358,7 +358,13 @@ export async function generateSettlement(
   // --- short read -----------------------------------------------------------
   const driver = await tx.driver.findFirst({
     where: { id: driverId, deletedAt: null },
-    select: { id: true, companyId: true, firstName: true, lastName: true },
+    select: {
+      id: true,
+      companyId: true,
+      firstName: true,
+      lastName: true,
+      employmentType: true,
+    },
   })
   if (!driver) return { ok: false, reason: 'driver_not_found' }
 
@@ -443,6 +449,9 @@ export async function generateSettlement(
       periodStart,
       periodEnd,
       status: 'DRAFT',
+      // FROZEN AT GENERATION (§6.2.10 part 6, migration 66), as the batch
+      // engine does.
+      driverType: driver.employmentType,
       grossCents,
       deductionsCents: 0,
       reimbursementsCents: 0,

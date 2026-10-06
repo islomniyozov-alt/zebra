@@ -1,0 +1,24 @@
+-- MIGRATION 66 — THE STATEMENT CARRIES THE DRIVER'S TYPE, FROZEN AT GENERATION
+--
+-- §6.2.10 part 6 and GAPS.md code gap 3. §6.2.2 freezes the unit, the payee and
+-- the tariff label beside the statement number; the driver's type was not
+-- frozen, so a driver who converted from company driver to owner-operator in
+-- June relabelled January's statements on every screen that showed them.
+--
+-- NULLABLE, DELIBERATELY. Statements issued before this migration have no
+-- frozen copy, and the readers fall back to the live driver row for them —
+-- which is exactly what they did before, so nothing gets worse and nothing is
+-- invented for a document already handed over. No default, no constraint, no
+-- index is removed, so the 2026-10-06 grep rule does not bind; the writers are
+-- quoted anyway, because the column is only worth having if both engines fill it:
+--
+--   $ grep -rn "settlement.create(" src/lib tests/integration/fixtures.ts
+--   src/lib/settlement-batch.ts:948      the batch engine     -> sets driverType (this commit)
+--   src/lib/settlements.ts:437           the workbench engine -> sets driverType (this commit)
+--   tests/integration/fixtures.ts:508    a fixture            -> omits it; NULL is the pre-66 shape
+--
+-- The 2026-10-06 ruling held this migration behind the production dispatch
+-- that 64 and 65 were waiting on (deploy order, step 5); it is prepared the
+-- same day, after that dispatch.
+
+ALTER TABLE "Settlement" ADD COLUMN "driverType" "OwnershipType";

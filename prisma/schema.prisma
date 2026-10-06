@@ -3073,6 +3073,12 @@ model Settlement {
   reimbursementsCents Int @default(0)
   netCents            Int @default(0)
 
+  /// THE DRIVER'S TYPE, FROZEN AT GENERATION (§6.2.10 part 6, migration 66).
+  /// Company driver or owner-operator as they WERE when this statement was
+  /// made, beside the unit number and for the same reason. Null on statements
+  /// issued before migration 66; readers fall back to the live driver row.
+  driverType OwnershipType?
+
   approvedByUserId String?
   approvedBy       User?          @relation(fields: [approvedByUserId], references: [id])
   approvedAt       DateTime?
