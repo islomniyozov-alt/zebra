@@ -263,8 +263,9 @@ Rules about instruments, which are the ones that cost whole sessions:
   rule.
 
 - **FROM THE MOMENT THE INTEGRATION GATE STARTS UNTIL THE RITUAL'S LAST STEP
-  REPORTS: NO EDIT, NO COMMIT, NO WATCHER. Queue the change; start it after.**
-  Owner's ruling, 2026-10-05.
+  REPORTS: NO EDIT, NO COMMIT, NO WATCHER, NO DRY RUN. The working directory
+  is UNTOUCHED. Queue the change; start it after.** Owner's rulings,
+  2026-10-05 and 2026-10-06.
 
   The receipt is tied to a commit AND a tree. The gate withholds it the moment
   either moves — "The working tree MOVED during the run: started at 5ab4c5e,
@@ -283,6 +284,14 @@ Rules about instruments, which are the ones that cost whole sessions:
   3. A WATCHER mid-chain. `scripts/watch-guard.mjs` breaks a source file and
      restores it by hash — that is an edit twice over, and the hash check
      proves the file came back, not that nothing saw it changed.
+  4. A "DRY RUN" mid-gate, 2026-10-06. A patch script was rehearsed against
+     the tree by replacing the body of its `write` with a no-op through
+     `str.replace` — the pattern had been mangled by a heredoc, the replace
+     matched nothing and handed the script back unchanged, and the "dry run"
+     wrote 28 files into a tree whose gate had started three minutes earlier.
+     The same silent no-op this file names for `sed`, arriving as a rehearsal.
+     The tree was restored within two minutes and the receipt survived; that
+     is luck, and the rule does not depend on it.
 
   "THE RITUAL'S LAST STEP" IS THE LAST THING IN THE CHAIN — the drift read,
   or the sweep when one is chained after the dispatches — and not "the deploy
@@ -293,6 +302,12 @@ Rules about instruments, which are the ones that cost whole sessions:
   want there — the patch script, the commit message, the breaks file — and
   apply it when the chain reports. The first entry made under this rule was
   this rule, written to the scratchpad while a chain ran and applied after.
+
+  AND A REHEARSAL IS NOT EXEMPT BECAUSE IT INTENDS TO WRITE NOTHING. Rehearse
+  in the scratchpad or in a worktree, never in the tree a gate is reading; a
+  dry-run mode belongs INSIDE the script as a flag that makes `write` a no-op,
+  not in a harness that edits the script's text. Owner's ruling, 2026-10-06:
+  "Freeze means the working directory is untouched, dry runs included."
 
 - **A MIGRATION THAT REMOVES A DEFAULT, A CONSTRAINT OR AN INDEX CARRIES THE
   GREP THAT PROVES EVERY WRITER SETS THE COLUMN — QUOTED IN THE MIGRATION'S
