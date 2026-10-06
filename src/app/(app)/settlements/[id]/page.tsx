@@ -458,11 +458,15 @@ export default async function SettlementPage({
         ),
     },
     {
+      // THE KEY STAYS `totalPay` UNDER THE NEW HEADER (§6.2.2, 2026-10-06):
+      // a column chooser preference is a row in somebody's settings, and
+      // renaming the key would silently drop it.
       key: 'totalPay',
-      header: t('workbench.totalPay'),
+      header: t('workbench.loadGross'),
       align: 'end',
-      // THE GROSS THE RULE WAS APPLIED TO — the artefact's "Total pay" and the
-      // PDF's "Load gross" are the same column under two names.
+      // THE FREIGHT THE RULE WAS APPLIED TO — "Load gross", Datatruck's own
+      // header and the word the PDF already prints. Freight is never called
+      // pay (owner's ruling, 2026-10-06).
       render: (row) => money(row.grossCents),
       foot: (rows) => money(sumCents(rows, (row) => row.grossCents)),
     },
@@ -786,9 +790,9 @@ export default async function SettlementPage({
             {/* THE FIGURES, ON THEIR OWN ROW AND SEPARATED BY A RULE. They are
              * what the page is for; the block above is who and when. */}
             <div className="mt-z3 flex flex-wrap items-baseline gap-x-z5 gap-y-z2 border-t border-border pt-z3">
-              <Fact label={t('workbench.totalPay')}>
-                {money(settlement.grossCents)}
-              </Fact>
+              {/* FREIGHT IS NEVER CALLED PAY (§6.2.2, 2026-10-06). Earnings is
+               * the driver's cut before deductions; the freight sum renders
+               * as Total gross in row 3 and Net pay beside it. */}
               <Fact label={t('workbench.earnings')}>
                 {money(settlement.earningsCents)}
               </Fact>
@@ -806,6 +810,14 @@ export default async function SettlementPage({
                 <span className="font-mono tabular-nums">
                   {settlement.loadLines.length}
                 </span>
+              </Fact>
+              {/* ROW 3 OPENS WITH THE FREIGHT SUM AND WHAT LANDS IN THE
+               * ACCOUNT — the two words the artefact prints there. */}
+              <Fact label={t('workbench.totalGross')}>
+                {money(settlement.grossCents)}
+              </Fact>
+              <Fact label={t('workbench.netPay')}>
+                {money(settlement.netCents)}
               </Fact>
               <Fact label={t('workbench.balances')}>
                 {money(

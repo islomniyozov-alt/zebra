@@ -220,7 +220,11 @@ describe('the header box carries every field §6.2.2 lists', () => {
     ['period', /settlements\.period/],
     ['driver type', /workbench\.driverType/],
     ['payment tariff', /settlements\.tariff/],
-    ['total pay', /workbench\.totalPay/],
+    // 'total pay' LEFT THIS LIST on 2026-10-06 with the ruling that freight is
+    // never called pay (§6.2.2): row 2 now opens with Earnings, and row 3
+    // renders Total gross and Net pay.
+    ['total gross', /workbench\.totalGross/],
+    ['net pay', /workbench\.netPay/],
     ['earnings', /workbench\.earnings/],
     ['other pay / reimbursements', /workbench\.otherPayReimbursements/],
     ['deductions / advances', /workbench\.deductionsAdvances/],

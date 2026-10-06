@@ -975,3 +975,35 @@ describe("the driver type is said in the office's word", () => {
     expect(statements).not.toMatch(/key: 'driverType',[^}]*filterable: true/)
   })
 })
+
+// ── FREIGHT IS NEVER CALLED PAY (§6.2.2, owner's ruling 2026-10-06) ─────────
+describe('the statement never calls freight "pay"', () => {
+  const page = readFileSync(
+    join('src', 'app', '(app)', 'settlements', '[id]', 'page.tsx'),
+    'utf8',
+  )
+  const words = readFileSync('src/lib/i18n.ts', 'utf8')
+
+  it('has no Total pay label left to come back under', () => {
+    // Removed from the words file, not just from the screen: a key that still
+    // exists is a label one import away from returning.
+    expect(words).not.toContain("'workbench.totalPay'")
+    expect(page).not.toContain('workbench.totalPay')
+  })
+
+  it("calls the trip's freight Load gross and keeps the column's stored key", () => {
+    expect(page).toMatch(
+      /key: 'totalPay',\s+header: t\('workbench.loadGross'\)/,
+    )
+  })
+
+  it('renders Earnings, Total gross and Net pay in the header', () => {
+    expect(page).toContain("t('workbench.earnings')")
+    expect(page).toMatch(
+      /workbench\.totalGross'\)\}>\s*\{money\(settlement\.grossCents\)\}/,
+    )
+    expect(page).toMatch(
+      /workbench\.netPay'\)\}>\s*\{money\(settlement\.netCents\)\}/,
+    )
+  })
+})
