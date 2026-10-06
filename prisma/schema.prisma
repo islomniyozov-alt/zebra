@@ -3108,7 +3108,17 @@ model Settlement {
   /// freeze the city and the load number for exactly that argument.
   ///
   /// Empty on a solo period.
-  teamWith String[]
+  /// `@default([])` DECLARED, migration 64 — reversing migration 63's drop.
+  ///
+  /// 63 dropped the database default on a premise written into its own comment:
+  /// "the application has always written both columns explicitly." It had not.
+  /// `settlements.ts` and every test fixture omit them, and Prisma sends NOTHING
+  /// for an omitted scalar list, so the database default was the contract. 23
+  /// integration tests failed with "Null constraint violation" on
+  /// `settlement.create` the first time the suite ran against 63. The database
+  /// was right and the schema did not say so — the same shape as the two indexes
+  /// 63 kept.
+  teamWith String[] @default([])
 
   /// The REFERRAL PAYEES in the second seat, printed as "Referral: X".
   ///
@@ -3123,7 +3133,7 @@ model Settlement {
   /// Deriving the label at render time by reading the driver's kind back would
   /// restate an already-paid statement the day somebody reclassifies a row —
   /// the exact argument the comment above makes for freezing `teamWith` at all.
-  referralWith String[]
+  referralWith String[] @default([])
 
   /// The payee as the statement printed it, FROZEN LIKE THE UNIT NUMBER.
   ///
