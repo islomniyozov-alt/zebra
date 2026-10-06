@@ -4,6 +4,7 @@ import { withOrg } from '@/lib/tenancy'
 import { createBroker } from '@/lib/brokers'
 import { LOAD_WRITE_TIMEOUT_MS, createLoad } from '@/lib/loads'
 import { openBatch, refreshDraft } from '@/lib/settlement-batch'
+import { previewBatch } from '@/lib/batch-preview'
 import {
   excludeTrips,
   includeTrips,
@@ -202,10 +203,57 @@ const grossOf = (batchId: string) =>
     .aggregate({ where: { batchId }, _sum: { grossCents: true } })
     .then((row) => row._sum.grossCents ?? 0)
 
+/**
+ * THE DRIVER'S SIDE OF THE SAME TRIPS — the batch's "load pay" (owner's ruling,
+ * 2026-10-05).
+ *
+ * Summed from `SettlementLoadLine.amountCents`, which is the per-trip figure the
+ * engine wrote, so this is the counterpart of the picker's own column rather than
+ * a second computation of it.
+ */
+const loadPayOf = (batchId: string) =>
+  owner.settlementLoadLine
+    .aggregate({
+      where: { settlement: { batchId } },
+      _sum: { amountCents: true },
+    })
+    .then((row) => row._sum.amountCents ?? 0)
+
 describe('the trips left ticked sum to the batch gross', () => {
   it('to the cent, with one trip unticked on the way in', async () => {
     const keep = [await trip({ cents: 120_000 }), await trip({ cents: 95_050 })]
     const drop = await trip({ cents: 77_077 })
+
+    // ── THE SCREEN'S OWN FIGURES AGAINST THE BATCH'S ──────────────────
+    //
+    // READ BEFORE THE BATCH IS OPENED, which is when the office reads it: once
+    // the batch exists these trips are `alreadyInBatch` and the available list
+    // is empty — the first run of this asserted 2 and got 0 for exactly that
+    // reason.
+    // READ BACK OUT OF `previewBatch`, not written as literals. The claim is
+    // "what the office ticked sums to what the batch pays", so one side has to be
+    // the PICKER's numbers — the first version of this compared the engine's
+    // output to arithmetic on the same engine's input, and `watch-guard` proved
+    // it by breaking the picker's pay column without failing anything.
+    const preview = await inOrg((tx) =>
+      previewBatch(tx, {
+        from: WEEK.start,
+        to: new Date(WEEK.end.getTime() + 86_399_999),
+        companyId,
+      }),
+    )
+    const ticked = preview.available.filter((row) => row.loadId !== drop)
+    expect(ticked.length).toBe(2)
+
+    const tickedGross = ticked.reduce((sum, row) => sum + row.grossCents, 0)
+    const tickedPay = ticked.reduce(
+      (sum, row) => sum + (row.loadPayCents ?? 0),
+      0,
+    )
+    // AND NEITHER SIDE IS ZERO, which is the way an agreement test passes while
+    // proving nothing.
+    expect(tickedGross).toBeGreaterThan(0)
+    expect(tickedPay).toBeGreaterThan(0)
 
     const opened = await inOrg((tx) =>
       openBatch(tx, {
@@ -220,8 +268,12 @@ describe('the trips left ticked sum to the batch gross', () => {
     expect(opened.ok).toBe(true)
     if (!opened.ok) return
 
-    // THE TWO NUMBERS, SIDE BY SIDE. This is the only place they meet.
-    expect(await grossOf(opened.batchId)).toBe(120_000 + 95_050)
+    expect(await grossOf(opened.batchId)).toBe(tickedGross)
+    expect(await loadPayOf(opened.batchId)).toBe(tickedPay)
+
+    // The literals too, so a preview and a batch that agreed on the WRONG figure
+    // would still be caught.
+    expect(tickedGross).toBe(120_000 + 95_050)
 
     // AND THE UNTICKED TRIP IS ON NOBODY'S STATEMENT — asserted separately,
     // because a gross that happened to match while the trip was also settled

@@ -131,6 +131,18 @@ export default async function OpenBatchPage({
     { timeoutMs: SETTLEMENT_BATCH_TIMEOUT_MS },
   )
 
+  // The four sentences the settlement screens already use for the four ways a
+  // pay rule can fail to produce a figure.
+  const PAY_PROBLEM: Record<
+    NonNullable<PreviewTrip['payProblem']>,
+    MessageKey
+  > = {
+    no_rule: 'settlements.error.noRule',
+    custom_unsupported: 'settlements.error.customUnsupported',
+    rule_incomplete: 'settlements.error.ruleIncomplete',
+    no_miles: 'settlements.error.noMiles',
+  }
+
   const money = (cents: number) => (
     <span className="font-mono tabular-nums">{formatCents(cents, locale)}</span>
   )
@@ -215,21 +227,45 @@ export default async function OpenBatchPage({
       foot: (rows) => money(sumCents(rows, (row) => row.grossCents)),
     },
     {
-      key: 'pickup',
-      header: t('loads.column.pickup'),
+      key: 'loadPay',
+      header: t('preview.loadPay'),
+      align: 'end',
       sortable: true,
-      render: (row) => (
-        <span className="font-mono text-xs" dir="ltr">
-          {row.pickupAt ? day(row.pickupAt) : '—'}
-        </span>
-      ),
+      // ── THE DRIVER'S CUT, OR WHY THERE ISN'T ONE ──────────────────────
+      //
+      // Owner's ruling 2026-10-05: "load pay" is the DRIVER's amount, not the
+      // gross. A row whose pay cannot be computed says so IN WORDS — not a dash,
+      // which would read as zero, and not a blank, which would read as nothing
+      // to see. The words are `settlements.error.*`, the same four sentences the
+      // settlement screens use for the same four failures, so the office reads
+      // one vocabulary rather than two.
+      render: (row) =>
+        row.loadPayCents === null ? (
+          <span className="text-xs text-warning">
+            {t(PAY_PROBLEM[row.payProblem ?? 'no_rule'])}
+          </span>
+        ) : (
+          money(row.loadPayCents)
+        ),
+      // THE FOOT SUMS WHAT CAN BE PAID, which is what the agreement test pins:
+      // a null is not a zero and must not be added as one.
+      foot: (rows) => money(sumCents(rows, (row) => row.loadPayCents ?? 0)),
     },
     {
-      key: 'delivery',
-      header: t('loads.column.delivery'),
+      key: 'dates',
+      // ── PICKUP AND DELIVERY IN ONE CELL, AND WHY ──────────────────────
+      //
+      // Adding load pay took the grid to ten and §7.1 caps it at nine, so one
+      // thing had to give. The two dates read as a SPAN — the same arrow idiom
+      // the locations cell already uses for the two places — which is the
+      // smallest loss available here: nothing is hidden and nothing is behind a
+      // control. The alternative was §7.1.4's chooser on a picker, where the
+      // column somebody hides could be the pay they are deciding on.
+      header: `${t('loads.column.pickup')} → ${t('loads.column.delivery')}`,
       sortable: true,
       render: (row) => (
         <span className="font-mono text-xs" dir="ltr">
+          {row.pickupAt ? day(row.pickupAt) : '—'} →{' '}
           {row.deliveredAt ? day(row.deliveredAt) : '—'}
         </span>
       ),
@@ -254,9 +290,12 @@ export default async function OpenBatchPage({
         payee: (row) => row.payeeName,
         driverType: (row) => row.driverType,
         status: (row) => row.status,
-        pickup: (row) => row.pickupAt?.getTime() ?? null,
-        delivery: (row) => row.deliveredAt?.getTime() ?? null,
+        dates: (row) => row.pickupAt?.getTime() ?? null,
         gross: (row) => row.grossCents,
+        // A NULL SORTS AS A NULL, not as zero: `gridView` puts them together at
+        // one end, which is where somebody looking for the unpriced rows wants
+        // them.
+        loadPay: (row) => row.loadPayCents,
       },
       defaultSort: 'loadNumber',
     },
@@ -367,6 +406,12 @@ export default async function OpenBatchPage({
             // AND EVERY ROW POSTS ITS ID REGARDLESS, so the action can compute
             // `shown` minus `ticked` without re-reading the window.
             alsoPost: 'shown',
+            // A TRIP NOBODY CAN PRICE IS NOT OFFERED (owner's ruling). It is
+            // shown, with the reason in words, and it posts NOTHING — so it is
+            // neither in the batch nor recorded as a decision to leave it out.
+            // Once the pay rule is fixed it joins on the next refresh, which an
+            // exclusion would have prevented forever.
+            offerFor: (row) => row.loadPayCents !== null,
           }}
           caption={t('preview.available')}
           sort={{

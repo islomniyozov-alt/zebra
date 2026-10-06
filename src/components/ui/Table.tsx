@@ -148,6 +148,17 @@ interface TableProps<Row> {
      * and the race impossible.
      */
     alsoPost?: string
+    /**
+     * Rows that are shown but not offered. Default: every row is offered.
+     *
+     * NO CHECKBOX AND NO HIDDEN INPUT, which is the important half. A row that
+     * posted its id without a tick would be read as a DECISION to leave it out —
+     * on §6.2.10's picker that writes an exclusion, and an exclusion is never
+     * un-done by a refresh, so a trip the system could not price today would stay
+     * out of the batch after somebody fixed the pay rule. Offering nothing leaves
+     * it pending instead, and it joins the moment it can be priced.
+     */
+    offerFor?: (row: Row) => boolean
   }
   /**
    * §7.1.2 — the sticky foot.
@@ -350,20 +361,24 @@ export function Table<Row>({
                     // swallow the click. A checkbox under the row's anchor
                     // would open the row instead of ticking.
                     <td className="relative z-10 w-[32px] px-z2">
-                      <input
-                        type="checkbox"
-                        name={selection.name}
-                        value={rowKey(row)}
-                        defaultChecked={selection.defaultChecked ?? false}
-                        aria-label={`${selection.label}: ${rowKey(row)}`}
-                        className="size-[14px] accent-[var(--color-accent)]"
-                      />
-                      {selection.alsoPost ? (
-                        <input
-                          type="hidden"
-                          name={selection.alsoPost}
-                          value={rowKey(row)}
-                        />
+                      {(selection.offerFor ?? (() => true))(row) ? (
+                        <>
+                          <input
+                            type="checkbox"
+                            name={selection.name}
+                            value={rowKey(row)}
+                            defaultChecked={selection.defaultChecked ?? false}
+                            aria-label={`${selection.label}: ${rowKey(row)}`}
+                            className="size-[14px] accent-[var(--color-accent)]"
+                          />
+                          {selection.alsoPost ? (
+                            <input
+                              type="hidden"
+                              name={selection.alsoPost}
+                              value={rowKey(row)}
+                            />
+                          ) : null}
+                        </>
                       ) : null}
                     </td>
                   ) : null}

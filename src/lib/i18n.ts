@@ -118,6 +118,7 @@ const en = {
   'preview.pod': 'POD',
   // §6.2.10 part 1 — the trip picker's own columns and controls.
   'preview.payee': 'Payee',
+  'preview.loadPay': 'Load pay',
   'preview.driverType': 'Driver type',
   'preview.locations': 'Locations',
   'preview.selectAll': 'Select all available',
@@ -2953,6 +2954,7 @@ const ru: Dictionary = {
   'preview.unavailable': 'Не войдут',
   'preview.pod': 'POD',
   'preview.payee': 'Получатель',
+  'preview.loadPay': 'Оплата рейса',
   'preview.driverType': 'Тип водителя',
   'preview.locations': 'Маршрут',
   'preview.selectAll': 'Выбрать все доступные',
@@ -5760,6 +5762,7 @@ const fa: Dictionary = {
   'preview.unavailable': 'واردنشدنی‌ها',
   'preview.pod': 'رسید تحویل',
   'preview.payee': 'دریافت‌کننده',
+  'preview.loadPay': 'پرداخت سفر',
   'preview.driverType': 'نوع راننده',
   'preview.locations': 'مسیر',
   'preview.selectAll': 'انتخاب همه موارد موجود',

@@ -1,6 +1,6 @@
 import type { Prisma } from '@/generated/prisma/client'
 import { SETTLEABLE_LOAD } from './settlements'
-import { ruleInForce } from './driver-pay'
+import { payFor, ruleInForce, type PayFailure } from './driver-pay'
 
 type TxClient = Prisma.TransactionClient
 
@@ -84,6 +84,29 @@ export interface PreviewTrip {
    * is the error this project has already made once, in `topDriversByGross`.
    */
   grossCents: number
+  /**
+   * THE DRIVER'S CUT FOR THIS TRIP, under the rule in force — the office's own
+   * "load pay" (owner's ruling, 2026-10-05).
+   *
+   * COMPUTED BY `payFor`, THE FUNCTION THAT WILL SETTLE IT. Not a percentage
+   * applied here: a second implementation of pay would agree with the engine
+   * until the day it did not, and the day it did not would be a Friday.
+   *
+   * NULL MEANS THE PAY CANNOT BE COMPUTED YET — a CUSTOM rule, or a percentage
+   * rule with no percentage on it. Those rows say so in words and cannot be
+   * ticked (§6.2.10): a trip whose pay nobody can state must not go into a batch
+   * on the strength of a blank cell.
+   */
+  loadPayCents: number | null
+  /**
+   * Why `loadPayCents` is null, for the words on the row.
+   *
+   * `PayFailure` ITSELF, not a hand-written copy of it. The first version listed
+   * three of the four and the compiler named the fourth — `no_miles`, a per-mile
+   * rule on a load nobody put miles on. A row saying "no rule" about that would
+   * send somebody to the wrong screen.
+   */
+  payProblem: PayFailure | null
   /** Null on an available trip; the bucket otherwise. */
   reason: UnavailableReason | null
 }
@@ -142,7 +165,17 @@ export async function previewBatch(
       operationalStatus: true,
       companyId: true,
       driverId: true,
+      // THE WHOLE MONEY SHAPE `payFor` TAKES. Six scalars rather than the one
+      // this query used to read, because a percentage rule works off the
+      // linehaul and a per-mile rule off the miles — deciding here which of them
+      // "really" matters would be this file knowing how pay rules work, which is
+      // the same argument the comment on `payRules` below already makes.
+      linehaulCents: true,
+      fuelSurchargeCents: true,
+      accessorialsCents: true,
       totalRevenueCents: true,
+      actualMiles: true,
+      dispatchedMiles: true,
       company: { select: { name: true } },
       driver: {
         select: {
@@ -241,6 +274,33 @@ export async function previewBatch(
       pickupAt: pickup?.scheduledAt ?? null,
       locations: ends.length === 0 ? null : ends.join(' → '),
       grossCents: load.totalRevenueCents,
+      // ── THE DRIVER'S CUT, FROM THE ENGINE ──────────────────────────────
+      //
+      // `input.to` is the date the rule is looked up on, which is the same date
+      // the `noRule` bucket below uses — one reading of "which rule applies", so
+      // the grid cannot offer a trip whose rule it then disagrees about.
+      ...(() => {
+        const rule = ruleInForce(load.driver?.payRules ?? [], input.to)
+        if (rule === null) {
+          return { loadPayCents: null, payProblem: 'no_rule' as const }
+        }
+        const pay = payFor(
+          {
+            id: load.id,
+            loadNumber: load.loadNumber,
+            linehaulCents: load.linehaulCents,
+            fuelSurchargeCents: load.fuelSurchargeCents,
+            accessorialsCents: load.accessorialsCents,
+            totalRevenueCents: load.totalRevenueCents,
+            actualMiles: load.actualMiles,
+            dispatchedMiles: load.dispatchedMiles,
+          },
+          rule,
+        )
+        return pay.ok
+          ? { loadPayCents: pay.amountCents, payProblem: null }
+          : { loadPayCents: null, payProblem: pay.reason }
+      })(),
       reason: null,
     }
 

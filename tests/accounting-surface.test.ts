@@ -730,6 +730,30 @@ describe('the open-batch flow', () => {
     expect(preview).toContain('podAt < input.from || podAt > input.to')
   })
 
+  it('offers no tick on a trip whose pay cannot be computed', () => {
+    // §6.2.10, owner's ruling 2026-10-05. The integration tests cover what the
+    // batch CONTAINS; this covers the one thing only the screen decides — whether
+    // a row can be ticked at all.
+    //
+    // AND THE REASON IT MATTERS IS THE EXCLUSION DESIGN. A row that posted its id
+    // without a tick would be recorded as a DECISION to leave the trip out, and
+    // exclusions are never undone by a refresh — so a trip nobody could price
+    // today would stay out of the batch after somebody fixed the pay rule.
+    // `offerFor` posts nothing for those rows, which leaves them pending.
+    expect(page).toMatch(
+      /^\s*offerFor: \(row\) => row\.loadPayCents !== null,$/m,
+    )
+  })
+
+  it('and says WHY in words rather than printing a dash', () => {
+    // A dash reads as zero on a money column and a blank reads as nothing to
+    // see. The four sentences are `settlements.error.*` — the vocabulary the
+    // settlement screens already use for the same four failures.
+    expect(page).toContain("no_rule: 'settlements.error.noRule'")
+    expect(page).toContain("no_miles: 'settlements.error.noMiles'")
+    expect(page).toContain('PAY_PROBLEM[row.payProblem')
+  })
+
   it('says WHICH authority the batch will settle, before the button is pressed', () => {
     // §6.2.10, 2026-10-05: the chip now scopes the BATCH and not only the grid,
     // so the sentence has to name what Create will settle. It used to say
