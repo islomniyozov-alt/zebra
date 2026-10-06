@@ -92,19 +92,10 @@ export async function transactionsInWindow(
       ? Prisma.empty
       : Prisma.sql`AND s."driverId" = ${window.driverId}`
 
-  // ONE STATEMENT FILTER, SPLICED INTO ALL THREE HALVES, so the three cannot
-  // disagree about which statements are in the window.
-  const statements = Prisma.sql`
-    FROM "Settlement" s
-    JOIN "Driver" d ON d."id" = s."driverId"
-    JOIN "Company" c ON c."id" = s."companyId"
-    WHERE s."status" <> 'VOID'
-      AND s."periodEnd" >= ${window.from}
-      AND s."periodEnd" <= ${window.to}
-      ${company}
-      ${driver}
-  `
-
+  // THE WINDOW IS RESTATED IN EACH OF THE THREE HALVES BELOW, on purpose: a
+  // tagged-template fragment cannot be spliced into three SELECTs without
+  // repeating its bind parameters anyway, and three visible copies are
+  // easier to check against each other than one hidden behind a name.
   const rows = await tx.$queryRaw<
     Array<{
       source: 'load' | 'line' | 'deduction'
@@ -195,12 +186,6 @@ export async function transactionsInWindow(
 
     ORDER BY "periodEnd" DESC, "settlementNumber" ASC, "sortOrder" ASC
   `
-
-  // `statements` is kept as the single definition of the window for the
-  // agreement reader below; the union above restates it per half because a CTE
-  // cannot be parameterised into three SELECTs through Prisma's tagged template
-  // without duplicating the bind parameters anyway.
-  void statements
 
   return rows.map(({ sortOrder: _order, ...row }) => row)
 }
