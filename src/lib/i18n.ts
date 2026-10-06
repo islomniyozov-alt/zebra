@@ -1246,6 +1246,8 @@ const en = {
   'loads.extractedRemembered':
     'From a past correction — the document says “{printed}”.',
   'loads.extractedChanged': 'You changed this — the document said “{was}”.',
+  'loads.rateTotalOnly':
+    'The rate confirmation prints a total of {total} and no line haul — type the line haul.',
   'loads.createOnMiss': 'Type a new name to create it.',
   'loads.placeHint': 'City, ST — or a facility name.',
   'loads.reference': 'Reference #',
@@ -4096,6 +4098,8 @@ const ru: Dictionary = {
   'loads.extractedRemembered':
     'Из прошлого исправления — в документе указано «{printed}».',
   'loads.extractedChanged': 'Вы изменили это — в документе было «{was}».',
+  'loads.rateTotalOnly':
+    'В подтверждении ставки указана только общая сумма {total}, без линейной ставки — введите линейную ставку.',
   'loads.createOnMiss': 'Введите новое название, чтобы создать его.',
   'loads.placeHint': 'Город, штат — или название площадки.',
   'loads.reference': 'Номер брокера',
@@ -6903,6 +6907,8 @@ const fa: Dictionary = {
   'loads.extractedRemembered':
     'از روی یک اصلاح پیشین — سند می‌گوید «{printed}».',
   'loads.extractedChanged': 'شما این را تغییر دادید — سند می‌گفت «{was}».',
+  'loads.rateTotalOnly':
+    'تأییدیهٔ نرخ فقط جمع کل {total} را چاپ کرده و خط حمل ندارد — خط حمل را وارد کنید.',
   'loads.createOnMiss': 'برای ساختن مورد تازه، نام آن را بنویسید.',
   'loads.placeHint': 'شهر، ایالت — یا نام محل.',
   'loads.reference': 'شمارهٔ مرجع',

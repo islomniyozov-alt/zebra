@@ -14,6 +14,12 @@ import {
   recordCorrections,
 } from '@/lib/correction-memory'
 import { createLoad, LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
+import { addAccessorial } from '@/lib/rates'
+import {
+  rateSplitFromMoney,
+  storedMoneyOf,
+  type RateSplit,
+} from '@/lib/rate-split'
 import { resolveBroker, resolveLocation } from '@/lib/locations'
 import { matchFacility, saveFacility } from '@/lib/facility-memory'
 import { DispatchConflictError } from '@/lib/dispatch'
@@ -256,6 +262,17 @@ export async function createLoadAction(
           ? await weightFromMint(tx, pendingUploadId)
           : null
 
+        // §7.6 — THE RATE FIELD IS THE LINE HAUL (owner's ruling 2026-10-06).
+        // The fuel surcharge and the accessorial lines come off the SERVER'S
+        // copy of the extraction, never the form, and only when its parts
+        // agree with its total; `rateSplitFromMoney` is that rule. A role
+        // with no rate field gets none of it (§1.3 keeps money off a
+        // dispatcher's save as it keeps it off their screen).
+        const split =
+          pendingUploadId && maySetRate
+            ? await splitFromMint(tx, pendingUploadId)
+            : null
+
         // The warnings still ask "when does this load start and end", which
         // is the first stop's date and the last stop's.
         const pickupAt = stopDate(stops[0]!.date, from)
@@ -289,7 +306,7 @@ export async function createLoadAction(
           throw new LoadWarningsError(warnings)
         }
 
-        return createLoad(
+        const created = await createLoad(
           tx,
           session.organizationId,
           {
@@ -314,6 +331,10 @@ export async function createLoadAction(
             // with no rate, which is what a dispatcher's load looks like
             // anyway. See PHASE-5-BRIEF.md §7 flag 6.
             linehaulCents,
+            // ITS OWN COLUMN, from the rate con's own line (§7.6). Absent
+            // where the extraction had no agreeing split, and the load keeps
+            // the schema default of zero.
+            ...(split ? { fuelSurchargeCents: split.fuelSurchargeCents } : {}),
             // SEQUENCE IS ARRAY ORDER — `writeStops` assigns it from the
             // index — and the TYPE is the one the form sent, never the one
             // the position implies. §6: "types read not assumed". A run of
@@ -334,6 +355,33 @@ export async function createLoadAction(
           },
           { byUserId: session.userId },
         )
+
+        // THE ACCESSORIAL LINES, ONE ROW EACH, IN THE SAME TRANSACTION AS THE
+        // LOAD (§7.6). `addAccessorial` is the writer the rate panel uses and
+        // it recomputes `accessorialsCents` and the billed total from the rows,
+        // so the load leaves this transaction with linehaul + fuel +
+        // accessorials equal to the rate con's own total, or it does not
+        // leave at all.
+        for (const line of split?.accessorials ?? []) {
+          const added = await addAccessorial(
+            tx,
+            session.organizationId,
+            created.id,
+            {
+              type: line.type,
+              amount: (line.amountCents / 100).toFixed(2),
+              isBillable: true,
+              notes: line.label,
+            },
+          )
+          if (!added.ok) {
+            throw new Error(
+              `accessorial from the rate con refused: ${added.reason}`,
+            )
+          }
+        }
+
+        return created
       },
       // See LOAD_WRITE_TIMEOUT_MS: a create sends ~31 statements, and Prisma's
       // 5s default is not enough when the round trip is long.
@@ -633,6 +681,23 @@ async function weightFromMint(
   const value = typeof raw === 'number' ? raw : Number(raw)
   if (!Number.isFinite(value) || value <= 0) return null
   return Math.floor(value)
+}
+
+/**
+ * The rate con's split — line haul, fuel, accessorial lines — off the mint's
+ * PARSED money (`extractedJson.money`, integer cents as `parse.ts` stored it),
+ * or null where there is none to take. The rule lives in `rate-split.ts` and
+ * is tested there; this only fetches the row.
+ */
+async function splitFromMint(
+  tx: Parameters<typeof resolveLocation>[0],
+  pendingUploadId: string,
+): Promise<RateSplit | null> {
+  const mint = await tx.pendingUpload.findFirst({
+    where: { id: pendingUploadId },
+    select: { extractedJson: true },
+  })
+  return rateSplitFromMoney(storedMoneyOf(mint?.extractedJson ?? null))
 }
 
 interface FormStop {

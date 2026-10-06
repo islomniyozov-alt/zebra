@@ -237,6 +237,7 @@ export default async function NewLoadPage({
             extractedUnsure: t('loads.extractedUnsure'),
             extractedRemembered: t('loads.extractedRemembered'),
             extractedChanged: t('loads.extractedChanged'),
+            rateTotalOnly: t('loads.rateTotalOnly'),
             preparing: t('upload.preparing'),
             uploading: t('upload.uploading'),
             uploaded: t('upload.done'),

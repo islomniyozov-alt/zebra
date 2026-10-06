@@ -119,6 +119,13 @@ const INSPECTION_READERS = [
   // prints the statements per row and stops: a PREVIEW, with the merge left to the
   // owner. Inside `BEGIN TRANSACTION READ ONLY` like its neighbour above.
   'duplicate-drivers.mjs',
+  // ADDED 2026-10-06, read-only. §7.6's ruling made the rate field the line
+  // haul and migration 68 backfills every hand-created load whose rate con
+  // carries an agreeing split; the owner's words for the rest were "listed in
+  // GAPS, not guessed". This is the list — NO_LINEHAUL, DISAGREES, STILL_TOTAL —
+  // and it is a SELECT inside `BEGIN TRANSACTION READ ONLY` like its
+  // neighbours, reaching production only through `--target=production`.
+  'rate-split-gaps.mjs',
   'inspect-relay-customer.mjs',
   // Counts loads that are finished, billable and attached to nobody, before
   // `isReady` learns to check assignment. SELECT only.

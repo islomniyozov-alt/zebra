@@ -109,6 +109,12 @@ export interface CreateLoadLabels {
   extractedRemembered: string
   /** Carries `{was}` — the value the document had before somebody changed it. */
   extractedChanged: string
+  /**
+   * Carries `{total}`. Shown under an EMPTY rate field when the rate con
+   * printed a total and no line haul (§7.6): the person types the line haul,
+   * and the total is there to type it from.
+   */
+  rateTotalOnly: string
   authority: string
   broker: string
   truck: string
@@ -946,7 +952,18 @@ export function CreateLoadForm({
           inputMode="decimal"
           value={rate}
           onChange={(event) => setRate(event.target.value)}
-          hint={hintFor('money.linehaul', undefined)}
+          // §7.6: a rate con that printed a total and no line haul leaves the
+          // field EMPTY and names the total here, so the person types the line
+          // haul from the paper rather than the form guessing it is the total.
+          hint={hintFor(
+            'money.linehaul',
+            (() => {
+              const total = prefill ? extractedTotalOnly(prefill) : null
+              return total
+                ? labels.rateTotalOnly.replace('{total}', total)
+                : undefined
+            })(),
+          )}
           className="font-mono"
         />
       ) : null}
@@ -1082,9 +1099,27 @@ function extractedMiles(prefill: Prefill | null): string | null {
   return String(Math.round(stated.value))
 }
 
+/**
+ * THE RATE FIELD IS THE LINE HAUL (§7.6, owner's ruling 2026-10-06). This read
+ * `money.total` until then, so fuel and detention became line haul and
+ * PERCENT_LINEHAUL paid on them — load 1177, $887.25 for a $735.00 week. The
+ * fuel surcharge and the accessorial lines take their own columns in the
+ * action, off the server's copy; a rate con that printed only a total prefills
+ * NOTHING here, and `extractedTotalOnly` puts the total in the hint instead.
+ */
 function extractedRate(prefill: Prefill): string | null {
-  const payout = fieldAt(prefill, 'money.total')
-  if (!payout || typeof payout.value !== 'string') return null
+  return moneyField(prefill, 'money.linehaul')
+}
+
+/** The printed total, for the hint under an empty rate field — and only then. */
+function extractedTotalOnly(prefill: Prefill): string | null {
+  if (moneyField(prefill, 'money.linehaul') !== null) return null
+  return moneyField(prefill, 'money.total')
+}
+
+function moneyField(prefill: Prefill, path: string): string | null {
+  const field = fieldAt(prefill, path)
+  if (!field || typeof field.value !== 'string') return null
 
   // Parsed and re-rendered through money.ts rather than passed along as the
   // model printed it. "$2,450.00" in a decimal input is a value the form would
@@ -1092,7 +1127,7 @@ function extractedRate(prefill: Prefill): string | null {
   // round-trips through the same parser the action will use, so what the user
   // sees is what will be saved or nothing is.
   try {
-    return centsToInput(parseMoneyToCents(payout.value))
+    return centsToInput(parseMoneyToCents(field.value))
   } catch {
     return null
   }
