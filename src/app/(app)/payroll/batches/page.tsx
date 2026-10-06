@@ -86,6 +86,9 @@ import type { StatusTone } from '@/lib/status'
 // compile, and `MessageKey` has to exist in the dictionary to type.
 const STATUS: Record<string, { tone: StatusTone; label: MessageKey }> = {
   DRAFT: { tone: 'neutral', label: 'batchStatus.DRAFT' },
+  // §6.2.10 part 3 — some statements final, some not. `warning`, as §3.3 reads
+  // it: attention, a batch somebody is in the middle of.
+  PARTIAL: { tone: 'warning', label: 'batchStatus.PARTIAL' },
   FINAL: { tone: 'progress', label: 'batchStatus.FINAL' },
   PAID: { tone: 'success', label: 'batchStatus.PAID' },
   APPROVED: { tone: 'progress', label: 'batchStatus.APPROVED' },

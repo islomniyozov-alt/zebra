@@ -4,6 +4,7 @@ import type {
   SettlementStatus,
   PaymentMethod,
 } from '@/generated/prisma/client'
+import { syncBatchStatus } from './batch-status'
 import type { TxClient } from './tenancy'
 import { lastFullWeekEnding } from './settings'
 import { allocateNumber } from './counters'
@@ -670,6 +671,7 @@ export async function approveSettlement(
     where: { id: settlementId, deletedAt: null },
     select: {
       id: true,
+      batchId: true,
       status: true,
       netCents: true,
       organizationId: true,
@@ -704,6 +706,11 @@ export async function approveSettlement(
       approvedAt: new Date(),
     },
   })
+  // THE BATCH FOLLOWS (§6.2.10 part 3): the last single approve is what
+  // finalises a batch, and the person who pressed it is who finalised it.
+  if (settlement.batchId) {
+    await syncBatchStatus(tx, settlement.batchId, userId)
+  }
   return { ok: true, status: 'APPROVED' }
 }
 
@@ -728,6 +735,7 @@ export async function markSettlementPaid(
     where: { id: settlementId, deletedAt: null },
     select: {
       id: true,
+      batchId: true,
       status: true,
       organizationId: true,
       settlementNumber: true,
@@ -755,6 +763,11 @@ export async function markSettlementPaid(
       paymentReference: reference,
     },
   })
+  // THE BATCH FOLLOWS (§6.2.10 part 3): all statements paid is a PAID batch,
+  // whichever button paid the last one.
+  if (settlement.batchId) {
+    await syncBatchStatus(tx, settlement.batchId, null)
+  }
   return { ok: true, status: 'PAID' }
 }
 

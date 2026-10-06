@@ -44,9 +44,11 @@ async function draftOrRefusal(tx: TxClient, batchId: string) {
   })
   if (!batch)
     return { ok: false as const, reason: { kind: 'not_found' as const } }
-  if (batch.status !== 'DRAFT') {
+  if (batch.status !== 'DRAFT' && batch.status !== 'PARTIAL') {
     // A FINAL or PAID batch is a document. Changing what is in it would rewrite
-    // what somebody was paid, which is the one thing FINAL means.
+    // what somebody was paid, which is the one thing FINAL means. PARTIAL is
+    // still open: an exclusion only ever affects the drafts, because a trip on
+    // an approved statement is not settleable and never re-enters the rebuild.
     return {
       ok: false as const,
       reason: { kind: 'not_draft' as const, status: batch.status },

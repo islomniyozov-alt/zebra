@@ -1,4 +1,5 @@
 import type { Prisma } from '@/generated/prisma/client'
+import { syncBatchStatus } from './batch-status'
 import { settleableInPeriod } from './settlements'
 import {
   allocateSeries,
@@ -880,9 +881,11 @@ export async function refreshDraft(
     where: { id: batchId, deletedAt: null },
   })
   if (!batch) return { ok: false, reason: { kind: 'not_found' } }
-  if (batch.status !== 'DRAFT') {
+  if (batch.status !== 'DRAFT' && batch.status !== 'PARTIAL') {
     // A FINAL batch is a document. Recomputing it would rewrite what somebody
-    // was paid, which is the one thing FINAL means.
+    // was paid, which is the one thing FINAL means. PARTIAL is still open:
+    // the drafts in it are recomputed and the approved statements are not
+    // touched — see the delete below.
     return { ok: false, reason: { kind: 'not_draft', status: batch.status } }
   }
 
@@ -900,7 +903,16 @@ export async function refreshDraft(
   //
   // Deleting first makes the read see the world as it would be with this
   // draft absent, which is exactly what recomputing it means.
-  await tx.settlement.deleteMany({ where: { batchId } })
+  //
+  // ── ONLY THE DRAFTS (§6.2.10 part 3) ──────────────────────────────────
+  //
+  // An approved statement is a document: it has its number and a person's name
+  // on the approval. Until 2026-10-06 this deleted EVERY statement on the batch,
+  // and the statements grid already let the office approve one at a time — so a
+  // refresh after a single approve would have destroyed a posted statement.
+  // Their trips stay out of the rebuild by the rule that already exists: a load
+  // carrying a settlement line is not settleable.
+  await tx.settlement.deleteMany({ where: { batchId, status: 'DRAFT' } })
 
   // ── THE SCOPE AND THE EXCLUSIONS COME OFF THE BATCH ───────────────────
   //
@@ -1018,6 +1030,10 @@ export async function refreshDraft(
     })
   }
 
+  // THE BATCH'S STATUS FOLLOWS ITS STATEMENTS, in this transaction. A refresh
+  // that rebuilt the drafts of a PARTIAL batch leaves it PARTIAL; one that found
+  // nothing left to draft leaves it where the approved statements put it.
+  await syncBatchStatus(tx, batchId, null)
   return { ok: true, result }
 }
 
@@ -1064,8 +1080,11 @@ export async function finaliseBatch(
     batch.batchNumber ??
     batchNumberOf(await allocateSeries(tx, batch.organizationId, BATCH_SERIES))
 
+  // ONLY THE STATEMENTS STILL IN DRAFT (§6.2.10 part 3). On a PARTIAL batch the
+  // approved ones already have their numbers and their approvals; minting them a
+  // second number would be two names for one document.
   const settlements = await tx.settlement.findMany({
-    where: { batchId },
+    where: { batchId, status: 'DRAFT' },
     orderBy: { createdAt: 'asc' },
     select: { id: true, driverId: true, deductionLines: true },
   })
@@ -1148,15 +1167,15 @@ export async function finaliseBatch(
     ])
   }
 
+  // THE NUMBER IS WRITTEN HERE; THE STATUS IS DERIVED, NOT SET. Every
+  // statement is now approved, so `syncBatchStatus` lands on FINAL and stamps
+  // when and who — the same stamp the last single approve would have written,
+  // from the same function, so the two paths cannot disagree.
   await tx.settlementBatch.update({
     where: { id: batchId },
-    data: {
-      status: 'FINAL',
-      batchNumber,
-      finalizedAt: new Date(),
-      finalizedByUserId: userId,
-    },
+    data: { batchNumber },
   })
+  await syncBatchStatus(tx, batchId, userId)
 
   return { ok: true, batchNumber }
 }
