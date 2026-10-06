@@ -958,21 +958,27 @@ describe("the driver type is said in the office's word", () => {
   })
 
   it('reads the word through the one key every other site uses', () => {
-    // `drivers.employment.<enum>` — the batch picker, the statement header, the
+    // `drivers.type.<enum>` — the batch picker, the statement header, the
     // record and this grid all build the same key, so there is no second
     // mapping to drift.
-    expect(statements).toContain('`drivers.employment.${row.driverType}`')
+    expect(statements).toContain('`drivers.type.${row.driverType}`')
     const record = readFileSync(
       join('src', 'app', '(app)', 'drivers', '[id]', 'page.tsx'),
       'utf8',
     )
-    expect(record).toContain('`drivers.employment.${driver.employmentType}`')
+    expect(record).toContain('`drivers.type.${driver.driverType}`')
   })
 
-  it('does not offer a funnel that would want the enum typed', () => {
-    // The funnel matches the STORED value. `OWNED` is not what anybody types
-    // for a company driver, so the column is sortable and nothing else.
-    expect(statements).not.toMatch(/key: 'driverType',[^}]*filterable: true/)
+  it('offers the funnel now that the enum has its name (migration 70)', () => {
+    // The funnel matches the STORED value, and since 70 the stored value is
+    // a word a person types — company, lease, owner. The shape's
+    // `columnFilters` carries the matching entry, which the pair check
+    // above enforces for every funnel-able column.
+    expect(statements).toMatch(/key: 'driverType',[^}]*filterable: true/)
+    const grids = readFileSync('src/lib/accounting-grids.ts', 'utf8')
+    expect(grids).toMatch(
+      /columnFilters: \{[^}]*driverType: \(row\) => row\.driverType/,
+    )
   })
 })
 

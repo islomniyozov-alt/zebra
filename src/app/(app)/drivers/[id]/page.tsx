@@ -368,7 +368,7 @@ export default async function EditDriverPage({
            * the name — not only inside the form below, where it is a select,
            * and a select is where you change a thing rather than read it. */}
           <span className="text-xs font-normal text-ink-3">
-            {t(`drivers.employment.${driver.employmentType}` as MessageKey)}
+            {t(`drivers.type.${driver.driverType}` as MessageKey)}
           </span>
         </h1>
         {/* OPERATIONAL, SO IT IS UNGATED. A dispatcher deciding who to
@@ -405,7 +405,7 @@ export default async function EditDriverPage({
             cdlClass: driver.cdlClass ?? '',
             hireDate: dateInputValue(driver.hireDate),
             status: driver.status,
-            employmentType: driver.employmentType,
+            driverType: driver.driverType,
             notes: driver.notes ?? '',
             assignedTruckId: driver.assignedTruckId ?? '',
             assignedTrailerId: driver.assignedTrailerId ?? '',

@@ -215,7 +215,7 @@ export default async function SettlementPage({
             firstName: true,
             lastName: true,
             email: true,
-            employmentType: true,
+            driverType: true,
           },
         },
         _count: { select: { documents: true } },
@@ -721,7 +721,7 @@ export default async function SettlementPage({
                 {t(
                   // THE FROZEN COPY, falling back to the live row only for a
                   // statement issued before migration 66 (§6.2.10 part 6).
-                  `drivers.employment.${settlement.driverType ?? settlement.driver.employmentType}` as MessageKey,
+                  `drivers.type.${settlement.driverType ?? settlement.driver.driverType}` as MessageKey,
                 )}
               </Fact>
               <Fact label={t('settlements.tariff')}>

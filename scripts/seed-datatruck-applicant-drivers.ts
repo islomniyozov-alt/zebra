@@ -360,7 +360,7 @@ async function main(): Promise<void> {
           // date invented here would be indistinguishable later from one
           // Datatruck actually recorded.
           status: 'INACTIVE',
-          employmentType: candidate.planned.employmentType,
+          driverType: candidate.planned.driverType,
           // THE INFERENCE, ON THE ROW ITSELF. Whoever opens this driver in six
           // months should not have to find this script to learn why they are
           // inactive with no end date.

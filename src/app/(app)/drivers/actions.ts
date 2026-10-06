@@ -7,7 +7,7 @@ import { getLocaleContext } from '@/lib/locale'
 import { createDriver, updateDriver } from '@/lib/fleet'
 import { rememberAuthority, toFormState } from '../_reference/shared'
 import type { RecordFormState } from '@/components/forms/RecordForm'
-import type { DriverStatus, OwnershipType } from '@/generated/prisma/client'
+import type { DriverStatus, DriverType } from '@/generated/prisma/client'
 
 function read(formData: FormData) {
   return {
@@ -28,8 +28,8 @@ function read(formData: FormData) {
     cdlClass: formData.get('cdlClass'),
     hireDate: formData.get('hireDate'),
     status: (formData.get('status') || undefined) as DriverStatus | undefined,
-    employmentType: (formData.get('employmentType') || undefined) as
-      | OwnershipType
+    driverType: (formData.get('driverType') || undefined) as
+      | DriverType
       | undefined,
     notes: formData.get('notes'),
     assignedTruckId: formData.get('assignedTruckId'),

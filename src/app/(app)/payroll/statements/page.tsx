@@ -247,7 +247,10 @@ export default async function StatementsPage({
       key: 'driverType',
       header: t('workbench.driverType'),
       sortable: true,
-      render: (row) => t(`drivers.employment.${row.driverType}` as MessageKey),
+      // FUNNEL-ABLE SINCE MIGRATION 70 (§6.2.10 part 6): the stored word is
+      // one a person types — company, lease, owner.
+      filterable: true,
+      render: (row) => t(`drivers.type.${row.driverType}` as MessageKey),
     },
     {
       key: 'period',

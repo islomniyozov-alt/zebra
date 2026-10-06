@@ -58,7 +58,7 @@ export interface PreviewTrip {
    */
   payeeName: string | null
   /**
-   * Company driver or owner-operator, from `Driver.employmentType`.
+   * Company driver or owner-operator, from `Driver.driverType`.
    *
    * THE SCREEN SHOWS IT BECAUSE THE PAY RULE USUALLY FOLLOWS IT, and a batch
    * with one owner-operator in the wrong week is the kind of mistake that is
@@ -184,7 +184,7 @@ export async function previewBatch(
           // THE PAYEE AND THE EMPLOYMENT, for the trip picker's columns
           // (§6.2.10). Two scalars on a relation this query already reads.
           payToName: true,
-          employmentType: true,
+          driverType: true,
           // THE WHOLE RULE, because `ruleInForce` takes a `PayRule` and
           // deciding here which of its fields it "really" needs would be this
           // file knowing how pay rules work.
@@ -266,7 +266,7 @@ export async function previewBatch(
         (load.driver
           ? `${load.driver.firstName} ${load.driver.lastName}`
           : null),
-      driverType: load.driver?.employmentType ?? null,
+      driverType: load.driver?.driverType ?? null,
       referenceNumber: load.referenceNumber,
       status: load.operationalStatus,
       podAt,

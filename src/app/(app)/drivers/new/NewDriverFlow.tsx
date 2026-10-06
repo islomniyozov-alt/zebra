@@ -324,7 +324,7 @@ export function NewDriverFlow({
           fields={[...shown, ...confirmFields]}
           values={{
             companyId,
-            employmentType: 'OWNED',
+            driverType: 'COMPANY_DRIVER',
             ...(read?.values ?? {}),
           }}
           action={createDriverAction}

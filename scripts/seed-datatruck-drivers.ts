@@ -379,10 +379,7 @@ function preview(
   // so the ones it overrules are listed here in full.
   const derivedCounts = new Map<string, number>()
   for (const d of planned) {
-    derivedCounts.set(
-      d.employmentType,
-      (derivedCounts.get(d.employmentType) ?? 0) + 1,
-    )
+    derivedCounts.set(d.driverType, (derivedCounts.get(d.driverType) ?? 0) + 1)
   }
   heading('PAY CLASS, DERIVED FROM THE TARIFF')
   for (const [type, n] of [...derivedCounts].sort()) {
@@ -391,7 +388,7 @@ function preview(
 
   const disagreeing = planned.filter((d) => {
     const declared = employmentFromColumn(d.declaredType)
-    return declared !== null && declared !== d.employmentType
+    return declared !== null && declared !== d.driverType
   })
   heading(
     `DERIVED TYPE DISAGREES WITH THE EXPORT'S COLUMN — ${disagreeing.length}`,
@@ -399,7 +396,7 @@ function preview(
   for (const d of disagreeing) {
     console.log(
       `  ${`${d.firstName} ${d.lastName}`.padEnd(28)} id=${d.externalId.padEnd(5)} ` +
-        `${String(d.payBps / 100).padStart(5)}%  column=${(d.declaredType ?? '').padEnd(15)} -> ${d.employmentType}`,
+        `${String(d.payBps / 100).padStart(5)}%  column=${(d.declaredType ?? '').padEnd(15)} -> ${d.driverType}`,
     )
   }
   console.log('')
@@ -484,7 +481,7 @@ async function write(
           // DERIVED FROM THE TARIFF, per the ruling — see
           // `employmentFromTariff`. The export's `Driver Type` column is a
           // payroll label and is recorded in the report, not written here.
-          employmentType: driver.employmentType,
+          driverType: driver.driverType,
           // STATUS IS NOT IMPORTED, same as the trucks. The export says 26
           // dispatched and 5 in_transit; Zebra's DriverStatus follows dispatch,
           // and a driver seeded DISPATCHED with no load is a board claiming
@@ -530,7 +527,7 @@ async function write(
 
     // ── THE DERIVED PAY CLASS, ON A ROW THAT PREDATES THE RULING ────────
     //
-    // The 54 dev rows were seeded before `employmentType` was derived, so they
+    // The 54 dev rows were seeded before `driverType` was derived, so they
     // all hold the schema default. Promoting them is the point of a re-run.
     //
     // ONLY FROM THE DEFAULT, THOUGH. If the stored value is anything else,
@@ -538,16 +535,16 @@ async function write(
     // editable per driver — and a seed that overwrote that would undo the
     // correction every time it ran. `--overwrite` is the deliberate way past.
     if (
-      row.employmentType !== driver.employmentType &&
-      (row.employmentType === 'OWNED' || OVERWRITE)
+      row.driverType !== driver.driverType &&
+      (row.driverType === 'COMPANY_DRIVER' || OVERWRITE)
     ) {
       await db.driver.update({
         where: { id: row.id },
-        data: { employmentType: driver.employmentType },
+        data: { driverType: driver.driverType },
       })
       promoted++
       console.log(
-        `  class    ${driver.firstName} ${driver.lastName}: ${row.employmentType} -> ${driver.employmentType} (${driver.payBps / 100}%)`,
+        `  class    ${driver.firstName} ${driver.lastName}: ${row.driverType} -> ${driver.driverType} (${driver.payBps / 100}%)`,
       )
     }
 

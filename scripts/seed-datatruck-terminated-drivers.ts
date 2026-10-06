@@ -279,7 +279,7 @@ async function main(): Promise<void> {
           // this is what keeps 69 people who left out of the dispatch board,
           // the create-load select and the load assignment picker.
           status: 'INACTIVE',
-          employmentType: row.planned.employmentType,
+          driverType: row.planned.driverType,
           ...(row.terminationIso
             ? {
                 terminationDate: new Date(

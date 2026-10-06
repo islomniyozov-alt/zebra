@@ -1,4 +1,4 @@
-import { Prisma, type OwnershipType } from '@/generated/prisma/client'
+import { Prisma, type DriverType } from '@/generated/prisma/client'
 import { companyScopeFilter } from './tenancy'
 import { listPayments, type PaymentRow } from './payments'
 import { listCharges, type ChargeRow } from './driver-deductions'
@@ -466,7 +466,7 @@ export interface StatementGridRow {
   driverId: string
   driverName: string
   /** §6.2.10 part 6 — frozen at generation since migration 66; live before it. */
-  driverType: OwnershipType
+  driverType: DriverType
   unitNumber: string | null
   periodStart: Date
   periodEnd: Date
@@ -523,7 +523,7 @@ export async function readStatements(
       driverId: true,
       driverType: true,
       driver: {
-        select: { firstName: true, lastName: true, employmentType: true },
+        select: { firstName: true, lastName: true, driverType: true },
       },
       // THE SETTLEMENT'S OWN PERIOD, not the batch's. They agree where both
       // exist — `generateSettlement` and `openBatch` both set it from the week —
@@ -594,7 +594,7 @@ export async function readStatements(
     driverId: row.driverId,
     driverName: `${row.driver.firstName} ${row.driver.lastName}`,
     // THE FROZEN COPY (migration 66); the live row only for older statements.
-    driverType: row.driverType ?? row.driver.employmentType,
+    driverType: row.driverType ?? row.driver.driverType,
     unitNumber: row.unitNumber,
     periodStart: row.periodStart,
     periodEnd: row.periodEnd,
@@ -616,9 +616,10 @@ export const statementShape: ListShape<StatementGridRow> = {
   dateOf: (row) => row.periodStart,
   sorts: {
     driver: (row) => row.driverName,
-    // SORTABLE, NOT FUNNEL-ABLE (§6.2.10 part 6): the funnel matches the
-    // stored value, and `OWNED` is not what anybody types for a company
-    // driver. It gets a funnel when the enum gets its name.
+    // SORTABLE, AND FUNNEL-ABLE SINCE MIGRATION 70 (§6.2.10 part 6): the
+    // funnel matches the stored value, and `COMPANY_DRIVER`, `LEASE_OPERATOR`
+    // and `OWNER_OPERATOR` are words somebody types — `company`, `lease`,
+    // `owner`. It was held back while the value was `OWNED`.
     driverType: (row) => row.driverType,
     period: (row) => row.periodStart.getTime(),
     unit: (row) => row.unitNumber,
@@ -633,6 +634,7 @@ export const statementShape: ListShape<StatementGridRow> = {
   columnFilters: {
     status: (row) => row.status,
     batch: (row) => row.batchNumber,
+    driverType: (row) => row.driverType,
   },
   defaultSort: 'period',
   defaultDir: 'desc',

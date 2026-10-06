@@ -781,6 +781,16 @@ enum OwnershipType {
   OWNER_OPERATOR
 }
 
+/// A person's type, said the way the industry says it about people
+/// (migration 70). Carried on `Driver.driverType`, frozen onto
+/// `Settlement.driverType` (66), and spelled the same way in
+/// `StandingCharge.appliesTo` (§6.2.4).
+enum DriverType {
+  COMPANY_DRIVER
+  LEASE_OPERATOR
+  OWNER_OPERATOR
+}
+
 // Not in the original spec, but trailer custody is exactly what the Amazon
 // Relay claim dispute turned on. Track it.
 model Trailer {
@@ -904,7 +914,10 @@ model Driver {
   hireDate        DateTime?
   terminationDate DateTime?
   status          DriverStatus  @default(AVAILABLE)
-  employmentType  OwnershipType @default(OWNED)
+  /// THE DRIVER'S OWN WORDS (migration 70). This was `employmentType`, an
+  /// `OwnershipType` — a truck's title on a person, with "company driver"
+  /// spelled OWNED. `OwnershipType` stays on trucks and trailers.
+  driverType      DriverType    @default(COMPANY_DRIVER)
 
   /// WHETHER THIS ROW IS A PERSON OR A REFERRAL PAYEE. `PERSON` | `PAYEE`.
   ///
@@ -3077,7 +3090,7 @@ model Settlement {
   /// Company driver or owner-operator as they WERE when this statement was
   /// made, beside the unit number and for the same reason. Null on statements
   /// issued before migration 66; readers fall back to the live driver row.
-  driverType OwnershipType?
+  driverType DriverType?
 
   approvedByUserId String?
   approvedBy       User?          @relation(fields: [approvedByUserId], references: [id])
@@ -4244,9 +4257,9 @@ model StandingCharge {
   amountCents Int
   cadence     DeductionCadence
 
-  /// Which drivers it reaches: `ALL`, or one `OwnershipType` value.
+  /// Which drivers it reaches: `ALL`, or one `DriverType` value.
   ///
-  /// A STRING CARRYING THE SAME VOCABULARY `Driver.employmentType` USES, so
+  /// A STRING CARRYING THE SAME VOCABULARY `Driver.driverType` USES, so
   /// the scope and the driver are compared in one currency rather than two.
   /// Not an enum, because `ALL` is not an ownership type and an enum holding
   /// both would be a type that means two things.

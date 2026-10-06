@@ -200,7 +200,7 @@ describe('what a driver IS, derived from what they are paid', () => {
   it('puts the two real populations on the right side', () => {
     // Every percentage in the export, by band.
     for (const bps of [300, 400, 3000, 3200, 3300, 3800, 5200, 5800, 6000]) {
-      expect(employmentFromTariff(bps), String(bps)).toBe('OWNED')
+      expect(employmentFromTariff(bps), String(bps)).toBe('COMPANY_DRIVER')
     }
     for (const bps of [8800, 8900, 9000]) {
       expect(employmentFromTariff(bps), String(bps)).toBe('OWNER_OPERATOR')
@@ -211,14 +211,14 @@ describe('what a driver IS, derived from what they are paid', () => {
     // A STATED THRESHOLD, NOT A CLUSTER FOUND IN THE DATA. 85% sits in the gap
     // between the two populations — nothing in the export is paid 61% to 87% —
     // so the boundary does not move when a new driver arrives at 80% or 92%.
-    expect(employmentFromTariff(8499)).toBe('OWNED')
+    expect(employmentFromTariff(8499)).toBe('COMPANY_DRIVER')
     expect(employmentFromTariff(8500)).toBe('OWNER_OPERATOR')
     expect(employmentFromTariff(8501)).toBe('OWNER_OPERATOR')
   })
 
   it('reads the export column onto the same axis, and refuses anything else', () => {
     expect(employmentFromColumn('company_owner')).toBe('OWNER_OPERATOR')
-    expect(employmentFromColumn('company_driver')).toBe('OWNED')
+    expect(employmentFromColumn('company_driver')).toBe('COMPANY_DRIVER')
     // null means "the column said something this rule has no opinion about",
     // which the report must treat as no disagreement rather than as a clash.
     for (const raw of ['', '   ', 'contractor', null, undefined]) {
@@ -249,7 +249,7 @@ describe('what a driver IS, derived from what they are paid', () => {
     // a person's wage — seeded exactly as printed, per the ruling. They must
     // not fall out on the owner-operator side of a threshold about wages.
     for (const bps of [300, 300, 400]) {
-      expect(employmentFromTariff(bps)).toBe('OWNED')
+      expect(employmentFromTariff(bps)).toBe('COMPANY_DRIVER')
     }
   })
 })
@@ -305,5 +305,43 @@ describe("the export's own test data", () => {
     ])
     expect(plan.planned).toHaveLength(1)
     expect(plan.planned[0]?.externalId).toBe('77')
+  })
+})
+
+// ── THE EXPORT'S COLUMN WINS; THE TARIFF DECIDES ONLY WHERE IT IS BLANK ─────
+//
+// Owner's instruction, 2026-10-06 (migration 70): compared per driver on dev,
+// the tariff threshold had inverted the office's own `Driver Type` for 56 of
+// 167 rows — a company driver paid 90% is what the office says he is.
+describe('the planned driver type', () => {
+  it('takes the export column first', () => {
+    const plan = planDrivers([
+      driverRow({
+        'Driver Type': 'company_driver',
+        'Driver tariff': '90% from gross',
+      }),
+    ])
+    expect(plan.planned[0]?.driverType).toBe('COMPANY_DRIVER')
+    const owner = planDrivers([
+      driverRow({
+        'Driver Type': 'company_owner',
+        'Driver tariff': '30% from gross',
+      }),
+    ])
+    expect(owner.planned[0]?.driverType).toBe('OWNER_OPERATOR')
+  })
+
+  it('falls back to the tariff only where the column is blank or unknown', () => {
+    const blank = planDrivers([
+      driverRow({ 'Driver tariff': '90% from gross' }),
+    ])
+    expect(blank.planned[0]?.driverType).toBe('OWNER_OPERATOR')
+    const odd = planDrivers([
+      driverRow({
+        'Driver Type': 'contractor',
+        'Driver tariff': '30% from gross',
+      }),
+    ])
+    expect(odd.planned[0]?.driverType).toBe('COMPANY_DRIVER')
   })
 })

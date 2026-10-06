@@ -378,9 +378,9 @@ export async function batchInputForOrg(
           // in `driverIds` by construction.
           kind: true,
           // WHICH STANDING CHARGES REACH THEM. `appliesTo` on a `StandingCharge`
-          // carries this same `OwnershipType` vocabulary, so the scope and the
+          // carries this same `DriverType` vocabulary, so the scope and the
           // driver are compared in one currency — see `standing-charges.ts`.
-          employmentType: true,
+          driverType: true,
           payToName: true,
           payToAddress: true,
           payoutLagWeeks: true,
@@ -529,7 +529,7 @@ export async function batchInputForOrg(
         exemptions: standing.exemptions,
         driver: {
           id: driver.id,
-          employmentType: driver.employmentType,
+          driverType: driver.driverType,
           hasFreight: mine.length > 0,
         },
       })
@@ -579,7 +579,7 @@ export async function batchInputForOrg(
 
       return {
         driverId: driver.id,
-        driverType: driver.employmentType,
+        driverType: driver.driverType,
         // AS THE STATEMENT PRINTS IT. "JERRY ROBERT MCKANE", first then last.
         driverName: `${driver.firstName} ${driver.lastName}`.trim(),
         unitNumber: driver.assignedTruck?.unitNumber ?? null,

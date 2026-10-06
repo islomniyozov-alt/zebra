@@ -87,13 +87,13 @@ const ERROR_KEYS: MessageKey[] = [
  * The scope in the office's words (§10).
  *
  * `OWNER_OPERATOR` is a column value and "Owner-operators" is what people say.
- * FOUR ENTRIES, because `Driver.employmentType` has three members and `ALL` is
+ * FOUR ENTRIES, because `Driver.driverType` has three members and `ALL` is
  * not one of them — see `standing-charges.ts` on why §6.2.4's two were one short.
  */
 const SCOPE_LABELS: Record<StandingScope, MessageKey> = {
   ALL: 'standing.scope.all',
-  OWNED: 'standing.scope.owned',
-  LEASED: 'standing.scope.leased',
+  COMPANY_DRIVER: 'standing.scope.owned',
+  LEASE_OPERATOR: 'standing.scope.leased',
   OWNER_OPERATOR: 'standing.scope.ownerOperator',
 }
 

@@ -414,7 +414,7 @@ export async function generateSettlement(
       companyId: true,
       firstName: true,
       lastName: true,
-      employmentType: true,
+      driverType: true,
     },
   })
   if (!driver) return { ok: false, reason: 'driver_not_found' }
@@ -512,7 +512,7 @@ export async function generateSettlement(
       status: 'DRAFT',
       // FROZEN AT GENERATION (§6.2.10 part 6, migration 66), as the batch
       // engine does.
-      driverType: driver.employmentType,
+      driverType: driver.driverType,
       grossCents,
       earningsCents,
       otherPayCents: 0,

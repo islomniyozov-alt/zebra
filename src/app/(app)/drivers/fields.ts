@@ -1,17 +1,22 @@
 import type { FieldSpec } from '@/components/forms/RecordForm'
 import type { SelectOption } from '@/components/ui/Select'
 import type { MessageKey, Translate } from '@/lib/i18n'
-import type { DriverStatus, OwnershipType } from '@/generated/prisma/client'
+import type { DriverStatus, DriverType } from '@/generated/prisma/client'
 import { ROSTER_STATUSES } from '@/lib/driver-roster'
-import { OWNERSHIP_TYPES } from '../trucks/fields'
 
 // A DRIVER IS NOT OWNED. The enum is shared with trucks and trailers, where
 // `OWNED` is the plain truth about a vehicle; on a person it read as
 // "Employment: Owned", which is what Daler stopped on. Same three values, said
 // the way the industry says them about people: a company driver, a lease
 // operator, an owner-operator.
-const employmentKey = (type: OwnershipType): MessageKey =>
-  `drivers.employment.${type}` as MessageKey
+// Migration 70 gave the column the same words, so the key is the value.
+export const DRIVER_TYPES: DriverType[] = [
+  'COMPANY_DRIVER',
+  'LEASE_OPERATOR',
+  'OWNER_OPERATOR',
+]
+const driverTypeKey = (type: DriverType): MessageKey =>
+  `drivers.type.${type}` as MessageKey
 
 // ── THE FORM OFFERS ROSTER VALUES ONLY (owner's ruling, 2026-09-21) ──
 //
@@ -120,11 +125,11 @@ export function driverFields(
     },
     {
       kind: 'select',
-      name: 'employmentType',
+      name: 'driverType',
       label: t('drivers.employment'),
-      options: OWNERSHIP_TYPES.map((type) => ({
+      options: DRIVER_TYPES.map((type) => ({
         value: type,
-        label: t(employmentKey(type)),
+        label: t(driverTypeKey(type)),
       })),
     },
     // THE PAY PERCENTAGE, ON CREATE ONLY — the field whose absence Daler named

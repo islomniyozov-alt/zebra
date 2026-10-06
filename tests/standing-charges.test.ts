@@ -39,31 +39,31 @@ const charge = (
 
 const driver = (over: Record<string, unknown> = {}) => ({
   id: 'd-1',
-  employmentType: 'OWNED',
+  driverType: 'COMPANY_DRIVER',
   hasFreight: true,
   ...over,
 })
 
 describe('the scope decides who a charge reaches', () => {
   it('ALL covers every ownership type', () => {
-    for (const type of ['OWNED', 'LEASED', 'OWNER_OPERATOR']) {
+    for (const type of ['COMPANY_DRIVER', 'LEASE_OPERATOR', 'OWNER_OPERATOR']) {
       expect(scopeCovers('ALL', type), type).toBe(true)
     }
   })
 
   it('a named scope covers only its own type', () => {
     expect(scopeCovers('OWNER_OPERATOR', 'OWNER_OPERATOR')).toBe(true)
-    expect(scopeCovers('OWNER_OPERATOR', 'OWNED')).toBe(false)
-    expect(scopeCovers('OWNED', 'LEASED')).toBe(false)
+    expect(scopeCovers('OWNER_OPERATOR', 'COMPANY_DRIVER')).toBe(false)
+    expect(scopeCovers('COMPANY_DRIVER', 'LEASE_OPERATOR')).toBe(false)
   })
 
   // THE SCOPE HAS FOUR VALUES AND §6.2.4 NAMED TWO. `LEASED` is the one it
   // left out, and a two-choice scope would have made it unreachable by
   // anything but ALL — which is the divergence flagged in PHASE-5-BRIEF §7.
   it('LEASED is a scope of its own, not a kind of company driver', () => {
-    expect(STANDING_SCOPES).toContain('LEASED')
-    expect(scopeCovers('OWNED', 'LEASED')).toBe(false)
-    expect(scopeCovers('LEASED', 'LEASED')).toBe(true)
+    expect(STANDING_SCOPES).toContain('LEASE_OPERATOR')
+    expect(scopeCovers('COMPANY_DRIVER', 'LEASE_OPERATOR')).toBe(false)
+    expect(scopeCovers('LEASE_OPERATOR', 'LEASE_OPERATOR')).toBe(true)
   })
 
   // AN UNRECOGNISED SCOPE MATCHES NOTHING. A typo in the column that decides

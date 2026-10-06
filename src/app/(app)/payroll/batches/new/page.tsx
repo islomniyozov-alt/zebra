@@ -188,14 +188,14 @@ export default async function OpenBatchPage({
       key: 'driverType',
       header: t('preview.driverType'),
       sortable: true,
-      // `drivers.employment.OWNED` is already "Company driver" and
+      // `drivers.type.COMPANY_DRIVER` is already "Company driver" and
       // `OWNER_OPERATOR` already "Owner-operator" — the vocabulary the driver
       // record uses, reused rather than reinvented here (§6.2.10 part 6).
       render: (row) =>
         row.driverType === null ? (
           <span className="text-ink-3">—</span>
         ) : (
-          t(`drivers.employment.${row.driverType}` as MessageKey)
+          t(`drivers.type.${row.driverType}` as MessageKey)
         ),
     },
     {

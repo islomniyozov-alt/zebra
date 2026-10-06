@@ -45,8 +45,9 @@ type TxClient = Prisma.TransactionClient
  * ── FOUR VALUES, AND §6.2.4 NAMES TWO ───────────────────────────────────
  *
  * The design system says "company drivers / owner-operators / all". The schema
- * says `Driver.employmentType` is an `OwnershipType`, which has THREE values:
- * `OWNED`, `LEASED` and `OWNER_OPERATOR`. A `LEASED` driver is neither a
+ * says `Driver.driverType` is a `DriverType` (migration 70; it was an
+ * `OwnershipType`), which has THREE values: `COMPANY_DRIVER`, `LEASE_OPERATOR`
+ * and `OWNER_OPERATOR`. A lease operator is neither a
  * company driver nor an owner-operator, so under a two-choice scope they would
  * be reachable by `ALL` and by nothing else — a charge aimed at company drivers
  * would silently skip them.
@@ -56,8 +57,8 @@ type TxClient = Prisma.TransactionClient
  */
 export const STANDING_SCOPES = [
   'ALL',
-  'OWNED',
-  'LEASED',
+  'COMPANY_DRIVER',
+  'LEASE_OPERATOR',
   'OWNER_OPERATOR',
 ] as const
 
@@ -74,7 +75,7 @@ export interface StandingChargeRule {
   description: string | null
   amountCents: number
   cadence: DeductionCadence
-  /** `ALL` or one `OwnershipType` value. A string — see `STANDING_SCOPES`. */
+  /** `ALL` or one `DriverType` value. A string — see `STANDING_SCOPES`. */
   appliesTo: string
   effectiveFrom: Date
   effectiveTo: Date | null
@@ -89,8 +90,8 @@ export interface StandingExemption {
 
 export interface StandingSubject {
   id: string
-  /** `Driver.employmentType`. */
-  employmentType: string
+  /** `Driver.driverType`. */
+  driverType: string
   /**
    * Whether this driver pulled anything in the period.
    *
@@ -103,17 +104,14 @@ export interface StandingSubject {
  * Does this charge's scope cover this driver?
  *
  * `ALL` covers everybody; anything else is an exact match against
- * `employmentType`. An UNRECOGNISED scope matches NOTHING rather than
+ * `driverType`. An UNRECOGNISED scope matches NOTHING rather than
  * everything — a typo in a column that decides who gets charged should under-
  * charge and be noticed, not over-charge and be discovered on a statement.
  */
-export function scopeCovers(
-  appliesTo: string,
-  employmentType: string,
-): boolean {
+export function scopeCovers(appliesTo: string, driverType: string): boolean {
   if (appliesTo === 'ALL') return true
   if (!isStandingScope(appliesTo)) return false
-  return appliesTo === employmentType
+  return appliesTo === driverType
 }
 
 /**
@@ -148,7 +146,7 @@ export function standingRulesFor(input: {
     .filter(
       (charge) =>
         !exempt.has(charge.id) &&
-        scopeCovers(charge.appliesTo, input.driver.employmentType),
+        scopeCovers(charge.appliesTo, input.driver.driverType),
     )
     .map((charge) => ({
       id: charge.id,

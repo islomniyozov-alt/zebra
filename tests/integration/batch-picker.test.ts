@@ -101,7 +101,7 @@ beforeAll(async () => {
         companyId: company,
         firstName: first,
         lastName: nonce.toUpperCase(),
-        employmentType: 'OWNER_OPERATOR',
+        driverType: 'OWNER_OPERATOR',
       },
     })
     // A PERCENTAGE RULE IN FORCE, or every trip lands in `noRule` and the test

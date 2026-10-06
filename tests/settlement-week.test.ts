@@ -278,7 +278,7 @@ function inputFor(fixture: StatementFixture): DriverSettlementInput {
     // the ruling and the six statements; the statements were right.
     payoutLagWeeks: 0,
     letterheadCompanyId: 'co-1',
-    driverType: 'OWNED',
+    driverType: 'COMPANY_DRIVER',
     checkDate: new Date(fixture.checkDate),
     openingBalances: {},
     priorThisYear: [],

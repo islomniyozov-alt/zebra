@@ -311,11 +311,13 @@ const AUTHORITY_BY_MC: Readonly<Record<string, string>> = {
 // wrong about somebody.
 const OWNER_OPERATOR_FLOOR_BPS = 8500
 
-export type DriverEmployment = 'OWNED' | 'OWNER_OPERATOR'
+export type DriverEmployment = 'COMPANY_DRIVER' | 'OWNER_OPERATOR'
 
-/** The pay class the percentage implies. `OWNED` is a company driver. */
+/** The pay class the percentage implies, in the driver's own words (migration 70). */
 export function employmentFromTariff(payBps: number): DriverEmployment {
-  return payBps >= OWNER_OPERATOR_FLOOR_BPS ? 'OWNER_OPERATOR' : 'OWNED'
+  return payBps >= OWNER_OPERATOR_FLOOR_BPS
+    ? 'OWNER_OPERATOR'
+    : 'COMPANY_DRIVER'
 }
 
 /** What the export's `Driver Type` column claims, mapped onto the same axis. */
@@ -324,7 +326,7 @@ export function employmentFromColumn(
 ): DriverEmployment | null {
   const value = (raw ?? '').trim().toLowerCase()
   if (value === 'company_owner') return 'OWNER_OPERATOR'
-  if (value === 'company_driver') return 'OWNED'
+  if (value === 'company_driver') return 'COMPANY_DRIVER'
   return null
 }
 
@@ -364,7 +366,7 @@ export interface PlannedDriver {
    * Falls back to the SCHEMA DEFAULT when there is no readable rate, because
    * this is a label and a label is not worth holding a row over.
    */
-  employmentType: DriverEmployment
+  driverType: DriverEmployment
   /** What `Driver Type` said, so the report can name every disagreement. */
   declaredType: string | null
   corrections: string[]
@@ -584,12 +586,18 @@ export function planDrivers(
       // value it has to handle, rather than a 0 that reads like a decision
       // somebody made.
       payBps: tariff.ok ? tariff.bps : null,
-      // SCHEMA DEFAULT WHEN THERE IS NOTHING TO DERIVE FROM. `OWNED` is what
-      // `Driver.employmentType` defaults to in the schema, so a row planned
+      // SCHEMA DEFAULT WHEN THERE IS NOTHING TO DERIVE FROM. `COMPANY_DRIVER` is
+      // what `Driver.driverType` defaults to in the schema, so a row planned
       // this way is indistinguishable from one created through the interface
       // without anybody stating a class — which is the honest outcome, since
       // nobody has.
-      employmentType: tariff.ok ? employmentFromTariff(tariff.bps) : 'OWNED',
+      // THE EXPORT'S OWN COLUMN FIRST (owner's instruction 2026-10-06, migration
+      // 70): compared per driver on dev, the tariff threshold had inverted the
+      // office's `Driver Type` for 56 of 167 rows. The tariff decides only
+      // where the column is blank.
+      driverType:
+        employmentFromColumn(text(record, 'Driver Type')) ??
+        (tariff.ok ? employmentFromTariff(tariff.bps) : 'COMPANY_DRIVER'),
       declaredType: text(record, 'Driver Type') || null,
       corrections,
     })

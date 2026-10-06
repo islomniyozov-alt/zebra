@@ -126,6 +126,13 @@ const INSPECTION_READERS = [
   // and it is a SELECT inside `BEGIN TRANSACTION READ ONLY` like its
   // neighbours, reaching production only through `--target=production`.
   'rate-split-gaps.mjs',
+  // ADDED 2026-10-06, read-only. Migration 70 seeds `driverType` from the
+  // Datatruck export per driver and falls back to the old column only where
+  // the export is silent; the owner's words for those were "lists the rest
+  // in GAPS". This is the list, reading the export's id list back out of the
+  // migration file so there is one source. A SELECT inside
+  // `BEGIN TRANSACTION READ ONLY`, reaching production only through --target.
+  'driver-type-gaps.mjs',
   'inspect-relay-customer.mjs',
   // Counts loads that are finished, billable and attached to nobody, before
   // `isReady` learns to check assignment. SELECT only.

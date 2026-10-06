@@ -165,11 +165,9 @@ export async function checkConfirm(page, manual) {
   }
 
   const employment = await page
-    .locator('select[name="employmentType"] option')
+    .locator('select[name="driverType"] option')
     .evaluateAll((nodes) => nodes.map((n) => n.textContent?.trim()))
-  console.log(
-    `\n  employmentType options: ${employment.join(' | ') || '(none)'}`,
-  )
+  console.log(`\n  driverType options: ${employment.join(' | ') || '(none)'}`)
 
   return ok
 }

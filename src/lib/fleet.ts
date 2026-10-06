@@ -9,6 +9,7 @@ import {
 } from './asset-transfer'
 import type {
   DriverStatus,
+  DriverType,
   OwnershipType,
   TruckStatus,
 } from '@/generated/prisma/client'
@@ -109,7 +110,7 @@ export interface DriverInput {
   cdlClass?: unknown
   hireDate?: unknown
   status?: DriverStatus
-  employmentType?: OwnershipType
+  driverType?: DriverType
   notes?: unknown
   /** The truck this driver runs. Must be under the same authority. */
   assignedTruckId?: unknown
@@ -614,7 +615,7 @@ export async function createDriver(
       // second screen can all reach this function, and only one of them has
       // a dropdown. See src/lib/driver-roster.ts.
       status: assertRosterStatus(input.status) ?? ACTIVE_ROSTER,
-      employmentType: input.employmentType ?? 'OWNED',
+      driverType: input.driverType ?? 'COMPANY_DRIVER',
       notes: optionalText(input.notes),
       assignedTruckId: await pairedTruck(tx, companyId, input.assignedTruckId),
       assignedTrailerId: await pairedTrailer(
@@ -723,7 +724,7 @@ export async function updateDriver(
       cdlClass: optionalText(input.cdlClass),
       hireDate: dateOnly(input.hireDate, 'hireDate'),
       ...(input.status ? { status: assertRosterStatus(input.status) } : {}),
-      ...(input.employmentType ? { employmentType: input.employmentType } : {}),
+      ...(input.driverType ? { driverType: input.driverType } : {}),
       notes: optionalText(input.notes),
       assignedTruckId,
       assignedTrailerId,
