@@ -5,6 +5,7 @@ import {
 } from '@/lib/auth-context'
 import { can } from '@/lib/permissions'
 import { transactionsInWindow } from '@/lib/transactions-report'
+import { salaryByDriverWeek } from '@/lib/by-company'
 import { DEFAULT_PERIOD, isPeriodKey, periodWindow } from '@/lib/rolling-period'
 import { companyIdScopeFilter, companyScopeFilter } from '@/lib/tenancy'
 import {
@@ -526,30 +527,43 @@ export async function GET(request: Request): Promise<Response> {
             )
           }
           case 'reports.driver': {
-            // Reports' by-driver cut is `driverTotals`, which takes a window
-            // rather than a row filter — it is exported through the statements
-            // reader instead, so the CSV is the rows somebody could see.
-            const rows = applyList(
-              await readStatements(tx, scope),
-              params,
-              statementShape,
-            )
+            // §6.2.10 part 5. The salary report takes a WINDOW, not a row
+            // filter, so the CSV rebuilds the window the way the screen does —
+            // the same `period` key through the same `periodWindow` — and
+            // exports the same reader's rows. Until 2026-10-06 this case sent
+            // the statements list instead, which was not the grid on screen.
+            const period =
+              typeof raw.period === 'string' && isPeriodKey(raw.period)
+                ? raw.period
+                : DEFAULT_PERIOD
+            const { from, to } = periodWindow(period, new Date())
+            const rows = await salaryByDriverWeek(tx, {
+              from,
+              to,
+              companyId: typeof raw.company === 'string' ? raw.company : null,
+            })
             return toCsv(
               [
                 'driver',
-                'period_start',
+                'authority',
+                'week_start',
+                'week_end',
+                'statements',
                 'gross',
                 'deductions',
+                'other_pay',
                 'net',
-                'status',
               ],
               rows.map((row) => [
                 row.driverName,
+                row.companyName,
                 csvDay(row.periodStart),
+                csvDay(row.periodEnd),
+                String(row.statements),
                 csvMoney(row.grossCents),
                 csvMoney(row.deductionsCents),
+                csvMoney(row.otherPayCents),
                 csvMoney(row.netCents),
-                row.status,
               ]),
             )
           }

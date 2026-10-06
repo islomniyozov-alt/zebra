@@ -13,7 +13,7 @@ import {
 import { agingSums } from '@/lib/factoring'
 import {
   driverPayByCompany,
-  driverTotals,
+  salaryByDriverWeek,
   firstSettledPeriodStart,
   grossByCompany,
 } from '@/lib/by-company'
@@ -144,9 +144,14 @@ await runInOrg(
         run: () => firstSettledPeriodStart(tx),
       },
       {
-        name: 'driverTotals (the driver cut)',
+        name: 'salaryByDriverWeek (the driver cut)',
         who: ['driver'],
-        run: () => driverTotals(tx, { from: window.from, to: window.to }),
+        run: () =>
+          salaryByDriverWeek(tx, {
+            from: window.from,
+            to: window.to,
+            companyId: null,
+          }),
       },
     ]
 

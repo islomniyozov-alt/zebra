@@ -412,7 +412,7 @@ const en = {
   'reports.gross': 'Gross',
   'reports.atRate': 'At rate',
   'reports.afterDriverPay': 'After driver pay',
-  'reports.weeksPaid': 'Weeks paid',
+  'reports.otherPay': 'Other pay',
   'reports.noneSettled':
     'Zebra has not finalised a batch yet, so driver pay is unknown for every period below.',
   'reports.emptyPeriods': 'No freight in this window',
@@ -3259,7 +3259,7 @@ const ru: Dictionary = {
   'reports.gross': 'Выручка',
   'reports.atRate': 'По ставке',
   'reports.afterDriverPay': 'После выплат водителям',
-  'reports.weeksPaid': 'Недель выплачено',
+  'reports.otherPay': 'Прочие выплаты',
   'reports.noneSettled':
     'Zebra ещё не утвердила ни одной партии, поэтому выплаты водителям неизвестны за все периоды ниже.',
   'reports.emptyPeriods': 'Нет грузов за этот период',
@@ -6078,7 +6078,7 @@ const fa: Dictionary = {
   'reports.gross': 'درآمد کل',
   'reports.atRate': 'بر پایهٔ نرخ',
   'reports.afterDriverPay': 'پس از پرداخت راننده',
-  'reports.weeksPaid': 'هفته‌های پرداختی',
+  'reports.otherPay': 'سایر پرداخت‌ها',
   'reports.noneSettled':
     'زبرا هنوز هیچ دسته‌ای را نهایی نکرده است، بنابراین پرداخت راننده برای همهٔ دوره‌های زیر نامعلوم است.',
   'reports.emptyPeriods': 'در این بازه باری نیست',

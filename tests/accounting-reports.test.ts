@@ -57,12 +57,16 @@ describe('netPayByDriverWeek', () => {
     // fifty, which is the shape flag 31 is about.
     expect(sent).toHaveLength(1)
     expect(sent[0]).toContain('"Settlement"')
-    // FINAL AND PAID ONLY — a draft is recomputed on every refresh.
+    // ISSUED STATEMENTS ONLY — APPROVED or PAID, the STATEMENT's own status
+    // (§6.2.10 part 5; until 2026-10-06 this read the batch's FINAL/PAID, which
+    // hid approved statements on a PARTIAL batch). A draft is recomputed on
+    // every refresh.
     //
     // THE SQL LITERAL, not the bare word: the statement's own comment explains
     // why a DRAFT is excluded, and `not.toContain('DRAFT')` failed on the
     // explanation rather than on a predicate.
-    expect(sent[0]).toContain("'FINAL', 'PAID'")
+    expect(sent[0]).toContain("'APPROVED', 'PAID'")
+    expect(sent[0]).not.toContain('"SettlementBatch"')
     expect(sent[0]).not.toContain("'DRAFT'")
   })
 

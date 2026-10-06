@@ -7,10 +7,10 @@ import { SETTLEMENT_BATCH_TIMEOUT_MS } from '@/lib/settlement-batch'
 import {
   assembleReport,
   driverPayByCompany,
-  driverTotals,
+  salaryByDriverWeek,
   firstSettledPeriodStart,
   grossByCompany,
-  type DriverTotalRow,
+  type SalaryRow,
   type Grouping,
 } from '@/lib/by-company'
 import {
@@ -98,11 +98,15 @@ const TRANSACTION_COLUMNS: readonly string[] = [
   'amount',
 ]
 
+// §6.2.10 part 5: seven, within §7.1's cap. Other pay is shown so that the
+// three money columns beside it ARE an equation.
 const DRIVER_COLUMNS: readonly string[] = [
   'driver',
-  'weeks',
+  'authority',
+  'week',
   'gross',
   'deductions',
+  'otherPay',
   'net',
 ]
 
@@ -208,7 +212,11 @@ export default async function ReportsPage({
         return {
           kind: 'driver' as const,
           charts,
-          rows: await driverTotals(tx, { from, to }),
+          rows: await salaryByDriverWeek(tx, {
+            from,
+            to,
+            companyId: companyParam,
+          }),
           columns: await readGridColumns(
             tx,
             session.userId,
@@ -668,24 +676,26 @@ export default async function ReportsPage({
     )
   }
   if (data.kind === 'driver') {
-    const shape: ListShape<DriverTotalRow> = {
-      searchText: (row) => row.driverName,
+    const shape: ListShape<SalaryRow> = {
+      searchText: (row) => `${row.driverName} ${row.companyName}`,
       sorts: {
         driver: (row) => row.driverName,
-        weeks: (row) => row.weeks,
+        authority: (row) => row.companyName,
+        week: (row) => row.periodStart.getTime(),
         gross: (row) => row.grossCents,
         deductions: (row) => row.deductionsCents,
+        otherPay: (row) => row.otherPayCents,
         net: (row) => row.netCents,
       },
-      defaultSort: 'net',
+      defaultSort: 'week',
       defaultDir: 'desc',
     }
-    // THE FULL GRID CONTRACT ON THE ONE CUT THAT IS A LIST (§7.1.3). The other
-    // two are a matrix — periods down, authorities across — and `Table` renders
-    // one row per record, so they carry the range and nothing else.
+    // THE FULL GRID CONTRACT ON THE CUTS THAT ARE LISTS (§7.1.3). Company and
+    // week are a matrix — periods down, authorities across — and `Table`
+    // renders one row per record, so they carry the range and nothing else.
     const view = gridView(data.rows, raw, shape, applyList)
 
-    const columns: Column<DriverTotalRow>[] = [
+    const columns: Column<SalaryRow>[] = [
       {
         key: 'driver',
         header: t('payroll.driver'),
@@ -693,17 +703,18 @@ export default async function ReportsPage({
         render: (row) => row.driverName,
       },
       {
-        key: 'weeks',
-        header: t('reports.weeksPaid'),
-        align: 'end',
+        key: 'authority',
+        header: t('accounting.company'),
+        truncate: true,
+        sortable: true,
+        render: (row) => row.companyName,
+      },
+      {
+        key: 'week',
+        header: t('reports.week'),
         sortable: true,
         render: (row) => (
-          <span className="font-mono tabular-nums">{row.weeks}</span>
-        ),
-        foot: (shown) => (
-          <span className="font-mono tabular-nums">
-            {sumCents(shown, (row) => row.weeks)}
-          </span>
+          <span className="font-mono tabular-nums">{day(row.periodStart)}</span>
         ),
       },
       {
@@ -721,6 +732,14 @@ export default async function ReportsPage({
         sortable: true,
         render: (row) => money(row.deductionsCents),
         foot: (shown) => money(sumCents(shown, (row) => row.deductionsCents)),
+      },
+      {
+        key: 'otherPay',
+        header: t('reports.otherPay'),
+        align: 'end',
+        sortable: true,
+        render: (row) => money(row.otherPayCents),
+        foot: (shown) => money(sumCents(shown, (row) => row.otherPayCents)),
       },
       {
         key: 'net',
@@ -762,7 +781,9 @@ export default async function ReportsPage({
           columns={keepColumns(columns, data.columns)}
           rows={view.paged.rows}
           footRows={view.filtered}
-          rowKey={(row) => row.driverId}
+          rowKey={(row) =>
+            `${row.driverId}:${row.companyId}:${day(row.periodStart)}`
+          }
           rowHref={(row) => `/drivers/${row.driverId}`}
           caption={t('reports.byDriver')}
           sort={{

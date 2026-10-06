@@ -430,27 +430,76 @@ export function assembleReport(input: {
 // back at 4,427ms. `by-company.test.ts` breaks on a version that groups here.
 // ---------------------------------------------------------------------------
 
-export interface DriverTotalRow {
+export interface SalaryRow {
   driverId: string
   driverName: string
-  /** How many settlements in the window — the weeks they were paid for. */
-  weeks: number
+  companyId: string
+  companyName: string
+  /** The settlement week — the statement's own `periodStart`, a Sunday. */
+  periodStart: Date
+  periodEnd: Date
+  /** Statements folded into the row: one, unless a week was settled twice. */
+  statements: number
+  /** The driver's gross pay — the Earnings total, not the linehaul. */
   grossCents: number
+  /** Negative: the ledger's sign, as every line table stores it. */
   deductionsCents: number
+  /** Reimbursements and other pay added back — so the three are an equation. */
   otherPayCents: number
   netCents: number
 }
 
-export async function driverTotals(
+/**
+ * THE SALARY REPORT (§6.2.10 part 5): one row per driver per settlement week
+ * per authority — gross, deductions, other pay, net — read off the statements
+ * and summed in SQL like the two readers above it.
+ *
+ * COUNTED BY THE STATEMENT'S STATUS, NOT THE BATCH'S. The reader this replaces
+ * (`driverTotals`) joined through `SettlementBatch` and took FINAL and PAID,
+ * which was the same rule while a batch was either all draft or all final.
+ * §6.2.10 part 3 made PARTIAL real: a half-posted week carries APPROVED
+ * statements that are already somebody's pay, and a batch-keyed rule hid them
+ * until the last statement posted. A DRAFT still contributes nothing — it is
+ * recomputed on every refresh.
+ *
+ * TWO ENGINES FILL THE HEADER DIFFERENTLY, AND THE CASE BELOW IS THE COST.
+ * The batch engine writes `earningsCents` for the driver's pay, `otherPayCents`
+ * for everything added back and a NEGATIVE `deductionsCents`; `grossCents` on
+ * its rows is the linehaul the percentage was taken of. The single-statement
+ * engine (`refreshTotals`) writes the driver's pay into `grossCents`, the
+ * add-backs into `reimbursementsCents` and a POSITIVE `deductionsCents`, and
+ * never touches the other three. The old join hid this by leaving every
+ * single-engine statement out. `batchId IS NULL` names the engine, because
+ * only the batch engine ever sets it. Measured, not assumed:
+ * `settlement-week.ts` line 780 and `settlements.ts` line 626. Unifying the
+ * columns is a GAPS.md item; until then this is the one place the two are
+ * reconciled, and the agreement test holds gross + other + deductions = net
+ * on every row, which fails the moment the CASE picks a wrong column.
+ *
+ * A REMOVED DRIVER'S WEEKS STAY. This is what was paid, and a total that shrank
+ * when a driver left would be a total nobody could reconcile to the bank.
+ *
+ * THE WINDOW IS THE STATEMENT'S `periodEnd`, the way part 4's transactions
+ * report counts it, so the two cuts of one screen agree on which weeks are in.
+ */
+export async function salaryByDriverWeek(
   tx: TxClient,
-  input: { from: Date; to: Date },
-): Promise<DriverTotalRow[]> {
+  input: { from: Date; to: Date; companyId: string | null },
+): Promise<SalaryRow[]> {
+  const company =
+    input.companyId === null
+      ? Prisma.empty
+      : Prisma.sql`AND st."companyId" = ${input.companyId}`
   const rows = await tx.$queryRaw<
     {
       driver_id: string
       first_name: string
       last_name: string
-      weeks: bigint
+      company_id: string
+      company_name: string
+      period_start: Date
+      period_end: Date
+      statements: bigint
       gross: bigint
       deductions: bigint
       other_pay: bigint
@@ -458,30 +507,42 @@ export async function driverTotals(
     }[]
   >`
     SELECT
-      d."id"                          AS driver_id,
-      d."firstName"                   AS first_name,
-      d."lastName"                    AS last_name,
-      COUNT(*)::bigint                AS weeks,
-      SUM(st."earningsCents")::bigint AS gross,
-      SUM(st."deductionsCents")::bigint AS deductions,
-      SUM(st."otherPayCents")::bigint AS other_pay,
-      SUM(st."netCents")::bigint      AS net
+      d."id"            AS driver_id,
+      d."firstName"     AS first_name,
+      d."lastName"      AS last_name,
+      c."id"            AS company_id,
+      c."name"          AS company_name,
+      st."periodStart"  AS period_start,
+      st."periodEnd"    AS period_end,
+      COUNT(*)::bigint  AS statements,
+      SUM(CASE WHEN st."batchId" IS NULL THEN st."grossCents"
+               ELSE st."earningsCents" END)::bigint          AS gross,
+      SUM(CASE WHEN st."batchId" IS NULL THEN -st."deductionsCents"
+               ELSE st."deductionsCents" END)::bigint        AS deductions,
+      SUM(CASE WHEN st."batchId" IS NULL THEN st."reimbursementsCents"
+               ELSE st."otherPayCents" END)::bigint          AS other_pay,
+      SUM(st."netCents")::bigint                             AS net
     FROM "Settlement" st
-    JOIN "SettlementBatch" b ON b."id" = st."batchId"
     JOIN "Driver" d ON d."id" = st."driverId"
-    WHERE b."status" IN ('FINAL', 'PAID')
-      AND b."deletedAt" IS NULL
-      AND d."deletedAt" IS NULL
-      AND b."periodStart" >= ${input.from}
-      AND b."periodStart" < ${input.to}
-    GROUP BY d."id", d."firstName", d."lastName"
-    ORDER BY d."lastName", d."firstName"
+    JOIN "Company" c ON c."id" = st."companyId"
+    WHERE st."status" IN ('APPROVED', 'PAID')
+      AND st."deletedAt" IS NULL
+      AND st."periodEnd" >= ${input.from}
+      AND st."periodEnd" <= ${input.to}
+      ${company}
+    GROUP BY d."id", d."firstName", d."lastName", c."id", c."name",
+             st."periodStart", st."periodEnd"
+    ORDER BY st."periodStart" DESC, d."lastName", d."firstName", c."name"
   `
 
   return rows.map((row) => ({
     driverId: row.driver_id,
     driverName: `${row.first_name} ${row.last_name}`,
-    weeks: Number(row.weeks),
+    companyId: row.company_id,
+    companyName: row.company_name,
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    statements: Number(row.statements),
     grossCents: Number(row.gross),
     deductionsCents: Number(row.deductions),
     otherPayCents: Number(row.other_pay),

@@ -627,13 +627,14 @@ export async function netPayByDriverWeek(
            ${bucketExprSql(Prisma.sql`s."periodStart"`, 'week')} AS week_start,
            COALESCE(SUM(s."netCents"), 0)::bigint AS net
     FROM "Settlement" s
-    JOIN "SettlementBatch" b ON b."id" = s."batchId"
     WHERE s."deletedAt" IS NULL
-      AND b."deletedAt" IS NULL
-      -- FINAL AND PAID ONLY, the same rule driverTotals applies: a DRAFT is
-      -- recomputed on every refresh, so a shape drawn from one changes under the
-      -- reader between two readings of the same screen.
-      AND b."status" IN ('FINAL', 'PAID')
+      -- ISSUED STATEMENTS ONLY — APPROVED or PAID — the rule the salary report
+      -- applies (§6.2.10 part 5): a DRAFT is recomputed on every refresh, so a
+      -- shape drawn from one changes under the reader between two readings of
+      -- the same screen. Keyed on the STATEMENT and not its batch, because a
+      -- PARTIAL batch carries approved statements that are already pay, and a
+      -- workbench statement has no batch at all.
+      AND s."status" IN ('APPROVED', 'PAID')
       AND s."driverId" = ANY(${[...driverIds]})
       AND s."periodStart" >= ${from}
     GROUP BY 1, 2

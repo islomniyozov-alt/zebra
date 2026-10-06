@@ -110,6 +110,15 @@ beforeAll(async () => {
             driverId: pay.driverId,
             batchId: batch.id,
             settlementNumber: `PR-${nonce}-${String(seq)}`,
+            // THE STATUS THE BATCH IS DERIVED FROM (§6.2.10 part 3). A FINAL
+            // batch over DRAFT statements is a state the engine can no longer
+            // produce, and the sparkline now reads the statement.
+            status:
+              spec.status === 'DRAFT'
+                ? 'DRAFT'
+                : spec.status === 'FINAL'
+                  ? 'APPROVED'
+                  : 'PAID',
             periodStart: spec.week,
             periodEnd: end,
             grossCents: pay.gross,

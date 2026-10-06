@@ -140,10 +140,11 @@ describe('the numbers', () => {
 describe('where the grouping happens', () => {
   const source = readFileSync('src/lib/by-company.ts', 'utf8')
 
-  // THREE SINCE 2026-09-28, not two: `driverTotals` is Reports' by-driver cut
-  // (§6.2) and it aggregates settlements the same way, so it is under the same
-  // rule and counted by the same instrument. The number is the number of
-  // aggregate queries in this file, and a fourth has to come and say so here.
+  // THREE SINCE 2026-09-28, not two: `salaryByDriverWeek` (which replaced
+  // `driverTotals` on 2026-10-06, §6.2.10 part 5) is Reports' by-driver cut
+  // and it aggregates settlements the same way, so it is under the same rule
+  // and counted by the same instrument. The number is the number of aggregate
+  // queries in this file, and a fourth has to come and say so here.
   it('groups every aggregate in SQL', () => {
     expect(source.match(/GROUP BY/g) ?? []).toHaveLength(3)
   })
