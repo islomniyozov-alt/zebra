@@ -300,6 +300,9 @@ describe('the salary report, against the statements', () => {
     // charge is negative, the single driver's bonus is above zero in gross.
     expect(sum(batchDriverId, (row) => row.deductionsCents)).toBeLessThan(0)
     expect(sum(singleDriverId, (row) => row.deductionsCents)).toBe(0)
-    expect(sum(singleDriverId, (row) => row.grossCents)).toBe(45_000 + 5_000)
+    // THE BONUS IS OTHER PAY, NOT GROSS (§6.2.2, migration 67): 30% of the
+    // $1,500.00 linehaul under earnings, the $50.00 put on by hand beside it.
+    expect(sum(singleDriverId, (row) => row.grossCents)).toBe(45_000)
+    expect(sum(singleDriverId, (row) => row.otherPayCents)).toBe(5_000)
   })
 })

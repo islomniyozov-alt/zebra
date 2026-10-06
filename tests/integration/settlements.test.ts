@@ -433,7 +433,7 @@ describe('generating the week', () => {
 
     // 30% of ($2,830.00 + $1,900.00) = 30% of $4,730.00 = $1,419.00.
     // Per load: 84900 and 57000, which sum to 141900.
-    expect(outcome.grossCents).toBe(141900)
+    expect(outcome.earningsCents).toBe(141900)
     expect(outcome.loadCount).toBe(2)
     expect(outcome.settlementNumber).toMatch(/^STL-\d+$/)
 
@@ -555,7 +555,7 @@ describe('deductions, approval and payment', () => {
     expect(load).toBeTruthy()
 
     // 30% of $3,000.00 = $900.00.
-    expect(outcome.grossCents).toBe(90000)
+    expect(outcome.earningsCents).toBe(90000)
 
     // POSITIVE as typed, negative once stored.
     const deduction = await inOrg((tx) =>
@@ -580,6 +580,8 @@ describe('deductions, approval and payment', () => {
       where: { id: settlementId },
       select: {
         grossCents: true,
+        earningsCents: true,
+        otherPayCents: true,
         deductionsCents: true,
         reimbursementsCents: true,
         netCents: true,
@@ -589,12 +591,16 @@ describe('deductions, approval and payment', () => {
         },
       },
     })
-    // The LINE is negative; the deductions COLUMN is positive. 90000 + 12000
-    // - 25000 = 77000.
+    // THE LINE AND THE COLUMN AGREE ON THE SIGN (§6.2.2, migration 67): a
+    // deduction is negative wherever it is stored. Gross is the FREIGHT the 30%
+    // was taken of — $3,000.00 — and the driver's cut sits under earnings.
+    // 90000 + 12000 - 25000 = 77000.
     expect(stored?.lines[0]?.amountCents).toBe(-25000)
     expect(stored).toMatchObject({
-      grossCents: 90000,
-      deductionsCents: 25000,
+      grossCents: 300000,
+      earningsCents: 90000,
+      otherPayCents: 12000,
+      deductionsCents: -25000,
       reimbursementsCents: 12000,
       netCents: 77000,
     })
@@ -721,7 +727,7 @@ describe('a raise does not rewrite what was already paid', () => {
     const first = await inOrg((tx) =>
       generateSettlement(tx, organizationId, { driverId, ...period, labels }),
     )
-    expect(first).toMatchObject({ ok: true, grossCents: 60000 })
+    expect(first).toMatchObject({ ok: true, earningsCents: 60000 })
     if (!first.ok) return
 
     // The driver gets a raise, effective the following January. The rule in
@@ -747,9 +753,10 @@ describe('a raise does not rewrite what was already paid', () => {
     // The old settlement is untouched by a rule it never referenced.
     const untouched = await owner.settlement.findUnique({
       where: { id: first.settlementId },
-      select: { grossCents: true },
+      // EARNINGS, the driver's cut — `grossCents` is the freight since 67.
+      select: { earningsCents: true },
     })
-    expect(untouched?.grossCents).toBe(60000)
+    expect(untouched?.earningsCents).toBe(60000)
 
     // And REGENERATING the same week reproduces it exactly, because the rule
     // in force in October is still the 30% one.
@@ -757,7 +764,7 @@ describe('a raise does not rewrite what was already paid', () => {
     const second = await inOrg((tx) =>
       generateSettlement(tx, organizationId, { driverId, ...period, labels }),
     )
-    expect(second).toMatchObject({ ok: true, grossCents: 60000 })
+    expect(second).toMatchObject({ ok: true, earningsCents: 60000 })
     if (!second.ok) return
     expect(second.settlementId).not.toBe(first.settlementId)
     expect(load).toBeTruthy()
@@ -903,7 +910,7 @@ describe('§7: a mixed-rule week, and Relay revenue', () => {
     )
     // 1240 x $0.58 = $719.20 and 860 x $0.58 = $498.80, so $1,218.00 —
     // per-mile, NOT the 32% of linehaul that December's rule would give.
-    expect(first).toMatchObject({ ok: true, grossCents: 121800 })
+    expect(first).toMatchObject({ ok: true, earningsCents: 121800 })
     if (!first.ok) return
 
     const before = await renderFor(first.settlementId)
@@ -949,7 +956,7 @@ describe('§7: a mixed-rule week, and Relay revenue', () => {
         labels,
       }),
     )
-    expect(second).toMatchObject({ ok: true, grossCents: 121800 })
+    expect(second).toMatchObject({ ok: true, earningsCents: 121800 })
     if (!second.ok) return
     expect(second.settlementId).not.toBe(first.settlementId)
 
@@ -993,7 +1000,7 @@ describe('§7: a mixed-rule week, and Relay revenue', () => {
         labels,
       }),
     )
-    expect(third).toMatchObject({ ok: true, grossCents: 157500 })
+    expect(third).toMatchObject({ ok: true, earningsCents: 157500 })
   }, 300_000)
 
   it('pays a Relay load in the settlement it never invoices', async () => {
@@ -1062,7 +1069,7 @@ describe('§7: a mixed-rule week, and Relay revenue', () => {
         labels,
       }),
     )
-    expect(outcome).toMatchObject({ ok: true, grossCents: 45000 })
+    expect(outcome).toMatchObject({ ok: true, earningsCents: 45000 })
     if (!outcome.ok) return
 
     const line = await owner.settlementLine.findFirst({

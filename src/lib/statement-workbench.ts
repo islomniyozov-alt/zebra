@@ -2,6 +2,12 @@ import type { Prisma } from '@/generated/prisma/client'
 import { batchInputForOrg } from './settlement-batch'
 import { grossFor, type HeldReason } from './settlement-week'
 import { refreshTotals } from './settlements'
+import {
+  payFor,
+  ruleInForce,
+  type PayRule,
+  type PaySnapshot,
+} from './driver-pay'
 
 type TxClient = Prisma.TransactionClient
 
@@ -120,6 +126,12 @@ export type AddTripsFailure =
   | 'not_draft'
   | 'no_loads'
   | 'already_settled'
+  /**
+   * No rule in force on the delivery date, or one the engine cannot apply.
+   * Refused WHOLE, the way `generateSettlement` refuses — a trip added at the
+   * freight because nobody could price it is a cheque for a hundred percent.
+   */
+  | 'no_pay_rule'
 
 export type AddTripsResult =
   | { ok: true; added: number }
@@ -134,18 +146,24 @@ export type AddTripsResult =
  * and §7 freezes it. Adding freight to one after the fact would change a figure
  * on paper without changing the paper.
  *
- * ── THE TRIP LINE AND THE PAY LINE ARE WRITTEN TOGETHER ───────────────────
+ * ── ONE ROW PER TRIP, PRICED (§6.2.2, migration 67) ───────────────────────
  *
- * `SettlementLoadLine` is the frozen snapshot the statement prints; the
- * `SettlementLine` of type LOAD_PAY is what the driver is actually paid for it.
- * Writing one without the other is how a statement comes to show a trip that
- * pays nothing, or pay with no trip behind it — both of which are arguments in
- * front of a driver.
+ * A trip added here is a `SettlementLoadLine` — freight under `grossCents`,
+ * the driver's cut under `amountCents`, the rule frozen beside it — and
+ * nothing else. Until 67 this ALSO wrote a `SettlementLine` of type LOAD_PAY,
+ * and wrote the FREIGHT as the pay on both rows, with a comment deferring the
+ * pricing to `Recalculate`. `Recalculate` re-adds and does not re-price
+ * (`recalculateAction` says so in its own words), so a trip added by hand was a
+ * cheque for a hundred percent of the freight until somebody noticed. Nobody
+ * had done it to a real statement — 0 of 6 workbench statements on dev carried
+ * a load line — and it is closed before anybody does.
  *
- * WHAT THIS DOES NOT DO IS PRICE THE LOAD. `amountCents` is left at the gross
- * for a held load and at the engine's figure otherwise, and `Recalculate` is
- * what applies the pay rule. Pricing here would be a third place that knows how
- * a driver is paid.
+ * THE PRICE IS `payFor` UNDER THE RULE IN FORCE WHEN THE LOAD RAN, the same
+ * lookup `generateSettlement` makes. A load the rule cannot price refuses the
+ * whole add, the way generation refuses: a short cheque with no explanation on
+ * it is worse than a refusal that names the load.
+ *
+ * `refreshTotals` then reads both tables, so the header counts this trip once.
  */
 export async function addTripsToSettlement(
   tx: TxClient,
@@ -184,6 +202,65 @@ export async function addTripsToSettlement(
     return { ok: false, reason: 'already_settled' }
   }
 
+  // ── PRICED BEFORE ANYTHING IS WRITTEN ────────────────────────────────────
+  //
+  // The driver's rules, read once; the loads, read for the fields `payFor`
+  // needs and for the POD date the rule is looked up on — the same lookup
+  // `generateSettlement` makes, so a trip added by hand is paid exactly what a
+  // generated one would have been.
+  const rules: PayRule[] = await tx.driverPayRule.findMany({
+    where: { driverId: settlement.driverId },
+    select: {
+      id: true,
+      type: true,
+      percentBps: true,
+      perMileCents: true,
+      flatCents: true,
+      effectiveFrom: true,
+      effectiveTo: true,
+    },
+  })
+  const payable = await tx.load.findMany({
+    where: { id: { in: [...loadIds] } },
+    select: {
+      id: true,
+      loadNumber: true,
+      linehaulCents: true,
+      fuelSurchargeCents: true,
+      accessorialsCents: true,
+      totalRevenueCents: true,
+      actualMiles: true,
+      dispatchedMiles: true,
+      statusEvents: {
+        where: {
+          axis: 'OPERATIONAL',
+          toStatus: 'POD_RECEIVED',
+          outcome: 'APPLIED',
+        },
+        orderBy: { occurredAt: 'asc' },
+        take: 1,
+        select: { occurredAt: true },
+      },
+    },
+  })
+  const priced = new Map<
+    string,
+    { amountCents: number; snapshot: PaySnapshot }
+  >()
+  for (const load of payable) {
+    const rule = ruleInForce(
+      rules,
+      load.statusEvents[0]?.occurredAt ?? settlement.periodEnd,
+    )
+    const result = payFor(load, rule)
+    // WHOLE, not the rest: see the header.
+    if (!result.ok) return { ok: false, reason: 'no_pay_rule' }
+    priced.set(load.id, {
+      amountCents: result.amountCents,
+      snapshot: result.snapshot,
+    })
+  }
+
   const existing = await tx.settlementLoadLine.count({
     where: { settlementId },
   })
@@ -191,6 +268,8 @@ export async function addTripsToSettlement(
 
   for (const id of loadIds) {
     const trip = byId.get(id)!
+    const pay = priced.get(id)
+    if (!pay) return { ok: false, reason: 'already_settled' }
     await tx.settlementLoadLine.create({
       data: {
         settlementId,
@@ -207,23 +286,14 @@ export async function addTripsToSettlement(
         delPlace: trip.delPlace,
         puDate: trip.puDate,
         delDate: trip.delDate,
+        // THE FREIGHT, as the engine would settle it, and THE CUT, as the rule
+        // prices it — two different numbers, which is the whole of 67.
         grossCents: trip.grossCents,
         milesHundredths: trip.milesHundredths,
-        amountCents: trip.grossCents,
+        amountCents: pay.amountCents,
+        payRuleSnapshot: pay.snapshot as unknown as Prisma.InputJsonValue,
         settledBasis: trip.held === null ? 'rate' : 'held_added',
         sortOrder: sortOrder++,
-      },
-    })
-
-    await tx.settlementLine.create({
-      data: {
-        settlementId,
-        organizationId: settlement.organizationId,
-        type: 'LOAD_PAY',
-        description: `${trip.loadNumber} ${trip.puPlace} → ${trip.delPlace}`,
-        amountCents: trip.grossCents,
-        loadId: trip.loadId,
-        sortOrder: sortOrder,
       },
     })
   }

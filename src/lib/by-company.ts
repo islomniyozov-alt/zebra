@@ -462,19 +462,16 @@ export interface SalaryRow {
  * until the last statement posted. A DRAFT still contributes nothing — it is
  * recomputed on every refresh.
  *
- * TWO ENGINES FILL THE HEADER DIFFERENTLY, AND THE CASE BELOW IS THE COST.
- * The batch engine writes `earningsCents` for the driver's pay, `otherPayCents`
- * for everything added back and a NEGATIVE `deductionsCents`; `grossCents` on
- * its rows is the linehaul the percentage was taken of. The single-statement
- * engine (`refreshTotals`) writes the driver's pay into `grossCents`, the
- * add-backs into `reimbursementsCents` and a POSITIVE `deductionsCents`, and
- * never touches the other three. The old join hid this by leaving every
- * single-engine statement out. `batchId IS NULL` names the engine, because
- * only the batch engine ever sets it. Measured, not assumed:
- * `settlement-week.ts` line 780 and `settlements.ts` line 626. Unifying the
- * columns is a GAPS.md item; until then this is the one place the two are
- * reconciled, and the agreement test holds gross + other + deductions = net
- * on every row, which fails the moment the CASE picks a wrong column.
+ * ONE SET OF COLUMNS, SINCE MIGRATION 67. Both engines now write the header
+ * the same way (§6.2.2, "the header's columns, both engines"): `earningsCents`
+ * the driver's cut, `otherPayCents` everything added back, `deductionsCents`
+ * NEGATIVE, `grossCents` the freight the percentage was taken of. Until 67 the
+ * workbench engine wrote the pay into `grossCents`, the add-backs into
+ * `reimbursementsCents` and a positive `deductionsCents`, and this query
+ * carried a CASE on `batchId` to read the two at once; 67 rewrote those
+ * headers and the CASE went with it. The agreement test still holds
+ * gross + other + deductions = net on every row, which is what would fail if
+ * either engine drifted from the rule again.
  *
  * A REMOVED DRIVER'S WEEKS STAY. This is what was paid, and a total that shrank
  * when a driver left would be a total nobody could reconcile to the bank.
@@ -515,13 +512,10 @@ export async function salaryByDriverWeek(
       st."periodStart"  AS period_start,
       st."periodEnd"    AS period_end,
       COUNT(*)::bigint  AS statements,
-      SUM(CASE WHEN st."batchId" IS NULL THEN st."grossCents"
-               ELSE st."earningsCents" END)::bigint          AS gross,
-      SUM(CASE WHEN st."batchId" IS NULL THEN -st."deductionsCents"
-               ELSE st."deductionsCents" END)::bigint        AS deductions,
-      SUM(CASE WHEN st."batchId" IS NULL THEN st."reimbursementsCents"
-               ELSE st."otherPayCents" END)::bigint          AS other_pay,
-      SUM(st."netCents")::bigint                             AS net
+      SUM(st."earningsCents")::bigint   AS gross,
+      SUM(st."deductionsCents")::bigint AS deductions,
+      SUM(st."otherPayCents")::bigint   AS other_pay,
+      SUM(st."netCents")::bigint        AS net
     FROM "Settlement" st
     JOIN "Driver" d ON d."id" = st."driverId"
     JOIN "Company" c ON c."id" = st."companyId"

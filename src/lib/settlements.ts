@@ -221,6 +221,10 @@ export function settleableWhere(
     // `SettlementLine` carries no driver of its own — it hangs off the
     // settlement, and the settlement is whose it is.
     settlementLines: { none: { settlement: { driverId } } },
+    // AND NOT PLACED ON A STATEMENT BY HAND EITHER (migration 67). A trip added
+    // through the workbench is a `SettlementLoadLine` that carries the driver
+    // itself, and since 67 it has no `LOAD_PAY` twin for the line above to see.
+    settlementLoadLines: { none: { driverId } },
   }
 }
 
@@ -321,7 +325,12 @@ export interface GenerateOutcome {
   ok: true
   settlementId: string
   settlementNumber: string
-  grossCents: number
+  /**
+   * The driver's cut — `Settlement.earningsCents`. This was `grossCents` until
+   * migration 67, when the column of that name became the FREIGHT on every
+   * statement (§6.2.2, "the header's columns, both engines").
+   */
+  earningsCents: number
   netCents: number
   loadCount: number
 }
@@ -431,7 +440,16 @@ export async function generateSettlement(
     }
   }
 
-  const grossCents = lines.reduce((sum, line) => sum + line.amountCents, 0)
+  // THE HEADER, BY THE ONE RULE BOTH ENGINES WRITE (§6.2.2, migration 67):
+  // `grossCents` is the FREIGHT the percentage was taken of, `earningsCents`
+  // the driver's cut. Nothing else is on a freshly generated statement, so the
+  // net is the earnings. Every load priced above is in `loads` — a refusal
+  // returned before this line — so the two sums run over the same trips.
+  const earningsCents = lines.reduce((sum, line) => sum + line.amountCents, 0)
+  const grossCents = loads.reduce(
+    (sum, load) => sum + load.totalRevenueCents,
+    0,
+  )
 
   // --- short write ----------------------------------------------------------
   // From here to commit the counter row is held. Nothing above happens inside
@@ -453,9 +471,12 @@ export async function generateSettlement(
       // engine does.
       driverType: driver.employmentType,
       grossCents,
-      deductionsCents: 0,
+      earningsCents,
+      otherPayCents: 0,
       reimbursementsCents: 0,
-      netCents: grossCents,
+      deductionsCents: 0,
+      advancesCents: 0,
+      netCents: earningsCents,
       lines: {
         create: lines.map((line, index) => ({
           organizationId,
@@ -479,8 +500,8 @@ export async function generateSettlement(
     ok: true,
     settlementId: settlement.id,
     settlementNumber: settlement.settlementNumber,
-    grossCents,
-    netCents: grossCents,
+    earningsCents,
+    netCents: earningsCents,
     loadCount: lines.length,
   }
 }
@@ -609,52 +630,127 @@ export async function removeSettlementLine(
 }
 
 export interface SettlementTotals {
+  /** The FREIGHT the percentage was taken of. */
   grossCents: number
-  deductionsCents: number
+  /** The driver's cut. */
+  earningsCents: number
+  /** Everything added back: bonus and reimbursement. */
+  otherPayCents: number
+  /** The reimbursement part of `otherPayCents`. */
   reimbursementsCents: number
+  /** NEGATIVE — the ledger's sign, as the lines store it. */
+  deductionsCents: number
   netCents: number
 }
 
+/** A line as the header rule needs it: its type, its signed amount, its load's freight. */
+export interface HeaderLine {
+  type: SettlementLineType
+  amountCents: number
+  load: { totalRevenueCents: number } | null
+}
+
+/** A trip placed by hand: freight and pay, as `SettlementLoadLine` stores them. */
+export interface HeaderLoadLine {
+  grossCents: number
+  amountCents: number
+}
+
 /**
- * Recompute the four stored totals from the lines.
+ * THE HEADER, BY THE ONE RULE BOTH ENGINES WRITE (§6.2.2, migration 67).
+ *
+ * The batch engine's meaning of the six money columns is the meaning: gross is
+ * the freight, earnings the driver's cut, other pay the add-backs, deductions
+ * negative, net the three summed. A workbench statement's trips may sit in
+ * EITHER table — the generate path writes `LOAD_PAY` lines, a trip added by
+ * hand is a `SettlementLoadLine` — and each trip is in exactly one of them, so
+ * both are read and nothing is counted twice.
+ *
+ * Pure, so the drift checker can apply the same rule to the same rows and the
+ * two cannot disagree about what a header should say.
+ */
+export function headerFromLines(
+  lines: readonly HeaderLine[],
+  loadLines: readonly HeaderLoadLine[],
+): SettlementTotals {
+  let grossCents = 0
+  let earningsCents = 0
+  let otherPayCents = 0
+  let reimbursementsCents = 0
+  let deductionsCents = 0
+
+  for (const line of lines) {
+    if (line.type === 'LOAD_PAY') {
+      earningsCents += line.amountCents
+      grossCents += line.load?.totalRevenueCents ?? 0
+    } else if (line.type === 'ACCESSORIAL_PAY') {
+      earningsCents += line.amountCents
+    } else if (line.type === 'REIMBURSEMENT') {
+      otherPayCents += line.amountCents
+      reimbursementsCents += line.amountCents
+    } else if (line.type === 'BONUS') {
+      otherPayCents += line.amountCents
+    } else {
+      // Every DEDUCTION_* type, stored negative — `isDeduction` is the list.
+      deductionsCents += line.amountCents
+    }
+  }
+  for (const row of loadLines) {
+    grossCents += row.grossCents
+    earningsCents += row.amountCents
+  }
+
+  return {
+    grossCents,
+    earningsCents,
+    otherPayCents,
+    reimbursementsCents,
+    deductionsCents,
+    // The signed sum of everything on the statement — the three figures above
+    // partition the lines, so this is the same number as adding them all up.
+    netCents: earningsCents + otherPayCents + deductionsCents,
+  }
+}
+
+/**
+ * Recompute the stored header from the lines, over BOTH tables.
  *
  * Derived on every write, never adjusted incrementally — the same argument as
- * `refreshUnapplied` in payments.ts. `deductionsCents` is stored POSITIVE
- * (it is a column called "deductions", and a negative deductions figure reads
- * as a refund), while the lines themselves stay signed and net is their sum.
+ * `refreshUnapplied` in payments.ts. Until migration 67 this summed
+ * `SettlementLine` alone and wrote the workbench's own column meanings
+ * (pay under `grossCents`, a positive `deductionsCents`); a hand line on a
+ * statement whose trips were load lines overwrote the engine's figures with the
+ * hand lines alone. That was GAPS.md gap 2, and reading both tables closes it.
  */
 export async function refreshTotals(
   tx: TxClient,
   settlementId: string,
 ): Promise<SettlementTotals> {
-  const lines = await tx.settlementLine.findMany({
-    where: { settlementId },
-    select: { type: true, amountCents: true },
-  })
+  const [lines, loadLines] = await Promise.all([
+    tx.settlementLine.findMany({
+      where: { settlementId },
+      select: {
+        type: true,
+        amountCents: true,
+        load: { select: { totalRevenueCents: true } },
+      },
+    }),
+    tx.settlementLoadLine.findMany({
+      where: { settlementId },
+      select: { grossCents: true, amountCents: true },
+    }),
+  ])
 
-  let grossCents = 0
-  let deductionsCents = 0
-  let reimbursementsCents = 0
-
-  for (const line of lines) {
-    if (isDeduction(line.type)) {
-      deductionsCents += -line.amountCents
-    } else if (line.type === 'REIMBURSEMENT') {
-      reimbursementsCents += line.amountCents
-    } else {
-      grossCents += line.amountCents
-    }
-  }
-
-  // The signed sum, which is the whole reason the lines are signed.
-  const netCents = lines.reduce((sum, line) => sum + line.amountCents, 0)
+  const totals = headerFromLines(lines, loadLines)
 
   await tx.settlement.update({
     where: { id: settlementId },
-    data: { grossCents, deductionsCents, reimbursementsCents, netCents },
+    // `advancesCents` is the batch's own "Advance" other-pay row; a workbench
+    // DEDUCTION_ADVANCE is a deduction and already inside `deductionsCents`.
+    data: { ...totals, advancesCents: 0 },
   })
 
-  return { grossCents, deductionsCents, reimbursementsCents, netCents }
+  return totals
 }
 
 // --- approve, pay, void -------------------------------------------------------
@@ -917,7 +1013,10 @@ export async function findSettlementDrift(
     select: {
       id: true,
       settlementNumber: true,
+      batchId: true,
       grossCents: true,
+      earningsCents: true,
+      otherPayCents: true,
       deductionsCents: true,
       reimbursementsCents: true,
       netCents: true,
@@ -927,14 +1026,13 @@ export async function findSettlementDrift(
           type: true,
           amountCents: true,
           payRuleSnapshot: true,
+          load: { select: { totalRevenueCents: true } },
         },
       },
-      // WHETHER THE DETAIL LIVES SOMEWHERE THIS FUNCTION DOES NOT READ. See the
-      // note on the `where` above: a batch draft keeps its lines in
-      // `SettlementLoadLine`, so its stored totals cannot be reproduced from
-      // `lines` and comparing them against an empty set reports a difference
-      // that is an artefact of asking the wrong relation.
-      _count: { select: { loadLines: true, deductionLines: true } },
+      // A TRIP ADDED BY HAND LIVES HERE (migration 67), with no `LOAD_PAY`
+      // twin — so the totals arm below reads both tables, exactly as
+      // `refreshTotals` does, through the same `headerFromLines`.
+      loadLines: { select: { grossCents: true, amountCents: true } },
     },
   })
 
@@ -966,50 +1064,42 @@ export async function findSettlementDrift(
       }
     }
 
-    // ── THE DETAIL IS NOT IN `lines` FOR A BATCH DRAFT ──────────────────
+    // ── THE TOTALS ARM IS THE WORKBENCH'S ───────────────────────────────
     //
-    // `refreshDraft` writes `SettlementLoadLine` and `SettlementDeductionLine`
-    // and no `SettlementLine` at all, so adding up `lines` gives 0/0/0/0 for a
-    // settlement whose real detail is right there in the other two relations.
-    // Comparing stored totals against that reports a difference that is an
-    // artefact of the question.
+    // A BATCH statement's header is the batch engine's: `settlement-week.ts`
+    // builds it from `SettlementLoadLine`, `SettlementDeductionLine` and the
+    // opening balances, and recomputing that here would be a second copy of
+    // the engine. So the batch's rows are skipped BY WHICH ENGINE WROTE THEM,
+    // not by status — `generateSettlement` produces drafts too, and excluding
+    // DRAFT by name once stopped this function noticing a hand-edited line
+    // (2026-09-27, for about an hour).
     //
-    // NOT `status === 'DRAFT'`, WHICH WAS TRIED AND WAS TOO WIDE:
-    // `generateSettlement` produces drafts that DO use `lines`, and excluding
-    // them by status stopped this function noticing a hand-edited line. The
-    // condition is about where the rows are, so it asks where the rows are.
-    //
-    // A SETTLEMENT WITH NO DETAIL ANYWHERE IS STILL CHECKED. Only a non-empty
-    // `loadLines` excuses an empty `lines`; totals claiming money with nothing
-    // behind them in either relation still drift.
-    if (settlement.lines.length === 0 && settlement._count.loadLines > 0) {
-      continue
-    }
+    // A WORKBENCH statement is held to the one rule both engines write
+    // (§6.2.2, migration 67), through the same `headerFromLines` that
+    // `refreshTotals` writes with — so the header a reader sees and the header
+    // this function expects cannot drift from each other. A statement with no
+    // detail in either table is still checked: totals claiming money with
+    // nothing behind them drift.
+    if (settlement.batchId !== null) continue
 
-    let gross = 0
-    let deductions = 0
-    let reimbursements = 0
-    for (const line of settlement.lines) {
-      if (isDeduction(line.type)) deductions += -line.amountCents
-      else if (line.type === 'REIMBURSEMENT') reimbursements += line.amountCents
-      else gross += line.amountCents
+    const expected = headerFromLines(settlement.lines, settlement.loadLines)
+    const stored: SettlementTotals = {
+      grossCents: settlement.grossCents,
+      earningsCents: settlement.earningsCents,
+      otherPayCents: settlement.otherPayCents,
+      reimbursementsCents: settlement.reimbursementsCents,
+      deductionsCents: settlement.deductionsCents,
+      netCents: settlement.netCents,
     }
-    const net = settlement.lines.reduce(
-      (sum, line) => sum + line.amountCents,
-      0,
-    )
+    const figures = (totals: SettlementTotals) =>
+      `${totals.grossCents}/${totals.earningsCents}/${totals.otherPayCents}/${totals.reimbursementsCents}/${totals.deductionsCents}/${totals.netCents}`
 
-    if (
-      gross !== settlement.grossCents ||
-      deductions !== settlement.deductionsCents ||
-      reimbursements !== settlement.reimbursementsCents ||
-      net !== settlement.netCents
-    ) {
+    if (figures(expected) !== figures(stored)) {
       drift.push({
         settlementId: settlement.id,
         settlementNumber: settlement.settlementNumber,
         problem: 'totals_disagree_with_lines',
-        detail: `stored ${settlement.grossCents}/${settlement.deductionsCents}/${settlement.reimbursementsCents}/${settlement.netCents}, lines give ${gross}/${deductions}/${reimbursements}/${net}`,
+        detail: `stored gross/earnings/other/reimb/deductions/net ${figures(stored)}, lines give ${figures(expected)}`,
       })
     }
   }
