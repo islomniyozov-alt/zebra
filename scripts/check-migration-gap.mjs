@@ -95,6 +95,10 @@ export async function check({
   label = 'production',
 } = {}) {
   const local = localMigrations()
+  // THE NUMBER THE PRODUCTION GATE EXPECTS. `prisma/production-gate.ts` counts
+  // the timestamped directories; `localMigrations()` has already filtered to
+  // exactly those, so its length is the same arithmetic on the same listing.
+  const localCount = local.length
 
   let applied
   let source
@@ -139,15 +143,22 @@ export async function check({
   console.log('')
 
   // THE REMEDIATION DEPENDS ON THE TARGET, and printing the wrong one is worse
-  // than printing none. The production ritual sets ALLOW_PROD_MIGRATION=1 and
-  // a production DIRECT_DATABASE_URL; showing that to somebody whose DEV
+  // than printing none. The production ritual sets ALLOW_PROD_MIGRATION to THE
+  // MIGRATION NUMBER (owner's ruling 2026-10-05 — `=1` is refused by the gate
+  // as a value that stays true forever) and a production DIRECT_DATABASE_URL;
+  // showing that to somebody whose DEV
   // schema is behind hands them a loaded gun to fix a paper cut — and the
   // first version of the dev check did exactly that, because the text was
   // written when only production could ever reach it.
   if (label === 'production') {
     console.log('    NEON_BRANCH=production NODE_ENV=production ' + BACKSLASH)
+    // THE NUMBER THE GATE WILL ACCEPT, not a placeholder: it is the ordinal of
+    // the newest migration directory, which this script has already listed.
+    // On 2026-10-06 this line still said `=1` and the gate had been refusing
+    // `=1` for a day — a refusal that tells somebody to type the thing it
+    // will refuse next is a loop with a human in it.
     console.log(
-      '      ALLOW_PROD_MIGRATION=1 DIRECT_DATABASE_URL=<direct url> ' +
+      `      ALLOW_PROD_MIGRATION=${localCount} DIRECT_DATABASE_URL=<direct url> ` +
         BACKSLASH,
     )
     console.log('      npx prisma migrate deploy')

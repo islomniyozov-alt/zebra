@@ -500,6 +500,20 @@ describe('the gate is asked by every local path that can write', () => {
 })
 
 // ── AND THE OVERRIDE IS IN NO COMMITTED FILE AS A VALUE ───────────────────
+describe('the refusals that tell somebody what to type name the real number', () => {
+  it('check-migration-gap prints the migration count, never =1', () => {
+    // On 2026-10-06 the production dispatch refused — correctly, 64 and 65 were
+    // not on production yet — and its remediation line still read
+    // `ALLOW_PROD_MIGRATION=1`, a value the gate had been refusing for a day. A
+    // refusal that tells somebody to type the thing it will refuse next is a
+    // loop with a human in it. The script has the local listing in hand at that
+    // point, so it prints the count the gate will accept.
+    const source = readFileSync('scripts/check-migration-gap.mjs', 'utf8')
+    expect(source).toContain('ALLOW_PROD_MIGRATION=${localCount}')
+    expect(source).not.toContain('ALLOW_PROD_MIGRATION=1 DIRECT')
+  })
+})
+
 describe('ALLOW_PROD_MIGRATION is never stored', () => {
   it.each(['.env.example', 'prisma.config.ts', 'prisma/seed.ts'])(
     '%s does not assign it',
