@@ -294,6 +294,41 @@ Rules about instruments, which are the ones that cost whole sessions:
   apply it when the chain reports. The first entry made under this rule was
   this rule, written to the scratchpad while a chain ran and applied after.
 
+- **A MIGRATION THAT REMOVES A DEFAULT, A CONSTRAINT OR AN INDEX CARRIES THE
+  GREP THAT PROVES EVERY WRITER SETS THE COLUMN — QUOTED IN THE MIGRATION'S
+  COMMENT, NOT ASSERTED.** Owner's ruling, 2026-10-06.
+
+  Migration 63 dropped the empty-array defaults on `Settlement.teamWith` and
+  `referralWith` on one sentence in its own comment: "the application has always
+  written both columns explicitly." The person who wrote it had not looked.
+  `settlements.ts` omits them, every test fixture omits them, and Prisma sends
+  NOTHING for an omitted scalar list — so the database default was the contract,
+  and the first integration run against 63 failed 23 cases across 11 files, every
+  one a "Null constraint violation" on `settlement.create`. 63 was already on
+  production. **64 was its cost:** a second production migration for the owner
+  to run, and a window in which any settlement created outside `refreshDraft`
+  failed.
+
+  THE GREP IS THE EVIDENCE, AND IT GOES IN THE FILE. For a default: every
+  `<model>.create(` and `createMany(` site, with whether each names the column.
+  For a constraint: every write the constraint used to refuse. For an index:
+  every read that used it. Run the command, paste the command AND its output
+  into the migration's comment above the statement, and let the reader check it
+  against the tree. An assertion in a comment is a belief with a timestamp.
+
+      $ grep -rln "settlement.create(" src/lib tests/integration/fixtures.ts
+      src/lib/settlement-batch.ts     mentions teamWith: 2
+      src/lib/settlements.ts          mentions teamWith: 0   <- the default was load-bearing
+      tests/integration/fixtures.ts   mentions teamWith: 0
+
+  That output, written into 63 before the apply, would have stopped it. It was
+  produced AFTER the suite failed, which is the order this rule exists to invert.
+
+  AND IT IS A GREP OF THE WRITERS, NOT OF THE SCHEMA. Flag 88's twin: the schema
+  file is what the code believes about the column, and a scalar list without
+  `@default` in Prisma looks exactly like one every writer sets. Build the
+  instrument from the artefact — the call sites — not from the declaration.
+
 - **Edit source with the tool that refuses a missed anchor. Not `sed`.**
   `str.replace` returns the original string when it matches nothing, `sed`
   exits 0, and a filter that matches nothing prints nothing — so a silent
