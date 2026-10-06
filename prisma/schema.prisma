@@ -3304,7 +3304,12 @@ model SettlementLoadLine {
 
   sortOrder    Int          @default(0)
   createdAt    DateTime     @default(now())
-  organization Organization @relation(fields: [organizationId], references: [id])
+  /// `onDelete: Cascade`, migration 65 — reversing migration 63's RESTRICT.
+  /// Forty-nine organization relations in this schema cascade; these five did
+  /// not say so, the database did, and 63 read the omission as intent. The
+  /// isolation suite's own regression test (2026-07-28, "nothing can ever be
+  /// deleted") is the guarantee RESTRICT broke. Grep in the migration's comment.
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   /// Which crew member this line pays, denormalized from the settlement —
   /// convention 9, and here it carries the uniqueness below.
@@ -3376,7 +3381,12 @@ model SettlementDeductionLine {
 
   sortOrder    Int          @default(0)
   createdAt    DateTime     @default(now())
-  organization Organization @relation(fields: [organizationId], references: [id])
+  /// `onDelete: Cascade`, migration 65 — reversing migration 63's RESTRICT.
+  /// Forty-nine organization relations in this schema cascade; these five did
+  /// not say so, the database did, and 63 read the omission as intent. The
+  /// isolation suite's own regression test (2026-07-28, "nothing can ever be
+  /// deleted") is the guarantee RESTRICT broke. Grep in the migration's comment.
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([settlementId])
   @@index([organizationId])
@@ -4175,7 +4185,12 @@ model RecurringDeduction {
   notes         String?
 
   createdAt    DateTime     @default(now())
-  organization Organization @relation(fields: [organizationId], references: [id])
+  /// `onDelete: Cascade`, migration 65 — reversing migration 63's RESTRICT.
+  /// Forty-nine organization relations in this schema cascade; these five did
+  /// not say so, the database did, and 63 read the omission as intent. The
+  /// isolation suite's own regression test (2026-07-28, "nothing can ever be
+  /// deleted") is the guarantee RESTRICT broke. Grep in the migration's comment.
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([driverId, effectiveFrom])
   @@index([organizationId])
@@ -4285,7 +4300,12 @@ model SettlementCharge {
   settledAt DateTime?
 
   createdAt    DateTime     @default(now())
-  organization Organization @relation(fields: [organizationId], references: [id])
+  /// `onDelete: Cascade`, migration 65 — reversing migration 63's RESTRICT.
+  /// Forty-nine organization relations in this schema cascade; these five did
+  /// not say so, the database did, and 63 read the omission as intent. The
+  /// isolation suite's own regression test (2026-07-28, "nothing can ever be
+  /// deleted") is the guarantee RESTRICT broke. Grep in the migration's comment.
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([driverId, appliesOn])
   @@index([loadId])
@@ -4315,7 +4335,12 @@ model DriverEscrowEntry {
   notes      String?
 
   createdAt    DateTime     @default(now())
-  organization Organization @relation(fields: [organizationId], references: [id])
+  /// `onDelete: Cascade`, migration 65 — reversing migration 63's RESTRICT.
+  /// Forty-nine organization relations in this schema cascade; these five did
+  /// not say so, the database did, and 63 read the omission as intent. The
+  /// isolation suite's own regression test (2026-07-28, "nothing can ever be
+  /// deleted") is the guarantee RESTRICT broke. Grep in the migration's comment.
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([driverId, occurredAt])
   @@index([organizationId])
