@@ -3,6 +3,20 @@ name: gate and deploy dev
 # ─────────────────────────────────────────────────────────────────────────
 # ON PUSH TO MAIN: prove the commit against a database, then ship dev.
 #
+# ON THE NIGHTLY SCHEDULE: prove main's HEAD against a fresh fork of dev,
+# sweep every page of dev's worker with and without a session, and SHIP
+# NOTHING. Build queue item 6. The same job runs both, because the nightly's
+# whole value is that it is the SAME gate and the SAME suite a push gets —
+# a second workflow would drift from this one by its second week. What
+# differs is gated on `github.event_name == 'schedule'` below, and the
+# verdicts are read from `scripts/run-status.mjs` files, never from `$?`.
+#
+# WHERE THE VERDICT LANDS: the run's step summary carries the sweep's line
+# and the suite's count, and GitHub mails the repository owner when a
+# scheduled run fails — which is the only notification a sleeping office
+# needs. 09:00 UTC is 04:00 in Chicago, after the socket window AGENTS.md
+# records for evening runs and before anybody books a load.
+#
 # WHY A NEON BRANCH PER RUN (owner's ruling, 2026-09-17). The suite clones
 # `zebra_template` into eight worker databases and holds an advisory lock for
 # the whole run, so two runs against one database serialise — CI would queue
@@ -32,6 +46,10 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    # 04:00 Chicago. See the header: the nightly proves and sweeps, and
+    # ships nothing.
+    - cron: '0 9 * * *'
 
 # ONE RUN AT A TIME. Not for the database — each run has its own branch — but
 # because two runs deploying the same worker would race, and the later push is
@@ -334,6 +352,30 @@ jobs:
       - name: integration suite
         run: npm run test:integration
 
+      # ── THE NIGHTLY SWEEP, ON THE SCHEDULE ONLY ───────────────────────
+      #
+      # `npm run sweep` signs in to dev's worker as the seed owner (already
+      # in `.env` above), resolves every `[id]` route through the database —
+      # the per-run fork carries dev's rows, so the ids are dev's — and
+      # fetches every page with and without the session. The verdict is
+      # read back from the status file: `|| true` on the run is what lets
+      # the file be the verdict instead of the shell.
+      - name: nightly sweep of dev
+        if: github.event_name == 'schedule'
+        run: |
+          set -euo pipefail
+          npx playwright install --with-deps chromium
+          node scripts/run-status.mjs nightly-sweep -- npm run sweep > sweep.log 2>&1 || true
+          {
+            echo '## nightly'
+            echo
+            echo '- suite: green (this step does not run otherwise)'
+            printf -- '- sweep: %s\n' "$(node scripts/run-status.mjs --check nightly-sweep | tail -1)"
+            printf -- '- %s\n' "$(grep -E '^SWEEP ' sweep.log | tail -1 || echo 'no sweep line')"
+          } >> "$GITHUB_STEP_SUMMARY"
+          tail -40 sweep.log
+          node scripts/run-status.mjs --check nightly-sweep
+
       # ── SHIPPING IS OPT-IN, BY A REPOSITORY VARIABLE ─────────────────
       #
       # `CI_DEPLOY` is a repository VARIABLE (Settings -> Secrets and
@@ -345,14 +387,16 @@ jobs:
       # order is to see it go green once against a real database before it is
       # allowed to move a worker. Set it to `true` when the runs are boring.
       - name: deploy dev
-        if: vars.CI_DEPLOY == 'true'
+        # NEVER ON THE SCHEDULE. A nightly that redeployed the same sha would
+        # be a deploy nobody asked for, at an hour nobody is watching it.
+        if: vars.CI_DEPLOY == 'true' && github.event_name != 'schedule'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npm run deploy:dev
 
       - name: say why nothing was deployed
-        if: vars.CI_DEPLOY != 'true'
+        if: vars.CI_DEPLOY != 'true' && github.event_name != 'schedule'
         run: |
           echo "CI_DEPLOY is not 'true', so this run proved the commit and shipped nothing."
           echo "Set the repository variable CI_DEPLOY=true to let pushes deploy dev."
