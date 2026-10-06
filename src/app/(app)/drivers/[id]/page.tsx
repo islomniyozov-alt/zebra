@@ -363,6 +363,12 @@ export default async function EditDriverPage({
           {t('drivers.edit')}{' '}
           <span className="text-ink-2">
             {driver.firstName} {driver.lastName}
+          </span>{' '}
+          {/* §6.2.10 part 6: what this person IS, in the office's word, beside
+           * the name — not only inside the form below, where it is a select,
+           * and a select is where you change a thing rather than read it. */}
+          <span className="text-xs font-normal text-ink-3">
+            {t(`drivers.employment.${driver.employmentType}` as MessageKey)}
           </span>
         </h1>
         {/* OPERATIONAL, SO IT IS UNGATED. A dispatcher deciding who to

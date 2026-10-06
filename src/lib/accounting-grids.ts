@@ -1,4 +1,4 @@
-import { Prisma } from '@/generated/prisma/client'
+import { Prisma, type OwnershipType } from '@/generated/prisma/client'
 import { companyScopeFilter } from './tenancy'
 import { listPayments, type PaymentRow } from './payments'
 import { listCharges, type ChargeRow } from './driver-deductions'
@@ -465,6 +465,8 @@ export interface StatementGridRow {
   settlementNumber: string | null
   driverId: string
   driverName: string
+  /** §6.2.10 part 6 — the driver's CURRENT type; the frozen copy is migration 66. */
+  driverType: OwnershipType
   unitNumber: string | null
   periodStart: Date
   periodEnd: Date
@@ -519,7 +521,9 @@ export async function readStatements(
       otherPayCents: true,
       netCents: true,
       driverId: true,
-      driver: { select: { firstName: true, lastName: true } },
+      driver: {
+        select: { firstName: true, lastName: true, employmentType: true },
+      },
       // THE SETTLEMENT'S OWN PERIOD, not the batch's. They agree where both
       // exist — `generateSettlement` and `openBatch` both set it from the week —
       // and only this one is present for an unbatched row.
@@ -588,6 +592,7 @@ export async function readStatements(
     settlementNumber: row.settlementNumber,
     driverId: row.driverId,
     driverName: `${row.driver.firstName} ${row.driver.lastName}`,
+    driverType: row.driver.employmentType,
     unitNumber: row.unitNumber,
     periodStart: row.periodStart,
     periodEnd: row.periodEnd,
@@ -609,6 +614,10 @@ export const statementShape: ListShape<StatementGridRow> = {
   dateOf: (row) => row.periodStart,
   sorts: {
     driver: (row) => row.driverName,
+    // SORTABLE, NOT FUNNEL-ABLE (§6.2.10 part 6): the funnel matches the
+    // stored value, and `OWNED` is not what anybody types for a company
+    // driver. It gets a funnel when the enum gets its name.
+    driverType: (row) => row.driverType,
     period: (row) => row.periodStart.getTime(),
     unit: (row) => row.unitNumber,
     gross: (row) => row.grossCents,

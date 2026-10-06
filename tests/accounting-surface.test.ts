@@ -943,3 +943,35 @@ describe('the statements grid finishes a week (§6.2.6)', () => {
     expect(bulk).toMatch(/refusals\.push/)
   })
 })
+
+// ── §6.2.10 PART 6: THE DRIVER'S TYPE, WHERE THE OFFICE LOOKS FOR IT ───────
+describe("the driver type is said in the office's word", () => {
+  const statements = pageSource('statements')
+
+  it('is a tenth column on the statements grid, default-hidden', () => {
+    // DEFAULT-HIDDEN, not merely present: the grid was at §7.1's nine, and a
+    // tenth default-visible column is the 500 §7.1.7 was written about.
+    expect(statements).toMatch(/COLUMN_KEYS[^\]]*'driverType'/)
+    expect(statements).toMatch(
+      /readGridColumns\([^)]*COLUMN_KEYS,\s*\[\s*'driverType',?\s*\]/,
+    )
+  })
+
+  it('reads the word through the one key every other site uses', () => {
+    // `drivers.employment.<enum>` — the batch picker, the statement header, the
+    // record and this grid all build the same key, so there is no second
+    // mapping to drift.
+    expect(statements).toContain('`drivers.employment.${row.driverType}`')
+    const record = readFileSync(
+      join('src', 'app', '(app)', 'drivers', '[id]', 'page.tsx'),
+      'utf8',
+    )
+    expect(record).toContain('`drivers.employment.${driver.employmentType}`')
+  })
+
+  it('does not offer a funnel that would want the enum typed', () => {
+    // The funnel matches the STORED value. `OWNED` is not what anybody types
+    // for a company driver, so the column is sortable and nothing else.
+    expect(statements).not.toMatch(/key: 'driverType',[^}]*filterable: true/)
+  })
+})

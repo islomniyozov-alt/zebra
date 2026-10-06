@@ -77,8 +77,11 @@ const statusOf = (value: string) =>
 // cannot see.
 const TABS = ['statements'] as const
 
+// TEN SINCE §6.2.10 PART 6, and `driverType` is DEFAULT-HIDDEN so the grid
+// stays at §7.1's nine for a user with no stored preference (§7.1.7).
 const COLUMN_KEYS: readonly string[] = [
   'driver',
+  'driverType',
   'period',
   'unit',
   'gross',
@@ -163,7 +166,9 @@ export default async function StatementsPage({
       const scope = companyScopeFilter(session.companyScopes)
       const [statements, columns] = await Promise.all([
         readStatements(tx, scope),
-        readGridColumns(tx, session.userId, 'payroll.statements', COLUMN_KEYS),
+        readGridColumns(tx, session.userId, 'payroll.statements', COLUMN_KEYS, [
+          'driverType',
+        ]),
       ])
 
       // ── THE SHAPE PER DRIVER, IN ONE STATEMENT ───────────────────────
@@ -237,6 +242,12 @@ export default async function StatementsPage({
       header: t('payroll.driver'),
       sortable: true,
       render: (row) => row.driverName,
+    },
+    {
+      key: 'driverType',
+      header: t('workbench.driverType'),
+      sortable: true,
+      render: (row) => t(`drivers.employment.${row.driverType}` as MessageKey),
     },
     {
       key: 'period',
