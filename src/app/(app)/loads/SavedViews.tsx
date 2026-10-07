@@ -12,7 +12,7 @@ import {
   setDensityAction,
 } from './view-actions'
 import { VIEW_INITIAL, type ViewState } from './view-state'
-import type { Density, SavedView } from '@/lib/preferences'
+import type { Density, SavedView, ViewGrid } from '@/lib/preferences'
 
 // §7.4 — "Saved views are first-class: a named filter set, per user, pinned to
 // the top of the table. 'My trucks today' should be one click, not four."
@@ -23,6 +23,8 @@ import type { Density, SavedView } from '@/lib/preferences'
 // table itself.
 
 interface Props {
+  /** Which list these views belong to (§6.4 part 1) — one key per grid. */
+  grid: ViewGrid
   views: readonly SavedView[]
   density: Density
   labels: {
@@ -37,7 +39,7 @@ interface Props {
   }
 }
 
-export function SavedViews({ views, density, labels }: Props) {
+export function SavedViews({ grid, views, density, labels }: Props) {
   const params = useSearchParams()
   const pathname = usePathname()
   const [naming, setNaming] = useState(false)
@@ -80,7 +82,7 @@ export function SavedViews({ views, density, labels }: Props) {
             </Link>
             {/* Removing a bookmark is not destructive enough for a modal, and
              * a modal on every chip would be four clicks to undo one. */}
-            <form action={deleteViewAction.bind(null, view.slug)}>
+            <form action={deleteViewAction.bind(null, grid, view.slug)}>
               <button
                 type="submit"
                 aria-label={`${labels.remove} ${view.name}`}
@@ -110,6 +112,7 @@ export function SavedViews({ views, density, labels }: Props) {
            * the server: what gets saved is exactly what the dispatcher was
            * looking at, not what the server thinks they were looking at. */}
           <input type="hidden" name="query" value={current} />
+          <input type="hidden" name="grid" value={grid} />
           <Input
             name="name"
             label={labels.name}

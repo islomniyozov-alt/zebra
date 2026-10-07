@@ -59,6 +59,9 @@ export const GRID_IDS = [
   // `src/lib/list-columns.ts`.
   'loads.loads',
   'trucks.trucks',
+  // §6.4 part 1 (2026-10-07): the drivers list on the same machinery, eleven
+  // columns declared with two behind the chooser.
+  'drivers.drivers',
 ] as const
 
 export type GridId = (typeof GRID_IDS)[number]
@@ -83,6 +86,7 @@ export function isGridId(value: string): value is GridId {
 export function gridResource(grid: GridId): Resource {
   if (grid === 'loads.loads') return 'load'
   if (grid === 'trucks.trucks') return 'truck'
+  if (grid === 'drivers.drivers') return 'driver'
   return 'settlement'
 }
 
@@ -99,6 +103,7 @@ export function gridRevalidate(grid: GridId): {
 } {
   if (grid === 'loads.loads') return { path: '/loads', type: 'page' }
   if (grid === 'trucks.trucks') return { path: '/trucks', type: 'page' }
+  if (grid === 'drivers.drivers') return { path: '/drivers', type: 'page' }
   return { path: '/accounting', type: 'layout' }
 }
 

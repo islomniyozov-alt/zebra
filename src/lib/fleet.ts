@@ -1,5 +1,9 @@
 import { parsePercentToBps } from './money'
-import { ACTIVE_ROSTER, assertRosterStatus } from './driver-roster'
+import {
+  ACTIVE_ROSTER,
+  assertRosterStatus,
+  type RosterStatus,
+} from './driver-roster'
 import { readFleetStatus, readFuelType } from './fleet-codes'
 import type { TxClient } from './tenancy'
 import {
@@ -846,3 +850,51 @@ export {
   type TransferFailure,
   type FleetKind,
 } from './asset-transfer'
+
+// ── THE ROSTER STATUS, ON ITS OWN (§6.4 part 1) ──────────────────────────────
+
+export type RosterChangeFailure = 'not_found' | 'removed'
+
+export type RosterChangeResult =
+  | { ok: true; name: string }
+  | { ok: false; reason: RosterChangeFailure; name: string | null }
+
+/**
+ * Set a driver's ROSTER status — the one fact about a person the freight
+ * cannot know — and nothing else.
+ *
+ * The bulk bar loops this; the record form goes through `updateDriver`. Both
+ * accept roster values only (owner's ruling, 2026-09-21): the type says so and
+ * `assertRosterStatus` refuses anything derived. A removed row is refused by
+ * name rather than quietly resurrected, and a termination gets its date if it
+ * has none — the Terminated tab sorts and prints by it.
+ */
+export async function setRosterStatus(
+  tx: TxClient,
+  id: string,
+  status: RosterStatus,
+): Promise<RosterChangeResult> {
+  const current = await tx.driver.findUnique({
+    where: { id },
+    select: {
+      firstName: true,
+      lastName: true,
+      deletedAt: true,
+      terminationDate: true,
+    },
+  })
+  if (!current) return { ok: false, reason: 'not_found', name: null }
+  const name = `${current.firstName} ${current.lastName}`.trim()
+  if (current.deletedAt !== null) return { ok: false, reason: 'removed', name }
+
+  await tx.driver.update({
+    where: { id },
+    data: {
+      status: assertRosterStatus(status) ?? ACTIVE_ROSTER,
+      ...(status === 'INACTIVE' && current.terminationDate === null
+        ? { terminationDate: new Date() }
+        : {}),
+    },
+  })
+  return { ok: true, name }
+}

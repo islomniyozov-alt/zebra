@@ -109,6 +109,29 @@ export const TRUCK_COLUMN_KEYS = [
  */
 export const TRUCK_COLUMNS_HIDDEN = ['model', 'year', 'odometer'] as const
 
+// ── /drivers (§6.4 part 1) ────────────────────────────────────────────────
+//
+// ELEVEN DECLARED, NINE SHOWN. The brief names ten; CDL already existed. Email
+// and CDL go behind the chooser: a dispatcher reads this list for who can go
+// where, and both are desk facts. The Terminated and Vacation board tabs add
+// their own date column in the page, outside this set.
+export const DRIVER_COLUMN_KEYS = [
+  'name',
+  'ready',
+  'type',
+  'status',
+  'lastActivity',
+  'company',
+  'phone',
+  'email',
+  'truck',
+  'cdl',
+  'warnings',
+] as const
+
+/** §7.1.7: never warnings. */
+export const DRIVER_COLUMNS_HIDDEN = ['email', 'cdl'] as const
+
 // ── /payroll/batches, the batches tab ─────────────────────────────────────
 //
 // ELEVEN COLUMNS, AND IT HAD A CHOOSER ALL ALONG. §6.2.9 added gross,

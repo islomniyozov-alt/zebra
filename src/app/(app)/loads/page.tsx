@@ -332,7 +332,7 @@ export default async function LoadsPage({
       }),
     ])
 
-    const savedViews = await readSavedViews(tx, session.userId)
+    const savedViews = await readSavedViews(tx, session.userId, 'loads')
     const density = await readDensity(tx, session.userId)
     // §7.1.7, in the same transaction as the two preference reads above it.
     const visibleLoadColumns = await readGridColumns(
@@ -453,6 +453,7 @@ export default async function LoadsPage({
 
       {/* §7.4 — pinned above the table, not behind a menu. One click. */}
       <SavedViews
+        grid="loads"
         views={savedViews}
         density={density}
         labels={{

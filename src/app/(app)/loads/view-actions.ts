@@ -5,10 +5,12 @@ import { withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import {
   deleteView,
+  isViewGrid,
   parseDensity,
   saveView,
   writePreference,
   PREFERENCE_KEYS,
+  type ViewGrid,
 } from '@/lib/preferences'
 import { VIEW_INITIAL, type ViewState } from './view-state'
 
@@ -25,9 +27,16 @@ export async function saveViewAction(
   // The CURRENT query string, sent by the client. It is re-parsed server-side
   // before storage, so what lands is a query this application can read back.
   const query = String(formData.get('query') ?? '')
+  // WHICH LIST (§6.4 part 1): the form says, the key follows, and an unknown
+  // value is the loads list rather than a write under a key nothing reads.
+  const rawGrid = formData.get('grid')
+  const grid: ViewGrid = isViewGrid(rawGrid) ? rawGrid : 'loads'
 
-  const outcome = await withCurrentOrg('read', 'load', (tx, session) =>
-    saveView(tx, session.organizationId, session.userId, name, query),
+  const outcome = await withCurrentOrg(
+    'read',
+    grid === 'drivers' ? 'driver' : 'load',
+    (tx, session) =>
+      saveView(tx, session.organizationId, session.userId, name, query, grid),
   )
 
   if (!outcome.ok) {
@@ -39,7 +48,7 @@ export async function saveViewAction(
     }
   }
 
-  revalidatePath('/loads')
+  revalidatePath(`/${grid}`)
   return VIEW_INITIAL
 }
 
@@ -68,9 +77,15 @@ export async function setDensityAction(formData: FormData): Promise<void> {
   revalidatePath('/', 'layout')
 }
 
-export async function deleteViewAction(slug: string): Promise<void> {
-  await withCurrentOrg('read', 'load', (tx, session) =>
-    deleteView(tx, session.organizationId, session.userId, slug),
+export async function deleteViewAction(
+  grid: ViewGrid,
+  slug: string,
+): Promise<void> {
+  await withCurrentOrg(
+    'read',
+    grid === 'drivers' ? 'driver' : 'load',
+    (tx, session) =>
+      deleteView(tx, session.organizationId, session.userId, slug, grid),
   )
-  revalidatePath('/loads')
+  revalidatePath(`/${grid}`)
 }

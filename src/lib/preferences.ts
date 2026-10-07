@@ -21,6 +21,8 @@ import type { TxClient } from './tenancy'
 export const PREFERENCE_KEYS = {
   /** `view.loads` — the saved filter sets for the Loads table. */
   loadsViews: 'view.loads',
+  /** `view.drivers` — the same, for the drivers list (§6.4 part 1). */
+  driversViews: 'view.drivers',
   /** `density` — §5.1's row density. Landed in Step 7, as this said it would. */
   density: 'density',
 } as const
@@ -145,13 +147,26 @@ export async function writePreference(
   })
 }
 
+/** Which list a saved view belongs to. One key per grid, never shared. */
+export const VIEW_GRIDS = ['loads', 'drivers'] as const
+export type ViewGrid = (typeof VIEW_GRIDS)[number]
+
+export function isViewGrid(value: unknown): value is ViewGrid {
+  return (
+    typeof value === 'string' &&
+    (VIEW_GRIDS as readonly string[]).includes(value)
+  )
+}
+
+const viewKey = (grid: ViewGrid) =>
+  grid === 'drivers' ? PREFERENCE_KEYS.driversViews : PREFERENCE_KEYS.loadsViews
+
 export async function readSavedViews(
   tx: TxClient,
   userId: string,
+  grid: ViewGrid = 'loads',
 ): Promise<SavedView[]> {
-  return parseSavedViews(
-    await readPreference(tx, userId, PREFERENCE_KEYS.loadsViews),
-  )
+  return parseSavedViews(await readPreference(tx, userId, viewKey(grid)))
 }
 
 export type SaveViewFailure = 'no_name' | 'too_many'
@@ -169,13 +184,14 @@ export async function saveView(
   userId: string,
   name: string,
   query: string,
+  grid: ViewGrid = 'loads',
 ): Promise<
   { ok: true; views: SavedView[] } | { ok: false; reason: SaveViewFailure }
 > {
   const slug = slugify(name)
   if (slug === '') return { ok: false, reason: 'no_name' }
 
-  const existing = await readSavedViews(tx, userId)
+  const existing = await readSavedViews(tx, userId, grid)
   const kept = existing.filter((view) => view.slug !== slug)
 
   if (kept.length >= MAX_SAVED_VIEWS) {
@@ -190,13 +206,7 @@ export async function saveView(
       query: new URLSearchParams(query).toString(),
     },
   ]
-  await writePreference(
-    tx,
-    organizationId,
-    userId,
-    PREFERENCE_KEYS.loadsViews,
-    views,
-  )
+  await writePreference(tx, organizationId, userId, viewKey(grid), views)
   return { ok: true, views }
 }
 
@@ -205,16 +215,11 @@ export async function deleteView(
   organizationId: string,
   userId: string,
   slug: string,
+  grid: ViewGrid = 'loads',
 ): Promise<SavedView[]> {
-  const views = (await readSavedViews(tx, userId)).filter(
+  const views = (await readSavedViews(tx, userId, grid)).filter(
     (view) => view.slug !== slug,
   )
-  await writePreference(
-    tx,
-    organizationId,
-    userId,
-    PREFERENCE_KEYS.loadsViews,
-    views,
-  )
+  await writePreference(tx, organizationId, userId, viewKey(grid), views)
   return views
 }

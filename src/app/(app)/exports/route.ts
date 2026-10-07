@@ -80,7 +80,7 @@ import type { Action, Resource } from '@/lib/permissions'
  */
 type ExportableGrid = Exclude<
   GridId,
-  'settlements.trips' | 'loads.loads' | 'trucks.trucks'
+  'settlements.trips' | 'loads.loads' | 'trucks.trucks' | 'drivers.drivers'
 >
 
 const NOT_EXPORTABLE = new Set<GridId>([
@@ -96,6 +96,10 @@ const NOT_EXPORTABLE = new Set<GridId>([
   // the decision arrived instead of being buried.
   'loads.loads',
   'trucks.trucks',
+  // §6.4 part 1 (2026-10-07): the third operational list, for the same
+  // reason. The brief asked for export; the design says the three get it
+  // together, as one shared reader, or not at all — flagged, not dropped.
+  'drivers.drivers',
 ])
 
 const isExportable = (grid: GridId): grid is ExportableGrid =>
@@ -128,6 +132,7 @@ const GUARD: Record<GridId, { action: Action; resource: Resource }> = {
   // and an exhaustive map is what forces the decision to be made out loud.
   'loads.loads': { action: 'read', resource: 'load' },
   'trucks.trucks': { action: 'read', resource: 'truck' },
+  'drivers.drivers': { action: 'read', resource: 'driver' },
 }
 
 const csv = (name: string, body: string): Response =>
