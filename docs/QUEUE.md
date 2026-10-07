@@ -135,6 +135,15 @@ the filtered list. Same later for Drivers. The office fixes data
 faster when the screen counts it.
 ```
 
+_And, after part 0 reported:_
+
+```
+Item 18 part 0b: the data-health row for Drivers, same module — five
+checks: no CDL on file, no medical card, no phone, no pay rule, no
+truck (active drivers only). Footer under the Drivers grid, GAPS
+reading, same agreement test. Then hold for the Trucks brief.
+```
+
 ### 16 — DRIVERS = Datatruck's shape (done 2026-10-07)
 
 _Owner's brief, received 2026-10-07 and transcribed here the same day, before
