@@ -103,8 +103,39 @@ the compliance block; what remains is the deferred list below.
 
 ## Next
 
-| #   | Item | Shape |
-| --- | ---- | ----- |
+| #   | Item                                                                                                                                                                                                                                                       | Shape                                                |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| 16  | **DRIVERS = Datatruck's shape**, three parts — the list with its tabs and columns on the existing grid machinery; the record's tabs, each reading what exists and saying so in words where nothing does; team drivers on load, statement and both records. | brief below, verbatim; doc-first; ten lines per part |
+
+### 16 — DRIVERS = Datatruck's shape
+
+_Owner's brief, received 2026-10-07 and transcribed here the same day, before
+part 1 was designed — because on 2026-10-06 the item was handed over as "the
+queued brief" and the brief was in neither this repository nor the session,
+which is the failure this file exists to stop._
+
+```
+DRIVERS = Datatruck's shape. Doc-first, then build:
+1. List tabs: Active · Unassigned · All · Terminated · Vacation board.
+   Columns: assign status (Ready to go / Not ready, from the DQF +
+   truck check), employee status, first/last name, driver type,
+   last activity, authority, phone, email, driver status (available /
+   in transit / off duty), truck. Filter, bulk actions, import file,
+   export, save view, column chooser — the existing grid machinery.
+2. Driver detail tabs: Main · Documents · Mobile app login ·
+   Recruiting · Accounting (pay rule, pay-to, deductions, opening
+   balance) · Safety (CDL, med card, DQF, random testing, inspections)
+   · Assets (truck/trailer history) · Statistics · Log history (audit)
+   · Tasks · Others. Each tab reads what exists today; a tab with
+   nothing behind it says so in words — no empty panels.
+3. Team drivers: a truck carries up to two drivers; both seats on the
+   load, both on the statement, shown on both records as "team with".
+Ten lines per part, full ritual.
+```
+
+Each part is designed in `TMS-DESIGN-SYSTEM.md` in its own commit before its
+code, and where the brief meets the design system or the schema, those two win
+and the contradiction is flagged (AGENTS.md).
 
 ## Deferred
 
