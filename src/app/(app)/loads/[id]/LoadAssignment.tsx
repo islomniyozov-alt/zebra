@@ -27,6 +27,9 @@ interface Props {
   truckId: string | null
   driverId: string | null
   coDriverId: string | null
+  /** The driver's team-mate, pre-filled into an EMPTY second seat (§6.4 part 3). */
+  suggestedCoDriverId: string | null
+  teamHint: string | null
   disabled: boolean
   assign: (previous: DetailState, formData: FormData) => Promise<DetailState>
   labels: {
@@ -46,6 +49,8 @@ export function LoadAssignment({
   truckId,
   driverId,
   coDriverId,
+  suggestedCoDriverId,
+  teamHint,
   disabled,
   assign,
   labels,
@@ -95,9 +100,14 @@ export function LoadAssignment({
             name="coDriverId"
             label={labels.coDriver}
             options={withBlank(drivers)}
-            defaultValue={coDriverId ?? ''}
+            defaultValue={coDriverId ?? suggestedCoDriverId ?? ''}
             disabled={disabled || pending}
           />
+          {/* A SUGGESTION, SAVED BY THE DISPATCHER. The sentence says who and
+           * from which unit; clearing the select above declines it. */}
+          {coDriverId === null && teamHint ? (
+            <p className="self-end text-xs text-ink-3">{teamHint}</p>
+          ) : null}
         </div>
 
         {/* EVERY refusal at once, as one sentence — `assignLoadAction` joins

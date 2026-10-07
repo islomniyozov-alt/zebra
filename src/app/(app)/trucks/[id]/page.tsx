@@ -1,6 +1,8 @@
 import { notFound } from 'next/navigation'
 import { SELECTABLE_AUTHORITY } from '@/lib/companies'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
+import Link from 'next/link'
+import { crewOfTruck } from '@/lib/team'
 import { getLocaleContext } from '@/lib/locale'
 import { companyIdScopeFilter } from '@/lib/tenancy'
 import { currentAuthority } from '@/lib/fleet'
@@ -72,6 +74,8 @@ export default async function EditTruckPage({
       compliance,
       maintenance,
       inspections,
+      // SHOWN ON BOTH RECORDS (§6.4 part 3): who holds this truck, up to two.
+      crew: await crewOfTruck(tx, id),
     }
   })
 
@@ -83,6 +87,7 @@ export default async function EditTruckPage({
     compliance,
     maintenance,
     inspections,
+    crew,
   } = data
   const maySeeCompliance = await currentUserCan('read', 'compliance')
   const maySeeInspections = await currentUserCan('read', 'inspection')
@@ -104,6 +109,30 @@ export default async function EditTruckPage({
           {t('trucks.edit')}{' '}
           <span className="font-mono text-ink-2">{truck.unitNumber}</span>
         </h1>
+        {/* THE CREW, OR THE SENTENCE. Two seats; a truck with nobody in
+         * them says so rather than showing an empty label. */}
+        <p className="text-xs text-ink-3">
+          {crew.length === 0 ? (
+            t('trucks.crewNone')
+          ) : (
+            <>
+              <span className="uppercase tracking-[0.04em]">
+                {t('trucks.crew')}
+              </span>{' '}
+              {crew.map((member, index) => (
+                <span key={member.id} className="text-ink-2">
+                  {index > 0 ? ' · ' : null}
+                  <Link
+                    href={`/drivers/${member.id}`}
+                    className="underline-offset-2 hover:underline"
+                  >
+                    {member.firstName} {member.lastName}
+                  </Link>
+                </span>
+              ))}
+            </>
+          )}
+        </p>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-surface-2 px-gutter py-z5">

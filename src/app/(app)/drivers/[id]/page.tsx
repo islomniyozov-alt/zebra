@@ -21,6 +21,7 @@ import {
   type RecordTab,
 } from '@/lib/driver-record'
 import { ActivityTimeline } from '../../loads/[id]/ActivityTimeline'
+import { teamMateFor } from '@/lib/team'
 import { SELECTABLE_AUTHORITY } from '@/lib/companies'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
@@ -196,6 +197,9 @@ export default async function EditDriverPage({
       select: { timezone: true },
     })
     const now = new Date()
+    // SHOWN ON BOTH RECORDS (§6.4 part 3): the other live person on this
+    // driver's truck, in the header where the type already is.
+    const teamMate = await teamMateFor(tx, id)
     const assignments =
       requestedTab === 'assets' ? await assignmentHistoryFor(tx, id) : []
     const draws = requestedTab === 'safety' ? await drawsForDriver(tx, id) : []
@@ -233,6 +237,7 @@ export default async function EditDriverPage({
       compliance,
       inspections,
       timezone: company?.timezone ?? 'America/Chicago',
+      teamMate,
       assignments,
       draws,
       stats,
@@ -265,6 +270,7 @@ export default async function EditDriverPage({
     compliance,
     inspections,
     timezone,
+    teamMate,
     assignments,
     draws,
     stats,
@@ -451,6 +457,17 @@ export default async function EditDriverPage({
           <span className="text-xs font-normal text-ink-3">
             {t(`drivers.type.${driver.driverType}` as MessageKey)}
           </span>
+          {teamMate ? (
+            <span className="ms-z2 text-xs font-normal text-ink-3">
+              {t('team.with')}{' '}
+              <Link
+                href={`/drivers/${teamMate.id}`}
+                className="text-ink-2 underline-offset-2 hover:underline"
+              >
+                {teamMate.firstName} {teamMate.lastName}
+              </Link>
+            </span>
+          ) : null}
         </h1>
         {/* OPERATIONAL, SO IT IS UNGATED. A dispatcher deciding who to
          * offer a load to needs this; it is a record of arrivals, not a

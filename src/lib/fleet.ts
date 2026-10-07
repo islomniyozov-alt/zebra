@@ -6,6 +6,7 @@ import {
 } from './driver-roster'
 import { readFleetStatus, readFuelType } from './fleet-codes'
 import type { TxClient } from './tenancy'
+import { assertSeatFree } from './team'
 import {
   closeOpenPeriod,
   openFirstPeriod,
@@ -227,6 +228,9 @@ async function pairedTruck(
   tx: TxClient,
   companyId: string,
   value: unknown,
+  // THE DRIVER BEING SAVED, so a driver keeping the truck they already hold
+  // is not counted against themselves. `null` on create.
+  exceptDriverId: string | null,
 ): Promise<string | null> {
   const truckId = optionalText(value)
   if (truckId === null) return null
@@ -243,6 +247,9 @@ async function pairedTruck(
       field: 'assignedTruckId',
     })
   }
+  // A TRUCK SEATS TWO (§6.4 part 3). Refused here and not on the form, for
+  // the same reason the authority is: every writer reaches this line.
+  await assertSeatFree(tx, truck.id, exceptDriverId)
   return truck.id
 }
 
@@ -621,7 +628,12 @@ export async function createDriver(
       status: assertRosterStatus(input.status) ?? ACTIVE_ROSTER,
       driverType: input.driverType ?? 'COMPANY_DRIVER',
       notes: optionalText(input.notes),
-      assignedTruckId: await pairedTruck(tx, companyId, input.assignedTruckId),
+      assignedTruckId: await pairedTruck(
+        tx,
+        companyId,
+        input.assignedTruckId,
+        null,
+      ),
       assignedTrailerId: await pairedTrailer(
         tx,
         companyId,
@@ -697,6 +709,7 @@ export async function updateDriver(
     tx,
     current.companyId,
     input.assignedTruckId,
+    id,
   )
   // `id` is passed so a driver keeping the trailer they already hold is not
   // refused for colliding with themselves.

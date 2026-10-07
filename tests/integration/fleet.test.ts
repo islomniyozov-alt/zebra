@@ -941,6 +941,43 @@ describe('a driver and their truck run under one authority', () => {
       ),
     ).rejects.toBeInstanceOf(ReferenceError)
   })
+
+  it('seats two drivers and refuses a third, in words (§6.4 part 3)', async () => {
+    const truck = await inOrg((tx) =>
+      createTruck(tx, organizationId, {
+        companyId: alphaId,
+        unitNumber: `team-${nonce}`,
+      }),
+    )
+    const seat = (lastName: string) =>
+      inOrg((tx) =>
+        createDriver(tx, organizationId, {
+          companyId: alphaId,
+          firstName: 'Team',
+          lastName: `${lastName} ${nonce}`,
+          assignedTruckId: truck.id,
+        }),
+      )
+    const first = await seat('One')
+    const second = await seat('Two')
+    expect(second.assignedTruckId).toBe(truck.id)
+
+    await expect(seat('Three')).rejects.toMatchObject({
+      code: 'truck_full',
+      field: 'assignedTruckId',
+    })
+
+    // THE PAIR: the first driver keeping their own truck is not a third
+    // driver. If this refuses, the count included the driver being saved.
+    const kept = await inOrg((tx) =>
+      updateDriver(tx, first.id, {
+        firstName: 'Team',
+        lastName: `One ${nonce}`,
+        assignedTruckId: truck.id,
+      }),
+    )
+    expect(kept.assignedTruckId).toBe(truck.id)
+  })
 })
 
 // ---------------------------------------------------------------------------

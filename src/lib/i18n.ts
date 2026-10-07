@@ -921,6 +921,13 @@ const en = {
   'ref.error.invalidAuthority': 'Choose an authority you work under.',
   'ref.error.truckOtherAuthority':
     'That truck runs under a different authority. A driver and their truck must be under the same one — transfer the truck first, or pick another.',
+  'ref.error.truckFull':
+    'That truck already carries two drivers. Take one off it first, or pick another truck.',
+  'team.with': 'Team with',
+  'team.suggested':
+    'Team: {name} shares unit {unit} with the driver — saved as the second seat when you press Save, unless you clear it.',
+  'trucks.crew': 'Drivers',
+  'trucks.crewNone': 'No driver holds this truck.',
   'ref.error.sameDriverTwice':
     'That is the same person in both seats. A team is two different drivers sharing one load — pick someone else as co-driver, or clear it.',
   'ref.error.closedHistoryPaymentType':
@@ -3841,6 +3848,13 @@ const ru: Dictionary = {
   'ref.error.invalidAuthority': 'Выберите перевозчика, с которым вы работаете.',
   'ref.error.truckOtherAuthority':
     'Этот тягач числится за другим перевозчиком. Водитель и его тягач должны быть под одним — сначала переведите тягач или выберите другой.',
+  'ref.error.truckFull':
+    'На этом тягаче уже два водителя. Сначала снимите одного или выберите другой тягач.',
+  'team.with': 'В команде с',
+  'team.suggested':
+    'Команда: {name} закреплён за тягачом {unit} вместе с водителем — сохранится вторым водителем при нажатии «Сохранить», если поле не очистить.',
+  'trucks.crew': 'Водители',
+  'trucks.crewNone': 'За тягачом не закреплён ни один водитель.',
   'ref.error.sameDriverTwice':
     'Это один и тот же человек на обоих местах. Экипаж — это два разных водителя на одном грузе — выберите другого вторым водителем или очистите поле.',
   'ref.error.closedHistoryPaymentType':
@@ -6724,6 +6738,13 @@ const fa: Dictionary = {
   'ref.error.invalidAuthority': 'شرکتی را انتخاب کنید که با آن کار می‌کنید.',
   'ref.error.truckOtherAuthority':
     'این کامیون زیر شرکت دیگری کار می‌کند. راننده و کامیونش باید زیر یک شرکت باشند — نخست کامیون را منتقل کنید یا کامیون دیگری برگزینید.',
+  'ref.error.truckFull':
+    'این کامیون از پیش دو راننده دارد. نخست یکی را بردارید یا کامیون دیگری برگزینید.',
+  'team.with': 'هم‌تیمی با',
+  'team.suggested':
+    'تیم: {name} با راننده در کامیون {unit} است — با زدن ذخیره به عنوان راننده دوم ثبت می‌شود، مگر آن را پاک کنید.',
+  'trucks.crew': 'رانندگان',
+  'trucks.crewNone': 'هیچ راننده‌ای این کامیون را در اختیار ندارد.',
   'ref.error.sameDriverTwice':
     'این یک نفر در هر دو جایگاه است. تیم یعنی دو راننده متفاوت در یک بار — راننده دوم دیگری برگزینید یا آن را خالی کنید.',
   'ref.error.closedHistoryPaymentType':

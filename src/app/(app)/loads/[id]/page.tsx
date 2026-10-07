@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation'
+import { teamMateFor } from '@/lib/team'
 import Link from 'next/link'
 import { assignableDriver, ASSIGNABLE_TRUCK } from '@/lib/driver-availability'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
@@ -366,6 +367,10 @@ export default async function LoadDetailPage({
       auditRows,
       trucks,
       drivers,
+      // THE SECOND SEAT, OFFERED (§6.4 part 3): the driver's team-mate, when
+      // they have one AND the picker can save them. Read after the picker so
+      // the control never names someone it would then refuse.
+      teamMate: load.driverId ? await teamMateFor(tx, load.driverId) : null,
     }
   })
 
@@ -379,7 +384,12 @@ export default async function LoadDetailPage({
     auditRows,
     trucks,
     drivers,
+    teamMate,
   } = data
+  const offeredMate =
+    teamMate && drivers.some((driver) => driver.id === teamMate.id)
+      ? teamMate
+      : null
 
   // WHAT THIS SCREEN SHOWS, decided in one place and testable without a
   // browser. Seven display items branch on whether this freight settles
@@ -890,6 +900,17 @@ export default async function LoadDetailPage({
               truckId={load.truckId}
               driverId={load.driverId}
               coDriverId={load.coDriverId}
+              suggestedCoDriverId={offeredMate?.id ?? null}
+              teamHint={
+                offeredMate
+                  ? t('team.suggested')
+                      .replace(
+                        '{name}',
+                        `${offeredMate.firstName} ${offeredMate.lastName}`,
+                      )
+                      .replace('{unit}', offeredMate.truckUnit)
+                  : null
+              }
               disabled={load.isCancelled}
               assign={assignLoadAction.bind(null, id)}
               labels={{
