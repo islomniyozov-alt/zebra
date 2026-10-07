@@ -2877,6 +2877,12 @@ const en = {
   'batch.finalise': 'Finalise batch',
   'batch.markPaid': 'Mark paid',
   'batch.statement': 'Statement',
+  'batch.trips': 'Trips in this batch',
+  'batch.tripsHint':
+    'Ticked trips are in the draft. Untick to leave one out; Save writes the change and recomputes the statements.',
+  'batch.tripsFinal':
+    'This batch is final. Its trips are a document and are not changed here.',
+  'batch.saveTicks': 'Save ticks · {count} in',
   'batch.driver': 'Driver',
   'batch.loads': 'Loads',
   'batch.earnings': 'Earnings',
@@ -5803,6 +5809,12 @@ const ru: Dictionary = {
   'batch.finalise': 'Утвердить партию',
   'batch.markPaid': 'Отметить оплаченной',
   'batch.statement': 'Ведомость',
+  'batch.trips': 'Рейсы в этой партии',
+  'batch.tripsHint':
+    'Отмеченные рейсы входят в черновик. Снимите галочку, чтобы исключить рейс; «Сохранить» запишет изменение и пересчитает ведомости.',
+  'batch.tripsFinal':
+    'Партия закрыта. Её рейсы — документ, здесь они не меняются.',
+  'batch.saveTicks': 'Сохранить отметки · {count} в партии',
   'batch.driver': 'Водитель',
   'batch.loads': 'Грузы',
   'batch.earnings': 'Начислено',
@@ -8698,6 +8710,12 @@ const fa: Dictionary = {
   'batch.finalise': 'نهایی کردن دسته',
   'batch.markPaid': 'ثبت پرداخت',
   'batch.statement': 'صورت‌حساب',
+  'batch.trips': 'سفرهای این دسته',
+  'batch.tripsHint':
+    'سفرهای تیک‌خورده در پیش‌نویس هستند. برای کنار گذاشتن یکی تیک را بردارید؛ ذخیره تغییر را می‌نویسد و صورت‌حساب‌ها را دوباره حساب می‌کند.',
+  'batch.tripsFinal':
+    'این دسته نهایی است. سفرهایش یک سند است و اینجا تغییر نمی‌کند.',
+  'batch.saveTicks': 'ذخیرهٔ تیک‌ها · {count} در دسته',
   'batch.driver': 'راننده',
   'batch.loads': 'بارها',
   'batch.earnings': 'درآمد',

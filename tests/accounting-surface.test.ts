@@ -680,6 +680,12 @@ describe('the screenshot script', () => {
 describe('the open-batch flow', () => {
   const preview = readFileSync('src/lib/batch-preview.ts', 'utf8')
   const page = readFileSync(join(PAYROLL, 'batches', 'new', 'page.tsx'), 'utf8')
+  // THE GRID LIVES ONCE (§6.2.10 part 2b): the picker and the batch screen
+  // render `BatchTripsGrid`, so the row rules are read from it, not the page.
+  const grid = readFileSync(
+    join(PAYROLL, 'batches', 'BatchTripsGrid.tsx'),
+    'utf8',
+  )
 
   // ── EVERY BUCKET IS RENDERED, AND NAMED FROM ONE LIST ───────────────────
   //
@@ -742,18 +748,19 @@ describe('the open-batch flow', () => {
     // exclusions are never undone by a refresh — so a trip nobody could price
     // today would stay out of the batch after somebody fixed the pay rule.
     // `offerFor` posts nothing for those rows, which leaves them pending.
-    expect(page).toMatch(
+    expect(grid).toMatch(
       /^\s*offerFor: \(row\) => row\.loadPayCents !== null,$/m,
     )
+    expect(page).toContain('<BatchTripsGrid')
   })
 
   it('and says WHY in words rather than printing a dash', () => {
     // A dash reads as zero on a money column and a blank reads as nothing to
     // see. The four sentences are `settlements.error.*` — the vocabulary the
     // settlement screens already use for the same four failures.
-    expect(page).toContain("no_rule: 'settlements.error.noRule'")
-    expect(page).toContain("no_miles: 'settlements.error.noMiles'")
-    expect(page).toContain('PAY_PROBLEM[row.payProblem')
+    expect(grid).toContain("no_rule: 'settlements.error.noRule'")
+    expect(grid).toContain("no_miles: 'settlements.error.noMiles'")
+    expect(grid).toContain('PAY_PROBLEM[row.payProblem')
   })
 
   it('says WHICH authority the batch will settle, before the button is pressed', () => {

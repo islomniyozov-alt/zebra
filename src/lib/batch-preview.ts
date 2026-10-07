@@ -109,6 +109,11 @@ export interface PreviewTrip {
   payProblem: PayFailure | null
   /** Null on an available trip; the bucket otherwise. */
   reason: UnavailableReason | null
+  /**
+   * On the batch screen (§6.2.10 part 2b): this batch has declined the trip, so
+   * its box starts UNTICKED. Always false on the picker, which has no batch yet.
+   */
+  excluded: boolean
 }
 
 export interface BatchPreview {
@@ -133,6 +138,13 @@ export async function previewBatch(
     to: Date
     /** Narrows the grid only. The batch itself is org-wide — see the page. */
     companyId: string | null
+    /**
+     * THE BATCH SCREEN'S OWN BATCH (§6.2.10 part 2b). A trip on this batch's
+     * statements is available and ticked; a trip this batch excluded is
+     * available and unticked; a trip on ANOTHER batch's statement is still
+     * "already on a statement". Null on the picker.
+     */
+    forBatchId?: string | null
   },
 ): Promise<BatchPreview> {
   // A WINDOW WIDER THAN THE RANGE, so `outsideRange` has something to report.
@@ -217,9 +229,26 @@ export async function previewBatch(
         take: 1,
         select: { occurredAt: true },
       },
-      settlementLoadLines: { select: { id: true }, take: 1 },
+      // WHOSE statement, not merely whether: the batch screen has to tell its
+      // own batch's lines from another batch's (§6.2.10 part 2b).
+      settlementLoadLines: {
+        select: { settlement: { select: { batchId: true } } },
+        take: 1,
+      },
     },
   })
+
+  // THE TICKS, FROM THE ONLY PLACE THEY LIVE. Empty on the picker.
+  const excludedHere = new Set(
+    input.forBatchId
+      ? (
+          await tx.settlementBatchExclusion.findMany({
+            where: { batchId: input.forBatchId },
+            select: { loadId: true },
+          })
+        ).map((row) => row.loadId)
+      : [],
+  )
 
   const unavailable: Record<UnavailableReason, PreviewTrip[]> = {
     inTransit: [],
@@ -302,7 +331,17 @@ export async function previewBatch(
           : { loadPayCents: null, payProblem: pay.reason }
       })(),
       reason: null,
+      excluded: excludedHere.has(load.id),
     }
+
+    // ON A STATEMENT — BUT WHOSE? On the picker any statement line settles it.
+    // On the batch screen this batch's own lines are the batch's trips, which
+    // is the whole point of the screen; only ANOTHER batch's line puts a trip
+    // in the "already on a statement" bucket.
+    const line = load.settlementLoadLines[0] ?? null
+    const onAnotherStatement =
+      line !== null &&
+      (input.forBatchId == null || line.settlement.batchId !== input.forBatchId)
 
     // ── THE PRECEDENCE, STATED ────────────────────────────────────────
     //
@@ -311,18 +350,17 @@ export async function previewBatch(
     // stops somebody looking. Then the two facts about the freight itself,
     // then the two about who would be paid — a load with no POD and no driver
     // is in transit first, because that is the earlier problem.
-    const reason: UnavailableReason | null =
-      load.settlementLoadLines.length > 0
-        ? 'alreadyInBatch'
-        : podAt === null
-          ? 'inTransit'
-          : podAt < input.from || podAt > input.to
-            ? 'outsideRange'
-            : load.driverId === null
-              ? 'noDriver'
-              : ruleInForce(load.driver?.payRules ?? [], input.to) === null
-                ? 'noRule'
-                : null
+    const reason: UnavailableReason | null = onAnotherStatement
+      ? 'alreadyInBatch'
+      : podAt === null
+        ? 'inTransit'
+        : podAt < input.from || podAt > input.to
+          ? 'outsideRange'
+          : load.driverId === null
+            ? 'noDriver'
+            : ruleInForce(load.driver?.payRules ?? [], input.to) === null
+              ? 'noRule'
+              : null
 
     if (reason === null) available.push(trip)
     else unavailable[reason].push({ ...trip, reason })

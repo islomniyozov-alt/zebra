@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 import { withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { openBatch, SETTLEMENT_BATCH_TIMEOUT_MS } from '@/lib/settlement-batch'
@@ -72,16 +73,17 @@ export async function openWeekAction(
 
   if (!outcome.ok) {
     // `period_taken` is not a collision to report — it is the one-per-period
-    // rule refusing, and the batch it hands back is the one this screen is
-    // already showing. Revalidating is the whole response: the page re-reads and
-    // the week now has a batch on it.
+    // rule refusing, and the batch it hands back is the batch for this week.
+    // OPEN A BATCH LANDS ON THE BATCH (§6.2.10 part 2b): the one just opened,
+    // or the one already covering the week.
     if (outcome.reason.kind === 'period_taken') {
       revalidatePath('/accounting/payroll')
-      return { error: null }
+      redirect(`/settlements/batches/${outcome.reason.batchId}`)
     }
     return { error: t('batch.error.notAWeek') }
   }
 
   revalidatePath('/accounting/payroll')
-  return { error: null }
+  revalidatePath('/payroll/batches')
+  redirect(`/settlements/batches/${outcome.batchId}`)
 }

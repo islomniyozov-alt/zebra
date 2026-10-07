@@ -154,3 +154,75 @@ export async function includeTrips(
     excluded: await countExclusions(tx, input.batchId),
   }
 }
+
+/**
+ * The batch screen's Save (§6.2.10 part 2b): the office's ticks, as a whole.
+ *
+ * `wanted` is shown minus ticked — the exclusion set the screen wants. Against
+ * the set the batch has, the difference is written as the DELTA: newly unticked
+ * trips through `excludeTrips`, newly re-ticked ones through `includeTrips`, so
+ * the two verbs stay the only writers and "who and when" is recorded on each
+ * new exclusion. ONE REFRESH, not one per verb: both verbs refresh, so when both
+ * halves are non-empty the second refresh is a recompute of a draft that is
+ * already right — cheap, and simpler than teaching the verbs to skip it.
+ *
+ * A trip that is neither shown nor already excluded is untouched: it arrived
+ * after the render and joins the batch, which is the monotonicity part 2 is for.
+ */
+export async function setExclusions(
+  tx: TxClient,
+  input: {
+    batchId: string
+    /** Every trip the grid rendered and offered. */
+    shownLoadIds: readonly string[]
+    /** The ones left ticked. */
+    tickedLoadIds: readonly string[]
+    byUserId: string | null
+  },
+): Promise<ExclusionOutcome> {
+  const found = await draftOrRefusal(tx, input.batchId)
+  if (!found.ok) return found
+
+  const ticked = new Set(input.tickedLoadIds)
+  const wanted = new Set(
+    input.shownLoadIds.filter((loadId) => !ticked.has(loadId)),
+  )
+  const have = new Set(await excludedLoadIds(tx, input.batchId))
+
+  const toExclude = [...wanted].filter((loadId) => !have.has(loadId))
+  // ONLY SHOWN TRIPS CAN BE RE-INCLUDED FROM HERE: a trip the grid did not
+  // render was not a box anybody ticked.
+  const shown = new Set(input.shownLoadIds)
+  const toInclude = [...have].filter(
+    (loadId) => shown.has(loadId) && ticked.has(loadId),
+  )
+
+  let changed = 0
+  if (toExclude.length > 0) {
+    const out = await excludeTrips(tx, {
+      batchId: input.batchId,
+      loadIds: toExclude,
+      byUserId: input.byUserId,
+    })
+    if (!out.ok) return out
+    changed += out.changed
+  }
+  if (toInclude.length > 0) {
+    const back = await includeTrips(tx, {
+      batchId: input.batchId,
+      loadIds: toInclude,
+    })
+    if (!back.ok) return back
+    changed += back.changed
+  }
+  if (toExclude.length === 0 && toInclude.length === 0) {
+    // NOTHING MOVED, but the office pressed Save: recompute so the screen
+    // shows the draft as the rows are now, which is what they asked for.
+    await refreshDraft(tx, input.batchId)
+  }
+  return {
+    ok: true,
+    changed,
+    excluded: await countExclusions(tx, input.batchId),
+  }
+}

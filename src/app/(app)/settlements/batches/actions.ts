@@ -13,6 +13,7 @@ import {
   type BatchRefusal,
 } from '@/lib/settlement-batch'
 import { isSettlementWeek, weekOf } from '@/lib/settlement-week'
+import { setExclusions } from '@/lib/batch-exclusions'
 import type { MessageKey } from '@/lib/i18n'
 
 // MONEY-DESIGN item 3 — the batch screen's writes.
@@ -95,6 +96,49 @@ export async function createBatchAction(
 
   revalidatePath('/settlements/batches')
   redirect(`/settlements/batches/${created.batchId}`)
+}
+
+/**
+ * The batch screen's Save (§6.2.10 part 2b). `shown` is every trip the grid
+ * offered and `trip` the ones left ticked; `setExclusions` writes the delta
+ * through the two exclusion verbs and refreshes the draft. Reads the form,
+ * calls one function, revalidates.
+ */
+export async function saveTicksAction(
+  batchId: string,
+  _previous: BatchState,
+  formData: FormData,
+): Promise<BatchState> {
+  const { t } = await getLocaleContext()
+  const shownLoadIds = formData.getAll('shown').map(String)
+  const tickedLoadIds = formData.getAll('trip').map(String)
+
+  const outcome = await withCurrentOrg(
+    'update',
+    'settlement',
+    (tx, session) =>
+      setExclusions(tx, {
+        batchId,
+        shownLoadIds,
+        tickedLoadIds,
+        byUserId: session.userId,
+      }),
+    { timeoutMs: SETTLEMENT_BATCH_TIMEOUT_MS },
+  )
+
+  revalidatePath(`/settlements/batches/${batchId}`)
+  revalidatePath('/payroll/batches')
+  if (outcome.ok) return { error: null, blocked: [] }
+  return {
+    error: t(
+      outcome.reason.kind === 'not_draft'
+        ? 'batch.error.notDraft'
+        : outcome.reason.kind === 'not_found'
+          ? 'batch.error.notFound'
+          : 'batch.error.incomplete',
+    ),
+    blocked: [],
+  }
 }
 
 export async function refreshBatchAction(

@@ -9,6 +9,7 @@ import {
   excludeTrips,
   includeTrips,
   excludedLoadIds,
+  setExclusions,
 } from '@/lib/batch-exclusions'
 import { weekOf } from '@/lib/settlement-week'
 import type { PrismaClient } from '@/generated/prisma/client'
@@ -323,6 +324,112 @@ describe('the trips left ticked sum to the batch gross', () => {
     // in force, and they differ only by authority.
     expect(ids).toContain(mine)
     expect(ids).not.toContain(theirs)
+  })
+})
+
+describe('the batch screen reads its own batch (§6.2.10 part 2b)', () => {
+  it('ticks what is on the batch, unticks what it excluded, and Save writes the delta', async () => {
+    // PRODUCTION-SHAPED: a week with three settleable trips, one unticked on
+    // the way in, then a fourth delivered after the batch was opened.
+    const week = weekOf(new Date(Date.UTC(2026, 7, 12)))
+    const a = await trip({ cents: 40_000, week })
+    const b = await trip({ cents: 35_000, week })
+    const declined = await trip({ cents: 22_000, week })
+
+    const opened = await inOrg((tx) =>
+      openBatch(tx, {
+        organizationId,
+        period: week,
+        statementDate: new Date(Date.UTC(2026, 7, 18)),
+        companyId,
+        excludeLoadIds: [declined],
+        excludedByUserId: userId,
+      }),
+    )
+    expect(opened.ok).toBe(true)
+    if (!opened.ok) return
+    const batchId = opened.batchId
+    const late = await trip({ cents: 9_000, week })
+
+    const screen = () =>
+      inOrg((tx) =>
+        previewBatch(tx, {
+          from: week.start,
+          to: new Date(week.end.getTime() + 86_399_999),
+          companyId,
+          forBatchId: batchId,
+        }),
+      )
+
+    // ── WHAT THE SCREEN SHOWS ─────────────────────────────────────────────
+    //
+    // The picker (no batch) would call a and b "already on a statement" and
+    // show nothing to tick. The batch screen shows all four as available: a
+    // and b ticked, the declined one unticked, the late one ticked (it has no
+    // exclusion and no line yet — it joins on the next refresh).
+    const before = await screen()
+    const byId = new Map(before.available.map((row) => [row.loadId, row]))
+    expect(before.unavailable.alreadyInBatch.map((r) => r.loadId)).toEqual([])
+    expect(byId.get(a)?.excluded).toBe(false)
+    expect(byId.get(b)?.excluded).toBe(false)
+    expect(byId.get(declined)?.excluded).toBe(true)
+    expect(byId.get(late)?.excluded).toBe(false)
+
+    // AND THE TICKED ROWS' GROSS IS THE BATCH'S GROSS, TO THE CENT, once the
+    // late trip is in — which Save does by refreshing.
+    const shown = before.available.map((row) => row.loadId)
+
+    // ── SAVE: the office re-ticks the declined trip and unticks b ─────────
+    const saved = await inOrg((tx) =>
+      setExclusions(tx, {
+        batchId,
+        shownLoadIds: shown,
+        tickedLoadIds: shown.filter((id) => id !== b),
+        byUserId: userId,
+      }),
+    )
+    expect(saved.ok).toBe(true)
+    expect(await excludedLoadIds(owner, batchId)).toEqual([b])
+
+    const after = await screen()
+    const ticked = after.available.filter((row) => !row.excluded)
+    const tickedGross = ticked.reduce((sum, row) => sum + row.grossCents, 0)
+    expect(ticked.map((row) => row.loadId).sort()).toEqual(
+      [a, declined, late].sort(),
+    )
+    expect(tickedGross).toBe(40_000 + 22_000 + 9_000)
+    expect(await grossOf(batchId)).toBe(tickedGross)
+
+    // A TRIP ON ANOTHER BATCH'S STATEMENT IS STILL "ALREADY ON A STATEMENT":
+    // the other-company batch for the same week settles its own trip, and
+    // this batch's screen does not offer it.
+    const theirs = await trip({
+      cents: 13_000,
+      company: otherCompanyId,
+      driver: otherDriverId,
+      week,
+    })
+    const other = await inOrg((tx) =>
+      openBatch(tx, {
+        organizationId,
+        period: week,
+        statementDate: new Date(Date.UTC(2026, 7, 18)),
+        companyId: otherCompanyId,
+      }),
+    )
+    expect(other.ok).toBe(true)
+    const wide = await inOrg((tx) =>
+      previewBatch(tx, {
+        from: week.start,
+        to: new Date(week.end.getTime() + 86_399_999),
+        companyId: null,
+        forBatchId: batchId,
+      }),
+    )
+    expect(wide.unavailable.alreadyInBatch.map((r) => r.loadId)).toContain(
+      theirs,
+    )
+    expect(wide.available.map((r) => r.loadId)).not.toContain(theirs)
   })
 })
 

@@ -2,20 +2,16 @@ import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyIdScopeFilter } from '@/lib/tenancy'
-import { formatCents } from '@/lib/money'
-import { operationalLabelKey } from '@/lib/status'
-import type { LoadOperationalStatus } from '@/generated/prisma/client'
 import { isSettlementWeek, payWeekFor, weekOf } from '@/lib/settlement-week'
 import {
   previewBatch,
   UNAVAILABLE_REASONS,
-  type PreviewTrip,
   type UnavailableReason,
 } from '@/lib/batch-preview'
-import { applyList, sumCents, type RawParams } from '@/lib/list-view'
+import { applyList, type RawParams } from '@/lib/list-view'
 import { SETTLEMENT_BATCH_TIMEOUT_MS } from '@/lib/settlement-batch'
-import { Table, type Column } from '@/components/ui/Table'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { BatchTripsGrid } from '../BatchTripsGrid'
 import { FilterBar } from '@/components/ui/FilterBar'
 import { PageHeader } from '../../../_grid/PageHeader'
 import { CompanyChips } from '../../../_grid/CompanyChips'
@@ -78,7 +74,7 @@ export default async function OpenBatchPage({
   if (!(await currentUserCan('create', 'settlement'))) notFound()
 
   const raw = await searchParams
-  const { t, locale } = await getLocaleContext()
+  const { t } = await getLocaleContext()
 
   // THE WEEK THAT IS DUE IS THE DEFAULT RANGE — the period that ended two
   // Saturdays ago (MONEY-DESIGN §0), not the one that just closed.
@@ -131,152 +127,8 @@ export default async function OpenBatchPage({
     { timeoutMs: SETTLEMENT_BATCH_TIMEOUT_MS },
   )
 
-  // The four sentences the settlement screens already use for the four ways a
-  // pay rule can fail to produce a figure.
-  const PAY_PROBLEM: Record<
-    NonNullable<PreviewTrip['payProblem']>,
-    MessageKey
-  > = {
-    no_rule: 'settlements.error.noRule',
-    custom_unsupported: 'settlements.error.customUnsupported',
-    rule_incomplete: 'settlements.error.ruleIncomplete',
-    no_miles: 'settlements.error.noMiles',
-  }
-
-  const money = (cents: number) => (
-    <span className="font-mono tabular-nums">{formatCents(cents, locale)}</span>
-  )
-
-  // ── NINE COLUMNS, WHICH IS §7.1's CAP EXACTLY (§6.2.10 part 1) ──────────
-  //
-  // ID · payee · driver type · load ref · status · load pay · pickup · delivery ·
-  // locations. The office's own shape, in the office's own order.
-  //
-  // THE AUTHORITY RIDES IN THE PAYEE CELL rather than taking a tenth column. It
-  // is now the BATCH's scope and is stated in the header above, so a column of it
-  // would repeat one value down the whole grid when a company is chosen — and when
-  // the batch is org-wide the fact still matters per row, which is why it is a
-  // second line on the payee rather than dropped. Same move `LoadsTable` makes
-  // with the broker's reference, and for the same reason: both are identity.
-  const columns: Column<PreviewTrip>[] = [
-    {
-      key: 'loadNumber',
-      header: t('settlements.trip.load'),
-      sortable: true,
-      render: (row) => (
-        <span className="z-identifier font-mono" dir="ltr">
-          {row.loadNumber}
-        </span>
-      ),
-    },
-    {
-      key: 'payee',
-      header: t('preview.payee'),
-      truncate: true,
-      sortable: true,
-      render: (row) => (
-        <span className="flex flex-col">
-          <span>{row.payeeName ?? <span className="text-ink-3">—</span>}</span>
-          {/* THE AUTHORITY, ONLY WHERE IT IS NOT ALREADY THE HEADER'S ANSWER. */}
-          {companyId === null ? (
-            <span className="text-xs text-ink-3">{row.companyName}</span>
-          ) : null}
-        </span>
-      ),
-    },
-    {
-      key: 'driverType',
-      header: t('preview.driverType'),
-      sortable: true,
-      // `drivers.type.COMPANY_DRIVER` is already "Company driver" and
-      // `OWNER_OPERATOR` already "Owner-operator" — the vocabulary the driver
-      // record uses, reused rather than reinvented here (§6.2.10 part 6).
-      render: (row) =>
-        row.driverType === null ? (
-          <span className="text-ink-3">—</span>
-        ) : (
-          t(`drivers.type.${row.driverType}` as MessageKey)
-        ),
-    },
-    {
-      key: 'ref',
-      header: t('loads.column.reference'),
-      truncate: true,
-      render: (row) =>
-        row.referenceNumber === null ? (
-          <span className="text-ink-3">—</span>
-        ) : (
-          <span className="font-mono text-xs" dir="ltr">
-            {row.referenceNumber}
-          </span>
-        ),
-    },
-    {
-      key: 'status',
-      header: t('ref.status'),
-      sortable: true,
-      render: (row) =>
-        t(operationalLabelKey(row.status as LoadOperationalStatus)),
-    },
-    {
-      key: 'gross',
-      header: t('settlements.trip.gross'),
-      align: 'end',
-      sortable: true,
-      render: (row) => money(row.grossCents),
-      foot: (rows) => money(sumCents(rows, (row) => row.grossCents)),
-    },
-    {
-      key: 'loadPay',
-      header: t('preview.loadPay'),
-      align: 'end',
-      sortable: true,
-      // ── THE DRIVER'S CUT, OR WHY THERE ISN'T ONE ──────────────────────
-      //
-      // Owner's ruling 2026-10-05: "load pay" is the DRIVER's amount, not the
-      // gross. A row whose pay cannot be computed says so IN WORDS — not a dash,
-      // which would read as zero, and not a blank, which would read as nothing
-      // to see. The words are `settlements.error.*`, the same four sentences the
-      // settlement screens use for the same four failures, so the office reads
-      // one vocabulary rather than two.
-      render: (row) =>
-        row.loadPayCents === null ? (
-          <span className="text-xs text-warning">
-            {t(PAY_PROBLEM[row.payProblem ?? 'no_rule'])}
-          </span>
-        ) : (
-          money(row.loadPayCents)
-        ),
-      // THE FOOT SUMS WHAT CAN BE PAID, which is what the agreement test pins:
-      // a null is not a zero and must not be added as one.
-      foot: (rows) => money(sumCents(rows, (row) => row.loadPayCents ?? 0)),
-    },
-    {
-      key: 'dates',
-      // ── PICKUP AND DELIVERY IN ONE CELL, AND WHY ──────────────────────
-      //
-      // Adding load pay took the grid to ten and §7.1 caps it at nine, so one
-      // thing had to give. The two dates read as a SPAN — the same arrow idiom
-      // the locations cell already uses for the two places — which is the
-      // smallest loss available here: nothing is hidden and nothing is behind a
-      // control. The alternative was §7.1.4's chooser on a picker, where the
-      // column somebody hides could be the pay they are deciding on.
-      header: `${t('loads.column.pickup')} → ${t('loads.column.delivery')}`,
-      sortable: true,
-      render: (row) => (
-        <span className="font-mono text-xs" dir="ltr">
-          {row.pickupAt ? day(row.pickupAt) : '—'} →{' '}
-          {row.deliveredAt ? day(row.deliveredAt) : '—'}
-        </span>
-      ),
-    },
-    {
-      key: 'locations',
-      header: t('preview.locations'),
-      truncate: true,
-      render: (row) => row.locations ?? <span className="text-ink-3">—</span>,
-    },
-  ]
+  // THE NINE COLUMNS LIVE IN `BatchTripsGrid` (§6.2.10 part 2b), shared with the
+  // batch screen so "what would go in" and "what is in" cannot drift apart.
 
   const view = gridView(
     data.preview.available,
@@ -388,30 +240,18 @@ export default async function OpenBatchPage({
           week: `${day(week.start)} — ${day(week.end)}`,
         }}
       >
-        <Table
-          columns={columns}
+        <BatchTripsGrid
           rows={view.paged.rows}
           footRows={view.filtered}
-          rowKey={(row) => row.loadId}
-          // NO `rowHref`. A ticked row is a control, and a stretched link over it
-          // would make "open the load" and "untick the trip" the same gesture.
-          // §7.1's selection column raises its own stacking for exactly this
-          // reason; here the whole row is part of a form, so the link goes.
+          companyId={companyId}
+          // TICKED BY DEFAULT — everything settleable is in the batch unless the
+          // office takes it out (§6.2.10 part 2). No batch exists yet, so there
+          // is nothing excluded to untick.
           selection={{
             name: 'trip',
             label: t('preview.available'),
-            // TICKED BY DEFAULT — everything settleable is in the batch unless the
-            // office takes it out (§6.2.10 part 2).
-            defaultChecked: true,
-            // AND EVERY ROW POSTS ITS ID REGARDLESS, so the action can compute
-            // `shown` minus `ticked` without re-reading the window.
             alsoPost: 'shown',
-            // A TRIP NOBODY CAN PRICE IS NOT OFFERED (owner's ruling). It is
-            // shown, with the reason in words, and it posts NOTHING — so it is
-            // neither in the batch nor recorded as a decision to leave it out.
-            // Once the pay rule is fixed it joins on the next refresh, which an
-            // exclusion would have prevented forever.
-            offerFor: (row) => row.loadPayCents !== null,
+            defaultCheckedFor: () => true,
           }}
           caption={t('preview.available')}
           sort={{
@@ -420,13 +260,11 @@ export default async function OpenBatchPage({
             hrefFor: view.sortFor(PATH),
             label: t('accounting.sortBy'),
           }}
-          totals={{
-            label: pagedFooterLabel(
-              t('preview.available'),
-              t('grid.rows'),
-              view.paged,
-            ),
-          }}
+          totalsLabel={pagedFooterLabel(
+            t('preview.available'),
+            t('grid.rows'),
+            view.paged,
+          )}
           empty={
             <EmptyState
               title={t('preview.emptyAvailable')}

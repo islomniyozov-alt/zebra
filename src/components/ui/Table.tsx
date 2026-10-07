@@ -139,6 +139,12 @@ interface TableProps<Row> {
      */
     defaultChecked?: boolean
     /**
+     * Start ticked PER ROW — the batch screen's grid, where a tick is "not
+     * excluded" and the exclusions are persisted (§6.2.10 part 2). Wins over
+     * `defaultChecked` when given.
+     */
+    defaultCheckedFor?: (row: Row) => boolean
+    /**
      * Also post every row's key under this name, ticked or not.
      *
      * WHAT WAS ON THE SCREEN, WHICH IS NOT WHAT WAS TICKED. A picker that posted
@@ -367,7 +373,11 @@ export function Table<Row>({
                             type="checkbox"
                             name={selection.name}
                             value={rowKey(row)}
-                            defaultChecked={selection.defaultChecked ?? false}
+                            defaultChecked={
+                              selection.defaultCheckedFor
+                                ? selection.defaultCheckedFor(row)
+                                : (selection.defaultChecked ?? false)
+                            }
                             aria-label={`${selection.label}: ${rowKey(row)}`}
                             className="size-[14px] accent-[var(--color-accent)]"
                           />
