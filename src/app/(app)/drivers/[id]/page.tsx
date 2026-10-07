@@ -1,4 +1,26 @@
 import { notFound } from 'next/navigation'
+import Link from 'next/link'
+import { Tabs } from '@/components/ui/Tabs'
+import { Table, type Column } from '@/components/ui/Table'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { documentTypeLabels } from '@/lib/document-types'
+import { humaniseField } from '@/lib/load-activity'
+import { netPayByDriverWeek } from '@/lib/accounting-reports'
+import { recentSundays } from '@/lib/rolling-period'
+import { formatCents as formatMoney } from '@/lib/money'
+import {
+  assignmentHistoryFor,
+  driverActivity,
+  drawsForDriver,
+  EMPTY_TABS,
+  recordTabFor,
+  thirteenWeekStats,
+  visibleRecordTabs,
+  type AssignmentPeriod,
+  type DriverDraw,
+  type RecordTab,
+} from '@/lib/driver-record'
+import { ActivityTimeline } from '../../loads/[id]/ActivityTimeline'
 import { SELECTABLE_AUTHORITY } from '@/lib/companies'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
@@ -43,7 +65,7 @@ const OPENING_CATEGORIES = [
   'OTHER_PAY',
   'NET_PAY',
 ] as const
-import type { MessageKey } from '@/lib/i18n'
+import { isMessageKey, type MessageKey } from '@/lib/i18n'
 import { driverFields } from '../fields'
 import { dateInputValue } from '../../_reference/shared'
 import {
@@ -54,11 +76,17 @@ import {
 
 export default async function EditDriverPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const { id } = await params
   const { t, locale } = await getLocaleContext()
+  // THE TAB IS IN THE URL, Main by default, a stale value opens Main (§6.4
+  // part 2). Read before the transaction so the readers a tab needs can run
+  // inside it, and nothing is fetched that the open tab does not show.
+  const requestedTab = recordTabFor((await searchParams)['tab'])
 
   const data = await withCurrentOrg('read', 'driver', async (tx, session) => {
     const driver = await tx.driver.findUnique({ where: { id } })
@@ -159,6 +187,38 @@ export default async function EditDriverPage({
       },
     })
 
+    // WHAT THE NEW TABS NEED, read only for the tab that is open (§6.4
+    // part 2). The viewer's money permission is applied by `activityEntries`
+    // through the one rule; it is read here so the stream is built once.
+    const maySeeMoneyInLog = await currentUserCan('read', 'driver.pay')
+    const company = await tx.company.findUnique({
+      where: { id: driver.companyId },
+      select: { timezone: true },
+    })
+    const now = new Date()
+    const assignments =
+      requestedTab === 'assets' ? await assignmentHistoryFor(tx, id) : []
+    const draws = requestedTab === 'safety' ? await drawsForDriver(tx, id) : []
+    const stats =
+      requestedTab === 'statistics'
+        ? await thirteenWeekStats(tx, id, now)
+        : null
+    const netByWeek =
+      requestedTab === 'statistics' && maySeeMoneyInLog
+        ? ((
+            await netPayByDriverWeek(tx, [id], recentSundays(now, 13)[0] ?? now)
+          ).get(id) ?? [])
+        : []
+    const activity =
+      requestedTab === 'log'
+        ? await driverActivity(
+            tx,
+            id,
+            { maySeeMoney: maySeeMoneyInLog },
+            (note) => (isMessageKey(note) ? t(note) : note),
+          )
+        : { items: [], truncated: false }
+
     return {
       driver,
       companies,
@@ -172,6 +232,12 @@ export default async function EditDriverPage({
       dqf,
       compliance,
       inspections,
+      timezone: company?.timezone ?? 'America/Chicago',
+      assignments,
+      draws,
+      stats,
+      netByWeek,
+      activity,
       documents: documents.map((document) => ({
         id: document.id,
         filename: document.filename,
@@ -198,6 +264,12 @@ export default async function EditDriverPage({
     dqf,
     compliance,
     inspections,
+    timezone,
+    assignments,
+    draws,
+    stats,
+    netByWeek,
+    activity,
   } = data
   const maySeeCompliance = await currentUserCan('read', 'compliance')
   const maySeeInspections = await currentUserCan('read', 'inspection')
@@ -210,6 +282,15 @@ export default async function EditDriverPage({
   const maySeePay = await currentUserCan('read', 'driver.pay')
   const maySetPay = await currentUserCan('update', 'driver.pay')
   const authorities = companies.map((c) => ({ value: c.id, label: c.name }))
+
+  // A TAB A ROLE MAY NOT SEE IS NOT RENDERED (§6.4 part 2) — and a URL
+  // naming one opens Main, the way an unknown tab does.
+  const tabs = visibleRecordTabs({
+    maySeePay,
+    maySeeCompliance,
+    maySeeInspections,
+  })
+  const tab: RecordTab = tabs.includes(requestedTab) ? requestedTab : 'main'
 
   const day = (value: Date | null) =>
     value ? value.toISOString().slice(0, 10) : null
@@ -382,78 +463,104 @@ export default async function EditDriverPage({
         </p>
       </div>
 
+      <Tabs
+        tabs={tabs.map((key) => ({
+          key,
+          label: t(`drivers.recordTab.${key}` as MessageKey),
+        }))}
+        active={tab}
+        hrefFor={(key) =>
+          key === 'main' ? `/drivers/${id}` : `/drivers/${id}?tab=${key}`
+        }
+        label={t('drivers.edit')}
+      />
+
       <div className="min-h-0 flex-1 overflow-y-auto bg-surface-2 px-gutter py-z5">
-        <RecordForm
-          fields={driverFields(
-            t,
-            authorities,
-            'edit',
-            truckOptions,
-            trailerOptions,
-          )}
-          values={{
-            firstName: driver.firstName,
-            lastName: driver.lastName,
-            phone: driver.phone ?? '',
-            email: driver.email ?? '',
-            addressLine1: driver.addressLine1 ?? '',
-            addressCity: driver.addressCity ?? '',
-            addressState: driver.addressState ?? '',
-            addressPostalCode: driver.addressPostalCode ?? '',
-            cdlNumber: driver.cdlNumber ?? '',
-            cdlState: driver.cdlState ?? '',
-            cdlClass: driver.cdlClass ?? '',
-            hireDate: dateInputValue(driver.hireDate),
-            status: driver.status,
-            driverType: driver.driverType,
-            notes: driver.notes ?? '',
-            assignedTruckId: driver.assignedTruckId ?? '',
-            assignedTrailerId: driver.assignedTrailerId ?? '',
-          }}
-          action={updateDriverAction.bind(null, id)}
-          cancelHref="/drivers"
-          labels={{ save: t('ref.save'), cancel: t('ref.cancel') }}
-        >
-          {mayEdit ? (
-            <AssetActions
-              kind="driver"
-              id={id}
-              isRetired={driver.deletedAt !== null}
-              authorities={authorities.filter(
-                (a) => a.value !== driver.companyId,
-              )}
-              currentAuthorityName={
-                openCompany ??
-                companies.find((c) => c.id === driver.companyId)?.name ??
-                null
-              }
-              transferAction={transferAssetAction.bind(null, 'driver', id)}
-              retireAction={
-                mayDelete
-                  ? retireAssetAction.bind(null, 'driver', id)
-                  : async () => {
-                      'use server'
-                    }
-              }
-              restoreAction={restoreAssetAction.bind(null, 'driver', id)}
-              labels={{
-                transfer: t('ref.transfer'),
-                transferTitle: t('ref.transferTitle'),
-                transferBody: t('ref.transferBody'),
-                transferTo: t('ref.transferTo'),
-                transferReason: t('ref.transferReason'),
-                transferConfirm: t('ref.transferConfirm'),
-                retire: t('ref.retire'),
-                retireConfirm: t('ref.retireConfirm'),
-                retireBody: t('ref.retireBody'),
-                restore: t('ref.restore'),
-                cancel: t('ref.cancel'),
-                currentAuthority: t('ref.currentAuthority'),
-                noOpenPeriod: t('ref.noOpenPeriod'),
-              }}
+        {/* ── A TAB WITH NOTHING BEHIND IT SAYS SO IN WORDS (§6.4 part 2) ──
+         * One sentence: the fact, and what the tab will carry. Never an empty
+         * panel, never a placeholder control. */}
+        {EMPTY_TABS.includes(tab) ? (
+          <div className="max-w-[720px]">
+            <EmptyState
+              title={t(`drivers.recordTab.${tab}` as MessageKey)}
+              body={t(`drivers.recordTab.${tab}.empty` as MessageKey)}
             />
-          ) : null}
-        </RecordForm>
+          </div>
+        ) : null}
+
+        {tab === 'main' ? (
+          <RecordForm
+            fields={driverFields(
+              t,
+              authorities,
+              'edit',
+              truckOptions,
+              trailerOptions,
+            )}
+            values={{
+              firstName: driver.firstName,
+              lastName: driver.lastName,
+              phone: driver.phone ?? '',
+              email: driver.email ?? '',
+              addressLine1: driver.addressLine1 ?? '',
+              addressCity: driver.addressCity ?? '',
+              addressState: driver.addressState ?? '',
+              addressPostalCode: driver.addressPostalCode ?? '',
+              cdlNumber: driver.cdlNumber ?? '',
+              cdlState: driver.cdlState ?? '',
+              cdlClass: driver.cdlClass ?? '',
+              hireDate: dateInputValue(driver.hireDate),
+              status: driver.status,
+              driverType: driver.driverType,
+              notes: driver.notes ?? '',
+              assignedTruckId: driver.assignedTruckId ?? '',
+              assignedTrailerId: driver.assignedTrailerId ?? '',
+            }}
+            action={updateDriverAction.bind(null, id)}
+            cancelHref="/drivers"
+            labels={{ save: t('ref.save'), cancel: t('ref.cancel') }}
+          >
+            {mayEdit ? (
+              <AssetActions
+                kind="driver"
+                id={id}
+                isRetired={driver.deletedAt !== null}
+                authorities={authorities.filter(
+                  (a) => a.value !== driver.companyId,
+                )}
+                currentAuthorityName={
+                  openCompany ??
+                  companies.find((c) => c.id === driver.companyId)?.name ??
+                  null
+                }
+                transferAction={transferAssetAction.bind(null, 'driver', id)}
+                retireAction={
+                  mayDelete
+                    ? retireAssetAction.bind(null, 'driver', id)
+                    : async () => {
+                        'use server'
+                      }
+                }
+                restoreAction={restoreAssetAction.bind(null, 'driver', id)}
+                labels={{
+                  transfer: t('ref.transfer'),
+                  transferTitle: t('ref.transferTitle'),
+                  transferBody: t('ref.transferBody'),
+                  transferTo: t('ref.transferTo'),
+                  transferReason: t('ref.transferReason'),
+                  transferConfirm: t('ref.transferConfirm'),
+                  retire: t('ref.retire'),
+                  retireConfirm: t('ref.retireConfirm'),
+                  retireBody: t('ref.retireBody'),
+                  restore: t('ref.restore'),
+                  cancel: t('ref.cancel'),
+                  currentAuthority: t('ref.currentAuthority'),
+                  noOpenPeriod: t('ref.noOpenPeriod'),
+                }}
+              />
+            ) : null}
+          </RecordForm>
+        ) : null}
 
         {/* NEVER SENT TO A ROLE THAT CANNOT SEE IT. A dispatcher gets no
          * payload at all here — not a hidden panel, not a disabled one. Rule:
@@ -466,8 +573,8 @@ export default async function EditDriverPage({
          * "not read — needs rotation" has no compliance row to appear under,
          * and it is the thing somebody has to act on — so it is not filed
          * below the records that are already in order. */}
-        {maySeeCompliance ? (
-          <div className="mt-z4 max-w-[900px]">
+        {tab === 'documents' && maySeeCompliance ? (
+          <div className="max-w-[900px]">
             <DriverDocuments
               documents={documents}
               driverId={id}
@@ -499,8 +606,8 @@ export default async function EditDriverPage({
          * records listed below, and the other three are documents listed
          * above. Reading the verdict first and the evidence after is the
          * order an audit goes in. */}
-        {maySeeCompliance ? (
-          <div className="mt-z4 max-w-[900px]">
+        {tab === 'safety' && maySeeCompliance ? (
+          <div className="max-w-[900px]">
             <DqfPanel
               rows={dqfRows}
               summary={dqfSummary}
@@ -515,7 +622,7 @@ export default async function EditDriverPage({
           </div>
         ) : null}
 
-        {maySeeCompliance ? (
+        {tab === 'safety' && maySeeCompliance ? (
           <div className="mt-z4 max-w-[900px]">
             <CompliancePanel
               subject="driver"
@@ -535,7 +642,30 @@ export default async function EditDriverPage({
           </div>
         ) : null}
 
-        {maySeePay ? (
+        {tab === 'accounting' && maySeePay ? (
+          <div className="max-w-[860px] rounded-card border border-border bg-surface p-z4">
+            <h2 className="text-md font-medium text-ink">
+              {t('drivers.accounting.payTo')}
+            </h2>
+            {/* THE TWO FROZEN FIELDS, READ-ONLY. The Datatruck import wrote them
+             * and nothing in Zebra edits them yet (§6.4 part 2, GAPS). */}
+            <dl className="mt-z2 grid grid-cols-[auto_1fr] gap-x-z4 gap-y-z1 text-sm">
+              <dt className="text-ink-3">
+                {t('drivers.accounting.payToName')}
+              </dt>
+              <dd className="text-ink">{driver.payToName ?? '—'}</dd>
+              <dt className="text-ink-3">
+                {t('drivers.accounting.payToAddress')}
+              </dt>
+              <dd className="text-ink">{driver.payToAddress ?? '—'}</dd>
+            </dl>
+            <p className="mt-z2 text-xs text-ink-3">
+              {t('drivers.accounting.payToSource')}
+            </p>
+          </div>
+        ) : null}
+
+        {tab === 'accounting' && maySeePay ? (
           <div className="mt-z4 max-w-[860px]">
             <PayRules
               driverId={id}
@@ -573,7 +703,7 @@ export default async function EditDriverPage({
 
         {/* THE SAME PERMISSION AS THE PAY RULES, because a deduction changes
          * what a driver is paid. See deduction-actions.ts. */}
-        {maySeePay ? (
+        {tab === 'accounting' && maySeePay ? (
           <div className="mt-z4 max-w-[860px]">
             <Deductions
               driverId={id}
@@ -622,7 +752,7 @@ export default async function EditDriverPage({
           </div>
         ) : null}
 
-        {maySeePay ? (
+        {tab === 'accounting' && maySeePay ? (
           <div className="mt-z4 max-w-[860px]">
             <OpeningBalances
               driverId={id}
@@ -658,7 +788,24 @@ export default async function EditDriverPage({
          * /safety/inspections/new, where the truck, the trailer and the driver
          * can all be named at once. A panel that could file one from here
          * would have to guess the other two. */}
-        {maySeeInspections ? (
+        {tab === 'safety' && maySeeCompliance ? (
+          <div className="mt-z4 max-w-[900px]">
+            <DrawsPanel
+              rows={draws}
+              locale={locale}
+              labels={{
+                title: t('drivers.safety.draws'),
+                none: t('drivers.safety.drawsNone'),
+                quarter: t('drivers.safety.quarter'),
+                drawn: t('drivers.safety.drawn'),
+                outcome: t('drivers.safety.outcome'),
+                tested: t('drivers.safety.tested'),
+              }}
+            />
+          </div>
+        ) : null}
+
+        {tab === 'safety' && maySeeInspections ? (
           <div className="mt-z4 max-w-[900px]">
             <InspectionPanel
               rows={inspections.rows}
@@ -670,7 +817,293 @@ export default async function EditDriverPage({
             />
           </div>
         ) : null}
+
+        {tab === 'assets' ? (
+          <AssetsTab
+            current={{
+              truck:
+                trucks.find((truck) => truck.id === driver.assignedTruckId)
+                  ?.unitNumber ?? null,
+              trailer:
+                trailers.find(
+                  (trailer) => trailer.id === driver.assignedTrailerId,
+                )?.unitNumber ?? null,
+            }}
+            history={assignments}
+            locale={locale}
+            labels={{
+              current: t('drivers.assets.current'),
+              truck: t('loads.column.truck'),
+              trailer: t('drivers.assets.trailer'),
+              history: t('drivers.assets.history'),
+              none: t('drivers.assets.none'),
+              from: t('drivers.assets.from'),
+              to: t('drivers.assets.to'),
+              authority: t('ref.authority'),
+              reason: t('ref.transferReason'),
+              by: t('loads.by'),
+              open: t('drivers.assets.open'),
+            }}
+          />
+        ) : null}
+
+        {tab === 'statistics' && stats ? (
+          <div className="max-w-[720px] rounded-card border border-border bg-surface p-z4">
+            <h2 className="text-md font-medium text-ink">
+              {t('drivers.recordTab.statistics')}
+            </h2>
+            {/* FIGURES, EACH WITH THE WINDOW IT COUNTS (§6.4 part 2); no chart
+             * §6.1.1 would then have to govern. */}
+            <dl className="mt-z3 grid grid-cols-[auto_1fr] gap-x-z5 gap-y-z2 text-sm">
+              <dt className="text-ink-3">{t('dispatch.onTimeRate')}</dt>
+              <dd className="text-ink">{onTimeLabel}</dd>
+              <dt className="text-ink-3">{t('drivers.stats.loads13')}</dt>
+              <dd className="font-mono tabular-nums text-ink">{stats.loads}</dd>
+              <dt className="text-ink-3">{t('drivers.stats.miles13')}</dt>
+              <dd className="font-mono tabular-nums text-ink">
+                {stats.miles.toLocaleString(locale)}
+              </dd>
+              {maySeePay ? (
+                <>
+                  <dt className="text-ink-3">{t('drivers.stats.net13')}</dt>
+                  <dd className="font-mono tabular-nums text-ink">
+                    {formatMoney(
+                      netByWeek.reduce((sum, point) => sum + point.netCents, 0),
+                      locale,
+                    )}
+                    <span className="ms-z2 text-xs text-ink-3">
+                      {netByWeek.length} {t('drivers.stats.weeksPaid')}
+                    </span>
+                  </dd>
+                </>
+              ) : null}
+            </dl>
+            <p className="mt-z3 text-xs text-ink-3">
+              {t('drivers.stats.window').replace(
+                '{from}',
+                new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(
+                  stats.from,
+                ),
+              )}
+            </p>
+          </div>
+        ) : null}
+
+        {tab === 'log' ? (
+          <div className="max-w-[900px]">
+            <ActivityTimeline
+              entries={activity.items}
+              truncated={activity.truncated}
+              statusLabels={{}}
+              documentTypeLabels={documentTypeLabels(t)}
+              locale={locale}
+              timeZone={timezone}
+              labels={{
+                title: t('drivers.recordTab.log'),
+                empty: t('drivers.log.empty'),
+                created: t('loads.activityCreated'),
+                deleted: t('loads.activityDeleted'),
+                uploaded: t('loads.activityUploaded'),
+                documentDeleted: t('loads.activityDocumentDeleted'),
+                via: t('loads.activityVia'),
+                truncated: t('loads.activityTruncated'),
+                manual: t('loads.source.manual'),
+                automatic: t('loads.source.automatic'),
+                driverPortal: t('loads.source.driverPortal'),
+                integration: t('loads.source.integration'),
+                refused: t('loads.source.refused'),
+                refusedBody: t('loads.refusedBody'),
+                by: t('loads.by'),
+                set: t('loads.activitySet'),
+                cleared: t('loads.activityCleared'),
+                changed: t('loads.activityChanged'),
+                // A translated field name where the form has one, a humanised
+                // column name where it does not.
+                field: (name: string) => {
+                  const key = `drivers.${name}`
+                  return isMessageKey(key) ? t(key) : humaniseField(name)
+                },
+              }}
+            />
+          </div>
+        ) : null}
+
+        {tab === 'others' ? (
+          <div className="max-w-[720px] rounded-card border border-border bg-surface p-z4">
+            <h2 className="text-md font-medium text-ink">
+              {t('drivers.recordTab.others')}
+            </h2>
+            <dl className="mt-z3 grid grid-cols-[auto_1fr] gap-x-z5 gap-y-z2 text-sm">
+              <dt className="text-ink-3">{t('drivers.others.kind')}</dt>
+              <dd className="text-ink">
+                {t(`drivers.kind.${driver.kind}` as MessageKey)}
+              </dd>
+              <dt className="text-ink-3">{t('drivers.others.tags')}</dt>
+              <dd className="flex flex-wrap gap-z1">
+                {driver.tags.length === 0
+                  ? '—'
+                  : driver.tags.map((tag) => (
+                      <Link
+                        key={tag}
+                        href={`/drivers?tag=${encodeURIComponent(tag)}`}
+                        className="rounded-control border border-border-strong bg-surface-2 px-z2 text-xs text-ink-2 hover:text-accent"
+                      >
+                        {tag}
+                      </Link>
+                    ))}
+              </dd>
+              <dt className="text-ink-3">{t('ref.notes')}</dt>
+              <dd className="whitespace-pre-wrap text-ink">
+                {driver.notes ?? '—'}
+              </dd>
+            </dl>
+            {/* READ-ONLY. Notes change on Main; kind and tags came from the import
+             * and have no editor yet (§6.4 part 2, GAPS). */}
+            <p className="mt-z3 text-xs text-ink-3">
+              {t('drivers.others.source')}
+            </p>
+          </div>
+        ) : null}
       </div>
     </>
+  )
+}
+
+// ── THE TWO SMALL TABLES THE NEW TABS DRAW ───────────────────────────────
+
+function DrawsPanel({
+  rows,
+  locale,
+  labels,
+}: {
+  rows: readonly DriverDraw[]
+  locale: string
+  labels: {
+    title: string
+    none: string
+    quarter: string
+    drawn: string
+    outcome: string
+    tested: string
+  }
+}) {
+  const day = new Intl.DateTimeFormat(locale, { dateStyle: 'medium' })
+  const columns: Column<DriverDraw>[] = [
+    {
+      key: 'quarter',
+      header: labels.quarter,
+      render: (row) => `${row.year} Q${row.quarter}`,
+    },
+    {
+      key: 'drawn',
+      header: labels.drawn,
+      render: (row) => day.format(row.drawnAt),
+    },
+    { key: 'outcome', header: labels.outcome, render: (row) => row.outcome },
+    {
+      key: 'tested',
+      header: labels.tested,
+      render: (row) => (row.testedAt ? day.format(row.testedAt) : '—'),
+    },
+  ]
+  return (
+    <section className="rounded-card border border-border bg-surface p-z4">
+      <h2 className="text-md font-medium text-ink">{labels.title}</h2>
+      <div className="mt-z3">
+        <Table
+          caption={labels.title}
+          columns={columns}
+          rows={rows}
+          rowKey={(row) => row.id}
+          empty={<p className="text-sm text-ink-3">{labels.none}</p>}
+        />
+      </div>
+    </section>
+  )
+}
+
+function AssetsTab({
+  current,
+  history,
+  locale,
+  labels,
+}: {
+  current: { truck: string | null; trailer: string | null }
+  history: readonly AssignmentPeriod[]
+  locale: string
+  labels: {
+    current: string
+    truck: string
+    trailer: string
+    history: string
+    none: string
+    from: string
+    to: string
+    authority: string
+    reason: string
+    by: string
+    open: string
+  }
+}) {
+  const day = new Intl.DateTimeFormat(locale, { dateStyle: 'medium' })
+  const columns: Column<AssignmentPeriod>[] = [
+    { key: 'from', header: labels.from, render: (row) => day.format(row.from) },
+    {
+      key: 'to',
+      header: labels.to,
+      render: (row) => (row.to ? day.format(row.to) : labels.open),
+    },
+    {
+      key: 'truck',
+      header: labels.truck,
+      render: (row) => (
+        <span className="font-mono">{row.truckUnit ?? '—'}</span>
+      ),
+    },
+    {
+      key: 'trailer',
+      header: labels.trailer,
+      render: (row) => (
+        <span className="font-mono">{row.trailerUnit ?? '—'}</span>
+      ),
+    },
+    {
+      key: 'authority',
+      header: labels.authority,
+      truncate: true,
+      render: (row) => row.companyName,
+    },
+    {
+      key: 'reason',
+      header: labels.reason,
+      truncate: true,
+      render: (row) => row.reason ?? '—',
+    },
+    { key: 'by', header: labels.by, render: (row) => row.byName ?? '—' },
+  ]
+  return (
+    <div className="max-w-[900px]">
+      <section className="rounded-card border border-border bg-surface p-z4">
+        <h2 className="text-md font-medium text-ink">{labels.current}</h2>
+        <dl className="mt-z2 grid grid-cols-[auto_1fr] gap-x-z4 gap-y-z1 text-sm">
+          <dt className="text-ink-3">{labels.truck}</dt>
+          <dd className="font-mono text-ink">{current.truck ?? '—'}</dd>
+          <dt className="text-ink-3">{labels.trailer}</dt>
+          <dd className="font-mono text-ink">{current.trailer ?? '—'}</dd>
+        </dl>
+      </section>
+      <section className="mt-z4 rounded-card border border-border bg-surface p-z4">
+        <h2 className="text-md font-medium text-ink">{labels.history}</h2>
+        <div className="mt-z3">
+          <Table
+            caption={labels.history}
+            columns={columns}
+            rows={history}
+            rowKey={(row) => row.id}
+            empty={<p className="text-sm text-ink-3">{labels.none}</p>}
+          />
+        </div>
+      </section>
+    </div>
   )
 }

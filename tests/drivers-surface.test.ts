@@ -87,3 +87,76 @@ describe('the drivers list (§6.4 part 1)', () => {
     expect(fence).toContain("'drivers.drivers'")
   })
 })
+
+// ---------------------------------------------------------------------------
+// §6.4 PART 2 — THE DRIVER RECORD'S ELEVEN TABS, HELD TO THE SAME SECTION.
+// ---------------------------------------------------------------------------
+
+const record = readFileSync(
+  join('src', 'app', '(app)', 'drivers', '[id]', 'page.tsx'),
+  'utf8',
+)
+
+describe('the driver record (§6.4 part 2)', () => {
+  it('takes its tabs, its gating and its empty set from the lib', () => {
+    expect(record).toContain("from '@/lib/driver-record'")
+    expect(record).toMatch(/recordTabFor\(/)
+    expect(record).toMatch(/visibleRecordTabs\(\{/)
+    expect(record).toMatch(/EMPTY_TABS\.includes\(tab\)/)
+    expect(doc).toContain('ELEVEN TABS over one page')
+  })
+
+  it('renders every one of the eleven under its own guard', () => {
+    // The three empty tabs render through EMPTY_TABS; the other eight each
+    // have a `tab === '…'` guard. A tab added to the lib and never rendered
+    // fails here by name.
+    for (const tab of [
+      'main',
+      'documents',
+      'accounting',
+      'safety',
+      'assets',
+      'statistics',
+      'log',
+      'others',
+    ]) {
+      expect(record, tab).toContain(`tab === '${tab}'`)
+    }
+  })
+
+  it('keeps the role gates the panels already carried', () => {
+    // A tab a role may not see is not rendered — and the panels inside keep
+    // their own guards too, so a tab the lib wrongly exposed would still
+    // render nothing it should not.
+    expect(record).toContain("tab === 'accounting' && maySeePay")
+    expect(record).toContain("tab === 'documents' && maySeeCompliance")
+    expect(record).toContain("tab === 'safety' && maySeeCompliance")
+    expect(record).toContain("tab === 'safety' && maySeeInspections")
+    // No panel at the body's own indent is guarded by the role alone — every
+    // one names its tab first. (An inner fragment, such as the net-pay rows
+    // inside Statistics, may still check the role on its own.)
+    expect(record).not.toMatch(/\n {8}\{maySeePay \? \(/)
+    expect(record).not.toMatch(/\n {8}\{maySeeCompliance \? \(/)
+    expect(record).not.toMatch(/\n {8}\{maySeeInspections \? \(/)
+  })
+
+  it('reads only what the open tab shows', () => {
+    for (const reader of [
+      'assignmentHistoryFor(',
+      'drawsForDriver(',
+      'thirteenWeekStats(',
+      'driverActivity(',
+    ]) {
+      const at = record.indexOf(reader)
+      expect(at, reader).toBeGreaterThan(0)
+      const before = record.slice(Math.max(0, at - 160), at)
+      expect(before, reader).toMatch(/requestedTab === '\w+'/)
+    }
+  })
+
+  it('says so in words on the empty tabs, through one sentence each', () => {
+    expect(record).toContain('<EmptyState')
+    expect(record).toContain('drivers.recordTab.${tab}.empty')
+    expect(record).not.toMatch(/Coming soon|TODO|FIXME|placeholder=/i)
+  })
+})
