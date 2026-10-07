@@ -104,11 +104,11 @@ the compliance block; what remains is the deferred list below.
 
 ## Next
 
-| #   | Item                                                                                                                                                                                                                | Shape                                       |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| 17  | **GAPS code gap 10** — editors for pay-to, kind and tags on the driver record's Accounting and Main tabs.                                                                                                           | doc-first; full ritual                      |
-| 18  | **TRUCKS = Datatruck's shape** — list tabs, record tabs, the same method as drivers. The brief comes from the next screenshots Islom sends; until then, start from the Trucks list columns the sweep already reads. | brief awaited; doc-first; same method as 16 |
-| 19  | **Nightly sweep output** — any new GAPS row goes to the top of this queue.                                                                                                                                          | standing                                    |
+| #   | Item                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Shape                                         |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| 17  | **GAPS code gap 10** — editors for pay-to, kind and tags on the driver record's Accounting and Main tabs.                                                                                                                                                                                                                                                                                                                                                     | doc-first; full ritual                        |
+| 18  | **TRUCKS = Datatruck's shape** — list tabs, record tabs, the same method as drivers. The brief comes from the next screenshots Islom sends; until then, start from the Trucks list columns the sweep already reads. **Part 0, before the screen:** a data-health row on the Trucks list footer and on GAPS — counts of trucks missing VIN, plate, odometer, registration expiry, annual inspection, each a link to the filtered list. Same later for Drivers. | part 0 now, doc-first; the rest brief awaited |
+| 19  | **Nightly sweep output** — any new GAPS row goes to the top of this queue.                                                                                                                                                                                                                                                                                                                                                                                    | standing                                      |
 
 ### 17–19 — the queue after item 16
 
@@ -123,6 +123,16 @@ transcribed here before item 17 was designed:_
    then, start from the Trucks list columns the sweep already reads.
 3. Nightly sweep output: any new GAPS row goes to the top of this
    queue.
+```
+
+_And, later the same day, before the screenshots:_
+
+```
+Item 18 part 0, before the screen: a "data health" row on the Trucks
+list footer and on GAPS — counts of trucks missing VIN, plate,
+odometer, registration expiry, annual inspection — each a link to
+the filtered list. Same later for Drivers. The office fixes data
+faster when the screen counts it.
 ```
 
 ### 16 — DRIVERS = Datatruck's shape (done 2026-10-07)
