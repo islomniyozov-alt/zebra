@@ -23,6 +23,11 @@ import {
 } from '@/lib/brokers'
 import { createLoad, LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import { ReferenceError } from '@/lib/reference'
+import {
+  countTruckHealth,
+  TRUCK_HEALTH_CHECKS,
+  truckHealthWhere,
+} from '@/lib/data-health'
 import type { PrismaClient } from '@/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -129,6 +134,81 @@ describe('trucks', () => {
     )
     // Soft: the row survives, because forty loads of history point at it.
     expect(after?.deletedAt).toBeInstanceOf(Date)
+  })
+
+  it('counts data health by the same definition the filter applies (§6.5 part 0)', async () => {
+    const scope = { companyIds: [alphaId] }
+    const read = () => inOrg((tx) => countTruckHealth(tx, scope))
+    // THE FILTER AND THE COUNT ARE ONE DEFINITION: whatever the list shows
+    // for `?missing=<check>` is what the footer counted.
+    const filtered = (check: Parameters<typeof truckHealthWhere>[0]) =>
+      inOrg((tx) =>
+        tx.truck.count({
+          where: {
+            companyId: alphaId,
+            deletedAt: null,
+            ...truckHealthWhere(check),
+          },
+        }),
+      )
+    const agree = async () => {
+      const counts = await read()
+      for (const check of TRUCK_HEALTH_CHECKS) {
+        expect(await filtered(check), check).toBe(counts[check])
+      }
+      return counts
+    }
+
+    const before = await agree()
+    // A bare truck: no VIN, a BLANK plate, no odometer, no records.
+    const truck = await inOrg((tx) =>
+      createTruck(tx, organizationId, {
+        companyId: alphaId,
+        unitNumber: `health-${nonce}`,
+        plate: '',
+      }),
+    )
+    const bare = await agree()
+    for (const check of TRUCK_HEALTH_CHECKS) {
+      expect(bare[check], check).toBe(before[check] + 1)
+    }
+
+    // Filling the columns takes the truck out of those three counts.
+    await inOrg((tx) =>
+      updateTruck(tx, truck.id, {
+        unitNumber: `health-${nonce}`,
+        vin: `1XKAD49X${nonce}`.slice(0, 17),
+        plate: `HLT${nonce}`.slice(0, 8),
+        currentOdometer: '1',
+      }),
+    )
+    const filled = await agree()
+    expect(filled.vin).toBe(before.vin)
+    expect(filled.plate).toBe(before.plate)
+    expect(filled.odometer).toBe(before.odometer)
+    expect(filled.registration).toBe(before.registration + 1)
+
+    // MISSING, NOT STALE: an EXPIRED registration record is a record. It
+    // leaves this count and is the warnings column's business.
+    await inOrg((tx) =>
+      tx.complianceItem.create({
+        data: {
+          organizationId,
+          companyId: alphaId,
+          truckId: truck.id,
+          type: 'REGISTRATION',
+          expiresAt: new Date('2020-01-01T00:00:00.000Z'),
+        },
+      }),
+    )
+    const recorded = await agree()
+    expect(recorded.registration).toBe(before.registration)
+    expect(recorded.inspection).toBe(before.inspection + 1)
+
+    // A removed truck counts nowhere.
+    await inOrg((tx) => retireAsset(tx, 'truck', truck.id))
+    const gone = await agree()
+    expect(gone).toEqual(before)
   })
 
   it('refuses a duplicate unit number, and accepts the same call once it is unique', async () => {

@@ -16,6 +16,14 @@ import { ColumnsChooser } from '../_grid/ColumnsChooser'
 import { keepColumns } from '../_grid/grid-page'
 import { readGridColumns } from '@/lib/grid-columns'
 import {
+  countTruckHealth,
+  truckHealthCheckFor,
+  truckHealthWhere,
+  type TruckHealthCheck,
+} from '@/lib/data-health'
+import { DataHealthRow } from './DataHealthRow'
+import type { MessageKey } from '@/lib/i18n'
+import {
   columnKeysFor,
   TRUCK_COLUMN_KEYS,
   TRUCK_COLUMNS_HIDDEN,
@@ -78,13 +86,28 @@ export default async function TrucksPage({
   // filter: tags are stored and GIN-indexed.
   const needsAttention = params['attention'] === '1'
   const tagParam = typeof params['tag'] === 'string' ? params['tag'] : undefined
+  // THE DATA-HEALTH FILTER (§6.5 part 0): the same definition the footer's
+  // count used, applied as a query filter. An unrecognised value filters
+  // nothing rather than failing the page.
+  const missing: TruckHealthCheck | null = truckHealthCheckFor(
+    params['missing'],
+  )
 
-  const { rows, companyCount, visible } = await withCurrentOrg(
+  const { rows, companyCount, visible, health } = await withCurrentOrg(
     'read',
     'truck',
     async (tx, session) => {
       const scope = companyScopeFilter(session.companyScopes)
       const companyCount = await tx.company.count()
+
+      // THE FIVE COUNTS, ONE STATEMENT, IN THIS TRANSACTION (§6.5 part 0).
+      // Over the fleet the user may see — scope and the authority filter —
+      // and not over this view: attention, tag and the health filter itself
+      // narrow the rows, not the row that says how much of the fleet is
+      // incomplete.
+      const health = await countTruckHealth(tx, {
+        companyIds: companyParam ? [companyParam] : session.companyScopes,
+      })
 
       const trucks = await tx.truck.findMany({
         where: {
@@ -92,6 +115,7 @@ export default async function TrucksPage({
           ...scope,
           ...(companyParam ? { companyId: companyParam } : {}),
           ...(showRetired ? {} : { deletedAt: null }),
+          ...(missing ? truckHealthWhere(missing) : {}),
         },
         orderBy: [{ company: { name: 'asc' } }, { unitNumber: 'asc' }],
         take: 200,
@@ -155,7 +179,7 @@ export default async function TrucksPage({
         TRUCK_COLUMNS_HIDDEN,
       )
 
-      return { rows, companyCount, visible }
+      return { rows, companyCount, visible, health }
     },
   )
 
@@ -284,6 +308,7 @@ export default async function TrucksPage({
       removed: showRetired ? '1' : undefined,
       attention: needsAttention ? '1' : undefined,
       tag: tagParam,
+      missing: missing ?? undefined,
       ...over,
     }
     for (const [key, value] of Object.entries(all)) {
@@ -374,6 +399,19 @@ export default async function TrucksPage({
             }
           />
         }
+      />
+
+      {/* THE DATA-HEALTH ROW (§6.5 part 0): five counts under the grid, each a
+       * link to this list filtered by the same definition. Zero is shown. */}
+      <DataHealthRow
+        counts={health}
+        active={missing}
+        hrefFor={(check) => withParams({ missing: check ?? undefined })}
+        labels={{
+          title: t('trucks.health.title'),
+          all: t('trucks.health.all'),
+          check: (check) => t(`trucks.health.${check}` as MessageKey),
+        }}
       />
     </>
   )
