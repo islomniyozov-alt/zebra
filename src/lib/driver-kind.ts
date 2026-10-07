@@ -43,6 +43,8 @@
 // gate, at the one place a kind is written.
 // ---------------------------------------------------------------------------
 
+import { ReferenceError } from './reference'
+
 export const DRIVER_KINDS = ['PERSON', 'PAYEE'] as const
 
 export type DriverKind = (typeof DRIVER_KINDS)[number]
@@ -63,9 +65,10 @@ export function isDriverKind(value: string): value is DriverKind {
  */
 export function assertDriverKind(value: unknown): DriverKind {
   if (typeof value !== 'string' || !isDriverKind(value)) {
-    throw new Error(
-      `Not a driver kind: ${JSON.stringify(value)}. One of ${DRIVER_KINDS.join(', ')}.`,
-    )
+    // A ReferenceError and not a bare Error since queue item 17 put the field
+    // on a form: a refusal has to reach the person as a sentence under the
+    // select, not as a five-hundred.
+    throw new ReferenceError('not_driver_kind', { field: 'kind' })
   }
   return value
 }

@@ -32,6 +32,10 @@ function read(formData: FormData) {
       | DriverType
       | undefined,
     notes: formData.get('notes'),
+    // Queue item 17: a person or a referral payee, and the tags as typed.
+    // `fleet.ts` refuses a kind outside the list and splits the tags.
+    kind: formData.get('kind') || undefined,
+    tags: formData.get('tags'),
     assignedTruckId: formData.get('assignedTruckId'),
     assignedTrailerId: formData.get('assignedTrailerId'),
     // Both create-only, and both null on an edit because the form does not

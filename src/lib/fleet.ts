@@ -7,6 +7,8 @@ import {
 import { readFleetStatus, readFuelType } from './fleet-codes'
 import type { TxClient } from './tenancy'
 import { assertSeatFree } from './team'
+import { assertDriverKind, DEFAULT_DRIVER_KIND } from './driver-kind'
+import { parseTags } from './tags'
 import {
   closeOpenPeriod,
   openFirstPeriod,
@@ -117,6 +119,14 @@ export interface DriverInput {
   status?: DriverStatus
   driverType?: DriverType
   notes?: unknown
+  /**
+   * A person, or a referral payee (queue item 17). Refused outside
+   * `DRIVER_KINDS` by name; omitted means "leave as is" on an edit and
+   * PERSON on create.
+   */
+  kind?: unknown
+  /** Free text, split on commas by `parseTags`. Omitted means "leave as is". */
+  tags?: unknown
   /** The truck this driver runs. Must be under the same authority. */
   assignedTruckId?: unknown
   /**
@@ -628,6 +638,13 @@ export async function createDriver(
       status: assertRosterStatus(input.status) ?? ACTIVE_ROSTER,
       driverType: input.driverType ?? 'COMPANY_DRIVER',
       notes: optionalText(input.notes),
+      // THE GATE AGAIN (queue item 17): a kind outside the list is refused by
+      // name, and the tags go through the one splitter the import uses.
+      kind:
+        input.kind === undefined
+          ? DEFAULT_DRIVER_KIND
+          : assertDriverKind(input.kind),
+      tags: parseTags(input.tags),
       assignedTruckId: await pairedTruck(
         tx,
         companyId,
@@ -743,9 +760,45 @@ export async function updateDriver(
       ...(input.status ? { status: assertRosterStatus(input.status) } : {}),
       ...(input.driverType ? { driverType: input.driverType } : {}),
       notes: optionalText(input.notes),
+      // OMITTED MEANS UNCHANGED, like status and type above: a caller that
+      // does not send the field is not clearing it (queue item 17).
+      ...(input.kind !== undefined
+        ? { kind: assertDriverKind(input.kind) }
+        : {}),
+      ...(input.tags !== undefined ? { tags: parseTags(input.tags) } : {}),
       assignedTruckId,
       assignedTrailerId,
     },
+  })
+}
+
+/**
+ * Who a statement is made out to (§6.4 part 2, queue item 17).
+ *
+ * ITS OWN WRITER AND NOT TWO MORE FIELDS ON `updateDriver`, because the gate
+ * differs: the form is `driver:update` and this is `driver.pay:update`, the
+ * permission the pay rules beside it carry. The action asks; this writes.
+ * The statement reads these at generation and freezes them onto the row
+ * (`Settlement.payToName`), so a change here reaches the next statement and
+ * restates nothing already issued.
+ */
+export async function setPayTo(
+  tx: TxClient,
+  id: string,
+  input: { payToName?: unknown; payToAddress?: unknown },
+) {
+  const current = await tx.driver.findUnique({
+    where: { id },
+    select: { id: true, deletedAt: true },
+  })
+  if (!current || current.deletedAt) throw new ReferenceError('not_found')
+  return tx.driver.update({
+    where: { id },
+    data: {
+      payToName: optionalText(input.payToName),
+      payToAddress: optionalText(input.payToAddress),
+    },
+    select: { id: true, payToName: true, payToAddress: true },
   })
 }
 

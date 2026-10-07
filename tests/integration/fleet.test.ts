@@ -10,6 +10,7 @@ import {
   findAuthorityDrift,
   restoreAsset,
   retireAsset,
+  setPayTo,
   transferAsset,
   updateDriver,
   updateTruck,
@@ -323,6 +324,82 @@ describe('trailers and drivers', () => {
       tx.trailer.findUnique({ where: { id: trailer.id } }),
     )
     expect(after?.deletedAt).toBeInstanceOf(Date)
+  })
+
+  it('writes kind, tags and pay-to through their gates (queue item 17)', async () => {
+    // KIND AND TAGS ride the form's own writer. Omitted on create means a
+    // person with no tags; omitted on an edit means unchanged.
+    const created = await inOrg((tx) =>
+      createDriver(tx, organizationId, {
+        companyId: alphaId,
+        firstName: 'Seven',
+        lastName: `Star ${nonce}`,
+        kind: 'PAYEE',
+        tags: ' referral, Amazon ,referral ',
+      }),
+    )
+    expect(created.kind).toBe('PAYEE')
+    expect(created.tags).toEqual(['referral', 'Amazon'])
+
+    const untouched = await inOrg((tx) =>
+      updateDriver(tx, created.id, {
+        firstName: 'Seven',
+        lastName: `Star ${nonce}`,
+      }),
+    )
+    expect(untouched.kind).toBe('PAYEE')
+    expect(untouched.tags).toEqual(['referral', 'Amazon'])
+
+    const edited = await inOrg((tx) =>
+      updateDriver(tx, created.id, {
+        firstName: 'Seven',
+        lastName: `Star ${nonce}`,
+        kind: 'PERSON',
+        tags: '',
+      }),
+    )
+    expect(edited.kind).toBe('PERSON')
+    expect(edited.tags).toEqual([])
+
+    // A KIND OUTSIDE THE LIST IS REFUSED BY NAME, with the field, so the form
+    // prints a sentence under the select.
+    await expect(
+      inOrg((tx) =>
+        updateDriver(tx, created.id, {
+          firstName: 'Seven',
+          lastName: `Star ${nonce}`,
+          kind: 'AGENCY',
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'not_driver_kind', field: 'kind' })
+
+    // PAY-TO HAS ITS OWN WRITER, because its gate is `driver.pay:update`.
+    const payTo = await inOrg((tx) =>
+      setPayTo(tx, created.id, {
+        payToName: '  Seven Star LLC ',
+        payToAddress: '',
+      }),
+    )
+    expect(payTo).toEqual({
+      id: created.id,
+      payToName: 'Seven Star LLC',
+      payToAddress: null,
+    })
+
+    // AND THE FORM'S WRITER DOES NOT TOUCH IT: an edit on Main cannot clear
+    // who the statement is made out to.
+    const afterEdit = await inOrg((tx) =>
+      updateDriver(tx, created.id, {
+        firstName: 'Seven',
+        lastName: `Star ${nonce}`,
+      }),
+    )
+    expect(afterEdit.payToName).toBe('Seven Star LLC')
+
+    await inOrg((tx) => retireAsset(tx, 'driver', created.id))
+    await expect(
+      inOrg((tx) => setPayTo(tx, created.id, { payToName: 'x' })),
+    ).rejects.toMatchObject({ code: 'not_found' })
   })
 
   it('creates, edits and soft-deletes a driver', async () => {

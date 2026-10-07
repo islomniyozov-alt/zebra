@@ -816,6 +816,7 @@ const en = {
   'billing.CLOSED_IN_DATATRUCK': 'Closed in Datatruck',
 
   'ref.save': 'Save',
+  'ref.saving': 'Saving…',
   'ref.cancel': 'Cancel',
   'ref.search': 'Search',
   'ref.authority': 'Authority',
@@ -874,7 +875,8 @@ const en = {
   'drivers.accounting.payToName': 'Name',
   'drivers.accounting.payToAddress': 'Address',
   'drivers.accounting.payToSource':
-    'Read-only: the Datatruck import wrote these and nothing in Zebra edits them yet.',
+    'The next statement is made out to this name and address. Statements already issued keep what they were generated with.',
+  'drivers.accounting.payToSaved': 'Saved. It applies from the next statement.',
   'drivers.safety.draws': 'Random testing',
   'drivers.safety.drawsNone': 'No random draw has selected this driver.',
   'drivers.safety.quarter': 'Quarter',
@@ -898,8 +900,12 @@ const en = {
   'drivers.log.empty': 'Nothing has been recorded against this driver yet.',
   'drivers.others.kind': 'Kind',
   'drivers.others.tags': 'Tags',
-  'drivers.others.source':
-    'Notes change on the Main tab. Kind and tags came from the import and have no editor yet.',
+  'drivers.others.source': 'Kind, tags and notes change on the Main tab.',
+  'drivers.kind': 'Kind',
+  'drivers.kindHint':
+    "A person drives. A referral payee takes a commission on another driver's loads and is never printed as a team-mate.",
+  'drivers.tags': 'Tags',
+  'drivers.tagsHint': 'Comma-separated. The same words the import reads.',
   'drivers.kind.PERSON': 'Person',
   'drivers.kind.PAYEE': 'Referral payee',
   'ref.transfer': 'Transfer authority',
@@ -923,6 +929,8 @@ const en = {
     'That truck runs under a different authority. A driver and their truck must be under the same one — transfer the truck first, or pick another.',
   'ref.error.truckFull':
     'That truck already carries two drivers. Take one off it first, or pick another truck.',
+  'ref.error.notDriverKind':
+    'Not a kind this record can be: a person or a referral payee.',
   'team.with': 'Team with',
   'team.suggested':
     'Team: {name} shares unit {unit} with the driver — saved as the second seat when you press Save, unless you clear it.',
@@ -3744,6 +3752,7 @@ const ru: Dictionary = {
   'billing.CLOSED_IN_DATATRUCK': 'Закрыт в Datatruck',
 
   'ref.save': 'Сохранить',
+  'ref.saving': 'Сохранение…',
   'ref.cancel': 'Отмена',
   'ref.search': 'Поиск',
   'ref.authority': 'Перевозчик',
@@ -3802,7 +3811,9 @@ const ru: Dictionary = {
   'drivers.accounting.payToName': 'Имя',
   'drivers.accounting.payToAddress': 'Адрес',
   'drivers.accounting.payToSource':
-    'Только чтение: эти поля записал импорт из Datatruck, в Zebra их пока нечем править.',
+    'Следующая ведомость будет выписана на это имя и адрес. Уже выпущенные ведомости сохраняют то, с чем были сформированы.',
+  'drivers.accounting.payToSaved':
+    'Сохранено. Действует со следующей ведомости.',
   'drivers.safety.draws': 'Случайное тестирование',
   'drivers.safety.drawsNone': 'Ни одна жеребьёвка не выбирала этого водителя.',
   'drivers.safety.quarter': 'Квартал',
@@ -3827,7 +3838,12 @@ const ru: Dictionary = {
   'drivers.others.kind': 'Тип записи',
   'drivers.others.tags': 'Теги',
   'drivers.others.source':
-    'Заметки правятся на вкладке «Основное». Тип записи и теги пришли из импорта, редактора у них пока нет.',
+    'Тип записи, теги и заметки правятся на вкладке «Основное».',
+  'drivers.kind': 'Тип записи',
+  'drivers.kindHint':
+    'Человек — водит. Получатель реферальных берёт комиссию с грузов другого водителя и никогда не печатается как напарник.',
+  'drivers.tags': 'Теги',
+  'drivers.tagsHint': 'Через запятую. Те же слова, что читает импорт.',
   'drivers.kind.PERSON': 'Человек',
   'drivers.kind.PAYEE': 'Получатель реферальных',
   'ref.transfer': 'Передать перевозчику',
@@ -3850,6 +3866,8 @@ const ru: Dictionary = {
     'Этот тягач числится за другим перевозчиком. Водитель и его тягач должны быть под одним — сначала переведите тягач или выберите другой.',
   'ref.error.truckFull':
     'На этом тягаче уже два водителя. Сначала снимите одного или выберите другой тягач.',
+  'ref.error.notDriverKind':
+    'Такого типа записи нет: человек или получатель реферальных.',
   'team.with': 'В команде с',
   'team.suggested':
     'Команда: {name} закреплён за тягачом {unit} вместе с водителем — сохранится вторым водителем при нажатии «Сохранить», если поле не очистить.',
@@ -6635,6 +6653,7 @@ const fa: Dictionary = {
   'billing.CLOSED_IN_DATATRUCK': 'بسته‌شده در Datatruck',
 
   'ref.save': 'ذخیره',
+  'ref.saving': 'در حال ذخیره…',
   'ref.cancel': 'انصراف',
   'ref.search': 'جست‌وجو',
   'ref.authority': 'شرکت',
@@ -6693,7 +6712,8 @@ const fa: Dictionary = {
   'drivers.accounting.payToName': 'نام',
   'drivers.accounting.payToAddress': 'نشانی',
   'drivers.accounting.payToSource':
-    'فقط‌خواندنی: این دو را واردات Datatruck نوشته و هنوز در Zebra ویرایش نمی‌شوند.',
+    'صورت‌حساب بعدی به این نام و نشانی صادر می‌شود. صورت‌حساب‌های صادرشده همان را نگه می‌دارند که با آن ساخته شده‌اند.',
+  'drivers.accounting.payToSaved': 'ذخیره شد. از صورت‌حساب بعدی اعمال می‌شود.',
   'drivers.safety.draws': 'آزمایش تصادفی',
   'drivers.safety.drawsNone': 'هیچ قرعه‌ای این راننده را انتخاب نکرده است.',
   'drivers.safety.quarter': 'فصل',
@@ -6717,7 +6737,12 @@ const fa: Dictionary = {
   'drivers.others.kind': 'نوع رکورد',
   'drivers.others.tags': 'برچسب‌ها',
   'drivers.others.source':
-    'یادداشت‌ها در تب «اصلی» تغییر می‌کنند. نوع رکورد و برچسب‌ها از واردات آمده‌اند و هنوز ویرایشگری ندارند.',
+    'نوع رکورد، برچسب‌ها و یادداشت‌ها در تب «اصلی» تغییر می‌کنند.',
+  'drivers.kind': 'نوع رکورد',
+  'drivers.kindHint':
+    'شخص رانندگی می‌کند. گیرندهٔ معرفی از بارهای رانندهٔ دیگر کمیسیون می‌گیرد و هرگز هم‌تیمی چاپ نمی‌شود.',
+  'drivers.tags': 'برچسب‌ها',
+  'drivers.tagsHint': 'با ویرگول جدا کنید. همان واژه‌هایی که واردات می‌خواند.',
   'drivers.kind.PERSON': 'شخص',
   'drivers.kind.PAYEE': 'گیرندهٔ معرفی',
   'ref.transfer': 'انتقال به شرکت دیگر',
@@ -6740,6 +6765,7 @@ const fa: Dictionary = {
     'این کامیون زیر شرکت دیگری کار می‌کند. راننده و کامیونش باید زیر یک شرکت باشند — نخست کامیون را منتقل کنید یا کامیون دیگری برگزینید.',
   'ref.error.truckFull':
     'این کامیون از پیش دو راننده دارد. نخست یکی را بردارید یا کامیون دیگری برگزینید.',
+  'ref.error.notDriverKind': 'چنین نوع رکوردی نیست: شخص یا گیرندهٔ معرفی.',
   'team.with': 'هم‌تیمی با',
   'team.suggested':
     'تیم: {name} با راننده در کامیون {unit} است — با زدن ذخیره به عنوان راننده دوم ثبت می‌شود، مگر آن را پاک کنید.',

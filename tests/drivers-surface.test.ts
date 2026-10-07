@@ -160,3 +160,55 @@ describe('the driver record (§6.4 part 2)', () => {
     expect(record).not.toMatch(/Coming soon|TODO|FIXME|placeholder=/i)
   })
 })
+
+// ---------------------------------------------------------------------------
+// QUEUE ITEM 17 — pay-to, kind and tags have editors (GAPS code gap 10 closed).
+// ---------------------------------------------------------------------------
+
+describe('the editors (queue item 17)', () => {
+  const fields = readFileSync(
+    join('src', 'app', '(app)', 'drivers', 'fields.ts'),
+    'utf8',
+  )
+
+  it('puts kind and tags on the Main form, through the one code list and the one splitter', () => {
+    expect(fields).toContain("name: 'kind'")
+    expect(fields).toContain("name: 'tags'")
+    expect(fields).toContain('DRIVER_KINDS.map(')
+    const fleet = readFileSync(join('src', 'lib', 'fleet.ts'), 'utf8')
+    expect(fleet).toContain('assertDriverKind(input.kind)')
+    expect(fleet).toContain('parseTags(input.tags)')
+    // The import splits with the same function; two splitters is two tags.
+    const importer = readFileSync(
+      join('src', 'lib', 'datatruck', 'loads.ts'),
+      'utf8',
+    )
+    expect(importer).toContain('return parseTags(value)')
+  })
+
+  it('puts pay-to on Accounting as its own form under driver.pay', () => {
+    expect(record).toContain('<PayToForm')
+    const accounting = record.slice(
+      record.indexOf("tab === 'accounting' && maySeePay"),
+      record.indexOf('<PayToForm'),
+    )
+    expect(accounting.length).toBeGreaterThan(0)
+    expect(record).toContain('disabled={!maySetPay}')
+    const actions = readFileSync(
+      join('src', 'app', '(app)', 'drivers', 'pay-actions.ts'),
+      'utf8',
+    )
+    expect(actions).toMatch(
+      /withCurrentOrg\('update', 'driver\.pay', \(tx\) =>\s*setPayTo\(/,
+    )
+  })
+
+  it('no longer tells the reader these have no editor', () => {
+    expect(record).not.toMatch(/nothing in Zebra edits them/)
+    const gaps = readFileSync('GAPS.md', 'utf8')
+    expect(gaps).not.toMatch(
+      /\| 10 {2}\| \*\*Pay-to, kind and tags have no editor/,
+    )
+    expect(doc).toMatch(/GAPS code\s+gap 10, closed 2026-10-07/)
+  })
+})

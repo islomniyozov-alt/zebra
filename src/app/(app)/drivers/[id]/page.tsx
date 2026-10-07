@@ -22,6 +22,8 @@ import {
 } from '@/lib/driver-record'
 import { ActivityTimeline } from '../../loads/[id]/ActivityTimeline'
 import { teamMateFor } from '@/lib/team'
+import { tagsToInput } from '@/lib/tags'
+import { PayToForm } from './PayToForm'
 import { SELECTABLE_AUTHORITY } from '@/lib/companies'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
@@ -530,6 +532,8 @@ export default async function EditDriverPage({
               status: driver.status,
               driverType: driver.driverType,
               notes: driver.notes ?? '',
+              kind: driver.kind,
+              tags: tagsToInput(driver.tags),
               assignedTruckId: driver.assignedTruckId ?? '',
               assignedTrailerId: driver.assignedTrailerId ?? '',
             }}
@@ -664,21 +668,24 @@ export default async function EditDriverPage({
             <h2 className="text-md font-medium text-ink">
               {t('drivers.accounting.payTo')}
             </h2>
-            {/* THE TWO FROZEN FIELDS, READ-ONLY. The Datatruck import wrote them
-             * and nothing in Zebra edits them yet (§6.4 part 2, GAPS). */}
-            <dl className="mt-z2 grid grid-cols-[auto_1fr] gap-x-z4 gap-y-z1 text-sm">
-              <dt className="text-ink-3">
-                {t('drivers.accounting.payToName')}
-              </dt>
-              <dd className="text-ink">{driver.payToName ?? '—'}</dd>
-              <dt className="text-ink-3">
-                {t('drivers.accounting.payToAddress')}
-              </dt>
-              <dd className="text-ink">{driver.payToAddress ?? '—'}</dd>
-            </dl>
-            <p className="mt-z2 text-xs text-ink-3">
-              {t('drivers.accounting.payToSource')}
-            </p>
+            {/* WHO THE STATEMENT IS MADE OUT TO — its own form under
+             * `driver.pay:update` (§6.4 part 2, queue item 17). Read at
+             * generation and frozen onto the statement, so a change here
+             * reaches the next statement and restates nothing issued. */}
+            <PayToForm
+              driverId={id}
+              payToName={driver.payToName}
+              payToAddress={driver.payToAddress}
+              disabled={!maySetPay}
+              labels={{
+                name: t('drivers.accounting.payToName'),
+                address: t('drivers.accounting.payToAddress'),
+                save: t('ref.save'),
+                saving: t('ref.saving'),
+                saved: t('drivers.accounting.payToSaved'),
+                hint: t('drivers.accounting.payToSource'),
+              }}
+            />
           </div>
         ) : null}
 

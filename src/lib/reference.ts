@@ -54,6 +54,8 @@ export type ReferenceFailure =
   | 'not_roster_status'
   /** A third driver on a truck that seats two (§6.4 part 3). */
   | 'truck_full'
+  /** A driver kind outside `DRIVER_KINDS` — a person or a referral payee (item 17). */
+  | 'not_driver_kind'
   /**
    * A value outside a small code list — fleet status, fuel type (item 12).
    *
@@ -113,6 +115,7 @@ export const REFERENCE_ERROR_KEYS: Record<ReferenceFailure, MessageKey> = {
   codes_unconfirmed: 'ref.error.codesUnconfirmed',
   not_roster_status: 'ref.error.notRosterStatus',
   truck_full: 'ref.error.truckFull',
+  not_driver_kind: 'ref.error.notDriverKind',
   not_in_code_list: 'ref.error.notInCodeList',
   trailer_already_paired: 'ref.error.trailerAlreadyPaired',
   already_voided: 'ref.error.alreadyVoided',

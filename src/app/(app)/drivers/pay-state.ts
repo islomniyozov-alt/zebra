@@ -10,3 +10,11 @@ export interface PayRuleState {
 }
 
 export const PAY_RULE_INITIAL: PayRuleState = { error: null, savedId: null }
+
+/** The pay-to form (§6.4 part 2, queue item 17). The error is already in words. */
+export interface PayToState {
+  error: string | null
+  saved: boolean
+}
+
+export const PAY_TO_INITIAL: PayToState = { error: null, saved: false }

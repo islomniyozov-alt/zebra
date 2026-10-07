@@ -3,6 +3,7 @@ import type { SelectOption } from '@/components/ui/Select'
 import type { MessageKey, Translate } from '@/lib/i18n'
 import type { DriverStatus, DriverType } from '@/generated/prisma/client'
 import { ROSTER_STATUSES } from '@/lib/driver-roster'
+import { DRIVER_KINDS } from '@/lib/driver-kind'
 
 // A DRIVER IS NOT OWNED. The enum is shared with trucks and trailers, where
 // `OWNED` is the plain truth about a vehicle; on a person it read as
@@ -131,6 +132,27 @@ export function driverFields(
         value: type,
         label: t(driverTypeKey(type)),
       })),
+    },
+    // WHAT THE ROW IS — a person, or a referral payee who takes a commission
+    // on another driver's loads (§6.4 part 2, queue item 17). A select over
+    // the code list; `fleet.ts` refuses anything outside it by name.
+    {
+      kind: 'select',
+      name: 'kind',
+      label: t('drivers.kind'),
+      hint: t('drivers.kindHint'),
+      options: DRIVER_KINDS.map((kind) => ({
+        value: kind,
+        label: t(`drivers.kind.${kind}` as MessageKey),
+      })),
+    },
+    // TAGS, ONE FIELD, SPLIT ON COMMAS — by the same rule the Datatruck import
+    // uses, so a tag typed here and a tag imported are the same tag.
+    {
+      kind: 'text',
+      name: 'tags',
+      label: t('drivers.tags'),
+      hint: t('drivers.tagsHint'),
     },
     // THE PAY PERCENTAGE, ON CREATE ONLY — the field whose absence Daler named
     // first, because it is the one that decides whether the driver can be paid

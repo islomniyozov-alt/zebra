@@ -9,7 +9,14 @@ import {
   parsePercentToBps,
 } from '@/lib/money'
 import { normalizeTypedDate, utcMidnight } from '@/lib/typed-date'
-import { PAY_RULE_INITIAL, type PayRuleState } from './pay-state'
+import { setPayTo } from '@/lib/fleet'
+import { getLocaleContext } from '@/lib/locale'
+import { toFormState } from '../_reference/shared'
+import {
+  PAY_RULE_INITIAL,
+  type PayRuleState,
+  type PayToState,
+} from './pay-state'
 import type { PayRuleType } from '@/generated/prisma/client'
 import type { MessageKey } from '@/lib/i18n'
 
@@ -112,4 +119,29 @@ export async function closePayRuleAction(
 
   revalidatePath(`/drivers/${driverId}`)
   return { ...PAY_RULE_INITIAL, savedId: ruleId }
+}
+
+/**
+ * Who the statement is made out to (§6.4 part 2, queue item 17). The same
+ * gate as the pay rules: `driver.pay:update`. Reads the form, calls one
+ * function, revalidates.
+ */
+export async function savePayToAction(
+  driverId: string,
+  _previous: PayToState,
+  formData: FormData,
+): Promise<PayToState> {
+  const { t } = await getLocaleContext()
+  try {
+    await withCurrentOrg('update', 'driver.pay', (tx) =>
+      setPayTo(tx, driverId, {
+        payToName: formData.get('payToName'),
+        payToAddress: formData.get('payToAddress'),
+      }),
+    )
+  } catch (error) {
+    return { error: toFormState(error, t).error, saved: false }
+  }
+  revalidatePath(`/drivers/${driverId}`)
+  return { error: null, saved: true }
 }

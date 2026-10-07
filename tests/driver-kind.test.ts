@@ -8,6 +8,7 @@ import {
   isDriverKind,
   isReferralPayee,
 } from '@/lib/driver-kind'
+import { ReferenceError } from '@/lib/reference'
 
 // ---------------------------------------------------------------------------
 // A PERSON, OR SOMEBODY WHO TAKES A CUT.
@@ -36,12 +37,24 @@ describe('the code list', () => {
     expect(isDriverKind('AGENCY')).toBe(false)
   })
 
-  it('names the value it refused, because a text column needs a gate', () => {
+  it('refuses by name, as a reference error the form can print (item 17)', () => {
     // `Truck.fleetStatus` learned this: a text column with a code list is only
-    // a code list if something refuses the values outside it.
-    expect(() => assertDriverKind('payee')).toThrow(/Not a driver kind/)
-    expect(() => assertDriverKind(undefined)).toThrow(/Not a driver kind/)
+    // a code list if something refuses the values outside it. Since the kind
+    // became a field on the driver form, the refusal is a ReferenceError with
+    // a code and a field, so it reaches the person as a sentence under the
+    // select rather than a five-hundred.
+    for (const bad of ['payee', undefined, '', 42]) {
+      let caught: unknown
+      try {
+        assertDriverKind(bad)
+      } catch (error) {
+        caught = error
+      }
+      expect(caught, String(bad)).toBeInstanceOf(ReferenceError)
+      expect(caught).toMatchObject({ code: 'not_driver_kind', field: 'kind' })
+    }
     expect(assertDriverKind('PAYEE')).toBe('PAYEE')
+    expect(assertDriverKind('PERSON')).toBe('PERSON')
   })
 })
 

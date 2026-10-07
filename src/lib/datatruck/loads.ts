@@ -1,6 +1,7 @@
 import { MoneyFormatError, parseMoneyToCents } from '../money'
 import { resolveState } from './states'
 import { isReferralPayee } from '../driver-kind'
+import { parseTags } from '../tags'
 import type {
   EquipmentType,
   LoadBillingStatus,
@@ -137,15 +138,9 @@ export function parseDatatruckMoment(raw: string): Date | null {
  * duplicates collapsed — a tag written twice on one row is one tag.
  */
 export function tagsFrom(value: string | null | undefined): string[] {
-  if (!value) return []
-  return [
-    ...new Set(
-      value
-        .split(',')
-        .map((tag) => tag.trim())
-        .filter((tag) => tag !== ''),
-    ),
-  ]
+  // ONE RULE. The driver form splits its tags with the same function (queue
+  // item 17), so a tag typed and a tag imported are the same tag.
+  return parseTags(value)
 }
 
 export interface StatusReading {
