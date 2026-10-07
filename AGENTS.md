@@ -319,11 +319,41 @@ Rules about instruments, which are the ones that cost whole sessions:
   apply it when the chain reports. The first entry made under this rule was
   this rule, written to the scratchpad while a chain ran and applied after.
 
-  AND A REHEARSAL IS NOT EXEMPT BECAUSE IT INTENDS TO WRITE NOTHING. Rehearse
-  in the scratchpad or in a worktree, never in the tree a gate is reading; a
-  dry-run mode belongs INSIDE the script as a flag that makes `write` a no-op,
-  not in a harness that edits the script's text. Owner's ruling, 2026-10-06:
-  "Freeze means the working directory is untouched, dry runs included."
+  AND A REHEARSAL IS NOT EXEMPT BECAUSE IT INTENDS TO WRITE NOTHING. Owner's
+  ruling, 2026-10-06: "Freeze means the working directory is untouched, dry
+  runs included."
+
+  **WHERE A REHEARSAL HAPPENS IS A WORKTREE, AND THE SCRIPTS KNOW IT.** Owner's
+  standing rule, 2026-10-07, after breach 5:
+
+      Every rehearsal, mirror or dry run happens in a git worktree at
+      ../zebra-rehearsal (git worktree add), never in
+      C:\Users\Daler\Downloads\zebra. The scripts take no root argument at
+      all — they refuse unless cwd is a worktree whose branch name starts
+      with rehearse/. Watch the refusal fire once from the live tree.
+
+  So the mechanism is:
+
+      git worktree add ../zebra-rehearsal -b rehearse/<topic> main
+
+  and a patch script's first act is to ask git where it is. The root is the
+  current directory and nothing else; there is no `--root`, no `--dry-run`,
+  no environment variable, because breach 5 was a root override that a
+  dying patch never installed and no script read — an argument nobody passes
+  cannot be forgotten. Not a linked worktree, or a branch that does not start
+  with `rehearse/`, or any argument at all: REFUSED, before a byte is read.
+  The refusal was watched firing from the live tree on 2026-10-07 before the
+  first script ran under it.
+
+  WHAT MOVES BETWEEN THE TWO IS A COMMIT, NOT A FILE. Run the script in the
+  worktree, format, `npm run check`, break the guards, commit on the
+  `rehearse/` branch — all while the live tree is frozen — and when the
+  chain's last step prints, `git merge --ff-only rehearse/<topic>` in the
+  live tree brings the commits over without a single edit there. The
+  worktree shares `.git`, so a commit on its branch moves neither `main` nor
+  the live checkout, which is what makes it legal during a freeze. Its
+  `node_modules`, `src/generated` and `.env` are junctions to the live
+  tree's, which git ignores on both sides.
 
 - **A MIGRATION THAT REMOVES A DEFAULT, A CONSTRAINT OR AN INDEX CARRIES THE
   GREP THAT PROVES EVERY WRITER SETS THE COLUMN — QUOTED IN THE MIGRATION'S
