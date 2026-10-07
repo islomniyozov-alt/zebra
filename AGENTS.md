@@ -292,6 +292,22 @@ Rules about instruments, which are the ones that cost whole sessions:
      The same silent no-op this file names for `sed`, arriving as a rehearsal.
      The tree was restored within two minutes and the receipt survived; that
      is luck, and the rule does not depend on it.
+  5. A REHEARSAL "AGAINST A MIRROR" THAT WAS NOT, 2026-10-07. Four patch
+     scripts were given a root override through an environment variable by
+     a patch that died on a syntax error — so no script read the variable,
+     every one took its default, and the default was the live tree. They
+     wrote four files 37 seconds into the PRODUCTION dispatch. The compile
+     had finished 22 seconds before the first write (the build output's
+     mtimes, not a belief), the restore took 14 seconds, and the bundle on
+     production is the committed tree's. That is luck a third time.
+
+     THE FIX IS IN THE SCRIPTS, NOT IN THE PERSON: the root is a strict
+     ARGUMENT (an unknown argument fails; an environment variable nobody
+     reads cannot), and a script asked to write into the live tree first
+     reads `.run-status/*.json` and REFUSES while any of them says
+     `running`. Both refusals were watched firing before the scripts were
+     trusted again. A rehearsal that DEFAULTS to the live tree is the hazard;
+     the mirror has to be the thing you cannot forget to name.
 
   "THE RITUAL'S LAST STEP" IS THE LAST THING IN THE CHAIN — the drift read,
   or the sweep when one is chained after the dispatches — and not "the deploy
