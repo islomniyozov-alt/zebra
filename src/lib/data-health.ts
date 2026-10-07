@@ -1,5 +1,6 @@
 import type { Prisma } from '@/generated/prisma/client'
 import type { TxClient } from './tenancy'
+import { WORKING_STATUSES } from './driver-list'
 
 // ---------------------------------------------------------------------------
 // DATA HEALTH (§6.5 part 0, queue item 18). "The office fixes data faster when
@@ -17,8 +18,11 @@ import type { TxClient } from './tenancy'
 // 26 no VIN, 9 no plate, 119 no odometer, 29 no registration record, 97 no
 // annual-inspection record.
 //
-// PER SUBJECT, so the drivers list adds its own five without a second design.
-// Which five is the drivers brief's to say; nothing is defined for drivers yet.
+// PER SUBJECT. Trucks first (part 0); drivers by the owner's five of the same
+// day (part 0b): no CDL on file, no medical card, no phone, no pay rule, no
+// truck — ACTIVE drivers only. Measured on dev before the code: of 59 active
+// person drivers, 13 no CDL record, 59 no medical-card record (none exists on
+// dev), 6 no phone, 2 no pay rule in force, 26 no truck.
 // ---------------------------------------------------------------------------
 
 export const TRUCK_HEALTH_CHECKS = [
@@ -113,5 +117,123 @@ export async function countTruckHealth(
     odometer: Number(row?.odometer ?? 0),
     registration: Number(row?.registration ?? 0),
     inspection: Number(row?.inspection ?? 0),
+  }
+}
+
+// ── DRIVERS (part 0b) ───────────────────────────────────────────────────────
+
+export const DRIVER_HEALTH_CHECKS = [
+  'cdl',
+  'medical',
+  'phone',
+  'payRule',
+  'truck',
+] as const
+
+export type DriverHealthCheck = (typeof DRIVER_HEALTH_CHECKS)[number]
+
+export function driverHealthCheckFor(raw: unknown): DriverHealthCheck | null {
+  return typeof raw === 'string' &&
+    (DRIVER_HEALTH_CHECKS as readonly string[]).includes(raw)
+    ? (raw as DriverHealthCheck)
+    : null
+}
+
+/**
+ * ACTIVE DRIVERS ONLY, by the owner's words: the Active tab's population —
+ * live, on a working roster value — and PEOPLE. A referral payee has no CDL,
+ * card or truck by its nature (`driver-kind.ts` excludes it from the DQF and
+ * the compliance warnings for the same reason), so counting it would make a
+ * gap of a row that is right as it is.
+ */
+export function driverHealthBase(): Prisma.DriverWhereInput {
+  return {
+    deletedAt: null,
+    status: { in: [...WORKING_STATUSES] },
+    kind: { not: 'PAYEE' },
+  }
+}
+
+/**
+ * The one definition per check, as the filter the link applies.
+ *
+ * "On file" is a live `ComplianceItem` of the type — the licence record with
+ * its expiry, the medical certificate with its expiry. The DQF's CDL item is a
+ * COPY of the licence (a document) and is a different fact, watched by the
+ * DQF. "No pay rule" is no rule IN FORCE TODAY by `ruleInForce`'s own test,
+ * because a driver whose only rule has closed generates an empty settlement
+ * exactly like one who never had one.
+ */
+export function driverHealthWhere(
+  check: DriverHealthCheck,
+  now: Date,
+): Prisma.DriverWhereInput {
+  switch (check) {
+    case 'cdl':
+      return { complianceItems: { none: { type: 'CDL', deletedAt: null } } }
+    case 'medical':
+      return {
+        complianceItems: { none: { type: 'MEDICAL_CARD', deletedAt: null } },
+      }
+    case 'phone':
+      return { OR: BLANK.map((phone) => ({ phone })) }
+    case 'payRule':
+      return {
+        payRules: {
+          none: {
+            effectiveFrom: { lte: now },
+            OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }],
+          },
+        },
+      }
+    case 'truck':
+      return { assignedTruckId: null }
+  }
+}
+
+export type DriverHealthCounts = Record<DriverHealthCheck, number>
+
+/** The five driver counts over the active people the caller may see, in ONE statement. */
+export async function countDriverHealth(
+  tx: TxClient,
+  scope: { companyIds?: readonly string[] | null },
+  now: Date,
+): Promise<DriverHealthCounts> {
+  const ids = scope.companyIds ?? null
+  const rows = await tx.$queryRaw<
+    {
+      cdl: number
+      medical: number
+      phone: number
+      payRule: number
+      truck: number
+    }[]
+  >`
+    SELECT COUNT(*) FILTER (WHERE NOT EXISTS (
+             SELECT 1 FROM "ComplianceItem" ci
+              WHERE ci."driverId" = d.id AND ci."deletedAt" IS NULL AND ci.type = 'CDL'))::int AS cdl,
+           COUNT(*) FILTER (WHERE NOT EXISTS (
+             SELECT 1 FROM "ComplianceItem" ci
+              WHERE ci."driverId" = d.id AND ci."deletedAt" IS NULL AND ci.type = 'MEDICAL_CARD'))::int AS medical,
+           COUNT(*) FILTER (WHERE d.phone IS NULL OR btrim(d.phone) = '')::int AS phone,
+           COUNT(*) FILTER (WHERE NOT EXISTS (
+             SELECT 1 FROM "DriverPayRule" r
+              WHERE r."driverId" = d.id
+                AND r."effectiveFrom" <= ${now}
+                AND (r."effectiveTo" IS NULL OR r."effectiveTo" >= ${now})))::int AS "payRule",
+           COUNT(*) FILTER (WHERE d."assignedTruckId" IS NULL)::int AS truck
+      FROM "Driver" d
+     WHERE d."deletedAt" IS NULL
+       AND d.status IN ('AVAILABLE', 'DISPATCHED', 'ON_ROUTE', 'OFF_DUTY')
+       AND d.kind <> 'PAYEE'
+       AND (${ids === null} OR d."companyId" = ANY(${ids ?? []}::text[]))
+  `
+  const row = rows[0]
+  return {
+    cdl: Number(row?.cdl ?? 0),
+    medical: Number(row?.medical ?? 0),
+    phone: Number(row?.phone ?? 0),
+    payRule: Number(row?.payRule ?? 0),
+    truck: Number(row?.truck ?? 0),
   }
 }

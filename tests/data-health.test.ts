@@ -2,10 +2,16 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  DRIVER_HEALTH_CHECKS,
+  driverHealthBase,
+  driverHealthCheckFor,
+  driverHealthWhere,
   TRUCK_HEALTH_CHECKS,
   truckHealthCheckFor,
   truckHealthWhere,
 } from '@/lib/data-health'
+import { WORKING_STATUSES } from '@/lib/driver-list'
+import { ruleInForce } from '@/lib/driver-pay'
 
 // ---------------------------------------------------------------------------
 // §6.5 PART 0 — DATA HEALTH. Five counts, one definition each, used as the
@@ -84,16 +90,114 @@ describe('the row on the list', () => {
     expect(page).toContain('truckHealthWhere(')
     expect(page).toContain('<DataHealthRow')
     const row = readFileSync(
-      join('src', 'app', '(app)', 'trucks', 'DataHealthRow.tsx'),
+      join('src', 'app', '(app)', '_grid', 'DataHealthRow.tsx'),
       'utf8',
     )
     // Zero is shown, never hidden: no branch drops a figure for being 0, and
-    // every check renders through the one list.
+    // every check renders through the one list — the component is generic
+    // over the check list, shared by trucks and drivers rather than copied.
     expect(row).not.toMatch(/counts\[check\]\s*(>|!==)\s*0\s*\?/)
-    expect(row).toContain('TRUCK_HEALTH_CHECKS.map(')
+    expect(row).toContain('checks.map(')
+    expect(row).not.toMatch(/TRUCK_HEALTH_CHECKS|DRIVER_HEALTH_CHECKS/)
     // The link carries `missing=` through the page's own URL builder, so the
     // other filters survive the click.
     expect(page).toContain('missing: missing ?? undefined')
     expect(page).toContain('withParams({ missing: check ?? undefined })')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// §6.5 PART 0b — THE SAME FOR DRIVERS, by the owner's five.
+// ---------------------------------------------------------------------------
+
+describe('the five driver checks (part 0b)', () => {
+  const now = new Date('2026-10-07T12:00:00.000Z')
+
+  it("are the owner's five, in the owner's order", () => {
+    expect([...DRIVER_HEALTH_CHECKS]).toEqual([
+      'cdl',
+      'medical',
+      'phone',
+      'payRule',
+      'truck',
+    ])
+    const queue = readFileSync('docs/QUEUE.md', 'utf8')
+    expect(queue).toContain(
+      'no CDL on file, no medical card, no phone, no pay rule, no\ntruck (active drivers only)',
+    )
+    expect(driverHealthCheckFor('payRule')).toBe('payRule')
+    expect(driverHealthCheckFor('vin')).toBeNull()
+  })
+
+  it('counts active people only — the Active tab, minus referral payees', () => {
+    expect(driverHealthBase()).toEqual({
+      deletedAt: null,
+      status: { in: [...WORKING_STATUSES] },
+      kind: { not: 'PAYEE' },
+    })
+  })
+
+  it('calls a licence or a card missing only when no live record exists', () => {
+    expect(driverHealthWhere('cdl', now)).toEqual({
+      complianceItems: { none: { type: 'CDL', deletedAt: null } },
+    })
+    expect(driverHealthWhere('medical', now)).toEqual({
+      complianceItems: { none: { type: 'MEDICAL_CARD', deletedAt: null } },
+    })
+  })
+
+  it("counts no pay rule by ruleInForce's own test, on the day asked", () => {
+    expect(driverHealthWhere('payRule', now)).toEqual({
+      payRules: {
+        none: {
+          effectiveFrom: { lte: now },
+          OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }],
+        },
+      },
+    })
+    // The test the engine applies, restated so the two cannot drift: a rule
+    // dated to start tomorrow is not in force today.
+    const rules = [
+      {
+        effectiveFrom: new Date('2026-10-08T00:00:00.000Z'),
+        effectiveTo: null,
+      },
+    ]
+    expect(ruleInForce(rules as never, now)).toBeNull()
+  })
+
+  it('counts a blank phone, and no truck', () => {
+    expect(driverHealthWhere('phone', now)).toEqual({
+      OR: [{ phone: { equals: null } }, { phone: { equals: '' } }],
+    })
+    expect(driverHealthWhere('truck', now)).toEqual({ assignedTruckId: null })
+  })
+
+  it('uses the same definitions in the SQL the counts run', () => {
+    const source = readFileSync(join('src', 'lib', 'data-health.ts'), 'utf8')
+    expect(source).toContain(`ci.type = 'CDL'`)
+    expect(source).toContain(`ci.type = 'MEDICAL_CARD'`)
+    expect(source).toContain(`d.phone IS NULL OR btrim(d.phone) = ''`)
+    expect(source).toContain(`r."effectiveFrom" <= \${now}`)
+    expect(source).toContain(
+      `(r."effectiveTo" IS NULL OR r."effectiveTo" >= \${now})`,
+    )
+    expect(source).toContain(`d."assignedTruckId" IS NULL`)
+    expect(source).toContain(`d.kind <> 'PAYEE'`)
+    expect(source).toContain(
+      `d.status IN ('AVAILABLE', 'DISPATCHED', 'ON_ROUTE', 'OFF_DUTY')`,
+    )
+  })
+
+  it('sits under the Drivers grid with the same row, filter and links', () => {
+    const page = readFileSync(
+      join('src', 'app', '(app)', 'drivers', 'page.tsx'),
+      'utf8',
+    )
+    expect(page).toMatch(/countDriverHealth\(\s*tx,/)
+    expect(page).toContain('driverHealthWhere(')
+    expect(page).toContain('driverHealthBase()')
+    expect(page).toContain('<DataHealthRow')
+    expect(page).toContain("from '../_grid/DataHealthRow'")
   })
 })

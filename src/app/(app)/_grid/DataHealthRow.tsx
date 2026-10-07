@@ -1,30 +1,36 @@
 import Link from 'next/link'
 import { cx } from '@/lib/cx'
-import {
-  TRUCK_HEALTH_CHECKS,
-  type TruckHealthCheck,
-  type TruckHealthCounts,
-} from '@/lib/data-health'
 
-// THE DATA-HEALTH ROW (§6.5 part 0). Five figures under the grid, in the
+// THE DATA-HEALTH ROW (§6.5 part 0 and 0b). Five figures under a grid, in the
 // footer's register, every one a link to the list filtered by the same
-// definition that produced the count. ZERO IS SHOWN: a row that drops its zeros
-// teaches the office that an absent figure means fine.
+// definition that produced the count. ZERO IS SHOWN: a row that drops its
+// zeros teaches the office that an absent figure means fine.
+//
+// GENERIC OVER THE CHECK LIST — trucks and drivers render the one component
+// with their own five, rather than a copy each. The component knows nothing
+// about what a check means; the lib does.
 
-interface Props {
-  counts: TruckHealthCounts
+interface Props<C extends string> {
+  checks: readonly C[]
+  counts: Record<C, number>
   /** The check the list is currently filtered by, if any. */
-  active: TruckHealthCheck | null
+  active: C | null
   /** Builds the list URL with the other filters kept and `missing` set/cleared. */
-  hrefFor: (check: TruckHealthCheck | null) => string
+  hrefFor: (check: C | null) => string
   labels: {
     title: string
     all: string
-    check: (check: TruckHealthCheck) => string
+    check: (check: C) => string
   }
 }
 
-export function DataHealthRow({ counts, active, hrefFor, labels }: Props) {
+export function DataHealthRow<C extends string>({
+  checks,
+  counts,
+  active,
+  hrefFor,
+  labels,
+}: Props<C>) {
   return (
     <nav
       aria-label={labels.title}
@@ -33,7 +39,7 @@ export function DataHealthRow({ counts, active, hrefFor, labels }: Props) {
       <span className="uppercase tracking-[0.04em] text-ink-3">
         {labels.title}
       </span>
-      {TRUCK_HEALTH_CHECKS.map((check) => {
+      {checks.map((check) => {
         const current = check === active
         return (
           <Link

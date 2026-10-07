@@ -49,6 +49,15 @@ import { Button } from '@/components/ui/Button'
 import { ColumnFunnel } from '../_grid/ColumnFunnel'
 import { ColumnsChooser } from '../_grid/ColumnsChooser'
 import { GridFooterNav } from '../_grid/GridFooterNav'
+import { DataHealthRow } from '../_grid/DataHealthRow'
+import {
+  countDriverHealth,
+  DRIVER_HEALTH_CHECKS,
+  driverHealthBase,
+  driverHealthCheckFor,
+  driverHealthWhere,
+  type DriverHealthCheck,
+} from '@/lib/data-health'
 import { gridView, keepColumns, pagedFooterLabel } from '../_grid/grid-page'
 import { SavedViews } from '../loads/SavedViews'
 import { BulkRoster } from './BulkRoster'
@@ -160,6 +169,12 @@ export default async function DriversPage({
   const tagParam = typeof params['tag'] === 'string' ? params['tag'] : undefined
   const dispatchParam =
     typeof params['dispatch'] === 'string' ? params['dispatch'] : undefined
+  // THE DATA-HEALTH FILTER (§6.5 part 0b): the footer's own definition applied
+  // as a query filter, over the footer's own base (active people), whichever
+  // tab is open. An unrecognised value filters nothing.
+  const missing: DriverHealthCheck | null = driverHealthCheckFor(
+    params['missing'],
+  )
 
   // ── THE DQF WARNING CARRIES KEYS; THIS TURNS THEM INTO WORDS ─────────
   const namedGaps = (warning: Warning): Warning =>
@@ -175,7 +190,7 @@ export default async function DriversPage({
 
   const now = new Date()
 
-  const { rows, companyCount, counts, visible, savedViews, density } =
+  const { rows, companyCount, counts, visible, savedViews, density, health } =
     await withCurrentOrg('read', 'driver', async (tx, session) => {
       const companyCount = await tx.company.count()
       const base = {
@@ -188,8 +203,27 @@ export default async function DriversPage({
       // list (§6.2.8). In the same transaction as the rows they count.
       const counts = await countDriverTabs(tx, base, now, showRetired)
 
+      // THE FIVE DATA-HEALTH COUNTS, ONE STATEMENT, IN THIS TRANSACTION (§6.5
+      // part 0b). Over the active people the user may see — scope and the
+      // authority filter — never over this view's tab, chip or tag.
+      const health = await countDriverHealth(
+        tx,
+        { companyIds: companyParam ? [companyParam] : session.companyScopes },
+        now,
+      )
+
       const drivers = await tx.driver.findMany({
-        where: { AND: [base, driverTabWhere(tab, now, showRetired)] },
+        where: {
+          AND: [
+            base,
+            driverTabWhere(tab, now, showRetired),
+            // The health filter brings its own base, so the figure's link
+            // lists the same rows from any tab.
+            ...(missing
+              ? [driverHealthBase(), driverHealthWhere(missing, now)]
+              : []),
+          ],
+        },
         orderBy: [{ company: { name: 'asc' } }, { lastName: 'asc' }],
         take: PAGE_CAP,
         select: {
@@ -299,7 +333,15 @@ export default async function DriversPage({
         }
       })
 
-      return { rows, companyCount, counts, visible, savedViews, density }
+      return {
+        rows,
+        companyCount,
+        counts,
+        visible,
+        savedViews,
+        density,
+        health,
+      }
     })
 
   const mayCreate = await currentUserCan('create', 'driver')
@@ -764,6 +806,21 @@ export default async function DriversPage({
           previous: t('grid.previous'),
           next: t('grid.next'),
           perPage: t('grid.perPage'),
+        }}
+      />
+
+      {/* THE DATA-HEALTH ROW (§6.5 part 0b): five counts over active people,
+       * each a link to this list filtered by the same definition, with the
+       * tab and the other filters kept. Zero is shown. */}
+      <DataHealthRow
+        checks={DRIVER_HEALTH_CHECKS}
+        counts={health}
+        active={missing}
+        hrefFor={(check) => keep({ missing: check })}
+        labels={{
+          title: t('drivers.health.title'),
+          all: t('drivers.health.all'),
+          check: (check) => t(`drivers.health.${check}` as MessageKey),
         }}
       />
 

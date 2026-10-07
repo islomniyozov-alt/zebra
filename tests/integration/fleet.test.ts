@@ -24,7 +24,11 @@ import {
 import { createLoad, LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import { ReferenceError } from '@/lib/reference'
 import {
+  countDriverHealth,
   countTruckHealth,
+  DRIVER_HEALTH_CHECKS,
+  driverHealthBase,
+  driverHealthWhere,
   TRUCK_HEALTH_CHECKS,
   truckHealthWhere,
 } from '@/lib/data-health'
@@ -404,6 +408,112 @@ describe('trailers and drivers', () => {
       tx.trailer.findUnique({ where: { id: trailer.id } }),
     )
     expect(after?.deletedAt).toBeInstanceOf(Date)
+  })
+
+  it('counts driver data health by the same definition the filter applies (§6.5 part 0b)', async () => {
+    const now = new Date()
+    const scope = { companyIds: [alphaId] }
+    const read = () => inOrg((tx) => countDriverHealth(tx, scope, now))
+    // THE FILTER AND THE COUNT ARE ONE DEFINITION over ONE BASE: the Active
+    // tab's people. Whatever `/drivers?missing=<check>` lists is what the
+    // footer counted.
+    const filtered = (check: (typeof DRIVER_HEALTH_CHECKS)[number]) =>
+      inOrg((tx) =>
+        tx.driver.count({
+          where: {
+            AND: [
+              { companyId: alphaId },
+              driverHealthBase(),
+              driverHealthWhere(check, now),
+            ],
+          },
+        }),
+      )
+    const agree = async () => {
+      const counts = await read()
+      for (const check of DRIVER_HEALTH_CHECKS) {
+        expect(await filtered(check), check).toBe(counts[check])
+      }
+      return counts
+    }
+
+    const before = await agree()
+    // A bare active person: no phone, no truck, no records, no rule.
+    const driver = await inOrg((tx) =>
+      createDriver(tx, organizationId, {
+        companyId: alphaId,
+        firstName: 'Health',
+        lastName: `Bare ${nonce}`,
+        phone: '',
+      }),
+    )
+    const bare = await agree()
+    for (const check of DRIVER_HEALTH_CHECKS) {
+      expect(bare[check], check).toBe(before[check] + 1)
+    }
+
+    // A phone and a truck take the row out of those two counts.
+    const truck = await inOrg((tx) =>
+      createTruck(tx, organizationId, {
+        companyId: alphaId,
+        unitNumber: `dh-${nonce}`,
+      }),
+    )
+    await inOrg((tx) =>
+      updateDriver(tx, driver.id, {
+        firstName: 'Health',
+        lastName: `Bare ${nonce}`,
+        phone: '555-0100',
+        assignedTruckId: truck.id,
+      }),
+    )
+    const placed = await agree()
+    expect(placed.phone).toBe(before.phone)
+    expect(placed.truck).toBe(before.truck)
+    expect(placed.cdl).toBe(before.cdl + 1)
+
+    // AN EXPIRED CARD IS A RECORD: it leaves this count and is the warnings
+    // column's business. A rule that starts tomorrow is NOT in force today.
+    await inOrg((tx) =>
+      tx.complianceItem.create({
+        data: {
+          organizationId,
+          companyId: alphaId,
+          driverId: driver.id,
+          type: 'MEDICAL_CARD',
+          expiresAt: new Date('2020-01-01T00:00:00.000Z'),
+        },
+      }),
+    )
+    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+    await inOrg((tx) =>
+      tx.driverPayRule.create({
+        data: {
+          driverId: driver.id,
+          organizationId,
+          type: 'PERCENT_GROSS',
+          percentBps: 2800,
+          effectiveFrom: tomorrow,
+        },
+      }),
+    )
+    const recorded = await agree()
+    expect(recorded.medical).toBe(before.medical)
+    expect(recorded.payRule).toBe(before.payRule + 1)
+
+    // TERMINATED ROWS COUNT NOWHERE: the base is the Active tab's people.
+    await inOrg((tx) =>
+      updateDriver(tx, driver.id, {
+        firstName: 'Health',
+        lastName: `Bare ${nonce}`,
+        status: 'INACTIVE',
+        assignedTruckId: truck.id,
+      }),
+    )
+    const gone = await agree()
+    expect(gone).toEqual(before)
+    await inOrg((tx) => retireAsset(tx, 'driver', driver.id))
+    await inOrg((tx) => retireAsset(tx, 'truck', truck.id))
   })
 
   it('writes kind, tags and pay-to through their gates (queue item 17)', async () => {

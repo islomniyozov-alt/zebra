@@ -17,11 +17,12 @@ import { keepColumns } from '../_grid/grid-page'
 import { readGridColumns } from '@/lib/grid-columns'
 import {
   countTruckHealth,
+  TRUCK_HEALTH_CHECKS,
   truckHealthCheckFor,
   truckHealthWhere,
   type TruckHealthCheck,
 } from '@/lib/data-health'
-import { DataHealthRow } from './DataHealthRow'
+import { DataHealthRow } from '../_grid/DataHealthRow'
 import type { MessageKey } from '@/lib/i18n'
 import {
   columnKeysFor,
@@ -404,6 +405,7 @@ export default async function TrucksPage({
       {/* THE DATA-HEALTH ROW (§6.5 part 0): five counts under the grid, each a
        * link to this list filtered by the same definition. Zero is shown. */}
       <DataHealthRow
+        checks={TRUCK_HEALTH_CHECKS}
         counts={health}
         active={missing}
         hrefFor={(check) => withParams({ missing: check ?? undefined })}
