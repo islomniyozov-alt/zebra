@@ -18,11 +18,12 @@ the phase briefs. Numbering is the owner's and is not renumbered.
 
 ## Done
 
-| #   | Item                                                                                                                                                                                                                                        | Landed                |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
-| 9   | **Warnings + Tags** — seven derived warnings across drivers, trucks and loads; `String[]` tags with GIN indexes and a tag filter. Nothing stored that can be derived.                                                                       | `src/lib/warnings.ts` |
-| 10  | **Pay to + payment type + default authority** — `payTo` frozen onto settlements, payment type as TEXT against a four-value code list (Quickpay, Factored, ACH, Direct), a customer's booking default, and one default authority.            | migrations 51–53      |
-| 11  | **Dispatch fields** — Heading to, dispatch status, last activity, on-time delivery, all derived on read. The only thing stored is the off-duty flag, and a CHECK stops its return date disagreeing with it. Five surfaces wired 2026-09-21. | migration 54          |
+| #   | Item                                                                                                                                                                                                                                                                                                                                                                                | Landed                |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| 9   | **Warnings + Tags** — seven derived warnings across drivers, trucks and loads; `String[]` tags with GIN indexes and a tag filter. Nothing stored that can be derived.                                                                                                                                                                                                               | `src/lib/warnings.ts` |
+| 10  | **Pay to + payment type + default authority** — `payTo` frozen onto settlements, payment type as TEXT against a four-value code list (Quickpay, Factored, ACH, Direct), a customer's booking default, and one default authority.                                                                                                                                                    | migrations 51–53      |
+| 11  | **Dispatch fields** — Heading to, dispatch status, last activity, on-time delivery, all derived on read. The only thing stored is the off-duty flag, and a CHECK stops its return date disagreeing with it. Five surfaces wired 2026-09-21.                                                                                                                                         | migration 54          |
+| 16  | **DRIVERS = Datatruck's shape** — the list with five tabs and ten columns on the grid machinery (`24a686a`); the record as eleven tabs, each reading what exists and saying so in words where nothing does (`b2da42b`); team drivers — a two-seat cap where the pairing is written, the second seat offered on the load, "Team with" on both records (`c6264f8`). §6.4, 2026-10-07. | no migration          |
 
 Item 11 was followed by four rulings on 2026-09-21 that are part of it: the
 driver form offers roster values only, the drivers list shows one status, the
@@ -103,16 +104,34 @@ the compliance block; what remains is the deferred list below.
 
 ## Next
 
-| #   | Item                                                                                                                                                                                                                                                       | Shape                                                |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| 16  | **DRIVERS = Datatruck's shape**, three parts — the list with its tabs and columns on the existing grid machinery; the record's tabs, each reading what exists and saying so in words where nothing does; team drivers on load, statement and both records. | brief below, verbatim; doc-first; ten lines per part |
+| #   | Item                                                                                                                                                                                                                | Shape                                       |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| 17  | **GAPS code gap 10** — editors for pay-to, kind and tags on the driver record's Accounting and Main tabs.                                                                                                           | doc-first; full ritual                      |
+| 18  | **TRUCKS = Datatruck's shape** — list tabs, record tabs, the same method as drivers. The brief comes from the next screenshots Islom sends; until then, start from the Trucks list columns the sweep already reads. | brief awaited; doc-first; same method as 16 |
+| 19  | **Nightly sweep output** — any new GAPS row goes to the top of this queue.                                                                                                                                          | standing                                    |
 
-### 16 — DRIVERS = Datatruck's shape
+### 17–19 — the queue after item 16
+
+_Owner's words, received 2026-10-07 after item 16's third part reported, and
+transcribed here before item 17 was designed:_
+
+```
+1. GAPS code gap 10: editors for pay-to, kind and tags on the driver
+   record's Accounting/Main tabs.
+2. TRUCKS = Datatruck's shape (list tabs, record tabs, same method as
+   drivers) — brief from the next screenshots Islom sends; until
+   then, start from the Trucks list columns the sweep already reads.
+3. Nightly sweep output: any new GAPS row goes to the top of this
+   queue.
+```
+
+### 16 — DRIVERS = Datatruck's shape (done 2026-10-07)
 
 _Owner's brief, received 2026-10-07 and transcribed here the same day, before
 part 1 was designed — because on 2026-10-06 the item was handed over as "the
 queued brief" and the brief was in neither this repository nor the session,
-which is the failure this file exists to stop._
+which is the failure this file exists to stop. Kept after the work landed,
+because `tests/driver-record.test.ts` counts the record's tabs against it._
 
 ```
 DRIVERS = Datatruck's shape. Doc-first, then build:
