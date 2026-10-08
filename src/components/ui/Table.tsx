@@ -402,12 +402,19 @@ export function Table<Row>({
                         'px-z3 py-[var(--z-cell-pad-y)] text-[length:var(--z-body-size)]/[var(--z-body-line)] text-ink',
                         column.align === 'end' ? 'text-end' : 'text-start',
                         column.truncate && 'max-w-[1px] truncate',
+                        // THE CELL IS THE CONTAINING BLOCK (§7.1, amended
+                        // 2026-10-07). Chromium does not let a positioned
+                        // <tr> contain the anchor's ::after, so a stretch
+                        // "over the row" covered 97px of a 1,056px row on
+                        // dev and the office reported rows that did not
+                        // link. Each cell stretches its own anchor instead.
+                        href && 'relative',
                       )}
                     >
-                      {/* THE FIRST CELL CARRIES THE ANCHOR, so the row's
+                      {/* THE FIRST CELL CARRIES THE NAMED ANCHOR, so the row's
                        * accessible name is the thing that identifies it —
                        * the load number, the broker's name — rather than a
-                       * bare "open". Its `::after` covers the whole row. */}
+                       * bare "open". Its `::after` covers its cell. */}
                       {href && index === 0 ? (
                         <Link
                           href={href}
@@ -418,6 +425,19 @@ export function Table<Row>({
                       ) : (
                         column.render(row)
                       )}
+                      {/* EVERY OTHER CELL CARRIES AN OVERLAY to the same
+                       * href — hidden from the accessibility tree and out of
+                       * the tab order, so the keyboard and the screen reader
+                       * meet ONE link per row while the mouse gets the whole
+                       * row. Controls inside the cell sit above it on z-10. */}
+                      {href && index > 0 ? (
+                        <Link
+                          href={href}
+                          aria-hidden
+                          tabIndex={-1}
+                          className="absolute inset-0"
+                        />
+                      ) : null}
                     </td>
                   ))}
                 </tr>,
