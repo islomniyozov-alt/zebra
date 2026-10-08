@@ -43,6 +43,24 @@ export const WORKING_STATUSES: readonly DriverStatus[] = [
 ]
 
 /**
+ * THE ACTIVE DRIVERS, as ONE predicate (§6.6, queue item 20 (6)).
+ *
+ * The Active tab's population — live rows on a working roster value — and
+ * PEOPLE: a referral payee is a commission and cannot be in a truck, which is
+ * why §6.5 part 0b's data-health base already left it out. The accident
+ * register's picker read "not removed" and listed terminated drivers and
+ * payees beside the people who could have been at the wheel. Both readers go
+ * through this now, so "active" means one thing on every screen that says it.
+ */
+export function activeDriversWhere(): Prisma.DriverWhereInput {
+  return {
+    deletedAt: null,
+    status: { in: [...WORKING_STATUSES] },
+    kind: { not: 'PAYEE' },
+  }
+}
+
+/**
  * The rows a tab selects. `includeRemoved` is the page's existing toggle and
  * widens the tab to the rows somebody soft-deleted — it is a question about
  * mistakes, orthogonal to every tab, which is why it is a flag and not a sixth.

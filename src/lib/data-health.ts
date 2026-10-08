@@ -1,6 +1,6 @@
 import type { Prisma } from '@/generated/prisma/client'
 import type { TxClient } from './tenancy'
-import { WORKING_STATUSES } from './driver-list'
+import { activeDriversWhere } from './driver-list'
 
 // ---------------------------------------------------------------------------
 // DATA HEALTH (§6.5 part 0, queue item 18). "The office fixes data faster when
@@ -161,11 +161,9 @@ export function driverHealthCheckFor(raw: unknown): DriverHealthCheck | null {
  * gap of a row that is right as it is.
  */
 export function driverHealthBase(): Prisma.DriverWhereInput {
-  return {
-    deletedAt: null,
-    status: { in: [...WORKING_STATUSES] },
-    kind: { not: 'PAYEE' },
-  }
+  // ONE PREDICATE FOR "ACTIVE" (§6.6): the accident register's picker reads
+  // the same function, so the two cannot disagree about who is a driver.
+  return activeDriversWhere()
 }
 
 /**

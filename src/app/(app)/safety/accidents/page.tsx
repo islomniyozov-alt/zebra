@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyIdScopeFilter } from '@/lib/tenancy'
+import { activeDriversWhere } from '@/lib/driver-list'
 import { SELECTABLE_AUTHORITY } from '@/lib/companies'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -64,9 +65,14 @@ export default async function AccidentRegisterPage({
 
     const entries = chosen ? await registerFor(tx, chosen) : []
 
+    // THE ACTIVE DRIVERS OF THE AUTHORITY (§6.6, queue item 20 (6)) — the
+    // Active tab's people, through the one predicate, not "every row that is
+    // not removed": a terminated driver or a referral payee was not at the
+    // wheel. The register records and voids and never edits, so an old
+    // entry keeps its driver by name whatever this list says today.
     const drivers = chosen
       ? await tx.driver.findMany({
-          where: { companyId: chosen, deletedAt: null },
+          where: { companyId: chosen, ...activeDriversWhere() },
           orderBy: { lastName: 'asc' },
           select: { id: true, firstName: true, lastName: true },
         })
