@@ -153,11 +153,18 @@ describe('the loader finds both kinds of evidence', () => {
     expect(dqfIncompleteCount(entries)).toBe(0)
   })
 
-  it('reads an empty file as eight missing, dated from the hire date', async () => {
+  it('reads an empty file as eight missing of nine, dated from the hire date', async () => {
+    // NINE ROWS since queue item 20 (4): the hire date is the first, and this
+    // driver has one — so it reads PRESENT and the other eight are missing,
+    // each dated from it. A production-shaped row: a new hire with a date
+    // typed and nothing filed yet.
     const facts = await inOrg((tx) => dqfFactsForDrivers(tx, [emptyId]))
     const entries = dqfChecklist(facts.get(emptyId)!, NOW)
+    expect(entries[0]!.key).toBe('hire_date')
+    expect(entries[0]!.status).toBe('present')
     expect(dqfIncompleteCount(entries)).toBe(8)
-    expect(entries[0]!.dueSince?.toISOString().slice(0, 10)).toBe(
+    expect(entries[1]!.status).toBe('missing')
+    expect(entries[1]!.dueSince?.toISOString().slice(0, 10)).toBe(
       days(-10).toISOString().slice(0, 10),
     )
   })

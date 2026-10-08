@@ -128,10 +128,20 @@ beforeAll(async () => {
     data: { userId, organizationId, role: 'OWNER' },
   })
 
+  // WITH A HIRE DATE, since queue item 20 (4): "everything" now includes the
+  // date the file is dated from, and a driver without one carries a DQF gap
+  // by design — which is exactly what the gate reported when this fixture
+  // had none.
   const makeDriver = async (last: string) =>
     (
       await owner.driver.create({
-        data: { organizationId, companyId, firstName: 'A', lastName: last },
+        data: {
+          organizationId,
+          companyId,
+          firstName: 'A',
+          lastName: last,
+          hireDate: days(-400),
+        },
       })
     ).id
 
