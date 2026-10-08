@@ -939,6 +939,8 @@ const en = {
     'That truck already carries two drivers. Take one off it first, or pick another truck.',
   'ref.error.notDriverKind':
     'Not a kind this record can be: a person or a referral payee.',
+  'ref.error.paymentTypeDirect':
+    'This load settles directly, so its payment type is Direct and cannot be changed.',
   'team.with': 'Team with',
   'team.suggested':
     'Team: {name} shares unit {unit} with the driver — saved as the second seat when you press Save, unless you clear it.',
@@ -950,6 +952,8 @@ const en = {
     'This freight was billed and settled in Datatruck. A payment type cannot be set on it — that would be this system asserting terms it was not present for.',
   'loads.column.paymentType': 'Payment type',
   'loads.paymentType.none': 'Not set',
+  'loads.paymentType.derived':
+    'This load settles directly by statement, so its arrangement is Direct. It is a fact of the customer, not a choice here.',
   'loads.paymentType.hint':
     'How this load gets billed and paid for. Stamped from the customer at booking; the invoice takes it when it is raised.',
   'loads.paymentType.saving': 'Saving…',
@@ -1551,6 +1555,8 @@ const en = {
   'loads.stageInTransit': 'In-Transit',
   'loads.stageDelivered': 'Delivered',
   'loads.stageInvoiced': 'Invoiced',
+  'loads.stageOnStatement': 'On statement',
+  'rate.otherNotBilled': 'Other lines, not billed',
   'loads.stagePaid': 'Paid',
   'loads.colPosition': 'Position',
   'loads.colLocation': 'Location',
@@ -3897,6 +3903,8 @@ const ru: Dictionary = {
     'На этом тягаче уже два водителя. Сначала снимите одного или выберите другой тягач.',
   'ref.error.notDriverKind':
     'Такого типа записи нет: человек или получатель реферальных.',
+  'ref.error.paymentTypeDirect':
+    'Этот груз рассчитывается напрямую, поэтому тип оплаты — Direct и его нельзя изменить.',
   'team.with': 'В команде с',
   'team.suggested':
     'Команда: {name} закреплён за тягачом {unit} вместе с водителем — сохранится вторым водителем при нажатии «Сохранить», если поле не очистить.',
@@ -3908,6 +3916,8 @@ const ru: Dictionary = {
     'Этот груз выставлен и рассчитан в Datatruck. Тип оплаты по нему задать нельзя — это была бы система, утверждающая условия, при которых её не было.',
   'loads.column.paymentType': 'Тип оплаты',
   'loads.paymentType.none': 'Не задан',
+  'loads.paymentType.derived':
+    'Этот груз рассчитывается напрямую по ведомости, поэтому тип оплаты — Direct. Это свойство заказчика, а не выбор здесь.',
   'loads.paymentType.hint':
     'Как этот груз выставляется и оплачивается. Проставляется от клиента при бронировании; счёт берёт это при выставлении.',
   'loads.paymentType.saving': 'Сохранение…',
@@ -4512,6 +4522,8 @@ const ru: Dictionary = {
   'loads.stageInTransit': 'В пути',
   'loads.stageDelivered': 'Доставлен',
   'loads.stageInvoiced': 'Выставлен счёт',
+  'loads.stageOnStatement': 'В ведомости',
+  'rate.otherNotBilled': 'Прочие строки, не выставлены',
   'loads.stagePaid': 'Оплачен',
   'loads.colPosition': 'Позиция',
   'loads.colLocation': 'Место',
@@ -6816,6 +6828,8 @@ const fa: Dictionary = {
   'ref.error.truckFull':
     'این کامیون از پیش دو راننده دارد. نخست یکی را بردارید یا کامیون دیگری برگزینید.',
   'ref.error.notDriverKind': 'چنین نوع رکوردی نیست: شخص یا گیرندهٔ معرفی.',
+  'ref.error.paymentTypeDirect':
+    'این بار مستقیم تسویه می‌شود، پس نوع پرداخت آن Direct است و تغییر نمی‌کند.',
   'team.with': 'هم‌تیمی با',
   'team.suggested':
     'تیم: {name} با راننده در کامیون {unit} است — با زدن ذخیره به عنوان راننده دوم ثبت می‌شود، مگر آن را پاک کنید.',
@@ -6827,6 +6841,8 @@ const fa: Dictionary = {
     'این بار در Datatruck صورتحساب و تسویه شده است. نوع پرداخت برای آن تعیین‌شدنی نیست — این یعنی سامانه شرطی را ادعا کند که در آن حضور نداشته.',
   'loads.column.paymentType': 'نوع پرداخت',
   'loads.paymentType.none': 'تعیین نشده',
+  'loads.paymentType.derived':
+    'این بار مستقیم و با صورت‌حساب تسویه می‌شود، پس نوع پرداخت آن Direct است؛ ویژگی مشتری است، نه انتخابی در اینجا.',
   'loads.paymentType.hint':
     'اینکه این بار چگونه صورتحساب و پرداخت می‌شود. هنگام ثبت از مشتری گرفته می‌شود؛ صورتحساب آن را هنگام صدور برمی‌دارد.',
   'loads.paymentType.saving': 'در حال ذخیره…',
@@ -7422,6 +7438,8 @@ const fa: Dictionary = {
   'loads.stageInTransit': 'در مسیر',
   'loads.stageDelivered': 'تحویل شده',
   'loads.stageInvoiced': 'صورتحساب شده',
+  'loads.stageOnStatement': 'در صورت‌حساب',
+  'rate.otherNotBilled': 'ردیف‌های دیگر، صورتحساب‌نشده',
   'loads.stagePaid': 'پرداخت شده',
   'loads.colPosition': 'موقعیت',
   'loads.colLocation': 'مکان',

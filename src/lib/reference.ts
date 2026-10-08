@@ -56,6 +56,8 @@ export type ReferenceFailure =
   | 'truck_full'
   /** A driver kind outside `DRIVER_KINDS` — a person or a referral payee (item 17). */
   | 'not_driver_kind'
+  /** A payment type other than Direct on direct-settled freight (§7.12). */
+  | 'payment_type_direct'
   /**
    * A value outside a small code list — fleet status, fuel type (item 12).
    *
@@ -116,6 +118,7 @@ export const REFERENCE_ERROR_KEYS: Record<ReferenceFailure, MessageKey> = {
   not_roster_status: 'ref.error.notRosterStatus',
   truck_full: 'ref.error.truckFull',
   not_driver_kind: 'ref.error.notDriverKind',
+  payment_type_direct: 'ref.error.paymentTypeDirect',
   not_in_code_list: 'ref.error.notInCodeList',
   trailer_already_paired: 'ref.error.trailerAlreadyPaired',
   already_voided: 'ref.error.alreadyVoided',

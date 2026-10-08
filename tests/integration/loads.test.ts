@@ -10,10 +10,12 @@ import {
   podConfirmed,
   uncancelLoad,
   LOAD_WRITE_TIMEOUT_MS,
+  recomputeTotals,
   setStopAddress,
   updateLoad,
   type StopInput,
 } from '@/lib/loads'
+import { addAccessorial } from '@/lib/rates'
 import { transitionOperational } from '@/lib/load-status'
 import { DispatchConflictError } from '@/lib/dispatch'
 import type { PrismaClient } from '@/generated/prisma/client'
@@ -1093,5 +1095,104 @@ describe('an address a dispatcher fills in', () => {
       addressLine1: '1 Old Book Rd',
       city: 'Olive Branch',
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// §7.12 — DIRECT-SETTLED FREIGHT (queue item 20 (5)), against PRODUCTION-SHAPED
+// rows: a customer that settles by statement, a load booked against it, and an
+// accessorial line that was denied.
+// ---------------------------------------------------------------------------
+describe('a load on a customer that settles directly', () => {
+  let directBrokerId = ''
+
+  beforeAll(async () => {
+    const broker = await inOrg((tx) =>
+      createBroker(tx, organizationId, { name: `Relay-ish ${nonce}` }),
+    )
+    directBrokerId = broker.id
+    // THE FLAG ON THE CUSTOMER, set the way the import sets it. `createBroker`
+    // does not take it, and that is right: it is a fact about how the payer
+    // settles, not a field on the booking form.
+    await owner.customer.update({
+      where: { id: directBrokerId },
+      data: { settlesDirectly: true },
+    })
+  })
+
+  it('is stamped Direct at booking and refuses any other arrangement', async () => {
+    const load = await inOrg((tx) =>
+      createLoad(
+        tx,
+        organizationId,
+        {
+          companyId: alphaId,
+          customerId: directBrokerId,
+          stops: stops(day(20), day(21)),
+          linehaulCents: 50_000,
+        },
+        { byUserId: userId },
+      ),
+    )
+    expect(load.directSettled).toBe(true)
+    expect(load.paymentType).toBe('Direct')
+
+    await expect(
+      inOrg((tx) =>
+        updateLoad(
+          tx,
+          load.id,
+          { paymentType: 'Quickpay' },
+          { byUserId: userId },
+        ),
+      ),
+    ).rejects.toMatchObject({
+      code: 'payment_type_direct',
+      field: 'paymentType',
+    })
+
+    // Saying Direct again is not a change and not a refusal.
+    const same = await inOrg((tx) =>
+      updateLoad(tx, load.id, { paymentType: 'Direct' }, { byUserId: userId }),
+    )
+    expect(same.paymentType).toBe('Direct')
+  })
+
+  it('keeps a DENIED line out of the stored total, which is the figure the panel now shows', async () => {
+    const load = await inOrg((tx) =>
+      createLoad(
+        tx,
+        organizationId,
+        {
+          companyId: alphaId,
+          customerId: brokerId,
+          stops: stops(day(22), day(23)),
+          linehaulCents: 80_000,
+        },
+        { byUserId: userId },
+      ),
+    )
+    const added = await inOrg((tx) =>
+      addAccessorial(tx, organizationId, load.id, {
+        type: 'DETENTION',
+        amount: '120.00',
+        isBillable: true,
+      }),
+    )
+    expect(added.ok && added.accessorialsCents).toBe(12_000)
+
+    // The office denies it. `recomputeTotals` is the rule: billable AND not
+    // denied. The panel reads the same two facts off the row (§7.12).
+    await owner.loadAccessorial.updateMany({
+      where: { loadId: load.id },
+      data: { status: 'DENIED' },
+    })
+    await inOrg((tx) => recomputeTotals(tx, load.id))
+    const after = await owner.load.findUniqueOrThrow({
+      where: { id: load.id },
+      select: { accessorialsCents: true, totalRevenueCents: true },
+    })
+    expect(after.accessorialsCents).toBe(0)
+    expect(after.totalRevenueCents).toBe(80_000)
   })
 })

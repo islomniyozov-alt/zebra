@@ -200,6 +200,9 @@ export default async function LoadDetailPage({
             type: true,
             amountCents: true,
             isBillable: true,
+            // THE STATUS, so the panel applies `recomputeTotals`' own rule —
+            // a denied line is in no figure (§7.12).
+            status: true,
           },
         },
         // ── IDS ONLY, SO THE AUDIT FILTER HAS THEM IN TIME ──────────────
@@ -590,6 +593,7 @@ export default async function LoadDetailPage({
         typeLabel: t(`accessorial.${row.type}` as MessageKey),
         amountCents: row.amountCents,
         isBillable: row.isBillable,
+        status: row.status,
       }))
     : []
 
@@ -872,7 +876,13 @@ export default async function LoadDetailPage({
                 upcoming: t('loads.stageUpcoming'),
                 inTransit: t('loads.stageInTransit'),
                 delivered: t('loads.stageDelivered'),
-                invoiced: t('loads.stageInvoiced'),
+                // §7.12 — "On statement" on direct-settled freight, where the
+                // literal word read as a demand for an invoice nobody raises.
+                invoiced: t(
+                  view.settledWord === 'onStatement'
+                    ? 'loads.stageOnStatement'
+                    : 'loads.stageInvoiced',
+                ),
                 paid: t('loads.stagePaid'),
               }}
             />
@@ -1270,6 +1280,7 @@ export default async function LoadDetailPage({
                 linehaul: t('rate.linehaul'),
                 fuelSurcharge: t('rate.fuelSurcharge'),
                 accessorials: t('rate.accessorials'),
+                otherNotBilled: t('rate.otherNotBilled'),
                 total: t('rate.total'),
                 save: t('rate.save'),
                 saved: t('rate.saved'),
@@ -1297,6 +1308,8 @@ export default async function LoadDetailPage({
             value={load.paymentType}
             options={PAYMENT_TYPES}
             disabled={load.isCancelled}
+            // §7.12 — a fact on direct-settled freight, a choice on the rest.
+            derived={view.paymentTypeDerived}
             save={setPaymentTypeAction.bind(null, id)}
             labels={{
               title: t('loads.column.paymentType'),
@@ -1305,6 +1318,7 @@ export default async function LoadDetailPage({
               save: t('ref.save'),
               saving: t('loads.paymentType.saving'),
               saved: t('loads.paymentType.saved'),
+              derived: t('loads.paymentType.derived'),
             }}
           />
 

@@ -28,6 +28,8 @@ export interface AccessorialRow {
   typeLabel: string
   amountCents: number
   isBillable: boolean
+  /** PENDING · APPROVED · BILLED · DENIED — a denied line is in no figure. */
+  status: string
 }
 
 interface Props {
@@ -53,6 +55,7 @@ interface Props {
     linehaul: string
     fuelSurcharge: string
     accessorials: string
+    otherNotBilled: string
     total: string
     save: string
     saved: string
@@ -89,8 +92,17 @@ export function RatePanel({
   const [linehaul, setLinehaul] = useState(centsToField(linehaulCents))
   const [fuel, setFuel] = useState(centsToField(fuelSurchargeCents))
 
-  const accessorialsCents = accessorials
+  // TWO FIGURES, BOTH NAMED (§7.12). "Billed" is `recomputeTotals`' own rule —
+  // billable and not denied — and enters the total; "other lines, not billed"
+  // is the approved lines that are not billable, the import's "Other" rows,
+  // which were on the load and in no figure the screen showed. A denied line
+  // is in neither.
+  const live = accessorials.filter((row) => row.status !== 'DENIED')
+  const accessorialsCents = live
     .filter((row) => row.isBillable)
+    .reduce((total, row) => total + row.amountCents, 0)
+  const otherNotBilledCents = live
+    .filter((row) => !row.isBillable)
     .reduce((total, row) => total + row.amountCents, 0)
 
   // Same three integers the server adds, added the same way.
@@ -143,6 +155,13 @@ export function RatePanel({
         <dt className="text-ink-2">{labels.accessorials}</dt>
         <dd className="text-end font-mono tabular-nums text-ink">
           {formatCents(accessorialsCents, locale)}
+        </dd>
+        {/* THE LINES THAT ARE ON THE LOAD AND NOT IN THE TOTAL (§7.12). Shown
+         * always, zero included: a figure that appears only when non-zero
+         * teaches the reader that its absence means nothing is there. */}
+        <dt className="text-ink-3">{labels.otherNotBilled}</dt>
+        <dd className="text-end font-mono tabular-nums text-ink-2">
+          {formatCents(otherNotBilledCents, locale)}
         </dd>
         <dt className="border-t border-border pt-z1 font-medium text-ink">
           {labels.total}

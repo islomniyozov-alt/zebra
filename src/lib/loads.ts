@@ -436,7 +436,12 @@ export async function createLoad(
         // Copied rather than read through, for the same reason
         // `directSettled` is: changing what a customer usually agrees to
         // must not restate what was agreed on freight already moved.
-        paymentType: readPaymentType(input.paymentType ?? defaultPaymentType),
+        // AND "DIRECT" IS THE FACT ON DIRECT-SETTLED FREIGHT (§7.12): the
+        // customer settles by statement, so the arrangement is not a choice
+        // the booking form makes.
+        paymentType: settlesDirectly
+          ? 'Direct'
+          : readPaymentType(input.paymentType ?? defaultPaymentType),
         bookedByUserId: options.byUserId ?? null,
         // NOT set here. BOOKED is the schema default and the first status
         // event is written below, so the log starts where the load does.
@@ -565,6 +570,7 @@ export async function updateLoad(
       truckId: true,
       driverId: true,
       coDriverId: true,
+      directSettled: true,
     },
   })
   if (!current) throw new ReferenceError('not_found')
@@ -605,6 +611,18 @@ export async function updateLoad(
       throw new ReferenceError('closed_history_payment_type', {
         field: 'paymentType',
       })
+    }
+    // ── DIRECT-SETTLED FREIGHT IS PAID "DIRECT" (§7.12) ─────────────────
+    //
+    // The arrangement is a fact of how the customer settles, copied onto the
+    // load at booking; another value here would say the statement freight is
+    // factored or quick-paid, which no screen could then reconcile. The panel
+    // shows the fact and offers no select; this is the writer saying the same.
+    if (
+      current.directSettled &&
+      readPaymentType(input.paymentType) !== 'Direct'
+    ) {
+      throw new ReferenceError('payment_type_direct', { field: 'paymentType' })
     }
   }
 

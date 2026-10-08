@@ -17,6 +17,11 @@ interface Props {
   /** The four, already translated is wrong — these are codes, shown as-is. */
   options: readonly string[]
   disabled: boolean
+  /**
+   * §7.12 — on direct-settled freight the arrangement is a FACT: "Direct",
+   * shown and not chosen. No select, no save; the sentence says why.
+   */
+  derived: boolean
   save: (
     previous: PaymentTypeState,
     formData: FormData,
@@ -28,6 +33,7 @@ interface Props {
     save: string
     saving: string
     saved: string
+    derived: string
   }
 }
 
@@ -52,10 +58,24 @@ export function PaymentTypePanel({
   value,
   options,
   disabled,
+  derived,
   save,
   labels,
 }: Props) {
   const [state, action, pending] = useActionState(save, INITIAL)
+
+  // A FACT, NOT A CHOICE (§7.12). Direct-settled freight is paid by statement;
+  // "Direct" is what that means, and a select offering Quickpay beside it
+  // was a question with one honest answer.
+  if (derived) {
+    return (
+      <section className="flex flex-col gap-z2 rounded-card border border-border bg-surface p-z4">
+        <h2 className="text-sm font-semibold text-ink">{labels.title}</h2>
+        <p className="text-sm text-ink">{value ?? 'Direct'}</p>
+        <p className="text-xs text-ink-3">{labels.derived}</p>
+      </section>
+    )
+  }
 
   return (
     <section className="flex flex-col gap-z3 rounded-card border border-border bg-surface p-z4">

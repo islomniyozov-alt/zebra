@@ -34,6 +34,10 @@ describe('the screen a load gets', () => {
     flagMissingAddress: true,
     notesInTimeline: true,
     showFactoring: false,
+    // §7.12: the arrangement is a fact, and the tracker's fourth word is the
+    // statement's, not the invoice's.
+    paymentTypeDerived: true,
+    settledWord: 'onStatement',
   }
 
   const broker: LoadDetailView = {
@@ -47,6 +51,8 @@ describe('the screen a load gets', () => {
     flagMissingAddress: false,
     notesInTimeline: false,
     showFactoring: true,
+    paymentTypeDerived: false,
+    settledWord: 'invoiced',
   }
 
   it('strips the panels Relay freight does not use', () => {

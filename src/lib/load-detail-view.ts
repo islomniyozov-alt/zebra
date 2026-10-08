@@ -77,6 +77,18 @@ export interface LoadDetailView {
    * never what a write allows.
    */
   showFactoring: boolean
+  /**
+   * §7.12 — the arrangement is a FACT on direct-settled freight: "Direct",
+   * shown and not chosen. Broker freight keeps the select.
+   */
+  paymentTypeDerived: boolean
+  /**
+   * §7.12 — the tracker's fourth word. "Invoiced" on freight that is
+   * invoiced; "On statement" on freight that settles by statement, where the
+   * literal word read as a demand for an invoice nobody should raise. The
+   * pipeline rule does not move; only the word does.
+   */
+  settledWord: 'invoiced' | 'onStatement'
 }
 
 /**
@@ -104,6 +116,8 @@ export function loadDetailView(load: {
     flagMissingAddress: direct,
     notesInTimeline: direct,
     showFactoring: !direct,
+    paymentTypeDerived: direct,
+    settledWord: direct ? 'onStatement' : 'invoiced',
   })
 }
 
