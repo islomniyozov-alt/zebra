@@ -355,6 +355,22 @@ Rules about instruments, which are the ones that cost whole sessions:
   `node_modules`, `src/generated` and `.env` are junctions to the live
   tree's, which git ignores on both sides.
 
+  AND THE WORKTREE SHARES DEV'S DATABASE WITH THE LIVE GATE. Its `.env` is
+  the live tree's, so `npm run check` there — which carries the
+  database-backed node tests: integrity, structure, migration checksums,
+  template clone, the two timing budgets — and any probe that signs in to
+  dev both land on the branch the gate is forking and reading. On 2026-10-07
+  a worktree `check` and two browser probes ran beside a live gate; the
+  `check` came back with eleven Neon socket errors, the probe timed out at
+  sign-in, and the gate failed 133 cases, every one "unable to start a
+  transaction in the given time". The code was right all three times; the
+  database had four clients. So the freeze covers the database as well as
+  the tree: from the gate's start to the chain's last step the worktree runs
+  nothing that opens a connection — type-check, lint, `vitest` on files that
+  read source, and nothing more. Queue the `check`; run it when the chain
+  reports. (CI is not the fourth client: its workflow forks its own Neon
+  branch per run.)
+
 - **A MIGRATION THAT REMOVES A DEFAULT, A CONSTRAINT OR AN INDEX CARRIES THE
   GREP THAT PROVES EVERY WRITER SETS THE COLUMN — QUOTED IN THE MIGRATION'S
   COMMENT, NOT ASSERTED.** Owner's ruling, 2026-10-06.
