@@ -1,7 +1,8 @@
 import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { companyIdScopeFilter, companyScopeFilter } from '@/lib/tenancy'
+import { companyScopeFilter } from '@/lib/tenancy'
+import { listedAuthorities } from '@/lib/companies'
 import { formatCents } from '@/lib/money'
 import {
   DEDUCTION_TYPES,
@@ -199,14 +200,7 @@ export default async function ChargesPage({
             orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
             select: { id: true, firstName: true, lastName: true },
           }),
-          tx.company.findMany({
-            where: {
-              isActive: true,
-              ...companyIdScopeFilter(session.companyScopes),
-            },
-            orderBy: { name: 'asc' },
-            select: { id: true, name: true },
-          }),
+          listedAuthorities(tx, session.companyScopes),
           // ONE CHOOSER PER GRID, keyed by the tab on screen. Three keys for
           // four tabs: `thisWeek` shares `payroll.scheduled` with the toolbar
           // it already renders, because it is the same columns over the same

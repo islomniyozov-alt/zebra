@@ -1,6 +1,7 @@
 import type { Prisma } from '@/generated/prisma/client'
 import { parseMoneyToCents, parsePercentToBps } from './money'
 import type { CompanyIdScopeFilter, TxClient } from './tenancy'
+import { LISTED_AUTHORITY } from './companies'
 
 // ---------------------------------------------------------------------------
 // COMPANY SETTINGS (Phase 4 §3 step 6).
@@ -97,7 +98,7 @@ export async function settingsForScope(
   scope: CompanyIdScopeFilter = {},
 ): Promise<SettingsRow[]> {
   const companies = await tx.company.findMany({
-    where: { isActive: true, ...scope },
+    where: { ...LISTED_AUTHORITY, ...scope },
     orderBy: { name: 'asc' },
     select: { id: true, organizationId: true },
   })

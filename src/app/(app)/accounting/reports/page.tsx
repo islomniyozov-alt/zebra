@@ -19,7 +19,8 @@ import {
   type ListShape,
   type RawParams,
 } from '@/lib/list-view'
-import { companyIdScopeFilter, narrowCompanyScope } from '@/lib/tenancy'
+import { narrowCompanyScope } from '@/lib/tenancy'
+import { listedAuthorities } from '@/lib/companies'
 import {
   DEFAULT_PERIOD,
   bucketsIn,
@@ -181,14 +182,7 @@ export default async function ReportsPage({
         // THE AGING RULE, FROM THE ONE PLACE IT LIVES (§6.2.7). The dashboard's
         // Cash panel reads the same fragment, so the two cannot drift.
         aging: await agingSums(tx, scopeSql('i', companyIds), now),
-        companies: await tx.company.findMany({
-          where: {
-            isActive: true,
-            ...companyIdScopeFilter(session.companyScopes),
-          },
-          orderBy: { name: 'asc' },
-          select: { id: true, name: true },
-        }),
+        companies: await listedAuthorities(tx, session.companyScopes),
       }
 
       if (cut === 'transactions') {

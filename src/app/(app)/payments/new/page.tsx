@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { companyIdScopeFilter } from '@/lib/tenancy'
+import { listedAuthorities } from '@/lib/companies'
 import { RecordForm } from './RecordForm'
 import type { PaymentMethod } from '@/generated/prisma/client'
 import type { MessageKey } from '@/lib/i18n'
@@ -32,11 +32,7 @@ export default async function NewPaymentPage() {
 
   const data = await withCurrentOrg('read', 'payment', async (tx, session) => {
     const [companies, customers] = await Promise.all([
-      tx.company.findMany({
-        where: companyIdScopeFilter(session.companyScopes),
-        orderBy: { name: 'asc' },
-        select: { id: true, name: true },
-      }),
+      listedAuthorities(tx, session.companyScopes),
       // Brokers are shared across authorities (schema note at Company), so
       // this list is not scoped the way the authority list is.
       tx.customer.findMany({

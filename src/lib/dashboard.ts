@@ -1,4 +1,5 @@
 import type { CompanyScopeFilter, TxClient } from './tenancy'
+import { listedAuthorities } from './companies'
 import { readyToInvoiceWhere } from './invoices'
 import { complianceCount } from './compliance'
 import { needsYouCounts, type CountedRow } from './dashboard-counts'
@@ -503,11 +504,7 @@ export async function thisWeek(
 ): Promise<WeekRow[]> {
   const since = weekStart(now)
 
-  const companies = await tx.company.findMany({
-    where: companyIds.length > 0 ? { id: { in: [...companyIds] } } : {},
-    orderBy: { name: 'asc' },
-    select: { id: true, name: true },
-  })
+  const companies = await listedAuthorities(tx, companyIds)
   if (companies.length === 0) return []
 
   const ids = companies.map((company) => company.id)

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { getLocaleContext } from '@/lib/locale'
 import type { MessageKey } from '@/lib/i18n'
 import { companyScopeFilter } from '@/lib/tenancy'
+import { listedAuthorities } from '@/lib/companies'
 import { FilterBar } from '@/components/ui/FilterBar'
 import { LoadsTable, type LoadRow } from './LoadsTable'
 import { billingLabelKey, operationalLabelKey } from '@/lib/status'
@@ -154,18 +155,9 @@ export default async function LoadsPage({
 
     // THE AUTHORITIES THIS VIEWER MAY NARROW TO — fetched here since
     // 2026-09-06, where the narrowing lives, rather than in the app layout on
-    // every page of the shell. Same predicate the topbar filter used: active
-    // companies, restricted to the viewer's own scope when they have one.
-    const authorities = await tx.company.findMany({
-      where: {
-        isActive: true,
-        ...(session.companyScopes.length > 0
-          ? { id: { in: [...session.companyScopes] } }
-          : {}),
-      },
-      orderBy: { name: 'asc' },
-      select: { id: true, name: true },
-    })
+    // every page of the shell. Active companies, restricted to the viewer's own
+    // scope when they have one — the rule every authority list reads.
+    const authorities = await listedAuthorities(tx, session.companyScopes)
     const companyCount = authorities.length
 
     // The filters other than the one being counted. Each chip's count is

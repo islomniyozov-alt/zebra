@@ -2,7 +2,8 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { companyIdScopeFilter, companyScopeFilter } from '@/lib/tenancy'
+import { companyScopeFilter } from '@/lib/tenancy'
+import { listedAuthorities } from '@/lib/companies'
 import { formatCents } from '@/lib/money'
 import { readGridColumns } from '@/lib/grid-columns'
 import { applyList, sumCents, type RawParams } from '@/lib/list-view'
@@ -108,14 +109,7 @@ export default async function AccountingPaymentsPage({
     const scope = companyScopeFilter(session.companyScopes)
     const [payments, companies, columns, strip] = await Promise.all([
       readPayments(tx, scope),
-      tx.company.findMany({
-        where: {
-          isActive: true,
-          ...companyIdScopeFilter(session.companyScopes),
-        },
-        orderBy: { name: 'asc' },
-        select: { id: true, name: true },
-      }),
+      listedAuthorities(tx, session.companyScopes),
       readGridColumns(tx, session.userId, 'payments.payments', COLUMN_KEYS),
       // COUNTED AND SUMMED IN SQL (§6.2.8). The unapplied tab's count was a
       // `.length` over `listPayments`, which takes 300 rows.

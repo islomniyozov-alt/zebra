@@ -4,6 +4,7 @@ import { NOT_CLOSED_HISTORY } from './billing-status'
 import { batchInputForOrg } from './settlement-batch'
 import { computeBatch, type Week } from './settlement-week'
 import { filingStatesForCompanies } from './factoring-filing'
+import { LISTED_AUTHORITY } from './companies'
 import {
   PACKET_PIECE_LABEL,
   type RequiredPacketDocument,
@@ -231,7 +232,7 @@ export async function thisWeekFor(
 
   const companies = await timed('companies', () =>
     tx.company.findMany({
-      where: { isActive: true },
+      where: LISTED_AUTHORITY,
       orderBy: { name: 'asc' },
       select: { id: true, name: true, organizationId: true },
     }),

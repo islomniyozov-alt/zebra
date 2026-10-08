@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { companyIdScopeFilter } from '@/lib/tenancy'
+import { listedAuthorities } from '@/lib/companies'
 import { isSettlementWeek, payWeekFor, weekOf } from '@/lib/settlement-week'
 import {
   previewBatch,
@@ -102,14 +102,7 @@ export default async function OpenBatchPage({
     async (tx, session) => {
       const [preview, companies, existing] = await Promise.all([
         previewBatch(tx, { from, to, companyId }),
-        tx.company.findMany({
-          where: {
-            isActive: true,
-            ...companyIdScopeFilter(session.companyScopes),
-          },
-          orderBy: { name: 'asc' },
-          select: { id: true, name: true },
-        }),
+        listedAuthorities(tx, session.companyScopes),
         // A BATCH ALREADY COVERING THIS WEEK. `openBatch` refuses with
         // `period_taken` and hands it back, but saying so before the click is
         // the difference between a form and a trap.

@@ -1,4 +1,4 @@
-import type { TxClient } from './tenancy'
+import { companyIdScopeFilter, type TxClient } from './tenancy'
 import { optionalText, stateCode } from './reference'
 
 // ---------------------------------------------------------------------------
@@ -19,6 +19,12 @@ import { optionalText, stateCode } from './reference'
 // away, which is why the model has `isActive` and no `deletedAt` — the same
 // reasoning `factoring.ts` records about its own company lookup.
 // ---------------------------------------------------------------------------
+
+/**
+ * An authority that is in service. Deactivated authorities are left out of
+ * every list; see `listedAuthorities` below.
+ */
+export const LISTED_AUTHORITY = { isActive: true } as const
 
 /**
  * THE AUTHORITIES SOMETHING NEW MAY BE FILED UNDER.
@@ -47,9 +53,39 @@ import { optionalText, stateCode } from './reference'
  * too many in a select.
  */
 export const SELECTABLE_AUTHORITY = {
-  isActive: true,
+  ...LISTED_AUTHORITY,
   retired: false,
 } as const
+
+/**
+ * The authorities a list shows: the chip rows, the Settings page, and every
+ * authority select on a screen.
+ *
+ * Owner's ruling, 2026-10-08 (GAPS code gap 11): every authority list reads this
+ * one rule. Before that, eight screens wrote `isActive: true` inline and three
+ * others (record a payment, the factoring page, the dashboard library's
+ * This-week rows) wrote nothing, so a deactivated authority dropped off some
+ * lists and stayed on others.
+ *
+ * Retired authorities are still listed. They stay active so that their imported
+ * freight can be filtered to (see `SELECTABLE_AUTHORITY`).
+ *
+ * Readers that match a document to an authority do not use this. The COI
+ * reader, inbound email, the remittance import and the companies admin screen
+ * must still recognise a deactivated authority as ours.
+ * `tests/authority-lists.test.ts` names each of them, and fails for any new
+ * `company.findMany` that is neither listed there nor reading this.
+ */
+export function listedAuthorities(
+  tx: TxClient,
+  companyScopes: readonly string[],
+): Promise<{ id: string; name: string }[]> {
+  return tx.company.findMany({
+    where: { ...LISTED_AUTHORITY, ...companyIdScopeFilter(companyScopes) },
+    orderBy: { name: 'asc' },
+    select: { id: true, name: true },
+  })
+}
 
 export type AddCompanyFailure =
   | 'no_name'

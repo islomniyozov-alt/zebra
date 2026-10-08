@@ -2,11 +2,8 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import {
-  companyIdScopeFilter,
-  companyScopeFilter,
-  narrowCompanyScope,
-} from '@/lib/tenancy'
+import { companyScopeFilter, narrowCompanyScope } from '@/lib/tenancy'
+import { listedAuthorities } from '@/lib/companies'
 import { actionQueue } from '@/lib/dashboard'
 import { complianceHorizons } from '@/lib/compliance'
 import {
@@ -285,16 +282,7 @@ export default async function DashboardPage({
       withCurrentOrg(
         'read',
         'dashboard',
-        (tx, ctx) =>
-          tx.company.findMany({
-            // `id`, not `companyId` — Company IS the authority (tenancy.ts).
-            where: {
-              isActive: true,
-              ...companyIdScopeFilter(ctx.companyScopes),
-            },
-            orderBy: { name: 'asc' },
-            select: { id: true, name: true },
-          }),
+        (tx, ctx) => listedAuthorities(tx, ctx.companyScopes),
         { timeoutMs: 10_000 },
       ),
     ])

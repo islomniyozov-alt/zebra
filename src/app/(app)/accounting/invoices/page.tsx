@@ -2,7 +2,8 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { companyIdScopeFilter, companyScopeFilter } from '@/lib/tenancy'
+import { companyScopeFilter } from '@/lib/tenancy'
+import { listedAuthorities } from '@/lib/companies'
 import { formatCents } from '@/lib/money'
 import {
   directSettledAwaiting,
@@ -168,14 +169,7 @@ export default async function AccountingInvoicesPage({
     const [invoices, companies, ready, direct, readyCount, columns, strip] =
       await Promise.all([
         readInvoices(tx, scope, new Date()),
-        tx.company.findMany({
-          where: {
-            isActive: true,
-            ...companyIdScopeFilter(session.companyScopes),
-          },
-          orderBy: { name: 'asc' },
-          select: { id: true, name: true },
-        }),
+        listedAuthorities(tx, session.companyScopes),
         mayCreate ? readyToInvoice(tx, scope) : Promise.resolve([]),
         directSettledAwaiting(tx, scope),
         // COUNTED, NOT INFERRED FROM THE ROWS. `readyToInvoice` takes 500, so

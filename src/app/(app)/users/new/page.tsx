@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { grantableRoles } from '@/lib/users'
+import { listedAuthorities } from '@/lib/companies'
 import { NewUserForm } from '../NewUserForm'
 import type { MessageKey } from '@/lib/i18n'
 
@@ -29,11 +30,9 @@ export default async function NewUserPage() {
     'company',
     async (tx, session) => ({
       actorRole: session.role,
-      companies: await tx.company.findMany({
-        where: { isActive: true },
-        orderBy: { name: 'asc' },
-        select: { id: true, name: true },
-      }),
+      // Unscoped on purpose, as it was: this lists the authorities a new
+      // member may be scoped TO, which is every active one in the organization.
+      companies: await listedAuthorities(tx, []),
     }),
   )
 

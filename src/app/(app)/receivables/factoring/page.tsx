@@ -2,7 +2,8 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { companyIdScopeFilter, companyScopeFilter } from '@/lib/tenancy'
+import { companyScopeFilter } from '@/lib/tenancy'
+import { listedAuthorities } from '@/lib/companies'
 import { factorsForCompanies } from '@/lib/factoring'
 import { bpsToInput } from '@/lib/money'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -40,11 +41,7 @@ export default async function FactoringSetupPage({
     async (tx, session) => {
       const [factors, companies] = await Promise.all([
         factorsForCompanies(tx, companyScopeFilter(session.companyScopes)),
-        tx.company.findMany({
-          where: companyIdScopeFilter(session.companyScopes),
-          orderBy: { name: 'asc' },
-          select: { id: true, name: true },
-        }),
+        listedAuthorities(tx, session.companyScopes),
       ])
       return { factors, companies }
     },
