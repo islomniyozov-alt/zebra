@@ -41,14 +41,18 @@ const COMPLETE: DqfFacts = {
 
 const without = (key: DqfKey): DqfFacts => {
   const requirement = DQF_REQUIREMENTS.find((r) => r.key === key)!
-  if (requirement.evidence.kind === 'document') {
-    const type = requirement.evidence.type as string
+  const evidence = requirement.evidence
+  if (evidence.kind === 'fact') return { ...COMPLETE, hireDate: null }
+  if (evidence.kind === 'document' || evidence.kind === 'either') {
+    const type = (
+      evidence.kind === 'document' ? evidence.type : evidence.document
+    ) as string
     return {
       ...COMPLETE,
       documents: COMPLETE.documents.filter((d) => d !== type),
     }
   }
-  const type = requirement.evidence.type as string
+  const type = evidence.type as string
   return {
     ...COMPLETE,
     compliance: COMPLETE.compliance.filter((c) => c.type !== type),
@@ -59,8 +63,12 @@ const statusOf = (facts: DqfFacts, key: DqfKey) =>
   dqfChecklist(facts, NOW).find((entry) => entry.key === key)!
 
 describe('the definition', () => {
-  it('is the eight items 391.51 lists, each with its section', () => {
-    expect(DQF_REQUIREMENTS).toHaveLength(8)
+  it('is the eight items 391.51 lists plus the date they are dated from, each with its section', () => {
+    // NINE SINCE QUEUE ITEM 20 (4): the hire date is a row of its own, first,
+    // because every at-hire row is dated from it and a file with none read
+    // "8 of 8 missing — no hire date recorded" against a date nobody typed.
+    expect(DQF_REQUIREMENTS).toHaveLength(9)
+    expect(DQF_REQUIREMENTS[0]?.key).toBe('hire_date')
     for (const requirement of DQF_REQUIREMENTS) {
       expect(requirement.cfr).toMatch(/^\d{3}\./)
     }
@@ -69,11 +77,26 @@ describe('the definition', () => {
       'application',
       'cdl_copy',
       'clearinghouse',
+      'hire_date',
       'medical_certificate',
       'mvr',
       'prior_employers',
       'road_test',
     ])
+  })
+
+  it('lets the licence record stand in for the copy of the CDL', () => {
+    // Queue item 20 (4): the copy OR the live CDL compliance record. The
+    // record stays out of DQF_COMPLIANCE_TYPES because its expiry already
+    // warns through Phase 4 — one date, one warning.
+    const copy = DQF_REQUIREMENTS.find((r) => r.key === 'cdl_copy')!
+    expect(copy.evidence).toEqual({
+      kind: 'either',
+      document: 'CDL_COPY',
+      compliance: 'CDL',
+    })
+    expect(DQF_COMPLIANCE_TYPES).not.toContain('CDL')
+    expect(DQF_DOCUMENT_TYPES).toContain('CDL_COPY')
   })
 
   it('keeps the MVR and the review of it as two items', () => {
@@ -196,7 +219,65 @@ describe('the checklist', () => {
     const empty: DqfFacts = { hireDate: null, compliance: [], documents: [] }
     const entries = dqfChecklist(empty, NOW)
     expect(entries.every((entry) => entry.status === 'missing')).toBe(true)
-    expect(dqfIncompleteCount(entries)).toBe(8)
+    expect(dqfIncompleteCount(entries)).toBe(9)
+  })
+
+  // ── QUEUE ITEM 20 (4): the licence record, and the hire date as a row ──
+  it('reads the copy of the CDL as present from the document alone', () => {
+    const entry = statusOf(COMPLETE, 'cdl_copy')
+    expect(entry.status).toBe('present')
+    expect(entry.dueSince).toBeNull()
+  })
+
+  it('reads the copy of the CDL from the licence record when there is no document, by its date', () => {
+    const recordOnly: DqfFacts = {
+      ...without('cdl_copy'),
+      compliance: [
+        ...COMPLETE.compliance,
+        { type: 'CDL', expiresAt: days(300) },
+      ],
+    }
+    expect(statusOf(recordOnly, 'cdl_copy').status).toBe('present')
+
+    const dueSoon: DqfFacts = {
+      ...recordOnly,
+      compliance: [
+        ...COMPLETE.compliance,
+        { type: 'CDL', expiresAt: days(DQF_LEAD_DAYS - 1) },
+      ],
+    }
+    expect(statusOf(dueSoon, 'cdl_copy').status).toBe('due')
+
+    // A LAPSED LICENCE IS NOT A COPY ON FILE. The production walk's file had a
+    // live record; a dead one must not pass for one.
+    const lapsed: DqfFacts = {
+      ...recordOnly,
+      compliance: [
+        ...COMPLETE.compliance,
+        { type: 'CDL', expiresAt: days(-1) },
+      ],
+    }
+    const entry = statusOf(lapsed, 'cdl_copy')
+    expect(entry.status).toBe('expired')
+    expect(entry.dueSince).toEqual(days(-1))
+    expect(dqfIncompleteCount(dqfChecklist(lapsed, NOW))).toBe(1)
+
+    // And neither: missing, dated from the hire date like any at-hire item.
+    const neither = statusOf(without('cdl_copy'), 'cdl_copy')
+    expect(neither.status).toBe('missing')
+    expect(neither.dueSince).toEqual(days(-500))
+  })
+
+  it('counts a missing hire date as its own row, not against every other one', () => {
+    const noDate: DqfFacts = { ...COMPLETE, hireDate: null }
+    const entries = dqfChecklist(noDate, NOW)
+    const row = entries.find((entry) => entry.key === 'hire_date')!
+    expect(row.status).toBe('missing')
+    // Nothing to be "since": the date IS the thing that is missing.
+    expect(row.dueSince).toBeNull()
+    // Every other row is on file and present; the file is one short, not nine.
+    expect(dqfIncompleteCount(entries)).toBe(1)
+    expect(statusOf(COMPLETE, 'hire_date').status).toBe('present')
   })
 })
 
@@ -280,8 +361,12 @@ describe('the warning', () => {
     // NAMED, NOT COUNTED. A row reading "4" sends somebody to the driver
     // page to find out which four; the names are the thing they were going
     // to look up.
+    // THE COPY OF THE CDL IS NOT AMONG THEM since queue item 20 (4): the
+    // fixture's live CDL compliance record stands in for the document, which
+    // is the whole change — and the hire date is recorded, so its row is
+    // present too.
     expect(out.find((w) => w.name === 'dqf_incomplete')?.detail).toBe(
-      'application,prior_employers,road_test,cdl_copy',
+      'application,prior_employers,road_test',
     )
   })
 

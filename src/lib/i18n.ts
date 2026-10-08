@@ -552,6 +552,7 @@ const en = {
   'dqf.incomplete': '{count} of {total} not on file or expired.',
   'dqf.notQualifiable':
     'No longer driving here. The file is kept for three years (391.51(c)) and is not kept current.',
+  'dqf.key.hire_date': 'Hire date recorded',
   'dqf.key.application': 'Employment application',
   'dqf.key.prior_employers': 'Prior-employer inquiries',
   'dqf.key.road_test': 'Road test or CDL equivalent',
@@ -3510,6 +3511,7 @@ const ru: Dictionary = {
   'dqf.incomplete': 'Не в наличии или просрочено: {count} из {total}.',
   'dqf.notQualifiable':
     'Больше здесь не работает. Досье хранится три года (391.51(c)) и не обновляется.',
+  'dqf.key.hire_date': 'Дата приёма указана',
   'dqf.key.application': 'Заявление о приёме',
   'dqf.key.prior_employers': 'Запросы прежним работодателям',
   'dqf.key.road_test': 'Дорожный тест или эквивалент CDL',
@@ -6439,6 +6441,7 @@ const fa: Dictionary = {
   'dqf.incomplete': '{count} از {total} موجود نیست یا منقضی شده.',
   'dqf.notQualifiable':
     'دیگر اینجا کار نمی‌کند. پرونده سه سال نگهداری می‌شود (391.51(c)) و به‌روز نگه داشته نمی‌شود.',
+  'dqf.key.hire_date': 'تاریخ استخدام ثبت شده',
   'dqf.key.application': 'فرم درخواست استخدام',
   'dqf.key.prior_employers': 'استعلام از کارفرمایان قبلی',
   'dqf.key.road_test': 'آزمون رانندگی یا معادل CDL',
