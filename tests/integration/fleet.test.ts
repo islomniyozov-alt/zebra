@@ -155,10 +155,28 @@ describe('trucks', () => {
           },
         }),
       )
+    // AND UNSCOPED — the owner's `[]` — against the whole organization, which
+    // is what the footer shows the people who look at it (item 20 (3)): the
+    // first cut read `[]` as "no company" and said 0 over a grid full of gaps.
+    const unscoped = (check: Parameters<typeof truckHealthWhere>[0]) =>
+      inOrg((tx) =>
+        tx.truck.count({
+          where: { deletedAt: null, ...truckHealthWhere(check) },
+        }),
+      )
     const agree = async () => {
       const counts = await read()
+      const everyCompany = await inOrg((tx) =>
+        countTruckHealth(tx, { companyIds: [] }),
+      )
       for (const check of TRUCK_HEALTH_CHECKS) {
         expect(await filtered(check), check).toBe(counts[check])
+        expect(await unscoped(check), `${check} unscoped`).toBe(
+          everyCompany[check],
+        )
+        expect(everyCompany[check], `${check} ⊇ alpha`).toBeGreaterThanOrEqual(
+          counts[check],
+        )
       }
       return counts
     }

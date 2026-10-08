@@ -12,6 +12,7 @@ import {
 } from '@/lib/data-health'
 import { WORKING_STATUSES } from '@/lib/driver-list'
 import { ruleInForce } from '@/lib/driver-pay'
+import { companyScopeFilter } from '@/lib/tenancy'
 
 // ---------------------------------------------------------------------------
 // §6.5 PART 0 — DATA HEALTH. Five counts, one definition each, used as the
@@ -76,6 +77,22 @@ describe('missing, not stale', () => {
     expect(source).toContain(`ci.type = 'ANNUAL_INSPECTION'`)
     expect(source).not.toMatch(/expiresAt/)
     expect(source).toContain(`t."deletedAt" IS NULL`)
+  })
+
+  it('reads an empty scope as every company, as the rest of the app does (item 20 (3))', () => {
+    // THE OWNER'S SCOPE IS `[]`. `companyScopeFilter` reads that as unscoped;
+    // the first cut of the counts read it as "no company" and both footers
+    // said 0 while the grid showed the gaps. One rule, through one helper,
+    // for both subjects.
+    expect(companyScopeFilter([])).toEqual({})
+    const source = readFileSync(join('src', 'lib', 'data-health.ts'), 'utf8')
+    expect(source).toContain(
+      'return companyIds && companyIds.length > 0 ? companyIds : null',
+    )
+    expect(
+      source.match(/const ids = scopeIds\(scope\.companyIds\)/g)?.length,
+    ).toBe(2)
+    expect(source).not.toMatch(/scope\.companyIds \?\? null/)
   })
 })
 

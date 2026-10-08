@@ -46,6 +46,20 @@ export function truckHealthCheckFor(raw: unknown): TruckHealthCheck | null {
 /** Null or blank: the two ways a text column is empty on an imported row. */
 const BLANK: Prisma.StringNullableFilter[] = [{ equals: null }, { equals: '' }]
 
+/**
+ * THE SCOPE, AS THE REST OF THE APP MEANS IT. `companyScopeFilter` treats an
+ * EMPTY list as "every company" — the unscoped owner's scope is `[]` — and the
+ * first version of these counts treated `[]` as "no company", so the footer
+ * read 0 for exactly the people who look at it. Production walk 2026-10-07,
+ * queue item 20 (3): "data-health counts read 0 on both lists while the grid
+ * shows gaps". Null here means unscoped; a non-empty list narrows.
+ */
+function scopeIds(
+  companyIds: readonly string[] | null | undefined,
+): readonly string[] | null {
+  return companyIds && companyIds.length > 0 ? companyIds : null
+}
+
 const noLiveItem = (type: 'REGISTRATION' | 'ANNUAL_INSPECTION') =>
   ({
     complianceItems: { none: { type, deletedAt: null } },
@@ -87,7 +101,7 @@ export async function countTruckHealth(
   tx: TxClient,
   scope: { companyIds?: readonly string[] | null },
 ): Promise<TruckHealthCounts> {
-  const ids = scope.companyIds ?? null
+  const ids = scopeIds(scope.companyIds)
   const rows = await tx.$queryRaw<
     {
       vin: number
@@ -199,7 +213,7 @@ export async function countDriverHealth(
   scope: { companyIds?: readonly string[] | null },
   now: Date,
 ): Promise<DriverHealthCounts> {
-  const ids = scope.companyIds ?? null
+  const ids = scopeIds(scope.companyIds)
   const rows = await tx.$queryRaw<
     {
       cdl: number
