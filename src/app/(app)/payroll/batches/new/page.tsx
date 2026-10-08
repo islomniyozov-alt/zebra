@@ -216,6 +216,27 @@ export default async function OpenBatchPage({
         <span className="font-mono tabular-nums">
           {t('preview.considered')} {data.preview.considered}
         </span>
+        {/* "0 AVAILABLE" NEVER STANDS ALONE (§6.2.10 part 1, queue item 20 (7)).
+         * The buckets that took the rest, with their counts, in the picker's
+         * order — the sum of the groups below, said first, on the same line as
+         * the zero. An empty bucket is omitted here as it is below (§4). */}
+        <span className="tabular-nums">
+          <span className="font-mono text-ink">
+            {data.preview.available.length}
+          </span>{' '}
+          {t('preview.available').toLowerCase()}
+          {UNAVAILABLE_REASONS.filter(
+            (reason) => data.preview.unavailable[reason].length > 0,
+          ).map((reason) => (
+            <span key={reason}>
+              {' · '}
+              <span className="font-mono text-ink">
+                {data.preview.unavailable[reason].length}
+              </span>{' '}
+              {t(REASON_LABEL[reason]).toLowerCase()}
+            </span>
+          ))}
+        </span>
         {!sameWeek ? (
           <span className="text-danger">{t('preview.twoWeeks')}</span>
         ) : null}
