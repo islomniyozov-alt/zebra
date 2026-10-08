@@ -8,6 +8,7 @@ import {
   narrowCompanyScope,
 } from '@/lib/tenancy'
 import { actionQueue } from '@/lib/dashboard'
+import { complianceHorizons } from '@/lib/compliance'
 import {
   dqfSplit,
   panelFigures,
@@ -166,111 +167,137 @@ export default async function DashboardPage({
   // `actionQueue`, not appended. Destructuring them in the order I wrote them
   // in the report rather than the order they run put `panels` where
   // `companies` was, and the compiler said so.
-  const [money, queue, panels, topDrivers, dqf, companies] = await Promise.all([
-    maySeeMoney
-      ? withCurrentOrg(
-          'read',
-          'dashboard',
-          (tx, ctx) =>
-            dashboardFor(tx, ctx.organizationId, companyParam, window, {
-              // THE PRESET DECIDES, not the span. Omitting this is how `w4`
-              // (28 days) would have been drawn DAILY against the ruling.
-              grain: grainOf(period),
-            }),
-          { timeoutMs: 10_000 },
-        )
-      : Promise.resolve(null),
-    withCurrentOrg(
-      'read',
-      'dashboard',
-      (tx, ctx) => actionQueue(tx, ctx, companyScopeFilter(ctx.companyScopes)),
-      { timeoutMs: 10_000 },
-    ),
-    // ── THE THREE PANELS (part 3) ───────────────────────────────────────
-    //
-    // ONE STATEMENT for every scalar figure across all three — the fleet
-    // tiles, the aging buckets, the pipeline and the three compliance
-    // horizons are all COUNTs and SUMs, so they are scalar subqueries in one
-    // SELECT. Only the two that return ROWS need statements of their own.
-    //
-    // CASH IS MONEY-ROLES-ONLY (§6.1.1), AND THE RULING IS THAT ITS QUERY DOES
-    // NOT RUN — not that its output is dropped. So `cash` is a parameter of the
-    // statement rather than a filter over its result: without it the seven
-    // aging and pipeline subqueries are not in the SELECT at all, and the fleet
-    // and compliance halves still arrive in ONE round trip for a dispatcher.
-    //
-    // The alternative was two statements, one per audience, which costs an
-    // extra round trip for every money role to spare one for a dispatcher.
-    maySeePanels
-      ? withCurrentOrg(
-          'read',
-          'dashboard',
-          (tx, ctx) =>
-            panelFigures(
-              tx,
-              // THE CHIP, NOT JUST THE SESSION SCOPE. §6.1.1: the chips
-              // govern everything below them. This read took
-              // `ctx.companyScopes` for one commit, so picking an authority
-              // moved the KPI strip and left all three panels on the whole
-              // group — two true numbers, one screen, nothing looking broken.
-              narrowCompanyScope(ctx.companyScopes, companyParam),
-              window,
-              now,
-              { cash: maySeeMoney },
-            ),
-          { timeoutMs: 10_000 },
-        )
-      : Promise.resolve(null),
-    // TOP DRIVERS BY GROSS IS MONEY INSIDE THE FLEET PANEL, so it needs both:
-    // the fleet to be visible and the figures to be permitted.
-    maySeeMoney && maySeeFleet
-      ? withCurrentOrg(
-          'read',
-          'dashboard',
-          (tx, ctx) =>
-            topDriversByGross(
-              tx,
-              narrowCompanyScope(ctx.companyScopes, companyParam),
-              window,
-            ),
-          { timeoutMs: 10_000 },
-        )
-      : Promise.resolve(null),
-    // ── THE DQF DONUT, AND IT COSTS THREE STATEMENTS ────────────────────
-    //
-    // `dqfSplit` is in `dashboard-counts.ts` and the cost is written at its
-    // definition: a roster read plus `dqfFactsForDrivers`' two, because the
-    // checklist rule needs full facts per driver and the one-statement version
-    // would be that rule rewritten in SQL. Measured, reported, not hidden.
-    // NO MONEY IN A QUALIFICATION FILE, so this answers to `compliance` rather
-    // than to `load.financials`. A dispatcher reads compliance dates (§2.5) and
-    // the ring is as much theirs as the expiry counts beside it.
-    maySeeCompliance
-      ? withCurrentOrg(
-          'read',
-          'dashboard',
-          (tx, ctx) =>
-            dqfSplit(
-              tx,
-              narrowCompanyScope(ctx.companyScopes, companyParam),
-              now,
-            ),
-          { timeoutMs: 10_000 },
-        )
-      : Promise.resolve(null),
-    withCurrentOrg(
-      'read',
-      'dashboard',
-      (tx, ctx) =>
-        tx.company.findMany({
-          // `id`, not `companyId` — Company IS the authority (tenancy.ts).
-          where: { isActive: true, ...companyIdScopeFilter(ctx.companyScopes) },
-          orderBy: { name: 'asc' },
-          select: { id: true, name: true },
-        }),
-      { timeoutMs: 10_000 },
-    ),
-  ])
+  const [money, queue, panels, topDrivers, dqf, horizons, companies] =
+    await Promise.all([
+      maySeeMoney
+        ? withCurrentOrg(
+            'read',
+            'dashboard',
+            (tx, ctx) =>
+              dashboardFor(tx, ctx.organizationId, companyParam, window, {
+                // THE PRESET DECIDES, not the span. Omitting this is how `w4`
+                // (28 days) would have been drawn DAILY against the ruling.
+                grain: grainOf(period),
+              }),
+            { timeoutMs: 10_000 },
+          )
+        : Promise.resolve(null),
+      withCurrentOrg(
+        'read',
+        'dashboard',
+        (tx, ctx) =>
+          actionQueue(tx, ctx, companyScopeFilter(ctx.companyScopes)),
+        { timeoutMs: 10_000 },
+      ),
+      // ── THE THREE PANELS (part 3) ───────────────────────────────────────
+      //
+      // ONE STATEMENT for every scalar figure across all three — the fleet
+      // tiles, the aging buckets, the pipeline and the three compliance
+      // horizons are all COUNTs and SUMs, so they are scalar subqueries in one
+      // SELECT. Only the two that return ROWS need statements of their own.
+      //
+      // CASH IS MONEY-ROLES-ONLY (§6.1.1), AND THE RULING IS THAT ITS QUERY DOES
+      // NOT RUN — not that its output is dropped. So `cash` is a parameter of the
+      // statement rather than a filter over its result: without it the seven
+      // aging and pipeline subqueries are not in the SELECT at all, and the fleet
+      // and compliance halves still arrive in ONE round trip for a dispatcher.
+      //
+      // The alternative was two statements, one per audience, which costs an
+      // extra round trip for every money role to spare one for a dispatcher.
+      maySeePanels
+        ? withCurrentOrg(
+            'read',
+            'dashboard',
+            (tx, ctx) =>
+              panelFigures(
+                tx,
+                // THE CHIP, NOT JUST THE SESSION SCOPE. §6.1.1: the chips
+                // govern everything below them. This read took
+                // `ctx.companyScopes` for one commit, so picking an authority
+                // moved the KPI strip and left all three panels on the whole
+                // group — two true numbers, one screen, nothing looking broken.
+                narrowCompanyScope(ctx.companyScopes, companyParam),
+                window,
+                now,
+                { cash: maySeeMoney },
+              ),
+            { timeoutMs: 10_000 },
+          )
+        : Promise.resolve(null),
+      // TOP DRIVERS BY GROSS IS MONEY INSIDE THE FLEET PANEL, so it needs both:
+      // the fleet to be visible and the figures to be permitted.
+      maySeeMoney && maySeeFleet
+        ? withCurrentOrg(
+            'read',
+            'dashboard',
+            (tx, ctx) =>
+              topDriversByGross(
+                tx,
+                narrowCompanyScope(ctx.companyScopes, companyParam),
+                window,
+              ),
+            { timeoutMs: 10_000 },
+          )
+        : Promise.resolve(null),
+      // ── THE DQF DONUT, AND IT COSTS THREE STATEMENTS ────────────────────
+      //
+      // `dqfSplit` is in `dashboard-counts.ts` and the cost is written at its
+      // definition: a roster read plus `dqfFactsForDrivers`' two, because the
+      // checklist rule needs full facts per driver and the one-statement version
+      // would be that rule rewritten in SQL. Measured, reported, not hidden.
+      // NO MONEY IN A QUALIFICATION FILE, so this answers to `compliance` rather
+      // than to `load.financials`. A dispatcher reads compliance dates (§2.5) and
+      // the ring is as much theirs as the expiry counts beside it.
+      maySeeCompliance
+        ? withCurrentOrg(
+            'read',
+            'dashboard',
+            (tx, ctx) =>
+              dqfSplit(
+                tx,
+                narrowCompanyScope(ctx.companyScopes, companyParam),
+                now,
+              ),
+            { timeoutMs: 10_000 },
+          )
+        : Promise.resolve(null),
+      // ── THE 30/60/90 FIGURES ARE THE NEEDS-YOU ROW AT 90 DAYS ───────────
+      //
+      // §6.1.1 (queue item 20 (8)): one reader, two horizons. `complianceHorizons`
+      // is `complianceQueue` read once at a fixed 90 days and bucketed, so the
+      // panel cannot count a sold truck's lapsed registration the row drops —
+      // which is what 54 against 96 on one production screen was. It costs the
+      // queue's three statements, the same as the row beside it, and that is
+      // written here rather than folded into `panelFigures` as SQL.
+      maySeeCompliance
+        ? withCurrentOrg(
+            'read',
+            'dashboard',
+            (tx, ctx) =>
+              complianceHorizons(
+                tx,
+                narrowCompanyScope(ctx.companyScopes, companyParam),
+                now,
+              ),
+            { timeoutMs: 10_000 },
+          )
+        : Promise.resolve(null),
+      withCurrentOrg(
+        'read',
+        'dashboard',
+        (tx, ctx) =>
+          tx.company.findMany({
+            // `id`, not `companyId` — Company IS the authority (tenancy.ts).
+            where: {
+              isActive: true,
+              ...companyIdScopeFilter(ctx.companyScopes),
+            },
+            orderBy: { name: 'asc' },
+            select: { id: true, name: true },
+          }),
+        { timeoutMs: 10_000 },
+      ),
+    ])
 
   const day = (value: Date) => value.toISOString().slice(0, 10)
 
@@ -512,9 +539,11 @@ export default async function DashboardPage({
                   />
                 )}
 
-                {!maySeeCompliance || dqf === null ? null : (
+                {!maySeeCompliance ||
+                dqf === null ||
+                horizons === null ? null : (
                   <CompliancePanel
-                    expiring={panels.expiring}
+                    expiring={horizons}
                     dqf={dqf}
                     labels={{
                       heading: t('dash.panel.compliance'),

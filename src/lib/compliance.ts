@@ -3,7 +3,11 @@ import type {
   DocumentType,
   Prisma,
 } from '@/generated/prisma/client'
-import type { CompanyScopeFilter, TxClient } from './tenancy'
+import {
+  companyScopeFilter,
+  type CompanyScopeFilter,
+  type TxClient,
+} from './tenancy'
 
 // ---------------------------------------------------------------------------
 // COMPLIANCE (Phase 4 §5 step 1).
@@ -292,6 +296,15 @@ export interface ComplianceQuery {
   type?: ComplianceType
   /** Include records a newer one has replaced. Off by default. */
   includeSuperseded?: boolean
+  /**
+   * A FIXED horizon in days, in place of the authority's own warning days.
+   *
+   * For a question like "expiring within 90 days" (§6.1.1's panel). Nothing
+   * else changes: the same actionable subjects, the same superseded rule, the
+   * same `statusFor` — so the answer is what the Needs-you row would list if
+   * its warning days were this number, and not a second reader.
+   */
+  horizonDays?: number
 }
 
 /**
@@ -329,7 +342,10 @@ export async function complianceQueue(
   query: ComplianceQuery = {},
   now: Date = new Date(),
 ): Promise<{ rows: ComplianceRow[]; leadDays: number }> {
-  const leadDays = await leadDaysFor(tx, scope)
+  // THE HORIZON IS THE CALLER'S WHEN IT SAYS SO, and the authorities' own
+  // otherwise. One variable from here down, so a fixed horizon cannot read the
+  // table at 90 days and then call a 45-day card "current" at 30.
+  const leadDays = query.horizonDays ?? (await leadDaysFor(tx, scope))
 
   // The horizon in SQL, so the queue does not read the whole table to throw
   // most of it away. The boundary is generous by a day at each end and the
@@ -481,6 +497,63 @@ export async function complianceCount(
   return {
     count: rows.length,
     expired: rows.filter((row) => row.status === 'expired').length,
+  }
+}
+
+/** The dashboard panel's three figures. Cumulative; expired in all three. */
+export interface ComplianceHorizons {
+  d30: number
+  d60: number
+  d90: number
+}
+
+/** The panel's one read: the queue at its longest horizon, bucketed after. */
+export const PANEL_HORIZON_DAYS = [30, 60, 90] as const
+
+/**
+ * Expiring within 30 / 60 / 90 days, for the dashboard's compliance panel.
+ *
+ * ── ONE READER, TWO HORIZONS (§6.1.1, queue item 20 (8)) ─────────────────
+ *
+ * These were three COUNT(*) subqueries over every live ComplianceItem inside
+ * each horizon, beside a Needs-you row that is `complianceQueue`. On
+ * production the row said 54 and the panel said 96, and the 42 were sold
+ * trucks' lapsed registrations and renewed-then-superseded records — rows the
+ * queue drops because nobody can act on them, and the SQL counted because it
+ * knew nothing of subjects. The office read the two as one number disagreeing
+ * with itself, which it was.
+ *
+ * So this is the queue, read ONCE at the longest horizon, and the three
+ * figures are counts over its rows by days left. Every rule the row applies —
+ * actionable subjects, superseded dropped, expired included, `statusFor` —
+ * applies here by construction, because it is the same function. The one
+ * difference left is the horizon: a card at 45 days is in the 60 figure and
+ * not in a 30-day row, and the panel's note says so.
+ *
+ * CUMULATIVE, NOT BANDED. "Within 60 days" includes the ones within 30 — that
+ * is what the phrase means, and three disjoint bands would make the 90-day
+ * figure read as a comfortable quarter away when it is the one somebody
+ * glances at. ALREADY EXPIRED COUNTS IN ALL THREE, because an expired medical
+ * card is not less urgent than one expiring on Friday; `daysLeft` is negative
+ * for those and so under every bound.
+ */
+export async function complianceHorizons(
+  tx: TxClient,
+  companyIds: readonly string[],
+  now: Date = new Date(),
+): Promise<ComplianceHorizons> {
+  const { rows } = await complianceQueue(
+    tx,
+    companyScopeFilter(companyIds),
+    { horizonDays: PANEL_HORIZON_DAYS[2] },
+    now,
+  )
+  const within = (days: number) =>
+    rows.filter((row) => row.daysLeft <= days).length
+  return {
+    d30: within(PANEL_HORIZON_DAYS[0]),
+    d60: within(PANEL_HORIZON_DAYS[1]),
+    d90: within(PANEL_HORIZON_DAYS[2]),
   }
 }
 

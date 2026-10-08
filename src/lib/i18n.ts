@@ -1941,9 +1941,10 @@ const en = {
   'dash.cash.paid': 'Paid',
   'dash.cash.noReceivables': 'Nothing invoiced and unpaid.',
   'dash.comp.expiring': 'Expiring',
-  // CUMULATIVE, said out loud: within 60 days INCLUDES within 30.
+  // CUMULATIVE, said out loud: within 60 days INCLUDES within 30. And the SAME
+  // ROWS as the Needs-you row, said out loud too (§6.1.1, queue item 20 (8)).
   'dash.comp.expiringNote':
-    'Items expiring within each horizon, including those already expired. Each figure includes the shorter ones.',
+    'What the Needs-you row would list at each horizon — the same rows, the same rule — including those already expired. Each figure includes the shorter ones; the row itself uses the authority’s own warning days.',
   'dash.comp.d30': 'Within 30 days',
   'dash.comp.d60': 'Within 60 days',
   'dash.comp.d90': 'Within 90 days',
@@ -4904,7 +4905,7 @@ const ru: Dictionary = {
   'dash.cash.noReceivables': 'Нет выставленных неоплаченных счетов.',
   'dash.comp.expiring': 'Истекает',
   'dash.comp.expiringNote':
-    'Записи с истечением в указанный срок, включая уже истекшие. Каждое число включает более короткие сроки.',
+    'То, что строка «Требует вас» показала бы на каждом горизонте — те же записи, то же правило, — включая уже истекшие. Каждое число включает более короткие сроки; сама строка использует срок предупреждения перевозчика.',
   'dash.comp.d30': 'В течение 30 дней',
   'dash.comp.d60': 'В течение 60 дней',
   'dash.comp.d90': 'В течение 90 дней',
@@ -7819,7 +7820,7 @@ const fa: Dictionary = {
   'dash.cash.noReceivables': 'صورتحساب پرداخت‌نشده‌ای نیست.',
   'dash.comp.expiring': 'در حال انقضا',
   'dash.comp.expiringNote':
-    'مواردی که در هر بازه منقضی می‌شوند، شامل منقضی‌شده‌ها. هر عدد بازه‌های کوتاه‌تر را نیز در بر می‌گیرد.',
+    'آنچه ردیف «نیاز به شما» در هر بازه فهرست می‌کرد — همان ردیف‌ها، همان قاعده — شامل منقضی‌شده‌ها. هر عدد بازه‌های کوتاه‌تر را نیز در بر می‌گیرد؛ خود ردیف از روزهای هشدار شرکت استفاده می‌کند.',
   'dash.comp.d30': 'تا ۳۰ روز',
   'dash.comp.d60': 'تا ۶۰ روز',
   'dash.comp.d90': 'تا ۹۰ روز',

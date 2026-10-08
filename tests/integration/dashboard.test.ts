@@ -18,6 +18,7 @@ import {
   panelFigures,
   topDriversByGross,
 } from '@/lib/dashboard-counts'
+import { complianceCount, complianceHorizons } from '@/lib/compliance'
 import { recordPayment } from '@/lib/payments'
 import { isLoadViewName, viewWhere } from '@/lib/load-views'
 import type { AuthorizedSession } from '@/lib/permissions'
@@ -984,7 +985,6 @@ describe('the three panels read real state (part 3)', () => {
     expect(withCash.aging).not.toBeNull()
     expect(withCash.pipeline).not.toBeNull()
     expect(without.fleet).toEqual(withCash.fleet)
-    expect(without.expiring).toEqual(withCash.expiring)
   }, 300_000)
 
   it('sums the settlement pipeline by batch status, inside the window', async () => {
@@ -1162,5 +1162,95 @@ describe('the three panels read real state (part 3)', () => {
     // counts lands on the incomplete side.
     expect(total(after) - total(before)).toBe(1)
     expect(after.incomplete - before.incomplete).toBe(1)
+  }, 300_000)
+
+  it("counts the 30/60/90 horizons over the Needs-you row's own rows (queue item 20 (8))", async () => {
+    // §6.1.1: ONE READER, TWO HORIZONS. Production showed 54 on the Needs-you
+    // row and 96 on the panel beside it; the 42 were sold trucks' lapsed
+    // registrations and renewed-then-superseded records, which the queue drops
+    // and the panel's raw SQL counted. So every figure here is a delta over
+    // `complianceHorizons`, which reads `complianceQueue` once at 90 days, and
+    // the control is `complianceCount`, which IS the row.
+    const scope = { companyId: { in: [alphaId] } }
+    const before = await inOrg((tx) => complianceHorizons(tx, [alphaId], NOW))
+    const rowBefore = await inOrg((tx) => complianceCount(tx, scope, NOW))
+
+    const at = (days: number) => new Date(NOW.getTime() + days * 86_400_000)
+
+    await inOrg(async (tx) => {
+      const live = await tx.truck.create({
+        data: { organizationId, companyId: alphaId, unitNumber: `H-${nonce}` },
+      })
+      const sold = await tx.truck.create({
+        data: {
+          organizationId,
+          companyId: alphaId,
+          unitNumber: `S-${nonce}`,
+          status: 'SOLD',
+        },
+      })
+      const renewed = await tx.truck.create({
+        data: { organizationId, companyId: alphaId, unitNumber: `R-${nonce}` },
+      })
+      const driver = await tx.driver.create({ data: newDriver('Horizon') })
+
+      const item = (
+        type: 'REGISTRATION' | 'MEDICAL_CARD',
+        subject: { truckId: string } | { driverId: string },
+        days: number,
+      ) =>
+        tx.complianceItem.create({
+          data: {
+            organizationId,
+            companyId: alphaId,
+            type,
+            expiresAt: at(days),
+            ...subject,
+          },
+        })
+
+      // IN BOTH, AND IN ALL THREE HORIZONS: a live truck's registration at 20
+      // days, inside the default 30-day warning.
+      await item('REGISTRATION', { truckId: live.id }, 20)
+      // IN BOTH, EXPIRED, AND IN ALL THREE: the same truck's annual inspection
+      // lapsed three days ago and nothing renews it. Expired counts in every
+      // horizon, because an expired record is not less urgent than one
+      // expiring on Friday.
+      await tx.complianceItem.create({
+        data: {
+          organizationId,
+          companyId: alphaId,
+          type: 'ANNUAL_INSPECTION',
+          expiresAt: at(-3),
+          truckId: live.id,
+        },
+      })
+      // IN NEITHER: a sold truck's registration, expired ten days ago. Nobody
+      // can renew it, so the queue does not list it — and now nor does the
+      // panel. This row alone was most of production's 42.
+      await item('REGISTRATION', { truckId: sold.id }, -10)
+      // IN NEITHER: a lapsed registration that has been renewed. The renewal
+      // is outside every horizon; the lapsed one is superseded by it.
+      await item('REGISTRATION', { truckId: renewed.id }, -5)
+      await item('REGISTRATION', { truckId: renewed.id }, 400)
+      // IN 60 AND 90, NOT IN 30, AND NOT IN THE ROW: a medical card at 45
+      // days. The horizon is the one place the two still differ.
+      await item('MEDICAL_CARD', { driverId: driver.id }, 45)
+    })
+
+    const after = await inOrg((tx) => complianceHorizons(tx, [alphaId], NOW))
+    const rowAfter = await inOrg((tx) => complianceCount(tx, scope, NOW))
+
+    // 30: the 20-day registration and the lapsed inspection. 60 and 90: those
+    // two and the 45-day card. Never the sold truck's, never the superseded.
+    expect(after.d30 - before.d30).toBe(2)
+    expect(after.d60 - before.d60).toBe(3)
+    expect(after.d90 - before.d90).toBe(3)
+    // THE ROW: the same two as the 30-day figure and nothing else. The warning
+    // days are the default 30 — this organization creates no CompanySettings
+    // row, and `leadDaysFor` says so. One of the two is expired, and it is the
+    // live truck's inspection, not the sold truck's registration.
+    expect(rowAfter.count - rowBefore.count).toBe(2)
+    expect(rowAfter.expired - rowBefore.expired).toBe(1)
   }, 300_000)
 })

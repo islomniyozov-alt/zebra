@@ -42,9 +42,15 @@ type TxClient = Prisma.TransactionClient
 // NINE the day this said seven. The seven was arithmetic over the reads as
 // written, which is the baseline-you-supplied failure AGENTS.md names; part
 // 3's budget was then derived from it. `scripts/measure-dashboard-page.ts`
-// asks the driver instead, and the answer at w13 on dev is FOURTEEN across six
+// asks the driver instead, and the answer at w13 on dev was FOURTEEN across six
 // concurrent transactions for a money role and NINE for a dispatcher, the
 // largest of them four. Phase 5 §7 flag 43.
+//
+// SIXTEEN AND ELEVEN SINCE 2026-10-07, measured the same way: the 30/60/90
+// horizons left this statement for `complianceHorizons` (queue item 20 (8)),
+// which is the Needs-you queue read once at 90 days and costs its two
+// statements in a seventh transaction. Two statements bought one definition;
+// the alternative was the panel counting what the row drops.
 //
 // ── ONE STATEMENT, AND THE LOAD TABLE SCANNED ONCE ──────────────────────
 //
@@ -266,9 +272,17 @@ export async function needsYouCounts(
 // THE NEEDS-YOU COMPLIANCE ROW. It asks each authority's own
 // `complianceWarnDays` through `complianceQueue`, which builds rows. Folding it
 // in would mean re-expressing a DOT horizon in SQL to save a round trip, which
-// the owner ruled against on 2026-10-01 and which §6.1.1 now records. The
-// 30/60/90 figures below are a DIFFERENT question — three fixed horizons — and
-// that is why they can live here without being a second expression of anything.
+// the owner ruled against on 2026-10-01 and which §6.1.1 records.
+//
+// AND THE 30/60/90 FIGURES, SINCE 2026-10-07. They lived here as three
+// COUNT(*) subqueries over every live ComplianceItem, on the argument that
+// three fixed horizons were "a different question". They were the same
+// question with the subject rule missing: production read 54 on the row and
+// 96 on the panel, the 42 being sold trucks' lapsed registrations and
+// renewed-then-superseded records the queue drops. The figures are now
+// `complianceHorizons` in compliance.ts — the queue read once at 90 days and
+// bucketed — which is the 2026-10-01 ruling honoured the other way round: the
+// SQL is removed rather than taught the subject rule. Queue item 20 (8).
 //
 // THE DQF DONUT. `dqfFactsForDrivers` is two statements and the checklist rule
 // lives in `dqf.ts`; the same argument applies and it keeps its own reader.
@@ -301,8 +315,6 @@ export interface PanelFigures {
     finalCents: number
     paidCents: number
   } | null
-  /** Three fixed horizons. NOT the Needs-you row — see the header. */
-  expiring: { d30: number; d60: number; d90: number }
 }
 
 /**
@@ -355,16 +367,13 @@ export async function panelFigures(
     dr."deletedAt" IS NULL AND dr."status" <> 'INACTIVE' AND dr."kind" <> 'PAYEE'
   `
 
-  // THE SEVEN CASH COLUMNS, AS ONE FRAGMENT. They sit in the middle of the
-  // SELECT list, so they carry their own trailing comma and vanish together —
-  // omitting them one at a time would leave a dangling comma for the first
-  // role that could not see money.
-  // THE SEVEN CASH COLUMNS, AS ONE FRAGMENT. They sit in the middle of the
-  // SELECT list, so they carry their own trailing comma and appear or vanish
-  // together — dropping them one at a time would leave a dangling comma for
-  // the first role that cannot see money.
+  // THE SEVEN CASH COLUMNS, AS ONE FRAGMENT. They END the SELECT list since
+  // the compliance horizons left it (queue item 20 (8)), so they carry their
+  // own LEADING comma and appear or vanish together — dropping them one at a
+  // time would leave a dangling comma for the first role that cannot see
+  // money, and a trailing comma would dangle for everybody.
   const cashColumns = options.cash
-    ? Prisma.sql`
+    ? Prisma.sql`,
       -- ── CASH: AGING, FROM THE SHARED FRAGMENT ───────────────────────
       --
       -- agingSumsSql lives in factoring.ts, four lines from
@@ -403,7 +412,7 @@ export async function panelFigures(
          AND b."status" = 'PAID'
          ${sc('s')}
          AND s."periodStart" >= ${period.from}
-         AND s."periodStart" < ${period.to}) AS paid_cents,
+         AND s."periodStart" < ${period.to}) AS paid_cents
   `
     : Prisma.empty
   const rows = await tx.$queryRaw<
@@ -424,9 +433,6 @@ export async function panelFigures(
       draft_cents?: bigint
       final_cents?: bigint
       paid_cents?: bigint
-      exp_30: bigint
-      exp_60: bigint
-      exp_90: bigint
     }[]
   >`
     SELECT
@@ -469,32 +475,11 @@ export async function panelFigures(
        WHERE l."deletedAt" IS NULL AND l."isCancelled" = false
          AND l."billingStatus" <> 'CLOSED_IN_DATATRUCK'
          AND l."operationalStatus" IN ('DISPATCHED', 'IN_TRANSIT')
-         ${sc('l')}) AS moving_now,
-
+         ${sc('l')}) AS moving_now
+      -- NO COMPLIANCE HERE. The 30/60/90 figures were three COUNT(*) over
+      -- ComplianceItem at this spot until 2026-10-07; they are the Needs-you
+      -- row's own reader now (complianceHorizons). See the header.
       ${cashColumns}
-
-      -- ── COMPLIANCE: THREE FIXED HORIZONS ────────────────────────────
-      --
-      -- NOT the Needs-you row. See the module header: that one asks each
-      -- authority own complianceWarnDays through complianceQueue, and
-      -- these are 30, 60 and 90 days flat.
-      --
-      -- CUMULATIVE, NOT BANDED. "Expiring within 60 days" INCLUDES the ones
-      -- expiring within 30 — that is what the phrase means, and three disjoint
-      -- bands would make the 90-day figure read as "a comfortable quarter
-      -- away" when it is the only one somebody glances at.
-      --
-      -- ALREADY EXPIRED COUNTS IN ALL THREE, because an expired medical card is
-      -- not less urgent than one expiring on Friday.
-      (SELECT COUNT(*)::bigint FROM "ComplianceItem" ci
-       WHERE ci."deletedAt" IS NULL ${sc('ci')}
-         AND ci."expiresAt" < ${now}::timestamp + interval '30 days') AS exp_30,
-      (SELECT COUNT(*)::bigint FROM "ComplianceItem" ci
-       WHERE ci."deletedAt" IS NULL ${sc('ci')}
-         AND ci."expiresAt" < ${now}::timestamp + interval '60 days') AS exp_60,
-      (SELECT COUNT(*)::bigint FROM "ComplianceItem" ci
-       WHERE ci."deletedAt" IS NULL ${sc('ci')}
-         AND ci."expiresAt" < ${now}::timestamp + interval '90 days') AS exp_90
   `
 
   const row = rows[0]
@@ -528,11 +513,6 @@ export async function panelFigures(
           paidCents: Number(row.paid_cents),
         }
       : null,
-    expiring: {
-      d30: Number(row.exp_30),
-      d60: Number(row.exp_60),
-      d90: Number(row.exp_90),
-    },
   }
 }
 

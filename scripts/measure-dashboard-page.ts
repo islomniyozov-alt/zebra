@@ -5,6 +5,7 @@ import { runInOrg, companyScopeFilter } from '@/lib/tenancy'
 import { unattributed } from '@/lib/audit'
 import type { AuthorizedSession } from '@/lib/permissions'
 import { actionQueue } from '@/lib/dashboard'
+import { complianceHorizons } from '@/lib/compliance'
 import {
   dqfSplit,
   panelFigures,
@@ -134,7 +135,7 @@ await runInOrg(
         run: () => actionQueue(tx, session, companyScopeFilter([])),
       },
       {
-        name: 'panelFigures, money role (fleet+cash+compliance)',
+        name: 'panelFigures, money role (fleet+cash)',
         who: ['money'],
         run: () => panelFigures(tx, [], window, NOW, { cash: true }),
       },
@@ -154,6 +155,14 @@ await runInOrg(
         name: 'dqfSplit (compliance donut)',
         who: ['money', 'dispatcher'],
         run: () => dqfSplit(tx, [], NOW),
+      },
+      {
+        // THE 30/60/90 FIGURES, since queue item 20 (8): the Needs-you queue
+        // read once at 90 days. It left `panelFigures` and costs the queue's
+        // own statements; measured here rather than added up.
+        name: 'complianceHorizons (panel 30/60/90)',
+        who: ['money', 'dispatcher'],
+        run: () => complianceHorizons(tx, [], NOW),
       },
       {
         name: 'company.findMany (the chips)',

@@ -43,9 +43,6 @@ const ROW = {
   draft_cents: 10n,
   final_cents: 11n,
   paid_cents: 12n,
-  exp_30: 13n,
-  exp_60: 14n,
-  exp_90: 15n,
 }
 
 /**
@@ -101,9 +98,11 @@ const occurrences = (haystack: string, needle: string) =>
 
 describe('panelFigures sends one statement', () => {
   it('and it is one statement, whoever is asking', async () => {
-    // THE WHOLE POINT OF THE READER. Five tiles, four aging buckets, three
-    // pipeline figures and three horizons in a single round trip — flag 31 is
-    // the screen that expired a transaction with eighteen statements in it.
+    // THE WHOLE POINT OF THE READER. Five tiles, four aging buckets and three
+    // pipeline figures in a single round trip — flag 31 is the screen that
+    // expired a transaction with eighteen statements in it. (The three
+    // compliance horizons left this statement for `complianceHorizons` on
+    // 2026-10-07 — §6.1.1, one reader with the Needs-you row.)
     const money = recordingTx()
     await panelFigures(money.tx, [], WINDOW, NOW, { cash: true })
     expect(money.sent).toHaveLength(1)
@@ -139,7 +138,7 @@ describe("a role without load.financials: the cash query DOESN'T RUN", () => {
     expect(sql).not.toContain('"SettlementBatch"')
   })
 
-  it('still asks for the fleet and the compliance horizons', async () => {
+  it('still asks for the fleet, and never for the compliance table', async () => {
     // THE CONTROL, AND THE REASON THIS IS ONE STATEMENT RATHER THAN TWO. If
     // withholding cash also withheld these, a dispatcher would get a page with
     // no fleet on it — which is what shipped for one commit.
@@ -153,20 +152,22 @@ describe("a role without load.financials: the cash query DOESN'T RUN", () => {
       'drivers_paired',
       'drivers_idle',
       'moving_now',
-      'exp_30',
-      'exp_60',
-      'exp_90',
     ]) {
       expect(sql).toContain(column)
     }
 
-    // AND THE COLUMNS ARE COMPUTED, not just named. `0::bigint AS exp_30`
-    // carries the alias and answers nothing — which is exactly what the guard
-    // caught this assertion failing to notice. Three horizons, three reads of
-    // the table; two trucks subqueries and one load scan for the tiles.
-    expect(occurrences(sql, 'FROM "ComplianceItem"')).toBe(3)
+    // AND THE COLUMNS ARE COMPUTED, not just named — two trucks subqueries and
+    // one load scan for the tiles, counted rather than found.
     expect(occurrences(sql, 'FROM "Truck"')).toBe(2)
     expect(occurrences(sql, 'FROM "Load"')).toBe(1)
+
+    // THE 30/60/90 FIGURES ARE NOT IN THIS STATEMENT ANY MORE (§6.1.1, queue
+    // item 20 (8)). They were three COUNT(*) over every ComplianceItem beside
+    // a Needs-you row that drops sold trucks and superseded records — 54
+    // against 96 on one production screen. They are `complianceHorizons` now,
+    // the queue read once at 90 days; a statement that reads the table here
+    // again is a second reader coming back.
+    expect(sql).not.toContain('"ComplianceItem"')
   })
 
   it('and reports the cash figures as null rather than as zero', async () => {
@@ -178,7 +179,6 @@ describe("a role without load.financials: the cash query DOESN'T RUN", () => {
     expect(figures.aging).toBeNull()
     expect(figures.pipeline).toBeNull()
     expect(figures.fleet.trucksPaired).toBe(1)
-    expect(figures.expiring.d30).toBe(13)
   })
 })
 
@@ -258,8 +258,10 @@ describe('the company scope', () => {
     const sql = textOf(sent)
 
     // ONE CLAUSE PER TABLE THE STATEMENT TOUCHES, because each subquery has its
-    // own alias and a scope applied to four of seven is a tenancy hole.
-    for (const alias of ['"t"', '"dr"', '"l"', '"i"', '"s"', '"ci"']) {
+    // own alias and a scope applied to four of seven is a tenancy hole. (The
+    // compliance alias "ci" left with its subqueries on 2026-10-07 — the
+    // horizons are scoped in `complianceHorizons` through `companyScopeFilter`.)
+    for (const alias of ['"t"', '"dr"', '"l"', '"i"', '"s"']) {
       expect(sql).toContain(`AND ${alias}."companyId" = ANY`)
     }
   })

@@ -3,6 +3,7 @@ import { formatCents } from '@/lib/money'
 import { ChartLegend } from '../_charts/ChartLegend'
 import { AgingBar } from '../_charts/AgingBar'
 import type { DriverGrossRow, PanelFigures } from '@/lib/dashboard-counts'
+import type { ComplianceHorizons } from '@/lib/compliance'
 
 // ---------------------------------------------------------------------------
 // THE FLEET, CASH AND COMPLIANCE PANELS. Dashboard part 3, §6.1.1.
@@ -300,7 +301,8 @@ export function CompliancePanel({
   dqf,
   labels,
 }: {
-  expiring: PanelFigures['expiring']
+  /** The Needs-you row's own rows at 90 days, bucketed (§6.1.1). */
+  expiring: ComplianceHorizons
   dqf: { complete: number; incomplete: number }
   labels: {
     heading: string
