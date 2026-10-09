@@ -114,6 +114,50 @@ the compliance block; what remains is the deferred list below.
 
 ### 21 — LOADS LIST = Datatruck's shape
 
+**Chain two**, the owner's words, received 2026-10-09 after items 1–6 reached
+production (`eaac469`), transcribed before any of it was designed:
+
+```
+LOADS LIST chain two. Rulings on your four decisions, then items 7–9.
+Doc-first (DESIGN.md § Loads list, bump), full ritual, ten-line report.
+
+Rulings:
+- "Attach POD" confirmed. Phase 2 rule stands; the kebab item opens the
+  POD upload, nothing sets POD received by hand.
+- Pickup is NOT hidden by default. Default-hidden columns are Rate and
+  Billing only. Default visible: Load, Authority, Broker, Pickup,
+  Delivery, DEL date, Driver, Truck, Status, Warnings. Update the test
+  that pinned the old default.
+- Column memory stores the set the user HID, not the set they showed,
+  so new columns appear for everyone without re-ticking. Migrate
+  existing saved choices once on read.
+- Filter bar must fit two rows at 1920. Row one: status chips +
+  Upcoming/Unpaid + billing + authority. Row two: reference search, a
+  "Filters" button that opens a popover with pickup range, delivery
+  range, broker, driver (badge shows active count), Columns, density.
+- Chip counts: 394 ms per render is too slow. Either compute all chip
+  counts in one grouped statement with the list query or cache per org
+  for 30 s. Guard: a render makes at most one extra count statement.
+  Report the new number.
+
+Items:
+7. Export current view as CSV. Same predicate as the list (agreement
+   test: export row count equals list count, >0). Columns = the user's
+   visible columns in order. Filename
+   zebra-loads-<view>-<yyyy-mm-dd>.csv. Role-gated the same as the list.
+8. Row expand (chevron): stops in order with local dates, notes,
+   warnings detail. Row kebab: Open, Copy load number, Attach POD.
+   Expand state is not persisted.
+9. Columns/density chooser check per the memory ruling above, plus a
+   browser walk step that hides a column, reloads, and sees it still
+   hidden.
+
+Keep the ten-line report; include the chip-count timing after the fix
+and the filter-bar height at 1920.
+```
+
+**Chain one**, the original brief:
+
 _Owner's brief, received 2026-10-08 from Islom's screenshots, and transcribed
 here before any of it was designed. The brief says "DESIGN.md"; the file is
 `TMS-DESIGN-SYSTEM.md`, and §6.7 there is its design._
