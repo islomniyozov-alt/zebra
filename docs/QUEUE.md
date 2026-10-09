@@ -107,9 +107,44 @@ the compliance block; what remains is the deferred list below.
 
 | #   | Item                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Shape                                         |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| 21  | **LOADS LIST = Datatruck's shape** — date views, broker and driver filters, linked cells, copy, a DEL date column, Upcoming and Unpaid, then export, row expand and the chooser. `TMS-DESIGN-SYSTEM.md` §6.7; the owner's words below.                                                                                                                                                                                                                        | doc-first; 1–6 one chain, 7–9 a second        |
 | 17  | **GAPS code gap 10** — editors for pay-to, kind and tags on the driver record's Accounting and Main tabs.                                                                                                                                                                                                                                                                                                                                                     | doc-first; full ritual                        |
 | 18  | **TRUCKS = Datatruck's shape** — list tabs, record tabs, the same method as drivers. The brief comes from the next screenshots Islom sends; until then, start from the Trucks list columns the sweep already reads. **Part 0, before the screen:** a data-health row on the Trucks list footer and on GAPS — counts of trucks missing VIN, plate, odometer, registration expiry, annual inspection, each a link to the filtered list. Same later for Drivers. | part 0 now, doc-first; the rest brief awaited |
 | 19  | **Nightly sweep output** — any new GAPS row goes to the top of this queue.                                                                                                                                                                                                                                                                                                                                                                                    | standing                                      |
+
+### 21 — LOADS LIST = Datatruck's shape
+
+_Owner's brief, received 2026-10-08 from Islom's screenshots, and transcribed
+here before any of it was designed. The brief says "DESIGN.md"; the file is
+`TMS-DESIGN-SYSTEM.md`, and §6.7 there is its design._
+
+```
+LOADS LIST = Datatruck's shape, from Islom's screenshots. Doc-first
+(DESIGN.md § Loads list, version bump), then build, full ritual,
+ten-line report.
+
+Take from Datatruck, in this order:
+1. Pickup date range + Delivery date range filters (named views,
+   ?view= + from/to params, not raw filters). "Delivers this week" and
+   "Picks up today" as default chips.
+2. Broker (customer) filter and Driver filter, both typeahead.
+3. Linked cells: Broker → company record, Driver → driver record,
+   Truck → truck record.
+4. Load ID cell gets a copy icon (clipboard, toast "copied").
+5. DEL date becomes its own column; Delivery cell keeps city/state only.
+6. Add Upcoming (Booked, pickup ≤ 7 days) and Unpaid (Delivered, not
+   Paid) chips to the status bar with counts. Reuse load-views.ts; one
+   predicate per view; agreement test both sides > 0.
+7. Export current view as CSV (same predicate as the list — agreement
+   test row count equals list count).
+8. Row expand: stops, notes, warnings detail inline. Row kebab: Open /
+   Copy ID / Mark POD received.
+9. Columns picker + density toggle, stored per user. Low priority — last.
+
+Keep: Warnings column, billing chips, authority chips. Do not add Trip
+planner, LTL, or generic bulk actions.
+Report when 1–6 are on prod; 7–9 can be a second chain.
+```
 
 ### 20 — Production walk 2026-10-07 (done 2026-10-07)
 
