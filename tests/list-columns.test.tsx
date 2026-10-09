@@ -326,9 +326,13 @@ describe('LoadsTable renders inside the cap with the authority column shown', ()
     loadNumber: 'L-1001',
     reference: 'TRIP-9',
     companyName: 'RAM Haulage',
+    customerId: 'c1',
     customerName: 'Amazon',
+    drivers: [{ id: 'd1', name: 'Hassan Ali' }],
     pickup: 'Chicago, IL',
     delivery: 'Dallas, TX',
+    deliveryDate: 'Oct 9, 2026',
+    truckId: 't1',
     truck: '104',
     operationalStatus: 'IN_TRANSIT' as const,
     billingStatus: 'UNINVOICED' as const,
@@ -347,12 +351,17 @@ describe('LoadsTable renders inside the cap with the authority column shown', ()
     reference: 'Ref',
     company: 'Authority',
     customer: 'Customer',
+    driver: 'Driver',
     pickup: 'Pickup',
     delivery: 'Delivery',
+    deliveryDate: 'DEL date',
     truck: 'Truck',
     status: 'Status',
     billing: 'Billing',
     rate: 'Rate',
+    copy: 'Copy load number',
+    copied: 'Load {n} copied',
+    copyFailed: 'Could not copy load {n}.',
     emptyTitle: 'No loads',
     emptyBody: 'Add one.',
     emptyFilteredTitle: 'Nothing matches',
@@ -362,15 +371,19 @@ describe('LoadsTable renders inside the cap with the authority column shown', ()
 
   async function renderList(visible: readonly string[]) {
     const { LoadsTable } = await import('@/app/(app)/loads/LoadsTable')
+    const { ToastProvider } = await import('@/components/ui/Toast')
     render(
-      <LoadsTable
-        rows={[row]}
-        showCompanyColumn
-        visible={visible}
-        labels={labels}
-        statusLabels={{ IN_TRANSIT: 'In transit' }}
-        billingLabels={{ UNINVOICED: 'Not invoiced' }}
-      />,
+      <ToastProvider>
+        <LoadsTable
+          rows={[row]}
+          showCompanyColumn
+          visible={visible}
+          labels={labels}
+          statusLabels={{ IN_TRANSIT: 'In transit' }}
+          billingLabels={{ UNINVOICED: 'Not invoiced' }}
+          mayOpen={{ customer: true, driver: true, truck: true }}
+        />
+      </ToastProvider>,
     )
     return screen.getAllByRole('columnheader')
   }
@@ -397,6 +410,6 @@ describe('LoadsTable renders inside the cap with the authority column shown', ()
     // is the fix and not a coincidence of this fixture.
     await expect(
       renderList(columnKeysFor(LOAD_COLUMN_KEYS, true)),
-    ).rejects.toThrow(/nine columns at most; this one has 10/)
+    ).rejects.toThrow(/nine columns at most; this one has 12/)
   })
 })

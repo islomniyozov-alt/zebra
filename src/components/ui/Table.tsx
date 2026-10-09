@@ -58,6 +58,15 @@ export interface Column<Row> {
    * column: a count of statuses is a number nobody asked for.
    */
   foot?: (rows: readonly Row[]) => ReactNode
+  /**
+   * A control after the cell's content, OUTSIDE the row's link (§6.7 item 4).
+   *
+   * The first cell's content is wrapped in the row's named anchor, and a button
+   * inside an anchor is invalid HTML that opens the row instead of acting. This
+   * renders after the anchor, raised above the cell's overlay (`relative z-10`,
+   * §7.1), so it can be clicked without opening the row.
+   */
+  trailing?: (row: Row) => ReactNode
 }
 
 /**
@@ -425,6 +434,11 @@ export function Table<Row>({
                       ) : (
                         column.render(row)
                       )}
+                      {column.trailing ? (
+                        <span className="relative z-10 ms-z1 inline-flex align-middle">
+                          {column.trailing(row)}
+                        </span>
+                      ) : null}
                       {/* EVERY OTHER CELL CARRIES AN OVERLAY to the same
                        * href — hidden from the accessibility tree and out of
                        * the tab order, so the keyboard and the screen reader

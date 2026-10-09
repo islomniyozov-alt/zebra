@@ -1,7 +1,7 @@
 'use client'
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { useCallback } from 'react'
+import { useCallback, type ReactNode } from 'react'
 import { Button } from './Button'
 import { cx } from '@/lib/cx'
 
@@ -32,6 +32,12 @@ export interface FilterChoice {
 export interface FilterGroup {
   /** The query-string key. Appears in the shared URL, so keep it readable. */
   param: string
+  /**
+   * Tells two groups apart when they share a `param` (§6.7: the date presets
+   * and the Upcoming/Unpaid chips are both `?view=`, so choosing one clears the
+   * other). Defaults to `param`.
+   */
+  id?: string
   label: string
   choices: readonly FilterChoice[]
 }
@@ -75,6 +81,13 @@ interface FilterBarProps {
   range?: FilterRange
   clearLabel: string
   moreLabel: string
+  /** Further controls a screen owns, rendered after the search (§6.7). */
+  children?: ReactNode
+  /**
+   * The URL keys those controls write, so "Clear filters" appears when only
+   * they are set. Clearing always clears every key.
+   */
+  extraParams?: readonly string[]
 }
 
 export function FilterBar({
@@ -83,6 +96,8 @@ export function FilterBar({
   range,
   clearLabel,
   moreLabel,
+  children,
+  extraParams = [],
 }: FilterBarProps) {
   const router = useRouter()
   const pathname = usePathname()
@@ -142,12 +157,13 @@ export function FilterBar({
     groups.some((group) => params.get(group.param) !== null) ||
     (search !== undefined && params.get(search.param) !== null) ||
     (range !== undefined &&
-      (params.get('from') !== null || params.get('to') !== null))
+      (params.get('from') !== null || params.get('to') !== null)) ||
+    extraParams.some((param) => params.get(param) !== null)
 
   return (
     <div className="flex flex-wrap items-center gap-z2 border-b border-border bg-surface px-gutter py-z2">
       {groups.map((group) => (
-        <div key={group.param} className="flex items-center gap-z1">
+        <div key={group.id ?? group.param} className="flex items-center gap-z1">
           <span className="text-xs font-medium uppercase tracking-[0.04em] text-ink-3">
             {group.label}
           </span>
@@ -245,6 +261,8 @@ export function FilterBar({
           />
         </div>
       ) : null}
+
+      {children}
 
       <Button variant="ghost" size="compact" disabled>
         {moreLabel}

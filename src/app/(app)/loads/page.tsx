@@ -10,9 +10,19 @@ import { listedAuthorities } from '@/lib/companies'
 import { FilterBar } from '@/components/ui/FilterBar'
 import { LoadsTable, type LoadRow } from './LoadsTable'
 import { billingLabelKey, operationalLabelKey } from '@/lib/status'
-import { loadSearchWhere } from '@/lib/loads'
-import { readyToInvoiceWhere } from '@/lib/invoices'
-import { viewWhere } from '@/lib/load-views'
+import { viewContext } from '@/lib/load-views'
+import {
+  billingCountWhere,
+  listWhere,
+  loadListWhere,
+  readLoadListParams,
+  READY,
+  readyCountWhere,
+  statusCountWhere,
+  viewCountWhere,
+} from '@/lib/load-list'
+import { loadFilterLabels } from '@/lib/load-filter-options'
+import { renderDateOnly, stopLocalDate } from '@/lib/stop-time'
 import { DENSITIES, readDensity, readSavedViews } from '@/lib/preferences'
 import { readGridColumns } from '@/lib/grid-columns'
 import {
@@ -22,20 +32,12 @@ import {
 } from '@/lib/list-columns'
 import { SavedViews } from './SavedViews'
 import { ColumnsChooser } from '../_grid/ColumnsChooser'
+import { DateRangeView } from './DateRangeView'
+import { TypeaheadFilter } from './TypeaheadFilter'
 import type {
   LoadBillingStatus,
   LoadOperationalStatus,
-  Prisma,
 } from '@/generated/prisma/client'
-
-/**
- * The billing chip whose filter is a predicate rather than an enum value.
- *
- * Not a `LoadBillingStatus`: it is the same string the column happens to use,
- * but it selects through `readyToInvoiceWhere()`. Named once so the three
- * places that special-case it cannot drift.
- */
-const READY = 'READY_TO_INVOICE'
 
 // §11.7 — the screen that proves the rest of it works. Real shell, real table,
 // real filter bar, real empty state. No data, no create action.
@@ -43,6 +45,11 @@ const READY = 'READY_TO_INVOICE'
 // It reads through `withCurrentOrg`, so the query is scoped by row-level
 // security and the permission check happened before the query did. ESLint
 // refuses `withOrg` and `prisma` under src/app, so there is no shorter path.
+//
+// §6.7 (2026-10-08) gave it Datatruck's shape: date views, broker and driver
+// filters, linked cells, a copy button, a DEL date column, and Upcoming and
+// Unpaid. EVERY FILTER IS BUILT IN `src/lib/load-list.ts`, as one `AND`, so
+// the rows, the footer and every chip count read one definition.
 
 /**
  * The chooser's labels, keyed by column (§7.1.7).
@@ -58,8 +65,10 @@ const loadColumnHeaders = (
   loadNumber: t('loads.column.load'),
   company: t('loads.column.company'),
   customer: t('loads.column.customer'),
+  driver: t('loads.column.driver'),
   pickup: t('loads.column.pickup'),
   delivery: t('loads.column.delivery'),
+  deliveryDate: t('loads.column.deliveryDate'),
   truck: t('loads.column.truck'),
   status: t('loads.column.status'),
   billing: t('loads.column.billing'),
@@ -106,36 +115,17 @@ export default async function LoadsPage({
   }
   const { t, locale } = await getLocaleContext()
 
-  const statusParam =
-    typeof params['status'] === 'string' ? params['status'] : undefined
-  const companyParam =
-    typeof params['company'] === 'string' ? params['company'] : undefined
-  // THE BILLING CHIPS NEVER FILTERED ANYTHING. The bar has offered them since
-  // Phase 2 and the query only ever read `status` and `company`, so clicking
-  // one rewrote the URL and returned the same rows. Found while adding the
-  // counts, because a count has to come from the query the chip runs and this
-  // chip ran none.
-  const billingParam =
-    typeof params['billing'] === 'string' ? params['billing'] : undefined
-  // "IS TRIP X IN THE SYSTEM?" — the reference is the number dispatch quotes
-  // to Amazon, and until now the only way to answer was to read the list.
-  const referenceParam =
-    typeof params['ref'] === 'string' ? params['ref'].trim() : ''
-  // ── A NAMED VIEW, RESOLVED THROUGH THE SAME FUNCTION THAT COUNTS IT ────
+  // ── THE URL, READ ONCE ──────────────────────────────────────────────────
   //
-  // Owner's ruling, 2026-10-01. The dashboard's Needs-you rows link here with
-  // `?view=<name>` and NOT with raw filter params, so the number on the row and
-  // the rows on this page come from one predicate in `load-views.ts`.
+  // `?view=` is a NAME resolved through `load-views.ts` (owner's ruling,
+  // 2026-10-01): the dashboard's Needs-you rows link here by name, and the
+  // number on the row and the rows on this page come from one predicate. NO
+  // VIEW MEANS TODAY'S BEHAVIOUR, archive included (ruling 3).
   //
-  // MEASURED BEFORE IT EXISTED: `podMissing` counted 1 and its old link —
-  // `?status=DELIVERED` — listed 13,500, because this page filtered on the
-  // status column alone while the row excluded closed history, cancellations
-  // and unrated freight.
-  //
-  // NO VIEW MEANS TODAY'S BEHAVIOUR, archive included (ruling 3). Closed
-  // history is excluded only where a view's own predicate says so.
-  const viewParam =
-    typeof params['view'] === 'string' ? params['view'] : undefined
+  // THE BILLING CHIPS NEVER FILTERED ANYTHING until the counts went in, because
+  // the query only read `status` and `company`. A count has to come from the
+  // query the chip runs, which is why every chip now reads `load-list.ts`.
+  const listParams = readLoadListParams(params)
 
   const {
     rows,
@@ -147,6 +137,8 @@ export default async function LoadsPage({
     visibleLoadColumns,
     statusCounts,
     billingCounts,
+    viewCounts,
+    filterLabels,
   } = await withCurrentOrg('read', 'load', async (tx, session) => {
     // Company scoping is a business filter in the app layer, not a security
     // boundary — the tenant wall is already in Postgres. An empty scope list
@@ -156,55 +148,22 @@ export default async function LoadsPage({
     // THE AUTHORITIES THIS VIEWER MAY NARROW TO — fetched here since
     // 2026-09-06, where the narrowing lives, rather than in the app layout on
     // every page of the shell. Active companies, restricted to the viewer's own
-    // scope when they have one — the rule every authority list reads.
+    // scope when they have one — the rule every authority list reads. Their
+    // zones also decide "today" for the date views (§6.7).
     const authorities = await listedAuthorities(tx, session.companyScopes)
     const companyCount = authorities.length
+    const ctx = viewContext(authorities, new Date())
 
-    // The filters other than the one being counted. Each chip's count is
-    // "how many rows would I get if I clicked this", so it honours every
-    // OTHER active filter and ignores its own group — a Booked count that
-    // ignored the company filter would send somebody to a screen with a
-    // different number on it.
-    // Contains rather than equals, and why, in `loadSearchWhere`. It lives in
-    // loads.ts so a test can call it — the searching semantics are the kind of
-    // thing that silently does not work.
-    const searchWhere = loadSearchWhere(referenceParam)
-
-    const base: Prisma.LoadWhereInput = {
-      deletedAt: null,
-      ...scope,
-      ...(companyParam ? { companyId: companyParam } : {}),
-      ...searchWhere,
-    }
-    const namedView = viewWhere(viewParam)
-    const statusWhere = statusParam
-      ? { operationalStatus: statusParam as LoadOperationalStatus }
-      : {}
-    // READY TO INVOICE IS A PREDICATE, NOT A COLUMN VALUE, and the two are
-    // not the same set. `billingStatus` says READY_TO_INVOICE for
-    // direct-settled freight too — it has a POD and a rate — while
-    // `readyToInvoiceWhere()` excludes it, because Relay work never becomes an
-    // invoice. Filtering on the column would list loads the invoice queue
-    // refuses to show, which is exactly the disagreement the shared-predicate
-    // rule exists to prevent.
-    const billingWhere: Prisma.LoadWhereInput =
-      billingParam === READY
-        ? readyToInvoiceWhere()
-        : billingParam
-          ? { billingStatus: billingParam as LoadBillingStatus }
-          : {}
+    const where = loadListWhere(listParams, scope, ctx)
 
     // The total under the CURRENT filter, so the footer can say "101–200 of
     // 2,156" rather than leaving somebody to guess whether there is more.
-    const matching = await tx.load.count({
-      where: { ...base, ...statusWhere, ...billingWhere, ...namedView },
-    })
+    // THE SAME WHERE THE ROWS USE, named view included: "1-50 of 13,500" over a
+    // list of 101 rows is the disagreement the named views exist to stop.
+    const matching = await tx.load.count({ where: listWhere(where) })
 
     const loads = await tx.load.findMany({
-      // THE SAME WHERE THE COUNT ABOVE USES, `namedView` included. The footer
-      // saying "1-50 of 13,500" over a list of 101 rows is the disagreement
-      // this ruling exists to stop, one level down.
-      where: { ...base, ...statusWhere, ...billingWhere, ...namedView },
+      where: listWhere(where),
       orderBy: { bookedAt: 'desc' },
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
@@ -221,14 +180,24 @@ export default async function LoadsPage({
         // hidden in CSS. Rate is here because `read load` implies the board;
         // margin and driver pay are separate resources and are not selected.
         linehaulCents: true,
-        company: { select: { name: true } },
-        customer: { select: { name: true } },
-        truck: { select: { unitNumber: true } },
+        // The zone dates a stop that has no state (§6.7, `renderStopTime`).
+        company: { select: { name: true, timezone: true } },
+        customer: { select: { id: true, name: true } },
+        driver: { select: { id: true, firstName: true, lastName: true } },
+        coDriver: { select: { id: true, firstName: true, lastName: true } },
+        truck: { select: { id: true, unitNumber: true } },
         stops: {
           orderBy: { sequence: 'asc' },
           // `name` IS SELECTED BECAUSE SOME STOPS HAVE NOTHING ELSE. See
           // `place` below.
-          select: { name: true, city: true, state: true, type: true },
+          select: {
+            name: true,
+            city: true,
+            state: true,
+            type: true,
+            scheduledAt: true,
+            windowStart: true,
+          },
         },
       },
     })
@@ -277,51 +246,90 @@ export default async function LoadsPage({
     )
     const now = new Date()
 
-    const rows: LoadRow[] = loads.map((load) => ({
-      id: load.id,
-      loadNumber: load.loadNumber,
-      reference: load.referenceNumber,
-      companyName: load.company.name,
-      customerName: load.customer.name,
-      pickup: place(load.stops.find((stop) => stop.type === 'PICKUP')),
-      delivery: place(
-        [...load.stops].reverse().find((stop) => stop.type === 'DELIVERY'),
-      ),
-      truck: load.truck?.unitNumber ?? '—',
-      operationalStatus: load.operationalStatus,
-      billingStatus: load.billingStatus,
-      // Money is an integer of cents everywhere until the moment it is read.
-      rate: money.format(load.linehaulCents / 100),
-      isCancelled: load.isCancelled,
-      warnings: warningFacts.has(load.id)
-        ? loadWarnings(warningFacts.get(load.id)!, now)
-        : [],
-    }))
+    const rows: LoadRow[] = loads.map((load) => {
+      const finalDelivery = [...load.stops]
+        .reverse()
+        .find((stop) => stop.type === 'DELIVERY')
+      // THE DAY THE DATE VIEWS READ (§6.7 item 5): the stop's own local date,
+      // in the zone `renderStopTime` would use, so a row never sits in a view
+      // its own DEL date contradicts.
+      const deliveryDay = finalDelivery
+        ? stopLocalDate(
+            finalDelivery.scheduledAt ?? finalDelivery.windowStart,
+            finalDelivery.state,
+            load.company.timezone,
+          )
+        : null
+      return {
+        id: load.id,
+        loadNumber: load.loadNumber,
+        reference: load.referenceNumber,
+        companyName: load.company.name,
+        customerId: load.customer.id,
+        customerName: load.customer.name,
+        drivers: [load.driver, load.coDriver]
+          .filter((seat) => seat !== null)
+          .map((seat) => ({
+            id: seat.id,
+            name: `${seat.firstName} ${seat.lastName}`.trim(),
+          })),
+        pickup: place(load.stops.find((stop) => stop.type === 'PICKUP')),
+        delivery: place(finalDelivery),
+        deliveryDate:
+          deliveryDay === null
+            ? '—'
+            : (renderDateOnly(new Date(`${deliveryDay}T00:00:00Z`), locale) ??
+              '—'),
+        truckId: load.truck?.id ?? null,
+        truck: load.truck?.unitNumber ?? '—',
+        operationalStatus: load.operationalStatus,
+        billingStatus: load.billingStatus,
+        // Money is an integer of cents everywhere until the moment it is read.
+        rate: money.format(load.linehaulCents / 100),
+        isCancelled: load.isCancelled,
+        warnings: warningFacts.has(load.id)
+          ? loadWarnings(warningFacts.get(load.id)!, now)
+          : [],
+      }
+    })
 
-    // THE COUNTS, from the same predicate the chips filter by. Two
-    // groupBys rather than one count per chip: seven statuses would be seven
-    // round trips on the screen a dispatcher reloads all morning, and the
-    // 200ms-per-statement link to Neon is what makes that expensive.
+    // THE COUNTS, from the same `where` the chips filter by. Each group
+    // ignores its OWN filter and honours every other, the view included —
+    // so clicking a chip lands on exactly the number it promised.
     //
-    // Each group ignores its OWN filter and honours the other — so the
-    // billing counts narrow when a status is picked, and vice versa, and
-    // clicking a chip lands on exactly the number it promised.
-    const [statusCounts, billingCounts, readyCount] = await Promise.all([
+    // Upcoming and Unpaid are the only views counted (§6.7): a count on every
+    // date preset would be three more statements on the screen a dispatcher
+    // reloads all morning, and the 200ms-per-statement link to Neon is what
+    // makes that expensive.
+    const [
+      statusCounts,
+      billingCounts,
+      readyCount,
+      upcomingCount,
+      unpaidCount,
+      filterLabels,
+    ] = await Promise.all([
       tx.load.groupBy({
         by: ['operationalStatus'],
-        where: { ...base, ...billingWhere },
+        where: statusCountWhere(where),
         _count: { _all: true },
       }),
       tx.load.groupBy({
         by: ['billingStatus'],
-        where: { ...base, ...statusWhere },
+        where: billingCountWhere(where),
         _count: { _all: true },
       }),
-      // One extra count: this chip's predicate is not a column, so `groupBy`
-      // cannot produce it. Same function the chip filters by.
-      tx.load.count({
-        where: { ...base, ...statusWhere, ...readyToInvoiceWhere() },
-      }),
+      // This chip's predicate is not a column, so `groupBy` cannot produce it.
+      tx.load.count({ where: readyCountWhere(where) }),
+      tx.load.count({ where: viewCountWhere(where, 'upcoming', ctx) }),
+      tx.load.count({ where: viewCountWhere(where, 'unpaid', ctx) }),
+      // Only what is set is read: nothing at all when neither filter is on.
+      listParams.customer || listParams.driver
+        ? loadFilterLabels(tx, {
+            customer: listParams.customer,
+            driver: listParams.driver,
+          })
+        : Promise.resolve({ customer: null, driver: null }),
     ])
 
     const savedViews = await readSavedViews(tx, session.userId, 'loads')
@@ -352,6 +360,8 @@ export default async function LoadsPage({
         ),
         [READY]: readyCount,
       } as Record<string, number>,
+      viewCounts: { upcoming: upcomingCount, unpaid: unpaidCount },
+      filterLabels,
     }
   })
 
@@ -381,7 +391,13 @@ export default async function LoadsPage({
     'CLOSED_IN_DATATRUCK',
   ]
 
-  const mayCreate = await currentUserCan('create', 'load')
+  const [mayCreate, mayOpenCustomer, mayOpenDriver, mayOpenTruck] =
+    await Promise.all([
+      currentUserCan('create', 'load'),
+      currentUserCan('read', 'customer'),
+      currentUserCan('read', 'driver'),
+      currentUserCan('read', 'truck'),
+    ])
 
   const statuses: LoadOperationalStatus[] = [
     'BOOKED',
@@ -466,6 +482,9 @@ export default async function LoadsPage({
       <FilterBar
         clearLabel={t('loads.filter.clear')}
         moreLabel={t('loads.filter.more')}
+        // The typeaheads and the range write these keys themselves; naming them
+        // here is what offers "Clear filters" when only they are set.
+        extraParams={['view', 'from', 'to', 'customer', 'driver']}
         groups={[
           {
             param: 'status',
@@ -480,6 +499,19 @@ export default async function LoadsPage({
               count: statusCounts[status] ?? 0,
             })),
           },
+          // §6.7 item 6 — two VIEWS beside the status chips, counted from the
+          // same `viewWhere` the list resolves `?view=` through. They share
+          // `?view=` with the date presets, so choosing one clears the other.
+          {
+            id: 'queue',
+            param: 'view',
+            label: t('loads.filter.queue'),
+            choices: (['upcoming', 'unpaid'] as const).map((name) => ({
+              value: name,
+              label: t(`loads.view.${name}`),
+              count: viewCounts[name],
+            })),
+          },
           {
             param: 'billing',
             label: t('loads.filter.billing'),
@@ -488,6 +520,17 @@ export default async function LoadsPage({
               label: t(billingLabelKey(status as LoadBillingStatus)),
               count: billingCounts[status] ?? 0,
             })),
+          },
+          // §6.7 item 1 — the two date presets, OFFERED, not pre-selected:
+          // `/loads` with no view still lists everything (ruling 3). No counts,
+          // like the authority chips: a narrowing, not a report.
+          {
+            id: 'dates',
+            param: 'view',
+            label: t('loads.filter.dates'),
+            choices: (['picksUpToday', 'deliversThisWeek'] as const).map(
+              (name) => ({ value: name, label: t(`loads.view.${name}`) }),
+            ),
           },
           // AUTHORITY, WHICH USED TO LIVE IN THE TOPBAR (2026-09-06). It was a
           // filter there too — it only ever wrote `?company=` — so this is the
@@ -498,12 +541,8 @@ export default async function LoadsPage({
           // gets no group at all, which is the rule the topbar had and the one
           // worth keeping: a filter offering one option is furniture.
           //
-          // NO COUNTS ON THESE CHIPS, deliberately. Every other group here
-          // promises "this many rows if you click me" and honours the other
-          // active filters to do it; adding a third counted dimension means a
-          // third groupBy on every load-list render for a filter used rarely.
-          // A chip with no number is honest about being a narrowing rather
-          // than a report.
+          // NO COUNTS ON THESE CHIPS, deliberately. A chip with no number is
+          // honest about being a narrowing rather than a report.
           ...(authorities.length > 1
             ? [
                 {
@@ -522,7 +561,41 @@ export default async function LoadsPage({
           label: t('loads.filter.reference'),
           placeholder: t('loads.filter.referencePlaceholder'),
         }}
-      />
+      >
+        <DateRangeView
+          labels={{
+            label: t('loads.filter.range'),
+            pickup: t('loads.filter.range.pickup'),
+            delivery: t('loads.filter.range.delivery'),
+            from: t('loads.filter.range.from'),
+            to: t('loads.filter.range.to'),
+          }}
+        />
+        <TypeaheadFilter
+          param="customer"
+          selectedLabel={filterLabels.customer}
+          labels={{
+            label: t('loads.filter.broker'),
+            placeholder: t('loads.filter.brokerPlaceholder'),
+            loading: t('loads.filter.optionsLoading'),
+            noMatch: t('loads.filter.optionsNone'),
+            failed: t('loads.filter.optionsFailed'),
+            clear: t('loads.filter.clearOne'),
+          }}
+        />
+        <TypeaheadFilter
+          param="driver"
+          selectedLabel={filterLabels.driver}
+          labels={{
+            label: t('loads.filter.driver'),
+            placeholder: t('loads.filter.driverPlaceholder'),
+            loading: t('loads.filter.optionsLoading'),
+            noMatch: t('loads.filter.optionsNone'),
+            failed: t('loads.filter.optionsFailed'),
+            clear: t('loads.filter.clearOne'),
+          }}
+        />
+      </FilterBar>
 
       <LoadsTable
         rows={rows}
@@ -532,6 +605,11 @@ export default async function LoadsPage({
         // §7.1.7. DECIDED HERE, not in the client component: the preference row
         // is here, and so is the cap that keeps the count under §7.1's nine.
         visible={visibleLoadColumns}
+        mayOpen={{
+          customer: mayOpenCustomer,
+          driver: mayOpenDriver,
+          truck: mayOpenTruck,
+        }}
         statusLabels={Object.fromEntries(
           ALL_OPERATIONAL.map((status) => [
             status,
@@ -551,12 +629,17 @@ export default async function LoadsPage({
           reference: t('loads.column.reference'),
           company: t('loads.column.company'),
           customer: t('loads.column.customer'),
+          driver: t('loads.column.driver'),
           pickup: t('loads.column.pickup'),
           delivery: t('loads.column.delivery'),
+          deliveryDate: t('loads.column.deliveryDate'),
           truck: t('loads.column.truck'),
           status: t('loads.column.status'),
           billing: t('loads.column.billing'),
           rate: t('loads.column.rate'),
+          copy: t('loads.copyNumber'),
+          copied: t('loads.copiedNumber'),
+          copyFailed: t('loads.copyFailed'),
           emptyTitle: t('loads.empty.title'),
           emptyBody: t('loads.empty.body'),
           emptyFilteredTitle: t('loads.emptyFiltered.title'),

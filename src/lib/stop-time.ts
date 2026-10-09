@@ -122,6 +122,48 @@ export const ZONE_CHOICES: readonly string[] = [
   ...new Set(Object.values(STATE_ZONES)),
 ].sort()
 
+/** Every state code this file maps to a zone. */
+export const MAPPED_STATES: readonly string[] = Object.keys(STATE_ZONES)
+
+/**
+ * The state codes `zoneForState` sends to `zone`.
+ *
+ * Read off the same map, so a database predicate that partitions stops by zone
+ * (§6.7's date views) partitions them exactly the way `renderStopTime` does.
+ */
+export function statesInZone(zone: string): string[] {
+  return MAPPED_STATES.filter((state) => STATE_ZONES[state] === zone)
+}
+
+/**
+ * The calendar date of an instant in `zone`, as `YYYY-MM-DD`.
+ *
+ * The inverse of `zoneMidnight`: a stop stored at midnight in its zone reads
+ * back as the day it was typed. `en-CA` is used for its ISO-shaped output, not
+ * for anything Canadian.
+ */
+export function localDateIn(at: Date, zone: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: zone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(at)
+}
+
+/**
+ * The local date of a stop, read in the zone `renderStopTime` would use: the
+ * stop's state, else the authority's zone.
+ */
+export function stopLocalDate(
+  at: Date | null | undefined,
+  state: string | null | undefined,
+  fallbackZone: string,
+): string | null {
+  if (!at) return null
+  return localDateIn(at, zoneForState(state, fallbackZone))
+}
+
 export function zoneForState(
   state: string | null | undefined,
   fallback: string,

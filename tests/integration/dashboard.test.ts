@@ -20,7 +20,7 @@ import {
 } from '@/lib/dashboard-counts'
 import { complianceCount, complianceHorizons } from '@/lib/compliance'
 import { recordPayment } from '@/lib/payments'
-import { isLoadViewName, viewWhere } from '@/lib/load-views'
+import { isLoadViewName, viewContext, viewWhere } from '@/lib/load-views'
 import type { AuthorizedSession } from '@/lib/permissions'
 import type { PrismaClient } from '@/generated/prisma/client'
 
@@ -600,7 +600,12 @@ describe('every Needs-you row counts what its destination lists', () => {
         // EXACTLY WHAT `loads/page.tsx` DOES: `base` is `deletedAt: null` plus
         // the scope, and the named view on top.
         return tx.load.count({
-          where: { deletedAt: null, ...scope, ...viewWhere(key) },
+          // The dashboard's five views are undated and ignore the context.
+          where: {
+            deletedAt: null,
+            ...scope,
+            ...viewWhere(key, viewContext([], new Date())),
+          },
         })
       }
       if (key === 'overdue') {

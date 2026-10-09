@@ -65,8 +65,10 @@ export const LOAD_COLUMN_KEYS = [
   'loadNumber',
   'company',
   'customer',
+  'driver',
   'pickup',
   'delivery',
+  'deliveryDate',
   'truck',
   'status',
   'billing',
@@ -79,11 +81,17 @@ export const LOAD_COLUMN_KEYS = [
  * whole screens of its own (§6.2.8). The operational badge is the dispatcher's
  * question and stays.
  *
+ * §6.7 added Driver and DEL date, which took the declared count to twelve, so
+ * rate and pickup start hidden as well. Pickup is the one column that brief
+ * names nowhere. The authority column is NOT hidden, because it tells the
+ * carriers' freight apart (`tests/list-columns.test.tsx`). The chooser restores
+ * any of the three.
+ *
  * WARNINGS IS NOT IN HERE, DELIBERATELY. An absent warnings column reads as
  * "nothing wrong", which is the one thing a hidden column must not be able to
  * say.
  */
-export const LOAD_COLUMNS_HIDDEN = ['billing'] as const
+export const LOAD_COLUMNS_HIDDEN = ['billing', 'rate', 'pickup'] as const
 
 // ── /trucks ───────────────────────────────────────────────────────────────
 

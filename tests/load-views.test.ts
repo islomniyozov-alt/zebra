@@ -4,9 +4,29 @@ import { describe, expect, it } from 'vitest'
 import {
   LOAD_VIEWS,
   isLoadViewName,
+  viewContext,
   viewWhere,
   type LoadViewName,
 } from '@/lib/load-views'
+
+/**
+ * A request's context. The range views need bounds; the rest ignore them.
+ * 15:00 UTC on 2026-10-08 is the same date in every US zone.
+ */
+const CTX = {
+  ...viewContext([], new Date('2026-10-08T15:00:00Z')),
+  from: '2026-10-01',
+  to: '2026-10-07',
+}
+
+/**
+ * THE RANGE VIEWS ARE FILTERS, NOT QUEUES (§6.7): "what picked up in March" is a
+ * question about the archive too, so they are the two views that keep it.
+ */
+const RANGE_VIEWS: readonly string[] = ['pickup', 'delivery']
+const QUEUE_VIEWS = (Object.keys(LOAD_VIEWS) as LoadViewName[]).filter(
+  (name) => !RANGE_VIEWS.includes(name),
+)
 
 // ---------------------------------------------------------------------------
 // THE NAMED VIEWS, AND THE THREE THINGS THE AGREEMENT TEST CANNOT SEE.
@@ -51,12 +71,24 @@ describe('an unknown view narrows nothing', () => {
   it.each(['podmissing', 'POD_MISSING', 'nope', '', 'podMissing '])(
     '%s resolves to an empty where, not an impossible one',
     (name) => {
-      expect(viewWhere(name)).toEqual({})
+      expect(viewWhere(name, CTX)).toEqual({})
     },
   )
 
   it('and undefined does the same, which is the no-view case', () => {
-    expect(viewWhere(undefined)).toEqual({})
+    expect(viewWhere(undefined, CTX)).toEqual({})
+  })
+
+  // A RANGE WITH NO USABLE BOUNDS NARROWS NOTHING, by the same rule as a typo.
+  it.each([
+    [undefined, undefined],
+    ['2026-13-01', undefined],
+    ['2026-02-30', undefined],
+    ['10/01/2026', undefined],
+    ['2026-10-07', '2026-10-01'],
+  ])('pickup with from=%s to=%s narrows nothing', (from, to) => {
+    expect(viewWhere('pickup', { ...CTX, from, to })).toEqual({})
+    expect(viewWhere('delivery', { ...CTX, from, to })).toEqual({})
   })
 
   // THE CASE-SENSITIVITY IS DELIBERATE and asserted so it cannot drift into a
@@ -65,7 +97,7 @@ describe('an unknown view narrows nothing', () => {
   it('recognises exactly the registry names', () => {
     for (const name of Object.keys(LOAD_VIEWS)) {
       expect(isLoadViewName(name)).toBe(true)
-      expect(viewWhere(name)).not.toEqual({})
+      expect(viewWhere(name, CTX)).not.toEqual({})
     }
     expect(isLoadViewName('podmissing')).toBe(false)
   })
@@ -79,18 +111,33 @@ describe('every view excludes the archive', () => {
   //
   // ASSERTED ON THE PREDICATE ITSELF, per view, because the agreement test
   // cannot: both of its sides call these functions.
-  it.each(Object.keys(LOAD_VIEWS) as LoadViewName[])(
-    '%s carries the billing-axis clause',
+  //
+  // UNPAID SAYS IT WITH AN INCLUDE-LIST rather than the shared `not`, so its
+  // clause is checked for what it names. The two range views are the
+  // deliberate exception, asserted below so the exception cannot spread.
+  it.each(QUEUE_VIEWS)('%s carries the billing-axis clause', (name) => {
+    const where = viewWhere(name, CTX)
+    if (name === 'unpaid') {
+      const billing = where.billingStatus as { in: string[] }
+      expect(billing.in.length).toBeGreaterThan(0)
+      expect(billing.in).not.toContain('CLOSED_IN_DATATRUCK')
+      return
+    }
+    expect(where).toMatchObject({
+      billingStatus: { not: 'CLOSED_IN_DATATRUCK' },
+    })
+  })
+
+  it.each(RANGE_VIEWS)(
+    '%s keeps the archive, because it is a filter',
     (name) => {
-      expect(viewWhere(name)).toMatchObject({
-        billingStatus: { not: 'CLOSED_IN_DATATRUCK' },
-      })
+      expect(viewWhere(name, CTX)).not.toHaveProperty('billingStatus')
     },
   )
 
   it('and none of them is soft-deleted freight', () => {
     for (const name of Object.keys(LOAD_VIEWS)) {
-      expect(viewWhere(name)).toMatchObject({ deletedAt: null })
+      expect(viewWhere(name, CTX)).toMatchObject({ deletedAt: null })
     }
   })
 })
@@ -105,17 +152,34 @@ describe('the loads list resolves the view it is given', () => {
   // integration suite stayed green, because it calls `viewWhere` directly.
   const source = readFileSync(LOADS_PAGE, 'utf8')
 
+  // SINCE §6.7 THE PAGE BUILDS ITS WHERE IN `load-list.ts`, so the claim is
+  // split across two files: the page reads the URL and hands it over, and the
+  // builder resolves `?view=` through `viewWhere`.
+  const builder = readFileSync(
+    join(process.cwd(), 'src', 'lib', 'load-list.ts'),
+    'utf8',
+  )
+
   it('reads ?view= and resolves it through viewWhere', () => {
-    expect(source).toContain("typeof params['view'] === 'string'")
-    expect(source).toContain('viewWhere(viewParam)')
+    expect(source).toMatch(
+      /^\s*const listParams = readLoadListParams\(params\)$/m,
+    )
+    expect(source).toMatch(
+      /^\s*const where = loadListWhere\(listParams, scope, ctx\)$/m,
+    )
+    expect(builder).toContain("view: one('view')")
+    expect(builder).toMatch(/^\s*view: viewWhere\(params\.view, \{$/m)
   })
 
   // BOTH QUERIES, NOT ONE. The count feeds the footer and the findMany feeds
   // the rows; applying the view to only one produces "1–50 of 13,500" over a
   // list of 101 — the same disagreement the ruling closed, one level down.
   it('applies it to the row query AND the matching count', () => {
-    const spreads = [...source.matchAll(/\.\.\.namedView/g)]
-    expect(spreads.length).toBeGreaterThanOrEqual(2)
+    expect(source).toMatch(/tx\.load\.count\(\{ where: listWhere\(where\) \}\)/)
+    expect(source).toMatch(/^\s*where: listWhere\(where\),$/m)
+    expect(builder).toMatch(
+      /return and\(where\.base, where\.status, where\.billing, where\.view\)/,
+    )
   })
 
   it('and the dashboard links by name, never by a raw filter', () => {

@@ -79,11 +79,16 @@ export const SELECTABLE_AUTHORITY = {
 export function listedAuthorities(
   tx: TxClient,
   companyScopes: readonly string[],
-): Promise<{ id: string; name: string }[]> {
+): Promise<
+  { id: string; name: string; timezone: string; isDefault: boolean }[]
+> {
   return tx.company.findMany({
     where: { ...LISTED_AUTHORITY, ...companyIdScopeFilter(companyScopes) },
     orderBy: { name: 'asc' },
-    select: { id: true, name: true },
+    // The zone and the default flag ride along for the loads list's date views
+    // (§6.7), which read "today" in the default authority's zone. One query
+    // either way.
+    select: { id: true, name: true, timezone: true, isDefault: true },
   })
 }
 

@@ -2,7 +2,9 @@
 import type { Warning, WarningName } from '@/lib/warnings'
 import { WarningCell } from '@/components/WarningCell'
 
+import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
+import { CopyLoadNumber } from './CopyLoadNumber'
 import { Table, type Column } from '@/components/ui/Table'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -15,8 +17,9 @@ import type {
   LoadOperationalStatus,
 } from '@/generated/prisma/client'
 
-// The Loads screen's table. TEN COLUMNS DECLARED — nine when the organization
-// holds a single authority (§6.3) — AND NINE SHOWN, behind §7.1.4's chooser.
+// The Loads screen's table. TWELVE COLUMNS DECLARED — eleven when the
+// organization holds a single authority (§6.3) — AND NINE SHOWN, behind §7.1.4's
+// chooser. Driver and DEL date arrived with §6.7 on 2026-10-08.
 //
 // This comment said "eight, or seven" and was accurate when it was written. The
 // warnings column arrived on 2026-09-20, took the count to ten for every
@@ -31,9 +34,15 @@ export interface LoadRow {
   /** Amazon's Trip ID, or whatever the broker calls this freight. */
   reference: string | null
   companyName: string
+  customerId: string
   customerName: string
+  /** Both seats when there are two, primary first (§6.7 item 3). */
+  drivers: readonly { id: string; name: string }[]
   pickup: string
   delivery: string
+  /** The final delivery's local date, already formatted (§6.7 item 5). */
+  deliveryDate: string
+  truckId: string | null
   truck: string
   operationalStatus: LoadOperationalStatus
   billingStatus: LoadBillingStatus
@@ -65,9 +74,14 @@ interface LoadsTableProps {
     reference: string
     company: string
     customer: string
+    driver: string
     pickup: string
     delivery: string
+    deliveryDate: string
     truck: string
+    copy: string
+    copied: string
+    copyFailed: string
     status: string
     billing: string
     rate: string
@@ -80,6 +94,27 @@ interface LoadsTableProps {
   /** Pre-translated maps. Functions cannot cross to a client component. */
   statusLabels: Record<string, string>
   billingLabels: Record<string, string>
+  /**
+   * Which records this role may open (§6.7 item 3). A role without `read` on
+   * the target gets the name as plain text, because a link that 404s is a
+   * broken screen rather than a permission.
+   */
+  mayOpen: { customer: boolean; driver: boolean; truck: boolean }
+}
+
+/**
+ * A name that opens its record, raised above the row's overlay so clicking it
+ * opens the record and clicking the rest of the cell opens the load (§7.1).
+ */
+function RecordLink({ href, children }: { href: string; children: string }) {
+  return (
+    <Link
+      href={href}
+      className="relative z-10 text-ink underline-offset-2 hover:text-accent hover:underline"
+    >
+      {children}
+    </Link>
+  )
 }
 
 export function LoadsTable({
@@ -89,6 +124,7 @@ export function LoadsTable({
   labels,
   statusLabels,
   billingLabels,
+  mayOpen,
 }: LoadsTableProps) {
   const params = useSearchParams()
   const router = useRouter()
@@ -109,7 +145,7 @@ export function LoadsTable({
       // Never truncated. These are the fields people copy and read down a
       // phone.
       render: (row) => (
-        <span className="flex flex-col">
+        <span className="inline-flex flex-col align-middle">
           <span className="z-identifier">{row.loadNumber}</span>
           {row.reference === null ? null : (
             <span className="font-mono text-xs text-ink-3" dir="ltr">
@@ -117,6 +153,17 @@ export function LoadsTable({
             </span>
           )}
         </span>
+      ),
+      // §6.7 item 4: outside the row's named link, which `trailing` is for.
+      trailing: (row) => (
+        <CopyLoadNumber
+          value={row.loadNumber}
+          labels={{
+            copy: labels.copy,
+            copied: labels.copied,
+            failed: labels.copyFailed,
+          }}
+        />
       ),
     },
     ...(showCompanyColumn
@@ -133,7 +180,35 @@ export function LoadsTable({
       key: 'customer',
       header: labels.customer,
       truncate: true,
-      render: (row) => row.customerName,
+      render: (row) =>
+        mayOpen.customer ? (
+          <RecordLink href={`/brokers/${row.customerId}`}>
+            {row.customerName}
+          </RecordLink>
+        ) : (
+          row.customerName
+        ),
+    },
+    {
+      key: 'driver',
+      header: labels.driver,
+      truncate: true,
+      // BOTH SEATS, each its own link. An empty seat is an em dash, never blank.
+      render: (row) =>
+        row.drivers.length === 0
+          ? '—'
+          : row.drivers.map((driver, index) => (
+              <span key={driver.id}>
+                {index > 0 ? ' · ' : null}
+                {mayOpen.driver ? (
+                  <RecordLink href={`/drivers/${driver.id}`}>
+                    {driver.name}
+                  </RecordLink>
+                ) : (
+                  driver.name
+                )}
+              </span>
+            )),
     },
     {
       key: 'pickup',
@@ -148,9 +223,23 @@ export function LoadsTable({
       render: (row) => row.delivery,
     },
     {
+      key: 'deliveryDate',
+      header: labels.deliveryDate,
+      render: (row) => (
+        <span className="font-mono tabular-nums">{row.deliveryDate}</span>
+      ),
+    },
+    {
       key: 'truck',
       header: labels.truck,
-      render: (row) => <span className="z-identifier">{row.truck}</span>,
+      render: (row) =>
+        mayOpen.truck && row.truckId !== null ? (
+          <span className="z-identifier">
+            <RecordLink href={`/trucks/${row.truckId}`}>{row.truck}</RecordLink>
+          </span>
+        ) : (
+          <span className="z-identifier">{row.truck}</span>
+        ),
     },
     {
       key: 'status',
