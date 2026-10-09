@@ -1982,6 +1982,9 @@ and only what somebody deliberately took away stays away.
 Upcoming and Unpaid, billing, and authority. It never wraps. It carries no group
 labels, because every chip already says what it is, and it scrolls sideways
 rather than growing a third row when a carrier has more authorities than fit.
+**Authority chips are capped at 128 px and truncate, with the full name as the
+chip's title** _(added 2026-10-09 after the browser walk measured row one 50 px
+past 1920 on dev's five authorities; with the cap it fits)._
 Row two holds the reference search; a **Filters** button with a badge counting
 the active filters inside it; the Columns chooser; density; and Clear filters.
 The **Filters** popover holds the two date presets, the pickup range, the
