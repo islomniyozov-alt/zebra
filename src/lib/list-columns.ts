@@ -19,40 +19,96 @@
 export const TABLE_COLUMN_CAP = 9
 
 /**
- * Which columns to render, from what this user has stored.
- *
- * ── TWO CASES THAT BOTH LOOK LIKE "EVERYTHING" ────────────────────────────
- *
- * `readGridColumns` returns the whole available list when no preference exists —
- * sensible for a grid of eight columns, and the throw for these two. So a set
- * that is literally all of them is read as "never chosen" and becomes the
- * default. Somebody who ticks every box is also asking for more than nine, and
- * the default set is the only honest answer to that.
- *
- * ── AND THE SLICE IS NOT DECORATION (§7.1.7) ──────────────────────────────
- *
- * A preference row outlives every deploy and can be edited by hand, so a stored
- * list naming ten columns that all still exist can arrive here. Handing it to
- * `Table` would 500 the page for one person in a way nobody else could
- * reproduce — which is strictly worse than the bug this module fixes, because it
- * would not show up in any live check.
+ * Columns the cap never drops (§7.1.7). An absent warnings column reads as
+ * "nothing wrong", which is the one thing a hidden column must not be able to
+ * say.
  */
-export function visibleWithinCap(
+export const NEVER_CAPPED: readonly string[] = ['warnings']
+
+/**
+ * At most `cap` columns, dropping from the END and skipping `NEVER_CAPPED`.
+ *
+ * A preference row outlives every deploy and can be edited by hand, so more
+ * visible columns than the cap can arrive here. Handing them to `Table` would
+ * 500 the page for one person in a way nobody else could reproduce. Dropping
+ * from the end keeps the identifying columns, which come first.
+ */
+export function capColumns(visible: readonly string[], cap: number): string[] {
+  const kept = [...visible]
+  for (let index = kept.length - 1; kept.length > cap && index > 0; index--) {
+    if (!NEVER_CAPPED.includes(kept[index]!)) kept.splice(index, 1)
+  }
+  return kept
+}
+
+/**
+ * What a person's stored column choice says, read off whatever is stored
+ * (TMS-DESIGN-SYSTEM.md §6.7, owner's ruling of 2026-10-09).
+ *
+ * THE MEMORY IS THE SET THEY HID, `{ hidden: [...] }`, so a column added later
+ * appears for everyone. `hidden: null` means "never chose": the grid's
+ * defaults apply.
+ *
+ * AN ARRAY IS THE OLD SHAPE, the set they SHOWED, and is migrated here: hidden
+ * is everything the grid offers that the array leaves out, minus the columns
+ * that did not exist while the old shape was current (`addedSinceLegacy`),
+ * because leaving out a column you never saw is not hiding it. `migrated` tells
+ * the caller to write the new shape back. An old array that names nothing this
+ * grid has, or names all of it, was always read as "never chose", and still is.
+ */
+export function readColumnMemory(
+  stored: unknown,
+  available: readonly string[],
+  addedSinceLegacy: readonly string[] = [],
+): { hidden: string[] | null; migrated: boolean } {
+  if (Array.isArray(stored)) {
+    const shown = new Set(stored.filter((key) => typeof key === 'string'))
+    const kept = available.filter((key) => shown.has(key))
+    if (kept.length === 0 || kept.length === available.length) {
+      return { hidden: null, migrated: false }
+    }
+    return {
+      hidden: available.filter(
+        (key) => !shown.has(key) && !addedSinceLegacy.includes(key),
+      ),
+      migrated: true,
+    }
+  }
+  if (
+    stored !== null &&
+    typeof stored === 'object' &&
+    Array.isArray((stored as { hidden?: unknown }).hidden)
+  ) {
+    const hidden = (stored as { hidden: unknown[] }).hidden.filter(
+      (key): key is string => typeof key === 'string',
+    )
+    return { hidden, migrated: false }
+  }
+  return { hidden: null, migrated: false }
+}
+
+/**
+ * The columns to render, in the table's own order, inside the grid's cap.
+ *
+ * NEVER BLANK, AND NEVER WITHOUT THE FIRST COLUMN, which carries the row's link
+ * and its accessible name. A hidden set that would leave nothing falls back to
+ * the defaults, because a table of no columns reads as a broken page rather
+ * than as a preference.
+ */
+export function visibleFromMemory(
   available: readonly string[],
   defaultHidden: readonly string[],
-  stored: readonly string[],
+  hidden: readonly string[] | null,
+  cap: number = TABLE_COLUMN_CAP,
 ): string[] {
-  const kept = available.filter((key) => stored.includes(key))
-  // EMPTY COUNTS AS NEVER CHOSEN TOO. `visibleColumns` already falls back to
-  // everything when a stored list names nothing this table still has, and
-  // `saveGridColumns` refuses an empty choice — but a direct caller handing this
-  // `[]` would otherwise get a table of one column, which reads as a broken page
-  // rather than as a preference.
-  const chosen =
-    kept.length === 0 || kept.length === available.length
-      ? available.filter((key) => !defaultHidden.includes(key))
-      : kept
-  return chosen.slice(0, TABLE_COLUMN_CAP)
+  const hide = hidden ?? defaultHidden
+  let visible = available.filter(
+    (key, index) => index === 0 || !hide.includes(key),
+  )
+  if (visible.length <= 1 && available.length > 1) {
+    visible = available.filter((key) => !defaultHidden.includes(key))
+  }
+  return capColumns(visible, cap)
 }
 
 // ── /loads ────────────────────────────────────────────────────────────────
@@ -65,10 +121,10 @@ export const LOAD_COLUMN_KEYS = [
   'loadNumber',
   'company',
   'customer',
-  'driver',
   'pickup',
   'delivery',
   'deliveryDate',
+  'driver',
   'truck',
   'status',
   'billing',
@@ -81,17 +137,25 @@ export const LOAD_COLUMN_KEYS = [
  * whole screens of its own (§6.2.8). The operational badge is the dispatcher's
  * question and stays.
  *
- * §6.7 added Driver and DEL date, which took the declared count to twelve, so
- * rate and pickup start hidden as well. Pickup is the one column that brief
- * names nowhere. The authority column is NOT hidden, because it tells the
- * carriers' freight apart (`tests/list-columns.test.tsx`). The chooser restores
- * any of the three.
+ * §6.7 added Driver and DEL date, which took the declared count to twelve. By
+ * the owner's ruling of 2026-10-09 only rate and billing start hidden, which
+ * shows ten with more than one authority — so `/loads` is capped at ten
+ * (`GRID_COLUMN_CAP`, §7.1.7 amended).
  *
  * WARNINGS IS NOT IN HERE, DELIBERATELY. An absent warnings column reads as
  * "nothing wrong", which is the one thing a hidden column must not be able to
  * say.
  */
-export const LOAD_COLUMNS_HIDDEN = ['billing', 'rate', 'pickup'] as const
+export const LOAD_COLUMNS_HIDDEN = ['billing', 'rate'] as const
+
+/**
+ * The columns `/loads` gained after column memory changed shape (§6.7): an old
+ * saved choice never saw them, so its migration does not count them as hidden.
+ */
+export const LOAD_COLUMNS_ADDED_SINCE_LEGACY = [
+  'driver',
+  'deliveryDate',
+] as const
 
 // ── /trucks ───────────────────────────────────────────────────────────────
 

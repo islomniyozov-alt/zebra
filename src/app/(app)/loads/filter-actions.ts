@@ -6,6 +6,15 @@ import {
   loadFilterOptions,
   type FilterOption,
 } from '@/lib/load-filter-options'
+import { recentLoadNotes, type LoadNote } from '@/lib/load-notes'
+
+/**
+ * A row's notes, read when its expand opens (§6.7 item 8). Under `read load`:
+ * the notes belong to a load the viewer can already see.
+ */
+export async function loadNotesAction(loadId: string): Promise<LoadNote[]> {
+  return withCurrentOrg('read', 'load', (tx) => recentLoadNotes(tx, loadId))
+}
 
 /**
  * The typeahead's options, read on first focus (§6.7 item 2).

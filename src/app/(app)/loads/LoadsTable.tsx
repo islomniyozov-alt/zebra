@@ -3,8 +3,17 @@ import type { Warning, WarningName } from '@/lib/warnings'
 import { WarningCell } from '@/components/WarningCell'
 
 import Link from 'next/link'
+import { useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { CopyLoadNumber } from './CopyLoadNumber'
+import {
+  ExpandToggle,
+  RowDetail,
+  RowMenu,
+  type ExpandLabels,
+  type MenuLabels,
+  type RowStop,
+} from './RowParts'
 import { Table, type Column } from '@/components/ui/Table'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -50,11 +59,23 @@ export interface LoadRow {
   rate: string
   isCancelled: boolean
   warnings: readonly Warning[]
+  /** Every stop in order, for the expand (§6.7 item 8). */
+  stops: readonly RowStop[]
+  /**
+   * Whether the menu offers Attach POD: the role may upload, and the load is
+   * not cancelled, not at POD received, and not direct-settled. Decided on the
+   * server, where the permission is.
+   */
+  attachPod: boolean
 }
 
 interface LoadsTableProps {
   rows: readonly LoadRow[]
   showCompanyColumn: boolean
+  /** The grid's cap, from `gridColumnCap` (§7.1.7): ten on this list. */
+  columnCap: number
+  expandLabels: ExpandLabels
+  menuLabels: MenuLabels
   /**
    * The columns this person keeps (§7.1.7). Decided on the server, where the
    * preference row is — and where the chooser that changes them is rendered,
@@ -120,6 +141,9 @@ function RecordLink({ href, children }: { href: string; children: string }) {
 export function LoadsTable({
   rows,
   showCompanyColumn,
+  columnCap,
+  expandLabels,
+  menuLabels,
   visible,
   labels,
   statusLabels,
@@ -130,6 +154,16 @@ export function LoadsTable({
   const router = useRouter()
   const pathname = usePathname()
   const filtered = params.size > 0
+  // WHICH ROWS ARE OPEN. Component state and nothing else (§6.7 item 8): a
+  // reload closes them all, and nothing is stored.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
+  const toggle = (id: string) =>
+    setExpanded((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
 
   const columns: Column<LoadRow>[] = [
     {
@@ -190,6 +224,25 @@ export function LoadsTable({
         ),
     },
     {
+      key: 'pickup',
+      header: labels.pickup,
+      truncate: true,
+      render: (row) => row.pickup,
+    },
+    {
+      key: 'delivery',
+      header: labels.delivery,
+      truncate: true,
+      render: (row) => row.delivery,
+    },
+    {
+      key: 'deliveryDate',
+      header: labels.deliveryDate,
+      render: (row) => (
+        <span className="font-mono tabular-nums">{row.deliveryDate}</span>
+      ),
+    },
+    {
       key: 'driver',
       header: labels.driver,
       truncate: true,
@@ -209,25 +262,6 @@ export function LoadsTable({
                 )}
               </span>
             )),
-    },
-    {
-      key: 'pickup',
-      header: labels.pickup,
-      truncate: true,
-      render: (row) => row.pickup,
-    },
-    {
-      key: 'delivery',
-      header: labels.delivery,
-      truncate: true,
-      render: (row) => row.delivery,
-    },
-    {
-      key: 'deliveryDate',
-      header: labels.deliveryDate,
-      render: (row) => (
-        <span className="font-mono tabular-nums">{row.deliveryDate}</span>
-      ),
     },
     {
       key: 'truck',
@@ -295,6 +329,33 @@ export function LoadsTable({
   return (
     <Table
       columns={keepColumns(columns, visible)}
+      columnCap={columnCap}
+      rowLead={(row) => (
+        <ExpandToggle
+          open={expanded.has(row.id)}
+          onToggle={() => toggle(row.id)}
+          loadNumber={row.loadNumber}
+          labels={expandLabels}
+        />
+      )}
+      rowDetail={(row) =>
+        expanded.has(row.id) ? (
+          <RowDetail
+            loadId={row.id}
+            stops={row.stops}
+            warnings={row.warnings}
+            labels={expandLabels}
+          />
+        ) : null
+      }
+      rowActions={(row) => (
+        <RowMenu
+          loadId={row.id}
+          loadNumber={row.loadNumber}
+          attachPod={row.attachPod}
+          labels={menuLabels}
+        />
+      )}
       rows={rows}
       rowKey={(row) => row.id}
       rowHref={(row) => `/loads/${row.id}`}

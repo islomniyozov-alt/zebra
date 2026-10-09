@@ -108,12 +108,16 @@ describe('every authority list reads one rule', () => {
     for (const file of [
       'src/app/(app)/payments/new/page.tsx',
       'src/app/(app)/receivables/factoring/page.tsx',
-      'src/app/(app)/loads/page.tsx',
     ]) {
       expect(readFileSync(file, 'utf8'), file).toMatch(
         /listedAuthorities\(tx, session\.companyScopes\)/,
       )
     }
+    // The loads list's chips: its reads moved to `readLoadListData` (§6.7
+    // chain two), which the page calls with the session's scopes.
+    expect(readFileSync('src/lib/load-list-page.ts', 'utf8')).toMatch(
+      /^\s*const authorities = await listedAuthorities\(tx, companyScopes\)$/m,
+    )
     expect(readFileSync('src/lib/dashboard.ts', 'utf8')).toMatch(
       /listedAuthorities\(tx, companyIds\)/,
     )

@@ -4,18 +4,25 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import { gridResource, readGridColumns } from '@/lib/grid-columns'
+import {
+  gridColumnCap,
+  gridResource,
+  readGridColumns,
+  saveGridColumns,
+} from '@/lib/grid-columns'
 import { can } from '@/lib/permissions'
 import {
   BATCH_COLUMN_KEYS,
   BATCH_COLUMNS_HIDDEN,
   columnKeysFor,
   LOAD_COLUMN_KEYS,
+  LOAD_COLUMNS_ADDED_SINCE_LEGACY,
   LOAD_COLUMNS_HIDDEN,
+  readColumnMemory,
   TABLE_COLUMN_CAP,
   TRUCK_COLUMN_KEYS,
   TRUCK_COLUMNS_HIDDEN,
-  visibleWithinCap,
+  visibleFromMemory,
 } from '@/lib/list-columns'
 
 // ---------------------------------------------------------------------------
@@ -142,22 +149,26 @@ describe('whatever is stored, the table gets nine columns or fewer', () => {
     for (const showCompany of [true, false]) {
       it(`${grid.name}, authority column ${showCompany ? 'shown' : 'absent'}`, () => {
         const available = columnKeysFor(grid.keys, showCompany)
-        // FOUR STORED STATES, INCLUDING THE TWO THAT ARRIVE FROM REAL ROWS:
-        // `readGridColumns` returns everything when no preference exists, and a
-        // row written before this cap existed can name more than nine columns
-        // that all still exist.
-        const stored = [
-          available, // never chosen
-          [], // a row that names nothing this table has
-          [...available].reverse(), // ticked everything, in another order
-          available.slice(0, 10), // ten real columns, hand-edited or historic
+        const cap =
+          grid.name === '/loads'
+            ? gridColumnCap('loads.loads')
+            : TABLE_COLUMN_CAP
+        // FIVE STORED STATES: never chosen, a hidden set naming nothing (every
+        // column shown), a hidden set naming everything, and the two OLD
+        // shapes a real row can still hold — a "shown" list of everything and
+        // a "shown" list of ten real columns.
+        const stored: unknown[] = [
+          null,
+          { hidden: [] },
+          { hidden: [...available] },
+          [...available],
+          available.slice(0, 10),
         ]
-        for (const choice of stored) {
-          const visible = visibleWithinCap(available, grid.hidden, choice)
-          expect(visible.length).toBeLessThanOrEqual(TABLE_COLUMN_CAP)
-          // AND NOT EMPTY. An empty list renders one column — the anchor
-          // `keepColumns` keeps — which reads as a broken page, not a
-          // preference.
+        for (const value of stored) {
+          const { hidden } = readColumnMemory(value, available)
+          const visible = visibleFromMemory(available, grid.hidden, hidden, cap)
+          expect(visible.length).toBeLessThanOrEqual(cap)
+          // AND NOT EMPTY, and never without the column carrying the row link.
           expect(visible.length).toBeGreaterThan(0)
           expect(visible[0]).toBe(available[0])
         }
@@ -165,34 +176,65 @@ describe('whatever is stored, the table gets nine columns or fewer', () => {
     }
   }
 
-  it('a stored list of more than nine real columns is truncated, not handed on', () => {
-    // A SYNTHETIC GRID, because neither real one can express this case. `/loads`
-    // declares exactly ten columns with the authority one, so "ten stored" IS
-    // "everything" and comes back as the default nine whether the slice exists
-    // or not — the loop above passes this break on /loads for that reason and
-    // proves nothing there. Twelve columns with eleven stored is a genuine
-    // subset that is still over the cap, which is the only shape that isolates
-    // the slice.
-    const available = Array.from({ length: 12 }, (_, index) => `c${index}`)
-    const visible = visibleWithinCap(available, ['c11'], available.slice(0, 11))
-    expect(visible.length).toBe(TABLE_COLUMN_CAP)
-    expect(visible[0]).toBe('c0')
+  it('more visible columns than the cap are cut from the end, never warnings', () => {
+    const available = [...LOAD_COLUMN_KEYS]
+    // Somebody who restored rate and billing: twelve, against a cap of ten.
+    const visible = visibleFromMemory(available, LOAD_COLUMNS_HIDDEN, [], 10)
+    expect(visible).toHaveLength(10)
+    expect(visible).toContain('warnings')
+    expect(visible[0]).toBe('loadNumber')
   })
 
-  it('a stored choice is honoured, in the table order and not the stored one', () => {
-    const visible = visibleWithinCap(
-      ['a', 'b', 'c'],
-      ['c'],
-      ['c', 'a'], // ticked in the other order
-    )
-    expect(visible).toEqual(['a', 'c'])
+  it('a hidden set is honoured, in the table order', () => {
+    expect(visibleFromMemory(['a', 'b', 'c'], ['c'], ['b'])).toEqual(['a', 'c'])
   })
 
-  it('and the default set is what "everything" means', () => {
-    expect(visibleWithinCap(['a', 'b', 'c'], ['b'], ['a', 'b', 'c'])).toEqual([
-      'a',
-      'c',
+  it('no stored choice means the grid defaults', () => {
+    expect(visibleFromMemory(['a', 'b', 'c'], ['b'], null)).toEqual(['a', 'c'])
+  })
+})
+
+describe('column memory is the set a person HID (§6.7, 2026-10-09)', () => {
+  it('a column added later appears for somebody who saved a choice', () => {
+    // THE RULING'S POINT. They hid billing; a brand-new column is not in
+    // their hidden set, so they see it without re-ticking anything.
+    const { hidden } = readColumnMemory({ hidden: ['billing'] }, [
+      'loadNumber',
+      'billing',
+      'brandNew',
     ])
+    expect(
+      visibleFromMemory(['loadNumber', 'billing', 'brandNew'], [], hidden),
+    ).toEqual(['loadNumber', 'brandNew'])
+  })
+
+  it('an old "shown" list migrates to the columns it left out', () => {
+    const available = [...LOAD_COLUMN_KEYS]
+    // Saved before Driver and DEL date existed, with Truck unticked.
+    const shown = available.filter(
+      (key) => !['truck', 'driver', 'deliveryDate', 'rate'].includes(key),
+    )
+    const memory = readColumnMemory(
+      shown,
+      available,
+      LOAD_COLUMNS_ADDED_SINCE_LEGACY,
+    )
+    expect(memory.migrated).toBe(true)
+    // Truck and rate were left out deliberately; Driver and DEL date never
+    // existed for that person, so they are NOT hidden.
+    expect(memory.hidden).toEqual(['truck', 'rate'])
+  })
+
+  it('an old list that meant "never chose" stays the defaults', () => {
+    const available = ['a', 'b']
+    expect(readColumnMemory(['a', 'b'], available)).toEqual({
+      hidden: null,
+      migrated: false,
+    })
+    expect(readColumnMemory(['gone'], available)).toEqual({
+      hidden: null,
+      migrated: false,
+    })
   })
 })
 
@@ -201,12 +243,61 @@ describe('the cap lives in readGridColumns, so no grid can get past it', () => {
   // solve — this on their own; a fourth will be written by somebody who has not
   // read §7.1.7, and the only protection that survives that is the function they
   // cannot avoid calling.
+  const writes: unknown[] = []
   const txWith = (value: unknown) =>
     ({
       userPreference: {
-        findFirst: async () => (value === undefined ? null : { value }),
+        findFirst: async () =>
+          value === undefined ? null : { value, organizationId: 'o1' },
+        upsert: async (args: { update: { value: unknown } }) => {
+          writes.push(args.update.value)
+        },
       },
     }) as never
+
+  it('writes an old row back in the new shape, once, on read', async () => {
+    writes.length = 0
+    const visible = await readGridColumns(
+      txWith(['loadNumber', 'customer', 'status', 'warnings']),
+      'u1',
+      'loads.loads',
+      [...LOAD_COLUMN_KEYS],
+      LOAD_COLUMNS_HIDDEN,
+    )
+    expect(writes).toHaveLength(1)
+    const written = writes[0] as { hidden: string[] }
+    expect(written.hidden).not.toContain('driver')
+    expect(written.hidden).toContain('truck')
+    // And what renders is what the migrated memory says, Driver included.
+    expect(visible).toContain('driver')
+    expect(visible).not.toContain('truck')
+  })
+
+  it('and writes nothing for a row already in the new shape', async () => {
+    writes.length = 0
+    await readGridColumns(
+      txWith({ hidden: ['rate'] }),
+      'u1',
+      'loads.loads',
+      [...LOAD_COLUMN_KEYS],
+      LOAD_COLUMNS_HIDDEN,
+    )
+    expect(writes).toHaveLength(0)
+  })
+
+  it('saving stores what was offered and left unticked', async () => {
+    writes.length = 0
+    const result = await saveGridColumns(
+      txWith(undefined),
+      'o1',
+      'u1',
+      'loads.loads',
+      ['loadNumber', 'customer', 'warnings'],
+      ['loadNumber', 'customer', 'truck', 'rate', 'warnings'],
+    )
+    expect(result).toEqual({ ok: true })
+    expect(writes).toEqual([{ hidden: ['truck', 'rate'] }])
+  })
 
   it('with no stored row at all', async () => {
     const visible = await readGridColumns(
@@ -297,17 +388,53 @@ describe('what is never default-hidden', () => {
   })
 
   it('and hiding the defaults is enough to get under the cap', () => {
-    const grids: { keys: readonly string[]; hidden: readonly string[] }[] = [
-      { keys: LOAD_COLUMN_KEYS, hidden: LOAD_COLUMNS_HIDDEN },
-      { keys: TRUCK_COLUMN_KEYS, hidden: TRUCK_COLUMNS_HIDDEN },
+    const grids: {
+      keys: readonly string[]
+      hidden: readonly string[]
+      cap: number
+    }[] = [
+      {
+        keys: LOAD_COLUMN_KEYS,
+        hidden: LOAD_COLUMNS_HIDDEN,
+        cap: gridColumnCap('loads.loads'),
+      },
+      {
+        keys: TRUCK_COLUMN_KEYS,
+        hidden: TRUCK_COLUMNS_HIDDEN,
+        cap: gridColumnCap('trucks.trucks'),
+      },
     ]
     for (const grid of grids) {
-      // WITHOUT THE SLICE DOING THE WORK. The slice is the backstop for a stored
+      // WITHOUT THE CAP DOING THE WORK. The cap is the backstop for a stored
       // row; the default set has to stand on its own, or the first thing a new
       // user sees is a page whose last column was truncated silently.
       const shown = grid.keys.filter((key) => !grid.hidden.includes(key))
-      expect(shown.length).toBeLessThanOrEqual(TABLE_COLUMN_CAP)
+      expect(shown.length).toBeLessThanOrEqual(grid.cap)
     }
+  })
+
+  it('the loads list opens on the ten the owner named (2026-10-09)', () => {
+    // THE RULING, PINNED: only rate and billing start hidden.
+    expect([...LOAD_COLUMNS_HIDDEN].sort()).toEqual(['billing', 'rate'])
+    expect(
+      LOAD_COLUMN_KEYS.filter(
+        (key) => !LOAD_COLUMNS_HIDDEN.includes(key as never),
+      ),
+    ).toEqual([
+      'loadNumber',
+      'company',
+      'customer',
+      'pickup',
+      'delivery',
+      'deliveryDate',
+      'driver',
+      'truck',
+      'status',
+      'warnings',
+    ])
+    // Ten is over §7.1's nine, which is why `/loads` alone is capped at ten.
+    expect(gridColumnCap('loads.loads')).toBe(10)
+    expect(gridColumnCap('trucks.trucks')).toBe(TABLE_COLUMN_CAP)
   })
 })
 
@@ -339,6 +466,30 @@ describe('LoadsTable renders inside the cap with the authority column shown', ()
     rate: '$2,450.00',
     isCancelled: false,
     warnings: [],
+    stops: [],
+    attachPod: true,
+  }
+
+  const expandLabels = {
+    expand: 'Show details',
+    collapse: 'Hide details',
+    stops: 'Stops',
+    notes: 'Notes',
+    notesNone: 'None',
+    notesLoading: 'Loading',
+    notesFailed: 'Failed',
+    warnings: 'Warnings',
+    warningsNone: 'Nothing',
+    stopTypes: { PICKUP: 'Pickup', DELIVERY: 'Delivery', INTERMEDIATE: 'Stop' },
+    warningNames: {} as never,
+  }
+  const menuLabels = {
+    menu: 'Load actions',
+    open: 'Open',
+    copy: 'Copy load number',
+    copied: 'Load {n} copied',
+    copyFailed: 'Could not copy',
+    attachPod: 'Attach POD',
   }
 
   const labels = {
@@ -377,6 +528,9 @@ describe('LoadsTable renders inside the cap with the authority column shown', ()
         <LoadsTable
           rows={[row]}
           showCompanyColumn
+          columnCap={gridColumnCap('loads.loads')}
+          expandLabels={expandLabels}
+          menuLabels={menuLabels}
           visible={visible}
           labels={labels}
           statusLabels={{ IN_TRANSIT: 'In transit' }}
@@ -388,28 +542,32 @@ describe('LoadsTable renders inside the cap with the authority column shown', ()
     return screen.getAllByRole('columnheader')
   }
 
-  it('nine headers, not ten', async () => {
+  it('ten headers by default, the authority and warnings among them', async () => {
+    const available = columnKeysFor(LOAD_COLUMN_KEYS, true)
     const headers = await renderList(
-      visibleWithinCap(
-        columnKeysFor(LOAD_COLUMN_KEYS, true),
+      visibleFromMemory(
+        available,
         LOAD_COLUMNS_HIDDEN,
-        columnKeysFor(LOAD_COLUMN_KEYS, true),
+        null,
+        gridColumnCap('loads.loads'),
       ),
     )
-    expect(headers.length).toBe(TABLE_COLUMN_CAP)
-    // THE AUTHORITY COLUMN IS THE ONE THAT MADE IT TEN, so it had better be one
-    // of the nine: dropping it would be "fixed" by hiding the thing that
-    // distinguishes six carriers' freight from each other.
-    expect(headers.map((cell) => cell.textContent)).toContain('Authority')
-    expect(headers.map((cell) => cell.textContent)).toContain('Warnings')
+    expect(headers.length).toBe(10)
+    // THE AUTHORITY COLUMN tells six carriers' freight apart, so it had better
+    // be shown; dropping it would "fix" the cap by hiding the distinction.
+    const text = headers.map((cell) => cell.textContent)
+    expect(text).toContain('Authority')
+    expect(text).toContain('Pickup')
+    expect(text).toContain('Warnings')
+    expect(text).not.toContain('Rate')
   })
 
-  it('and the ten-column list is what throws, so the cap is load-bearing', async () => {
-    // THE FAILURE ITSELF, OBSERVED. Hand the component every column and §7.1's
-    // throw is what a dispatcher met on 2026-09-20 — proof that the nine above
-    // is the fix and not a coincidence of this fixture.
+  it('and every column at once is what throws, so the cap is load-bearing', async () => {
+    // THE FAILURE ITSELF, OBSERVED. Hand the component all twelve and the
+    // grid's cap throws — proof that the ten above is the cap and not a
+    // coincidence of this fixture.
     await expect(
       renderList(columnKeysFor(LOAD_COLUMN_KEYS, true)),
-    ).rejects.toThrow(/nine columns at most; this one has 12/)
+    ).rejects.toThrow(/10 columns at most; this one has 12/)
   })
 })

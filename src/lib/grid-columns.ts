@@ -1,7 +1,11 @@
 import type { Prisma } from '@/generated/prisma/client'
-import { readPreference, writePreference } from './preferences'
-import { visibleColumns } from './list-view'
-import { visibleWithinCap } from './list-columns'
+import { writePreference } from './preferences'
+import {
+  LOAD_COLUMNS_ADDED_SINCE_LEGACY,
+  readColumnMemory,
+  TABLE_COLUMN_CAP,
+  visibleFromMemory,
+} from './list-columns'
 import type { Resource } from './permissions'
 
 type TxClient = Prisma.TransactionClient
@@ -138,11 +142,47 @@ export async function readGridColumns(
   available: readonly string[],
   defaultHidden: readonly string[] = [],
 ): Promise<string[]> {
-  return visibleWithinCap(
+  const key = keyFor(grid)
+  const row = await tx.userPreference.findFirst({
+    where: { userId, key },
+    select: { value: true, organizationId: true },
+  })
+  const memory = readColumnMemory(
+    row?.value ?? null,
+    available,
+    ADDED_SINCE_LEGACY[grid] ?? [],
+  )
+  // MIGRATED ONCE, ON READ (§6.7): an old "shown" list is rewritten as the new
+  // "hidden" shape in the same transaction, so the next read has nothing to do.
+  if (memory.migrated && row) {
+    await writePreference(tx, row.organizationId, userId, key, {
+      hidden: memory.hidden,
+    })
+  }
+  return visibleFromMemory(
     available,
     defaultHidden,
-    visibleColumns(available, await readPreference(tx, userId, keyFor(grid))),
+    memory.hidden,
+    gridColumnCap(grid),
   )
+}
+
+/**
+ * How many columns a grid may show (§7.1.7). Nine, except `/loads`, which the
+ * owner's ruling of 2026-10-09 gives ten: its default names ten columns for a
+ * multi-authority carrier.
+ */
+export const GRID_COLUMN_CAP: Partial<Record<GridId, number>> = {
+  'loads.loads': 10,
+}
+
+export function gridColumnCap(grid: GridId): number {
+  return GRID_COLUMN_CAP[grid] ?? TABLE_COLUMN_CAP
+}
+
+/** Per grid, the columns an old "shown" list never had the chance to show. */
+const ADDED_SINCE_LEGACY: Partial<Record<GridId, readonly string[]>> = {
+  'loads.loads': LOAD_COLUMNS_ADDED_SINCE_LEGACY,
 }
 
 export type SaveColumnsFailure = 'unknown_grid' | 'no_columns'
@@ -152,12 +192,12 @@ export type SaveColumnsResult =
   | { ok: false; reason: SaveColumnsFailure }
 
 /**
- * Store a choice. Refuses an empty one.
+ * Store a choice as the set HIDDEN (§6.7): what the chooser offered and the
+ * person left unticked. Refuses an empty choice.
  *
  * A GRID WITH NO COLUMNS IS NOT A PREFERENCE, it is a blank screen somebody
- * would report as a broken page. `visibleColumns` already falls back to
- * everything on read, so this refusal is belt and braces on the way in — and the
- * two together mean neither a bad write nor a stale row can produce one.
+ * would report as a broken page. `visibleFromMemory` already refuses to render
+ * one, so this refusal is belt and braces on the way in.
  */
 export async function saveGridColumns(
   tx: TxClient,
@@ -165,10 +205,13 @@ export async function saveGridColumns(
   userId: string,
   grid: string,
   columns: readonly string[],
+  offered: readonly string[],
 ): Promise<SaveColumnsResult> {
   if (!isGridId(grid)) return { ok: false, reason: 'unknown_grid' }
-  const kept = columns.filter((name) => name.length > 0)
-  if (kept.length === 0) return { ok: false, reason: 'no_columns' }
-  await writePreference(tx, organizationId, userId, keyFor(grid), kept)
+  const kept = new Set(columns.filter((name) => name.length > 0))
+  if (kept.size === 0) return { ok: false, reason: 'no_columns' }
+  await writePreference(tx, organizationId, userId, keyFor(grid), {
+    hidden: offered.filter((name) => !kept.has(name)),
+  })
   return { ok: true }
 }

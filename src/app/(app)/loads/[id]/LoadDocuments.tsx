@@ -126,7 +126,13 @@ export function LoadDocuments({
           const active = busy === slot.type
 
           return (
-            <div key={slot.type}>
+            // `id="pod"` is where the loads list's Attach POD lands (§6.7
+            // item 8): the slot itself, so the upload is one click away.
+            <div
+              key={slot.type}
+              id={slot.type === 'POD' ? 'pod' : undefined}
+              className="scroll-mt-z6"
+            >
               <div className="flex items-center justify-between gap-z2">
                 <h3 className="text-sm font-medium text-ink-2">{slot.label}</h3>
                 {mayUpload ? (

@@ -61,6 +61,9 @@ export async function saveColumnsAction(
         session.userId,
         grid,
         columns,
+        // What the chooser offered, so the store can keep the set left
+        // unticked (§6.7: column memory is what a person hid).
+        available,
       ),
   )
 

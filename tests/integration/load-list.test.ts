@@ -4,13 +4,19 @@ import { withOrg, type TxClient } from '@/lib/tenancy'
 import { createBroker } from '@/lib/brokers'
 import { LOAD_WRITE_TIMEOUT_MS, createLoad } from '@/lib/loads'
 import { listedAuthorities } from '@/lib/companies'
-import { viewContext, type LoadViewName } from '@/lib/load-views'
+import { LOAD_VIEWS, viewContext, type LoadViewName } from '@/lib/load-views'
 import {
+  billingCountWhere,
   listWhere,
   loadListWhere,
+  READY,
   readLoadListParams,
+  readyCountWhere,
+  statusCountWhere,
   viewCountWhere,
 } from '@/lib/load-list'
+import { loadListCounts } from '@/lib/load-list-counts'
+import { readLoadListData, readLoadListExport } from '@/lib/load-list-page'
 import { zoneMidnight, zoneWallClock } from '@/lib/stop-time'
 import type {
   LoadBillingStatus,
@@ -242,6 +248,46 @@ beforeAll(async () => {
     'DELIVERED',
     'CLOSED_IN_DATATRUCK',
   )
+  // Ready to invoice, and finished with nobody on it: POD in, a rate, no
+  // invoice line, no seat. Its dates sit before every range below, so the only
+  // views it joins are the ones it is for.
+  await book(
+    'ready',
+    chicagoId,
+    [
+      { type: 'PICKUP', state: 'IL', at: zoneMidnight('2026-11-04', CHI) },
+      { type: 'DELIVERY', state: 'TX', at: zoneMidnight('2026-11-05', CHI) },
+    ],
+    'POD_RECEIVED',
+    'UNINVOICED',
+  )
+  await owner.load.update({
+    where: { id: ids['ready']! },
+    data: { linehaulCents: 120_000, totalRevenueCents: 120_000 },
+  })
+  // PRODUCTION'S SHAPE, AND THE ONE THAT CAUGHT A DEFECT ON DEV: direct-settled
+  // freight whose billing COLUMN says READY_TO_INVOICE while the Ready
+  // predicate refuses it. The grouped count once added the column's loads to
+  // the predicate's under the one key and showed 1,603 against 849; the seed
+  // makes no such row, so the agreement test agreed with the wrong number.
+  await book(
+    'relayReady',
+    chicagoId,
+    [
+      { type: 'PICKUP', state: 'IL', at: zoneMidnight('2026-11-04', CHI) },
+      { type: 'DELIVERY', state: 'TX', at: zoneMidnight('2026-11-05', CHI) },
+    ],
+    'POD_RECEIVED',
+    'READY_TO_INVOICE',
+  )
+  await owner.load.update({
+    where: { id: ids['relayReady']! },
+    data: {
+      linehaulCents: 90_000,
+      totalRevenueCents: 90_000,
+      directSettled: true,
+    },
+  })
   // The driver sits in the second seat of one load and the first of another.
   await owner.load.update({
     where: { id: ids['illinois']! },
@@ -303,7 +349,7 @@ describe('each counted chip agrees with its list, both above zero', () => {
 
   it('Unpaid: delivered or POD in, and still owed', async () => {
     const { listed, chipCount } = await read({ view: 'unpaid' }, 'unpaid')
-    expect(keysOf(listed)).toEqual(['owed'])
+    expect(keysOf(listed)).toEqual(['owed', 'ready', 'relayReady'])
     expect(chipCount).toBe(listed.length)
     expect(chipCount).toBeGreaterThan(0)
   }, 300_000)
@@ -368,5 +414,245 @@ describe('filters combine, and none overwrites another', () => {
     expect(listed).toHaveLength(Object.keys(ids).length)
     const { listed: none } = await read({ customer: 'no-such-broker' })
     expect(none).toEqual([])
+  }, 300_000)
+})
+
+// ---------------------------------------------------------------------------
+// CHAIN TWO (2026-10-09): THE GROUPED STATEMENT, THE EXPORT, THE BUDGET.
+// ---------------------------------------------------------------------------
+
+/** A Prisma `groupBy` result as a record, zeros left out like the SQL's. */
+const byKey = <K extends string>(
+  rows: readonly ({ _count: { _all: number } } & Record<K, string>)[],
+  key: K,
+): Record<string, number> =>
+  Object.fromEntries(rows.map((row) => [row[key], row._count._all]))
+
+/**
+ * Every number the bar shows, two ways: the one grouped SQL statement the page
+ * runs, and the Prisma predicates the rows are defined by.
+ */
+async function bothWays(query: Record<string, string>) {
+  return inOrg(async (tx) => {
+    const ctx = viewContext(await listedAuthorities(tx, []), NOW)
+    const params = readLoadListParams(query)
+    const where = loadListWhere(params, {}, ctx)
+    const sql = await loadListCounts(tx, params, [], ctx)
+    const [matching, status, billing, ready, upcoming, unpaid] =
+      await Promise.all([
+        tx.load.count({ where: listWhere(where) }),
+        tx.load.groupBy({
+          by: ['operationalStatus'],
+          where: statusCountWhere(where),
+          _count: { _all: true },
+        }),
+        tx.load.groupBy({
+          by: ['billingStatus'],
+          where: billingCountWhere(where),
+          _count: { _all: true },
+        }),
+        tx.load.count({ where: readyCountWhere(where) }),
+        tx.load.count({ where: viewCountWhere(where, 'upcoming', ctx) }),
+        tx.load.count({ where: viewCountWhere(where, 'unpaid', ctx) }),
+      ])
+    // THE PAGE'S RULE SINCE THE COUNTS WENT IN: the Ready chip is the
+    // predicate's count, and the column value of the same name is not a chip.
+    const prismaBilling = byKey(billing, 'billingStatus')
+    delete prismaBilling[READY]
+    if (ready > 0) prismaBilling[READY] = ready
+    return {
+      sql,
+      prisma: {
+        status: byKey(status, 'operationalStatus'),
+        billing: prismaBilling,
+        upcoming,
+        unpaid,
+        matching,
+      },
+    }
+  })
+}
+
+/** Filters crossed with every view, so a drift fails by the view's name. */
+const FILTER_SETS: Record<string, string>[] = [
+  {},
+  { status: 'BOOKED' },
+  { status: 'POD_RECEIVED' },
+  { billing: 'UNINVOICED' },
+  { billing: READY },
+]
+
+describe('the grouped statement agrees with the predicates, one case per view', () => {
+  const views = Object.keys(LOAD_VIEWS) as LoadViewName[]
+
+  it.each(views)(
+    '%s',
+    async (view) => {
+      // The ranges need bounds; they cover every fixture's dates.
+      const bounds = { from: '2026-11-01', to: '2026-11-30' }
+      let seen = 0
+      for (const filters of FILTER_SETS) {
+        const { sql, prisma } = await bothWays({ view, ...bounds, ...filters })
+        expect(sql, `${view} ${JSON.stringify(filters)}`).toEqual(prisma)
+        seen += prisma.matching
+      }
+      // NOT VACUOUS: every view lists something in at least one filter set, so
+      // agreement is never 0 = 0 for a view.
+      expect(seen, `${view} listed nothing in any filter set`).toBeGreaterThan(
+        0,
+      )
+    },
+    600_000,
+  )
+
+  it('and with no view, the broker and the driver set', async () => {
+    const sets: Record<string, string>[] = [
+      {},
+      { customer: brokerId },
+      { driver: driverId },
+      { ref: numbers['owed']! },
+    ]
+    for (const filters of sets) {
+      const { sql, prisma } = await bothWays(filters)
+      expect(sql, JSON.stringify(filters)).toEqual(prisma)
+    }
+  }, 600_000)
+})
+
+describe('the export is the list, every row of it', () => {
+  it.each<Record<string, string>>([
+    {},
+    { view: 'unpaid' },
+    { view: 'upcoming' },
+    { driver: '' },
+  ])(
+    'export row count equals the list for %j, above zero',
+    async (query) => {
+      const { listed } = await read(query)
+      const exported = await inOrg((tx) =>
+        readLoadListExport(
+          tx,
+          { userId, companyScopes: [] },
+          readLoadListParams(query),
+          NOW,
+        ),
+      )
+      expect(exported.rowCount).toBe(listed.length)
+      expect(exported.rowCount).toBeGreaterThan(0)
+      // A header and one line per row, CRLF-separated with a trailing break.
+      const lines = exported.body.replace(/^﻿/, '').split('\r\n')
+      expect(lines.filter((line) => line !== '')).toHaveLength(
+        exported.rowCount + 1,
+      )
+      // The person's visible columns, in order, as codes.
+      expect(
+        lines[0]!.startsWith('load_number,reference,authority,broker'),
+      ).toBe(true)
+    },
+    300_000,
+  )
+
+  it('names the file by the view and the default authority’s day', async () => {
+    const unpaid = await inOrg((tx) =>
+      readLoadListExport(
+        tx,
+        { userId, companyScopes: [] },
+        readLoadListParams({ view: 'unpaid' }),
+        NOW,
+      ),
+    )
+    expect(unpaid.filename).toBe('zebra-loads-unpaid-2026-11-18.csv')
+    const forged = await inOrg((tx) =>
+      readLoadListExport(
+        tx,
+        { userId, companyScopes: [] },
+        readLoadListParams({ view: 'x"; evil' }),
+        NOW,
+      ),
+    )
+    expect(forged.filename).toBe('zebra-loads-all-2026-11-18.csv')
+  }, 300_000)
+})
+
+describe('the budget: a render makes at most one counting statement', () => {
+  /**
+   * A transaction that counts its counting statements: every `count`,
+   * `groupBy` and `aggregate` on any model, and every raw statement that
+   * GROUPS. The warnings read is raw too, but reads rows, not totals.
+   */
+  function counting(tx: TxClient): { tx: TxClient; counted: () => number } {
+    let counted = 0
+    const COUNTING = new Set(['count', 'groupBy', 'aggregate'])
+    const proxy = new Proxy(tx as object, {
+      get(target, prop) {
+        const value = Reflect.get(target, prop)
+        if (prop === '$queryRaw') {
+          return (strings: TemplateStringsArray, ...values: unknown[]) => {
+            if (/GROUP BY/i.test(strings.join(''))) counted++
+            return (value as (...a: unknown[]) => unknown).call(
+              target,
+              strings,
+              ...values,
+            )
+          }
+        }
+        if (
+          value !== null &&
+          typeof value === 'object' &&
+          'findMany' in value
+        ) {
+          return new Proxy(value as object, {
+            get(model, method) {
+              const fn = Reflect.get(model, method)
+              if (typeof method === 'string' && COUNTING.has(method)) {
+                return (...args: unknown[]) => {
+                  counted++
+                  return (fn as (...a: unknown[]) => unknown).apply(model, args)
+                }
+              }
+              return typeof fn === 'function' ? fn.bind(model) : fn
+            },
+          })
+        }
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+    return { tx: proxy as TxClient, counted: () => counted }
+  }
+
+  it.each([
+    {},
+    { view: 'upcoming', status: 'BOOKED' },
+    { view: 'pickup', from: '2026-11-01', to: '2026-11-30', billing: READY },
+  ])(
+    'for %j',
+    async (query) => {
+      const used = await inOrg(async (tx) => {
+        const probe = counting(tx)
+        await readLoadListData(probe.tx, [], readLoadListParams(query), {
+          page: 1,
+          pageSize: 100,
+          now: NOW,
+          locale: 'en-US',
+        })
+        return probe.counted()
+      })
+      expect(used).toBe(1)
+    },
+    300_000,
+  )
+
+  it('and the broker and driver labels add reads, not counts', async () => {
+    const used = await inOrg(async (tx) => {
+      const probe = counting(tx)
+      await readLoadListData(
+        probe.tx,
+        [],
+        readLoadListParams({ customer: brokerId, driver: driverId }),
+        { page: 1, pageSize: 100, now: NOW, locale: 'en-US' },
+      )
+      return probe.counted()
+    })
+    expect(used).toBe(1)
   }, 300_000)
 })

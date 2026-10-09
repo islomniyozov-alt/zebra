@@ -152,11 +152,17 @@ describe('the loads list resolves the view it is given', () => {
   // integration suite stayed green, because it calls `viewWhere` directly.
   const source = readFileSync(LOADS_PAGE, 'utf8')
 
-  // SINCE §6.7 THE PAGE BUILDS ITS WHERE IN `load-list.ts`, so the claim is
-  // split across two files: the page reads the URL and hands it over, and the
-  // builder resolves `?view=` through `viewWhere`.
+  // SINCE §6.7 THE CLAIM SPANS THREE FILES: the page reads the URL and hands
+  // it to `readLoadListData`; that builds the `where` and reads the rows; the
+  // builder resolves `?view=` through `viewWhere`. The footer's total comes
+  // from the grouped count statement since chain two, and the integration
+  // agreement test is what holds it to the rows.
   const builder = readFileSync(
     join(process.cwd(), 'src', 'lib', 'load-list.ts'),
+    'utf8',
+  )
+  const reader = readFileSync(
+    join(process.cwd(), 'src', 'lib', 'load-list-page.ts'),
     'utf8',
   )
 
@@ -165,18 +171,22 @@ describe('the loads list resolves the view it is given', () => {
       /^\s*const listParams = readLoadListParams\(params\)$/m,
     )
     expect(source).toMatch(
-      /^\s*const where = loadListWhere\(listParams, scope, ctx\)$/m,
+      /readLoadListData\(tx, session\.companyScopes, listParams, \{/,
+    )
+    expect(reader).toMatch(
+      /^\s*const where = loadListWhere\(params, companyScopeFilter\(companyScopes\), ctx\)$/m,
     )
     expect(builder).toContain("view: one('view')")
     expect(builder).toMatch(/^\s*view: viewWhere\(params\.view, \{$/m)
   })
 
-  // BOTH QUERIES, NOT ONE. The count feeds the footer and the findMany feeds
-  // the rows; applying the view to only one produces "1–50 of 13,500" over a
-  // list of 101 — the same disagreement the ruling closed, one level down.
-  it('applies it to the row query AND the matching count', () => {
-    expect(source).toMatch(/tx\.load\.count\(\{ where: listWhere\(where\) \}\)/)
-    expect(source).toMatch(/^\s*where: listWhere\(where\),$/m)
+  // BOTH, NOT ONE. The count feeds the footer and the rows feed the table;
+  // applying the view to only one produces "1–50 of 13,500" over a list of
+  // 101 — the same disagreement the ruling closed, one level down.
+  it('applies it to the rows AND the footer total', () => {
+    expect(reader).toMatch(/readLoadRows\(tx, listWhere\(where\), \{/)
+    expect(reader).toMatch(/loadListCounts\(tx, params, companyScopes, ctx\)/)
+    expect(source).toMatch(/^\s*const matching = counts\.matching$/m)
     expect(builder).toMatch(
       /return and\(where\.base, where\.status, where\.billing, where\.view\)/,
     )

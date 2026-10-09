@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { TONE_STRIPE, type StatusTone } from '@/lib/status'
 import Link from 'next/link'
 import { cx } from '@/lib/cx'
+import { TABLE_COLUMN_CAP } from '@/lib/list-columns'
 
 // §7.1 — the primary interface of the application. Everything else is support.
 //
@@ -220,6 +221,21 @@ interface TableProps<Row> {
    * is the entire point of putting it there.
    */
   rowDetail?: (row: Row) => ReactNode
+  /**
+   * How many columns this grid may show (§7.1.7). Nine, except where a ruling
+   * says otherwise: `/loads` is ten by the owner's ruling of 2026-10-09.
+   * `GRID_COLUMN_CAP` in `grid-columns.ts` is where a grid's number lives.
+   */
+  columnCap?: number
+  /**
+   * A leading control cell, before the first column: the loads list's expand
+   * chevron (§6.7 item 8). A CONTROL, NOT A COLUMN — like the selection
+   * checkbox it is not counted against the cap, and it sits above the row's
+   * overlay so it can be clicked without opening the row.
+   */
+  rowLead?: (row: Row) => ReactNode
+  /** A trailing control cell after the last column: the row's menu. */
+  rowActions?: (row: Row) => ReactNode
 }
 
 export function Table<Row>({
@@ -238,7 +254,16 @@ export function Table<Row>({
   footRows,
   below,
   rowDetail,
+  columnCap = TABLE_COLUMN_CAP,
+  rowLead,
+  rowActions,
 }: TableProps<Row>) {
+  /** The cells that are controls rather than columns, for every colSpan. */
+  const controlCells =
+    (stripeTone ? 1 : 0) +
+    (selection ? 1 : 0) +
+    (rowLead ? 1 : 0) +
+    (rowActions ? 1 : 0)
   if (totals && columns[0]?.foot) {
     // The first foot cell carries the label, so a `foot` there would be
     // overwritten. Loud in development rather than silently dropped — the
@@ -249,11 +274,11 @@ export function Table<Row>({
         'carries the totals label. Move the sum to a money column.',
     )
   }
-  if (columns.length > 9) {
-    // §7.1. Anything beyond nine goes behind a column chooser. Failing loudly
+  if (columns.length > columnCap) {
+    // §7.1. Anything beyond the cap goes behind a column chooser. Failing loudly
     // in development beats discovering it on a 1080p screen at 6am.
     throw new Error(
-      `A table may show nine columns at most; this one has ${columns.length}. ` +
+      `A table may show ${columnCap} columns at most; this one has ${columns.length}. ` +
         'Put the rest behind a column chooser.',
     )
   }
@@ -273,6 +298,12 @@ export function Table<Row>({
               >
                 <span className="sr-only">{selection.label}</span>
               </th>
+            ) : null}
+            {rowLead ? (
+              <th
+                aria-hidden
+                className="sticky top-0 z-10 w-[28px] border-b border-border bg-surface-2 p-0"
+              />
             ) : null}
             {columns.map((column) => {
               const active = sort?.key === column.key
@@ -326,18 +357,19 @@ export function Table<Row>({
                 </th>
               )
             })}
+            {rowActions ? (
+              <th
+                aria-hidden
+                className="sticky top-0 z-10 w-[36px] border-b border-border bg-surface-2 p-0"
+              />
+            ) : null}
           </tr>
         </thead>
 
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td
-                colSpan={
-                  columns.length + (stripeTone ? 1 : 0) + (selection ? 1 : 0)
-                }
-                className="p-0"
-              >
+              <td colSpan={columns.length + controlCells} className="p-0">
                 {empty}
               </td>
             </tr>
@@ -401,6 +433,12 @@ export function Table<Row>({
                       ) : null}
                     </td>
                   ) : null}
+                  {rowLead ? (
+                    // `relative z-10`, like the checkbox: above the overlays.
+                    <td className="relative z-10 w-[28px] ps-z2 pe-0">
+                      {rowLead(row)}
+                    </td>
+                  ) : null}
                   {columns.map((column, index) => (
                     <td
                       key={column.key}
@@ -454,6 +492,11 @@ export function Table<Row>({
                       ) : null}
                     </td>
                   ))}
+                  {rowActions ? (
+                    <td className="relative z-10 w-[36px] pe-z2 ps-0 text-end">
+                      {rowActions(row)}
+                    </td>
+                  ) : null}
                 </tr>,
                 // THE CONTINUATION, IMMEDIATELY BENEATH. A second `<tr>` in the
                 // same table body, spanning every column, so it inherits the
@@ -467,8 +510,9 @@ export function Table<Row>({
                       <td aria-hidden className="w-[3px] p-0" />
                     ) : null}
                     {selection ? <td aria-hidden className="w-[32px]" /> : null}
+                    {rowLead ? <td aria-hidden className="w-[28px]" /> : null}
                     <td
-                      colSpan={columns.length}
+                      colSpan={columns.length + (rowActions ? 1 : 0)}
                       className="px-z3 py-z1 ps-z6 text-xs text-ink-2"
                     >
                       {detail}
@@ -497,6 +541,9 @@ export function Table<Row>({
               {selection ? (
                 <td aria-hidden className="border-t border-border-strong" />
               ) : null}
+              {rowLead ? (
+                <td aria-hidden className="border-t border-border-strong" />
+              ) : null}
               {columns.map((column, index) => (
                 <td
                   key={column.key}
@@ -515,6 +562,9 @@ export function Table<Row>({
                   )}
                 </td>
               ))}
+              {rowActions ? (
+                <td aria-hidden className="border-t border-border-strong" />
+              ) : null}
             </tr>
           </tfoot>
         ) : null}

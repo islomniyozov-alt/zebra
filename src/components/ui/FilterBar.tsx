@@ -40,6 +40,12 @@ export interface FilterGroup {
   id?: string
   label: string
   choices: readonly FilterChoice[]
+  /**
+   * Cap each chip's width and truncate, with the full label as its title. For
+   * chips that are names (the authorities), so a long legal name cannot push a
+   * one-row bar past 1920 (§6.7 chain two).
+   */
+  truncate?: boolean
 }
 
 /**
@@ -88,6 +94,27 @@ interface FilterBarProps {
    * they are set. Clearing always clears every key.
    */
   extraParams?: readonly string[]
+  /**
+   * `twoRows` (§6.7 chain two, the loads list): every chip on row one, which
+   * never wraps and scrolls sideways instead; the search, the screen's own
+   * controls and Clear filters on row two. Group labels are spoken, not shown,
+   * because every chip already says what it is. Default `wrap` is the bar every
+   * other screen has always had.
+   */
+  layout?: 'wrap' | 'twoRows'
+}
+
+/** A wrapper element only when `on`, so one tree serves both layouts. */
+function Wrap({
+  on,
+  className,
+  children,
+}: {
+  on: boolean
+  className: string
+  children: ReactNode
+}) {
+  return on ? <div className={className}>{children}</div> : <>{children}</>
 }
 
 export function FilterBar({
@@ -98,7 +125,9 @@ export function FilterBar({
   moreLabel,
   children,
   extraParams = [],
+  layout = 'wrap',
 }: FilterBarProps) {
+  const twoRows = layout === 'twoRows'
   const router = useRouter()
   const pathname = usePathname()
   const params = useSearchParams()
@@ -161,125 +190,156 @@ export function FilterBar({
     extraParams.some((param) => params.get(param) !== null)
 
   return (
-    <div className="flex flex-wrap items-center gap-z2 border-b border-border bg-surface px-gutter py-z2">
-      {groups.map((group) => (
-        <div key={group.id ?? group.param} className="flex items-center gap-z1">
-          <span className="text-xs font-medium uppercase tracking-[0.04em] text-ink-3">
-            {group.label}
-          </span>
-          {group.choices.map((choice) => {
-            const selected = params.get(group.param) === choice.value
-            return (
-              <button
-                key={choice.value}
-                type="button"
-                aria-pressed={selected}
-                onClick={() => toggle(group.param, choice.value)}
-                className={cx(
-                  'h-control-compact rounded-control border px-z2 text-xs font-medium',
-                  'transition-colors duration-120 ease-out',
-                  selected
-                    ? 'border-accent bg-accent-soft text-accent'
-                    : 'border-border-strong bg-surface text-ink-2 hover:bg-surface-3',
-                )}
-              >
-                {choice.label}
-                {choice.count === undefined ? null : (
-                  // Dimmer than the label and tabular, so a column of chips
-                  // stays scannable and the numbers line up rather than
-                  // jittering as they change.
-                  <span
-                    className={cx(
-                      'ms-z1 font-mono tabular-nums',
-                      selected ? 'text-accent' : 'text-ink-3',
-                    )}
-                  >
-                    {choice.count}
-                  </span>
-                )}
-              </button>
-            )
-          })}
-        </div>
-      ))}
-
-      {search ? (
-        <form
-          className="flex items-center gap-z1"
-          onSubmit={(event) => {
-            event.preventDefault()
-            const field = new FormData(event.currentTarget).get(search.param)
-            submitSearch(typeof field === 'string' ? field : '')
-          }}
-        >
-          <label
-            htmlFor={`filter-${search.param}`}
-            className="text-xs font-medium uppercase tracking-[0.04em] text-ink-3"
+    <div
+      data-filter-bar
+      className={cx(
+        'border-b border-border bg-surface px-gutter py-z2',
+        twoRows ? 'flex flex-col gap-z2' : 'flex flex-wrap items-center gap-z2',
+      )}
+    >
+      <Wrap
+        on={twoRows}
+        className="flex flex-nowrap items-center gap-z2 overflow-x-auto"
+      >
+        {groups.map((group, index) => (
+          <div
+            key={group.id ?? group.param}
+            role="group"
+            aria-label={group.label}
+            className={cx(
+              'flex shrink-0 items-center gap-z1',
+              twoRows && index > 0 && 'border-s border-border ps-z2',
+            )}
           >
-            {search.label}
-          </label>
-          <input
-            id={`filter-${search.param}`}
-            name={search.param}
-            type="search"
-            dir="ltr"
-            // `key` on the URL value so a cleared filter empties the box.
-            // Without it the input keeps what was typed while the table shows
-            // everything, which reads as a filter that stopped working.
-            key={params.get(search.param) ?? ''}
-            defaultValue={params.get(search.param) ?? ''}
-            placeholder={search.placeholder}
-            className="h-control-compact rounded-control border border-border-strong bg-surface px-z2 font-mono text-xs text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none"
-          />
-        </form>
-      ) : null}
+            <span
+              className={cx(
+                'text-xs font-medium uppercase tracking-[0.04em] text-ink-3',
+                twoRows && 'sr-only',
+              )}
+            >
+              {group.label}
+            </span>
+            {group.choices.map((choice) => {
+              const selected = params.get(group.param) === choice.value
+              return (
+                <button
+                  key={choice.value}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => toggle(group.param, choice.value)}
+                  title={group.truncate ? choice.label : undefined}
+                  className={cx(
+                    'h-control-compact rounded-control border px-z2 text-xs font-medium',
+                    'transition-colors duration-120 ease-out',
+                    group.truncate && 'max-w-[128px] truncate',
+                    selected
+                      ? 'border-accent bg-accent-soft text-accent'
+                      : 'border-border-strong bg-surface text-ink-2 hover:bg-surface-3',
+                  )}
+                >
+                  {choice.label}
+                  {choice.count === undefined ? null : (
+                    // Dimmer than the label and tabular, so a column of chips
+                    // stays scannable and the numbers line up rather than
+                    // jittering as they change.
+                    <span
+                      className={cx(
+                        'ms-z1 font-mono tabular-nums',
+                        selected ? 'text-accent' : 'text-ink-3',
+                      )}
+                    >
+                      {choice.count}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        ))}
+      </Wrap>
 
-      {range ? (
-        <div className="flex items-center gap-z1">
-          {/* WHICH DATE, said once, before both inputs (§7.4.1). */}
-          <span className="text-xs font-medium uppercase tracking-[0.04em] text-ink-3">
-            {range.label}
-          </span>
-          <input
-            type="date"
-            aria-label={range.fromLabel}
-            key={`from-${params.get('from') ?? ''}`}
-            defaultValue={params.get('from') ?? ''}
-            onChange={(event) => setDay('from', event.target.value)}
-            className="h-control-compact rounded-control border border-border-strong bg-surface px-z2 font-mono text-xs text-ink focus:border-accent focus:outline-none"
-          />
-          <span aria-hidden className="text-xs text-ink-3">
-            –
-          </span>
-          <input
-            type="date"
-            aria-label={range.toLabel}
-            key={`to-${params.get('to') ?? ''}`}
-            defaultValue={params.get('to') ?? ''}
-            onChange={(event) => setDay('to', event.target.value)}
-            className="h-control-compact rounded-control border border-border-strong bg-surface px-z2 font-mono text-xs text-ink focus:border-accent focus:outline-none"
-          />
-        </div>
-      ) : null}
+      <Wrap on={twoRows} className="flex flex-wrap items-center gap-z2">
+        {search ? (
+          <form
+            className="flex items-center gap-z1"
+            onSubmit={(event) => {
+              event.preventDefault()
+              const field = new FormData(event.currentTarget).get(search.param)
+              submitSearch(typeof field === 'string' ? field : '')
+            }}
+          >
+            <label
+              htmlFor={`filter-${search.param}`}
+              className="text-xs font-medium uppercase tracking-[0.04em] text-ink-3"
+            >
+              {search.label}
+            </label>
+            <input
+              id={`filter-${search.param}`}
+              name={search.param}
+              type="search"
+              dir="ltr"
+              // `key` on the URL value so a cleared filter empties the box.
+              // Without it the input keeps what was typed while the table shows
+              // everything, which reads as a filter that stopped working.
+              key={params.get(search.param) ?? ''}
+              defaultValue={params.get(search.param) ?? ''}
+              placeholder={search.placeholder}
+              className="h-control-compact rounded-control border border-border-strong bg-surface px-z2 font-mono text-xs text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none"
+            />
+          </form>
+        ) : null}
 
-      {children}
+        {range ? (
+          <div className="flex items-center gap-z1">
+            {/* WHICH DATE, said once, before both inputs (§7.4.1). */}
+            <span className="text-xs font-medium uppercase tracking-[0.04em] text-ink-3">
+              {range.label}
+            </span>
+            <input
+              type="date"
+              aria-label={range.fromLabel}
+              key={`from-${params.get('from') ?? ''}`}
+              defaultValue={params.get('from') ?? ''}
+              onChange={(event) => setDay('from', event.target.value)}
+              className="h-control-compact rounded-control border border-border-strong bg-surface px-z2 font-mono text-xs text-ink focus:border-accent focus:outline-none"
+            />
+            <span aria-hidden className="text-xs text-ink-3">
+              –
+            </span>
+            <input
+              type="date"
+              aria-label={range.toLabel}
+              key={`to-${params.get('to') ?? ''}`}
+              defaultValue={params.get('to') ?? ''}
+              onChange={(event) => setDay('to', event.target.value)}
+              className="h-control-compact rounded-control border border-border-strong bg-surface px-z2 font-mono text-xs text-ink focus:border-accent focus:outline-none"
+            />
+          </div>
+        ) : null}
 
-      <Button variant="ghost" size="compact" disabled>
-        {moreLabel}
-      </Button>
+        {children}
 
-      {/* Only offered when there is something to clear. An always-present
-       * "Clear filters" on an unfiltered view is noise. */}
-      {active ? (
-        <Button
-          variant="ghost"
-          size="compact"
-          onClick={() => router.replace(pathname, { scroll: false })}
-          className="ms-auto"
-        >
-          {clearLabel}
-        </Button>
-      ) : null}
+        {/* In two rows the screen's own controls take this place (§6.7). */}
+        {twoRows ? null : (
+          <Button variant="ghost" size="compact" disabled>
+            {moreLabel}
+          </Button>
+        )}
+
+        {/* Only offered when there is something to clear. An always-present
+         * "Clear filters" on an unfiltered view is noise. */}
+        {active ? (
+          <Button
+            variant="ghost"
+            size="compact"
+            onClick={() => router.replace(pathname, { scroll: false })}
+            className="ms-auto"
+          >
+            {clearLabel}
+          </Button>
+        ) : null}
+      </Wrap>
     </div>
   )
 }

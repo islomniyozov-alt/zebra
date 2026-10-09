@@ -14,6 +14,7 @@ import {
   statusCountWhere,
   viewCountWhere,
 } from '@/lib/load-list'
+import { loadListCounts } from '@/lib/load-list-counts'
 
 // ---------------------------------------------------------------------------
 // WHAT THE LOADS LIST COSTS, READ BY READ, ON DEV (TMS-DESIGN-SYSTEM.md §6.7).
@@ -70,6 +71,38 @@ await runInOrg(
     console.log(`today     ${ctx.today}   zones ${ctx.zones.length}\n`)
 
     const reads: { name: string; run: () => Promise<unknown> }[] = [
+      // CHAIN TWO (2026-10-09): EVERY CHIP AND THE FOOTER, ONE STATEMENT.
+      // This is what a render pays; the six rows below are what it replaced,
+      // kept so the two can be read side by side.
+      {
+        name: 'ALL chip counts, grouped (THE RENDER)',
+        run: async () =>
+          (await loadListCounts(tx, readLoadListParams({}), [], ctx)).matching,
+      },
+      {
+        name: 'grouped, with ?view=upcoming',
+        run: async () =>
+          (
+            await loadListCounts(
+              tx,
+              readLoadListParams({ view: 'upcoming' }),
+              [],
+              ctx,
+            )
+          ).matching,
+      },
+      {
+        name: 'grouped, with ?view=deliversThisWeek',
+        run: async () =>
+          (
+            await loadListCounts(
+              tx,
+              readLoadListParams({ view: 'deliversThisWeek' }),
+              [],
+              ctx,
+            )
+          ).matching,
+      },
       {
         name: 'matching count',
         run: () => tx.load.count({ where: listWhere(where) }),
@@ -97,7 +130,7 @@ await runInOrg(
         run: () => tx.load.count({ where: readyCountWhere(where) }),
       },
       ...(['upcoming', 'unpaid'] as LoadViewName[]).map((name) => ({
-        name: `${name} count (NEW, every render)`,
+        name: `${name} count (before chain two)`,
         run: () => tx.load.count({ where: viewCountWhere(where, name, ctx) }),
       })),
       ...(
