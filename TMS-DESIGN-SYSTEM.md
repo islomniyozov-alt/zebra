@@ -1954,11 +1954,16 @@ in the cell, and the fallback stays._
 
 **Columns, inside §7.1's cap.** Twelve declared: load · authority · broker ·
 driver · pickup · delivery · DEL date · truck · status · billing · rate ·
-warnings. With more than one authority, rate, billing and authority start
-hidden, and the chooser restores any of them. That leaves nine, warnings
-included, for single- and multi-authority carriers alike. **A saved column
-choice keeps its own set**, so a person who chose columns before this ships
-adds Driver and DEL date in the chooser once. _Flagged, not migrated._
+warnings. **Billing, rate and pickup start hidden**, and the chooser restores
+any of them. That leaves nine with more than one authority, warnings and
+authority included, and eight with one. _Amended 2026-10-08, before the code:_
+this section first hid the authority column, and `tests/list-columns.test.tsx`
+forbids that, because the authority is what tells six carriers' freight apart.
+That test also requires the defaults alone to fit the cap, so three columns
+must start hidden. Pickup is the one the brief names nowhere, and the date
+views still read it. _Flagged for the owner._ **A saved column choice keeps
+its own set**, so a person who chose columns before this ships adds Driver and
+DEL date in the chooser once. _Flagged, not migrated._
 
 **6 — Upcoming and Unpaid**, two more names with a count on each chip:
 
