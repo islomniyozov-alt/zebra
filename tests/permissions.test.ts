@@ -100,6 +100,29 @@ describe('the dispatcher boundary', () => {
     expect(can(dispatcher, 'read', 'auditLog')).toBe(false)
   })
 
+  // OWNER'S RULINGS, 2026-10-10 (GAPS 15, 16): record, never review.
+  it('records a cargo claim and a roadside inspection, and edits neither', () => {
+    expect(can(dispatcher, 'read', 'claim')).toBe(true)
+    expect(can(dispatcher, 'create', 'claim')).toBe(true)
+    expect(can(dispatcher, 'update', 'claim')).toBe(false)
+    expect(can(dispatcher, 'delete', 'claim')).toBe(false)
+    expect(can(dispatcher, 'read', 'inspection')).toBe(true)
+    expect(can(dispatcher, 'create', 'inspection')).toBe(true)
+    expect(can(dispatcher, 'update', 'inspection')).toBe(false)
+    expect(can(dispatcher, 'delete', 'inspection')).toBe(false)
+    // DataQs is the challenge safety files; recording a claim does not open it.
+    expect(can(dispatcher, 'read', 'dataQs')).toBe(false)
+  })
+
+  // GAPS 13, 14: the code was right, the matrix moved.
+  it('reads authorities and does not create roster', () => {
+    expect(can(dispatcher, 'read', 'company')).toBe(true)
+    expect(can(dispatcher, 'update', 'company')).toBe(false)
+    for (const resource of ['truck', 'trailer', 'driver'] as const) {
+      expect(can(dispatcher, 'create', resource), resource).toBe(false)
+    }
+  })
+
   // OWNER'S RULING, 2026-10-10 (GAPS 17): 49 CFR Part 40 confidentiality —
   // the random pool's selection lists are owner/safety only. Not read, not
   // anything: a dispatcher learns nothing about who was selected.
@@ -521,11 +544,15 @@ describe('Phase 4 step 5: claims and DataQs', () => {
     expect(can(session('ACCOUNTING'), 'update', 'dataQs')).toBe(false)
   })
 
-  it('a dispatcher cannot even read one', () => {
-    // Deliberately NOT in FLEET_READ, unlike compliance and inspections. A
-    // claim carries an amount and a dispute; the dispatcher who books the next
-    // load has no part in either, and §2.5 does not list them.
-    expect(can(session('DISPATCHER'), 'read', 'claim')).toBe(false)
+  it('a dispatcher records a claim but never moves one, and never sees a challenge', () => {
+    // SUPERSEDED 2026-10-10 by the owner's ruling on GAPS 15. This read "a
+    // dispatcher cannot even read one" — a claim carries an amount and a
+    // dispute. The ruling keeps the dispute out of their hands and lets them in
+    // at the start: they are the first to hear of a claim, so they open the
+    // list and record it; amounts, status and settling stay with safety.
+    expect(can(session('DISPATCHER'), 'read', 'claim')).toBe(true)
+    expect(can(session('DISPATCHER'), 'create', 'claim')).toBe(true)
+    expect(can(session('DISPATCHER'), 'update', 'claim')).toBe(false)
     expect(can(session('DISPATCHER'), 'read', 'dataQs')).toBe(false)
   })
 

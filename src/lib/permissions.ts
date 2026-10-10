@@ -371,6 +371,14 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     ...OPERATIONS_READ,
     ...OPERATIONS_WRITE,
     ...FLEET_READ,
+    // RECORDING, NOT REVIEWING. Owner's rulings, 2026-10-10 (GAPS 15, 16): the
+    // dispatcher is the first to hear of a cargo claim and of a roadside
+    // inspection, so they may open the list and record a new one. Amounts,
+    // status and settling stay with safety: no `update`, no `delete`, and
+    // nothing on DataQs, which is the challenge safety files.
+    ...read('claim'),
+    'claim:create',
+    'inspection:create',
     ...read('customer'),
     'customer:create',
     ...read('document'),
