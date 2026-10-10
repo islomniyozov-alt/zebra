@@ -262,6 +262,24 @@ Rules about instruments, which are the ones that cost whole sessions:
   nothing broke; that is luck, and a rule that depends on luck is not a
   rule.
 
+- **EVERY COMMIT ON `main` IS DEPLOYED BY THE RITUAL IN THE SAME SESSION IT IS
+  MADE.** Owner's standing rule, 2026-10-10. `main` never sits ahead of
+  `origin`, and `origin` never sits ahead of what dev and production serve,
+  at the end of a session. That holds however small the change is.
+
+  "NO BEHAVIOUR CHANGE" IS NOT AN EXEMPTION. THE DRIFT CHECK IS THE ONLY
+  WITNESS. On 2026-10-10 two commits were left local on the reasoning that one
+  was a behaviour-identical refactor and the other tests and a script.
+  "Identical" was a belief about the code, the same kind of belief migration
+  63's comment held about its writers. The drift check reads what the workers
+  actually serve, so it is the only instrument that can say the gap is zero.
+  A brief that says "into the next sweep, no new chain" still means the next
+  ritual in this session, not a commit parked for another day.
+
+  So a session's last ritual ends with `check:drift` printing both workers at
+  HEAD, and HEAD equal to `origin/main`. A report that ends any other way is
+  incomplete, by the same rule that makes "dev behind" incomplete.
+
 - **FROM THE MOMENT THE INTEGRATION GATE STARTS UNTIL THE RITUAL'S LAST STEP
   REPORTS: NO EDIT, NO COMMIT, NO WATCHER, NO DRY RUN. The working directory
   is UNTOUCHED. Queue the change; start it after.** Owner's rulings,
