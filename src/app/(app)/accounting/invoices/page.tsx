@@ -8,7 +8,7 @@ import { formatCents } from '@/lib/money'
 import {
   directSettledAwaiting,
   readyToInvoice,
-  readyToInvoiceWhere,
+  readyToInvoiceCount,
 } from '@/lib/invoices'
 import { readGridColumns } from '@/lib/grid-columns'
 import {
@@ -175,10 +175,8 @@ export default async function AccountingInvoicesPage({
         // COUNTED, NOT INFERRED FROM THE ROWS. `readyToInvoice` takes 500, so
         // `ready.length` is the CAP once there are more than that — and the tab
         // would read "500" forever while the real number grew. Same predicate,
-        // counted in SQL.
-        mayCreate
-          ? tx.load.count({ where: { ...readyToInvoiceWhere(), ...scope } })
-          : Promise.resolve(0),
+        // counted in SQL, and held to the /loads Ready chip by a test.
+        mayCreate ? readyToInvoiceCount(tx, scope) : Promise.resolve(0),
         readGridColumns(tx, session.userId, 'invoices.invoices', COLUMN_KEYS),
         // ── THE STRIP, AND EVERY COUNT ON IT, IN ONE STATEMENT ───────────
         //

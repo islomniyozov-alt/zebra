@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
-import { withOrg, type TxClient } from '@/lib/tenancy'
+import { companyScopeFilter, withOrg, type TxClient } from '@/lib/tenancy'
+import { readyToInvoiceCount } from '@/lib/invoices'
 import { createBroker } from '@/lib/brokers'
 import { LOAD_WRITE_TIMEOUT_MS, createLoad } from '@/lib/loads'
 import { listedAuthorities } from '@/lib/companies'
@@ -655,4 +656,46 @@ describe('the budget: a render makes at most one counting statement', () => {
     })
     expect(used).toBe(1)
   }, 300_000)
+})
+
+// ---------------------------------------------------------------------------
+// TWO SCREENS, ONE READY NUMBER (owner's follow-up of 2026-10-10).
+//
+// `/accounting/invoices` counts its Ready tab through `readyToInvoiceCount`
+// (the Prisma predicate); the `/loads` chip counts it in the grouped SQL
+// statement. Direct-settled freight is excluded by both, and the fixture that
+// proves it is `relayReady`: POD in, a rate, billing COLUMN READY_TO_INVOICE,
+// direct-settled. It must be in neither number.
+// ---------------------------------------------------------------------------
+
+describe('the Ready number is the same on /accounting and /loads', () => {
+  it.each([
+    ['every authority', () => [] as string[]],
+    ['one authority', () => [chicagoId]],
+  ])(
+    '%s, both above zero, direct-settled in neither',
+    async (_, scopes) => {
+      const companyScopes = scopes()
+      const { chip, tab } = await inOrg(async (tx) => {
+        const ctx = viewContext(await listedAuthorities(tx, companyScopes), NOW)
+        const counts = await loadListCounts(
+          tx,
+          readLoadListParams({}),
+          companyScopes,
+          ctx,
+        )
+        return {
+          chip: counts.billing[READY] ?? 0,
+          tab: await readyToInvoiceCount(tx, companyScopeFilter(companyScopes)),
+        }
+      })
+      expect(chip).toBe(tab)
+      expect(tab).toBeGreaterThan(0)
+      // Membership, not just size: the one ready load, and not the Relay one.
+      const { listed } = await read({ billing: READY })
+      expect(keysOf(listed)).toEqual(['ready'])
+      expect(tab).toBe(1)
+    },
+    300_000,
+  )
 })

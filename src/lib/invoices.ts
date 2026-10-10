@@ -62,6 +62,22 @@ export interface ReadyLoad {
   totalRevenueCents: number
 }
 
+/**
+ * How many loads are ready to invoice: the `/accounting/invoices` Ready tab.
+ *
+ * COUNTED, NOT INFERRED FROM THE ROWS: `readyToInvoice` takes 500, so its
+ * length is the cap once there are more. Moved here from the page on
+ * 2026-10-10 so `tests/integration/load-list.test.ts` can hold it to the
+ * `/loads` Ready chip: one predicate, direct-settled freight excluded, two
+ * screens that must say the same number.
+ */
+export async function readyToInvoiceCount(
+  tx: TxClient,
+  where: Prisma.LoadWhereInput = {},
+): Promise<number> {
+  return tx.load.count({ where: { ...readyToInvoiceWhere(), ...where } })
+}
+
 export async function readyToInvoice(
   tx: TxClient,
   where: Prisma.LoadWhereInput = {},
