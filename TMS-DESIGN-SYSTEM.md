@@ -2117,7 +2117,7 @@ artefact)._
 | `/brokers`                  | reach    | reach      | Records                               |
 | `/brokers/[id]`             | reach    | reach      | Records                               |
 | `/brokers/new`              | reach    | reach      | Phase 2: a dispatcher creates brokers |
-| `/companies`                | reach    | refuse     | Admin — Authorities                   |
+| `/companies`                | reach    | refuse     | Admin — Authorities; GAPS 13          |
 | `/companies/[id]`           | reach    | refuse     | Admin — Authorities                   |
 | `/companies/new`            | reach    | refuse     | Admin — Authorities                   |
 | `/dashboard`                | reach    | reach      | Operations; money panels omitted      |
@@ -2125,7 +2125,7 @@ artefact)._
 | `/documents`                | reach    | reach      | Records; flagged call above           |
 | `/drivers`                  | reach    | reach      | Fleet                                 |
 | `/drivers/[id]`             | reach    | reach      | Fleet; money tabs omitted             |
-| `/drivers/new`              | reach    | reach      | Fleet                                 |
+| `/drivers/new`              | reach    | reach      | Fleet; GAPS 14                        |
 | `/invoices/[id]`            | reach    | refuse     | a money document                      |
 | `/loads`                    | reach    | reach      | Operations                            |
 | `/loads/[id]`               | reach    | reach      | Operations; money fields omitted      |
@@ -2144,23 +2144,23 @@ artefact)._
 | `/receivables/factoring`    | reach    | refuse     | Accounting                            |
 | `/safety`                   | reach    | reach      | Fleet — Safety                        |
 | `/safety/accidents`         | reach    | reach      | Fleet — Safety                        |
-| `/safety/claims`            | reach    | reach      | Fleet — Safety                        |
-| `/safety/claims/[id]`       | reach    | reach      | Fleet — Safety                        |
-| `/safety/claims/new`        | reach    | reach      | Fleet — Safety                        |
+| `/safety/claims`            | reach    | reach      | Fleet — Safety; GAPS 15               |
+| `/safety/claims/[id]`       | reach    | reach      | Fleet — Safety; GAPS 15               |
+| `/safety/claims/new`        | reach    | reach      | Fleet — Safety; GAPS 15               |
 | `/safety/dqf`               | reach    | reach      | Fleet — Safety                        |
 | `/safety/inspections`       | reach    | reach      | Fleet — Safety                        |
 | `/safety/inspections/[id]`  | reach    | reach      | Fleet — Safety                        |
-| `/safety/inspections/new`   | reach    | reach      | Fleet — Safety                        |
-| `/safety/random`            | reach    | refuse     | flagged call above: 49 CFR 382.405    |
+| `/safety/inspections/new`   | reach    | reach      | Fleet — Safety; GAPS 16               |
+| `/safety/random`            | reach    | refuse     | flagged call: 382.405; GAPS 17        |
 | `/settings`                 | reach    | refuse     | Admin                                 |
 | `/settlements/[id]`         | reach    | refuse     | a money document                      |
 | `/settlements/batches/[id]` | reach    | refuse     | a money document                      |
 | `/trailers`                 | reach    | reach      | Fleet                                 |
 | `/trailers/[id]`            | reach    | reach      | Fleet                                 |
-| `/trailers/new`             | reach    | reach      | Fleet                                 |
+| `/trailers/new`             | reach    | reach      | Fleet; GAPS 14                        |
 | `/trucks`                   | reach    | reach      | Fleet                                 |
 | `/trucks/[id]`              | reach    | reach      | Fleet                                 |
-| `/trucks/new`               | reach    | reach      | Fleet                                 |
+| `/trucks/new`               | reach    | reach      | Fleet; GAPS 14                        |
 | `/users`                    | reach    | refuse     | Admin                                 |
 | `/users/new`                | reach    | refuse     | Admin                                 |
 
