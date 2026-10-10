@@ -3,10 +3,14 @@
 What is known to be wrong or unfinished, in the order it gets worked: money
 first, then everything else, in batches of ten. Build queue item 3.
 
-**Source of the sweep rows:** `npm run sweep` against dev, 2026-10-06 —
-`SWEEP CLEAN — OK. 57 PAGE(S), 0 PROBLEM(S)`, with the owner's session and with
-no session. **The dispatcher role is NOT swept**: no dispatcher account exists
-(ruling open, below). A clean sweep of two roles says nothing about the third.
+**Source of the sweep rows:** `npm run sweep` against dev, 2026-10-10, at
+`1103e03` — `SWEEP CLEAN — OK. 57 PAGE(S), 0 PROBLEM(S)`, with the owner's
+session and with no session (54 anonymous checks, 0 not refused). Its one
+finding was the sweep's own output: two designed redirects printed as FAIL
+rows above "0 PROBLEMS"; fixed in the same commit as this line
+(`tests/sweep.test.ts`, one break watched). **The dispatcher role is NOT
+swept**: `scripts/sweep.mjs` signs in only as the seed owner
+(`SEED_OWNER_EMAIL`). A clean sweep of two roles says nothing about the third.
 
 A row leaves this file in the commit that closes it, with the commit named.
 

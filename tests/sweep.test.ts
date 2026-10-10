@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 // that ships. It resolves without a directive, so there is none: an unnecessary
 // `@ts-expect-error` is itself a type error here, which is the compiler making
 // the same point this file makes about guards that assert nothing.
-import { classify, routesUnder, tally } from '../scripts/sweep.mjs'
+import { classify, markFor, routesUnder, tally } from '../scripts/sweep.mjs'
 
 // ---------------------------------------------------------------------------
 // THE SWEEP'S ARITHMETIC, WITHOUT A WORKER.
@@ -82,6 +82,14 @@ describe('what a response means', () => {
 
   it('a redirect is neither a fault nor a render', () => {
     expect(classify(307, '')).toBe('redirect')
+  })
+
+  it('and its row is not labelled FAIL', () => {
+    // The 2026-10-10 sweep printed two FAIL rows above "0 PROBLEMS".
+    expect(markFor(classify(307, ''))).toBe('redir')
+    expect(markFor(classify(200, ''))).toBe('ok   ')
+    expect(markFor(classify(500, ''))).toBe('FAIL ')
+    expect(markFor(classify(404, ''))).toBe('FAIL ')
   })
 
   it('and a 4xx says which', () => {

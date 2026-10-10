@@ -169,6 +169,18 @@ async function resolveIds(pool) {
  * this printed "55 answered, 2 did not" directly above "0 PROBLEMS" and made the
  * reader choose which line to believe.
  */
+/**
+ * The label at the start of a row, and it agrees with the verdict.
+ *
+ * A REDIRECT PRINTED AS "FAIL" until 2026-10-10: the label said FAIL for
+ * anything that was not `ok`, while the classifier and the summary counted a
+ * redirect as neither a fault nor a pass. The night's sweep printed two FAIL
+ * rows directly above "0 PROBLEMS" — the exact contradiction the redirect
+ * rule below was written to remove, surviving one line further down.
+ */
+export const markFor = (verdict) =>
+  verdict === 'ok' ? 'ok   ' : verdict === 'redirect' ? 'redir' : 'FAIL '
+
 export const classify = (status, body) => {
   if (status >= 500) return 'SERVER ERROR'
   if (BOUNDARY_WORDS.some((words) => body.includes(words)))
@@ -285,9 +297,8 @@ async function sweep() {
     const withSession = await get(path, { cookie })
     const verdict = classify(withSession.status, withSession.body)
     authed.push({ route, path, status: withSession.status, verdict })
-    const mark = verdict === 'ok' ? 'ok  ' : 'FAIL'
     console.log(
-      `${mark}  ${String(withSession.status).padEnd(3)} ${route.padEnd(34)} ${verdict === 'ok' ? '' : verdict}${withSession.to ? ` → ${withSession.to}` : ''}`,
+      `${markFor(verdict)} ${String(withSession.status).padEnd(3)} ${route.padEnd(34)} ${verdict === 'ok' ? '' : verdict}${withSession.to ? ` → ${withSession.to}` : ''}`,
     )
 
     // THE ANONYMOUS HALF. Auth pages are supposed to render to a stranger; every
