@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyIdScopeFilter } from '@/lib/tenancy'
@@ -59,6 +60,12 @@ export default async function RandomTestingPage({
       ? params['year']
       : new Date().getFullYear(),
   )
+
+  // A ROLE WITHOUT THE POOL IS REFUSED AS A 404, before the read: without
+  // this, `withCurrentOrg` would throw and the page would answer 500 (the
+  // shape GAPS code row 12 had). Owner's ruling, 2026-10-10: selection lists
+  // are owner/safety only (49 CFR Part 40).
+  if (!(await currentUserCan('read', 'randomTesting'))) notFound()
 
   const data = await withCurrentOrg(
     'read',

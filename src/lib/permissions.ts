@@ -217,9 +217,11 @@ const FLEET_READ: Permission[] = [
   // out-of-service order: a driver who put a truck in a ditch last month
   // is context for what they are handed today.
   ...read('accident'),
-  // Read, so a dispatcher can see that a driver they are about to send out
-  // is sitting on an unresolved selection.
-  ...read('randomTesting'),
+  // NOT the random pool. Owner's ruling, 2026-10-10 (GAPS 17): under 49 CFR
+  // Part 40 confidentiality, selection lists are owner/safety only. It used to
+  // be read here "so a dispatcher can see a driver sitting on an unresolved
+  // selection", which is exactly the disclosure the rule forbids. The roles
+  // that test (FLEET_WRITE's `crud('randomTesting')`) keep it.
 ]
 
 const FLEET_WRITE: Permission[] = [

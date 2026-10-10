@@ -99,6 +99,18 @@ describe('the dispatcher boundary', () => {
     expect(can(dispatcher, 'read', 'user')).toBe(false)
     expect(can(dispatcher, 'read', 'auditLog')).toBe(false)
   })
+
+  // OWNER'S RULING, 2026-10-10 (GAPS 17): 49 CFR Part 40 confidentiality —
+  // the random pool's selection lists are owner/safety only. Not read, not
+  // anything: a dispatcher learns nothing about who was selected.
+  it('cannot see the drug and alcohol random pool at all', () => {
+    for (const action of ACTIONS) {
+      expect(can(dispatcher, action, 'randomTesting'), action).toBe(false)
+    }
+    // The roles that run the programme still can.
+    expect(can(session('OWNER'), 'read', 'randomTesting')).toBe(true)
+    expect(can(session('MANAGER'), 'read', 'randomTesting')).toBe(true)
+  })
 })
 
 describe('the accounting boundary', () => {
