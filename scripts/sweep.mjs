@@ -42,7 +42,7 @@
 // exists to keep apart.
 // ---------------------------------------------------------------------------
 
-import { readdirSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join, sep } from 'node:path'
 import { chromium } from 'playwright'
 import { neonConfig, Pool } from '@neondatabase/serverless'
@@ -190,6 +190,86 @@ export const classify = (status, body) => {
   return 'ok'
 }
 
+// ── THE ROUTE MATRIX (TMS-DESIGN-SYSTEM.md §6.8, 2026-10-10) ──────────────
+
+/** The roles the sweep signs in as, and the matrix's column for each. */
+export const MATRIX_ROLES = ['owner', 'dispatcher']
+
+/**
+ * §6.8's table, read from the design system itself: the rows between the two
+ * markers, as `route → { owner, dispatcher, note }`.
+ *
+ * READ FROM THE DOC, NOT COPIED INTO THIS FILE, so the intent has one home and
+ * a change to it is a change to the design system. Throws when the markers are
+ * missing, because a sweep that silently checked nothing against an empty
+ * matrix would read as a sweep that found nothing wrong.
+ */
+export function readRouteMatrix(markdown) {
+  const start = markdown.indexOf('<!-- route-matrix:start -->')
+  const end = markdown.indexOf('<!-- route-matrix:end -->')
+  if (start < 0 || end < start) {
+    throw new Error('TMS-DESIGN-SYSTEM.md has no §6.8 route matrix markers.')
+  }
+  const matrix = new Map()
+  for (const line of markdown.slice(start, end).split('\n')) {
+    const cells = line.split('|').map((cell) => cell.trim())
+    const route = /^`(\/[^`]*)`$/.exec(cells[1] ?? '')?.[1]
+    if (!route) continue
+    matrix.set(route, {
+      owner: cells[2],
+      dispatcher: cells[3],
+      note: cells[4] ?? '',
+    })
+  }
+  return matrix
+}
+
+/** What a verdict amounts to in the matrix's words. */
+export const outcomeOf = (verdict) =>
+  verdict === 'ok'
+    ? 'reach'
+    : verdict === 'redirect'
+      ? 'redirect'
+      : verdict.startsWith('CLIENT ERROR')
+        ? 'refuse'
+        : 'error'
+
+/** The GAPS row a matrix note names, as `GAPS 12`, or null. */
+export const knownGap = (note) => /\bGAPS \d+\b/.exec(note ?? '')?.[0] ?? null
+
+/**
+ * Every page whose answer disagrees with its matrix row, per role.
+ *
+ * A row with no matrix entry is itself a finding: a new page nobody decided
+ * the roles for. A disagreement the row's note names as a GAPS row is KNOWN;
+ * any other is NEW, and a NEW one makes the sweep NOT OK.
+ */
+export function matrixFindings(seen, matrix) {
+  const findings = []
+  for (const row of seen) {
+    const expected = matrix.get(row.route)?.[row.role]
+    if (expected === undefined) {
+      findings.push({
+        ...row,
+        expected: '(no row)',
+        got: outcomeOf(row.verdict),
+        known: null,
+      })
+      continue
+    }
+    const got = outcomeOf(row.verdict)
+    if (got !== expected) {
+      findings.push({
+        ...row,
+        expected,
+        got,
+        known: knownGap(matrix.get(row.route).note),
+      })
+    }
+  }
+  return findings
+}
+
 /**
  * The verdict, as arithmetic over what was seen.
  *
@@ -197,8 +277,10 @@ export const classify = (status, body) => {
  * thing that decides OK from NOT OK is twelve lines somebody can read. A page
  * that was never reached counts as a problem: "we did not look" must never
  * arrive dressed as "we looked and it was fine".
+ *
+ * @param {{ authed: any[], anon: any[], unresolved: string[], findings?: any[] }} input
  */
-export const tally = ({ authed, anon, unresolved }) => {
+export const tally = ({ authed, anon, unresolved, findings = [] }) => {
   const errors = authed.filter(
     (row) => row.verdict === 'SERVER ERROR' || row.verdict === 'ERROR BOUNDARY',
   )
@@ -207,6 +289,14 @@ export const tally = ({ authed, anon, unresolved }) => {
   )
   const redirects = authed.filter((row) => row.verdict === 'redirect')
   const unrefused = anon.filter((row) => !row.refused)
+  // THE MATRIX'S NEW DISAGREEMENTS. An owner page that errored or refused is
+  // already counted above, so it is not counted twice here.
+  const known = findings.filter((row) => row.known !== null)
+  const fresh = findings.filter(
+    (row) =>
+      row.known === null &&
+      !(row.role === 'owner' && (row.got === 'error' || row.got === 'refuse')),
+  )
   return {
     rendered:
       authed.length - errors.length - clientErrors.length - redirects.length,
@@ -215,11 +305,14 @@ export const tally = ({ authed, anon, unresolved }) => {
     redirects,
     unrefused,
     unresolved,
+    known,
+    fresh,
     problems:
       errors.length +
       clientErrors.length +
       unrefused.length +
-      unresolved.length,
+      unresolved.length +
+      fresh.length,
   }
 }
 
@@ -237,32 +330,60 @@ async function sweep() {
     `ids resolved inside organization ${organizationId ?? '(none)'}\n`,
   )
 
-  // THE COOKIE COMES FROM A REAL SIGN-IN, because the login is a server action
+  // THE MATRIX, READ FROM THE DESIGN SYSTEM BEFORE ANY SIGN-IN (§6.8).
+  const matrix = readRouteMatrix(
+    readFileSync(join(process.cwd(), 'TMS-DESIGN-SYSTEM.md'), 'utf8'),
+  )
+
+  // THE COOKIES COME FROM REAL SIGN-INS, because the login is a server action
   // and its id is Next's business, not ours. `live-check.mjs` learned that the
   // hard way: a hand-built POST reported "credentials not set".
+  //
+  // TWO ROLES SINCE 2026-10-10: the owner, and the seed dispatcher (dev only,
+  // `prisma/seed.ts`). A dispatcher whose credentials are missing FAILS the
+  // sweep rather than skipping it: a clean sweep of one role says nothing
+  // about the other, which is the gap this exists to close.
   const browser = await chromium.launch(
     process.env.SHOT_CHROME ? { executablePath: process.env.SHOT_CHROME } : {},
   )
-  const context = await browser.newContext()
-  const page = await context.newPage()
-  await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded' })
-  await page.fill('input[name="email"]', process.env.SEED_OWNER_EMAIL)
-  await page.fill('input[name="password"]', process.env.SEED_OWNER_PASSWORD)
-  await Promise.all([
-    page.waitForURL(/\/(loads|dashboard)/, { timeout: 90_000 }),
-    page.click('button[type="submit"]'),
-  ])
-  const cookies = await context.cookies()
-  await browser.close()
-
-  const cookie = cookies
-    .filter((entry) => entry.name === 'zebra_session')
-    .map((entry) => `${entry.name}=${entry.value}`)
-    .join('; ')
-  if (!cookie) {
-    console.error('NO SESSION COOKIE AFTER SIGN-IN. Nothing swept. NOT OK.')
-    process.exit(1)
+  const signIn = async (email, password, label) => {
+    if (!email || !password) {
+      console.error(
+        `NO ${label} CREDENTIALS (${label === 'DISPATCHER' ? 'SEED_DISPATCHER_EMAIL / SEED_DISPATCHER_PASSWORD' : 'SEED_OWNER_EMAIL / SEED_OWNER_PASSWORD'}). Nothing swept. NOT OK.`,
+      )
+      process.exit(1)
+    }
+    const context = await browser.newContext()
+    const page = await context.newPage()
+    await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded' })
+    await page.fill('input[name="email"]', email)
+    await page.fill('input[name="password"]', password)
+    await Promise.all([
+      page.waitForURL(/\/(loads|dashboard)/, { timeout: 90_000 }),
+      page.click('button[type="submit"]'),
+    ])
+    const found = (await context.cookies())
+      .filter((entry) => entry.name === 'zebra_session')
+      .map((entry) => `${entry.name}=${entry.value}`)
+      .join('; ')
+    await context.close()
+    if (!found) {
+      console.error(`NO SESSION COOKIE AFTER ${label} SIGN-IN. NOT OK.`)
+      process.exit(1)
+    }
+    return found
   }
+  const cookie = await signIn(
+    process.env.SEED_OWNER_EMAIL,
+    process.env.SEED_OWNER_PASSWORD,
+    'OWNER',
+  )
+  const dispatcherCookie = await signIn(
+    process.env.SEED_DISPATCHER_EMAIL,
+    process.env.SEED_DISPATCHER_PASSWORD,
+    'DISPATCHER',
+  )
+  await browser.close()
 
   const get = async (path, headers) => {
     const response = await fetch(new URL(path, BASE), {
@@ -280,6 +401,8 @@ async function sweep() {
   const authed = []
   const anon = []
   const unresolved = [...failed]
+  /** Every protected page's answer per role, for the matrix. */
+  const seen = []
 
   for (const route of routes) {
     let path = route
@@ -308,6 +431,19 @@ async function sweep() {
       !['/login', '/reset-password'].includes(route) &&
       !route.includes('[token]')
     ) {
+      // THE MATRIX HALF (§6.8): the same page as the dispatcher, and both
+      // roles' answers held to the design system's table.
+      const asDispatcher = await get(path, { cookie: dispatcherCookie })
+      seen.push(
+        { route, role: 'owner', status: withSession.status, verdict },
+        {
+          route,
+          role: 'dispatcher',
+          status: asDispatcher.status,
+          verdict: classify(asDispatcher.status, asDispatcher.body),
+        },
+      )
+
       const without = await get(path, {})
       const refused = without.status >= 300 && without.status < 400
       anon.push({ route, status: without.status, refused })
@@ -320,7 +456,15 @@ async function sweep() {
   }
 
   // ── THE VERDICT, IN CAPITALS, WITH THE NUMBERS REPEATED ──────────────────
-  const sums = tally({ authed, anon, unresolved })
+  const findings = matrixFindings(seen, matrix)
+  // A matrix row that names no page is a decision about nothing, and hides
+  // the page it was meant for.
+  const protectedRoutes = new Set(seen.map((row) => row.route))
+  for (const route of matrix.keys()) {
+    if (!protectedRoutes.has(route))
+      unresolved.push(`${route} (matrix row, no page)`)
+  }
+  const sums = tally({ authed, anon, unresolved, findings })
 
   console.log('\n' + '='.repeat(70))
   console.log(
@@ -338,6 +482,21 @@ async function sweep() {
     console.log(`   ${row.verdict}: ${row.route}`)
   for (const row of sums.errors) console.log(`   ${row.verdict}: ${row.route}`)
   for (const row of sums.unrefused) console.log(`   NOT REFUSED: ${row.route}`)
+  const dispatcherRows = seen.filter((row) => row.role === 'dispatcher')
+  console.log(
+    `ROUTE MATRIX (§6.8): ${seen.length / 2} page(s) x ${MATRIX_ROLES.length} roles; ` +
+      `dispatcher reached ${dispatcherRows.filter((row) => outcomeOf(row.verdict) === 'reach').length}, ` +
+      `refused ${dispatcherRows.filter((row) => outcomeOf(row.verdict) === 'refuse').length}; ` +
+      `${sums.fresh.length} NEW disagreement(s), ${sums.known.length} known`,
+  )
+  for (const row of sums.fresh)
+    console.log(
+      `   NEW  ${row.role.padEnd(10)} ${row.route.padEnd(30)} matrix ${row.expected}, got ${row.got} (${row.status})`,
+    )
+  for (const row of sums.known)
+    console.log(
+      `   KNOWN ${row.known}: ${row.role} ${row.route} — matrix ${row.expected}, got ${row.got}`,
+    )
   if (sums.unresolved.length > 0) {
     console.log(`UNRESOLVED (never fetched at all): ${sums.unresolved.length}`)
     for (const line of sums.unresolved) console.log(`   ${line}`)

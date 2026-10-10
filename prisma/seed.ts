@@ -235,6 +235,58 @@ async function seedIsolationCounterpart(db: PrismaClient): Promise<void> {
   )
 }
 
+/**
+ * The sweep's dispatcher (TMS-DESIGN-SYSTEM.md §6.8, 2026-10-10): a DISPATCHER
+ * of the operating group across every authority, so `scripts/sweep.mjs` can
+ * hold every page to the route matrix as the role that lives on the board.
+ * NEVER SEEDED INTO PRODUCTION — called only beside the isolation counterpart.
+ *
+ * Both credentials come from the environment and the password is never
+ * printed: the sweep reads the same two variables, so there is nothing to
+ * hand over. Re-seeding resets the password to the environment's, which is
+ * what keeps the sweep's sign-in and the stored hash from drifting apart.
+ */
+async function seedSweepDispatcher(db: PrismaClient): Promise<void> {
+  const email = process.env.SEED_DISPATCHER_EMAIL
+  const password = process.env.SEED_DISPATCHER_PASSWORD
+  if (!email || !password) {
+    console.log(
+      '  skipping the sweep dispatcher — SEED_DISPATCHER_EMAIL / ' +
+        'SEED_DISPATCHER_PASSWORD not set',
+    )
+    return
+  }
+  const organization = await db.organization.findUniqueOrThrow({
+    where: { slug: 'zebra' },
+    select: { id: true },
+  })
+  const passwordHash = await hashPassword(password)
+  const user = await db.user.upsert({
+    where: { email },
+    update: { passwordHash },
+    create: { email, name: 'Sweep Dispatcher', passwordHash, locale: 'en' },
+  })
+  await db.membership.upsert({
+    where: {
+      userId_organizationId: {
+        userId: user.id,
+        organizationId: organization.id,
+      },
+    },
+    // THE ROLE IS RESET ON EVERY SEED, because a sweep that signed in as a
+    // dispatcher somebody had promoted would hold the matrix's dispatcher
+    // column against an owner's answers and pass.
+    update: { role: 'DISPATCHER' },
+    create: {
+      userId: user.id,
+      organizationId: organization.id,
+      role: 'DISPATCHER',
+      isDefault: true,
+    },
+  })
+  console.log(`  sweep dispatcher ${email} — DISPATCHER, all authorities`)
+}
+
 async function main(): Promise<void> {
   // ── THE GATE, BEFORE ANYTHING OPENS A SOCKET ──────────────────────────
   //
@@ -277,6 +329,8 @@ async function main(): Promise<void> {
       console.log('  skipping the isolation counterpart — never in production')
     } else {
       await seedIsolationCounterpart(db)
+      // §6.8: the sweep's dispatcher, on the same never-in-production side.
+      await seedSweepDispatcher(db)
     }
 
     console.log('Done.')

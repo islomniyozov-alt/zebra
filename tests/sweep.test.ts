@@ -5,7 +5,16 @@ import { describe, expect, it } from 'vitest'
 // that ships. It resolves without a directive, so there is none: an unnecessary
 // `@ts-expect-error` is itself a type error here, which is the compiler making
 // the same point this file makes about guards that assert nothing.
-import { classify, markFor, routesUnder, tally } from '../scripts/sweep.mjs'
+import {
+  classify,
+  knownGap,
+  markFor,
+  matrixFindings,
+  outcomeOf,
+  readRouteMatrix,
+  routesUnder,
+  tally,
+} from '../scripts/sweep.mjs'
 
 // ---------------------------------------------------------------------------
 // THE SWEEP'S ARITHMETIC, WITHOUT A WORKER.
@@ -154,6 +163,122 @@ describe('the verdict', () => {
     })
     expect(sums.problems).toBe(0)
     expect(sums.redirects.length).toBe(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE ROUTE MATRIX (TMS-DESIGN-SYSTEM.md §6.8, 2026-10-10).
+//
+// The sweep reads the table out of the design system, so these read it the same
+// way and hold it to the filesystem: every protected page has exactly one row,
+// and every row is a page. A new page with no decision about who may open it
+// fails here by name, before any sweep runs.
+// ---------------------------------------------------------------------------
+
+const PUBLIC = new Set(['/login', '/reset-password', '/reset-password/[token]'])
+const MATRIX = readRouteMatrix(readFileSync('TMS-DESIGN-SYSTEM.md', 'utf8'))
+
+describe('the route matrix covers every protected page, and only those', () => {
+  const protectedRoutes = ROUTES.filter((route) => !PUBLIC.has(route))
+
+  it('reads the rows out of the design system', () => {
+    expect(MATRIX.size).toBe(protectedRoutes.length)
+    expect(protectedRoutes.length).toBe(54)
+  })
+
+  it.each(ROUTES.filter((route) => !PUBLIC.has(route)))(
+    '%s has a row',
+    (route) => {
+      expect(MATRIX.has(route)).toBe(true)
+    },
+  )
+
+  it('and names no page that does not exist', () => {
+    expect(
+      [...MATRIX.keys()].filter((route) => !ROUTES.includes(route)),
+    ).toEqual([])
+  })
+
+  it('speaks only the three words, in both columns', () => {
+    for (const [route, row] of MATRIX) {
+      expect(['reach', 'refuse', 'redirect'], `${route} owner`).toContain(
+        row.owner,
+      )
+      expect(['reach', 'refuse', 'redirect'], `${route} dispatcher`).toContain(
+        row.dispatcher,
+      )
+    }
+  })
+
+  it('refuses without markers rather than checking an empty matrix', () => {
+    expect(() => readRouteMatrix('# no table here')).toThrow(/markers/)
+  })
+})
+
+describe('a disagreement with the matrix', () => {
+  const matrix = new Map([
+    [
+      '/payroll/batches',
+      { owner: 'reach', dispatcher: 'refuse', note: 'Payroll' },
+    ],
+    [
+      '/safety/random',
+      { owner: 'reach', dispatcher: 'refuse', note: 'GAPS 12' },
+    ],
+  ])
+
+  it('maps a verdict to the matrix words', () => {
+    expect(outcomeOf('ok')).toBe('reach')
+    expect(outcomeOf('CLIENT ERROR 404')).toBe('refuse')
+    expect(outcomeOf('redirect')).toBe('redirect')
+    expect(outcomeOf('SERVER ERROR')).toBe('error')
+    expect(knownGap('flagged — GAPS 12')).toBe('GAPS 12')
+    expect(knownGap('Payroll')).toBeNull()
+  })
+
+  it('is NEW and fails the sweep unless the row names a GAPS row', () => {
+    const findings = matrixFindings(
+      [
+        // A dispatcher who can open payroll: the failure this exists for.
+        {
+          route: '/payroll/batches',
+          role: 'dispatcher',
+          status: 200,
+          verdict: 'ok',
+        },
+        // Known: the row says which GAPS row carries it.
+        {
+          route: '/safety/random',
+          role: 'dispatcher',
+          status: 200,
+          verdict: 'ok',
+        },
+        // Agreeing rows are not findings.
+        {
+          route: '/payroll/batches',
+          role: 'owner',
+          status: 200,
+          verdict: 'ok',
+        },
+      ],
+      matrix,
+    )
+    expect(findings).toHaveLength(2)
+    const sums = tally({ authed: [], anon: [], unresolved: [], findings })
+    expect(sums.fresh.map((row) => row.route)).toEqual(['/payroll/batches'])
+    expect(sums.known.map((row) => row.route)).toEqual(['/safety/random'])
+    expect(sums.problems).toBe(1)
+  })
+
+  it('and a page with no row is a finding too', () => {
+    const findings = matrixFindings(
+      [{ route: '/new-page', role: 'dispatcher', status: 200, verdict: 'ok' }],
+      matrix,
+    )
+    expect(findings[0]?.expected).toBe('(no row)')
+    expect(
+      tally({ authed: [], anon: [], unresolved: [], findings }).problems,
+    ).toBe(1)
   })
 })
 
