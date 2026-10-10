@@ -70,6 +70,12 @@ export default async function BatchPage({
   const { id } = await params
   const raw = await searchParams
   const { t, locale } = await getLocaleContext()
+  // A ROLE WITHOUT `read settlement` IS REFUSED HERE, AS A 404 (GAPS code
+  // row 12, closed 2026-10-10). Without this the check inside `withCurrentOrg`
+  // threw `ForbiddenError` and a dispatcher met a server error; the statement
+  // page has always asked first, and the two-role sweep found the one that did
+  // not.
+  if (!(await currentUserCan('read', 'settlement'))) notFound()
   const mayWrite = await currentUserCan('update', 'settlement')
   const path = `/settlements/batches/${id}`
 

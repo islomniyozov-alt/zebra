@@ -291,10 +291,15 @@ export const tally = ({ authed, anon, unresolved, findings = [] }) => {
   const unrefused = anon.filter((row) => !row.refused)
   // THE MATRIX'S NEW DISAGREEMENTS. An owner page that errored or refused is
   // already counted above, so it is not counted twice here.
-  const known = findings.filter((row) => row.known !== null)
+  //
+  // A SERVER ERROR IS NEVER KNOWN (§6.8: "a server error is never an
+  // acceptable answer, in any column"). A GAPS reference may park a policy
+  // disagreement while the owner rules; it may not park a 500.
+  const isKnown = (row) => row.known !== null && row.got !== 'error'
+  const known = findings.filter(isKnown)
   const fresh = findings.filter(
     (row) =>
-      row.known === null &&
+      !isKnown(row) &&
       !(row.role === 'owner' && (row.got === 'error' || row.got === 'refuse')),
   )
   return {

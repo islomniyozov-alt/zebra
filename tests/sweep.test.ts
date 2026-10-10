@@ -270,6 +270,23 @@ describe('a disagreement with the matrix', () => {
     expect(sums.problems).toBe(1)
   })
 
+  it('but a server error is never known, whatever the row says', () => {
+    const findings = matrixFindings(
+      [
+        {
+          route: '/safety/random',
+          role: 'dispatcher',
+          status: 500,
+          verdict: 'SERVER ERROR',
+        },
+      ],
+      matrix,
+    )
+    const sums = tally({ authed: [], anon: [], unresolved: [], findings })
+    expect(sums.known).toEqual([])
+    expect(sums.problems).toBe(1)
+  })
+
   it('and a page with no row is a finding too', () => {
     const findings = matrixFindings(
       [{ route: '/new-page', role: 'dispatcher', status: 200, verdict: 'ok' }],
