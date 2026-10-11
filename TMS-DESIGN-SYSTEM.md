@@ -2115,62 +2115,62 @@ artefact)._
 
 <!-- route-matrix:start -->
 
-| Route                       | Owner    | Admin    | Manager  | Dispatcher | Accounting | Driver   | Note                                              |
-| --------------------------- | -------- | -------- | -------- | ---------- | ---------- | -------- | ------------------------------------------------- |
-| `/account`                  | reach    | reach    | reach    | reach      | reach      | reach    | everyone's own account                            |
-| `/accounting/invoices`      | reach    | reach    | reach    | refuse     | reach      | refuse   | Accounting; a manager reads                       |
-| `/accounting/payments`      | reach    | reach    | reach    | refuse     | reach      | refuse   | Accounting; a manager reads                       |
-| `/accounting/reports`       | reach    | reach    | reach    | refuse     | reach      | refuse   | Accounting; a manager reads                       |
-| `/audit`                    | reach    | reach    | refuse   | refuse     | refuse     | refuse   | Admin                                             |
-| `/brokers`                  | reach    | reach    | reach    | reach      | reach      | refuse   | Records                                           |
-| `/brokers/[id]`             | reach    | reach    | reach    | reach      | reach      | refuse   | Records                                           |
-| `/brokers/new`              | reach    | reach    | reach    | reach      | refuse     | refuse   | booking side; accounting does not book (inferred) |
-| `/companies`                | reach    | reach    | reach    | reach      | reach      | refuse   | ruled 13: read-only, which MC books it            |
-| `/companies/[id]`           | reach    | reach    | refuse   | refuse     | refuse     | refuse   | Admin — Authorities                               |
-| `/companies/new`            | reach    | reach    | refuse   | refuse     | refuse     | refuse   | Admin — Authorities                               |
-| `/dashboard`                | reach    | reach    | reach    | reach      | reach      | refuse   | org-wide; money panels per role                   |
-| `/dispatch`                 | reach    | reach    | reach    | reach      | refuse     | refuse   | accounting does not dispatch (Phase 3)            |
-| `/documents`                | reach    | reach    | reach    | reach      | reach      | refuse   | Records; ruled: dispatcher reaches                |
-| `/drivers`                  | reach    | reach    | reach    | reach      | reach      | refuse   | Fleet; accounting pays drivers                    |
-| `/drivers/[id]`             | reach    | reach    | reach    | reach      | reach      | refuse   | Fleet; tabs per role                              |
-| `/drivers/new`              | reach    | reach    | reach    | refuse     | refuse     | refuse   | ruled 14: roster creation is safety's             |
-| `/invoices/[id]`            | reach    | reach    | reach    | refuse     | reach      | refuse   | a money document                                  |
-| `/loads`                    | reach    | reach    | reach    | reach      | reach      | refuse   | Operations; accounting reads (Phase 3)            |
-| `/loads/[id]`               | reach    | reach    | reach    | reach      | reach      | refuse   | Operations; fields per role                       |
-| `/loads/import`             | redirect | redirect | redirect | redirect   | redirect   | redirect | a pure redirect to its first tab, no data         |
-| `/loads/import/trips`       | reach    | reach    | reach    | reach      | refuse     | refuse   | creates loads; accounting does not book           |
-| `/loads/incoming`           | reach    | reach    | reach    | reach      | refuse     | refuse   | creates loads; accounting does not book           |
-| `/loads/new`                | reach    | reach    | reach    | reach      | refuse     | refuse   | creates loads; accounting does not book           |
-| `/maintenance`              | reach    | reach    | reach    | reach      | reach      | refuse   | Fleet; carries costs (inferred)                   |
-| `/payments/[id]`            | reach    | reach    | reach    | refuse     | reach      | refuse   | a money document                                  |
-| `/payments/import`          | reach    | reach    | refuse   | refuse     | reach      | refuse   | sets money; a manager reads, does not set         |
-| `/payments/new`             | reach    | reach    | refuse   | refuse     | reach      | refuse   | sets money; a manager reads, does not set         |
-| `/payroll/batches`          | reach    | reach    | reach    | refuse     | reach      | refuse   | Payroll; a manager reads driver pay               |
-| `/payroll/batches/new`      | reach    | reach    | refuse   | refuse     | reach      | refuse   | sets pay; a manager does not                      |
-| `/payroll/charges`          | reach    | reach    | reach    | refuse     | reach      | refuse   | Payroll; a manager reads                          |
-| `/payroll/statements`       | reach    | reach    | reach    | refuse     | reach      | refuse   | org-wide; a driver's own is not this page         |
-| `/receivables/factoring`    | reach    | reach    | reach    | refuse     | reach      | refuse   | Accounting; a manager reads                       |
-| `/safety`                   | reach    | reach    | reach    | reach      | reach      | refuse   | Safety; accounting reads its parts                |
-| `/safety/accidents`         | reach    | reach    | reach    | reach      | reach      | refuse   | accounting reserves against claims                |
-| `/safety/claims`            | reach    | reach    | reach    | reach      | reach      | refuse   | ruled 15; accounting reserves                     |
-| `/safety/claims/[id]`       | reach    | reach    | reach    | reach      | reach      | refuse   | ruled 15: read; no edit controls                  |
-| `/safety/claims/new`        | reach    | reach    | reach    | reach      | refuse     | refuse   | ruled 15: the dispatcher hears first              |
-| `/safety/dqf`               | reach    | reach    | reach    | reach      | refuse     | refuse   | the safety file (inferred)                        |
-| `/safety/inspections`       | reach    | reach    | reach    | reach      | reach      | refuse   | Safety                                            |
-| `/safety/inspections/[id]`  | reach    | reach    | reach    | reach      | reach      | refuse   | Safety                                            |
-| `/safety/inspections/new`   | reach    | reach    | reach    | reach      | refuse     | refuse   | ruled 16: record; safety edits                    |
-| `/safety/random`            | reach    | reach    | reach    | refuse     | refuse     | refuse   | ruled 17: Part 40, owner/safety only              |
-| `/settings`                 | reach    | reach    | refuse   | refuse     | refuse     | refuse   | Admin                                             |
-| `/settlements/[id]`         | reach    | reach    | reach    | refuse     | reach      | refuse   | a money document                                  |
-| `/settlements/batches/[id]` | reach    | reach    | reach    | refuse     | reach      | refuse   | a money document                                  |
-| `/trailers`                 | reach    | reach    | reach    | reach      | reach      | refuse   | Fleet (inferred for accounting)                   |
-| `/trailers/[id]`            | reach    | reach    | reach    | reach      | reach      | refuse   | Fleet (inferred for accounting)                   |
-| `/trailers/new`             | reach    | reach    | reach    | refuse     | refuse     | refuse   | ruled 14: roster creation is safety's             |
-| `/trucks`                   | reach    | reach    | reach    | reach      | reach      | refuse   | Fleet; truck financials                           |
-| `/trucks/[id]`              | reach    | reach    | reach    | reach      | reach      | refuse   | Fleet; truck financials                           |
-| `/trucks/new`               | reach    | reach    | reach    | refuse     | refuse     | refuse   | ruled 14: roster creation is safety's             |
-| `/users`                    | reach    | reach    | refuse   | refuse     | refuse     | refuse   | Admin                                             |
-| `/users/new`                | reach    | reach    | refuse   | refuse     | refuse     | refuse   | Admin                                             |
+| Route                       | Owner    | Admin    | Manager  | Dispatcher | Accounting | Driver   | Note                                          |
+| --------------------------- | -------- | -------- | -------- | ---------- | ---------- | -------- | --------------------------------------------- |
+| `/account`                  | reach    | reach    | reach    | reach      | reach      | reach    | everyone's own account                        |
+| `/accounting/invoices`      | reach    | reach    | reach    | refuse     | reach      | refuse   | Accounting; a manager reads                   |
+| `/accounting/payments`      | reach    | reach    | reach    | refuse     | reach      | refuse   | Accounting; a manager reads                   |
+| `/accounting/reports`       | reach    | reach    | reach    | refuse     | reach      | refuse   | Accounting; a manager reads                   |
+| `/audit`                    | reach    | reach    | refuse   | refuse     | refuse     | refuse   | Admin                                         |
+| `/brokers`                  | reach    | reach    | reach    | reach      | reach      | refuse   | Records                                       |
+| `/brokers/[id]`             | reach    | reach    | reach    | reach      | reach      | refuse   | Records                                       |
+| `/brokers/new`              | reach    | reach    | reach    | reach      | refuse     | refuse   | booking side (inferred); GAPS 20              |
+| `/companies`                | reach    | reach    | reach    | reach      | reach      | refuse   | ruled 13: read-only, which MC books it        |
+| `/companies/[id]`           | reach    | reach    | refuse   | refuse     | refuse     | refuse   | Admin — Authorities                           |
+| `/companies/new`            | reach    | reach    | refuse   | refuse     | refuse     | refuse   | Admin — Authorities                           |
+| `/dashboard`                | reach    | reach    | reach    | reach      | reach      | refuse   | org-wide; money panels per role               |
+| `/dispatch`                 | reach    | reach    | reach    | reach      | refuse     | refuse   | accounting does not dispatch (Phase 3)        |
+| `/documents`                | reach    | reach    | reach    | reach      | reach      | refuse   | Records; ruled: dispatcher reaches            |
+| `/drivers`                  | reach    | reach    | reach    | reach      | reach      | refuse   | Fleet; accounting pays drivers                |
+| `/drivers/[id]`             | reach    | reach    | reach    | reach      | reach      | refuse   | Fleet; tabs per role                          |
+| `/drivers/new`              | reach    | reach    | reach    | refuse     | refuse     | refuse   | ruled 14: roster creation is safety's         |
+| `/invoices/[id]`            | reach    | reach    | reach    | refuse     | reach      | refuse   | a money document                              |
+| `/loads`                    | reach    | reach    | reach    | reach      | reach      | refuse   | Operations; accounting reads (Phase 3)        |
+| `/loads/[id]`               | reach    | reach    | reach    | reach      | reach      | refuse   | Operations; fields per role                   |
+| `/loads/import`             | redirect | redirect | redirect | redirect   | redirect   | redirect | a pure redirect to its first tab, no data     |
+| `/loads/import/trips`       | reach    | reach    | reach    | reach      | refuse     | refuse   | creates loads; accounting does not book       |
+| `/loads/incoming`           | reach    | reach    | reach    | reach      | refuse     | refuse   | creates loads; accounting does not book       |
+| `/loads/new`                | reach    | reach    | reach    | reach      | refuse     | refuse   | creates loads; accounting does not book       |
+| `/maintenance`              | reach    | reach    | reach    | reach      | reach      | refuse   | Fleet; carries costs (inferred)               |
+| `/payments/[id]`            | reach    | reach    | reach    | refuse     | reach      | refuse   | a money document                              |
+| `/payments/import`          | reach    | reach    | refuse   | refuse     | reach      | refuse   | sets money; a manager reads, does not set     |
+| `/payments/new`             | reach    | reach    | refuse   | refuse     | reach      | refuse   | sets money; a manager reads, does not set     |
+| `/payroll/batches`          | reach    | reach    | reach    | refuse     | reach      | refuse   | Payroll; a manager reads driver pay           |
+| `/payroll/batches/new`      | reach    | reach    | refuse   | refuse     | reach      | refuse   | sets pay; a manager does not                  |
+| `/payroll/charges`          | reach    | reach    | reach    | refuse     | reach      | refuse   | Payroll; a manager reads                      |
+| `/payroll/statements`       | reach    | reach    | reach    | refuse     | reach      | refuse   | org-wide; a driver's own is not this page     |
+| `/receivables/factoring`    | reach    | reach    | reach    | refuse     | reach      | refuse   | Accounting; a manager reads; GAPS 22          |
+| `/safety`                   | reach    | reach    | reach    | reach      | reach      | refuse   | Safety; accounting reads its parts            |
+| `/safety/accidents`         | reach    | reach    | reach    | reach      | reach      | refuse   | accounting reserves against claims            |
+| `/safety/claims`            | reach    | reach    | reach    | reach      | reach      | refuse   | ruled 15; accounting reserves                 |
+| `/safety/claims/[id]`       | reach    | reach    | reach    | reach      | reach      | refuse   | ruled 15: read; no edit controls              |
+| `/safety/claims/new`        | reach    | reach    | reach    | reach      | refuse     | refuse   | ruled 15: the dispatcher hears first          |
+| `/safety/dqf`               | reach    | reach    | reach    | reach      | refuse     | refuse   | the safety file (inferred); GAPS 19           |
+| `/safety/inspections`       | reach    | reach    | reach    | reach      | reach      | refuse   | Safety                                        |
+| `/safety/inspections/[id]`  | reach    | reach    | reach    | reach      | reach      | refuse   | Safety                                        |
+| `/safety/inspections/new`   | reach    | reach    | reach    | reach      | refuse     | refuse   | ruled 16: record; safety edits                |
+| `/safety/random`            | reach    | reach    | reach    | refuse     | refuse     | refuse   | ruled 17: Part 40, owner/safety only; GAPS 18 |
+| `/settings`                 | reach    | reach    | refuse   | refuse     | refuse     | refuse   | Admin                                         |
+| `/settlements/[id]`         | reach    | reach    | reach    | refuse     | reach      | refuse   | a money document                              |
+| `/settlements/batches/[id]` | reach    | reach    | reach    | refuse     | reach      | refuse   | a money document                              |
+| `/trailers`                 | reach    | reach    | reach    | reach      | reach      | refuse   | Fleet (inferred for accounting); GAPS 21      |
+| `/trailers/[id]`            | reach    | reach    | reach    | reach      | reach      | refuse   | Fleet (inferred for accounting); GAPS 21      |
+| `/trailers/new`             | reach    | reach    | reach    | refuse     | refuse     | refuse   | ruled 14: roster creation is safety's         |
+| `/trucks`                   | reach    | reach    | reach    | reach      | reach      | refuse   | Fleet; truck financials                       |
+| `/trucks/[id]`              | reach    | reach    | reach    | reach      | reach      | refuse   | Fleet; truck financials                       |
+| `/trucks/new`               | reach    | reach    | reach    | refuse     | refuse     | refuse   | ruled 14: roster creation is safety's         |
+| `/users`                    | reach    | reach    | refuse   | refuse     | refuse     | refuse   | Admin                                         |
+| `/users/new`                | reach    | reach    | refuse   | refuse     | refuse     | refuse   | Admin                                         |
 
 <!-- route-matrix:end -->
 
