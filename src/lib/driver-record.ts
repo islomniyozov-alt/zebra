@@ -1,5 +1,6 @@
 import type { DocumentType, Prisma } from '@/generated/prisma/client'
 import type { TxClient } from './tenancy'
+import { can, type AuthorizedSession } from './permissions'
 import {
   activityEntries,
   mergeActivity,
@@ -132,11 +133,23 @@ export interface DriverDraw {
   reason: string | null
 }
 
-/** Random-testing selections naming this driver, newest draw first. */
+/**
+ * Random-testing selections naming this driver, newest draw first.
+ *
+ * THE POOL, ONE PERSON AT A TIME, so it follows the pool's rule
+ * (TMS-DESIGN-SYSTEM.md §6.9, 2026-10-11): under 49 CFR Part 40 the selection
+ * lists are owner/safety only. A session without `randomTesting:read` gets
+ * nothing, and gets it BEFORE any query — so a screen that calls this cannot
+ * reopen the door by forgetting its own check. Until this, the driver
+ * record's Safety tab showed every selection to any role with
+ * `compliance:read`, dispatchers and accounting included.
+ */
 export async function drawsForDriver(
   tx: TxClient,
   driverId: string,
+  session: AuthorizedSession,
 ): Promise<DriverDraw[]> {
+  if (!can(session, 'read', 'randomTesting')) return []
   const rows = await tx.randomSelection.findMany({
     where: { driverId },
     orderBy: { draw: { drawnAt: 'desc' } },

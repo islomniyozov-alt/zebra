@@ -206,7 +206,10 @@ export default async function EditDriverPage({
     const teamMate = await teamMateFor(tx, id)
     const assignments =
       requestedTab === 'assets' ? await assignmentHistoryFor(tx, id) : []
-    const draws = requestedTab === 'safety' ? await drawsForDriver(tx, id) : []
+    // §6.9: the pool, one person at a time — owner/safety only (Part 40).
+    // `drawsForDriver` refuses without `randomTesting:read` on its own.
+    const draws =
+      requestedTab === 'safety' ? await drawsForDriver(tx, id, session) : []
     const stats =
       requestedTab === 'statistics'
         ? await thirteenWeekStats(tx, id, now)
@@ -282,6 +285,10 @@ export default async function EditDriverPage({
     activity,
   } = data
   const maySeeCompliance = await currentUserCan('read', 'compliance')
+  // §6.9: the selections panel exists only for a role that reads the pool.
+  // ABSENT, not empty: "no draws" would tell a dispatcher this driver was
+  // never selected, which is itself a disclosure.
+  const maySeeRandom = await currentUserCan('read', 'randomTesting')
   const maySeeInspections = await currentUserCan('read', 'inspection')
   const mayRenewCompliance = await currentUserCan('create', 'compliance')
 
@@ -814,7 +821,7 @@ export default async function EditDriverPage({
          * /safety/inspections/new, where the truck, the trailer and the driver
          * can all be named at once. A panel that could file one from here
          * would have to guess the other two. */}
-        {tab === 'safety' && maySeeCompliance ? (
+        {tab === 'safety' && maySeeRandom ? (
           <div className="mt-z4 max-w-[900px]">
             <DrawsPanel
               rows={draws}
