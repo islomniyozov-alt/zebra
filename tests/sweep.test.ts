@@ -185,7 +185,9 @@ describe('the route matrix covers every protected page, and only those', () => {
 
   it('reads the rows out of the design system', () => {
     expect(MATRIX.size).toBe(protectedRoutes.length)
-    expect(protectedRoutes.length).toBe(54)
+    // 54 at §6.8's writing; 55 since §6.9's testing summary (2026-10-11). A
+    // pinned number so a page cannot appear or vanish without this line moving.
+    expect(protectedRoutes.length).toBe(55)
   })
 
   it.each(ROUTES.filter((route) => !PUBLIC.has(route)))(

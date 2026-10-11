@@ -1004,6 +1004,17 @@ const en = {
   'ref.error.rateNotRecorded':
     'No FMCSA random testing rate has been recorded for that year. Enter it with the Federal Register citation before drawing.',
   'rt.title': 'Random testing programme',
+  // §6.9 — the programme's numbers, without its people.
+  'rts.title': 'Testing summary',
+  'rts.note':
+    'Counts only: pool size, selections and tests completed per quarter. Names and results are in the random testing programme, which is owner and safety only (49 CFR Part 40).',
+  'rts.quarter': 'Quarter',
+  'rts.poolSize': 'Pool size',
+  'rts.drugSelected': 'Drug — selected',
+  'rts.drugTested': 'Drug — tested',
+  'rts.alcoholSelected': 'Alcohol — selected',
+  'rts.alcoholTested': 'Alcohol — tested',
+  'rts.noDraw': 'No draw was made this quarter.',
   'rt.hint':
     '49 CFR 382.305. Every draw records its seed and the pool it ran over, so an auditor can recompute the same names.',
   'rt.year': 'Year',
@@ -4010,6 +4021,16 @@ const ru: Dictionary = {
   'ref.error.rateNotRecorded':
     'Ставка случайного тестирования FMCSA за этот год не внесена. Укажите её со ссылкой на публикацию до проведения жеребьёвки.',
   'rt.title': 'Программа случайного тестирования',
+  'rts.title': 'Сводка тестирования',
+  'rts.note':
+    'Только числа: размер пула, отборы и проведённые тесты по кварталам. Имена и результаты — в программе случайного тестирования, доступной только владельцу и службе безопасности (49 CFR Part 40).',
+  'rts.quarter': 'Квартал',
+  'rts.poolSize': 'Размер пула',
+  'rts.drugSelected': 'Наркотики — отобрано',
+  'rts.drugTested': 'Наркотики — проверено',
+  'rts.alcoholSelected': 'Алкоголь — отобрано',
+  'rts.alcoholTested': 'Алкоголь — проверено',
+  'rts.noDraw': 'В этом квартале отбор не проводился.',
   'rt.hint':
     '49 CFR 382.305. Каждая жеребьёвка сохраняет зерно и состав пула, чтобы инспектор мог воспроизвести тот же список.',
   'rt.year': 'Год',
@@ -6976,6 +6997,16 @@ const fa: Dictionary = {
   'ref.error.rateNotRecorded':
     'نرخ آزمایش تصادفی FMCSA برای آن سال ثبت نشده است. پیش از قرعه‌کشی آن را با استناد به اطلاعیه وارد کنید.',
   'rt.title': 'برنامه آزمایش تصادفی',
+  'rts.title': 'خلاصه آزمایش‌ها',
+  'rts.note':
+    'فقط اعداد: اندازه مخزن، انتخاب‌ها و آزمایش‌های انجام‌شده در هر فصل. نام‌ها و نتایج در برنامه آزمایش تصادفی هستند که فقط برای مالک و بخش ایمنی است (49 CFR Part 40).',
+  'rts.quarter': 'فصل',
+  'rts.poolSize': 'اندازه مخزن',
+  'rts.drugSelected': 'مواد — انتخاب‌شده',
+  'rts.drugTested': 'مواد — آزمایش‌شده',
+  'rts.alcoholSelected': 'الکل — انتخاب‌شده',
+  'rts.alcoholTested': 'الکل — آزمایش‌شده',
+  'rts.noDraw': 'در این فصل قرعه‌کشی انجام نشد.',
   'rt.hint':
     '49 CFR 382.305. هر قرعه‌کشی بذر و ترکیب استخر را ثبت می‌کند تا بازرس بتواند همان فهرست را بازتولید کند.',
   'rt.year': 'سال',

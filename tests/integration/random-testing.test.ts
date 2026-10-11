@@ -11,6 +11,7 @@ import {
   yearSummary,
   type AnnualRate,
 } from '@/lib/random-testing'
+import { testingSummary } from '@/lib/testing-summary'
 import type { PrismaClient } from '@/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -393,5 +394,60 @@ describe('the year-end summary', () => {
     // The alcohol selection was excused, so nothing was conducted.
     expect(summary.kinds.ALCOHOL.tested).toBe(0)
     expect(summary.citation).toBe('Fixture — not a real notice')
+  })
+})
+
+// ── §6.9, OWNER'S RULING ON GAPS 18 (2026-10-11) ───────────────────────
+describe('the testing summary is counts, never people', () => {
+  it('agrees with the stored draws, quarter by quarter', async () => {
+    const [authority] = await inOrg((tx) =>
+      testingSummary(tx, { year: 2026, companyScopes: [] }),
+    )
+    expect(authority?.companyId).toBe(companyId)
+    const draws = await owner.randomDraw.findMany({
+      where: { companyId, year: 2026 },
+      select: {
+        quarter: true,
+        poolSize: true,
+        selections: { select: { kind: true, outcome: true } },
+      },
+    })
+    expect(draws.length).toBeGreaterThan(0)
+    for (const row of authority!.quarters) {
+      const draw = draws.find((d) => d.quarter === row.quarter)
+      expect(row.drawn, `Q${row.quarter}`).toBe(draw !== undefined)
+      if (!draw) continue
+      expect(row.poolSize).toBe(draw.poolSize)
+      for (const kind of ['DRUG', 'ALCOHOL'] as const) {
+        const mine = draw.selections.filter((s) => s.kind === kind)
+        expect(row.kinds[kind].selected, `Q${row.quarter} ${kind}`).toBe(
+          mine.length,
+        )
+        expect(row.kinds[kind].tested).toBe(
+          mine.filter((s) => s.outcome === 'TESTED').length,
+        )
+      }
+    }
+  })
+
+  it('carries no name, no driver id and no member key', async () => {
+    const summary = await inOrg((tx) =>
+      testingSummary(tx, { year: 2026, companyScopes: [] }),
+    )
+    const text = JSON.stringify(summary)
+    const people = await owner.randomSelection.findMany({
+      where: { draw: { companyId } },
+      select: { name: true, driverId: true, memberKey: true },
+    })
+    // NOT VACUOUS: there are selected people to leak.
+    expect(people.length).toBeGreaterThan(0)
+    for (const person of people) {
+      expect(text).not.toContain(person.name)
+      expect(text).not.toContain(person.memberKey)
+      if (person.driverId) expect(text).not.toContain(person.driverId)
+    }
+    for (const last of ['ALPHA', 'BRAVO', 'CHARLIE', 'DELTA', 'ECHO']) {
+      expect(text).not.toContain(last)
+    }
   })
 })

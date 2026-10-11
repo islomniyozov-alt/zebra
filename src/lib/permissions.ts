@@ -99,6 +99,11 @@ export const RESOURCES = [
   // programme, and §382.305's whole subject is that nobody can. That is a
   // narrower permission than "may edit safety records".
   'randomTesting',
+  // THE PROGRAMME'S NUMBERS, WITHOUT ITS PEOPLE (§6.9, owner's ruling on GAPS
+  // 18, 2026-10-11). Pool size, selections and tests completed per quarter —
+  // counts only. Its own resource so that granting the summary can never
+  // grant the pool, whose selection lists are owner/safety only (Part 40).
+  'randomTesting.summary',
   // Claims and DataQs challenges. §2.5 gives them their own role line —
   // OWNER/ADMIN/MANAGER write, ACCOUNTING reads — which is neither FLEET_* nor
   // MONEY_*, so they are named here and granted explicitly below.
@@ -339,6 +344,8 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     ...OPERATIONS_WRITE,
     ...FLEET_READ,
     ...FLEET_WRITE,
+    // The safety desk runs the pool (FLEET_WRITE), so it reads its summary.
+    ...read('randomTesting.summary'),
     ...CLAIMS_READ,
     ...CLAIMS_WRITE,
     ...MONEY_READ,
@@ -437,9 +444,12 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     // is the occurrence the claim is about. Filing one is the safety
     // desk's act.
     ...read('accident'),
-    // And the programme, read-only. Accounting is asked for the year-end
-    // summary at insurance renewal; running the draw is the safety desk.
-    ...read('randomTesting'),
+    // NOT THE POOL — ITS NUMBERS. Owner's ruling on GAPS 18, 2026-10-11:
+    // accounting is asked for the year-end summary at insurance renewal, and
+    // that is a count, not a list. The pool's selection lists are
+    // owner/safety only under 49 CFR Part 40, so accounting reads the
+    // counts-only summary (§6.9) and never `randomTesting` itself.
+    ...read('randomTesting.summary'),
     // Read and not write, straight from §2.5. Accounting reserves against an
     // open claim and reconciles what was paid on a settled one; filing and
     // moving one is the safety desk's act.

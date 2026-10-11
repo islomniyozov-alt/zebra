@@ -50,6 +50,9 @@ export default async function SafetyPage({
   const maySeeClaims = await currentUserCan('read', 'claim')
   const maySeeAccidents = await currentUserCan('read', 'accident')
   const maySeeRandom = await currentUserCan('read', 'randomTesting')
+  // §6.9: the programme's numbers, for the roles that hold them — accounting
+  // among them, which no longer sees the pool itself.
+  const maySeeSummary = await currentUserCan('read', 'randomTesting.summary')
 
   const params = await searchParams
   const { t } = await getLocaleContext()
@@ -312,6 +315,14 @@ export default async function SafetyPage({
               className="whitespace-nowrap text-sm text-accent hover:underline"
             >
               {t('rt.title')}
+            </Link>
+          ) : null}
+          {maySeeSummary ? (
+            <Link
+              href="/safety/testing-summary"
+              className="whitespace-nowrap text-sm text-accent hover:underline"
+            >
+              {t('rts.title')}
             </Link>
           ) : null}
           {maySeeAccidents ? (

@@ -136,6 +136,24 @@ describe('the dispatcher boundary', () => {
   })
 })
 
+// OWNER'S RULING ON GAPS 18, 2026-10-11 (§6.9): the pool is owner/safety
+// only; its numbers are a resource of their own.
+describe('the random pool and its summary', () => {
+  it('owner and safety only for the pool — accounting refused too', () => {
+    const pool = ROLES.filter((role) =>
+      can(session(role), 'read', 'randomTesting'),
+    )
+    expect(pool.sort()).toEqual(['ADMIN', 'MANAGER', 'OWNER'])
+  })
+
+  it('the counts-only summary for owner, admin, manager and accounting', () => {
+    const summary = ROLES.filter((role) =>
+      can(session(role), 'read', 'randomTesting.summary'),
+    )
+    expect(summary.sort()).toEqual(['ACCOUNTING', 'ADMIN', 'MANAGER', 'OWNER'])
+  })
+})
+
 describe('the accounting boundary', () => {
   const accounting = session('ACCOUNTING')
 
