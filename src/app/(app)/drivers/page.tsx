@@ -19,6 +19,7 @@ import {
   NO_DRIVER_FACTS,
   truckWarningFacts,
   truckWarnings,
+  withoutDqfGaps,
   type Warning,
 } from '@/lib/warnings'
 import { dqfChecklist, dqfIncompleteCount } from '@/lib/dqf'
@@ -193,6 +194,9 @@ export default async function DriversPage({
 
   // §6.8: a role without the read is REFUSED as a 404, never a 500 (sweep).
   if (!(await currentUserCan('read', 'driver'))) notFound()
+  // GAPS 23: every role on this list sees "DQF incomplete"; only a role that
+  // reads the file sees which items are missing (`withoutDqfGaps`).
+  const maySeeDqf = await currentUserCan('read', 'dqf')
   const { rows, companyCount, counts, visible, savedViews, density, health } =
     await withCurrentOrg('read', 'driver', async (tx, session) => {
       const companyCount = await tx.company.count()
@@ -307,7 +311,10 @@ export default async function DriversPage({
           status: driver.status,
           roster: rosterBadge(driver.status),
           isRetired: driver.deletedAt !== null,
-          warnings: driverWarnings(driverFacts, now).map(namedGaps),
+          warnings: withoutDqfGaps(
+            driverWarnings(driverFacts, now).map(namedGaps),
+            maySeeDqf,
+          ),
           dispatch: dispatchStatusFrom(
             dispatchFacts.get(driver.id) ?? {
               rosterStatus: driver.status,

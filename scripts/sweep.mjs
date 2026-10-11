@@ -42,10 +42,11 @@
 // exists to keep apart.
 // ---------------------------------------------------------------------------
 
-import { readdirSync, readFileSync } from 'node:fs'
-import { join, sep } from 'node:path'
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join, sep } from 'node:path'
 import { chromium } from 'playwright'
 import { neonConfig, Pool } from '@neondatabase/serverless'
+import { startTail, trimEvent, workerNameFor } from './worker-tail.mjs'
 
 const BASE =
   process.env.VERIFY_BASE ?? 'https://zebra-dev.tajikcargollc.workers.dev'
@@ -191,6 +192,45 @@ export const classify = (status, body) => {
 }
 
 // ── THE ROUTE MATRIX (TMS-DESIGN-SYSTEM.md §6.8, 2026-10-10) ──────────────
+
+// ── A SERVER ERROR IS EVIDENCE (§6.8, owner's ruling 2026-10-11) ──────────
+
+/** How much of a failing page's body goes into the record. */
+export const BODY_BYTES = 2048
+
+/** The verdicts that are the server's failure, whatever the status line says. */
+export const isServerError = (verdict) =>
+  verdict === 'SERVER ERROR' || verdict === 'ERROR BOUNDARY'
+
+/**
+ * One server error as the verdict file keeps it: who asked, for what, the ray
+ * that names the request, and the start of what came back. The Worker's log
+ * is attached later, once the tail has had time to deliver it.
+ */
+export const serverErrorRecord = ({
+  role,
+  route,
+  path,
+  status,
+  verdict,
+  ray,
+  body,
+}) => ({
+  role,
+  route,
+  path,
+  status,
+  verdict,
+  ray: ray ?? null,
+  body: String(body ?? '').slice(0, BODY_BYTES),
+})
+
+/**
+ * Where the records go: the file `scripts/run-status.mjs` hands its command
+ * and folds into the verdict, or a fixed one when the sweep runs bare.
+ */
+export const detailPath = (env) =>
+  env.RUN_STATUS_DETAIL ?? join('.run-status', 'sweep-server-errors.json')
 
 /** Tries per role before a stalled sign-in fails the sweep: one retry, no more. */
 export const SIGN_IN_ATTEMPTS = 2
@@ -460,13 +500,37 @@ async function sweep() {
       headers,
       redirect: 'manual',
     })
-    const body = response.status < 300 ? await response.text() : ''
+    // A 5xx body is read too: it is half of what a server error is recorded
+    // with, and the ray is the other half.
+    const body =
+      response.status < 300 || response.status >= 500
+        ? await response.text()
+        : ''
     return {
       status: response.status,
       body,
       to: response.headers.get('location'),
+      ray: response.headers.get('cf-ray'),
     }
   }
+
+  // THE WORKER'S LOG, FOR THE LENGTH OF THE SWEEP. Started after the sign-ins
+  // and proven with a canary before the first page, so a 500 below has a log
+  // line to be matched against (scripts/worker-tail.mjs).
+  const worker = workerNameFor(BASE)
+  const tail = startTail(worker)
+  const tailReady = worker
+    ? await tail.ready(new URL('/login', BASE), 60_000)
+    : false
+  // On every way out, a throw included: an orphaned tail outlives the sweep.
+  process.on('exit', () => tail.stop())
+  console.log(
+    tailReady
+      ? `worker log: tailing ${worker}`
+      : `worker log: NOT AVAILABLE (${tail.failure() ?? 'the canary never came back through the tail'}) — a server error will be recorded without it`,
+  )
+  /** Every server error, for the verdict file. */
+  const serverErrors = []
 
   const authed = []
   const anon = []
@@ -490,6 +554,16 @@ async function sweep() {
     const withSession = await get(path, { cookie })
     const verdict = classify(withSession.status, withSession.body)
     authed.push({ route, path, status: withSession.status, verdict })
+    if (isServerError(verdict))
+      serverErrors.push(
+        serverErrorRecord({
+          role: 'owner',
+          route,
+          path,
+          verdict,
+          ...withSession,
+        }),
+      )
     console.log(
       `${markFor(verdict)} ${String(withSession.status).padEnd(3)} ${route.padEnd(34)} ${verdict === 'ok' ? '' : verdict}${withSession.to ? ` → ${withSession.to}` : ''}`,
     )
@@ -506,12 +580,12 @@ async function sweep() {
       seen.push({ route, role: 'owner', status: withSession.status, verdict })
       for (const role of MATRIX_ROLES.filter((name) => name !== 'owner')) {
         const answer = await get(path, { cookie: cookies[role] })
-        seen.push({
-          route,
-          role,
-          status: answer.status,
-          verdict: classify(answer.status, answer.body),
-        })
+        const verdict = classify(answer.status, answer.body)
+        seen.push({ route, role, status: answer.status, verdict })
+        if (isServerError(verdict))
+          serverErrors.push(
+            serverErrorRecord({ role, route, path, verdict, ...answer }),
+          )
       }
 
       const without = await get(path, {})
@@ -523,6 +597,64 @@ async function sweep() {
         )
       }
     }
+  }
+
+  // ── EVERY SERVER ERROR, WITH THE WORKER'S ACCOUNT OF IT ──────────────────
+  //
+  // Written whether or not there were any, so a file from an earlier run can
+  // never be read as this one's. Tail delivers an event a few seconds after
+  // the response, so the rays are waited for — 30 s, then recorded as missing.
+  if (serverErrors.length > 0 && tailReady)
+    await tail.waitFor(
+      serverErrors.map((row) => row.ray).filter(Boolean),
+      30_000,
+    )
+  for (const row of serverErrors) {
+    const event = row.ray ? tail.lookup(row.ray) : null
+    row.worker = event ? trimEvent(event) : null
+    if (!event)
+      row.workerNote = !row.ray
+        ? 'the response carried no cf-ray'
+        : tailReady
+          ? 'no tail event for this ray within 30 s'
+          : `worker log not available: ${tail.failure() ?? 'the canary never came back through the tail'}`
+  }
+  tail.stop()
+  const detail = detailPath(process.env)
+  mkdirSync(dirname(detail), { recursive: true })
+  writeFileSync(
+    detail,
+    JSON.stringify(
+      {
+        base: BASE,
+        tail: { worker, ready: tailReady, failure: tail.failure() },
+        serverErrors,
+      },
+      null,
+      2,
+    ),
+  )
+  if (serverErrors.length > 0) {
+    console.log(`SERVER ERRORS, RECORDED IN ${detail}:`)
+    for (const row of serverErrors) {
+      console.log(
+        `   ${row.role.padEnd(10)} ${row.route.padEnd(30)} ${row.status} ray ${row.ray ?? '(none)'}`,
+      )
+      const said = [
+        ...(row.worker?.exceptions ?? []).map(
+          (entry) => `${entry.name}: ${entry.message}`,
+        ),
+        ...(row.worker?.logs ?? [])
+          .filter((entry) => entry.level === 'error')
+          .map((entry) => entry.message),
+      ]
+      for (const line of said.slice(0, 3))
+        console.log(`      worker: ${line.slice(0, 300)}`)
+      if (row.workerNote) console.log(`      worker: ${row.workerNote}`)
+    }
+    console.log(
+      '   A 500 ON A SWEEP IS A GAPS ROW, NOT A RE-RUN (§6.8, 2026-10-11).',
+    )
   }
 
   // ── THE VERDICT, IN CAPITALS, WITH THE NUMBERS REPEATED ──────────────────

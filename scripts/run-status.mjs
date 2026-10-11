@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 // ---------------------------------------------------------------------------
@@ -49,6 +49,24 @@ const HOME = '.run-status'
 
 const statusPath = (name) => join(HOME, `${name.replace(/[^\w.-]/g, '_')}.json`)
 
+// ── WHAT THE COMMAND SAW, BESIDE WHAT IT RETURNED ────────────────────────
+//
+// The child gets `RUN_STATUS_DETAIL`, a path it may write JSON to, and the
+// wrapper folds that file into the verdict as `detail`. The sweep writes its
+// server errors there (§6.8, owner's ruling 2026-10-11: a 500 is recorded with
+// its ray, role, body and Worker log in the verdict file). The exit code is
+// still the verdict; the detail is what it was about.
+const detailPathFor = (name) =>
+  join(HOME, `${name.replace(/[^\w.-]/g, '_')}.detail.json`)
+
+const readDetail = (name) => {
+  try {
+    return JSON.parse(readFileSync(detailPathFor(name), 'utf8'))
+  } catch {
+    return null
+  }
+}
+
 const write = (name, payload) => {
   const path = statusPath(name)
   mkdirSync(dirname(path), { recursive: true })
@@ -91,6 +109,21 @@ if (process.argv[2] === '--check') {
 
   console.log(`  finished  ${status.finishedAt}`)
 
+  const serverErrors = status.detail?.serverErrors
+  if (Array.isArray(serverErrors) && serverErrors.length > 0) {
+    console.log(`  recorded  ${serverErrors.length} server error(s):`)
+    for (const row of serverErrors) {
+      const said =
+        row.worker?.exceptions?.[0]?.message ??
+        row.worker?.logs?.find((entry) => entry.level === 'error')?.message ??
+        row.workerNote ??
+        '(no worker log line)'
+      console.log(
+        `    ${row.role} ${row.route} ${row.status} ray ${row.ray ?? '(none)'} — ${String(said).slice(0, 200)}`,
+      )
+    }
+  }
+
   if (status.signal) {
     console.log(`  KILLED BY ${status.signal} — NOT OK. EXIT CODE: none.`)
     process.exit(1)
@@ -129,12 +162,17 @@ console.log(`run-status: ${name} -> ${path}`)
 // STDIO INHERITED, so the wrapped command's output still goes wherever the
 // caller sent it. This wrapper adds a record; it does not stand between
 // anybody and the log.
+// A detail file from an earlier run under this name is not this run's.
+rmSync(detailPathFor(name), { force: true })
+
 const child = spawn(command[0], command.slice(1), {
   stdio: 'inherit',
   shell: process.platform === 'win32',
+  env: { ...process.env, RUN_STATUS_DETAIL: detailPathFor(name) },
 })
 
 const finish = (exitCode, signal) => {
+  const detail = readDetail(name)
   write(name, {
     state: 'finished',
     command: command.join(' '),
@@ -142,6 +180,7 @@ const finish = (exitCode, signal) => {
     finishedAt: new Date().toISOString(),
     exitCode,
     signal: signal ?? null,
+    ...(detail ? { detail } : {}),
   })
   // AND THE WRAPPER EXITS WITH THE SAME CODE. Belt and braces: the file is the
   // record, this is so a caller that DOES read the status still gets the truth.

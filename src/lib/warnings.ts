@@ -274,6 +274,27 @@ export function driverWarnings(facts: DriverFacts, now: Date): Warning[] {
   return found
 }
 
+/**
+ * A driver's warnings as a viewer WITHOUT `dqf:read` may see them (§6.8,
+ * owner's ruling on GAPS 23, 2026-10-11).
+ *
+ * THE FLAG STAYS, THE GAPS GO. "DQF incomplete" is a readiness signal —
+ * accounting needs it, because an unready driver does not get a paid load —
+ * while the detail names WHICH items of the file are missing or expired, and
+ * the file's documents, gaps and dates are what `dqf` guards. So the warning
+ * is kept and its detail is emptied before it reaches the payload, which is
+ * the never-send-a-field rule rather than a cell that hides it.
+ */
+export function withoutDqfGaps(
+  warnings: readonly Warning[],
+  maySeeDqf: boolean,
+): Warning[] {
+  if (maySeeDqf) return [...warnings]
+  return warnings.map((warning) =>
+    warning.name === 'dqf_incomplete' ? { ...warning, detail: '' } : warning,
+  )
+}
+
 export function truckWarnings(facts: TruckFacts, now: Date): Warning[] {
   return complianceWarnings(facts.compliance, REQUIRED_TRUCK_DOCUMENTS, now)
 }
