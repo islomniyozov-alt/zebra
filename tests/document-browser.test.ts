@@ -57,13 +57,20 @@ describe('what a dispatcher may browse', () => {
 
   it('and excludes every kind that carries money or a dispute', () => {
     // THE PAIR. A settlement PDF is driver pay in a wrapper; an invoice is the
-    // rate. Neither is theirs, and §2.5 does not put claims on their list.
+    // rate. Neither is theirs. DataQs is the challenge safety files.
     expect(allowed).not.toContain('settlement')
     expect(allowed).not.toContain('invoice')
     expect(allowed).not.toContain('expense')
     expect(allowed).not.toContain('fuelTransaction')
-    expect(allowed).not.toContain('claim')
     expect(allowed).not.toContain('dataQs')
+  })
+
+  it('but browses claim documents, since the 2026-10-10 ruling on GAPS 15', () => {
+    // SUPERSEDED: this file used to assert claims were off the list. The owner
+    // ruled that a dispatcher opens and records claims, and the claim's own
+    // page already shows its documents; browsing the same files from
+    // /documents follows from `read claim`, which is the rule this map keeps.
+    expect(allowed).toContain('claim')
   })
 
   it('while an owner may browse all of them', () => {
