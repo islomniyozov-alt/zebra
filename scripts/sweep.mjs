@@ -192,6 +192,9 @@ export const classify = (status, body) => {
 
 // ── THE ROUTE MATRIX (TMS-DESIGN-SYSTEM.md §6.8, 2026-10-10) ──────────────
 
+/** Tries per role before a stalled sign-in fails the sweep: one retry, no more. */
+export const SIGN_IN_ATTEMPTS = 2
+
 /** The roles the sweep signs in as, and the matrix's column for each. */
 /**
  * Every role in `enum Role`, each a column of §6.8 (extended 2026-10-10), and
@@ -395,25 +398,48 @@ async function sweep() {
       )
       process.exit(1)
     }
-    const context = await browser.newContext()
-    const page = await context.newPage()
-    await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded' })
-    await page.fill('input[name="email"]', email)
-    await page.fill('input[name="password"]', password)
-    // ANYWHERE BUT THE LOGIN PAGE: where a role lands is its business, and a
-    // driver has no dashboard to land on. A sign-in that stays on /login is a
-    // refusal, and the timeout says so.
-    await Promise.all([
-      page.waitForURL((url) => !url.pathname.startsWith('/login'), {
-        timeout: 90_000,
-      }),
-      page.click('button[type="submit"]'),
-    ])
-    const found = (await context.cookies())
-      .filter((entry) => entry.name === 'zebra_session')
-      .map((entry) => `${entry.name}=${entry.value}`)
-      .join('; ')
-    await context.close()
+    // ONE RETRY PER ROLE, AND THE ROLE IS NAMED. Owner's brief, 2026-10-11:
+    // two deployed sweeps stalled at sign-in with Playwright's bare timeout,
+    // which said nothing about WHICH of six accounts stalled, and a re-run
+    // was clean. A second stall is a failure, printed as one — a sweep that
+    // retried until it got in would sweep a dev that cannot sign anybody in.
+    let found = ''
+    for (let attempt = 1; ; attempt++) {
+      const context = await browser.newContext()
+      const page = await context.newPage()
+      try {
+        await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded' })
+        await page.fill('input[name="email"]', email)
+        await page.fill('input[name="password"]', password)
+        // ANYWHERE BUT THE LOGIN PAGE: where a role lands is its business,
+        // and a driver has no dashboard to land on. A sign-in that stays on
+        // /login is a refusal, and the timeout says so.
+        await Promise.all([
+          page.waitForURL((url) => !url.pathname.startsWith('/login'), {
+            timeout: 90_000,
+          }),
+          page.click('button[type="submit"]'),
+        ])
+        found = (await context.cookies())
+          .filter((entry) => entry.name === 'zebra_session')
+          .map((entry) => `${entry.name}=${entry.value}`)
+          .join('; ')
+        await context.close()
+        break
+      } catch (error) {
+        await context.close()
+        const reason = String(error?.message ?? error).split('\n')[0]
+        if (attempt >= SIGN_IN_ATTEMPTS) {
+          console.error(
+            `${label} SIGN-IN STALLED, ${attempt} of ${SIGN_IN_ATTEMPTS} attempts: ${reason}. NOT OK.`,
+          )
+          process.exit(1)
+        }
+        console.error(
+          `${label} sign-in stalled (attempt ${attempt} of ${SIGN_IN_ATTEMPTS}): ${reason} — retrying once.`,
+        )
+      }
+    }
     if (!found) {
       console.error(`NO SESSION COOKIE AFTER ${label} SIGN-IN. NOT OK.`)
       process.exit(1)

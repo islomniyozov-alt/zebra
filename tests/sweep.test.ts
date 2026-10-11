@@ -15,8 +15,28 @@ import {
   outcomeOf,
   readRouteMatrix,
   routesUnder,
+  SIGN_IN_ATTEMPTS,
   tally,
 } from '../scripts/sweep.mjs'
+
+// Owner's brief, 2026-10-11: a stalled sign-in names its role and is retried
+// once — once, because a sweep that retried until it got in would sweep a dev
+// that cannot sign anybody in.
+describe('a stalled sign-in', () => {
+  it('is retried once and no more', () => {
+    expect(SIGN_IN_ATTEMPTS).toBe(2)
+  })
+
+  it('names the role in both messages, and the last one is NOT OK', () => {
+    const script = readFileSync('scripts/sweep.mjs', 'utf8')
+    expect(script).toContain(
+      '`${label} SIGN-IN STALLED, ${attempt} of ${SIGN_IN_ATTEMPTS} attempts: ${reason}. NOT OK.`',
+    )
+    expect(script).toContain(
+      '`${label} sign-in stalled (attempt ${attempt} of ${SIGN_IN_ATTEMPTS}): ${reason} — retrying once.`',
+    )
+  })
+})
 
 // ---------------------------------------------------------------------------
 // THE SWEEP'S ARITHMETIC, WITHOUT A WORKER.

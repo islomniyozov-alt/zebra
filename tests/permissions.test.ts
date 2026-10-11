@@ -154,6 +154,35 @@ describe('the random pool and its summary', () => {
   })
 })
 
+// OWNER'S RULINGS ON GAPS 19–22, 2026-10-11 (§6.8).
+describe('the six-role sweep’s four rulings', () => {
+  // 19: the file is safety's. Accounting reads the certificates it is built
+  // from, which is exactly why the file needs a permission of its own.
+  it('the DQF for the fleet and safety roles, never accounting or a driver', () => {
+    const dqf = ROLES.filter((role) => can(session(role), 'read', 'dqf'))
+    expect(dqf.sort()).toEqual(['ADMIN', 'DISPATCHER', 'MANAGER', 'OWNER'])
+    expect(can(session('ACCOUNTING'), 'read', 'compliance')).toBe(true)
+  })
+
+  // 21: accounting opens trailers the way it opens trucks — read only.
+  it('accounting reads trailers and writes none', () => {
+    const accounting = session('ACCOUNTING')
+    expect(can(accounting, 'read', 'trailer')).toBe(true)
+    for (const action of ['create', 'update', 'delete'] as const) {
+      expect(can(accounting, action, 'trailer'), action).toBe(false)
+    }
+  })
+
+  // 20 and 22 moved the matrix, so these pin the code it moved to.
+  // The two pages' own guards: `/brokers/new` asks `customer:create`,
+  // `/receivables/factoring` asks `receivable:update`.
+  it('accounting creates a broker; a manager does not factor', () => {
+    expect(can(session('ACCOUNTING'), 'create', 'customer')).toBe(true)
+    expect(can(session('MANAGER'), 'update', 'receivable')).toBe(false)
+    expect(can(session('ACCOUNTING'), 'update', 'receivable')).toBe(true)
+  })
+})
+
 describe('the accounting boundary', () => {
   const accounting = session('ACCOUNTING')
 

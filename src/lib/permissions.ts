@@ -73,6 +73,13 @@ export const RESOURCES = [
   'driver',
   'maintenance',
   'compliance',
+  // THE DRIVER QUALIFICATION FILE (49 CFR 391.51), owner's ruling on GAPS 19,
+  // 2026-10-11: it is safety's, and accounting may not open it. It is BUILT
+  // from compliance records, which accounting reads for insurance
+  // certificates — so it needs a name of its own, or granting the
+  // certificates grants the file. Read-only by nature: nothing about the
+  // checklist is stored, so there is nothing to create or update.
+  'dqf',
   // A roadside inspection is its own kind of record, not a compliance date: it
   // is an EVENT with violations hanging off it, it is what a DataQs challenge
   // is written against (§2.5, step 5), and an out-of-service order on it is a
@@ -214,6 +221,9 @@ const FLEET_READ: Permission[] = [
   ...read('driver'),
   ...read('maintenance'),
   ...read('compliance'),
+  // The file a driver is qualified on, which a dispatcher checks before
+  // handing them a load. In FLEET_READ and not in ACCOUNTING (GAPS 19).
+  ...read('dqf'),
   // A DISPATCHER reads inspections for the same reason they read compliance
   // dates (§2.5): a driver placed out of service at a scale house is the fact
   // that decides what happens to the load they are under.
@@ -422,11 +432,18 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     ...read('calendar'),
     ...read('driver'),
     ...read('truck'),
+    // Trailers the way trucks are: OPENED, never created or edited. Owner's
+    // ruling on GAPS 21, 2026-10-11 — before it, both trailer pages refused
+    // accounting while the truck pages beside them did not.
+    ...read('trailer'),
     // READ-ONLY, deliberately. Accounting handles insurance certificates at
     // billing and factoring time, so it needs to see an expiry date — but
     // renewing one is a safety act, and `compliance:create/update/delete` stay
     // with the roles that hold FLEET_WRITE. Resolves PHASE-4-BRIEF.md §6
     // flag 5, which §2.5 left open.
+    //
+    // AND NOT THE DQF BUILT FROM THESE RECORDS: `dqf:read` is deliberately
+    // absent (owner's ruling on GAPS 19, 2026-10-11).
     ...read('compliance'),
     // The same shape one step later, and the same ruling. Accounting already
     // holds `truck.financials`, so it could see a work order's cost and could

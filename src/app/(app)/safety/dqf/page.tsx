@@ -73,10 +73,12 @@ export default async function DqfRosterPage({
     typeof params['company'] === 'string' ? params['company'] : undefined
 
   // §6.8: a role without the read is REFUSED as a 404, never a 500 (sweep).
-  if (!(await currentUserCan('read', 'compliance'))) notFound()
+  // `dqf`, not `compliance`: accounting reads the certificates this file is
+  // built from and may not open the file (owner's ruling on GAPS 19).
+  if (!(await currentUserCan('read', 'dqf'))) notFound()
   const { rows, companyCount } = await withCurrentOrg(
     'read',
-    'compliance',
+    'dqf',
     async (tx, session) => {
       const companyCount = await tx.company.count()
       const drivers = await tx.driver.findMany({

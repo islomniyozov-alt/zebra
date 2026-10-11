@@ -289,6 +289,10 @@ export default async function EditDriverPage({
   // ABSENT, not empty: "no draws" would tell a dispatcher this driver was
   // never selected, which is itself a disclosure.
   const maySeeRandom = await currentUserCan('read', 'randomTesting')
+  // The DQF checklist is the roster one driver at a time, so it follows the
+  // roster's permission: accounting reads this tab's certificates and not the
+  // file built from them (§6.8, owner's ruling on GAPS 19).
+  const maySeeDqf = await currentUserCan('read', 'dqf')
   const maySeeInspections = await currentUserCan('read', 'inspection')
   const mayRenewCompliance = await currentUserCan('create', 'compliance')
 
@@ -636,7 +640,7 @@ export default async function EditDriverPage({
          * records listed below, and the other three are documents listed
          * above. Reading the verdict first and the evidence after is the
          * order an audit goes in. */}
-        {tab === 'safety' && maySeeCompliance ? (
+        {tab === 'safety' && maySeeDqf ? (
           <div className="max-w-[900px]">
             <DqfPanel
               rows={dqfRows}
