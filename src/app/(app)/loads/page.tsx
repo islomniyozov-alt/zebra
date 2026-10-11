@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { notFound } from 'next/navigation'
 import { warningLabels } from '@/components/WarningCell'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { Button } from '@/components/ui/Button'
@@ -96,6 +97,9 @@ export default async function LoadsPage({
   // (owner's ruling, 2026-10-01); no view means today's behaviour, archive
   // included (ruling 3).
   const listParams = readLoadListParams(params)
+
+  // §6.8: a role without the read is REFUSED as a 404, never a 500 (sweep).
+  if (!(await currentUserCan('read', 'load'))) notFound()
 
   /** The same query string, for the export: the file is this view. */
   const exportQuery = pageHref(1)

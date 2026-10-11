@@ -7,7 +7,9 @@ import { describe, expect, it } from 'vitest'
 // the same point this file makes about guards that assert nothing.
 import {
   classify,
+  credentialsFor,
   knownGap,
+  MATRIX_ROLES,
   markFor,
   matrixFindings,
   outcomeOf,
@@ -199,15 +201,59 @@ describe('the route matrix covers every protected page, and only those', () => {
     ).toEqual([])
   })
 
-  it('speaks only the three words, in both columns', () => {
+  it('speaks only the three words, in every role column', () => {
+    expect(MATRIX_ROLES).toEqual([
+      'owner',
+      'admin',
+      'manager',
+      'dispatcher',
+      'accounting',
+      'driver',
+    ])
     for (const [route, row] of MATRIX) {
-      expect(['reach', 'refuse', 'redirect'], `${route} owner`).toContain(
-        row.owner,
-      )
-      expect(['reach', 'refuse', 'redirect'], `${route} dispatcher`).toContain(
-        row.dispatcher,
-      )
+      for (const role of MATRIX_ROLES) {
+        expect(['reach', 'refuse', 'redirect'], `${route} ${role}`).toContain(
+          (row as Record<string, string>)[role],
+        )
+      }
     }
+  })
+
+  it('reads columns by header, so a reordered table cannot swap two roles', () => {
+    // THE FAILURE THIS GUARDS: the table grew from two columns to six, and a
+    // positional parser read the admin column as the dispatcher's.
+    const table = [
+      '<!-- route-matrix:start -->',
+      '| Route | Driver | Owner | Note | Admin | Manager | Dispatcher | Accounting |',
+      '| --- | --- | --- | --- | --- | --- | --- | --- |',
+      '| `/x` | refuse | reach | n | reach | reach | refuse | reach |',
+      '<!-- route-matrix:end -->',
+    ].join('\n')
+    const row = readRouteMatrix(table).get('/x') as Record<string, string>
+    expect(row.driver).toBe('refuse')
+    expect(row.owner).toBe('reach')
+    expect(row.dispatcher).toBe('refuse')
+    expect(row.note).toBe('n')
+    expect(() =>
+      readRouteMatrix(table.replace('| Dispatcher ', '| Nobody ')),
+    ).toThrow(/dispatcher/)
+  })
+
+  it('a driver reaches nothing org-wide: only their own account', () => {
+    // The owner's words, 2026-10-10. Every one of these pages is org-wide.
+    const reached = [...MATRIX]
+      .filter(([, row]) => (row as Record<string, string>).driver === 'reach')
+      .map(([route]) => route)
+    expect(reached).toEqual(['/account'])
+  })
+
+  it('credentials come from SEED_<ROLE>_EMAIL / _PASSWORD', () => {
+    expect(
+      credentialsFor('accounting', {
+        SEED_ACCOUNTING_EMAIL: 'a@x.test',
+        SEED_ACCOUNTING_PASSWORD: 'p',
+      }),
+    ).toEqual({ email: 'a@x.test', password: 'p' })
   })
 
   it('refuses without markers rather than checking an empty matrix', () => {

@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyScopeFilter } from '@/lib/tenancy'
@@ -94,6 +95,8 @@ export default async function TrucksPage({
     params['missing'],
   )
 
+  // §6.8: a role without the read is REFUSED as a 404, never a 500 (sweep).
+  if (!(await currentUserCan('read', 'truck'))) notFound()
   const { rows, companyCount, visible, health } = await withCurrentOrg(
     'read',
     'truck',

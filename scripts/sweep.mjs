@@ -193,11 +193,32 @@ export const classify = (status, body) => {
 // ── THE ROUTE MATRIX (TMS-DESIGN-SYSTEM.md §6.8, 2026-10-10) ──────────────
 
 /** The roles the sweep signs in as, and the matrix's column for each. */
-export const MATRIX_ROLES = ['owner', 'dispatcher']
+/**
+ * Every role in `enum Role`, each a column of §6.8 (extended 2026-10-10), and
+ * the environment variables its seed account signs in with.
+ */
+export const MATRIX_ROLES = [
+  'owner',
+  'admin',
+  'manager',
+  'dispatcher',
+  'accounting',
+  'driver',
+]
+
+export const credentialsFor = (role, env) => ({
+  email: env[`SEED_${role.toUpperCase()}_EMAIL`],
+  password: env[`SEED_${role.toUpperCase()}_PASSWORD`],
+})
 
 /**
  * §6.8's table, read from the design system itself: the rows between the two
- * markers, as `route → { owner, dispatcher, note }`.
+ * markers, as `route → { owner, admin, …, note }`.
+ *
+ * COLUMNS ARE FOUND BY THEIR HEADER, NOT THEIR POSITION. The table grew from
+ * two roles to six on 2026-10-10; a parser that read cell 3 as the dispatcher
+ * would have read the admin column instead and held the wrong role to it
+ * without a word. A role with no column, or a header with no Note, throws.
  *
  * READ FROM THE DOC, NOT COPIED INTO THIS FILE, so the intent has one home and
  * a change to it is a change to the design system. Throws when the markers are
@@ -210,16 +231,32 @@ export function readRouteMatrix(markdown) {
   if (start < 0 || end < start) {
     throw new Error('TMS-DESIGN-SYSTEM.md has no §6.8 route matrix markers.')
   }
+  const lines = markdown.slice(start, end).split('\n')
+  const split = (line) => line.split('|').map((cell) => cell.trim())
+  const header = lines.map(split).find((cells) => cells[1] === 'Route')
+  if (!header) throw new Error('§6.8 route matrix has no header row.')
+  const column = (name) => {
+    const index = header.findIndex((cell) => cell.toLowerCase() === name)
+    if (index < 0) throw new Error(`§6.8 route matrix has no "${name}" column.`)
+    return index
+  }
+  const indices = Object.fromEntries(
+    [...MATRIX_ROLES, 'note'].map((name) => [name, column(name)]),
+  )
   const matrix = new Map()
-  for (const line of markdown.slice(start, end).split('\n')) {
-    const cells = line.split('|').map((cell) => cell.trim())
+  for (const line of lines) {
+    const cells = split(line)
     const route = /^`(\/[^`]*)`$/.exec(cells[1] ?? '')?.[1]
     if (!route) continue
-    matrix.set(route, {
-      owner: cells[2],
-      dispatcher: cells[3],
-      note: cells[4] ?? '',
-    })
+    matrix.set(
+      route,
+      Object.fromEntries(
+        Object.entries(indices).map(([name, index]) => [
+          name,
+          cells[index] ?? '',
+        ]),
+      ),
+    )
   }
   return matrix
 }
@@ -344,17 +381,17 @@ async function sweep() {
   // and its id is Next's business, not ours. `live-check.mjs` learned that the
   // hard way: a hand-built POST reported "credentials not set".
   //
-  // TWO ROLES SINCE 2026-10-10: the owner, and the seed dispatcher (dev only,
-  // `prisma/seed.ts`). A dispatcher whose credentials are missing FAILS the
-  // sweep rather than skipping it: a clean sweep of one role says nothing
-  // about the other, which is the gap this exists to close.
+  // EVERY ROLE SINCE 2026-10-10: the owner and one seed account per other
+  // role (dev only, `prisma/seed.ts`). A role whose credentials are missing
+  // FAILS the sweep rather than skipping it: a clean sweep of five roles says
+  // nothing about the sixth, which is the gap this exists to close.
   const browser = await chromium.launch(
     process.env.SHOT_CHROME ? { executablePath: process.env.SHOT_CHROME } : {},
   )
   const signIn = async (email, password, label) => {
     if (!email || !password) {
       console.error(
-        `NO ${label} CREDENTIALS (${label === 'DISPATCHER' ? 'SEED_DISPATCHER_EMAIL / SEED_DISPATCHER_PASSWORD' : 'SEED_OWNER_EMAIL / SEED_OWNER_PASSWORD'}). Nothing swept. NOT OK.`,
+        `NO ${label} CREDENTIALS (SEED_${label}_EMAIL / SEED_${label}_PASSWORD). Nothing swept. NOT OK.`,
       )
       process.exit(1)
     }
@@ -363,8 +400,13 @@ async function sweep() {
     await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded' })
     await page.fill('input[name="email"]', email)
     await page.fill('input[name="password"]', password)
+    // ANYWHERE BUT THE LOGIN PAGE: where a role lands is its business, and a
+    // driver has no dashboard to land on. A sign-in that stays on /login is a
+    // refusal, and the timeout says so.
     await Promise.all([
-      page.waitForURL(/\/(loads|dashboard)/, { timeout: 90_000 }),
+      page.waitForURL((url) => !url.pathname.startsWith('/login'), {
+        timeout: 90_000,
+      }),
       page.click('button[type="submit"]'),
     ])
     const found = (await context.cookies())
@@ -378,16 +420,13 @@ async function sweep() {
     }
     return found
   }
-  const cookie = await signIn(
-    process.env.SEED_OWNER_EMAIL,
-    process.env.SEED_OWNER_PASSWORD,
-    'OWNER',
-  )
-  const dispatcherCookie = await signIn(
-    process.env.SEED_DISPATCHER_EMAIL,
-    process.env.SEED_DISPATCHER_PASSWORD,
-    'DISPATCHER',
-  )
+  /** One session per role, the owner's first: it is also the classic sweep's. */
+  const cookies = {}
+  for (const role of MATRIX_ROLES) {
+    const { email, password } = credentialsFor(role, process.env)
+    cookies[role] = await signIn(email, password, role.toUpperCase())
+  }
+  const cookie = cookies.owner
   await browser.close()
 
   const get = async (path, headers) => {
@@ -436,18 +475,18 @@ async function sweep() {
       !['/login', '/reset-password'].includes(route) &&
       !route.includes('[token]')
     ) {
-      // THE MATRIX HALF (§6.8): the same page as the dispatcher, and both
-      // roles' answers held to the design system's table.
-      const asDispatcher = await get(path, { cookie: dispatcherCookie })
-      seen.push(
-        { route, role: 'owner', status: withSession.status, verdict },
-        {
+      // THE MATRIX HALF (§6.8): the same page as every other role, and each
+      // role's answer held to the design system's table.
+      seen.push({ route, role: 'owner', status: withSession.status, verdict })
+      for (const role of MATRIX_ROLES.filter((name) => name !== 'owner')) {
+        const answer = await get(path, { cookie: cookies[role] })
+        seen.push({
           route,
-          role: 'dispatcher',
-          status: asDispatcher.status,
-          verdict: classify(asDispatcher.status, asDispatcher.body),
-        },
-      )
+          role,
+          status: answer.status,
+          verdict: classify(answer.status, answer.body),
+        })
+      }
 
       const without = await get(path, {})
       const refused = without.status >= 300 && without.status < 400
@@ -487,13 +526,18 @@ async function sweep() {
     console.log(`   ${row.verdict}: ${row.route}`)
   for (const row of sums.errors) console.log(`   ${row.verdict}: ${row.route}`)
   for (const row of sums.unrefused) console.log(`   NOT REFUSED: ${row.route}`)
-  const dispatcherRows = seen.filter((row) => row.role === 'dispatcher')
   console.log(
-    `ROUTE MATRIX (§6.8): ${seen.length / 2} page(s) x ${MATRIX_ROLES.length} roles; ` +
-      `dispatcher reached ${dispatcherRows.filter((row) => outcomeOf(row.verdict) === 'reach').length}, ` +
-      `refused ${dispatcherRows.filter((row) => outcomeOf(row.verdict) === 'refuse').length}; ` +
+    `ROUTE MATRIX (§6.8): ${seen.length / MATRIX_ROLES.length} page(s) x ${MATRIX_ROLES.length} roles; ` +
       `${sums.fresh.length} NEW disagreement(s), ${sums.known.length} known`,
   )
+  for (const role of MATRIX_ROLES) {
+    const rows = seen.filter((row) => row.role === role)
+    const count = (outcome) =>
+      rows.filter((row) => outcomeOf(row.verdict) === outcome).length
+    console.log(
+      `   ${role.padEnd(10)} reached ${count('reach')}, refused ${count('refuse')}, redirected ${count('redirect')}, errored ${count('error')}`,
+    )
+  }
   for (const row of sums.fresh)
     console.log(
       `   NEW  ${row.role.padEnd(10)} ${row.route.padEnd(30)} matrix ${row.expected}, got ${row.got} (${row.status})`,

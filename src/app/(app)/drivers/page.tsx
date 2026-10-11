@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyScopeFilter } from '@/lib/tenancy'
@@ -190,6 +191,8 @@ export default async function DriversPage({
 
   const now = new Date()
 
+  // §6.8: a role without the read is REFUSED as a 404, never a 500 (sweep).
+  if (!(await currentUserCan('read', 'driver'))) notFound()
   const { rows, companyCount, counts, visible, savedViews, density, health } =
     await withCurrentOrg('read', 'driver', async (tx, session) => {
       const companyCount = await tx.company.count()

@@ -166,6 +166,8 @@ export default async function LoadDetailPage({
   const { id } = await params
   const { t, locale } = await getLocaleContext()
 
+  // §6.8: a role without the read is REFUSED as a 404, never a 500 (sweep).
+  if (!(await currentUserCan('read', 'load'))) notFound()
   const data = await withCurrentOrg('read', 'load', async (tx) => {
     const load = await tx.load.findUnique({
       where: { id },

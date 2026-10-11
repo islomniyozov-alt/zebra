@@ -1,9 +1,10 @@
 import { redirect } from 'next/navigation'
 import type { ReactNode } from 'react'
-import { getSession, withCurrentOrg } from '@/lib/auth-context'
+import { currentUserCan, getSession, withCurrentOrg } from '@/lib/auth-context'
+import { ownAccountDb } from '@/lib/auth-db'
 import { getLocaleContext } from '@/lib/locale'
 import { navigationFor } from '@/lib/permissions'
-import { readDensity } from '@/lib/preferences'
+import { DEFAULT_DENSITY, readDensity, type Density } from '@/lib/preferences'
 import { Sidebar, type SidebarGroup } from '@/components/shell/Sidebar'
 import { Topbar } from '@/components/shell/Topbar'
 import { ribbonBranch } from '@/lib/environment'
@@ -65,21 +66,30 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // changes nothing, while narrowing it is a permission change dressed as a
   // cleanup, and the wrong guess locks somebody out of every screen at once.
   // Worth revisiting against the role matrix, deliberately, not in passing.
-  const { density, account } = await withCurrentOrg(
-    'read',
-    'company',
-    async (tx, current) => ({
-      density: await readDensity(tx, current.userId),
-      // THE NAME ON THE ACCOUNT CONTROL, read here because the session does not
-      // carry one — `SessionContext` has userId and role and nothing a person
-      // would recognise as themselves. One more row on a connection already
-      // open, which is the same argument the density read makes above.
-      account: await tx.user.findUnique({
-        where: { id: current.userId },
-        select: { name: true, email: true },
-      }),
-    }),
-  )
+  //
+  // REVISITED AGAINST THE ROLE MATRIX ON 2026-10-10, as the line above asked.
+  // The six-role sweep (§6.8) found the guess it warned about: a DRIVER holds
+  // no `company:read`, so this read threw on EVERY page and a driver met a
+  // server error everywhere, their own account included. Neither value is
+  // the organization's — both are the person's own:
+  //
+  //   * the NAME comes through the own-account handle, as `/account` reads it
+  //     (`User` is outside row-level security; src/lib/auth-db.ts);
+  //   * the DENSITY is read in the tenant transaction for every role that
+  //     holds `company:read`, exactly as before, and is the default for a role
+  //     that does not — a driver has no grid to be dense on.
+  //
+  // So nothing about the shell's permission changes for the five roles that
+  // load it today, and the sixth gets a shell instead of a 500.
+  const account = await ownAccountDb().user.findUnique({
+    where: { id: session.userId },
+    select: { name: true, email: true },
+  })
+  const density: Density = (await currentUserCan('read', 'company'))
+    ? await withCurrentOrg('read', 'company', (tx, current) =>
+        readDensity(tx, current.userId),
+      )
+    : DEFAULT_DENSITY
 
   return (
     /* §5.1 lives HERE rather than on <html>: the preference belongs to a

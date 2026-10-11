@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyIdScopeFilter } from '@/lib/tenancy'
@@ -45,6 +46,8 @@ export default async function AccidentRegisterPage({
   const asked =
     typeof params['company'] === 'string' ? params['company'] : undefined
 
+  // §6.8: a role without the read is REFUSED as a 404, never a 500 (sweep).
+  if (!(await currentUserCan('read', 'accident'))) notFound()
   const data = await withCurrentOrg('read', 'accident', async (tx, session) => {
     const companies = await tx.company.findMany({
       where: {

@@ -1,4 +1,5 @@
 import { assignableDriver, ASSIGNABLE_TRUCK } from '@/lib/driver-availability'
+import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyScopeFilter } from '@/lib/tenancy'
@@ -47,6 +48,8 @@ export default async function DispatchPage({
   const windowEnd = new Date(start)
   windowEnd.setUTCDate(start.getUTCDate() + DAYS)
 
+  // §6.8: a role without the read is REFUSED as a 404, never a 500 (sweep).
+  if (!(await currentUserCan('read', 'dispatch'))) notFound()
   const data = await withCurrentOrg('read', 'dispatch', async (tx, session) => {
     const scope = companyScopeFilter(session.companyScopes)
     const where = {

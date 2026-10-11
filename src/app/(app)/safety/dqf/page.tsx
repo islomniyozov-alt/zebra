@@ -1,5 +1,6 @@
 import Link from 'next/link'
-import { withCurrentOrg } from '@/lib/auth-context'
+import { notFound } from 'next/navigation'
+import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyScopeFilter } from '@/lib/tenancy'
 import { Table, type Column } from '@/components/ui/Table'
@@ -71,6 +72,8 @@ export default async function DqfRosterPage({
   const companyParam =
     typeof params['company'] === 'string' ? params['company'] : undefined
 
+  // §6.8: a role without the read is REFUSED as a 404, never a 500 (sweep).
+  if (!(await currentUserCan('read', 'compliance'))) notFound()
   const { rows, companyCount } = await withCurrentOrg(
     'read',
     'compliance',

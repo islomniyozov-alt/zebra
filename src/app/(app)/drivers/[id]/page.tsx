@@ -91,6 +91,8 @@ export default async function EditDriverPage({
   // inside it, and nothing is fetched that the open tab does not show.
   const requestedTab = recordTabFor((await searchParams)['tab'])
 
+  // §6.8: a role without the read is REFUSED as a 404, never a 500 (sweep).
+  if (!(await currentUserCan('read', 'driver'))) notFound()
   const data = await withCurrentOrg('read', 'driver', async (tx, session) => {
     const driver = await tx.driver.findUnique({ where: { id } })
     if (!driver) return null

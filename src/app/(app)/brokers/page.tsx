@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { brokerTone } from '@/lib/brokers'
@@ -39,6 +40,8 @@ export default async function BrokersPage({
   const { t } = await getLocaleContext()
   const showRetired = params['removed'] === '1'
 
+  // §6.8: a role without the read is REFUSED as a 404, never a 500 (sweep).
+  if (!(await currentUserCan('read', 'customer'))) notFound()
   const rows = await withCurrentOrg('read', 'customer', async (tx) => {
     const brokers = await tx.customer.findMany({
       where: showRetired ? {} : { deletedAt: null },

@@ -5,7 +5,7 @@ import { hashPassword } from '../src/lib/password'
 import { normalizeEmail } from '../src/lib/auth'
 import { assertProductionWrite, isProductionLabel } from './production-gate'
 import { readLatestMigrationNumber, readPersistedScopes } from './gate-readers'
-import type { PrismaClient } from '../src/generated/prisma/client'
+import type { PrismaClient, Role } from '../src/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
 // SEED — §12, and nothing beyond it.
@@ -236,55 +236,69 @@ async function seedIsolationCounterpart(db: PrismaClient): Promise<void> {
 }
 
 /**
- * The sweep's dispatcher (TMS-DESIGN-SYSTEM.md §6.8, 2026-10-10): a DISPATCHER
- * of the operating group across every authority, so `scripts/sweep.mjs` can
- * hold every page to the route matrix as the role that lives on the board.
- * NEVER SEEDED INTO PRODUCTION — called only beside the isolation counterpart.
+ * The sweep's role accounts (TMS-DESIGN-SYSTEM.md §6.8, 2026-10-10): one
+ * member of the operating group per role other than the owner, across every
+ * authority, so `scripts/sweep.mjs` can hold every page to the route matrix
+ * as every role. NEVER SEEDED INTO PRODUCTION — called only beside the
+ * isolation counterpart.
  *
- * Both credentials come from the environment and the password is never
- * printed: the sweep reads the same two variables, so there is nothing to
- * hand over. Re-seeding resets the password to the environment's, which is
- * what keeps the sweep's sign-in and the stored hash from drifting apart.
+ * The credentials come from `SEED_<ROLE>_EMAIL` / `SEED_<ROLE>_PASSWORD` and
+ * no password is printed: the sweep reads the same variables, so there is
+ * nothing to hand over. Re-seeding resets each password to the environment's,
+ * which keeps the sweep's sign-in and the stored hash from drifting apart.
  */
-async function seedSweepDispatcher(db: PrismaClient): Promise<void> {
-  const email = process.env.SEED_DISPATCHER_EMAIL
-  const password = process.env.SEED_DISPATCHER_PASSWORD
-  if (!email || !password) {
-    console.log(
-      '  skipping the sweep dispatcher — SEED_DISPATCHER_EMAIL / ' +
-        'SEED_DISPATCHER_PASSWORD not set',
-    )
-    return
-  }
+const SWEEP_ROLES = [
+  'ADMIN',
+  'MANAGER',
+  'DISPATCHER',
+  'ACCOUNTING',
+  'DRIVER',
+] as const satisfies readonly Role[]
+
+async function seedSweepRoles(db: PrismaClient): Promise<void> {
   const organization = await db.organization.findUniqueOrThrow({
     where: { slug: 'zebra' },
     select: { id: true },
   })
-  const passwordHash = await hashPassword(password)
-  const user = await db.user.upsert({
-    where: { email },
-    update: { passwordHash },
-    create: { email, name: 'Sweep Dispatcher', passwordHash, locale: 'en' },
-  })
-  await db.membership.upsert({
-    where: {
-      userId_organizationId: {
+  for (const role of SWEEP_ROLES) {
+    const email = process.env[`SEED_${role}_EMAIL`]
+    const password = process.env[`SEED_${role}_PASSWORD`]
+    if (!email || !password) {
+      console.log(
+        `  skipping the sweep ${role} — SEED_${role}_EMAIL / ` +
+          `SEED_${role}_PASSWORD not set`,
+      )
+      continue
+    }
+    const passwordHash = await hashPassword(password)
+    const name = `Sweep ${role.charAt(0)}${role.slice(1).toLowerCase()}`
+    const user = await db.user.upsert({
+      where: { email },
+      update: { passwordHash },
+      create: { email, name, passwordHash, locale: 'en' },
+    })
+    await db.membership.upsert({
+      where: {
+        userId_organizationId: {
+          userId: user.id,
+          organizationId: organization.id,
+        },
+      },
+      // THE ROLE IS RESET ON EVERY SEED, because a sweep that signed in as an
+      // account somebody had promoted would hold one column of the matrix
+      // against another role's answers and pass.
+      update: { role },
+      create: {
         userId: user.id,
         organizationId: organization.id,
+        role,
+        isDefault: true,
       },
-    },
-    // THE ROLE IS RESET ON EVERY SEED, because a sweep that signed in as a
-    // dispatcher somebody had promoted would hold the matrix's dispatcher
-    // column against an owner's answers and pass.
-    update: { role: 'DISPATCHER' },
-    create: {
-      userId: user.id,
-      organizationId: organization.id,
-      role: 'DISPATCHER',
-      isDefault: true,
-    },
-  })
-  console.log(`  sweep dispatcher ${email} — DISPATCHER, all authorities`)
+    })
+    console.log(
+      `  sweep ${role.toLowerCase()} ${email} — ${role}, all authorities`,
+    )
+  }
 }
 
 async function main(): Promise<void> {
@@ -329,8 +343,8 @@ async function main(): Promise<void> {
       console.log('  skipping the isolation counterpart — never in production')
     } else {
       await seedIsolationCounterpart(db)
-      // §6.8: the sweep's dispatcher, on the same never-in-production side.
-      await seedSweepDispatcher(db)
+      // §6.8: the sweep's role accounts, on the same never-in-production side.
+      await seedSweepRoles(db)
     }
 
     console.log('Done.')

@@ -32,6 +32,8 @@ export default async function EditTrailerPage({
   // cost is never selected for a role that cannot see it — §2.5.
   const maySeeCost = await currentUserCan('read', 'truck.financials')
 
+  // §6.8: a role without the read is REFUSED as a 404, never a 500 (sweep).
+  if (!(await currentUserCan('read', 'trailer'))) notFound()
   const data = await withCurrentOrg('read', 'trailer', async (tx, session) => {
     const trailer = await tx.trailer.findUnique({ where: { id } })
     if (!trailer) return null

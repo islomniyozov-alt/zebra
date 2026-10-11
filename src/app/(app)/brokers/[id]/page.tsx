@@ -20,6 +20,8 @@ export default async function EditBrokerPage({
   const { id } = await params
   const { t } = await getLocaleContext()
 
+  // §6.8: a role without the read is REFUSED as a 404, never a 500 (sweep).
+  if (!(await currentUserCan('read', 'customer'))) notFound()
   const found = await withCurrentOrg('read', 'customer', async (tx) => {
     const row = await tx.customer.findUnique({ where: { id } })
     // Read alongside the broker rather than in a second round trip: it decides

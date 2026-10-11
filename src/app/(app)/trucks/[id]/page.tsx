@@ -35,6 +35,8 @@ export default async function EditTruckPage({
   // standing rule that a field the role cannot see is left OUT of the payload.
   const maySeeCost = await currentUserCan('read', 'truck.financials')
 
+  // §6.8: a role without the read is REFUSED as a 404, never a 500 (sweep).
+  if (!(await currentUserCan('read', 'truck'))) notFound()
   const data = await withCurrentOrg('read', 'truck', async (tx, session) => {
     // Row-level security has already removed another tenant's trucks, so a
     // miss here is a genuine 404 rather than a permission answer in disguise.
