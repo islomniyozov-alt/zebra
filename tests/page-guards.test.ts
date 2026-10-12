@@ -62,9 +62,11 @@ describe('the shell loads for a role with no organization read', () => {
   })
 
   it('asks before the density read, and falls back to the default', () => {
+    // The read is timed since GAPS 26 (`timed(() => withCurrentOrg(...))`);
+    // the question still comes first and the fallback is still the default.
     expect(layout).toMatch(
-      /\(await currentUserCan\('read', 'company'\)\)\s*\?\s*await withCurrentOrg\('read', 'company'/,
+      /\(await currentUserCan\('read', 'company'\)\)\s*\?\s*await timed\(\(\) =>\s*withCurrentOrg\('read', 'company'/,
     )
-    expect(layout).toMatch(/:\s*DEFAULT_DENSITY/)
+    expect(layout).toMatch(/densityRead\?\.value \?\? DEFAULT_DENSITY/)
   })
 })

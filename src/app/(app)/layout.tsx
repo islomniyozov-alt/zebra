@@ -9,6 +9,12 @@ import { Sidebar, type SidebarGroup } from '@/components/shell/Sidebar'
 import { Topbar } from '@/components/shell/Topbar'
 import { ribbonBranch } from '@/lib/environment'
 import type { MessageKey } from '@/lib/i18n'
+import {
+  shellIsolateMark,
+  shellTimingLine,
+  stopwatch,
+  timed,
+} from '@/lib/request-timing'
 
 // §6.1 — the app shell. Sidebar 224px, topbar 48px, content the only scrolling
 // region.
@@ -19,7 +25,12 @@ import type { MessageKey } from '@/lib/i18n'
 // owns the scroll, and nothing else does.
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
-  const session = await getSession()
+  // GAPS 26, MEASUREMENT ONLY: the three reads every page pays before its
+  // own, timed, and written as one structured line for the tail
+  // (`request-timing.ts`). Numbers and a role — nothing else.
+  const clock = stopwatch()
+  const isolate = shellIsolateMark(clock.startedAt)
+  const { value: session, ms: sessionMs } = await timed(() => getSession())
   if (!session) redirect('/login')
 
   const { t } = await getLocaleContext()
@@ -81,15 +92,34 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   //
   // So nothing about the shell's permission changes for the five roles that
   // load it today, and the sixth gets a shell instead of a 500.
-  const account = await ownAccountDb().user.findUnique({
-    where: { id: session.userId },
-    select: { name: true, email: true },
-  })
-  const density: Density = (await currentUserCan('read', 'company'))
-    ? await withCurrentOrg('read', 'company', (tx, current) =>
-        readDensity(tx, current.userId),
+  const { value: account, ms: accountMs } = await timed(() =>
+    ownAccountDb().user.findUnique({
+      where: { id: session.userId },
+      select: { name: true, email: true },
+    }),
+  )
+  const densityRead = (await currentUserCan('read', 'company'))
+    ? await timed(() =>
+        withCurrentOrg('read', 'company', (tx, current) =>
+          readDensity(tx, current.userId),
+        ),
       )
-    : DEFAULT_DENSITY
+    : null
+  const density: Density = densityRead?.value ?? DEFAULT_DENSITY
+
+  console.log(
+    shellTimingLine({
+      role: session.role,
+      spans: {
+        sessionMs,
+        accountMs,
+        densityMs: densityRead?.ms ?? null,
+        totalMs: clock.ms(),
+      },
+      isolate,
+      startedAt: clock.startedAt,
+    }),
+  )
 
   return (
     /* §5.1 lives HERE rather than on <html>: the preference belongs to a

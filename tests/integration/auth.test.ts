@@ -116,7 +116,6 @@ describe('login', () => {
     for (const key of [
       'rateLimitMs',
       'lookupMs',
-      'verifyMs',
       'membershipMs',
       'sessionMs',
       'finalizeMs',
@@ -124,10 +123,10 @@ describe('login', () => {
     ] as const) {
       expect(spans[key], key).toBeGreaterThanOrEqual(0)
     }
-    // argon2id at m=19 MiB, t=2 is not free anywhere; a zero here means the
-    // stopwatch is wrapped around nothing.
-    expect(spans.verifyMs).toBeGreaterThan(0)
-    expect(spans.totalMs).toBeGreaterThanOrEqual(spans.verifyMs!)
+    // NO VERIFY SPAN: argon2id is measured by the runtime's cpuTime, not a
+    // stopwatch (owner's ruling 2026-10-12, `signin-timing.ts`).
+    expect(spans).not.toHaveProperty('verifyMs')
+    expect(spans.totalMs).toBeGreaterThanOrEqual(spans.membershipMs!)
   })
 
   it('stores only the hash of the token', async () => {

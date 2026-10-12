@@ -1,4 +1,5 @@
 import { ARGON2_PARAMS } from './password'
+import { MODULE_LOADED_AT } from './request-timing'
 
 // ---------------------------------------------------------------------------
 // WHERE A SIGN-IN SPENDS ITS TIME (GAPS 24, owner's brief 2026-10-12).
@@ -6,22 +7,24 @@ import { ARGON2_PARAMS } from './password'
 // Measurement only. Three deployed sweeps in two days had one role's sign-in
 // stall past 90 seconds and succeed on the retry, and nothing said which part
 // of the sign-in stalled. This writes one structured log line per sign-in
-// attempt so `wrangler tail` can answer it: the argon2id verify, the user
-// lookup, the session insert and the total, plus the spans that complete the
-// total (the rate-limit read, which is the request's FIRST query and so also
-// pays for opening the Neon socket; membership; the closing writes).
+// attempt so `wrangler tail` can answer it: the user lookup, the session
+// insert and the total, plus the spans that complete the total (the
+// rate-limit read, which is the request's FIRST query and so also pays for
+// opening the Neon socket; membership; the closing writes).
 //
 // NO EMAIL AND NO HASH, by construction: the fields are numbers, an outcome,
 // a role and the argon2 parameters, and nothing else is accepted.
 //
-// ── THE CLOCK DOES NOT MOVE WHILE CODE RUNS ───────────────────────────────
+// ── ARGON2 IS MEASURED BY THE RUNTIME, NOT BY A STOPWATCH ─────────────────
 //
-// On workerd, `Date.now()` and `performance.now()` advance only when I/O
-// happens — a Spectre mitigation. argon2id is synchronous pure JavaScript, so
-// a stopwatch around it reads the time BEFORE it ran at both ends: 0 ms. The
-// verify span therefore yields to the event loop (`setTimeout(0)`) before it
-// stops the watch, which lets the clock catch up. The tail's per-request
-// `cpuTime` is the cross-check, and it is read beside this line.
+// Owner's ruling, 2026-10-12, on the first three sweeps' numbers. On workerd
+// the clock advances only across I/O, so a stopwatch around the synchronous
+// argon2id verify read 0 ms in all twelve attempts — and yielding a macrotask
+// first did not help, because a `setTimeout(0)` is not I/O either. The verify's
+// time landed in whichever span next waited on the database. The runtime's
+// own `cpuTime` for the invocation, read from the tail beside this line, is
+// the measure (1.1 s median, 1.3 s worst, over twelve sign-ins): argon2id is
+// the only CPU-heavy thing a sign-in does. So there is no verify span here.
 // ---------------------------------------------------------------------------
 
 export interface SignInSpans {
@@ -29,9 +32,7 @@ export interface SignInSpans {
   rateLimitMs: number | null
   /** `User` by email. */
   lookupMs: number | null
-  /** argon2id (or the dummy hash and its verify, for an unknown email). */
-  verifyMs: number | null
-  /** Membership resolution. */
+  /** Membership resolution. Absorbs the argon2 verify's wall time — see above. */
   membershipMs: number | null
   /** The `Session` insert. */
   sessionMs: number | null
@@ -48,7 +49,6 @@ export interface SignInSpans {
 export const newSignInSpans = (): SignInSpans => ({
   rateLimitMs: null,
   lookupMs: null,
-  verifyMs: null,
   membershipMs: null,
   sessionMs: null,
   finalizeMs: null,
@@ -63,19 +63,12 @@ export const since = (
   now: () => number = performance.now.bind(performance),
 ) => Math.round(now() - start)
 
-/**
- * Let the workerd clock catch up after synchronous work. Elsewhere it is a
- * single macrotask, which is the price of a verify span that is not zero.
- */
-export const clockCatchUp = () =>
-  new Promise<void>((resolve) => setTimeout(resolve, 0))
-
 // ── THE ISOLATE, FOR "FIRST REQUEST AFTER IDLE" ───────────────────────────
 //
 // Module state lives as long as the isolate. A fresh isolate's first sign-in
 // has `isolateSignIns: 1` and no idle figure; a warm one reports how long it
-// sat since its previous sign-in. `wallClockMs` is when this one started, so
-// a stall can be lined up against the sweep's own timeline and the database's.
+// sat since its previous sign-in. `startedAt` is when this one began, so a
+// stall can be lined up against the sweep's own timeline and the database's.
 
 let isolateSignIns = 0
 let lastSignInAt: number | null = null
@@ -93,6 +86,10 @@ export function isolateMark(now: number = Date.now()): {
 /**
  * The one line, as JSON so the tail carries it whole. Built from named fields
  * only: there is no way to pass an email or a hash through it.
+ *
+ * `sinceModuleEvalMs` (GAPS 26) is the gap from this isolate's module
+ * evaluation to the action's first line — on a fresh isolate, the
+ * I/O-advanced part of what the framework did before the action ran.
  */
 export function signInTimingLine(input: {
   outcome: string
@@ -109,12 +106,12 @@ export function signInTimingLine(input: {
     attempts: spans.attempts,
     rateLimitMs: spans.rateLimitMs,
     lookupMs: spans.lookupMs,
-    verifyMs: spans.verifyMs,
     membershipMs: spans.membershipMs,
     sessionMs: spans.sessionMs,
     finalizeMs: spans.finalizeMs,
     totalMs: spans.totalMs,
     actionMs: input.actionMs,
+    sinceModuleEvalMs: input.startedAt - MODULE_LOADED_AT,
     isolateSignIns: input.isolate.isolateSignIns,
     isolateIdleMs: input.isolate.isolateIdleMs,
     startedAt: new Date(input.startedAt).toISOString(),

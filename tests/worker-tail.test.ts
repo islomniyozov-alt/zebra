@@ -4,11 +4,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  CANARY_EVERY_MS,
   isSignInPost,
   rayKey,
   rayOf,
+  READY_WINDOW_MS,
   signInTimingOf,
   takeJsonObjects,
+  timingLinesOf,
   trimEvent,
   workerNameFor,
 } from '../scripts/worker-tail.mjs'
@@ -136,6 +139,22 @@ describe('a sign-in in the tail', () => {
     ).toMatchObject({ event: 'signin.timing', verifyMs: 512 })
   })
 
+  it('yields every timing line a shell GET wrote, in order (GAPS 26)', () => {
+    const shell = JSON.stringify({ event: 'shell.timing', sessionMs: 310 })
+    const dash = JSON.stringify({ event: 'dashboard.timing', fanOutMs: 2100 })
+    const lines = timingLinesOf(
+      signIn([
+        { level: 'log', message: [shell] },
+        { level: 'log', message: ['not a line'] },
+        { level: 'log', message: [dash] },
+      ]),
+    )
+    expect(lines.map((line) => line.event)).toEqual([
+      'shell.timing',
+      'dashboard.timing',
+    ])
+  })
+
   it('and null when the invocation never wrote one', () => {
     expect(signInTimingOf(signIn([]))).toBeNull()
     expect(
@@ -143,6 +162,22 @@ describe('a sign-in in the tail', () => {
         signIn([{ level: 'log', message: ['mentions "signin.timing" only'] }]),
       ),
     ).toBeNull()
+  })
+})
+
+// Owner's ruling, 2026-10-12: 120 s, a canary every 10 s, and no sweep
+// without the tail.
+describe('tail readiness', () => {
+  it('waits 120 s, sends a canary every 10 s', () => {
+    expect(READY_WINDOW_MS).toBe(120_000)
+    expect(CANARY_EVERY_MS).toBe(10_000)
+  })
+
+  it('and the sweep refuses to start without it', () => {
+    const script = readFileSync('scripts/sweep.mjs', 'utf8')
+    expect(script).toMatch(
+      /if \(worker && !tailReady\) \{\s*console\.error\(\s*`WORKER LOG NOT AVAILABLE after \$\{READY_WINDOW_MS \/ 1000\} s[^`]*NOT OK\.`,\s*\)\s*process\.exit\(1\)/,
+    )
   })
 })
 

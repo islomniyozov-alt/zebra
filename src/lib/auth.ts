@@ -14,7 +14,7 @@ import {
   type RequestMetadata,
   type SessionDb,
 } from './session'
-import { clockCatchUp, since, type SignInSpans } from './signin-timing'
+import { since, type SignInSpans } from './signin-timing'
 
 // ---------------------------------------------------------------------------
 // LOGIN
@@ -229,17 +229,14 @@ export async function login(
   // does not exist take the same path, at the same cost.
   const hash =
     user?.isActive === true && user.passwordHash ? user.passwordHash : null
-  mark = performance.now()
+  // NOT TIMED HERE. argon2id is synchronous and the workerd clock does not
+  // move while it runs; the runtime's `cpuTime` in the tail is its measure
+  // (owner's ruling 2026-10-12, `signin-timing.ts`). Its wall time lands in
+  // the membership span below, which is the first thing to wait after it.
   const valid = await verifyPassword(
     input.password,
     hash ?? (await dummyHash()),
   )
-  // The workerd clock is frozen through synchronous work; one macrotask lets
-  // it catch up, or this span reads 0 ms (see `signin-timing.ts`).
-  if (spans) {
-    await clockCatchUp()
-    spans.verifyMs = since(mark)
-  }
 
   if (!hash || !valid || !user) {
     await record(db, email, false, metadata)

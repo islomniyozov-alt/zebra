@@ -105,26 +105,50 @@ export const isSignInPost = (event) => {
 }
 
 /**
- * The `signin.timing` line a sign-in wrote (src/lib/signin-timing.ts), parsed,
- * or null when the invocation never got as far as writing it.
+ * Every structured timing line an invocation wrote — `signin.timing`,
+ * `shell.timing`, `dashboard.timing` (src/lib/signin-timing.ts,
+ * src/lib/request-timing.ts) — parsed, in the order written. A GET on the
+ * shell writes two; a sign-in POST writes one; a request that never got that
+ * far writes none.
  */
-export function signInTimingOf(event) {
+export function timingLinesOf(event) {
+  const found = []
   for (const entry of event?.logs ?? []) {
     const parts = Array.isArray(entry?.message)
       ? entry.message
       : [entry?.message]
     for (const part of parts) {
-      if (typeof part !== 'string' || !part.includes('"signin.timing"'))
-        continue
+      if (typeof part !== 'string' || !part.includes('.timing"')) continue
       try {
-        return JSON.parse(part)
+        const line = JSON.parse(part)
+        if (typeof line?.event === 'string' && line.event.endsWith('.timing'))
+          found.push(line)
       } catch {
         // A line that only mentions the name is not the line.
       }
     }
   }
-  return null
+  return found
 }
+
+/** The `signin.timing` line a sign-in wrote, or null. */
+export const signInTimingOf = (event) =>
+  timingLinesOf(event).find((line) => line.event === 'signin.timing') ?? null
+
+// ── READINESS (owner's ruling, 2026-10-12) ────────────────────────────────
+//
+// On the first of three sweeps the canary never came back through the tail
+// inside 60 s, the sweep went on without a worker log, and six sign-ins were
+// recorded with nothing beside them. So: a 120 s window, a canary every 10 s,
+// and a sweep that REFUSES to start without the tail rather than sweeping
+// blind. The constants are pinned in tests/worker-tail.test.ts.
+
+/** How long the sweep waits for the tail to prove it sees requests. */
+export const READY_WINDOW_MS = 120_000
+/** How long each canary is given before the next one is sent. */
+export const CANARY_EVERY_MS = 10_000
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
  * The worker a `*.workers.dev` origin is served by, or null for anything else
@@ -192,17 +216,20 @@ export function startTail(worker) {
      * seen is the only evidence there is. Past `ms` the sweep goes on, and a
      * 500 whose ray never arrived is recorded as such.
      */
-    async ready(canaryUrl, ms) {
+    async ready(canaryUrl, ms = READY_WINDOW_MS) {
       const deadline = Date.now() + ms
       while (Date.now() < deadline && !failure) {
         const response = await fetch(canaryUrl).catch(() => null)
         const ray = response?.headers.get('cf-ray')
         await response?.arrayBuffer().catch(() => null)
-        const until = Math.min(Date.now() + 4000, deadline)
+        const until = Math.min(Date.now() + CANARY_EVERY_MS, deadline)
         while (ray && Date.now() < until && !failure) {
           if (events.has(rayKey(ray))) return true
-          await new Promise((resolve) => setTimeout(resolve, 500))
+          await sleep(500)
         }
+        // A canary that got no answer at all still waits its turn out.
+        if (!ray)
+          await sleep(Math.max(0, Math.min(until, deadline) - Date.now()))
       }
       return false
     },

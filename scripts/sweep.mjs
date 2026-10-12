@@ -48,8 +48,10 @@ import { chromium } from 'playwright'
 import { neonConfig, Pool } from '@neondatabase/serverless'
 import {
   isSignInPost,
+  READY_WINDOW_MS,
   signInTimingOf,
   startTail,
+  timingLinesOf,
   trimEvent,
   workerNameFor,
 } from './worker-tail.mjs'
@@ -440,15 +442,24 @@ async function sweep() {
   // (scripts/worker-tail.mjs; GAPS 24 moved it ahead of the sign-ins).
   const worker = workerNameFor(BASE)
   const tail = startTail(worker)
-  const tailReady = worker
-    ? await tail.ready(new URL('/login', BASE), 60_000)
-    : false
   // On every way out, a throw included: an orphaned tail outlives the sweep.
   process.on('exit', () => tail.stop())
+  // NO TAIL, NO SWEEP. Owner's ruling, 2026-10-12: a sweep that cannot see the
+  // Worker's log records a stall or a 500 with nothing beside it, which is
+  // what happened on the first of three sweeps. 120 s, a canary every 10 s
+  // (worker-tail.mjs), then REFUSED. A localhost origin has no worker to tail
+  // and sweeps without one, as before.
+  const tailReady = worker ? await tail.ready(new URL('/login', BASE)) : false
+  if (worker && !tailReady) {
+    console.error(
+      `WORKER LOG NOT AVAILABLE after ${READY_WINDOW_MS / 1000} s (${tail.failure() ?? 'the canary never came back through the tail'}). Nothing swept. NOT OK.`,
+    )
+    process.exit(1)
+  }
   console.log(
-    tailReady
+    worker
       ? `worker log: tailing ${worker}`
-      : `worker log: NOT AVAILABLE (${tail.failure() ?? 'the canary never came back through the tail'}) — a server error will be recorded without it`,
+      : 'worker log: none — not a workers.dev origin',
   )
   /** Every server error, for the verdict file. */
   const serverErrors = []
@@ -463,7 +474,10 @@ async function sweep() {
    */
   const attachSignInLogs = async () => {
     if (!tailReady || signIns.length === 0) return
-    await tail.waitFor(signIns.map((row) => row.ray).filter(Boolean), 30_000)
+    await tail.waitFor(
+      signIns.flatMap((row) => [row.ray, row.redirect?.ray]).filter(Boolean),
+      30_000,
+    )
     for (const row of signIns) {
       const byRay = row.ray ? tail.lookup(row.ray) : null
       const from = Date.parse(row.startedAt) - 2_000
@@ -486,6 +500,16 @@ async function sweep() {
         row.workerNote = row.ray
           ? 'no tail event for this ray within 30 s'
           : 'no sign-in POST in the tail inside this attempt'
+      // THE REDIRECT TARGET'S OWN INVOCATION (GAPS 26): the shell's line and
+      // the page's line, from the GET the browser made after the 303.
+      if (row.redirect?.ray) {
+        const event = tail.lookup(row.redirect.ray)
+        row.redirect.worker = event
+          ? { ...trimEvent(event), timings: timingLinesOf(event) }
+          : null
+        if (!event)
+          row.redirect.workerNote = 'no tail event for this ray within 30 s'
+      }
     }
   }
 
@@ -539,15 +563,40 @@ async function sweep() {
         outcome: null,
         ray: null,
         status: null,
+        /** The POST as the browser timed it, request start to response end. */
+        postMs: null,
+        /** The GET the browser made after the 303 (GAPS 26). */
+        redirect: null,
       }
-      page.on('response', (response) => {
-        if (
-          response.request().method() === 'POST' &&
-          new URL(response.url()).pathname === '/login'
-        ) {
-          row.ray = response.headers()['cf-ray'] ?? null
-          row.status = response.status()
-        }
+      // READ AT `requestfinished`, NOT `response`: the browser's timing has a
+      // `responseEnd` only once the body has arrived.
+      page.on('requestfinished', (request) => {
+        void (async () => {
+          const response = await request.response()
+          if (!response) return
+          const path = new URL(request.url()).pathname
+          const timing = request.timing()
+          const ms =
+            timing.responseEnd >= 0 ? Math.round(timing.responseEnd) : null
+          if (request.method() === 'POST' && path === '/login') {
+            row.ray = response.headers()['cf-ray'] ?? null
+            row.status = response.status()
+            row.postMs = ms
+          } else if (
+            request.method() === 'GET' &&
+            request.isNavigationRequest() &&
+            request.frame() === page.mainFrame() &&
+            path !== '/login' &&
+            row.redirect === null
+          ) {
+            row.redirect = {
+              path,
+              ray: response.headers()['cf-ray'] ?? null,
+              status: response.status(),
+              getMs: ms,
+            }
+          }
+        })().catch(() => {})
       })
       try {
         await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded' })
