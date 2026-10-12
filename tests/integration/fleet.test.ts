@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
-import { withOrg } from '@/lib/tenancy'
+import { withOrg, type TxClient as Tx } from '@/lib/tenancy'
 import {
   TransferError,
   createDriver,
@@ -142,44 +142,44 @@ describe('trucks', () => {
 
   it('counts data health by the same definition the filter applies (§6.5 part 0)', async () => {
     const scope = { companyIds: [alphaId] }
-    const read = () => inOrg((tx) => countTruckHealth(tx, scope))
     // THE FILTER AND THE COUNT ARE ONE DEFINITION: whatever the list shows
     // for `?missing=<check>` is what the footer counted.
-    const filtered = (check: Parameters<typeof truckHealthWhere>[0]) =>
-      inOrg((tx) =>
-        tx.truck.count({
-          where: {
-            companyId: alphaId,
-            deletedAt: null,
-            ...truckHealthWhere(check),
-          },
-        }),
-      )
+    const filtered = (tx: Tx, check: Parameters<typeof truckHealthWhere>[0]) =>
+      tx.truck.count({
+        where: {
+          companyId: alphaId,
+          deletedAt: null,
+          ...truckHealthWhere(check),
+        },
+      })
     // AND UNSCOPED — the owner's `[]` — against the whole organization, which
     // is what the footer shows the people who look at it (item 20 (3)): the
     // first cut read `[]` as "no company" and said 0 over a grid full of gaps.
-    const unscoped = (check: Parameters<typeof truckHealthWhere>[0]) =>
-      inOrg((tx) =>
-        tx.truck.count({
-          where: { deletedAt: null, ...truckHealthWhere(check) },
-        }),
-      )
-    const agree = async () => {
-      const counts = await read()
-      const everyCompany = await inOrg((tx) =>
-        countTruckHealth(tx, { companyIds: [] }),
-      )
-      for (const check of TRUCK_HEALTH_CHECKS) {
-        expect(await filtered(check), check).toBe(counts[check])
-        expect(await unscoped(check), `${check} unscoped`).toBe(
-          everyCompany[check],
-        )
-        expect(everyCompany[check], `${check} ⊇ alpha`).toBeGreaterThanOrEqual(
-          counts[check],
-        )
-      }
-      return counts
-    }
+    const unscoped = (tx: Tx, check: Parameters<typeof truckHealthWhere>[0]) =>
+      tx.truck.count({
+        where: { deletedAt: null, ...truckHealthWhere(check) },
+      })
+    // ONE TRANSACTION PER AGREEMENT. Each count used to open its own — about
+    // seventy transactions over the test, each paying the round trip to
+    // us-east-2 — and the test ran 94–106 s against a 120 s budget, then
+    // timed out twice on 2026-10-12 when the line was a third slower. The
+    // definitions compared are unchanged; only the round trips are.
+    const agree = () =>
+      inOrg(async (tx) => {
+        const counts = await countTruckHealth(tx, scope)
+        const everyCompany = await countTruckHealth(tx, { companyIds: [] })
+        for (const check of TRUCK_HEALTH_CHECKS) {
+          expect(await filtered(tx, check), check).toBe(counts[check])
+          expect(await unscoped(tx, check), `${check} unscoped`).toBe(
+            everyCompany[check],
+          )
+          expect(
+            everyCompany[check],
+            `${check} ⊇ alpha`,
+          ).toBeGreaterThanOrEqual(counts[check])
+        }
+        return counts
+      })
 
     const before = await agree()
     // A bare truck: no VIN, a BLANK plate, no odometer, no records.
@@ -431,29 +431,28 @@ describe('trailers and drivers', () => {
   it('counts driver data health by the same definition the filter applies (§6.5 part 0b)', async () => {
     const now = new Date()
     const scope = { companyIds: [alphaId] }
-    const read = () => inOrg((tx) => countDriverHealth(tx, scope, now))
     // THE FILTER AND THE COUNT ARE ONE DEFINITION over ONE BASE: the Active
     // tab's people. Whatever `/drivers?missing=<check>` lists is what the
     // footer counted.
-    const filtered = (check: (typeof DRIVER_HEALTH_CHECKS)[number]) =>
-      inOrg((tx) =>
-        tx.driver.count({
-          where: {
-            AND: [
-              { companyId: alphaId },
-              driverHealthBase(),
-              driverHealthWhere(check, now),
-            ],
-          },
-        }),
-      )
-    const agree = async () => {
-      const counts = await read()
-      for (const check of DRIVER_HEALTH_CHECKS) {
-        expect(await filtered(check), check).toBe(counts[check])
-      }
-      return counts
-    }
+    const filtered = (tx: Tx, check: (typeof DRIVER_HEALTH_CHECKS)[number]) =>
+      tx.driver.count({
+        where: {
+          AND: [
+            { companyId: alphaId },
+            driverHealthBase(),
+            driverHealthWhere(check, now),
+          ],
+        },
+      })
+    // ONE TRANSACTION PER AGREEMENT, for the reason the truck test gives.
+    const agree = () =>
+      inOrg(async (tx) => {
+        const counts = await countDriverHealth(tx, scope, now)
+        for (const check of DRIVER_HEALTH_CHECKS) {
+          expect(await filtered(tx, check), check).toBe(counts[check])
+        }
+        return counts
+      })
 
     const before = await agree()
     // A bare active person: no phone, no truck, no records, no rule.
