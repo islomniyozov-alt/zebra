@@ -509,16 +509,21 @@ describe('the Relay path: one ACH, many loads, no invoice', () => {
       shortfallCents: 0,
     })
 
-    for (const load of [a, b, c]) {
-      expect(await billingOf(load.id)).toBe('PAID')
-    }
-
-    // And no invoice was created anywhere along the way.
-    expect(
-      await owner.invoiceLine.count({
-        where: { loadId: { in: [a.id, b.id, c.id] } },
+    // FOUR READS, TWO STATEMENTS (2026-10-12): the three loads' billing in one
+    // query rather than one each, beside the invoice-line count. Nothing
+    // writes between them.
+    const ids = [a.id, b.id, c.id]
+    const [billed, invoiced] = await Promise.all([
+      owner.load.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, billingStatus: true },
       }),
-    ).toBe(0)
+      // And no invoice was created anywhere along the way.
+      owner.invoiceLine.count({ where: { loadId: { in: ids } } }),
+    ])
+    expect(billed).toHaveLength(3)
+    for (const row of billed) expect(row.billingStatus, row.id).toBe('PAID')
+    expect(invoiced).toBe(0)
   }, 300_000)
 
   it('leaves a statement that paid too little as an unreconciled shortfall', async () => {

@@ -243,14 +243,33 @@ describe('the salary report, against the statements', () => {
       }),
     )
     expect(draft.ok).toBe(true)
+
+    // THREE READS, ONE TRANSACTION (2026-10-12): the draft count, the report
+    // and the issued statements, read together after the last write —
+    // separate transactions bought only round trips to us-east-2. The
+    // assertions below keep their order.
+    const [drafts, rows, issued] = await inOrg(
+      async (tx) =>
+        [
+          await tx.settlement.count({
+            where: { organizationId, driverId: batchDriverId, status: 'DRAFT' },
+          }),
+          await salaryByDriverWeek(tx, WINDOW),
+          await tx.settlement.groupBy({
+            by: ['driverId'],
+            where: {
+              organizationId,
+              status: { in: ['APPROVED', 'PAID'] },
+              periodEnd: { gte: WINDOW.from, lte: WINDOW.to },
+            },
+            _sum: { netCents: true },
+          }),
+        ] as const,
+    )
     // THE DRAFT EXISTS — asserted before its absence means anything.
-    const drafts = await owner.settlement.count({
-      where: { organizationId, driverId: batchDriverId, status: 'DRAFT' },
-    })
     expect(drafts).toBe(1)
 
     // ── THE REPORT ───────────────────────────────────────────────────────
-    const rows = await inOrg((tx) => salaryByDriverWeek(tx, WINDOW))
     expect(rows.length).toBeGreaterThan(0)
     expect(rows.every((row) => row.companyId === companyId)).toBe(true)
     expect(
@@ -272,15 +291,6 @@ describe('the salary report, against the statements', () => {
     }
 
     // ── AND PER DRIVER, THE NET AGREES WITH THE ISSUED STATEMENTS ────────
-    const issued = await owner.settlement.groupBy({
-      by: ['driverId'],
-      where: {
-        organizationId,
-        status: { in: ['APPROVED', 'PAID'] },
-        periodEnd: { gte: WINDOW.from, lte: WINDOW.to },
-      },
-      _sum: { netCents: true },
-    })
     const sum = (
       driverId: string,
       pick: (row: (typeof rows)[number]) => number,

@@ -389,16 +389,36 @@ describe('the batch screen reads its own batch (§6.2.10 part 2b)', () => {
       }),
     )
     expect(saved.ok).toBe(true)
-    expect(await excludedLoadIds(owner, batchId)).toEqual([b])
 
-    const after = await screen()
+    // THREE READS, ONE TRANSACTION (2026-10-12): the exclusions, the screen and
+    // the batch's gross after Save, read together — nothing writes between
+    // them, so separate transactions bought only round trips to us-east-2.
+    const [excluded, after, batchGross] = await inOrg(
+      async (tx) =>
+        [
+          await excludedLoadIds(tx, batchId),
+          await previewBatch(tx, {
+            from: week.start,
+            to: new Date(week.end.getTime() + 86_399_999),
+            companyId,
+            forBatchId: batchId,
+          }),
+          (
+            await tx.settlement.aggregate({
+              where: { batchId },
+              _sum: { grossCents: true },
+            })
+          )._sum.grossCents ?? 0,
+        ] as const,
+    )
+    expect(excluded).toEqual([b])
     const ticked = after.available.filter((row) => !row.excluded)
     const tickedGross = ticked.reduce((sum, row) => sum + row.grossCents, 0)
     expect(ticked.map((row) => row.loadId).sort()).toEqual(
       [a, declined, late].sort(),
     )
     expect(tickedGross).toBe(40_000 + 22_000 + 9_000)
-    expect(await grossOf(batchId)).toBe(tickedGross)
+    expect(batchGross).toBe(tickedGross)
 
     // A TRIP ON ANOTHER BATCH'S STATEMENT IS STILL "ALREADY ON A STATEMENT":
     // the other-company batch for the same week settles its own trip, and
