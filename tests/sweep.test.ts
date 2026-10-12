@@ -49,6 +49,29 @@ describe('the warm-up', () => {
   })
 })
 
+// GAPS 26's first three sweeps recorded no GET at all and a browser POST
+// duration on 2 of 21: the context closed the moment the URL changed, before
+// the redirect target finished, and a 303 has no `responseEnd`. Both fixes
+// are pinned here, because a sweep that silently measures nothing is the
+// failure this whole instrument exists to prevent.
+describe('the two-request capture', () => {
+  const script = readFileSync('scripts/sweep.mjs', 'utf8')
+
+  it('waits for the redirect target to load before the context closes', () => {
+    expect(script).toMatch(
+      /row\.outcome = 'ok'[\s\S]*?waitForLoadState\('load', \{ timeout: 60_000 \}\)[\s\S]*?signIns\.push\(row\)/,
+    )
+  })
+
+  it('falls back to responseStart for a redirect, and says which it read', () => {
+    expect(script).toMatch(
+      /timing\.responseEnd >= 0\s*\?\s*Math\.round\(timing\.responseEnd\)\s*:\s*timing\.responseStart >= 0\s*\?\s*Math\.round\(timing\.responseStart\)/,
+    )
+    expect(script).toContain('row.postMsKind = msKind')
+    expect(script).toContain('getMsKind: msKind')
+  })
+})
+
 // Owner's brief, 2026-10-11: a stalled sign-in names its role and is retried
 // once — once, because a sweep that retried until it got in would sweep a dev
 // that cannot sign anybody in.

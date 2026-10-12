@@ -627,12 +627,26 @@ async function sweep() {
           if (!response) return
           const path = new URL(request.url()).pathname
           const timing = request.timing()
+          // A 303 carries no body, so Playwright gives it no `responseEnd`:
+          // fall back to `responseStart`, the time to its headers, and say
+          // which was read. (Found by the first GAPS 26 sweeps: 2 of 21.)
           const ms =
-            timing.responseEnd >= 0 ? Math.round(timing.responseEnd) : null
+            timing.responseEnd >= 0
+              ? Math.round(timing.responseEnd)
+              : timing.responseStart >= 0
+                ? Math.round(timing.responseStart)
+                : null
+          const msKind =
+            timing.responseEnd >= 0
+              ? 'responseEnd'
+              : timing.responseStart >= 0
+                ? 'responseStart'
+                : null
           if (request.method() === 'POST' && path === '/login') {
             row.ray = response.headers()['cf-ray'] ?? null
             row.status = response.status()
             row.postMs = ms
+            row.postMsKind = msKind
           } else if (
             request.method() === 'GET' &&
             request.isNavigationRequest() &&
@@ -645,6 +659,7 @@ async function sweep() {
               ray: response.headers()['cf-ray'] ?? null,
               status: response.status(),
               getMs: ms,
+              getMsKind: msKind,
             }
           }
         })().catch(() => {})
@@ -666,6 +681,16 @@ async function sweep() {
         row.endedAt = new Date().toISOString()
         row.elapsedMs = Date.parse(row.endedAt) - Date.parse(row.startedAt)
         row.outcome = 'ok'
+        // LET THE REDIRECT TARGET FINISH (GAPS 26). The first three sweeps
+        // closed the context here, the moment the URL changed, and the
+        // dashboard document never reached `requestfinished`: zero GET
+        // records. Its load is the measurement, so it is waited for — bounded,
+        // and a page that never finishes loading is recorded without a GET,
+        // not a sweep that stalls on it.
+        await page.waitForLoadState('load', { timeout: 60_000 }).catch(() => {})
+        // The `requestfinished` handler above is asynchronous; one tick for
+        // its `request.response()` to resolve before the context goes.
+        await new Promise((resolve) => setTimeout(resolve, 500))
         signIns.push(row)
         found = (await context.cookies())
           .filter((entry) => entry.name === 'zebra_session')
