@@ -46,7 +46,13 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, sep } from 'node:path'
 import { chromium } from 'playwright'
 import { neonConfig, Pool } from '@neondatabase/serverless'
-import { startTail, trimEvent, workerNameFor } from './worker-tail.mjs'
+import {
+  isSignInPost,
+  signInTimingOf,
+  startTail,
+  trimEvent,
+  workerNameFor,
+} from './worker-tail.mjs'
 
 const BASE =
   process.env.VERIFY_BASE ?? 'https://zebra-dev.tajikcargollc.workers.dev'
@@ -428,6 +434,80 @@ async function sweep() {
   // role (dev only, `prisma/seed.ts`). A role whose credentials are missing
   // FAILS the sweep rather than skipping it: a clean sweep of five roles says
   // nothing about the sixth, which is the gap this exists to close.
+  // THE WORKER'S LOG, FOR THE LENGTH OF THE SWEEP — SIGN-INS INCLUDED. Started
+  // before the first sign-in and proven with a canary, so a 500 below has a
+  // log line to be matched against, and so does every sign-in, stalled or not
+  // (scripts/worker-tail.mjs; GAPS 24 moved it ahead of the sign-ins).
+  const worker = workerNameFor(BASE)
+  const tail = startTail(worker)
+  const tailReady = worker
+    ? await tail.ready(new URL('/login', BASE), 60_000)
+    : false
+  // On every way out, a throw included: an orphaned tail outlives the sweep.
+  process.on('exit', () => tail.stop())
+  console.log(
+    tailReady
+      ? `worker log: tailing ${worker}`
+      : `worker log: NOT AVAILABLE (${tail.failure() ?? 'the canary never came back through the tail'}) — a server error will be recorded without it`,
+  )
+  /** Every server error, for the verdict file. */
+  const serverErrors = []
+  /** Every sign-in attempt, stalled or not, for the verdict file (GAPS 24). */
+  const signIns = []
+
+  /**
+   * Each attempt's Worker invocations: by the ray of its POST when one came
+   * back, otherwise every sign-in POST the tail saw inside the attempt's
+   * window — a stalled request has no response, so no ray, and its event
+   * arrives whenever the Worker finishes with it.
+   */
+  const attachSignInLogs = async () => {
+    if (!tailReady || signIns.length === 0) return
+    await tail.waitFor(signIns.map((row) => row.ray).filter(Boolean), 30_000)
+    for (const row of signIns) {
+      const byRay = row.ray ? tail.lookup(row.ray) : null
+      const from = Date.parse(row.startedAt) - 2_000
+      const to = Date.parse(row.endedAt) + 2_000
+      const events = byRay
+        ? [byRay]
+        : tail
+            .all()
+            .filter(
+              (event) =>
+                isSignInPost(event) &&
+                event.eventTimestamp >= from &&
+                event.eventTimestamp <= to,
+            )
+      row.worker = events.map((event) => ({
+        ...trimEvent(event),
+        timing: signInTimingOf(event),
+      }))
+      if (events.length === 0)
+        row.workerNote = row.ray
+          ? 'no tail event for this ray within 30 s'
+          : 'no sign-in POST in the tail inside this attempt'
+    }
+  }
+
+  const writeDetail = () => {
+    const detail = detailPath(process.env)
+    mkdirSync(dirname(detail), { recursive: true })
+    writeFileSync(
+      detail,
+      JSON.stringify(
+        {
+          base: BASE,
+          tail: { worker, ready: tailReady, failure: tail.failure() },
+          signIns,
+          serverErrors,
+        },
+        null,
+        2,
+      ),
+    )
+    return detail
+  }
+
   const browser = await chromium.launch(
     process.env.SHOT_CHROME ? { executablePath: process.env.SHOT_CHROME } : {},
   )
@@ -447,10 +527,33 @@ async function sweep() {
     for (let attempt = 1; ; attempt++) {
       const context = await browser.newContext()
       const page = await context.newPage()
+      // THE ATTEMPT, RECORDED WHETHER OR NOT IT STALLS (GAPS 24): when the
+      // click went, when it ended, and the ray of the sign-in POST if the
+      // Worker ever answered it.
+      const row = {
+        role: label.toLowerCase(),
+        attempt,
+        startedAt: null,
+        endedAt: null,
+        elapsedMs: null,
+        outcome: null,
+        ray: null,
+        status: null,
+      }
+      page.on('response', (response) => {
+        if (
+          response.request().method() === 'POST' &&
+          new URL(response.url()).pathname === '/login'
+        ) {
+          row.ray = response.headers()['cf-ray'] ?? null
+          row.status = response.status()
+        }
+      })
       try {
         await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded' })
         await page.fill('input[name="email"]', email)
         await page.fill('input[name="password"]', password)
+        row.startedAt = new Date().toISOString()
         // ANYWHERE BUT THE LOGIN PAGE: where a role lands is its business,
         // and a driver has no dashboard to land on. A sign-in that stays on
         // /login is a refusal, and the timeout says so.
@@ -460,6 +563,10 @@ async function sweep() {
           }),
           page.click('button[type="submit"]'),
         ])
+        row.endedAt = new Date().toISOString()
+        row.elapsedMs = Date.parse(row.endedAt) - Date.parse(row.startedAt)
+        row.outcome = 'ok'
+        signIns.push(row)
         found = (await context.cookies())
           .filter((entry) => entry.name === 'zebra_session')
           .map((entry) => `${entry.name}=${entry.value}`)
@@ -469,10 +576,20 @@ async function sweep() {
       } catch (error) {
         await context.close()
         const reason = String(error?.message ?? error).split('\n')[0]
+        row.endedAt = new Date().toISOString()
+        row.startedAt ??= row.endedAt
+        row.elapsedMs = Date.parse(row.endedAt) - Date.parse(row.startedAt)
+        row.outcome = 'stalled'
+        row.reason = reason
+        signIns.push(row)
         if (attempt >= SIGN_IN_ATTEMPTS) {
           console.error(
             `${label} SIGN-IN STALLED, ${attempt} of ${SIGN_IN_ATTEMPTS} attempts: ${reason}. NOT OK.`,
           )
+          // The stall is the finding: its record goes in the verdict file
+          // before the sweep stops.
+          await attachSignInLogs()
+          console.error(`sign-in record written to ${writeDetail()}`)
           process.exit(1)
         }
         console.error(
@@ -513,24 +630,6 @@ async function sweep() {
       ray: response.headers.get('cf-ray'),
     }
   }
-
-  // THE WORKER'S LOG, FOR THE LENGTH OF THE SWEEP. Started after the sign-ins
-  // and proven with a canary before the first page, so a 500 below has a log
-  // line to be matched against (scripts/worker-tail.mjs).
-  const worker = workerNameFor(BASE)
-  const tail = startTail(worker)
-  const tailReady = worker
-    ? await tail.ready(new URL('/login', BASE), 60_000)
-    : false
-  // On every way out, a throw included: an orphaned tail outlives the sweep.
-  process.on('exit', () => tail.stop())
-  console.log(
-    tailReady
-      ? `worker log: tailing ${worker}`
-      : `worker log: NOT AVAILABLE (${tail.failure() ?? 'the canary never came back through the tail'}) — a server error will be recorded without it`,
-  )
-  /** Every server error, for the verdict file. */
-  const serverErrors = []
 
   const authed = []
   const anon = []
@@ -619,20 +718,16 @@ async function sweep() {
           ? 'no tail event for this ray within 30 s'
           : `worker log not available: ${tail.failure() ?? 'the canary never came back through the tail'}`
   }
+  // The sign-ins ran twenty minutes ago, so every one of their events has
+  // arrived by now, a stalled request's included.
+  await attachSignInLogs()
   tail.stop()
-  const detail = detailPath(process.env)
-  mkdirSync(dirname(detail), { recursive: true })
-  writeFileSync(
-    detail,
-    JSON.stringify(
-      {
-        base: BASE,
-        tail: { worker, ready: tailReady, failure: tail.failure() },
-        serverErrors,
-      },
-      null,
-      2,
-    ),
+  const detail = writeDetail()
+  const timed = signIns.filter((row) =>
+    row.worker?.some((event) => event.timing),
+  ).length
+  console.log(
+    `SIGN-INS: ${signIns.length} attempt(s), ${signIns.filter((row) => row.outcome === 'stalled').length} stalled, ${timed} with a timing line — recorded in ${detail}`,
   )
   if (serverErrors.length > 0) {
     console.log(`SERVER ERRORS, RECORDED IN ${detail}:`)

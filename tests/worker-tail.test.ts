@@ -4,8 +4,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  isSignInPost,
   rayKey,
   rayOf,
+  signInTimingOf,
   takeJsonObjects,
   trimEvent,
   workerNameFor,
@@ -28,6 +30,8 @@ import {
 
 const event = (ray: string, extra: Record<string, unknown> = {}) => ({
   outcome: 'exception',
+  wallTime: 95_012,
+  cpuTime: 41,
   eventTimestamp: 1791747344767,
   exceptions: [{ name: 'Error', message: 'unable to start a transaction' }],
   logs: [{ level: 'error', message: ['⨯', 'Error: boom'] }],
@@ -73,6 +77,8 @@ describe('the tail’s stream', () => {
     expect(kept).toEqual({
       outcome: 'exception',
       status: 500,
+      wallTime: 95_012,
+      cpuTime: 41,
       at: new Date(1791747344767).toISOString(),
       exceptions: [{ name: 'Error', message: 'unable to start a transaction' }],
       logs: [{ level: 'error', message: '⨯ Error: boom' }],
@@ -85,6 +91,58 @@ describe('the tail’s stream', () => {
       'zebra-dev',
     )
     expect(workerNameFor('http://localhost:3000')).toBeNull()
+  })
+})
+
+// GAPS 24: every sign-in attempt, stalled or not, is matched to the Worker's
+// invocation and the timing line it wrote.
+describe('a sign-in in the tail', () => {
+  const signIn = (logs: unknown[]) =>
+    event('e5', {
+      logs,
+      event: {
+        request: {
+          url: 'https://zebra-dev.example.workers.dev/login',
+          method: 'POST',
+          headers: { 'cf-ray': 'e5' },
+        },
+        response: { status: 303 },
+      },
+    })
+
+  it('is the login form’s POST and nothing else', () => {
+    expect(isSignInPost(signIn([]))).toBe(true)
+    expect(isSignInPost(event('f6'))).toBe(false)
+    const get = event('g7', {
+      event: {
+        request: {
+          url: 'https://zebra-dev.example.workers.dev/login',
+          method: 'GET',
+          headers: { 'cf-ray': 'g7' },
+        },
+      },
+    })
+    expect(isSignInPost(get)).toBe(false)
+  })
+
+  it('yields the timing line it wrote, parsed', () => {
+    const line = JSON.stringify({
+      event: 'signin.timing',
+      outcome: 'ok',
+      verifyMs: 512,
+    })
+    expect(
+      signInTimingOf(signIn([{ level: 'log', message: [line] }])),
+    ).toMatchObject({ event: 'signin.timing', verifyMs: 512 })
+  })
+
+  it('and null when the invocation never wrote one', () => {
+    expect(signInTimingOf(signIn([]))).toBeNull()
+    expect(
+      signInTimingOf(
+        signIn([{ level: 'log', message: ['mentions "signin.timing" only'] }]),
+      ),
+    ).toBeNull()
   })
 })
 

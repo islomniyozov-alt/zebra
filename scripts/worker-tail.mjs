@@ -78,6 +78,10 @@ export const rayOf = (event) =>
 export const trimEvent = (event) => ({
   outcome: event?.outcome ?? null,
   status: event?.event?.response?.status ?? null,
+  // The invocation's own clock and CPU, from the runtime rather than from
+  // code: the cross-check for a span measured inside it (GAPS 24).
+  wallTime: event?.wallTime ?? null,
+  cpuTime: event?.cpuTime ?? null,
   at: event?.eventTimestamp
     ? new Date(event.eventTimestamp).toISOString()
     : null,
@@ -92,6 +96,35 @@ export const trimEvent = (event) => ({
       : String(entry?.message ?? ''),
   })),
 })
+
+/** Whether a tail event is a sign-in: the login form's server action. */
+export const isSignInPost = (event) => {
+  const request = event?.event?.request
+  if (request?.method !== 'POST' || !request.url) return false
+  return new URL(request.url).pathname === '/login'
+}
+
+/**
+ * The `signin.timing` line a sign-in wrote (src/lib/signin-timing.ts), parsed,
+ * or null when the invocation never got as far as writing it.
+ */
+export function signInTimingOf(event) {
+  for (const entry of event?.logs ?? []) {
+    const parts = Array.isArray(entry?.message)
+      ? entry.message
+      : [entry?.message]
+    for (const part of parts) {
+      if (typeof part !== 'string' || !part.includes('"signin.timing"'))
+        continue
+      try {
+        return JSON.parse(part)
+      } catch {
+        // A line that only mentions the name is not the line.
+      }
+    }
+  }
+  return null
+}
 
 /**
  * The worker a `*.workers.dev` origin is served by, or null for anything else
@@ -174,6 +207,8 @@ export function startTail(worker) {
       return false
     },
     lookup: (ray) => events.get(rayKey(ray)) ?? null,
+    /** Every event seen so far, for a request whose ray never came back. */
+    all: () => [...events.values()],
     /** Wait until every ray has an event, the tail has failed, or `ms` passes. */
     async waitFor(rays, ms) {
       const deadline = Date.now() + ms
