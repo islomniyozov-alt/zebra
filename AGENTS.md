@@ -204,11 +204,31 @@ Rules about instruments, which are the ones that cost whole sessions:
   1. FIX whatever is red. A dispatch runs the same gate and the same
      integration suite as CI, so a broken tree cannot deploy anywhere — it
      can only fail twice.
-  2. RUN THE FULL INTEGRATION PROJECT LOCALLY, not the file you edited.
-     `npm run check` does not include it. On 2026-09-21 and again on
-     2026-09-22 a change to `driverWarnings` passed `check` and every node
-     test and broke a fixture in `tests/integration/warnings.test.ts` — the
-     second time AFTER saying the habit was fixed. Ten minutes; run it.
+  2. RUN THE FULL INTEGRATION PROJECT LOCALLY, not the file you edited —
+     AS A PRE-CHECK. `npm run check` does not include it. On 2026-09-21 and
+     again on 2026-09-22 a change to `driverWarnings` passed `check` and
+     every node test and broke a fixture in
+     `tests/integration/warnings.test.ts` — the second time AFTER saying the
+     habit was fixed. Ten minutes; run it when the network is usable.
+
+     **THE GATE OF RECORD IS CI'S RUN ON THE PUSHED SHA.** Owner's ruling,
+     2026-10-12. `ci.yml` and `deploy-production.yml` each run the full
+     integration suite on the exact sha and earn the receipt there, before
+     `deploy:dev` and `deploy:prod`. NOTHING DEPLOYS TO DEV OR PRODUCTION
+     UNTIL CI IS GREEN ON THE EXACT SHA BEING DEPLOYED. The local run no
+     longer blocks a push when its failures are Neon-connection-only (a
+     dropped socket, "Unable to start a transaction", a hang) in files the
+     chain did not touch — and the commit message SAYS SO, naming the runs
+     and the failures. A failure in code the chain touched is a real
+     failure, locally or in CI. `--skip-integration` stays forbidden: this
+     moves the gate, it does not skip it.
+
+     WHY: on 2026-10-12 four local runs from Tajikistan in the evening
+     failed four different ways — a 120 s hang, five dropped sockets in
+     twelve seconds, two transaction-start timeouts — none in code the
+     chain touched, while the two commits sat undeployed. CI forks its own
+     Neon branch from GitHub's network, which is the run that deploys
+     anyway.
 
      COMMIT FIRST: the gate refuses a dirty tree, because its receipt is tied
      to a commit and a receipt from a tree nobody can reconstruct would be
@@ -218,8 +238,9 @@ Rules about instruments, which are the ones that cost whole sessions:
      seconds, and the refusal was nearly read as a pass because the wrapper
      exited 0 around it.
 
-  3. DISPATCH DEV, and read its receipt. Owner's ruling, 2026-10-04: the
-     ritual always goes DEV → PROD, never prod alone.
+  3. DISPATCH DEV, and read its receipt — the push to `main` is the dispatch,
+     and its receipt is CI's green run on that sha. Owner's ruling,
+     2026-10-04: the ritual always goes DEV → PROD, never prod alone.
   4. DISPATCH PRODUCTION, on dev's receipt, and read the drift from
      Cloudflare for BOTH workers.
   5. ONLY THEN push the next migration.
@@ -262,10 +283,12 @@ Rules about instruments, which are the ones that cost whole sessions:
   nothing broke; that is luck, and a rule that depends on luck is not a
   rule.
 
-- **EVERY COMMIT ON `main` IS DEPLOYED BY THE RITUAL IN THE SAME SESSION IT IS
-  MADE.** Owner's standing rule, 2026-10-10. `main` never sits ahead of
-  `origin`, and `origin` never sits ahead of what dev and production serve,
-  at the end of a session. That holds however small the change is.
+- **EVERY COMMIT ON `main` IS DEPLOYED BY THE RITUAL ONCE CI IS GREEN.**
+  Owner's standing rule, 2026-10-10, reworded 2026-10-12 when CI became the
+  gate of record (step 2 above). `main` never sits ahead of `origin`, and
+  `origin` never sits ahead of what dev and production serve, at the end of a
+  session — except while CI is red on it, which is then the open work. That
+  holds however small the change is.
 
   "NO BEHAVIOUR CHANGE" IS NOT AN EXEMPTION. THE DRIFT CHECK IS THE ONLY
   WITNESS. On 2026-10-10 two commits were left local on the reasoning that one
