@@ -82,6 +82,18 @@ Rules that are cheap to state and expensive to rediscover:
   Proxy — Workers I/O objects cannot cross request boundaries.
 - Password hashing must run on workerd. Native bcrypt and `@node-rs/argon2` do
   not. Verify under `npm run preview`, not just `next dev`.
+
+  **AND IT MUST FIT A WARM ISOLATE.** argon2id's memory parameter is a
+  per-verify allocation inside the Worker's 128 MB, beside everything the
+  isolate already holds. At m=19456 (19 MiB) the fifth sign-in of a six-role
+  sweep — after four dashboards had rendered on the isolate — died with
+  `exceededMemory`, a 503 nobody received, three sweeps out of three on
+  2026-10-12; the browser waited 90 s each time. That was GAPS 24's stall,
+  closed in error on a Neon cold start; GAPS 28 has it. The profile is
+  m=7168, t=5, p=1 with rehash-on-login (owner's ruling, 2026-10-12). Raising
+  `m` again is a measured change: three sweeps, zero `exceededMemory` in the
+  tail, before it ships.
+
 - Permission is decided in `src/lib/permissions.ts` and nowhere else. Routes
   call `requirePermission`; none of them decide inline.
 - **Domain logic lives in `src/lib/`. A `'use server'` action reads the form,
