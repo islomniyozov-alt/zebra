@@ -63,6 +63,16 @@ describe('the two-request capture', () => {
     )
   })
 
+  it('matches the redirect render from the tail by window, not from the browser', () => {
+    // Two probes with the tail open (2026-10-12): the browser's RSC fetch of
+    // /dashboard never reached Playwright's request events, and the tail had
+    // it every time. So the attachment asks the tail, ray first, window second.
+    expect(script).toMatch(
+      /isRedirectRender\(event, null\) &&\s*event\.eventTimestamp >= renderFrom &&\s*event\.eventTimestamp <= renderTo/,
+    )
+    expect(script).toContain("matchedBy: byRedirectRay ? 'ray' : 'window'")
+  })
+
   it('falls back to responseStart for a redirect, and says which it read', () => {
     expect(script).toMatch(
       /timing\.responseEnd >= 0\s*\?\s*Math\.round\(timing\.responseEnd\)\s*:\s*timing\.responseStart >= 0\s*\?\s*Math\.round\(timing\.responseStart\)/,

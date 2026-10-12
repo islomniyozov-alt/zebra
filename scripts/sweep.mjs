@@ -47,6 +47,7 @@ import { dirname, join, sep } from 'node:path'
 import { chromium } from 'playwright'
 import { neonConfig, Pool } from '@neondatabase/serverless'
 import {
+  isRedirectRender,
   isSignInPost,
   READY_WINDOW_MS,
   signInTimingOf,
@@ -551,14 +552,45 @@ async function sweep() {
           ? 'no tail event for this ray within 30 s'
           : 'no sign-in POST in the tail inside this attempt'
       // THE REDIRECT TARGET'S OWN INVOCATION (GAPS 26): the shell's line and
-      // the page's line, from the GET the browser made after the 303.
-      if (row.redirect?.ray) {
-        const event = tail.lookup(row.redirect.ray)
-        row.redirect.worker = event
-          ? { ...trimEvent(event), timings: timingLinesOf(event) }
-          : null
-        if (!event)
-          row.redirect.workerNote = 'no tail event for this ray within 30 s'
+      // the page's line. FROM THE TAIL, BY WINDOW — the browser's router
+      // fetches `/dashboard?_rsc` about a second after the 303 and Playwright
+      // never surfaced that request (two probes, 2026-10-12), so three sweeps
+      // recorded no GET. The tail saw every one. The ray is used when the
+      // browser did record it; otherwise the one render in the window, which
+      // opens at the click and closes well after the attempt, because the
+      // render runs ~14 s of wall and its event arrives after that.
+      const renderFrom = Date.parse(row.startedAt) - 2_000
+      const renderTo = Date.parse(row.endedAt) + 40_000
+      const byRedirectRay = row.redirect?.ray
+        ? tail.lookup(row.redirect.ray)
+        : null
+      const render =
+        byRedirectRay ??
+        tail
+          .all()
+          .filter(
+            (event) =>
+              isRedirectRender(event, null) &&
+              event.eventTimestamp >= renderFrom &&
+              event.eventTimestamp <= renderTo,
+          )
+          .sort((a, b) => a.eventTimestamp - b.eventTimestamp)[0] ??
+        null
+      if (render) {
+        row.redirect = {
+          ...(row.redirect ?? {}),
+          path: new URL(render.event.request.url).pathname,
+          status:
+            render.event?.response?.status ?? row.redirect?.status ?? null,
+          matchedBy: byRedirectRay ? 'ray' : 'window',
+          worker: { ...trimEvent(render), timings: timingLinesOf(render) },
+        }
+      } else if (row.outcome === 'ok') {
+        row.redirect = {
+          ...(row.redirect ?? {}),
+          worker: null,
+          workerNote: 'no redirect render in the tail inside this attempt',
+        }
       }
     }
   }
