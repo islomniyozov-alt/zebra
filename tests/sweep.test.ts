@@ -17,7 +17,37 @@ import {
   routesUnder,
   SIGN_IN_ATTEMPTS,
   tally,
+  WARM_UP_WINDOW_MS,
+  warmUp,
 } from '../scripts/sweep.mjs'
+
+// §6.8, owner's ruling 2026-10-12 (closing GAPS 24): the sweep measures the
+// application, not Neon waking up. One direct SELECT 1 and one GET /login
+// answered 200, BEFORE the id-resolving connection that would otherwise be
+// the wake-up nobody measured; both wall times go in the verdict file.
+describe('the warm-up', () => {
+  it('runs before the ids are resolved, and its record reaches the verdict file', () => {
+    const script = readFileSync('scripts/sweep.mjs', 'utf8')
+    expect(script).toMatch(
+      /const coldStart = await warmUp\(pool, BASE\)[\s\S]*?await resolveIds\(pool\)/,
+    )
+    expect(script).toMatch(/coldStart,\s*signIns,\s*serverErrors,/)
+    expect(WARM_UP_WINDOW_MS).toBe(120_000)
+  })
+
+  it('records both wall times and the status it stopped on', async () => {
+    const pool = { query: async () => ({ rows: [{ '?column?': 1 }] }) }
+    const fetchImpl = async () =>
+      new Response('ok', { status: 200 }) as unknown as Response
+    const cold = await warmUp(pool, 'https://zebra-dev.example.workers.dev', {
+      fetchImpl,
+    })
+    expect(cold.loginStatus).toBe(200)
+    expect(cold.directMs).toBeGreaterThanOrEqual(0)
+    expect(cold.loginMs).toBeGreaterThanOrEqual(0)
+    expect(typeof cold.at).toBe('string')
+  })
+})
 
 // Owner's brief, 2026-10-11: a stalled sign-in names its role and is retried
 // once — once, because a sweep that retried until it got in would sweep a dev

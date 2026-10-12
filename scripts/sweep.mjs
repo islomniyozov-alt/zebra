@@ -243,6 +243,51 @@ export const detailPath = (env) =>
 /** Tries per role before a stalled sign-in fails the sweep: one retry, no more. */
 export const SIGN_IN_ATTEMPTS = 2
 
+// ── THE WARM-UP (§6.8, owner's ruling 2026-10-12, closing GAPS 24) ─────────
+//
+// Dev keeps Neon's scale-to-zero by choice, so the first thing to touch the
+// database after idle pays the compute's cold start — which is what a
+// sign-in stalling past 90 s and a one-row read taking 6.7 s to start a
+// transaction both were. The sweep measures the application, so it wakes
+// the compute FIRST and records what that cost, separately: one direct
+// `SELECT 1` (the wake-up itself) and one `GET /login` answered 200 (the
+// Worker, awake and answering). Before `resolveIds`, whose own connection
+// would otherwise be the wake-up nobody measured.
+
+/** How long dev is given to answer 200 on /login before the sweep refuses. */
+export const WARM_UP_WINDOW_MS = 120_000
+
+export async function warmUp(
+  pool,
+  base,
+  { fetchImpl = fetch, windowMs = WARM_UP_WINDOW_MS, pauseMs = 5_000 } = {},
+) {
+  const at = new Date().toISOString()
+  const directStart = Date.now()
+  await pool.query('SELECT 1')
+  const directMs = Date.now() - directStart
+
+  const deadline = Date.now() + windowMs
+  let loginStatus = null
+  let loginMs = null
+  for (;;) {
+    const loginStart = Date.now()
+    const response = await fetchImpl(new URL('/login', base)).catch(() => null)
+    await response?.arrayBuffer().catch(() => null)
+    loginMs = Date.now() - loginStart
+    loginStatus = response?.status ?? null
+    if (loginStatus === 200) break
+    if (Date.now() >= deadline) {
+      console.error(
+        `DEV DID NOT ANSWER 200 ON /login WITHIN ${windowMs / 1000} s (last answer ${loginStatus ?? 'none'}). Nothing swept. NOT OK.`,
+      )
+      process.exit(1)
+    }
+    await new Promise((resolve) => setTimeout(resolve, pauseMs))
+  }
+  return { at, directMs, loginMs, loginStatus }
+}
+
 /** The roles the sweep signs in as, and the matrix's column for each. */
 /**
  * Every role in `enum Role`, each a column of §6.8 (extended 2026-10-10), and
@@ -415,6 +460,11 @@ async function sweep() {
     connectionString: process.env.DIRECT_DATABASE_URL,
     max: 1,
   })
+  // FIRST, before anything else reaches the database (see `warmUp`).
+  const coldStart = await warmUp(pool, BASE)
+  console.log(
+    `cold start: direct SELECT 1 ${coldStart.directMs} ms · GET /login ${coldStart.loginMs} ms (${coldStart.loginStatus})`,
+  )
   const { resolved, failed, organizationId } = await resolveIds(pool)
   await pool.end()
 
@@ -522,6 +572,7 @@ async function sweep() {
         {
           base: BASE,
           tail: { worker, ready: tailReady, failure: tail.failure() },
+          coldStart,
           signIns,
           serverErrors,
         },

@@ -45,6 +45,17 @@ Rules that are cheap to state and expensive to rediscover:
 
 - Neon **WebSocket** adapter only. The HTTP driver cannot run interactive
   transactions, and the RLS session variable needs one per request.
+- **PRODUCTION'S NEON COMPUTE IS ALWAYS AWAKE. Scale-to-zero is OFF there
+  (0.25 CU floor) and MUST NEVER BE RE-ENABLED.** Owner's ruling,
+  2026-10-12, closing GAPS 24: with it on, the first request after idle paid
+  the compute's cold start, a sign-in stalled past 90 s, and a one-row read
+  took 6.7 s to start a transaction. Dev keeps scale-to-zero by choice, so
+  the sweep warms dev before it measures anything and records the cold start
+  separately. `npm run check:prod-signin` signs in to production once and
+  FAILS if the sign-in's first-query span exceeds 3 s — a cold start shows as
+  5 s or more — so re-enabling it would be caught at the next ritual, not
+  the next stall. The check needs the Live Check credentials (GAPS 8) and
+  says NOT OK by name without them.
 - Prisma 7 syntax. The datasource block has no `url` on purpose and
   `driverAdapters` is no longer a preview feature. Do not "fix" either back.
 - **`relationJoins` is ON, deliberately, and it is app-wide.** With that

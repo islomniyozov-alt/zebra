@@ -34,6 +34,7 @@
     "verify:driver-form": "node -r dotenv/config scripts/verify-driver-form.mjs",
     "check:unrouted": "node -r dotenv/config scripts/check-unrouted.mjs",
     "sweep": "node -r dotenv/config scripts/sweep.mjs",
+    "check:prod-signin": "node -r dotenv/config scripts/prod-signin-check.mjs",
     "test:integration": "node scripts/integration-gate.mjs"
   },
   "dependencies": {
