@@ -15,6 +15,12 @@ import { logout } from '@/lib/auth'
 import { LOCALE_COOKIE } from '@/lib/locale'
 import { isLocale } from '@/lib/i18n'
 import type { MessageKey } from '@/lib/i18n'
+import {
+  isolateMark,
+  newSignInSpans,
+  signInTimingLine,
+  since,
+} from '@/lib/signin-timing'
 
 // The auth mechanism has been complete and tested since Step 4; this is the
 // first thing standing in front of it.
@@ -71,6 +77,24 @@ export async function signInAction(
   // per attempt.
   const metadata = await requestMetadata()
 
+  // GAPS 24, MEASUREMENT ONLY: one structured line per sign-in, on every way
+  // out, for `wrangler tail` to read. Numbers, an outcome and a role — no
+  // email, no hash (`signin-timing.ts`).
+  const spans = newSignInSpans()
+  const startedAt = Date.now()
+  const actionStart = performance.now()
+  const isolate = isolateMark(startedAt)
+  const logTiming = (outcome: string) =>
+    console.log(
+      signInTimingLine({
+        outcome,
+        spans,
+        actionMs: since(actionStart),
+        isolate,
+        startedAt,
+      }),
+    )
+
   let result: Awaited<ReturnType<typeof login>>
   try {
     result = await withSocketRetry('signInAction.login', () =>
@@ -82,13 +106,17 @@ export async function signInAction(
         // worthless after it.
         currentToken: store.get(SESSION_COOKIE)?.value ?? null,
         metadata,
+        spans,
       }),
     )
   } catch {
+    logTiming('unavailable')
     // THE ROW EVERYBODY FORGETS: the request was fine and the system was not.
     // It says the system failed, not the person, and it says the remedy.
     return { error: 'auth.unavailable' }
   }
+
+  logTiming(result.ok ? 'ok' : result.reason)
 
   if (!result.ok) {
     // Three outcomes, three messages, and none of them says which half was

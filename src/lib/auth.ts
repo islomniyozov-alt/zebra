@@ -14,6 +14,7 @@ import {
   type RequestMetadata,
   type SessionDb,
 } from './session'
+import { clockCatchUp, since, type SignInSpans } from './signin-timing'
 
 // ---------------------------------------------------------------------------
 // LOGIN
@@ -90,6 +91,11 @@ export interface LoginInput {
   /** Pick a specific membership when the user belongs to several. */
   organizationId?: string
   metadata?: RequestMetadata
+  /**
+   * Filled in as the sign-in runs, when given (GAPS 24 — measurement only).
+   * Numbers and a role; see `signin-timing.ts`.
+   */
+  spans?: SignInSpans
 }
 
 /**
@@ -174,9 +180,17 @@ export async function login(
   const email = normalizeEmail(input.email)
   const metadata = input.metadata ?? {}
   const ip = metadata.ip ?? null
-  const since = new Date(Date.now() - RATE_LIMIT.windowMs)
+  const windowStart = new Date(Date.now() - RATE_LIMIT.windowMs)
+  // GAPS 24: a stopwatch per span, when the caller asked for one. Every span
+  // is overwritten on a socket retry, so the line describes the attempt that
+  // finished; `attempts` says whether there was an earlier one.
+  const spans = input.spans
+  if (spans) spans.attempts += 1
+  const loginStart = performance.now()
+  let mark = loginStart
 
-  const failures = await countRecentFailures(db, email, ip, since)
+  const failures = await countRecentFailures(db, email, ip, windowStart)
+  if (spans) spans.rateLimitMs = since(mark)
   if (
     failures.byEmail >= RATE_LIMIT.perEmail ||
     failures.byIp >= RATE_LIMIT.perIp
@@ -184,6 +198,7 @@ export async function login(
     // Recorded, so that hammering a locked account extends the lockout rather
     // than waiting it out for free.
     await record(db, email, false, metadata)
+    if (spans) spans.totalMs = since(loginStart)
     return {
       ok: false,
       reason: 'rate_limited',
@@ -191,6 +206,7 @@ export async function login(
     }
   }
 
+  mark = performance.now()
   const user = await db.user.findUnique({
     where: { email },
     // THE LOCALE COMES BACK WITH THE CREDENTIAL CHECK, in this query, because
@@ -207,25 +223,38 @@ export async function login(
     },
   })
 
+  if (spans) spans.lookupMs = since(mark)
+
   // A user with no password set (invited, never activated) and a user that
   // does not exist take the same path, at the same cost.
   const hash =
     user?.isActive === true && user.passwordHash ? user.passwordHash : null
+  mark = performance.now()
   const valid = await verifyPassword(
     input.password,
     hash ?? (await dummyHash()),
   )
+  // The workerd clock is frozen through synchronous work; one macrotask lets
+  // it catch up, or this span reads 0 ms (see `signin-timing.ts`).
+  if (spans) {
+    await clockCatchUp()
+    spans.verifyMs = since(mark)
+  }
 
   if (!hash || !valid || !user) {
     await record(db, email, false, metadata)
+    if (spans) spans.totalMs = since(loginStart)
     return { ok: false, reason: 'invalid_credentials' }
   }
 
+  mark = performance.now()
   const membership = await resolveMembership(db, user.id, input.organizationId)
+  if (spans) spans.membershipMs = since(mark)
   if (!membership) {
     // Correct credentials, no way in. Not a credential failure, and not
     // something a stranger can provoke, so it gets its own answer.
     await record(db, email, false, metadata)
+    if (spans) spans.totalMs = since(loginStart)
     return { ok: false, reason: 'no_membership' }
   }
 
@@ -248,6 +277,7 @@ export async function login(
     }
   }
 
+  mark = performance.now()
   const issued = await createSession(
     db,
     user.id,
@@ -259,7 +289,9 @@ export async function login(
     },
     metadata,
   )
+  if (spans) spans.sessionMs = since(mark)
 
+  mark = performance.now()
   await Promise.all([
     record(db, email, true, metadata),
     db.user.update({
@@ -267,6 +299,11 @@ export async function login(
       data: { lastLoginAt: new Date() },
     }),
   ])
+  if (spans) {
+    spans.finalizeMs = since(mark)
+    spans.totalMs = since(loginStart)
+    spans.role = membership.role
+  }
 
   // THE LOCALE TRAVELS WITH THE RESULT so the caller needs no second read. See
   // the `select` above.

@@ -134,6 +134,43 @@ describe('every refusal names itself on the form', () => {
   })
 })
 
+// GAPS 24, MEASUREMENT ONLY: one structured line per sign-in, on every way
+// out, and never the email or the password.
+describe('every sign-in writes one timing line', () => {
+  const lines = async (run: () => Promise<unknown>) => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      await run().catch(() => {})
+      return spy.mock.calls
+        .map((call) => String(call[0]))
+        .filter((text) => text.includes('"signin.timing"'))
+    } finally {
+      spy.mockRestore()
+    }
+  }
+
+  it.each([
+    ['ok', () => login.mockResolvedValue(ok())],
+    [
+      'invalid_credentials',
+      () =>
+        login.mockResolvedValue({ ok: false, reason: 'invalid_credentials' }),
+    ],
+    ['unavailable', () => login.mockRejectedValue(new Error('boom'))],
+  ])('%s', async (outcome, arrange) => {
+    arrange()
+    const written = await lines(() =>
+      submit('islom@example.test', 'correct horse'),
+    )
+    expect(written).toHaveLength(1)
+    expect(JSON.parse(written[0]!)).toMatchObject({ outcome })
+    // The spans the line reports are the ones `login` was handed to fill.
+    expect((login.mock.calls[0]![1] as { spans?: unknown }).spans).toBeDefined()
+    expect(written[0]).not.toContain('islom@example.test')
+    expect(written[0]).not.toContain('correct horse')
+  })
+})
+
 describe('the request was fine and the system was not', () => {
   it('a dropped socket says the database was unreachable', async () => {
     login.mockRejectedValue(droppedSocket())

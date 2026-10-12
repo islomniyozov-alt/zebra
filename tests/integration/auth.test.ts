@@ -19,6 +19,7 @@ import {
   revokeAllSessionsForUser,
 } from '@/lib/session'
 import { can } from '@/lib/permissions'
+import { newSignInSpans } from '@/lib/signin-timing'
 import type { PrismaClient } from '@/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -103,6 +104,30 @@ describe('login', () => {
     // The session is immediately usable as an authorization subject.
     expect(can(result.context, 'read', 'load')).toBe(true)
     expect(can(result.context, 'read', 'invoice')).toBe(false)
+  })
+
+  // GAPS 24: the spans the sign-in log line reports, filled by the real path.
+  it('fills every span and the role when asked to time itself', async () => {
+    const spans = newSignInSpans()
+    const result = await login(app, { email, password: PASSWORD, spans })
+    expect(result.ok).toBe(true)
+    expect(spans.attempts).toBe(1)
+    expect(spans.role).toBe('DISPATCHER')
+    for (const key of [
+      'rateLimitMs',
+      'lookupMs',
+      'verifyMs',
+      'membershipMs',
+      'sessionMs',
+      'finalizeMs',
+      'totalMs',
+    ] as const) {
+      expect(spans[key], key).toBeGreaterThanOrEqual(0)
+    }
+    // argon2id at m=19 MiB, t=2 is not free anywhere; a zero here means the
+    // stopwatch is wrapped around nothing.
+    expect(spans.verifyMs).toBeGreaterThan(0)
+    expect(spans.totalMs).toBeGreaterThanOrEqual(spans.verifyMs!)
   })
 
   it('stores only the hash of the token', async () => {
