@@ -1,5 +1,9 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { FIXTURE_PASSWORD, FIXTURE_PASSWORD_HASH } from '../fixtures/password'
+import {
+  FIXTURE_PASSWORD,
+  FIXTURE_PASSWORD_HASH,
+  FIXTURE_PASSWORD_HASH_19MIB,
+} from '../fixtures/password'
 import { retryingClient } from '../retrying-client'
 import {
   RATE_LIMIT,
@@ -20,6 +24,7 @@ import {
 } from '@/lib/session'
 import { can } from '@/lib/permissions'
 import { newSignInSpans } from '@/lib/signin-timing'
+import { ARGON2_PARAMS, needsRehash, verifyPassword } from '@/lib/password'
 import type { PrismaClient } from '@/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -127,6 +132,75 @@ describe('login', () => {
     // stopwatch (owner's ruling 2026-10-12, `signin-timing.ts`).
     expect(spans).not.toHaveProperty('verifyMs')
     expect(spans.totalMs).toBeGreaterThanOrEqual(spans.membershipMs!)
+  })
+
+  // GAPS 28, owner's ruling 2026-10-12: the profile moved to m=7168, t=5, p=1
+  // with rehash-on-login. An old-profile hash verifies, is rewritten at the
+  // new profile in the same request, and the rewritten hash verifies; a wrong
+  // password is refused against either.
+  it('rewrites an old-profile hash on login, and refuses the wrong password before and after', async () => {
+    const oldEmail = `auth-old-${nonce}@example.test`
+    const oldUser = await owner.user.create({
+      data: {
+        email: oldEmail,
+        name: 'Old Profile',
+        passwordHash: FIXTURE_PASSWORD_HASH_19MIB,
+      },
+    })
+    await owner.membership.create({
+      data: {
+        userId: oldUser.id,
+        organizationId,
+        role: 'DISPATCHER',
+        isDefault: true,
+      },
+    })
+    try {
+      expect(FIXTURE_PASSWORD_HASH_19MIB).toContain('m=19456,t=2,p=1')
+      expect(needsRehash(FIXTURE_PASSWORD_HASH_19MIB)).toBe(true)
+
+      // Wrong password against the old hash: refused, and nothing rewritten.
+      const refused = await login(app, { email: oldEmail, password: 'not-it' })
+      expect(refused).toEqual({ ok: false, reason: 'invalid_credentials' })
+      const untouched = await owner.user.findUniqueOrThrow({
+        where: { id: oldUser.id },
+        select: { passwordHash: true },
+      })
+      expect(untouched.passwordHash).toBe(FIXTURE_PASSWORD_HASH_19MIB)
+
+      // Right password: in, and the stored hash is now at the current profile.
+      const accepted = await login(app, { email: oldEmail, password: PASSWORD })
+      expect(accepted.ok).toBe(true)
+      const rewritten = await owner.user.findUniqueOrThrow({
+        where: { id: oldUser.id },
+        select: { passwordHash: true },
+      })
+      expect(rewritten.passwordHash).not.toBe(FIXTURE_PASSWORD_HASH_19MIB)
+      expect(rewritten.passwordHash).toContain(
+        `m=${ARGON2_PARAMS.m},t=${ARGON2_PARAMS.t},p=${ARGON2_PARAMS.p}`,
+      )
+      expect(needsRehash(rewritten.passwordHash!)).toBe(false)
+      expect(await verifyPassword(PASSWORD, rewritten.passwordHash!)).toBe(true)
+      expect(await verifyPassword('not-it', rewritten.passwordHash!)).toBe(
+        false,
+      )
+
+      // And the rewritten hash signs in, while the wrong password still does not.
+      expect(
+        (await login(app, { email: oldEmail, password: PASSWORD })).ok,
+      ).toBe(true)
+      expect(await login(app, { email: oldEmail, password: 'not-it' })).toEqual(
+        {
+          ok: false,
+          reason: 'invalid_credentials',
+        },
+      )
+    } finally {
+      await owner.loginAttempt.deleteMany({ where: { email: oldEmail } })
+      await owner.session.deleteMany({ where: { userId: oldUser.id } })
+      await owner.membership.deleteMany({ where: { userId: oldUser.id } })
+      await owner.user.delete({ where: { id: oldUser.id } })
+    }
   })
 
   it('stores only the hash of the token', async () => {

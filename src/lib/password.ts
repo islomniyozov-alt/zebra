@@ -34,18 +34,32 @@ import { argon2id } from '@noble/hashes/argon2.js'
 // ---------------------------------------------------------------------------
 
 /**
- * OWASP's second recommended argon2id profile (m=19 MiB, t=2, p=1).
+ * OWASP's low-memory argon2id profile (m=7 MiB, t=5, p=1). Owner's ruling,
+ * 2026-10-12, GAPS 28.
  *
  * Memory is the parameter that costs an attacker their GPU advantage, so it is
- * the one to spend on. 19 MiB per concurrent login leaves comfortable room
- * under a Worker isolate's 128 MB alongside Next and Prisma; the 46 MiB
- * profile does not, and buys little — measured, the two are 640ms and 511ms.
+ * the one to spend on — and this used to be the 19 MiB profile on the belief
+ * that it "leaves comfortable room under a Worker isolate's 128 MB alongside
+ * Next and Prisma". MEASURED OTHERWISE. On 2026-10-12 three six-role sweeps
+ * each lost the fifth sign-in the same way: after four roles' dashboards had
+ * rendered on the isolate, the verify's 19 MiB allocation crossed the limit,
+ * the Worker died with `exceededMemory` (a 503 nobody received, ~3 s wall,
+ * ~1.2 s CPU, four "Worker exceeded memory limit" exceptions in the tail),
+ * and the browser waited the full 90 s. The retry, on a fresh isolate, took
+ * 3.5 s. That was the stall GAPS 24 had been chasing for three days.
+ *
+ * 7 MiB × 5 passes is the same order of work as 19 MiB × 2 (35,840 against
+ * 38,912 KiB-passes) at a third of the allocation. Verify honours whatever
+ * parameters a stored hash encodes, so every existing hash still verifies and
+ * is rewritten at this profile on its next successful login (`needsRehash`).
+ * Raising `m` again is a measured change: three sweeps, zero `exceededMemory`
+ * in the tail, before it ships.
  */
 export const ARGON2_PARAMS = {
   /** Memory cost, in KiB. */
-  m: 19456,
+  m: 7168,
   /** Time cost — passes over memory. */
-  t: 2,
+  t: 5,
   /** Lanes. One, because workerd gives us no threads to spend them on. */
   p: 1,
 } as const
@@ -253,11 +267,15 @@ export async function verifyPassword(
 }
 
 /**
- * Whether a stored hash was made with weaker parameters than we now use.
+ * Whether a stored hash is NOT at the current profile.
  *
- * Every PBKDF2 hash qualifies, which is what makes the migration a rolling one
- * rather than a forced reset: the old hash verifies, and is replaced in the
- * same request.
+ * "Not current", deliberately, rather than "weaker": this used to compare
+ * each parameter downward, which ordered profiles only while a retune raised
+ * every one of them. GAPS 28 lowered memory and raised passes, and the two
+ * do not order — so the rule is now that any hash not made with exactly
+ * `ARGON2_PARAMS` is rewritten on its next successful login. Every PBKDF2
+ * hash qualifies, which is what makes the migration a rolling one rather than
+ * a forced reset: the old hash verifies, and is replaced in the same request.
  *
  * Call after a successful verify — that is the only moment the plaintext is in
  * hand, and so the only moment a rehash is possible.
@@ -270,9 +288,9 @@ export function needsRehash(
   if (parsed === null) return true
   if (parsed.kind === 'pbkdf2') return true
   return (
-    parsed.params.m < params.m ||
-    parsed.params.t < params.t ||
-    parsed.params.p < params.p
+    parsed.params.m !== params.m ||
+    parsed.params.t !== params.t ||
+    parsed.params.p !== params.p
   )
 }
 

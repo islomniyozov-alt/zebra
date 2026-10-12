@@ -21,6 +21,17 @@ import { ARGON2_PARAMS, verifyPassword } from '@/lib/password'
 export const FIXTURE_PASSWORD = 'fixture-passphrase-not-a-secret'
 
 export const FIXTURE_PASSWORD_HASH =
+  '$argon2id$v=19$m=7168,t=5,p=1$R4Ypam40uBWN06nTLXRK8A$KBVrB4geLcdzy3Hp9zfZwokOnNSaWmdyFTbMPLUcv3Q'
+
+/**
+ * The same passphrase at the PREVIOUS profile (m=19456, t=2, p=1), kept on
+ * purpose: it is what every real password hash looked like before GAPS 28
+ * (owner's ruling 2026-10-12), and `tests/integration/auth.test.ts` proves it
+ * still verifies and is rewritten at the current profile on its next login.
+ * `fixtureHashIsCurrent` must say this one does NOT match the current
+ * parameters — the day it does, the rehash path has nothing left to test.
+ */
+export const FIXTURE_PASSWORD_HASH_19MIB =
   '$argon2id$v=19$m=19456,t=2,p=1$QWPZfjPNHX7SzkzEhN7lmA$cIktCmqh5BDzNiX/oDLSz2ZjmT/QWflqP2N5X2XR+hg'
 
 /**

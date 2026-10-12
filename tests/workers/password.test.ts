@@ -165,11 +165,19 @@ describe('needsRehash', () => {
     expect(needsRehash(await hashPassword('x'))).toBe(false)
   })
 
-  it('leaves a STRONGER hash alone', async () => {
-    // Someone tuning the parameters up and then rolling back must not cause a
-    // rehash storm that quietly weakens every password it touches.
-    const stronger = await hashPassword('x', { m: 32768, t: 3, p: 1 })
-    expect(needsRehash(stronger)).toBe(false)
+  it('rewrites a hash at ANY other profile, a higher-memory one included', async () => {
+    // This used to leave a "stronger" hash alone, against a rehash storm after
+    // a rollback. GAPS 28 (owner's ruling 2026-10-12) is exactly the case that
+    // rule could not express: the previous profile, m=19456, is higher on
+    // memory and lower on passes than the current one, the two do not order,
+    // and the higher-memory hash is the one that crashed the isolate. So "not
+    // the current profile" is the rule, and every hash converges on it at its
+    // owner's next login — the previous profile first of all.
+    const previous = await hashPassword('x', { m: 19456, t: 2, p: 1 })
+    expect(needsRehash(previous)).toBe(true)
+    expect(await verifyPassword('x', previous)).toBe(true)
+    const higherEverywhere = await hashPassword('x', { m: 32768, t: 6, p: 1 })
+    expect(needsRehash(higherEverywhere)).toBe(true)
   })
 
   it('flags anything it cannot parse', () => {
