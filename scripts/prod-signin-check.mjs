@@ -31,6 +31,7 @@ import { dirname, join, sep } from 'node:path'
 import { chromium } from 'playwright'
 import { credentialsFor } from './check-credentials.mjs'
 import {
+  isSignInPost,
   signInTimingOf,
   startTail,
   trimEvent,
@@ -94,6 +95,24 @@ async function main() {
   try {
     const context = await browser.newContext()
     const page = await context.newPage()
+    // THE RAY AND STATUS AT `response`, SYNCHRONOUSLY: for a 303 the later
+    // `requestfinished` is not reliably delivered before the navigation moves
+    // on (2026-10-12: two runs, one with the POST recorded, one without). The
+    // browser's timing still comes from `requestfinished`, when it arrives.
+    page.on('response', (response) => {
+      const request = response.request()
+      if (
+        request.method() === 'POST' &&
+        new URL(request.url()).pathname === '/login'
+      ) {
+        ray = response.headers()['cf-ray'] ?? null
+        record.post = {
+          ...(record.post ?? {}),
+          status: response.status(),
+          ray,
+        }
+      }
+    })
     page.on('requestfinished', (request) => {
       void (async () => {
         const response = await request.response()
@@ -102,11 +121,25 @@ async function main() {
           request.method() === 'POST' &&
           new URL(request.url()).pathname === '/login'
         ) {
-          ray = response.headers()['cf-ray'] ?? null
+          const timing = request.timing()
           record.post = {
+            ...(record.post ?? {}),
             status: response.status(),
-            ray,
-            browserMs: Math.round(request.timing().responseEnd),
+            ray: (ray ??= response.headers()['cf-ray'] ?? null),
+            // A 303 has no body, so no `responseEnd`; its headers' arrival is
+            // the duration then, and the field says which was read.
+            browserMs:
+              timing.responseEnd >= 0
+                ? Math.round(timing.responseEnd)
+                : timing.responseStart >= 0
+                  ? Math.round(timing.responseStart)
+                  : null,
+            browserMsKind:
+              timing.responseEnd >= 0
+                ? 'responseEnd'
+                : timing.responseStart >= 0
+                  ? 'responseStart'
+                  : null,
           }
         }
       })().catch(() => {})
@@ -114,12 +147,20 @@ async function main() {
     await page.goto(`${base}/login`, { waitUntil: 'domcontentloaded' })
     await page.fill('input[name="email"]', credentials.email)
     await page.fill('input[name="password"]', credentials.password)
+    const clickedAt = Date.now()
     await Promise.all([
       page.waitForURL((url) => !url.pathname.startsWith('/login'), {
         timeout: 90_000,
       }),
       page.click('button[type="submit"]'),
     ])
+    record.signedInAt = new Date().toISOString()
+    record.windowFrom = clickedAt - 2_000
+    // LET THE REDIRECT TARGET LOAD before the context goes: the
+    // `requestfinished` handler above is asynchronous, and closing here lost
+    // the POST's record on 2026-10-12 (no ray, no tail match). Bounded.
+    await page.waitForLoadState('load', { timeout: 60_000 }).catch(() => {})
+    await new Promise((resolve) => setTimeout(resolve, 500))
     await context.close()
   } catch (error) {
     record.error = String(error?.message ?? error).split('\n')[0]
@@ -128,12 +169,31 @@ async function main() {
   }
   await browser.close()
 
+  // By ray when the browser recorded one; otherwise the one sign-in POST the
+  // tail saw inside this attempt's window — the sweep's own fallback. The
+  // tail delivers a few seconds after the response, so it is waited for.
   if (ray) await tail.waitFor([ray], 30_000)
-  const event = ray ? tail.lookup(ray) : null
+  else await new Promise((resolve) => setTimeout(resolve, 15_000))
+  const windowTo = Date.now()
+  const event = ray
+    ? tail.lookup(ray)
+    : (tail
+        .all()
+        .filter(
+          (candidate) =>
+            isSignInPost(candidate) &&
+            candidate.eventTimestamp >= record.windowFrom &&
+            candidate.eventTimestamp <= windowTo,
+        )
+        .at(-1) ?? null)
   tail.stop()
   const timing = event ? signInTimingOf(event) : null
   record.worker = event ? { ...trimEvent(event), timing } : null
-  if (!event) record.workerNote = 'no tail event for this ray within 30 s'
+  record.matchedBy = event ? (ray ? 'ray' : 'window') : null
+  if (!event)
+    record.workerNote = ray
+      ? 'no tail event for this ray within 30 s'
+      : 'no sign-in POST in the tail inside this attempt'
   const verdict = verdictFor(timing)
   return finish(verdict.ok, verdict.reason)
 }

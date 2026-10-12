@@ -619,8 +619,33 @@ async function sweep() {
         /** The GET the browser made after the 303 (GAPS 26). */
         redirect: null,
       }
-      // READ AT `requestfinished`, NOT `response`: the browser's timing has a
-      // `responseEnd` only once the body has arrived.
+      // THE RAY AND STATUS AT `response`, SYNCHRONOUSLY — for a 303 the later
+      // `requestfinished` is not reliably delivered before the navigation
+      // moves on (the production check lost its POST record that way on
+      // 2026-10-12). The browser's timings still come from `requestfinished`,
+      // which alone has a `responseEnd`.
+      page.on('response', (response) => {
+        const request = response.request()
+        const path = new URL(request.url()).pathname
+        if (request.method() === 'POST' && path === '/login') {
+          row.ray = response.headers()['cf-ray'] ?? null
+          row.status = response.status()
+        } else if (
+          request.method() === 'GET' &&
+          request.isNavigationRequest() &&
+          request.frame() === page.mainFrame() &&
+          path !== '/login' &&
+          row.redirect === null
+        ) {
+          row.redirect = {
+            path,
+            ray: response.headers()['cf-ray'] ?? null,
+            status: response.status(),
+            getMs: null,
+            getMsKind: null,
+          }
+        }
+      })
       page.on('requestfinished', (request) => {
         void (async () => {
           const response = await request.response()
@@ -643,8 +668,8 @@ async function sweep() {
                 ? 'responseStart'
                 : null
           if (request.method() === 'POST' && path === '/login') {
-            row.ray = response.headers()['cf-ray'] ?? null
-            row.status = response.status()
+            row.ray ??= response.headers()['cf-ray'] ?? null
+            row.status ??= response.status()
             row.postMs = ms
             row.postMsKind = msKind
           } else if (
@@ -652,12 +677,13 @@ async function sweep() {
             request.isNavigationRequest() &&
             request.frame() === page.mainFrame() &&
             path !== '/login' &&
-            row.redirect === null
+            (row.redirect === null || row.redirect.path === path)
           ) {
             row.redirect = {
+              ...(row.redirect ?? {}),
               path,
-              ray: response.headers()['cf-ray'] ?? null,
-              status: response.status(),
+              ray: row.redirect?.ray ?? response.headers()['cf-ray'] ?? null,
+              status: row.redirect?.status ?? response.status(),
               getMs: ms,
               getMsKind: msKind,
             }

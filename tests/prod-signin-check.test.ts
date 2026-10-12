@@ -45,4 +45,18 @@ describe('the production first-query check', () => {
     )
     expect(script).toContain('PRODUCTION SIGN-IN FIRST QUERY — NOT OK.')
   })
+
+  it('lets the redirect target load before the context closes, and matches by window when the ray is lost', () => {
+    // 2026-10-12: the context closed the moment the URL changed, the async
+    // `requestfinished` handler never recorded the POST, and the check
+    // reported "no signin.timing line" about a sign-in that had succeeded.
+    const script = readFileSync('scripts/prod-signin-check.mjs', 'utf8')
+    expect(script).toMatch(
+      /record\.signedInAt = [\s\S]*?waitForLoadState\('load', \{ timeout: 60_000 \}\)[\s\S]*?await context\.close\(\)/,
+    )
+    expect(script).toMatch(/isSignInPost\(candidate\)/)
+    expect(script).toContain(
+      "record.matchedBy = event ? (ray ? 'ray' : 'window') : null",
+    )
+  })
 })
