@@ -58,7 +58,9 @@ describe('the sign-in timing line', () => {
       outcome: 'ok',
       role: 'ACCOUNTING',
       membershipMs: 1215,
-      argon2: 'm=19456,t=2,p=1',
+      // The current profile, as a literal: the line must say what the code
+      // hashes with (GAPS 28 moved it from m=19456,t=2,p=1).
+      argon2: 'm=7168,t=5,p=1',
       startedAt: '2026-10-12T09:00:00.000Z',
     })
   })

@@ -168,6 +168,23 @@ Rules about instruments, which are the ones that cost whole sessions:
   is still unambiguous. That is the one hostile reading the whole thing exists
   to defeat.
 
+  AND A VERDICT THAT IS READ BUT NOT ACTED ON IS THE SAME BUG. On 2026-10-12
+  one shell command chained format → `npm run check` → guards → pre-check →
+  three commits → push with `&&`, each step gated on the previous verdict
+  file. `check` was RED, the `--check` failed, and the chain stopped —
+  correctly. Then the next line ran anyway: a heredoc (`<<'EOF' … EOF`) ENDS
+  THE SHELL STATEMENT, so the two commits and the push written after the
+  first commit's heredoc were new statements with no `&&` behind them. Two
+  code commits reached `origin/main` on a red check, ahead of the doc commit
+  that the stopped sequence had correctly withheld; CI failed on the sha and
+  nothing deployed, which is the gate doing its job after the hands did not.
+
+  SO: ONE COMMIT PER SHELL COMMAND, and every command that follows a verdict
+  begins by reading that verdict file (`--check`) and does nothing else if
+  it is NOT OK. Never put a second commit, or a push, behind a heredoc in the
+  same command. The length of the chain was the hazard; the heredoc was only
+  where it broke.
+
   AND THE WRAPPER'S OWN EXIT CODE IS NOT THE WRAPPED COMMAND'S, WHEREVER YOU
   READ IT FROM. On 2026-09-24 the integration gate was run under the wrapper
   and backgrounded:
