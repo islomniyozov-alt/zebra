@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 import {
   classify,
   credentialsFor,
+  duplicateMatches,
   knownGap,
   MATRIX_ROLES,
   markFor,
@@ -63,14 +64,32 @@ describe('the two-request capture', () => {
     )
   })
 
-  it('matches the redirect render from the tail by window, not from the browser', () => {
-    // Two probes with the tail open (2026-10-12): the browser's RSC fetch of
-    // /dashboard never reached Playwright's request events, and the tail had
-    // it every time. So the attachment asks the tail, ray first, window second.
+  it('reads the render from the POST’s own invocation, by ray, with no window', () => {
+    // §6.10, owner's ruling 2026-10-13: a sign-in renders the dashboard in
+    // its own response, so its lines are in the POST's invocation. The window
+    // matcher this replaces paired several roles with one render.
     expect(script).toMatch(
-      /isRedirectRender\(event, null\) &&\s*event\.eventTimestamp >= renderFrom &&\s*event\.eventTimestamp <= renderTo/,
+      /const post = byRay\s*const separate = row\.redirect\?\.ray \? tail\.lookup\(row\.redirect\.ray\) : null/,
     )
-    expect(script).toContain("matchedBy: byRedirectRay ? 'ray' : 'window'")
+    expect(script).not.toMatch(/renderFrom|renderTo|isRedirectRender/)
+  })
+
+  it('two sign-ins matched to one invocation is a problem, by name', () => {
+    const rows = [
+      { role: 'owner', attempt: 1, matchedRays: ['a1'] },
+      { role: 'admin', attempt: 1, matchedRays: ['b2'] },
+      { role: 'manager', attempt: 1, matchedRays: ['a1'] },
+    ]
+    const shared = duplicateMatches(rows)
+    expect([...shared.keys()]).toEqual(['a1'])
+    expect(shared.get('a1')!.map((row: { role: string }) => row.role)).toEqual([
+      'owner',
+      'manager',
+    ])
+    expect(duplicateMatches(rows.slice(0, 2)).size).toBe(0)
+    expect(script).toMatch(
+      /const shared = duplicateMatches\(signIns\)[\s\S]*?sums\.problems \+= shared\.size/,
+    )
   })
 
   it('falls back to responseStart for a redirect, and says which it read', () => {

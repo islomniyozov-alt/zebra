@@ -22,6 +22,8 @@
 // first, and reads 0 on a warm isolate's later requests only if nothing waited.
 // ---------------------------------------------------------------------------
 
+import { after } from 'next/server'
+
 /** When this isolate evaluated its modules (see the note on the clock). */
 export const MODULE_LOADED_AT = Date.now()
 
@@ -37,6 +39,30 @@ export function stopwatch(): { startedAt: number; ms: () => number } {
   const startedAt = Date.now()
   const start = performance.now()
   return { startedAt, ms: () => Math.round(performance.now() - start) }
+}
+
+/**
+ * Write a timing line into THIS INVOCATION'S log, from `after()`.
+ *
+ * WHY NOT A PLAIN `console.log` (§6.10, owner's ruling 2026-10-13). A sign-in
+ * renders the dashboard inside its own POST response, and the shell's and
+ * dashboard's lines, logged during that render, never reached the POST's log
+ * in the tail — three probes, the action's own line present every time. A
+ * line handed to `after()` is written by the same invocation once the
+ * response is sent, which is where the sign-in's line already lands. Outside
+ * a request `after()` throws, and the line is written directly.
+ */
+export function writeTimingLine(
+  line: string,
+  schedule: (task: () => void) => void = after,
+): void {
+  try {
+    schedule(() => {
+      console.log(line)
+    })
+  } catch {
+    console.log(line)
+  }
 }
 
 /** Run `fn` and report how long it waited, in whole milliseconds. */

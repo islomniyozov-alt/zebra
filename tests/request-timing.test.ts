@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   DASHBOARD_READS,
   dashboardTimingLine,
   shellIsolateMark,
   shellTimingLine,
   timed,
+  writeTimingLine,
 } from '@/lib/request-timing'
 
 // ---------------------------------------------------------------------------
@@ -108,12 +109,34 @@ describe('the spans', () => {
     expect(layout).toMatch(
       /const \{ value: session, ms: sessionMs \} = await timed\(/,
     )
-    expect(layout).toMatch(/console\.log\(\s*shellTimingLine\(/)
+    // Through `after()`, not a bare console.log: a render inside a sign-in's
+    // POST response logged nothing the tail could see (§6.10, 2026-10-13).
+    expect(layout).toMatch(/writeTimingLine\(\s*shellTimingLine\(/)
+    expect(layout).not.toMatch(/console\.log\(\s*shellTimingLine\(/)
     const page = readFileSync('src/app/(app)/dashboard/page.tsx', 'utf8')
-    expect(page).toMatch(/console\.log\(\s*dashboardTimingLine\(/)
+    expect(page).toMatch(/writeTimingLine\(\s*dashboardTimingLine\(/)
+    expect(page).not.toMatch(/console\.log\(\s*dashboardTimingLine\(/)
     // All seven, positionally, so a read added to the fan-out without a span
     // fails here.
     for (const [index, name] of DASHBOARD_READS.entries())
       expect(page, name).toContain(`settled('${name}', fanOut[${index}])`)
+  })
+
+  it('writes from after() in a request, and directly outside one', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      let task: (() => void) | null = null
+      writeTimingLine('{"event":"shell.timing"}', (t) => void (task = t))
+      expect(log).not.toHaveBeenCalled()
+      task!()
+      expect(log).toHaveBeenCalledWith('{"event":"shell.timing"}')
+      log.mockClear()
+      writeTimingLine('{"event":"dashboard.timing"}', () => {
+        throw new Error('`after` was called outside a request scope')
+      })
+      expect(log).toHaveBeenCalledWith('{"event":"dashboard.timing"}')
+    } finally {
+      log.mockRestore()
+    }
   })
 })

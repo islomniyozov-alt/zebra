@@ -47,7 +47,7 @@ import { dirname, join, sep } from 'node:path'
 import { chromium } from 'playwright'
 import { neonConfig, Pool } from '@neondatabase/serverless'
 import {
-  isRedirectRender,
+  rayOf,
   isSignInPost,
   READY_WINDOW_MS,
   signInTimingOf,
@@ -243,6 +243,18 @@ export const detailPath = (env) =>
 
 /** Tries per role before a stalled sign-in fails the sweep: one retry, no more. */
 export const SIGN_IN_ATTEMPTS = 2
+
+/**
+ * Rays matched by more than one sign-in attempt, each with the attempts that
+ * claimed it. Empty is the only acceptable answer (§6.10, 2026-10-13).
+ */
+export function duplicateMatches(rows) {
+  const claims = new Map()
+  for (const row of rows)
+    for (const ray of new Set(row.matchedRays ?? []))
+      claims.set(ray, [...(claims.get(ray) ?? []), row])
+  return new Map([...claims].filter(([, claimants]) => claimants.length > 1))
+}
 
 // ── THE WARM-UP (§6.8, owner's ruling 2026-10-12, closing GAPS 24) ─────────
 //
@@ -547,51 +559,38 @@ async function sweep() {
         ...trimEvent(event),
         timing: signInTimingOf(event),
       }))
+      row.matchedRays = events.map(rayOf).filter(Boolean)
       if (events.length === 0)
         row.workerNote = row.ray
           ? 'no tail event for this ray within 30 s'
           : 'no sign-in POST in the tail inside this attempt'
-      // THE REDIRECT TARGET'S OWN INVOCATION (GAPS 26): the shell's line and
-      // the page's line. FROM THE TAIL, BY WINDOW — the browser's router
-      // fetches `/dashboard?_rsc` about a second after the 303 and Playwright
-      // never surfaced that request (two probes, 2026-10-12), so three sweeps
-      // recorded no GET. The tail saw every one. The ray is used when the
-      // browser did record it; otherwise the one render in the window, which
-      // opens at the click and closes well after the attempt, because the
-      // render runs ~14 s of wall and its event arrives after that.
-      const renderFrom = Date.parse(row.startedAt) - 2_000
-      const renderTo = Date.parse(row.endedAt) + 40_000
-      const byRedirectRay = row.redirect?.ray
-        ? tail.lookup(row.redirect.ray)
+      // THE DESTINATION'S RENDER, BY RAY ONLY (§6.10, owner's ruling
+      // 2026-10-13). A server action that calls `redirect()` renders the
+      // destination in its own response, so the dashboard's shell and fan-out
+      // lines are in the POST's invocation — written from `after()` — and are
+      // read from the event that carries the POST's ray. A separate GET the
+      // browser did make is read by its own ray. No time window: the window
+      // matcher paired several roles with one render on 2026-10-12.
+      const post = byRay
+      const separate = row.redirect?.ray ? tail.lookup(row.redirect.ray) : null
+      const source = separate ?? post
+      const lines = source
+        ? timingLinesOf(source).filter((line) => line.event !== 'signin.timing')
+        : []
+      row.render = source
+        ? {
+            inline: !separate,
+            ray: rayOf(source),
+            wallTime: source.wallTime ?? null,
+            cpuTime: source.cpuTime ?? null,
+            timings: lines,
+          }
         : null
-      const render =
-        byRedirectRay ??
-        tail
-          .all()
-          .filter(
-            (event) =>
-              isRedirectRender(event, null) &&
-              event.eventTimestamp >= renderFrom &&
-              event.eventTimestamp <= renderTo,
-          )
-          .sort((a, b) => a.eventTimestamp - b.eventTimestamp)[0] ??
-        null
-      if (render) {
-        row.redirect = {
-          ...(row.redirect ?? {}),
-          path: new URL(render.event.request.url).pathname,
-          status:
-            render.event?.response?.status ?? row.redirect?.status ?? null,
-          matchedBy: byRedirectRay ? 'ray' : 'window',
-          worker: { ...trimEvent(render), timings: timingLinesOf(render) },
-        }
-      } else if (row.outcome === 'ok') {
-        row.redirect = {
-          ...(row.redirect ?? {}),
-          worker: null,
-          workerNote: 'no redirect render in the tail inside this attempt',
-        }
-      }
+      if (separate) row.matchedRays.push(rayOf(separate))
+      if (row.outcome === 'ok' && lines.length === 0)
+        row.renderNote = source
+          ? 'the matched invocation carries no shell or dashboard line'
+          : 'no invocation matched by ray'
     }
   }
 
@@ -986,6 +985,16 @@ async function sweep() {
     console.log(`UNRESOLVED (never fetched at all): ${sums.unresolved.length}`)
     for (const line of sums.unresolved) console.log(`   ${line}`)
   }
+
+  // ONE INVOCATION, ONE SIGN-IN (§6.10, 2026-10-13). Two sign-ins matched to
+  // the same invocation means a measurement attributed to the wrong role —
+  // what the window matcher did — so it counts as a problem, by name.
+  const shared = duplicateMatches(signIns)
+  for (const [ray, rows] of shared)
+    console.log(
+      `   SHARED MATCH ${ray}: ${rows.map((row) => `${row.role}#${row.attempt}`).join(', ')}`,
+    )
+  sums.problems += shared.size
 
   if (sums.problems === 0) {
     console.log(`SWEEP CLEAN — OK. ${authed.length} PAGE(S), 0 PROBLEM(S).`)

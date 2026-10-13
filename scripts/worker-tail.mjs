@@ -105,29 +105,11 @@ export const isSignInPost = (event) => {
 }
 
 /**
- * Whether a tail event is the browser rendering a sign-in's redirect target:
- * the router's RSC fetch (`rsc: 1`) for a page other than /login, and not one
- * of the sidebar's prefetches (`next-router-prefetch`). Found with the tail
- * open on 2026-10-12: Playwright never surfaced this request, twice, which is
- * why three sweeps recorded no GET — the tail is where it is.
- *
- * @param {string | null} [path] the render's path, or `null` for any page but /login
- */
-export const isRedirectRender = (event, path = '/dashboard') => {
-  const request = event?.event?.request
-  if (request?.method !== 'GET' || !request.url) return false
-  const headers = request.headers ?? {}
-  if (headers['rsc'] !== '1' || headers['next-router-prefetch']) return false
-  const pathname = new URL(request.url).pathname
-  return pathname !== '/login' && (path === null || pathname === path)
-}
-
-/**
  * Every structured timing line an invocation wrote — `signin.timing`,
  * `shell.timing`, `dashboard.timing` (src/lib/signin-timing.ts,
- * src/lib/request-timing.ts) — parsed, in the order written. A GET on the
- * shell writes two; a sign-in POST writes one; a request that never got that
- * far writes none.
+ * src/lib/request-timing.ts) — parsed, in the order written. A sign-in POST
+ * writes all three, because it renders the dashboard in its own response
+ * (§6.10); a request that never got that far writes none.
  */
 export function timingLinesOf(event) {
   const found = []

@@ -5,7 +5,6 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   CANARY_EVERY_MS,
-  isRedirectRender,
   isSignInPost,
   rayKey,
   rayOf,
@@ -127,37 +126,6 @@ describe('a sign-in in the tail', () => {
       },
     })
     expect(isSignInPost(get)).toBe(false)
-  })
-
-  it('knows a redirect render: the router’s RSC fetch, never a prefetch', () => {
-    const render = (path: string, headers: Record<string, string>) =>
-      event('h8', {
-        event: {
-          request: {
-            url: `https://zebra-dev.example.workers.dev${path}?_rsc=abc`,
-            method: 'GET',
-            headers: { 'cf-ray': 'h8', ...headers },
-          },
-          response: { status: 200 },
-        },
-      })
-    expect(isRedirectRender(render('/dashboard', { rsc: '1' }))).toBe(true)
-    expect(isRedirectRender(render('/dashboard', { rsc: '1' }), null)).toBe(
-      true,
-    )
-    // The sidebar's prefetches carry the same header plus one more.
-    expect(
-      isRedirectRender(
-        render('/loads', { rsc: '1', 'next-router-prefetch': '1' }),
-        null,
-      ),
-    ).toBe(false)
-    // A document GET, the login page, or another path when one is named: no.
-    expect(isRedirectRender(render('/dashboard', {}))).toBe(false)
-    expect(isRedirectRender(render('/login', { rsc: '1' }), null)).toBe(false)
-    expect(isRedirectRender(render('/loads', { rsc: '1' }), '/dashboard')).toBe(
-      false,
-    )
   })
 
   it('yields the timing line it wrote, parsed', () => {

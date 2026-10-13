@@ -6,6 +6,7 @@ import {
   dashboardTimingLine,
   stopwatch,
   type DashboardRead,
+  writeTimingLine,
 } from '@/lib/request-timing'
 import { companyScopeFilter, narrowCompanyScope } from '@/lib/tenancy'
 import { listedAuthorities } from '@/lib/companies'
@@ -323,7 +324,9 @@ export default async function DashboardPage({
       settled('companies', fanOut[6]),
     ])
   const fanOutMs = fanOutClock.ms()
-  console.log(
+  // From `after()`, into this invocation's log (§6.10 — a sign-in renders
+  // this page inside its own POST response).
+  writeTimingLine(
     dashboardTimingLine({
       role: (await getSession())?.role ?? null,
       reads: readMs,

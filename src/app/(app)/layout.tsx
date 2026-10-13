@@ -14,6 +14,7 @@ import {
   shellTimingLine,
   stopwatch,
   timed,
+  writeTimingLine,
 } from '@/lib/request-timing'
 
 // §6.1 — the app shell. Sidebar 224px, topbar 48px, content the only scrolling
@@ -107,7 +108,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     : null
   const density: Density = densityRead?.value ?? DEFAULT_DENSITY
 
-  console.log(
+  // From `after()`, into this invocation's log — inline renders included
+  // (§6.10: a sign-in renders this inside its own POST response).
+  writeTimingLine(
     shellTimingLine({
       role: session.role,
       spans: {
