@@ -362,6 +362,27 @@ jobs:
       # the file be the verdict instead of the shell.
       - name: nightly sweep of dev
         if: github.event_name == 'schedule'
+        # GAPS 27. The six-role sweep (§6.8) signs in as every role and runs
+        # `wrangler tail` for its whole length, and refuses without either —
+        # so it has failed by name every night since 2026-10-10 on a runner
+        # holding only the owner's credentials and a deploy-scoped token.
+        # These are the names it needs as repository secrets; an unset one
+        # arrives empty and the sweep says "NO <ROLE> CREDENTIALS … NOT OK".
+        # The tail token is its own secret so the deploy token's scope does
+        # not have to grow: Workers Tail read on the dev worker is enough.
+        env:
+          SEED_ADMIN_EMAIL: ${{ secrets.SEED_ADMIN_EMAIL }}
+          SEED_ADMIN_PASSWORD: ${{ secrets.SEED_ADMIN_PASSWORD }}
+          SEED_MANAGER_EMAIL: ${{ secrets.SEED_MANAGER_EMAIL }}
+          SEED_MANAGER_PASSWORD: ${{ secrets.SEED_MANAGER_PASSWORD }}
+          SEED_DISPATCHER_EMAIL: ${{ secrets.SEED_DISPATCHER_EMAIL }}
+          SEED_DISPATCHER_PASSWORD: ${{ secrets.SEED_DISPATCHER_PASSWORD }}
+          SEED_ACCOUNTING_EMAIL: ${{ secrets.SEED_ACCOUNTING_EMAIL }}
+          SEED_ACCOUNTING_PASSWORD: ${{ secrets.SEED_ACCOUNTING_PASSWORD }}
+          SEED_DRIVER_EMAIL: ${{ secrets.SEED_DRIVER_EMAIL }}
+          SEED_DRIVER_PASSWORD: ${{ secrets.SEED_DRIVER_PASSWORD }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_TAIL_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           npx playwright install --with-deps chromium

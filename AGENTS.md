@@ -433,8 +433,23 @@ Rules about instruments, which are the ones that cost whole sessions:
   live tree brings the commits over without a single edit there. The
   worktree shares `.git`, so a commit on its branch moves neither `main` nor
   the live checkout, which is what makes it legal during a freeze. Its
-  `node_modules`, `src/generated` and `.env` are junctions to the live
-  tree's, which git ignores on both sides.
+  `node_modules` and `src/generated` are junctions to the live tree's, and
+  its `.env` is a HARD LINK to the live tree's — a junction cannot point at a
+  file. Git ignores all three on both sides.
+
+  THE `.env` LINK WAS A COPY UNTIL 2026-10-12, and a copy goes stale: the
+  worktree's was from 5 October, missing `PROD_CHECK_*`, and a production
+  check run there reported the credentials absent while the live tree had
+  them. Recreated by the owner's ruling, with (PowerShell, from the live
+  tree; the first line removes only the worktree's stale copy):
+
+      Remove-Item -LiteralPath ..\zebra-rehearsal\.env -Force -Confirm:$false
+      New-Item -ItemType HardLink -Path ..\zebra-rehearsal\.env -Target .\.env
+
+  A hard link stays one file only while editors write in place; one that
+  saves by replace-and-rename breaks it silently. So the check is
+  `(Get-Item ..\zebra-rehearsal\.env).LinkType` — `HardLink` — before any
+  run in the worktree that reads credentials.
 
   AND THE WORKTREE SHARES DEV'S DATABASE WITH THE LIVE GATE. Its `.env` is
   the live tree's, so `npm run check` there — which carries the
