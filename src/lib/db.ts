@@ -70,8 +70,16 @@ export function createPrismaClient(connectionString: string): PrismaClient {
   return client.$extends(auditExtension) as unknown as PrismaClient
 }
 
-/** How long an idle pooled connection is kept before it closes (GAPS 31). */
-export const POOL_IDLE_TIMEOUT_MS = 1_000
+/**
+ * How long an idle pooled connection is kept before it closes (GAPS 31).
+ *
+ * 5,000, NOT 1,000 (owner's ruling, 2026-10-13). At 1 s the pool closed
+ * connections DURING a request — the sign-in's closing writes run two queries
+ * in parallel after the ~1 s argon2 gap, and the second connection had been
+ * closed and was reopened: 232 → 845 ms median. `after()` is what ends the
+ * pool; this only bounds a client nothing ended.
+ */
+export const POOL_IDLE_TIMEOUT_MS = 5_000
 
 /**
  * End `client` when the response is finished (GAPS 31, owner's ruling

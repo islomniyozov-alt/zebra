@@ -96,7 +96,9 @@ describe('the client ends with the response (GAPS 31)', () => {
         throw new Error('`after` was called outside a request scope')
       }),
     ).toBe(false)
-    expect(POOL_IDLE_TIMEOUT_MS).toBe(1_000)
+    // 5 s, not 1 s: at 1 s the pool closed connections mid-request (owner's
+    // ruling 2026-10-13). Not the 10 s default either, which was the linger.
+    expect(POOL_IDLE_TIMEOUT_MS).toBe(5_000)
     const db = readFileSync('src/lib/db.ts', 'utf8')
     expect(db).toContain('idleTimeoutMillis: POOL_IDLE_TIMEOUT_MS')
     expect(db).toMatch(
