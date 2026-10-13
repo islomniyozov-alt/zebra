@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { cache } from 'react'
 import { neonConfig } from '@neondatabase/serverless'
 import { PrismaNeon } from '@prisma/adapter-neon'
+import { after } from 'next/server'
 import { PrismaClient } from '@/generated/prisma/client'
 import { auditExtension } from './audit'
 import { ensureAuditSink } from './audit-sink'
@@ -56,9 +57,44 @@ export function createPrismaClient(connectionString: string): PrismaClient {
   ensureAuditSink()
 
   const client = new PrismaClient({
-    adapter: new PrismaNeon({ connectionString }),
+    adapter: new PrismaNeon({
+      connectionString,
+      // THE FLOOR UNDER `after()` (GAPS 31). The pool's default is 10 s, and
+      // a pool nobody closed kept its idle WebSocket open that long after the
+      // response — OpenNext's `ctx.waitUntil` held the invocation until it
+      // dropped: ~10 s of Worker wall on every request, measured. Where no
+      // request scope exists to end the client, this is how long it lingers.
+      idleTimeoutMillis: POOL_IDLE_TIMEOUT_MS,
+    }),
   })
   return client.$extends(auditExtension) as unknown as PrismaClient
+}
+
+/** How long an idle pooled connection is kept before it closes (GAPS 31). */
+export const POOL_IDLE_TIMEOUT_MS = 1_000
+
+/**
+ * End `client` when the response is finished (GAPS 31, owner's ruling
+ * 2026-10-12): `after()` runs once the response is sent — OpenNext hands it
+ * to `ctx.waitUntil` — and `$disconnect()` ends the adapter's pool, closing
+ * its WebSockets instead of leaving them to the idle timeout.
+ *
+ * Outside a request (a seed, a script, a test) `after()` throws; there is
+ * nothing to end the client with, and the pool's 1 s idle timeout is the
+ * floor. Returns whether the end was scheduled, for the tests.
+ */
+export function endWithResponse(
+  client: PrismaClient,
+  schedule: (task: () => Promise<void>) => void = after,
+): boolean {
+  try {
+    schedule(async () => {
+      await client.$disconnect().catch(() => {})
+    })
+    return true
+  } catch {
+    return false
+  }
 }
 
 function appConnectionString(): string {
@@ -81,9 +117,11 @@ function appConnectionString(): string {
   return connectionString
 }
 
-const cachedClient = cache(
-  (): PrismaClient => createPrismaClient(appConnectionString()),
-)
+const cachedClient = cache((): PrismaClient => {
+  const client = createPrismaClient(appConnectionString())
+  endWithResponse(client)
+  return client
+})
 
 /**
  * A scope that owns one client for its duration.
@@ -105,16 +143,38 @@ const cachedClient = cache(
  */
 const requestScope = new AsyncLocalStorage<{ client?: PrismaClient }>()
 
+/**
+ * Run `fn` with one client for the whole request.
+ *
+ * REUSES A SCOPE THAT IS ALREADY OPEN (GAPS 32). This used to open a fresh
+ * scope on every call, so every `withCurrentOrg` built its own client — and
+ * its own pool, and its own socket: a dashboard render with seven parallel
+ * reads built about ten. "One client for the whole request" was the comment
+ * above and not the behaviour.
+ */
 export function withRequestClient<T>(fn: () => Promise<T>): Promise<T> {
-  return requestScope.run({}, fn)
+  return requestScope.getStore() ? fn() : requestScope.run({}, fn)
 }
 
 function getClient(): PrismaClient {
   const scope = requestScope.getStore()
-  if (scope) {
-    return (scope.client ??= createPrismaClient(appConnectionString()))
-  }
+  // SEEDED FROM REACT'S PER-REQUEST CLIENT (GAPS 32): inside a render,
+  // `cachedClient()` is the one the session read already used, so a scope
+  // opened by `withCurrentOrg` shares it instead of starting another. Outside
+  // React's scope (a Route Handler) it builds one, which this scope keeps.
+  if (scope) return (scope.client ??= cachedClient())
   return cachedClient()
+}
+
+/**
+ * The request's client as a concrete handle, for the code that has no tenant
+ * and so does not go through `withCurrentOrg`: sign-in, the viewer's own
+ * account, the inbound-email store (`auth-db.ts`, `unrouted-email-store.ts`).
+ * Same role, same connection string, same client as everything else in the
+ * request — never a second one (GAPS 32).
+ */
+export function requestClient(): PrismaClient {
+  return getClient()
 }
 
 /**

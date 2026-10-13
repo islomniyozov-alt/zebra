@@ -1,5 +1,5 @@
 import 'server-only'
-import { createPrismaClient } from './db'
+import { requestClient } from './db'
 import type { AuthDb } from './auth'
 import type { ResetDb } from './password-reset'
 
@@ -23,11 +23,14 @@ import type { ResetDb } from './password-reset'
 // ---------------------------------------------------------------------------
 
 export function unauthenticatedDb(): AuthDb & ResetDb {
-  const connectionString = process.env.DATABASE_URL
-  if (!connectionString) throw new Error('DATABASE_URL is not set.')
-  // Still zebra_app — createPrismaClient refuses anything else. Being outside
-  // RLS is a property of these four tables, not a licence to connect as owner.
-  return createPrismaClient(connectionString)
+  // THE REQUEST'S CLIENT, NOT A SECOND ONE (GAPS 32, owner's ruling
+  // 2026-10-12). This used to construct its own client — its own pool and its
+  // own socket — on every call; the shell's account read through it cost
+  // 2,229 ms against 794 for the session read on the request's client. It is
+  // the same role and the same connection string: `requestClient()` builds
+  // from `DATABASE_URL` and refuses anything that is not `zebra_app`. Being
+  // outside RLS is a property of these four tables, not of the client.
+  return requestClient()
 }
 
 /**

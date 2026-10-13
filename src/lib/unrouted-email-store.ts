@@ -1,5 +1,5 @@
 import 'server-only'
-import { createPrismaClient } from './db'
+import { requestClient } from './db'
 import { putObject, r2ConfigFromEnv } from './r2'
 import type { UnroutedStore } from './unrouted-email'
 
@@ -20,12 +20,11 @@ import type { UnroutedStore } from './unrouted-email'
 
 /** The real store. Not tenant-scoped, for the reason at the top of this file. */
 export function liveUnroutedStore(): UnroutedStore {
-  const connectionString = process.env.DATABASE_URL
-  if (!connectionString) throw new Error('DATABASE_URL is not set.')
-  // Still zebra_app — `createPrismaClient` refuses anything else. Being outside
-  // row-level security is a property of this table, not a licence to connect
-  // as the owner.
-  const db = createPrismaClient(connectionString)
+  // THE REQUEST'S CLIENT, NOT A SECOND ONE (GAPS 32): same role, same
+  // connection string — `requestClient()` refuses anything not `zebra_app`.
+  // Being outside row-level security is a property of this table, not a
+  // licence to connect as the owner, nor a reason for a pool of its own.
+  const db = requestClient()
 
   const select = { id: true, messageId: true, rawR2Key: true } as const
 
