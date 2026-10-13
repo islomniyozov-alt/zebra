@@ -20,8 +20,10 @@ process.env.DATABASE_URL ??=
 
 const {
   endWithResponse,
+  hyperdriveConnectionString,
   POOL_IDLE_TIMEOUT_MS,
   requestClient,
+  requireAppRole,
   withRequestClient,
 } = await import('@/lib/db')
 
@@ -59,7 +61,7 @@ describe('one client per request (GAPS 32)', () => {
         else if (/\.(ts|tsx|mjs)$/.test(name)) {
           const text = readFileSync(path, 'utf8')
           if (
-            /createPrismaClient\(|new PrismaClient\(|new PrismaNeon\(|new Pool\(/.test(
+            /createPrismaClient\(|new PrismaClient\(|new PrismaNeon\(|new PrismaPg\(|new Pool\(/.test(
               text,
             ) &&
             path.replaceAll('\\', '/') !== 'src/lib/db.ts'
@@ -70,11 +72,59 @@ describe('one client per request (GAPS 32)', () => {
     }
     walk('src')
     expect(offenders).toEqual([])
-    // And inside db.ts, one construction site for a request: `cachedClient`.
+    // And inside db.ts, one construction site for a request: `cachedClient`
+    // calls `createRequestPrismaClient`, which picks the path (§6.10).
     const db = readFileSync('src/lib/db.ts', 'utf8')
+    expect(db.match(/= createRequestPrismaClient\(\)/g)).toHaveLength(1)
+  })
+})
+
+// §6.10, GAPS 33: Hyperdrive on the dev worker only, switched by the binding.
+describe('the connection path', () => {
+  const contextWith = (env: unknown) => ({
+    [Symbol.for('__cloudflare-context__')]: { env },
+  })
+
+  it('is Hyperdrive only when the Worker carries the binding', () => {
     expect(
-      db.match(/createPrismaClient\(appConnectionString\(\)\)/g),
-    ).toHaveLength(1)
+      hyperdriveConnectionString(
+        contextWith({
+          HYPERDRIVE: {
+            connectionString: 'postgresql://zebra_app:x@h.hyperdrive.local/db',
+          },
+        }),
+      ),
+    ).toBe('postgresql://zebra_app:x@h.hyperdrive.local/db')
+    expect(hyperdriveConnectionString(contextWith({}))).toBeNull()
+    expect(hyperdriveConnectionString({})).toBeNull()
+    // Under Node, here, there is no binding: tests and scripts stay on Neon.
+    expect(hyperdriveConnectionString()).toBeNull()
+  })
+
+  it('refuses a connection that is not zebra_app, on either path', () => {
+    expect(() =>
+      requireAppRole('postgresql://neondb_owner:x@h.hyperdrive.local/db'),
+    ).toThrow(/does not authenticate as zebra_app/)
+    const db = readFileSync('src/lib/db.ts', 'utf8')
+    expect(db).toMatch(
+      /createPrismaClient\(requireAppRole\(hyperdrive\), 'hyperdrive'\)/,
+    )
+  })
+
+  it('is bound on the dev worker and never in production', () => {
+    const stripped = readFileSync('wrangler.jsonc', 'utf8')
+      .split('\n')
+      .map((line) => (line.trimStart().startsWith('//') ? '' : line))
+      .join('\n')
+      .replace(/,(\s*[}\]])/g, '$1')
+    const config = JSON.parse(stripped) as {
+      hyperdrive?: { binding: string; id: string }[]
+      env?: Record<string, { hyperdrive?: unknown }>
+    }
+    expect(config.hyperdrive).toEqual([
+      { binding: 'HYPERDRIVE', id: '4395e48e858b4d1ca4a5ea2fdd2610c9' },
+    ])
+    expect(config.env?.production?.hyperdrive).toBeUndefined()
   })
 })
 
@@ -102,7 +152,7 @@ describe('the client ends with the response (GAPS 31)', () => {
     const db = readFileSync('src/lib/db.ts', 'utf8')
     expect(db).toContain('idleTimeoutMillis: POOL_IDLE_TIMEOUT_MS')
     expect(db).toMatch(
-      /const client = createPrismaClient\(appConnectionString\(\)\)\s*endWithResponse\(client\)/,
+      /const client = createRequestPrismaClient\(\)\s*endWithResponse\(client\)/,
     )
   })
 })

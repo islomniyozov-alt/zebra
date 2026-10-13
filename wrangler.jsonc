@@ -53,6 +53,34 @@
     },
   ],
 
+  // HYPERDRIVE, ON THE DEV WORKER ONLY (TMS-DESIGN-SYSTEM.md §6.10, GAPS 33).
+  //
+  // Its presence switches `src/lib/db.ts` to `@prisma/adapter-pg` over this
+  // connection; its absence leaves the Neon WebSocket path. It is declared
+  // HERE, at the top, and NOT in `env.production` below — bindings do not
+  // inherit, so production stays on Neon with no code difference. ROLLBACK IS
+  // DELETING THIS BLOCK and deploying dev.
+  //
+  // Config `zebra-dev-hyperdrive`: origin `zebra_app` on Neon's DIRECT dev
+  // endpoint (Hyperdrive is the pooler), and QUERY CACHING DISABLED — RLS
+  // makes the same query text return different rows per tenant, so a cached
+  // read is a cross-tenant read. Check before every dev ritual while bound:
+  //   npx wrangler hyperdrive get 4395e48e858b4d1ca4a5ea2fdd2610c9
+  //   → "caching": { "disabled": true }
+  //
+  // LOCALLY (`next dev`, `npm run preview`) wrangler wants a Postgres string
+  // to stand in for the binding, and refuses to start without one: set
+  // CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE in the shell to
+  // dev's `zebra_app` DATABASE_URL. It is not set here, because a credential
+  // never lives in this file. `next build` no longer starts that proxy
+  // (next.config.ts).
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "4395e48e858b4d1ca4a5ea2fdd2610c9",
+    },
+  ],
+
   // Non-secret configuration only. Connection strings, R2 keys and
   // AUTH_SECRET are set with `wrangler secret put` and never live here.
   "vars": {

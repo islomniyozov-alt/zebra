@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { cache } from 'react'
 import { neonConfig } from '@neondatabase/serverless'
 import { PrismaNeon } from '@prisma/adapter-neon'
+import { PrismaPg } from '@prisma/adapter-pg'
 import { after } from 'next/server'
 import { PrismaClient } from '@/generated/prisma/client'
 import { auditExtension } from './audit'
@@ -50,24 +51,76 @@ neonConfig.poolQueryViaFetch = false
  * back to PrismaClient — the alternative is threading an extended-client type
  * through every module that takes a database handle, for no gain.
  */
-export function createPrismaClient(connectionString: string): PrismaClient {
+export function createPrismaClient(
+  connectionString: string,
+  driver: 'neon' | 'hyperdrive' = 'neon',
+): PrismaClient {
   // Idempotent, and the only place guaranteed to run before an audited write
   // in every runtime we have. See src/lib/audit-sink.ts — a missing binding is
   // a no-op, so this is free under Node and in tests.
   ensureAuditSink()
 
+  const pool = {
+    connectionString,
+    // THE FLOOR UNDER `after()` (GAPS 31). The pool's default is 10 s, and a
+    // pool nobody closed kept its idle socket open that long after the
+    // response — OpenNext's `ctx.waitUntil` held the invocation until it
+    // dropped: ~10 s of Worker wall on every request, measured. Where no
+    // request scope exists to end the client, this is how long it lingers.
+    idleTimeoutMillis: POOL_IDLE_TIMEOUT_MS,
+  }
   const client = new PrismaClient({
-    adapter: new PrismaNeon({
-      connectionString,
-      // THE FLOOR UNDER `after()` (GAPS 31). The pool's default is 10 s, and
-      // a pool nobody closed kept its idle WebSocket open that long after the
-      // response — OpenNext's `ctx.waitUntil` held the invocation until it
-      // dropped: ~10 s of Worker wall on every request, measured. Where no
-      // request scope exists to end the client, this is how long it lingers.
-      idleTimeoutMillis: POOL_IDLE_TIMEOUT_MS,
-    }),
+    // THE CONNECTION PATH (§6.10, GAPS 33). Hyperdrive speaks plain Postgres
+    // over TCP, so its path is `pg` (Workers sockets under nodejs_compat);
+    // everywhere else — production, tests, seeds — Neon's WebSocket driver.
+    // Above the adapter nothing differs: interactive transactions, SET LOCAL,
+    // row-level security, the audit extension.
+    adapter:
+      driver === 'hyperdrive' ? new PrismaPg(pool) : new PrismaNeon(pool),
   })
   return client.$extends(auditExtension) as unknown as PrismaClient
+}
+
+/**
+ * The Worker's Hyperdrive connection string, or null (§6.10, GAPS 33).
+ *
+ * THE SWITCH IS THE BINDING. `HYPERDRIVE` is declared at the top of
+ * `wrangler.jsonc` — the dev worker; the `production` environment does not
+ * inherit bindings — so production, tests and scripts get null and the Neon
+ * path. Rollback is removing the binding. Read through OpenNext's context
+ * symbol, as `audit-sink.ts` reads its dataset, so nothing here imports a
+ * build tool at runtime.
+ */
+export function hyperdriveConnectionString(
+  scope: object = globalThis,
+): string | null {
+  const context = (scope as Record<symbol, unknown>)[
+    Symbol.for('__cloudflare-context__')
+  ]
+  const env =
+    context && typeof context === 'object'
+      ? (context as { env?: unknown }).env
+      : null
+  const binding =
+    env && typeof env === 'object'
+      ? (env as Record<string, unknown>)['HYPERDRIVE']
+      : null
+  const value =
+    binding && typeof binding === 'object'
+      ? (binding as { connectionString?: unknown }).connectionString
+      : null
+  return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+/**
+ * The request's client, on whichever path this Worker is bound to. The one
+ * place a per-request client is built (GAPS 32's grep-proof).
+ */
+function createRequestPrismaClient(): PrismaClient {
+  const hyperdrive = hyperdriveConnectionString()
+  return hyperdrive
+    ? createPrismaClient(requireAppRole(hyperdrive), 'hyperdrive')
+    : createPrismaClient(appConnectionString())
 }
 
 /**
@@ -105,6 +158,24 @@ export function endWithResponse(
   }
 }
 
+/**
+ * Fail loudly rather than quietly running the app with a role that bypasses
+ * every policy. See the note in .env — the owner carries BYPASSRLS. Applies
+ * to the Hyperdrive string as much as to DATABASE_URL: Hyperdrive passes the
+ * origin's user through, and its origin is `zebra_app` (§6.10).
+ */
+export function requireAppRole(connectionString: string): string {
+  if (!connectionString.includes('zebra_app')) {
+    throw new Error(
+      'The database connection does not authenticate as zebra_app. The ' +
+        'application must never connect as the database owner: the owner ' +
+        'bypasses row-level security, so every tenant boundary would silently ' +
+        'disappear.',
+    )
+  }
+  return connectionString
+}
+
 function appConnectionString(): string {
   const connectionString = process.env.DATABASE_URL
 
@@ -112,21 +183,11 @@ function appConnectionString(): string {
     throw new Error('DATABASE_URL is not set.')
   }
 
-  // Fail loudly rather than quietly running the app with a role that bypasses
-  // every policy. See the note in .env — the owner carries BYPASSRLS.
-  if (!connectionString.includes('zebra_app')) {
-    throw new Error(
-      'DATABASE_URL does not authenticate as zebra_app. The application must ' +
-        'never connect as the database owner: the owner bypasses row-level ' +
-        'security, so every tenant boundary would silently disappear.',
-    )
-  }
-
-  return connectionString
+  return requireAppRole(connectionString)
 }
 
 const cachedClient = cache((): PrismaClient => {
-  const client = createPrismaClient(appConnectionString())
+  const client = createRequestPrismaClient()
   endWithResponse(client)
   return client
 })
