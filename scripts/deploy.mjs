@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { check as checkMigrationGap } from './check-migration-gap.mjs'
 import { runIntegrationSuite, resolveEndpoint } from './integration-gate.mjs'
 import { refusalMessage } from './deploy-refusal.mjs'
+import { measure, verdict } from './bundle-size.mjs'
 import {
   checkReceipt,
   readReceipt,
@@ -153,13 +154,32 @@ const ENTRIES = {
   'opennextjs-cloudflare': entry('@opennextjs/cloudflare/dist/cli/index.js'),
 }
 
-const run = ([tool, ...rest]) => {
+const run = ([tool, ...rest], env = process.env) => {
   const entry = ENTRIES[tool]
   if (!entry) throw new Error(`no resolved entry for ${tool}`)
   const result = spawnSync(process.execPath, [entry, ...rest], {
     stdio: 'inherit',
+    env,
   })
   if (result.status !== 0) process.exit(result.status ?? 1)
+}
+
+// A LOCALHOST STAND-IN FOR THE HYPERDRIVE BINDING, FOR OPENNEXT'S DEPLOY ONLY
+// (§6.10, GAPS 33). `opennextjs-cloudflare deploy` starts wrangler's local
+// platform proxy just to read the env for its cache configuration, and the
+// proxy refuses to start without a local Postgres string for any Hyperdrive
+// binding — CI's dev deploy died on exactly that (run 39937644153). Nothing in
+// a deploy queries through that proxy, so the stand-in points at 127.0.0.1
+// and carries no credential; the deployed Worker uses Cloudflare's binding,
+// never this. A value already set in the environment wins.
+const HYPERDRIVE_DEPLOY_STAND_IN =
+  'postgresql://deploy-placeholder:unused@127.0.0.1:5432/unused'
+
+const deployEnv = {
+  ...process.env,
+  CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE:
+    process.env.CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE ??
+    HYPERDRIVE_DEPLOY_STAND_IN,
 }
 
 // THE INTEGRATION GATE (owner's ruling). Before the build, because a refusal
@@ -229,14 +249,28 @@ if (process.argv.includes('--skip-integration')) {
 }
 
 run(['opennextjs-cloudflare', 'build'])
-run([
-  'opennextjs-cloudflare',
-  'deploy',
-  '--',
-  ...(production ? ['--env', 'production'] : []),
-  '--message',
-  message,
-])
+
+// THE SIZE, BEFORE THE UPLOAD (owner's ruling, 2026-10-23). Cloudflare
+// refuses an oversized Worker at upload; this refuses it here, at the plan's
+// limit minus 10%, and prints the size either way so every deploy log carries
+// the number. Dormant code counts — see scripts/bundle-size.mjs.
+{
+  const { ok, line } = verdict(measure({ production }))
+  console.log(line)
+  if (!ok) process.exit(1)
+}
+
+run(
+  [
+    'opennextjs-cloudflare',
+    'deploy',
+    '--',
+    ...(production ? ['--env', 'production'] : []),
+    '--message',
+    message,
+  ],
+  deployEnv,
+)
 
 console.log(
   `\nDeployed to ${deployTarget}. The OTHER worker is unchanged — that is the point` +
