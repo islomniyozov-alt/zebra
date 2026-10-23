@@ -407,15 +407,15 @@ Rules about instruments, which are the ones that cost whole sessions:
   **WHERE A REHEARSAL HAPPENS IS A WORKTREE, AND THE SCRIPTS KNOW IT.** Owner's
   standing rule, 2026-10-07, after breach 5:
 
-      Every rehearsal, mirror or dry run happens in a git worktree at
-      ../zebra-rehearsal (git worktree add), never in
-      C:\Users\Daler\Downloads\zebra. The scripts take no root argument at
-      all — they refuse unless cwd is a worktree whose branch name starts
-      with rehearse/. Watch the refusal fire once from the live tree.
+          Every rehearsal, mirror or dry run happens in a git worktree at
+          ../zebra-rehearsal (git worktree add), never in
+          C:\Users\Daler\Downloads\zebra. The scripts take no root argument at
+          all — they refuse unless cwd is a worktree whose branch name starts
+          with rehearse/. Watch the refusal fire once from the live tree.
 
   So the mechanism is:
 
-      git worktree add ../zebra-rehearsal -b rehearse/<topic> main
+          git worktree add ../zebra-rehearsal -b rehearse/<topic> main
 
   and a patch script's first act is to ask git where it is. The root is the
   current directory and nothing else; there is no `--root`, no `--dry-run`,
@@ -443,13 +443,28 @@ Rules about instruments, which are the ones that cost whole sessions:
   them. Recreated by the owner's ruling, with (PowerShell, from the live
   tree; the first line removes only the worktree's stale copy):
 
-      Remove-Item -LiteralPath ..\zebra-rehearsal\.env -Force -Confirm:$false
-      New-Item -ItemType HardLink -Path ..\zebra-rehearsal\.env -Target .\.env
+          Remove-Item -LiteralPath ..\zebra-rehearsal\.env -Force -Confirm:$false
+          New-Item -ItemType HardLink -Path ..\zebra-rehearsal\.env -Target .\.env
 
   A hard link stays one file only while editors write in place; one that
   saves by replace-and-rename breaks it silently. So the check is
   `(Get-Item ..\zebra-rehearsal\.env).LinkType` — `HardLink` — before any
   run in the worktree that reads credentials.
+
+  AND THE WORKTREE SHARES `node_modules`, SO IT SHARES VITEST'S CACHE. On
+  2026-10-23 a `vitest run` in the worktree, started while the live tree's
+  `npm run check` was running, left every node test file in the live run
+  failing with "Cannot read properties of undefined (reading 'config')" —
+  vitest's own state, torn between two runs through one `.vite` directory,
+  not a test. Run vitest in ONE tree at a time; a verdict read while the
+  other tree is testing is not a verdict. If it happens, clear the shared
+  cache and re-run:
+
+      rm -rf node_modules/.vite node_modules/.vitest
+
+  And an `npm install` in the worktree replaces the junction with a real
+  directory and installs into the worktree alone — restore the junction
+  before trusting either tree.
 
   AND THE WORKTREE SHARES DEV'S DATABASE WITH THE LIVE GATE. Its `.env` is
   the live tree's, so `npm run check` there — which carries the
