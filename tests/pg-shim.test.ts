@@ -43,20 +43,31 @@ describe('pg’s Workers socket shim', () => {
     expect(deploy).toMatch(/'deploy',[\s\S]*?message,\s*\],\s*deployEnv,\s*\)/)
   })
 
-  it('is reachable only through the binding, which production does not have', () => {
+  it('is reachable only through the binding, and production’s binding is the production config', () => {
     const db = readFileSync('src/lib/db.ts', 'utf8')
     // The pg path is chosen by the binding and by nothing else.
     expect(db).toMatch(
       /const hyperdrive = hyperdriveConnectionString\(\)\s*return hyperdrive\s*\?\s*createPrismaClient\(requireHyperdriveString\(hyperdrive\), 'hyperdrive'\)/,
     )
+    // §6.10 production section, 2026-10-23: `zebra-prod-hyperdrive`, origin
+    // zebra_app on production's direct endpoint, caching disabled — read back
+    // from Cloudflare before it was bound, and by every production deploy
+    // since. Never dev's id: a production worker on dev's database is the
+    // failure this pin exists to catch.
     const wrangler = readFileSync('wrangler.jsonc', 'utf8')
       .split('\n')
       .map((line) => (line.trimStart().startsWith('//') ? '' : line))
       .join('\n')
       .replace(/,(\s*[}\]])/g, '$1')
     const config = JSON.parse(wrangler) as {
-      env?: Record<string, { hyperdrive?: unknown }>
+      hyperdrive?: { binding: string; id: string }[]
+      env?: Record<string, { hyperdrive?: { binding: string; id: string }[] }>
     }
-    expect(config.env?.production?.hyperdrive).toBeUndefined()
+    expect(config.env?.production?.hyperdrive).toEqual([
+      { binding: 'HYPERDRIVE', id: 'e7286f158be4460698caa507231685e8' },
+    ])
+    expect(config.env?.production?.hyperdrive?.[0]?.id).not.toBe(
+      config.hyperdrive?.[0]?.id,
+    )
   })
 })

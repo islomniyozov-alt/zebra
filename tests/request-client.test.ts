@@ -135,7 +135,7 @@ describe('the connection path', () => {
     )
   })
 
-  it('is bound on the dev worker and never in production', () => {
+  it('binds dev’s config at the top level and production’s under env.production, never one for the other', () => {
     const stripped = readFileSync('wrangler.jsonc', 'utf8')
       .split('\n')
       .map((line) => (line.trimStart().startsWith('//') ? '' : line))
@@ -143,12 +143,16 @@ describe('the connection path', () => {
       .replace(/,(\s*[}\]])/g, '$1')
     const config = JSON.parse(stripped) as {
       hyperdrive?: { binding: string; id: string }[]
-      env?: Record<string, { hyperdrive?: unknown }>
+      env?: Record<string, { hyperdrive?: { binding: string; id: string }[] }>
     }
     expect(config.hyperdrive).toEqual([
       { binding: 'HYPERDRIVE', id: '4395e48e858b4d1ca4a5ea2fdd2610c9' },
     ])
-    expect(config.env?.production?.hyperdrive).toBeUndefined()
+    // Production's own config (§6.10, 2026-10-23), bound under env.production
+    // — bindings do not inherit, so without this line production stays on Neon.
+    expect(config.env?.production?.hyperdrive).toEqual([
+      { binding: 'HYPERDRIVE', id: 'e7286f158be4460698caa507231685e8' },
+    ])
   })
 })
 

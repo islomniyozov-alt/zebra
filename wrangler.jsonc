@@ -213,6 +213,23 @@
         },
       ],
 
+      // HYPERDRIVE, PRODUCTION'S OWN CONFIG (§6.10 production section,
+      // owner's ruling 2026-10-23). `zebra-prod-hyperdrive`: origin
+      // `zebra_app` on production's DIRECT Neon endpoint (ep-proud-union),
+      // query caching DISABLED — created by Islom with production's zebra_app
+      // credential, read back by me from Cloudflare before this line was
+      // written, and read back again by `scripts/deploy.mjs` before every
+      // production upload, which refuses on any other answer. NEVER the dev
+      // id above: a production worker reading dev's database is the failure
+      // this separate block exists to make impossible. ROLLBACK IS DELETING
+      // THIS BLOCK and dispatching production; the code falls back to Neon.
+      "hyperdrive": [
+        {
+          "binding": "HYPERDRIVE",
+          "id": "e7286f158be4460698caa507231685e8",
+        },
+      ],
+
       "vars": {
         "NEON_BRANCH": "production",
         "R2_BUCKET": "zebra-docs",

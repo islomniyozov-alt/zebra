@@ -28,10 +28,17 @@ describe('which config a target binds', () => {
     expect(boundHyperdriveId(devOnly, 'production')).toBeNull()
   })
 
-  it('the repository binds the dev config at the top level today', () => {
-    expect(
-      boundHyperdriveId(readFileSync('wrangler.jsonc', 'utf8'), 'dev'),
-    ).toBe('4395e48e858b4d1ca4a5ea2fdd2610c9')
+  it('the repository binds the dev config at the top level and the production config under env.production — two ids, never the same', () => {
+    const jsonc = readFileSync('wrangler.jsonc', 'utf8')
+    expect(boundHyperdriveId(jsonc, 'dev')).toBe(
+      '4395e48e858b4d1ca4a5ea2fdd2610c9',
+    )
+    expect(boundHyperdriveId(jsonc, 'production')).toBe(
+      'e7286f158be4460698caa507231685e8',
+    )
+    expect(boundHyperdriveId(jsonc, 'production')).not.toBe(
+      boundHyperdriveId(jsonc, 'dev'),
+    )
   })
 })
 
