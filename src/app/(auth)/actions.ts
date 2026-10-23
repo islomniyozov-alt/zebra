@@ -18,6 +18,7 @@ import type { MessageKey } from '@/lib/i18n'
 import {
   isolateMark,
   newSignInSpans,
+  signInErrorLine,
   signInTimingLine,
   since,
 } from '@/lib/signin-timing'
@@ -109,7 +110,10 @@ export async function signInAction(
         spans,
       }),
     )
-  } catch {
+  } catch (error) {
+    // WHAT THREW, NAMED (GAPS 37): class, message, first frame — no PII —
+    // so an "unavailable" in the tail is a record and not a mystery.
+    console.log(signInErrorLine(error))
     logTiming('unavailable')
     // THE ROW EVERYBODY FORGETS: the request was fine and the system was not.
     // It says the system failed, not the person, and it says the remedy.

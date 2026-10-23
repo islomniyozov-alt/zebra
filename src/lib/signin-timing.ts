@@ -118,3 +118,53 @@ export function signInTimingLine(input: {
     argon2: `m=${ARGON2_PARAMS.m},t=${ARGON2_PARAMS.t},p=${ARGON2_PARAMS.p}`,
   })
 }
+
+// ── WHAT THREW, WHEN THE SIGN-IN SAYS "UNAVAILABLE" (GAPS 37) ─────────────
+//
+// Owner's ruling, 2026-10-23. One sign-in in 19 came back `unavailable` after
+// 11.3 s of CPU and the record could not say what threw: the action's catch
+// swallowed the error and logged nothing but the timing line. This is the
+// line that names it — the error's class, its message and its first stack
+// frame — written before the form says "unavailable". NO PII: the message is
+// capped and scrubbed of anything shaped like a credential in a URL or an
+// email address, and nothing from the form reaches it.
+
+const MESSAGE_CAP = 300
+
+/** A message with URL credentials and email addresses removed. */
+export function scrubMessage(text: string): string {
+  return text
+    .replace(/(\w+:\/\/)[^\s/@]+@/g, '$1<redacted>@')
+    .replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, '<email>')
+    .slice(0, MESSAGE_CAP)
+}
+
+/** The first frame of a stack, after the message line, or null. */
+export function firstFrameOf(stack: string | undefined): string | null {
+  const frame = (stack ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.startsWith('at '))
+  return frame ? scrubMessage(frame) : null
+}
+
+export function signInErrorLine(error: unknown): string {
+  const named =
+    error && typeof error === 'object'
+      ? (error as Record<string, unknown>)
+      : null
+  const cls =
+    (typeof named?.name === 'string' && named.name) ||
+    (named?.constructor as { name?: string } | undefined)?.name ||
+    typeof error
+  const message =
+    typeof named?.message === 'string' ? named.message : String(error)
+  return JSON.stringify({
+    event: 'signin.error',
+    class: cls,
+    message: scrubMessage(message),
+    firstFrame: firstFrameOf(
+      typeof named?.stack === 'string' ? named.stack : undefined,
+    ),
+  })
+}

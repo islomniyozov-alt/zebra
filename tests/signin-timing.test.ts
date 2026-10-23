@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  firstFrameOf,
   isolateMark,
   newSignInSpans,
+  scrubMessage,
+  signInErrorLine,
   signInTimingLine,
 } from '@/lib/signin-timing'
 
@@ -62,6 +65,40 @@ describe('the sign-in timing line', () => {
       // hashes with (GAPS 28 moved it from m=19456,t=2,p=1).
       argon2: 'm=7168,t=5,p=1',
       startedAt: '2026-10-12T09:00:00.000Z',
+    })
+  })
+
+  // GAPS 37, owner's ruling 2026-10-23: what threw, named, without PII.
+  it('names an error’s class, message and first frame, and nothing else', () => {
+    const error = new TypeError('Connection terminated unexpectedly')
+    const line = JSON.parse(signInErrorLine(error))
+    expect(Object.keys(line).sort()).toEqual(
+      ['event', 'class', 'message', 'firstFrame'].sort(),
+    )
+    expect(line).toMatchObject({
+      event: 'signin.error',
+      class: 'TypeError',
+      message: 'Connection terminated unexpectedly',
+    })
+    expect(line.firstFrame).toMatch(/^at /)
+  })
+
+  it('scrubs a credential in a URL and an email address, and caps the message', () => {
+    expect(
+      scrubMessage(
+        "Can't reach postgresql://zebra_app:s3cret@ep-x.neon.tech/db for islom@example.test",
+      ),
+    ).toBe("Can't reach postgresql://<redacted>@ep-x.neon.tech/db for <email>")
+    expect(scrubMessage('x'.repeat(500))).toHaveLength(300)
+    expect(firstFrameOf(undefined)).toBeNull()
+    expect(firstFrameOf('Error: boom\n    at login (file:///a.js:1:2)')).toBe(
+      'at login (file:///a.js:1:2)',
+    )
+    // Not an Error at all: still a line, still named.
+    expect(JSON.parse(signInErrorLine('a string'))).toMatchObject({
+      class: 'string',
+      message: 'a string',
+      firstFrame: null,
     })
   })
 

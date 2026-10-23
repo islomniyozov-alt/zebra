@@ -171,6 +171,39 @@ describe('every sign-in writes one timing line', () => {
   })
 })
 
+// GAPS 37, owner's ruling 2026-10-23: when the sign-in says "unavailable",
+// the log says what threw — class, message, first frame — and nothing else.
+describe('an unavailable sign-in names what threw', () => {
+  it('writes signin.error before the timing line, without the credentials', async () => {
+    // NOT a socket error: `withSocketRetry` claims those, retries once and
+    // throws its own wrapper — "dropped Neon socket in signInAction.login,
+    // twice: TypeError" — which the line then names, correctly, as `Error`.
+    // A RangeError reaches the catch as itself.
+    const thrown = new RangeError('membership resolution exploded')
+    login.mockRejectedValue(thrown)
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      expect(await submit('islom@example.test', 'correct horse')).toEqual({
+        error: 'auth.unavailable',
+      })
+      const written = spy.mock.calls.map((call) => String(call[0]))
+      const errorAt = written.findIndex((t) => t.includes('"signin.error"'))
+      const timingAt = written.findIndex((t) => t.includes('"signin.timing"'))
+      expect(errorAt).toBeGreaterThanOrEqual(0)
+      expect(timingAt).toBeGreaterThan(errorAt)
+      expect(JSON.parse(written[errorAt]!)).toMatchObject({
+        event: 'signin.error',
+        class: 'RangeError',
+        message: 'membership resolution exploded',
+      })
+      expect(written[errorAt]).not.toContain('islom@example.test')
+      expect(written[errorAt]).not.toContain('correct horse')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})
+
 describe('the request was fine and the system was not', () => {
   it('a dropped socket says the database was unreachable', async () => {
     login.mockRejectedValue(droppedSocket())
