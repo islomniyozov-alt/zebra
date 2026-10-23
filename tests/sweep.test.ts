@@ -64,12 +64,15 @@ describe('the two-request capture', () => {
     )
   })
 
-  it('reads the render from the POST’s own invocation, by ray, with no window', () => {
-    // §6.10, owner's ruling 2026-10-13: a sign-in renders the dashboard in
-    // its own response, so its lines are in the POST's invocation. The window
-    // matcher this replaces paired several roles with one render.
+  it('measures the render on its own GET, by that GET’s ray, with no window', () => {
+    // §6.10, owner's ruling 2026-10-23: nothing written during the render
+    // inside the sign-in POST reaches the tail, so after each sign-in the
+    // sweep GETs /dashboard with the new session and reads that invocation.
     expect(script).toMatch(
-      /const post = byRay\s*const separate = row\.redirect\?\.ray \? tail\.lookup\(row\.redirect\.ray\) : null/,
+      /if \(found\) row\.renderGet = await timedGet\('\/dashboard', found\)/,
+    )
+    expect(script).toMatch(
+      /const render = row\.renderGet\?\.ray \? tail\.lookup\(row\.renderGet\.ray\) : null/,
     )
     expect(script).not.toMatch(/renderFrom|renderTo|isRedirectRender/)
   })

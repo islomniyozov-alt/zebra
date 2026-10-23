@@ -538,7 +538,7 @@ async function sweep() {
   const attachSignInLogs = async () => {
     if (!tailReady || signIns.length === 0) return
     await tail.waitFor(
-      signIns.flatMap((row) => [row.ray, row.redirect?.ray]).filter(Boolean),
+      signIns.flatMap((row) => [row.ray, row.renderGet?.ray]).filter(Boolean),
       30_000,
     )
     for (const row of signIns) {
@@ -564,33 +564,33 @@ async function sweep() {
         row.workerNote = row.ray
           ? 'no tail event for this ray within 30 s'
           : 'no sign-in POST in the tail inside this attempt'
-      // THE DESTINATION'S RENDER, BY RAY ONLY (§6.10, owner's ruling
-      // 2026-10-13). A server action that calls `redirect()` renders the
-      // destination in its own response, so the dashboard's shell and fan-out
-      // lines are in the POST's invocation — written from `after()` — and are
-      // read from the event that carries the POST's ray. A separate GET the
-      // browser did make is read by its own ray. No time window: the window
-      // matcher paired several roles with one render on 2026-10-12.
-      const post = byRay
-      const separate = row.redirect?.ray ? tail.lookup(row.redirect.ray) : null
-      const source = separate ?? post
-      const lines = source
-        ? timingLinesOf(source).filter((line) => line.event !== 'signin.timing')
+      // THE DASHBOARD RENDER, ON ITS OWN REQUEST, BY ITS OWN RAY (§6.10,
+      // owner's ruling 2026-10-23). The sign-in POST renders the dashboard
+      // inside its own response, but nothing written during that render
+      // reaches the tail — a known limitation, not chased. So after each
+      // sign-in the sweep GETs /dashboard with the new session (`renderGet`
+      // below) and reads `shell.timing` and `dashboard.timing` from THAT
+      // invocation, matched by its ray and nothing else: no time window.
+      const render = row.renderGet?.ray ? tail.lookup(row.renderGet.ray) : null
+      const lines = render
+        ? timingLinesOf(render).filter((line) => line.event !== 'signin.timing')
         : []
-      row.render = source
+      row.render = row.renderGet
         ? {
-            inline: !separate,
-            ray: rayOf(source),
-            wallTime: source.wallTime ?? null,
-            cpuTime: source.cpuTime ?? null,
+            ...row.renderGet,
+            wallTime: render?.wallTime ?? null,
+            cpuTime: render?.cpuTime ?? null,
+            outcome: render?.outcome ?? null,
             timings: lines,
           }
         : null
-      if (separate) row.matchedRays.push(rayOf(separate))
+      if (render) row.matchedRays.push(rayOf(render))
       if (row.outcome === 'ok' && lines.length === 0)
-        row.renderNote = source
-          ? 'the matched invocation carries no shell or dashboard line'
-          : 'no invocation matched by ray'
+        row.renderNote = !row.renderGet
+          ? 'no dashboard GET was made after this sign-in'
+          : render
+            ? 'the dashboard GET carries no shell or dashboard line'
+            : 'no tail event for the dashboard GET’s ray within 30 s'
     }
   }
 
@@ -612,6 +612,32 @@ async function sweep() {
       ),
     )
     return detail
+  }
+
+  /** A GET with a session, timed to the body's end, its ray kept (§6.10). */
+  const timedGet = async (path, cookie) => {
+    const start = Date.now()
+    try {
+      const response = await fetch(new URL(path, BASE), {
+        headers: { cookie },
+        redirect: 'manual',
+      })
+      await response.arrayBuffer()
+      return {
+        path,
+        status: response.status,
+        ray: response.headers.get('cf-ray'),
+        browserMs: Date.now() - start,
+      }
+    } catch (error) {
+      return {
+        path,
+        status: null,
+        ray: null,
+        browserMs: Date.now() - start,
+        error: String(error?.message ?? error).split('\n')[0],
+      }
+    }
   }
 
   const browser = await chromium.launch(
@@ -754,6 +780,11 @@ async function sweep() {
           .map((entry) => `${entry.name}=${entry.value}`)
           .join('; ')
         await context.close()
+        // THE RENDER'S OWN REQUEST (§6.10, 2026-10-23): /dashboard with the
+        // session just issued, timed from here, its ray kept so the tail can
+        // be asked for exactly that invocation. A driver is refused the
+        // dashboard (404) and still renders the shell, which is measured.
+        if (found) row.renderGet = await timedGet('/dashboard', found)
         break
       } catch (error) {
         await context.close()
