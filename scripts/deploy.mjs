@@ -5,6 +5,7 @@ import { check as checkMigrationGap } from './check-migration-gap.mjs'
 import { runIntegrationSuite, resolveEndpoint } from './integration-gate.mjs'
 import { refusalMessage } from './deploy-refusal.mjs'
 import { measure, verdict } from './bundle-size.mjs'
+import { describeReadBack, readBackHyperdrive } from './hyperdrive-config.mjs'
 import {
   checkReceipt,
   readReceipt,
@@ -249,6 +250,22 @@ if (process.argv.includes('--skip-integration')) {
 }
 
 run(['opennextjs-cloudflare', 'build'])
+
+// THE HYPERDRIVE CONFIG, READ BACK AND PRINTED (§6.10, owner's ruling
+// 2026-10-23). The target's binding — dev's at the top of wrangler.jsonc,
+// production's under env.production, never inherited — is asked of
+// Cloudflare before the upload: origin user zebra_app, query caching
+// disabled, or the deploy refuses. An unbound target is the Neon path and
+// prints nothing. The answer goes in this deploy's log, which is where the
+// owner asked to read it.
+{
+  const target = production ? 'production' : 'dev'
+  const readBack = readBackHyperdrive(target)
+  if (readBack) {
+    console.log(describeReadBack(target, readBack))
+    if (!readBack.ok) process.exit(1)
+  }
+}
 
 // THE SIZE, BEFORE THE UPLOAD (owner's ruling, 2026-10-23). Cloudflare
 // refuses an oversized Worker at upload; this refuses it here, at the plan's

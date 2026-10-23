@@ -42,10 +42,9 @@
 // exists to keep apart.
 // ---------------------------------------------------------------------------
 
-import { spawnSync } from 'node:child_process'
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { describeReadBack, readBackHyperdrive } from './hyperdrive-config.mjs'
 import { chromium } from 'playwright'
 import { neonConfig, Pool } from '@neondatabase/serverless'
 import {
@@ -272,71 +271,6 @@ export function duplicateMatches(rows) {
 /** How long dev is given to answer 200 on /login before the sweep refuses. */
 export const WARM_UP_WINDOW_MS = 120_000
 
-// ── THE HYPERDRIVE CONFIG (§6.10, corrected 2026-10-23) ───────────────────
-
-/** The id wrangler.jsonc binds as HYPERDRIVE at the top level, or null. */
-export function boundHyperdriveId(jsonc) {
-  const stripped = jsonc
-    .split('\n')
-    .map((line) => (line.trimStart().startsWith('//') ? '' : line))
-    .join('\n')
-    .replace(/,(\s*[}\]])/g, '$1')
-  const config = JSON.parse(stripped)
-  const entry = (config.hyperdrive ?? []).find(
-    (h) => h.binding === 'HYPERDRIVE',
-  )
-  return entry?.id ?? null
-}
-
-/**
- * The verdict over a `wrangler hyperdrive get` answer: the origin must be
- * `zebra_app` (the owner bypasses RLS) and caching must be disabled (a cached
- * read under RLS is a cross-tenant read). Pure, for the test.
- */
-export function hyperdriveVerdict(id, config) {
-  const originUser = config?.origin?.user ?? null
-  const cachingDisabled = config?.caching?.disabled === true
-  const reasons = []
-  if (originUser !== 'zebra_app')
-    reasons.push(`origin user is ${originUser ?? 'unknown'}, not zebra_app`)
-  if (!cachingDisabled) reasons.push('query caching is not disabled')
-  return {
-    id,
-    originUser,
-    cachingDisabled,
-    ok: reasons.length === 0,
-    reason: reasons.join('; ') || null,
-  }
-}
-
-/** Ask Cloudflare for the bound config; null when nothing is bound. */
-async function hyperdriveReadBack() {
-  const id = boundHyperdriveId(
-    readFileSync(join(process.cwd(), 'wrangler.jsonc'), 'utf8'),
-  )
-  if (!id) return null
-  const wrangler = fileURLToPath(
-    new URL('../node_modules/wrangler/bin/wrangler.js', import.meta.url),
-  )
-  const result = spawnSync(
-    process.execPath,
-    [wrangler, 'hyperdrive', 'get', id],
-    { encoding: 'utf8' },
-  )
-  const text = `${result.stdout}\n${result.stderr}`.replace(
-    /\x1b\[[0-9;]*m/g,
-    '',
-  )
-  const start = text.indexOf('{')
-  const end = text.lastIndexOf('}')
-  if (start < 0 || end < start) return hyperdriveVerdict(id, null) // no JSON: unknown origin, caching
-  try {
-    return hyperdriveVerdict(id, JSON.parse(text.slice(start, end + 1)))
-  } catch {
-    return hyperdriveVerdict(id, null)
-  }
-}
-
 export async function warmUp(
   pool,
   base,
@@ -547,17 +481,14 @@ async function sweep() {
   // so while wrangler.jsonc binds one, the sweep asks Cloudflare and refuses
   // to start unless the answer is `zebra_app` and `disabled: true`. A cached
   // read under RLS is a cross-tenant read; an owner origin bypasses RLS.
-  const hyperdrive = await hyperdriveReadBack()
+  // (scripts/hyperdrive-config.mjs — the deploy reads its target's config
+  // back through the same module before it uploads.)
+  const hyperdrive = readBackHyperdrive('dev')
+  if (hyperdrive) console.log(describeReadBack('dev', hyperdrive))
   if (hyperdrive && !hyperdrive.ok) {
-    console.error(
-      `HYPERDRIVE CONFIG REFUSED: ${hyperdrive.reason}. Nothing swept. NOT OK.`,
-    )
+    console.error('Nothing swept. NOT OK.')
     process.exit(1)
   }
-  if (hyperdrive)
-    console.log(
-      `hyperdrive ${hyperdrive.id}: origin user ${hyperdrive.originUser}, caching disabled ${hyperdrive.cachingDisabled}`,
-    )
   const coldStart = await warmUp(pool, BASE)
   console.log(
     `cold start: direct SELECT 1 ${coldStart.directMs} ms · GET /login ${coldStart.loginMs} ms (${coldStart.loginStatus})`,
