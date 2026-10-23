@@ -24,6 +24,7 @@ const {
   POOL_IDLE_TIMEOUT_MS,
   requestClient,
   requireAppRole,
+  requireHyperdriveString,
   withRequestClient,
 } = await import('@/lib/db')
 
@@ -101,13 +102,36 @@ describe('the connection path', () => {
     expect(hyperdriveConnectionString()).toBeNull()
   })
 
-  it('refuses a connection that is not zebra_app, on either path', () => {
+  it('the Neon path still refuses anything that is not zebra_app', () => {
     expect(() =>
-      requireAppRole('postgresql://neondb_owner:x@h.hyperdrive.local/db'),
+      requireAppRole('postgresql://neondb_owner:x@ep-x-pooler.neon.tech/db'),
     ).toThrow(/does not authenticate as zebra_app/)
+  })
+
+  it('the Hyperdrive path takes the binding’s own string and nothing else', () => {
+    // §6.10, corrected 2026-10-23: the binding's string carries Hyperdrive's
+    // generated user at a *.hyperdrive.local host — the old zebra_app check
+    // on it refused six of six sign-ins. The role is read back from the
+    // config by the sweep; the client checks the host and refuses the owner.
+    const bound =
+      'postgresql://8a1f2c3d4e5f:generated-secret@4395e48e858b4d1ca4a5ea2fdd2610c9.hyperdrive.local:5432/neondb?sslmode=disable'
+    expect(requireHyperdriveString(bound)).toBe(bound)
+    expect(() =>
+      requireHyperdriveString(
+        'postgresql://zebra_app:x@ep-x-pooler.us-east-2.aws.neon.tech/neondb',
+      ),
+    ).toThrow(/does not point at a Hyperdrive host/)
+    expect(() =>
+      requireHyperdriveString(
+        'postgresql://neondb_owner:x@abc.hyperdrive.local:5432/neondb',
+      ),
+    ).toThrow(/names an owner role/)
+    expect(() => requireHyperdriveString('not a url')).toThrow(
+      /did not provide a connection URL/,
+    )
     const db = readFileSync('src/lib/db.ts', 'utf8')
     expect(db).toMatch(
-      /createPrismaClient\(requireAppRole\(hyperdrive\), 'hyperdrive'\)/,
+      /createPrismaClient\(requireHyperdriveString\(hyperdrive\), 'hyperdrive'\)/,
     )
   })
 

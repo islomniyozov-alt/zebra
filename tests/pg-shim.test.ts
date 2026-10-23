@@ -47,7 +47,7 @@ describe('pg’s Workers socket shim', () => {
     const db = readFileSync('src/lib/db.ts', 'utf8')
     // The pg path is chosen by the binding and by nothing else.
     expect(db).toMatch(
-      /const hyperdrive = hyperdriveConnectionString\(\)\s*return hyperdrive\s*\?\s*createPrismaClient\(requireAppRole\(hyperdrive\), 'hyperdrive'\)/,
+      /const hyperdrive = hyperdriveConnectionString\(\)\s*return hyperdrive\s*\?\s*createPrismaClient\(requireHyperdriveString\(hyperdrive\), 'hyperdrive'\)/,
     )
     const wrangler = readFileSync('wrangler.jsonc', 'utf8')
       .split('\n')

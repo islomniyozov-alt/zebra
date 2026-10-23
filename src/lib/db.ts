@@ -119,8 +119,45 @@ export function hyperdriveConnectionString(
 function createRequestPrismaClient(): PrismaClient {
   const hyperdrive = hyperdriveConnectionString()
   return hyperdrive
-    ? createPrismaClient(requireAppRole(hyperdrive), 'hyperdrive')
+    ? createPrismaClient(requireHyperdriveString(hyperdrive), 'hyperdrive')
     : createPrismaClient(appConnectionString())
+}
+
+/**
+ * The Hyperdrive binding's string, and nothing else, on the Hyperdrive path
+ * (§6.10, corrected 2026-10-23).
+ *
+ * THE STRING DOES NOT NAME THE ROLE. Hyperdrive hands the Worker its own
+ * generated user and password at a `*.hyperdrive.local` host; the origin's
+ * user — `zebra_app` — is in the config Cloudflare holds. `requireAppRole`
+ * applied here refused every request on the first three Hyperdrive sweeps:
+ * a 500 in 10–35 ms, six of six sign-ins. So this accepts a Hyperdrive host
+ * and refuses the two things that would mean the binding is not what §6.10
+ * says: a Neon URL pasted in, or any string naming the owner role. The role
+ * is READ BACK from the config by the sweep before it starts (origin user
+ * `zebra_app`, caching disabled), which is the check the string cannot make.
+ */
+export function requireHyperdriveString(connectionString: string): string {
+  let url: URL
+  try {
+    url = new URL(connectionString)
+  } catch {
+    throw new Error('The HYPERDRIVE binding did not provide a connection URL.')
+  }
+  if (!url.hostname.endsWith('.hyperdrive.local')) {
+    throw new Error(
+      'The HYPERDRIVE binding does not point at a Hyperdrive host. The pg ' +
+        'path takes only the binding’s own string; a database URL belongs in ' +
+        'DATABASE_URL, where the zebra_app check applies.',
+    )
+  }
+  if (/owner/i.test(url.username)) {
+    throw new Error(
+      'The HYPERDRIVE binding names an owner role. The origin must be ' +
+        'zebra_app: the owner bypasses row-level security.',
+    )
+  }
+  return connectionString
 }
 
 /**
@@ -160,9 +197,9 @@ export function endWithResponse(
 
 /**
  * Fail loudly rather than quietly running the app with a role that bypasses
- * every policy. See the note in .env — the owner carries BYPASSRLS. Applies
- * to the Hyperdrive string as much as to DATABASE_URL: Hyperdrive passes the
- * origin's user through, and its origin is `zebra_app` (§6.10).
+ * every policy. See the note in .env — the owner carries BYPASSRLS. For
+ * `DATABASE_URL`, the Neon path. The Hyperdrive string cannot carry the role
+ * (`requireHyperdriveString`); its origin user is read back from the config.
  */
 export function requireAppRole(connectionString: string): string {
   if (!connectionString.includes('zebra_app')) {

@@ -6,9 +6,11 @@ import { describe, expect, it } from 'vitest'
 // `@ts-expect-error` is itself a type error here, which is the compiler making
 // the same point this file makes about guards that assert nothing.
 import {
+  boundHyperdriveId,
   classify,
   credentialsFor,
   duplicateMatches,
+  hyperdriveVerdict,
   knownGap,
   MATRIX_ROLES,
   markFor,
@@ -47,6 +49,47 @@ describe('the warm-up', () => {
     expect(cold.directMs).toBeGreaterThanOrEqual(0)
     expect(cold.loginMs).toBeGreaterThanOrEqual(0)
     expect(typeof cold.at).toBe('string')
+  })
+})
+
+// §6.10, corrected 2026-10-23: the binding's string cannot name the origin
+// role or say whether caching is off; the config Cloudflare holds can. So the
+// sweep reads it back and refuses to start on the wrong answer.
+describe('the Hyperdrive read-back', () => {
+  it('finds the bound id in wrangler.jsonc, top level only', () => {
+    expect(boundHyperdriveId(readFileSync('wrangler.jsonc', 'utf8'))).toBe(
+      '4395e48e858b4d1ca4a5ea2fdd2610c9',
+    )
+    expect(boundHyperdriveId('{ "name": "x" }')).toBeNull()
+  })
+
+  it('passes zebra_app with caching disabled, and refuses everything else by name', () => {
+    const good = hyperdriveVerdict('id', {
+      origin: { user: 'zebra_app' },
+      caching: { disabled: true },
+    })
+    expect(good).toMatchObject({ ok: true, originUser: 'zebra_app' })
+    expect(
+      hyperdriveVerdict('id', {
+        origin: { user: 'neondb_owner' },
+        caching: { disabled: true },
+      }).reason,
+    ).toMatch(/origin user is neondb_owner, not zebra_app/)
+    expect(
+      hyperdriveVerdict('id', {
+        origin: { user: 'zebra_app' },
+        caching: { disabled: false },
+      }).reason,
+    ).toMatch(/caching is not disabled/)
+    // No answer at all is a refusal, not a pass.
+    expect(hyperdriveVerdict('id', null).ok).toBe(false)
+  })
+
+  it('runs before the warm-up and refuses the sweep on a bad answer', () => {
+    const script = readFileSync('scripts/sweep.mjs', 'utf8')
+    expect(script).toMatch(
+      /const hyperdrive = await hyperdriveReadBack\(\)\s*if \(hyperdrive && !hyperdrive\.ok\) \{[\s\S]*?process\.exit\(1\)[\s\S]*?const coldStart = await warmUp\(pool, BASE\)/,
+    )
   })
 })
 
