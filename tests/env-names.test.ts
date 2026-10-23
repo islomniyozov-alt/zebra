@@ -8,8 +8,8 @@ import { describe, expect, it } from 'vitest'
 //
 // On 2026-10-13 `wrangler types` regenerated cloudflare-env.d.ts from the
 // local .env and wrote every key name into it — PROD_CHECK_PASSWORD, the seed
-// accounts, and two stray lines (`Website:`, `Created:`) that dotenv reads as
-// keys because it accepts `NAME: value`. No values, but a committed file
+// accounts, and two stray non-key lines that dotenv nonetheless reads as keys
+// because it accepts the colon form. No values, but a committed file
 // describing the shape of somebody's credentials file. It was caught by
 // reading the diff; this is the check that does not depend on that.
 //
@@ -63,11 +63,13 @@ describe('committed files and the local .env', () => {
   it('a declaration is found in every form the leak took', () => {
     const pattern = (key: string) =>
       new RegExp(`(^|[^\\w.-])${escape(key)}\\s*\\??\\s*[:=]`, 'm')
-    expect(pattern('Website').test('\tWebsite: string;')).toBe(true)
+    // Synthetic names only: this file is tracked, and a real local key in a
+    // declaration form here is exactly what the check above would report.
+    expect(pattern('StrayKey').test('\tStrayKey: string;')).toBe(true)
     expect(pattern('SECRET_X').test('SECRET_X="1"')).toBe(true)
     expect(pattern('SECRET_X').test('  SECRET_X?: string')).toBe(true)
     // Prose that merely mentions a word is not a declaration.
-    expect(pattern('Created').test('// Created in SQL')).toBe(false)
-    expect(pattern('Created').test("'Created date',")).toBe(false)
+    expect(pattern('Stamped').test('// Stamped in SQL')).toBe(false)
+    expect(pattern('Stamped').test("'Stamped date',")).toBe(false)
   })
 })
