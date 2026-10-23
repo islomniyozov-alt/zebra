@@ -113,6 +113,15 @@ const nextConfig: NextConfig = {
         }
       : {},
   },
+  // `pg`'s Workers socket shim, CARRIED BY NAME (§6.10, GAPS 33). `pg` loads
+  // `pg-cloudflare` only on workerd, behind a runtime check, and Next's file
+  // tracing decides by platform whether to follow that require: the Windows
+  // trace copied it into the server function and the Linux trace in CI did
+  // not, so CI's bundle step died on "Could not resolve pg-cloudflare" while
+  // every local build passed. Naming it here makes the copy unconditional.
+  outputFileTracingIncludes: {
+    '/**': ['./node_modules/pg-cloudflare/**/*'],
+  },
 }
 
 export default nextConfig

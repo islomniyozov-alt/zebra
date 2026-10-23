@@ -49,6 +49,7 @@
     "aws4fetch": "1.0.20",
     "next": "16.2.12",
     "pg": "8.16.3",
+    "pg-cloudflare": "1.4.1",
     "postal-mime": "3.0.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
