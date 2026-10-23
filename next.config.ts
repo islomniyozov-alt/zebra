@@ -117,13 +117,13 @@ const nextConfig: NextConfig = {
 
 export default nextConfig
 
-// Makes Cloudflare bindings (ASSETS, and anything added later) reachable from
-// `getCloudflareContext()` while running `next dev`.
-//
-// NOT DURING `next build`, WHICH THE OLD "No-op in production" ASSUMED. It is
-// not a no-op there: `next build` runs with NODE_ENV=production and still
-// started wrangler's local platform proxy, which was harmless until a
-// Hyperdrive binding (§6.10, GAPS 33) — the proxy refuses to start without a
-// local Postgres string for it, and the build died before bundling anything.
-// `forWorkers` is that same NODE_ENV test, used above for the Workers build.
+// Starts wrangler's local platform proxy so Cloudflare bindings (ASSETS, the
+// Hyperdrive binding, anything added later) are reachable from
+// `getCloudflareContext()` under `next dev` — and ONLY there. It does not run
+// when NODE_ENV is production, which is `next build`, the Workers build: the
+// proxy refuses to start without a local Postgres string for the Hyperdrive
+// binding (§6.10, GAPS 33), so running it at build time killed the build.
+// `forWorkers` is the same NODE_ENV test the Workers build uses above. Under
+// `next dev` the proxy needs CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_
+// HYPERDRIVE set in the shell (see the binding in wrangler.jsonc).
 if (!forWorkers) void initOpenNextCloudflareForDev()
