@@ -56,6 +56,19 @@ Rules that are cheap to state and expensive to rediscover:
   5 s or more — so re-enabling it would be caught at the next ritual, not
   the next stall. The check needs the Live Check credentials (GAPS 8) and
   says NOT OK by name without them.
+- **ANY PRODUCTION SECRET CHANGE IS FOLLOWED IMMEDIATELY BY
+  `npm run check:prod-signin`.** Owner's ruling, 2026-10-23, GAPS 38. The
+  `zebra_app` password was rotated and production's `DATABASE_URL` was re-set
+  with the OWNER role's string by mistake. `requireAppRole` refused it on
+  every request — which is right, the owner bypasses row-level security —
+  so every production login answered 500 for about 75 minutes, and nothing
+  said so until the Row 37 chain's closing `check:prod-signin` came back
+  "sign-in did not complete" and a probe with the production tail read the
+  log line. The guard catches the wrong role; only a sign-in tells anyone.
+  So the rotation is not done when `wrangler secret put` returns: it is done
+  when the check prints OK with the first-query span. The same holds for
+  `AUTH_SECRET`, the R2 keys and anything else the Worker reads at request
+  time — the check is the one instrument that exercises them from outside.
 - Prisma 7 syntax. The datasource block has no `url` on purpose and
   `driverAdapters` is no longer a preview feature. Do not "fix" either back.
 - **`relationJoins` is ON, deliberately, and it is app-wide.** With that
