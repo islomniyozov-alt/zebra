@@ -21,6 +21,8 @@ describe('the sign-in timing line', () => {
       rateLimitMs: 40,
       lookupMs: 20,
       membershipMs: 1215,
+      membershipMaxWaitMs: 5_000,
+      membershipTimeoutMs: 10_000,
       sessionMs: 18,
       finalizeMs: 22,
       totalMs: 625,
@@ -45,6 +47,8 @@ describe('the sign-in timing line', () => {
         'rateLimitMs',
         'lookupMs',
         'membershipMs',
+        'membershipMaxWaitMs',
+        'membershipTimeoutMs',
         'sessionMs',
         'finalizeMs',
         'totalMs',
@@ -61,6 +65,9 @@ describe('the sign-in timing line', () => {
       outcome: 'ok',
       role: 'ACCOUNTING',
       membershipMs: 1215,
+      // The budget the membership transaction ran under (GAPS 37), beside it.
+      membershipMaxWaitMs: 5_000,
+      membershipTimeoutMs: 10_000,
       // The current profile, as a literal: the line must say what the code
       // hashes with (GAPS 28 moved it from m=19456,t=2,p=1).
       argon2: 'm=7168,t=5,p=1',
