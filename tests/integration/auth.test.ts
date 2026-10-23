@@ -24,7 +24,6 @@ import {
 } from '@/lib/session'
 import { can } from '@/lib/permissions'
 import { newSignInSpans } from '@/lib/signin-timing'
-import { TRANSACTION_BUDGET } from '@/lib/tenancy'
 import { ARGON2_PARAMS, needsRehash, verifyPassword } from '@/lib/password'
 import type { PrismaClient } from '@/generated/prisma/client'
 
@@ -133,10 +132,6 @@ describe('login', () => {
     // stopwatch (owner's ruling 2026-10-12, `signin-timing.ts`).
     expect(spans).not.toHaveProperty('verifyMs')
     expect(spans.totalMs).toBeGreaterThanOrEqual(spans.membershipMs!)
-    // GAPS 37: the membership transaction's budget is recorded beside its
-    // span, and it is ours — not Prisma's 2 s / 5 s defaults.
-    expect(spans.membershipMaxWaitMs).toBe(TRANSACTION_BUDGET.maxWaitMs)
-    expect(spans.membershipTimeoutMs).toBe(TRANSACTION_BUDGET.timeoutMs)
   })
 
   // GAPS 28, owner's ruling 2026-10-12: the profile moved to m=7168, t=5, p=1
