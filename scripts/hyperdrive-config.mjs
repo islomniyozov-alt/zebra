@@ -108,21 +108,32 @@ export function readBackHyperdrive(target = 'dev', cwd = process.cwd()) {
     /\x1b\[[0-9;]*m/g,
     '',
   )
-  // What wrangler said when it did not say JSON: its last non-empty line,
-  // capped. An error line carries no secret; the config JSON is never quoted.
-  const lastLine = () =>
-    text
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .pop()
-      ?.slice(0, 300) ?? `exit ${result.status ?? 'null'}, no output`
   const start = text.indexOf('{')
   const end = text.lastIndexOf('}')
-  if (start < 0 || end < start) return hyperdriveVerdict(id, null, lastLine())
+  if (start < 0 || end < start)
+    return hyperdriveVerdict(id, null, wranglerSaid(text, result.status))
   try {
     return hyperdriveVerdict(id, JSON.parse(text.slice(start, end + 1)))
   } catch {
-    return hyperdriveVerdict(id, null, lastLine())
+    return hyperdriveVerdict(id, null, wranglerSaid(text, result.status))
   }
+}
+
+/**
+ * What wrangler said when it did not say JSON. The ERROR lines if there are
+ * any, else the last three non-empty lines — never the "Logs were written to"
+ * footer alone, which is what the first version quoted on 2026-10-26 and
+ * which says nothing. Capped; an error line carries no secret.
+ * @param {string} text wrangler's stdout and stderr, colours stripped
+ * @param {number | null} status its exit code
+ */
+export function wranglerSaid(text, status) {
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !/^🪵|Logs were written to/.test(line))
+  const errors = lines.filter((line) => /error|✘|\[code:/i.test(line))
+  const chosen = (errors.length ? errors : lines.slice(-3)).join(' | ')
+  return chosen.slice(0, 400) || `exit ${status ?? 'null'}, no output`
 }

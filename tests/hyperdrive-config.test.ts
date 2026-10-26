@@ -4,6 +4,7 @@ import {
   boundHyperdriveId,
   describeReadBack,
   hyperdriveVerdict,
+  wranglerSaid,
 } from '../scripts/hyperdrive-config.mjs'
 
 // ---------------------------------------------------------------------------
@@ -103,5 +104,30 @@ describe('the verdict', () => {
     expect(describeReadBack('dev', silent)).toMatch(
       /REFUSED: Cloudflare returned no config — wrangler said: Authentication error/,
     )
+  })
+
+  it('quotes wrangler’s ERROR lines, never the "Logs were written to" footer alone', () => {
+    // The second cutover dispatch (8e97776) quoted the footer — "🪵 Logs were
+    // written to /home/runner/.config/.wrangler/logs/…" — which is the one line
+    // of wrangler's output that says nothing. The error sits above it.
+    const output = [
+      '',
+      ' ⛅️ wrangler 4.x',
+      '────────────────',
+      '✘ [ERROR] A request to the Cloudflare API (/accounts/x/hyperdrive/configs/y) failed.',
+      '  Authentication error [code: 10000]',
+      '',
+      '🪵  Logs were written to "/home/runner/.config/.wrangler/logs/wrangler-2026-10-26.log".',
+    ].join('\n')
+    const said = wranglerSaid(output, 1)
+    expect(said).toMatch(/\[ERROR\] A request to the Cloudflare API/)
+    expect(said).toMatch(/Authentication error \[code: 10000\]/)
+    expect(said).not.toMatch(/Logs were written/)
+    // No error line: the last three lines, footer excluded.
+    expect(wranglerSaid('a\nb\nc\nd\n🪵  Logs were written to x', 0)).toBe(
+      'b | c | d',
+    )
+    // Nothing at all: the exit code is the whole story.
+    expect(wranglerSaid('', 1)).toBe('exit 1, no output')
   })
 })
