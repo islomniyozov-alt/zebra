@@ -30,6 +30,19 @@ if (tail.failure()) {
   console.error(`tail-capture: ${tail.failure()} — NOT OK`)
   process.exit(1)
 }
+// PROVE THE TAIL SEES REQUESTS BEFORE SAYING SO. With `--format json`
+// wrangler prints no "connected" banner; the first capture printed "tailing"
+// while the socket was still opening and recorded 0 events around a probe.
+// Given an origin, a canary GET is made until its own ray comes back.
+if (target.startsWith('http')) {
+  const seen = await tail.ready(new URL('/login', target))
+  if (!seen) {
+    console.error(
+      `tail-capture: ${tail.failure() ?? 'the canary never came back through the tail'} — NOT OK`,
+    )
+    process.exit(1)
+  }
+}
 console.log(`tail-capture: tailing ${worker} for ${seconds} s → ${out}`)
 await new Promise((resolve) => setTimeout(resolve, seconds * 1000))
 tail.stop()
