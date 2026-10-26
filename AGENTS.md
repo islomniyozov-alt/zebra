@@ -98,6 +98,35 @@ Rules that are cheap to state and expensive to rediscover:
   that proof, and holds its own teeth: it re-creates the bad wrapper and
   must see it hang. Instrument `pg` from inside a `Client` class handed to
   the pool through `PoolConfig.Client`, never by replacing a pool method.
+- **PRODUCTION RUNS ON HYPERDRIVE (§6.10 production section; owner's
+  cutover ruling 2026-10-26), AND ROLLBACK IS ONE STEP.** The binding is
+  the `hyperdrive` block under `env.production` in `wrangler.jsonc`, id
+  `e7286f158be4460698caa507231685e8` (`zebra-prod-hyperdrive`: origin
+  `zebra_app` on production's DIRECT Neon endpoint, query caching DISABLED
+  because RLS makes a cached read a cross-tenant read). Every production
+  deploy reads that config back from Cloudflare and prints it before the
+  upload; any other answer refuses the deploy. Without the block the code
+  falls back to the Neon path by itself, and the tests accept either state
+  — a binding that is production's id, or no binding — never dev's id.
+  So the rollback, from a clean tree on `main`:
+
+      node scripts/hyperdrive-unbind.mjs \
+        && git commit -am "Rollback: production off Hyperdrive (unbind env.production)" \
+        && git push origin main \
+        && gh workflow run deploy-production.yml --ref main -f confirm=production
+
+  The script removes exactly that block and refuses if it is not there;
+  CI gates the push as always (about ten minutes), production follows.
+  There is nothing else to change: no secret, no code, no test.
+
+  AND FOR 24 HOURS AFTER THE CUTOVER THE PRODUCTION SIGN-IN CHECK RUNS
+  HOURLY (`.github/workflows/prod-signin.yml`, owner's ruling 4), then
+  goes back to once a night. Any `signin.error` or `unavailable` on
+  production in that window is a GAPS row and a report to the owner — not
+  a re-run. The check needs `PROD_CHECK_EMAIL` / `PROD_CHECK_PASSWORD`
+  and the tail token as repository secrets, and says NOT OK by name
+  without them.
+
 - Prisma 7 syntax. The datasource block has no `url` on purpose and
   `driverAdapters` is no longer a preview feature. Do not "fix" either back.
 - **`relationJoins` is ON, deliberately, and it is app-wide.** With that
