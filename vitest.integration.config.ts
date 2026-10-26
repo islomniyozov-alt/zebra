@@ -7,6 +7,8 @@ import { workerCount } from './tests/worker-db'
 // it will do to the database.
 export default defineConfig({
   plugins: [tsconfigPaths()],
+  // Per tree, never node_modules/.vite — see vitest.config.ts.
+  cacheDir: '.vitest-cache/integration',
   test: {
     name: 'integration',
     include: ['tests/integration/**/*.test.ts'],

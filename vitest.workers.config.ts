@@ -11,6 +11,8 @@ import tsconfigPaths from 'vite-tsconfig-paths'
 // `cloudflarePool(...)` rather than either of the shapes the older docs show.
 export default defineConfig({
   plugins: [tsconfigPaths()],
+  // Per tree, never node_modules/.vite — see vitest.config.ts.
+  cacheDir: '.vitest-cache/workers',
   test: {
     name: 'workers',
     include: ['tests/workers/**/*.test.ts'],

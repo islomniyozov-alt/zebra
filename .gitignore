@@ -122,3 +122,9 @@ next-env.d.ts
 # a file rather than from whatever the shell last happened to run. Evidence
 # about one machine at one moment, like the integration receipt above it.
 /.run-status/
+
+# Vitest's cache, PER TREE. The default is node_modules/.vite, and the
+# rehearsal worktree's node_modules is a junction to the live tree's — so two
+# trees testing at once tore one cache and failed every file in both runs
+# (owner's ruling 3, 2026-10-26). Each checkout now caches under its own root.
+/.vitest-cache/

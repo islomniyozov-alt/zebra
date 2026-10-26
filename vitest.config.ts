@@ -12,6 +12,14 @@ import FailureLogReporter from './tests/failure-reporter'
 //
 // `npm run check` runs the first two. `npm test` runs all three.
 export default defineConfig({
+  // THE CACHE IS PER TREE, NOT PER node_modules (owner's ruling 3, 2026-10-26).
+  // Vite's default cacheDir is node_modules/.vite; the rehearsal worktree's
+  // node_modules is a junction to the live tree's, so a vitest run in each
+  // tree at once shared one cache and tore both — "failed to find the runner",
+  // every file, no tests. Relative to each checkout's root, so each has its
+  // own; gitignored. Every project config says the same, because each
+  // project is its own Vite server.
+  cacheDir: '.vitest-cache',
   test: {
     projects: [
       'vitest.node.config.ts',

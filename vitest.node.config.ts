@@ -26,6 +26,8 @@ export default defineConfig({
         .pathname,
     },
   },
+  // Per tree, never node_modules/.vite — see vitest.config.ts.
+  cacheDir: '.vitest-cache/node',
   test: {
     name: 'node',
     // `.tsx` FOR COMPONENT TESTS, WHICH DECLARE THEIR OWN ENVIRONMENT.
