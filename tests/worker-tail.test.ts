@@ -6,10 +6,14 @@ import { describe, expect, it } from 'vitest'
 import {
   CANARY_EVERY_MS,
   isSignInPost,
+  PRODUCTION_WORKER,
   rayKey,
   rayOf,
   READY_WINDOW_MS,
   signInTimingOf,
+  startTail,
+  TAIL_MAX_MS,
+  tailRefusal,
   takeJsonObjects,
   timingLinesOf,
   trimEvent,
@@ -94,6 +98,60 @@ describe('the tail’s stream', () => {
       'zebra-dev',
     )
     expect(workerNameFor('http://localhost:3000')).toBeNull()
+  })
+})
+
+// ── A TAIL IS BOUNDED, AND PRODUCTION'S IS NOT A CHAIN'S TO OPEN ──────────
+// Owner's ruling 2026-10-26, GAPS 38: a stray ad-hoc tail on production
+// outlived its `timeout` by 35 minutes and split the events two
+// check:prod-signin runs were reading.
+describe('every tail runs under startTail', () => {
+  it('refuses the production worker unless the caller is the production check', () => {
+    expect(PRODUCTION_WORKER).toBe('zebra')
+    expect(tailRefusal('zebra')).toMatch(
+      /refusing to tail zebra.*check:prod-signin/,
+    )
+    expect(tailRefusal('zebra', { production: true })).toBeNull()
+    expect(tailRefusal('zebra-dev')).toBeNull()
+    expect(tailRefusal(null)).toMatch(/no worker/)
+    // And the refusal reaches a caller through the same `failure()` every
+    // other tail fault does — no process is spawned for it.
+    const refused = startTail('zebra')
+    expect(refused.failure()).toMatch(/refusing to tail zebra/)
+    refused.stop()
+  })
+
+  it('only prod-signin-check says production: true; the sweep and the probe do not', () => {
+    const check = readFileSync('scripts/prod-signin-check.mjs', 'utf8')
+    const sweep = readFileSync('scripts/sweep.mjs', 'utf8')
+    const capture = readFileSync('scripts/tail-capture.mjs', 'utf8')
+    expect(check).toMatch(/startTail\(worker, \{ production: true \}\)/)
+    expect(sweep).toMatch(/startTail\(worker\)/)
+    expect(sweep).not.toMatch(/production: true/)
+    expect(capture).not.toMatch(/production: true/)
+    // No bare `wrangler tail` anywhere a script could spawn one.
+    for (const [name, source] of [
+      ['sweep', sweep],
+      ['check', check],
+      ['capture', capture],
+    ])
+      expect(source, name).not.toMatch(/['"`]tail['"`]\s*,\s*worker/)
+  })
+
+  it('dies at its deadline, tree and all', () => {
+    expect(TAIL_MAX_MS).toBe(30 * 60_000)
+    const source = readFileSync('scripts/worker-tail.mjs', 'utf8')
+    // The deadline is armed in startTail and the kill is of the TREE:
+    // `child.kill()` on its own left wrangler's node process alive.
+    expect(source).toMatch(
+      /deadline = setTimeout\(\(\) => \{[\s\S]*?killTree\(child\)/,
+    )
+    expect(source).toMatch(
+      /taskkill', \['\/PID', String\(child\.pid\), '\/T', '\/F'\]/,
+    )
+    expect(source).toMatch(
+      /stop\(\) \{\s*clearTimeout\(deadline\)\s*killTree\(child\)/,
+    )
   })
 })
 

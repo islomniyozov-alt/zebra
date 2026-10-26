@@ -159,18 +159,58 @@ export function workerNameFor(base) {
   return host.endsWith('.workers.dev') ? host.split('.')[0] : null
 }
 
+// ── A TAIL IS BOUNDED, AND PRODUCTION'S IS NOT A CHAIN'S TO OPEN ──────────
+//
+// Owner's ruling, 2026-10-26 (GAPS 38). An ad-hoc `timeout 700 npx wrangler
+// tail zebra` outlived its deadline by 35 minutes — `timeout` killed `npx`,
+// not wrangler's node process — and split production's events with
+// `check:prod-signin`'s own tail, which then reported "no signin.timing line"
+// about sign-ins that had succeeded. So every tail starts here: it dies with
+// its whole process tree at `stop()` and at `TAIL_MAX_MS` regardless, and the
+// production worker is refused unless the caller says `production: true`,
+// which only `prod-signin-check.mjs` does, for its own duration.
+
+/** The production worker's name: the one no sweep or probe may tail. */
+export const PRODUCTION_WORKER = 'zebra'
+/** The longest any tail lives, whatever its caller forgets to stop. */
+export const TAIL_MAX_MS = 30 * 60_000
+
+/** Why a tail may not start, or null when it may. */
+export function tailRefusal(worker, { production = false } = {}) {
+  if (!worker) return 'no worker to tail for this origin'
+  if (worker === PRODUCTION_WORKER && !production)
+    return `refusing to tail ${PRODUCTION_WORKER}: production's log is read only by check:prod-signin, for its own duration (AGENTS.md, GAPS 38)`
+  return null
+}
+
+/** Kill a child and everything it spawned; `child.kill()` alone leaves the tree. */
+export function killTree(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return
+  if (process.platform === 'win32') {
+    spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+      stdio: 'ignore',
+    })
+  } else {
+    child.kill('SIGKILL')
+  }
+}
+
 /**
  * Start `wrangler tail <worker> --format json` and keep its events by ray.
  * Never throws: a tail that cannot start reports why through `failure()`, and
  * every lookup then says so.
  */
-export function startTail(worker) {
+export function startTail(
+  worker,
+  { production = false, maxMs = TAIL_MAX_MS } = {},
+) {
   const events = new Map()
-  let failure = worker ? null : 'no worker to tail for this origin'
+  let failure = tailRefusal(worker, { production })
   let stderr = ''
   let buffer = ''
   let child = null
-  if (worker) {
+  let deadline = null
+  if (!failure) {
     const wrangler = fileURLToPath(
       new URL('../node_modules/wrangler/bin/wrangler.js', import.meta.url),
     )
@@ -195,7 +235,15 @@ export function startTail(worker) {
     child.on('error', (error) => {
       failure = `wrangler tail could not start: ${error.message}`
     })
+    // THE DEADLINE: the tree dies at `maxMs` whether or not anyone calls
+    // `stop()`. Unref'd, so a tail never keeps its caller's process alive.
+    deadline = setTimeout(() => {
+      failure ??= `tail stopped at its ${maxMs} ms deadline`
+      killTree(child)
+    }, maxMs)
+    deadline.unref?.()
     child.on('exit', (code) => {
+      clearTimeout(deadline)
       if (!failure && code !== null && code !== 0) {
         const line = stderr
           .replace(/\x1b\[[0-9;]*m/g, '')
@@ -245,7 +293,8 @@ export function startTail(worker) {
       }
     },
     stop() {
-      child?.kill()
+      clearTimeout(deadline)
+      killTree(child)
     },
   }
 }

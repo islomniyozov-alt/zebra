@@ -80,7 +80,9 @@ async function main() {
 
   const worker = workerNameFor(base)
   if (!worker) return finish(false, `${base} is not a workers.dev origin`)
-  const tail = startTail(worker)
+  // THE ONE CALLER ALLOWED TO TAIL PRODUCTION, for exactly this run (AGENTS.md,
+  // GAPS 38): `startTail` refuses the production worker to everyone else.
+  const tail = startTail(worker, { production: true })
   process.on('exit', () => tail.stop())
   if (!(await tail.ready(new URL('/login', base))))
     return finish(
