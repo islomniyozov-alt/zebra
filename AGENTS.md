@@ -505,9 +505,24 @@ Rules about instruments, which are the ones that cost whole sessions:
   checkout's own root (root config and every project config; gitignored).
   VERIFIED by running the whole node project in both trees at the same
   moment, 17:59:12–17:59:46 UTC, both green — 177 files / 3,351 tests in
-  the live tree, 179 / 3,362 in the worktree. The earlier "one tree at a
-  time" rule is retired; if the symptom ever returns, the first question is
-  which tree is caching under `node_modules` again.
+  the live tree, 179 / 3,362 in the worktree — and again at 18:12, the live
+  integration project beside the worktree's node project, both green.
+
+  AND THEN IT RECURRED ANYWAY, so the "one tree at a time" rule is NOT
+  retired. At 19:04 UTC the same day, with both trees on their own cache
+  and nothing testing in the worktree, the live integration run tore the
+  same way — 56 files, no tests. Five minutes later the same file passed
+  with nothing cleared, and a deliberate reproduction (worktree run, then
+  an immediate live run) passed too. So the cache was not the whole
+  mechanism: something a worktree run leaves under the shared
+  `node_modules` for a short while — `.vite-temp` is the only thing it
+  writes there now — still poisons a live run that starts soon after. What
+  is known: the symptom is "failed to find the runner" / "reading
+  'config'" on EVERY file with no tests run, it decays within minutes, and
+  it has never been seen in a live run that started before or at the same
+  moment as the worktree's. So: read that verdict as torn, not red; do not
+  start a live vitest run within a few minutes of a worktree run ending;
+  re-run and read the file. The cause is open and goes to the owner.
 
   And an `npm install` in the worktree replaces the junction with a real
   directory and installs into the worktree alone — restore the junction
