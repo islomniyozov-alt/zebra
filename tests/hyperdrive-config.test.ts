@@ -28,17 +28,18 @@ describe('which config a target binds', () => {
     expect(boundHyperdriveId(devOnly, 'production')).toBeNull()
   })
 
-  it('the repository binds the dev config at the top level and the production config under env.production — two ids, never the same', () => {
+  it('the repository binds the dev config at the top level; production binds its own config or nothing — never dev’s', () => {
+    // ROLLBACK IS ONE STEP (AGENTS.md, owner's cutover ruling 2026-10-26):
+    // removing production's block must not fail this test, or the rollback
+    // would need a test change and a second commit. So production is either
+    // its own id or unbound; what is refused is dev's id under production.
     const jsonc = readFileSync('wrangler.jsonc', 'utf8')
     expect(boundHyperdriveId(jsonc, 'dev')).toBe(
       '4395e48e858b4d1ca4a5ea2fdd2610c9',
     )
-    expect(boundHyperdriveId(jsonc, 'production')).toBe(
-      'e7286f158be4460698caa507231685e8',
-    )
-    expect(boundHyperdriveId(jsonc, 'production')).not.toBe(
-      boundHyperdriveId(jsonc, 'dev'),
-    )
+    const production = boundHyperdriveId(jsonc, 'production')
+    expect([null, 'e7286f158be4460698caa507231685e8']).toContain(production)
+    expect(production).not.toBe(boundHyperdriveId(jsonc, 'dev'))
   })
 })
 

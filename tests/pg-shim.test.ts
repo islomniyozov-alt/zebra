@@ -63,11 +63,13 @@ describe('pg’s Workers socket shim', () => {
       hyperdrive?: { binding: string; id: string }[]
       env?: Record<string, { hyperdrive?: { binding: string; id: string }[] }>
     }
-    expect(config.env?.production?.hyperdrive).toEqual([
-      { binding: 'HYPERDRIVE', id: 'e7286f158be4460698caa507231685e8' },
-    ])
-    expect(config.env?.production?.hyperdrive?.[0]?.id).not.toBe(
-      config.hyperdrive?.[0]?.id,
-    )
+    // Either bound to production's own config or unbound (rollback is removing
+    // the block and nothing else, AGENTS.md 2026-10-26) — never dev's id.
+    const production = config.env?.production?.hyperdrive
+    if (production !== undefined)
+      expect(production).toEqual([
+        { binding: 'HYPERDRIVE', id: 'e7286f158be4460698caa507231685e8' },
+      ])
+    expect(production?.[0]?.id).not.toBe(config.hyperdrive?.[0]?.id)
   })
 })

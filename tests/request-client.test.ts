@@ -149,10 +149,16 @@ describe('the connection path', () => {
       { binding: 'HYPERDRIVE', id: '4395e48e858b4d1ca4a5ea2fdd2610c9' },
     ])
     // Production's own config (§6.10, 2026-10-23), bound under env.production
-    // — bindings do not inherit, so without this line production stays on Neon.
-    expect(config.env?.production?.hyperdrive).toEqual([
-      { binding: 'HYPERDRIVE', id: 'e7286f158be4460698caa507231685e8' },
-    ])
+    // — bindings do not inherit, so without this block production stays on
+    // Neon. EITHER state is legal here, because rollback is removing the block
+    // and nothing else (AGENTS.md, 2026-10-26); dev's id under production is
+    // the one thing refused.
+    const production = config.env?.production?.hyperdrive
+    if (production !== undefined)
+      expect(production).toEqual([
+        { binding: 'HYPERDRIVE', id: 'e7286f158be4460698caa507231685e8' },
+      ])
+    expect(production?.[0]?.id).not.toBe('4395e48e858b4d1ca4a5ea2fdd2610c9')
   })
 })
 
