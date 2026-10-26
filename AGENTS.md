@@ -69,6 +69,21 @@ Rules that are cheap to state and expensive to rediscover:
   when the check prints OK with the first-query span. The same holds for
   `AUTH_SECRET`, the R2 keys and anything else the Worker reads at request
   time — the check is the one instrument that exercises them from outside.
+- **EVERY `wrangler tail` RUNS UNDER `startTail` (`scripts/worker-tail.mjs`),
+  WHICH KILLS THE CHILD AT ITS DEADLINE, AND NO CHAIN OPENS A TAIL ON
+  PRODUCTION — only `check:prod-signin`, for its own duration.** Owner's
+  ruling, 2026-10-26, GAPS 38. On 2026-10-23 an ad-hoc
+  `timeout 700 npx wrangler tail zebra` outlived its deadline by 35 minutes:
+  `timeout` killed `npx` and not wrangler's node process. The stray tail
+  split production's events with the check's own tail, and two
+  `check:prod-signin` runs said "no signin.timing line in the tail" about
+  sign-ins that had succeeded — a false reading on the one instrument that
+  had just found a real outage. So: a probe tails through
+  `scripts/tail-capture.mjs <origin> <seconds> <file>`, never a bare
+  `wrangler tail`; `startTail` kills the whole process tree at `stop()` and
+  at `TAIL_MAX_MS`; and `startTail` REFUSES the production worker unless the
+  caller says `production: true`, which only `prod-signin-check.mjs` does.
+  `tests/worker-tail.test.ts` pins all three.
 - Prisma 7 syntax. The datasource block has no `url` on purpose and
   `driverAdapters` is no longer a preview feature. Do not "fix" either back.
 - **`relationJoins` is ON, deliberately, and it is app-wide.** With that
