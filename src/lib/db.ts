@@ -3,6 +3,8 @@ import { cache } from 'react'
 import { neonConfig } from '@neondatabase/serverless'
 import { PrismaNeon } from '@prisma/adapter-neon'
 import { PrismaPg } from '@prisma/adapter-pg'
+import pg from 'pg'
+import { instrumentPool, PG_CONNECT_TIMEOUT_MS } from './pg-connect'
 import { after } from 'next/server'
 import { PrismaClient } from '@/generated/prisma/client'
 import { auditExtension } from './audit'
@@ -75,8 +77,29 @@ export function createPrismaClient(
     // everywhere else — production, tests, seeds — Neon's WebSocket driver.
     // Above the adapter nothing differs: interactive transactions, SET LOCAL,
     // row-level security, the audit extension.
+    //
+    // ON THE pg PATH THE POOL IS BUILT HERE, NOT BY THE ADAPTER (GAPS 37): so
+    // a connect that does not complete fails by name at PG_CONNECT_TIMEOUT_MS
+    // instead of spinning, and every acquisition writes a `pg.connect` line
+    // (src/lib/pg-connect.ts). The adapter takes the pool as is.
     adapter:
-      driver === 'hyperdrive' ? new PrismaPg(pool) : new PrismaNeon(pool),
+      driver === 'hyperdrive'
+        ? new PrismaPg(
+            instrumentPool(
+              new pg.Pool({
+                ...pool,
+                connectionTimeoutMillis: PG_CONNECT_TIMEOUT_MS,
+              }),
+            ),
+            // A POOL THE CALLER BUILT IS "EXTERNAL" TO THE ADAPTER, and by
+            // default it survives `$disconnect` (adapter-pg 7.9.1,
+            // dist/index.mjs:749–760). On workerd that is a socket crossing
+            // the request boundary: the first version of this hung every
+            // sign-in for 600 s until the runtime canceled it — "Promise will
+            // never complete" (GAPS 37, b406735). So the adapter ends it.
+            { disposeExternalPool: true },
+          )
+        : new PrismaNeon(pool),
   })
   return client.$extends(auditExtension) as unknown as PrismaClient
 }

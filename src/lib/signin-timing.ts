@@ -34,6 +34,10 @@ export interface SignInSpans {
   lookupMs: number | null
   /** Membership resolution. Absorbs the argon2 verify's wall time — see above. */
   membershipMs: number | null
+  /** The budget the membership transaction ran under (GAPS 37): `maxWait`. */
+  membershipMaxWaitMs: number | null
+  /** …and its `timeout`. Both from `TRANSACTION_BUDGET` unless a call site says otherwise. */
+  membershipTimeoutMs: number | null
   /** The `Session` insert. */
   sessionMs: number | null
   /** The success row and `lastLoginAt`. */
@@ -50,6 +54,8 @@ export const newSignInSpans = (): SignInSpans => ({
   rateLimitMs: null,
   lookupMs: null,
   membershipMs: null,
+  membershipMaxWaitMs: null,
+  membershipTimeoutMs: null,
   sessionMs: null,
   finalizeMs: null,
   totalMs: null,
@@ -107,6 +113,8 @@ export function signInTimingLine(input: {
     rateLimitMs: spans.rateLimitMs,
     lookupMs: spans.lookupMs,
     membershipMs: spans.membershipMs,
+    membershipMaxWaitMs: spans.membershipMaxWaitMs,
+    membershipTimeoutMs: spans.membershipTimeoutMs,
     sessionMs: spans.sessionMs,
     finalizeMs: spans.finalizeMs,
     totalMs: spans.totalMs,
