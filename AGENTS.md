@@ -84,6 +84,20 @@ Rules that are cheap to state and expensive to rediscover:
   at `TAIL_MAX_MS`; and `startTail` REFUSES the production worker unless the
   caller says `production: true`, which only `prod-signin-check.mjs` does.
   `tests/worker-tail.test.ts` pins all three.
+- **ANY WRAPPER OR SUBCLASS OF A `pg` OR `pg-pool` API SHIPS WITH
+  `tests/pg-pool-contract.test.ts` GREEN — a real `pg.Pool` built the way
+  `db.ts` builds it, a stub for the wire, and `pool.query()`,
+  `pool.connect()` and a transaction through `@prisma/adapter-pg`, each
+  completing inside one second.** Owner's ruling 2, 2026-10-26, GAPS 37.
+  `b406735` replaced `pool.connect` with an `async () => …`; pg-pool's own
+  `query()` acquires through the CALLBACK form and the wrapper dropped the
+  callback, so `connect()` answered and `query()` never did — every sign-in
+  on the pg path hung for 600 s, twice (`ce162d0` repeated it with a
+  different guess attached). The proof that found it took four minutes with
+  a stub Client under a real pool and ran three days late. The test holds
+  that proof, and holds its own teeth: it re-creates the bad wrapper and
+  must see it hang. Instrument `pg` from inside a `Client` class handed to
+  the pool through `PoolConfig.Client`, never by replacing a pool method.
 - Prisma 7 syntax. The datasource block has no `url` on purpose and
   `driverAdapters` is no longer a preview feature. Do not "fix" either back.
 - **`relationJoins` is ON, deliberately, and it is app-wide.** With that
@@ -479,16 +493,21 @@ Rules about instruments, which are the ones that cost whole sessions:
   `(Get-Item ..\zebra-rehearsal\.env).LinkType` — `HardLink` — before any
   run in the worktree that reads credentials.
 
-  AND THE WORKTREE SHARES `node_modules`, SO IT SHARES VITEST'S CACHE. On
-  2026-10-23 a `vitest run` in the worktree, started while the live tree's
-  `npm run check` was running, left every node test file in the live run
-  failing with "Cannot read properties of undefined (reading 'config')" —
-  vitest's own state, torn between two runs through one `.vite` directory,
-  not a test. Run vitest in ONE tree at a time; a verdict read while the
-  other tree is testing is not a verdict. If it happens, clear the shared
-  cache and re-run:
-
-      rm -rf node_modules/.vite node_modules/.vitest
+  AND VITEST CACHES PER TREE, BECAUSE THE WORKTREE SHARES `node_modules`.
+  Until 2026-10-26 both trees cached under one `node_modules/.vite`, and a
+  worktree run left entries the live tree then loaded through the
+  worktree's path — a second copy of vitest — so every file in the live
+  run failed with "Vitest failed to find the runner" or "Cannot read
+  properties of undefined (reading 'config')", no tests. It did not even
+  need concurrency: on 2026-10-26 a live run that started one second AFTER
+  a worktree run ended failed the same way, and it happened four times in
+  three days. Owner's ruling 3: `cacheDir` is `.vitest-cache` under each
+  checkout's own root (root config and every project config; gitignored).
+  VERIFIED by running the whole node project in both trees at the same
+  moment, 17:59:12–17:59:46 UTC, both green — 177 files / 3,351 tests in
+  the live tree, 179 / 3,362 in the worktree. The earlier "one tree at a
+  time" rule is retired; if the symptom ever returns, the first question is
+  which tree is caching under `node_modules` again.
 
   And an `npm install` in the worktree replaces the junction with a real
   directory and installs into the worktree alone — restore the junction
