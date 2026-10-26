@@ -3,6 +3,7 @@ import { cache } from 'react'
 import { neonConfig } from '@neondatabase/serverless'
 import { PrismaNeon } from '@prisma/adapter-neon'
 import { PrismaPg } from '@prisma/adapter-pg'
+import { PG_CONNECT_TIMEOUT_MS, timedClientClass } from './pg-connect'
 import { after } from 'next/server'
 import { PrismaClient } from '@/generated/prisma/client'
 import { auditExtension } from './audit'
@@ -75,8 +76,25 @@ export function createPrismaClient(
     // everywhere else — production, tests, seeds — Neon's WebSocket driver.
     // Above the adapter nothing differs: interactive transactions, SET LOCAL,
     // row-level security, the audit extension.
+    //
+    // ON THE pg PATH THE POOL IS BUILT HERE, NOT BY THE ADAPTER (GAPS 37): so
+    // a connect that does not complete fails by name at PG_CONNECT_TIMEOUT_MS
+    // instead of spinning, and every acquisition writes a `pg.connect` line
+    // (src/lib/pg-connect.ts). The adapter takes the pool as is.
     adapter:
-      driver === 'hyperdrive' ? new PrismaPg(pool) : new PrismaNeon(pool),
+      driver === 'hyperdrive'
+        ? new PrismaPg({
+            ...pool,
+            // THE ADAPTER BUILDS THE POOL, NEVER THE CALLER. A pool built here
+            // is "external" to adapter-pg and survives `$disconnect`; on
+            // workerd that socket crossed the request boundary and b406735
+            // hung every sign-in for 600 s (GAPS 37). So the config names a
+            // connect timeout — a hung connect errors by name — and a Client
+            // class that times its own connect (src/lib/pg-connect.ts).
+            connectionTimeoutMillis: PG_CONNECT_TIMEOUT_MS,
+            Client: timedClientClass(),
+          })
+        : new PrismaNeon(pool),
   })
   return client.$extends(auditExtension) as unknown as PrismaClient
 }

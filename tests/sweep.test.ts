@@ -118,6 +118,12 @@ describe('the two-request capture', () => {
       /const render = row\.renderGet\?\.ray \? tail\.lookup\(row\.renderGet\.ray\) : null/,
     )
     expect(script).not.toMatch(/renderFrom|renderTo|isRedirectRender/)
+    // GAPS 37, owner's ruling (a): the GET's record keeps the invocation's
+    // trimmed logs, so the `pg.connect` lines the render wrote are read
+    // beside its cpuTime.
+    expect(script).toMatch(
+      /timings: lines,[\s\S]*?logs: render\?\.logs \?\? \[\],/,
+    )
   })
 
   it('two sign-ins matched to one invocation is a problem, by name', () => {

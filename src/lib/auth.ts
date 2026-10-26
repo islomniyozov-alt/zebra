@@ -15,6 +15,7 @@ import {
   type SessionDb,
 } from './session'
 import { since, type SignInSpans } from './signin-timing'
+import { TRANSACTION_BUDGET } from './tenancy'
 
 // ---------------------------------------------------------------------------
 // LOGIN
@@ -245,6 +246,12 @@ export async function login(
   }
 
   mark = performance.now()
+  // THE BUDGET, RECORDED BESIDE THE SPAN IT BOUNDS (GAPS 37): `resolveMembership`
+  // runs `runAsUser` with no options, so it runs under TRANSACTION_BUDGET.
+  if (spans) {
+    spans.membershipMaxWaitMs = TRANSACTION_BUDGET.maxWaitMs
+    spans.membershipTimeoutMs = TRANSACTION_BUDGET.timeoutMs
+  }
   const membership = await resolveMembership(db, user.id, input.organizationId)
   if (spans) spans.membershipMs = since(mark)
   if (!membership) {

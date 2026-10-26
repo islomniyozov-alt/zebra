@@ -666,6 +666,10 @@ async function sweep() {
             cpuTime: render?.cpuTime ?? null,
             outcome: render?.outcome ?? null,
             timings: lines,
+            // The GET's own log lines, trimmed by `trimEvent` (no headers):
+            // the `pg.connect` acquisitions the render made sit here beside
+            // the invocation's cpuTime (GAPS 37, owner's ruling (a)).
+            logs: render?.logs ?? [],
           }
         : null
       if (render) row.matchedRays.push(rayOf(render))
