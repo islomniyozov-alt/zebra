@@ -82,4 +82,26 @@ describe('the verdict', () => {
     ).toMatch(/caching is not disabled/)
     expect(hyperdriveVerdict('id', null).ok).toBe(false)
   })
+
+  it('no answer names itself, with what wrangler said — never the config’s shape', () => {
+    // 2026-10-26: CI's deploy token could not read Hyperdrive; the verdict
+    // said "origin user is unknown, not zebra_app; query caching is not
+    // disabled" about a config nobody had seen. The cause has to be the line.
+    const silent = hyperdriveVerdict(
+      'id',
+      null,
+      'Authentication error [code: 10000]',
+    )
+    expect(silent.ok).toBe(false)
+    expect(silent.reason).toBe(
+      'Cloudflare returned no config — wrangler said: Authentication error [code: 10000]',
+    )
+    expect(silent.reason).not.toMatch(/origin user|caching/)
+    expect(hyperdriveVerdict('id', null).reason).toBe(
+      'Cloudflare returned no config',
+    )
+    expect(describeReadBack('dev', silent)).toMatch(
+      /REFUSED: Cloudflare returned no config — wrangler said: Authentication error/,
+    )
+  })
 })

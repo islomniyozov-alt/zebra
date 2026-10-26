@@ -44,15 +44,29 @@ export function boundHyperdriveId(jsonc, target = 'dev') {
 /**
  * The verdict over a `wrangler hyperdrive get` answer. Pure, for the tests.
  * No answer at all is a refusal, not a pass.
+ * @param {string} id
+ * @param {{ origin?: { user?: string; host?: string }; caching?: { disabled?: boolean } } | null} config
+ * @param {string | null} [noAnswer] what wrangler said when it said no JSON
  */
-export function hyperdriveVerdict(id, config) {
+export function hyperdriveVerdict(id, config, noAnswer = null) {
   const originUser = config?.origin?.user ?? null
   const originHost = config?.origin?.host ?? null
   const cachingDisabled = config?.caching?.disabled === true
   const reasons = []
-  if (originUser !== 'zebra_app')
-    reasons.push(`origin user is ${originUser ?? 'unknown'}, not zebra_app`)
-  if (!cachingDisabled) reasons.push('query caching is not disabled')
+  // NO ANSWER IS ITS OWN REASON. On 2026-10-26 CI's dev deploy refused with
+  // "origin user is unknown, not zebra_app; query caching is not disabled"
+  // when wrangler had returned no config at all — the deploy token could not
+  // read Hyperdrive — and the message blamed the config. Say what wrangler
+  // said instead, so the next reader sees the cause and not a symptom.
+  if (!config)
+    reasons.push(
+      `Cloudflare returned no config${noAnswer ? ` — wrangler said: ${noAnswer}` : ''}`,
+    )
+  else {
+    if (originUser !== 'zebra_app')
+      reasons.push(`origin user is ${originUser ?? 'unknown'}, not zebra_app`)
+    if (!cachingDisabled) reasons.push('query caching is not disabled')
+  }
   return {
     id,
     originUser,
@@ -94,12 +108,21 @@ export function readBackHyperdrive(target = 'dev', cwd = process.cwd()) {
     /\x1b\[[0-9;]*m/g,
     '',
   )
+  // What wrangler said when it did not say JSON: its last non-empty line,
+  // capped. An error line carries no secret; the config JSON is never quoted.
+  const lastLine = () =>
+    text
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .pop()
+      ?.slice(0, 300) ?? `exit ${result.status ?? 'null'}, no output`
   const start = text.indexOf('{')
   const end = text.lastIndexOf('}')
-  if (start < 0 || end < start) return hyperdriveVerdict(id, null)
+  if (start < 0 || end < start) return hyperdriveVerdict(id, null, lastLine())
   try {
     return hyperdriveVerdict(id, JSON.parse(text.slice(start, end + 1)))
   } catch {
-    return hyperdriveVerdict(id, null)
+    return hyperdriveVerdict(id, null, lastLine())
   }
 }

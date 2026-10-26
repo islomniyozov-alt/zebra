@@ -105,7 +105,13 @@ Rules that are cheap to state and expensive to rediscover:
   `zebra_app` on production's DIRECT Neon endpoint, query caching DISABLED
   because RLS makes a cached read a cross-tenant read). Every production
   deploy reads that config back from Cloudflare and prints it before the
-  upload; any other answer refuses the deploy. Without the block the code
+  upload; any other answer refuses the deploy — INCLUDING NO ANSWER, which
+  is what a deploy token without the Hyperdrive read scope gets: on
+  2026-10-26 the first cutover dispatch refused in CI exactly so, and the
+  verdict now quotes wrangler's own line rather than blaming the config.
+  The `CLOUDFLARE_API_TOKEN` CI deploys with must be able to read
+  Hyperdrive configs (Workers Hyperdrive: Read), or nothing with a binding
+  deploys from CI. Without the block the code
   falls back to the Neon path by itself, and the tests accept either state
   — a binding that is production's id, or no binding — never dev's id.
   So the rollback, from a clean tree on `main`:
