@@ -60,45 +60,15 @@ export function assertOrgId(orgId: unknown): asserts orgId is string {
 
 export interface TransactionTimeouts {
   /**
-   * How long the transaction may run before Prisma aborts it — the abort
-   * surfaces as an opaque "expired transaction" error rather than a slow
-   * query. Work that legitimately runs long — generating a settlement across
-   * a pay period, invoicing a batch of loads — has to say so, out loud, at
-   * the call site. Unset means `TRANSACTION_BUDGET.timeoutMs`.
+   * Prisma aborts an interactive transaction after 5 seconds by default, and
+   * the abort surfaces as an opaque "expired transaction" error rather than as
+   * a slow query. Work that legitimately runs long — generating a settlement
+   * across a pay period, invoicing a batch of loads — has to say so, out loud,
+   * at the call site.
    */
   timeoutMs?: number
-  /**
-   * How long to wait for a connection from the pool before giving up. Unset
-   * means `TRANSACTION_BUDGET.maxWaitMs`.
-   */
+  /** How long to wait for a connection from the pool before giving up. */
   maxWaitMs?: number
-}
-
-/**
- * THE BUDGET IS OURS (§6.10, owner's ruling 2026-10-23, GAPS 37). Prisma's
- * defaults — 2 s to acquire a connection, 5 s to run — were the budget of
- * every transaction that did not name its own, and the sign-in's membership
- * read failed that 2 s on the pg path three times in 39 without any line of
- * ours saying what the limit had been. So every interactive transaction in
- * the application runs under these unless its call site says otherwise, and
- * the sign-in's timing line records them beside the span they bound.
- */
-export const TRANSACTION_BUDGET = {
-  /** Milliseconds to acquire a pooled connection before the start fails. */
-  maxWaitMs: 5_000,
-  /** Milliseconds the transaction may run before Prisma aborts it. */
-  timeoutMs: 10_000,
-} as const
-
-/** Prisma's `$transaction` options for a call site's timeouts, defaults applied. */
-export function transactionOptions(options: TransactionTimeouts): {
-  maxWait: number
-  timeout: number
-} {
-  return {
-    maxWait: options.maxWaitMs ?? TRANSACTION_BUDGET.maxWaitMs,
-    timeout: options.timeoutMs ?? TRANSACTION_BUDGET.timeoutMs,
-  }
 }
 
 export interface OrgTransactionOptions extends TransactionTimeouts {
@@ -144,40 +114,50 @@ export async function runInOrg<T>(
 ): Promise<T> {
   assertOrgId(orgId)
 
-  return client.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT set_config('app.current_org_id', ${orgId}, true)`
-    // The audit extension is handed the operation but not the client
-    // running it, and Prisma will not let a query extension be applied to a
-    // transaction client. Async context is how it finds both.
-    //
-    // The `await` is load-bearing and cost an hour. A PrismaPromise is lazy:
-    // `tx.load.update(...)` builds a thenable and executes nothing until it
-    // is awaited. Returning `fn(tx)` unawaited ends the async context before
-    // the query — and therefore before the extension — ever runs, so the
-    // most natural call style in the codebase,
-    //
-    //     withOrg(orgId, (tx) => tx.load.update({ ... }))
-    //
-    // would have written no audit row at all, silently, while every test
-    // that awaited inside its callback passed.
-    const scope: AuditScope = {
-      tx: tx as unknown as AuditCapableTx,
-      organizationId: orgId,
-      attribution: options.attribution,
-      buffer: [],
-    }
+  return client.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.current_org_id', ${orgId}, true)`
+      // The audit extension is handed the operation but not the client
+      // running it, and Prisma will not let a query extension be applied to a
+      // transaction client. Async context is how it finds both.
+      //
+      // The `await` is load-bearing and cost an hour. A PrismaPromise is lazy:
+      // `tx.load.update(...)` builds a thenable and executes nothing until it
+      // is awaited. Returning `fn(tx)` unawaited ends the async context before
+      // the query — and therefore before the extension — ever runs, so the
+      // most natural call style in the codebase,
+      //
+      //     withOrg(orgId, (tx) => tx.load.update({ ... }))
+      //
+      // would have written no audit row at all, silently, while every test
+      // that awaited inside its callback passed.
+      const scope: AuditScope = {
+        tx: tx as unknown as AuditCapableTx,
+        organizationId: orgId,
+        attribution: options.attribution,
+        buffer: [],
+      }
 
-    return await auditScope.run(scope, async () => {
-      const result = await fn(tx)
-      // Every audit row for this transaction, in one insert behind one
-      // savepoint, while the transaction is STILL OPEN. Inside, because a
-      // rolled-back write must not leave a row claiming it happened; before
-      // the return, because after it there is no transaction left to write
-      // in. See `AuditScope.buffer` for the measurement that put it here.
-      await flushAuditBuffer(scope)
-      return result
-    })
-  }, transactionOptions(options))
+      return await auditScope.run(scope, async () => {
+        const result = await fn(tx)
+        // Every audit row for this transaction, in one insert behind one
+        // savepoint, while the transaction is STILL OPEN. Inside, because a
+        // rolled-back write must not leave a row claiming it happened; before
+        // the return, because after it there is no transaction left to write
+        // in. See `AuditScope.buffer` for the measurement that put it here.
+        await flushAuditBuffer(scope)
+        return result
+      })
+    },
+    {
+      ...(options.timeoutMs === undefined
+        ? {}
+        : { timeout: options.timeoutMs }),
+      ...(options.maxWaitMs === undefined
+        ? {}
+        : { maxWait: options.maxWaitMs }),
+    },
+  )
 }
 
 /**
@@ -218,10 +198,20 @@ export async function runAsUser<T>(
 ): Promise<T> {
   assertUserId(userId)
 
-  return client.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT set_config('app.current_user_id', ${userId}, true)`
-    return fn(tx)
-  }, transactionOptions(options))
+  return client.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.current_user_id', ${userId}, true)`
+      return fn(tx)
+    },
+    {
+      ...(options.timeoutMs === undefined
+        ? {}
+        : { timeout: options.timeoutMs }),
+      ...(options.maxWaitMs === undefined
+        ? {}
+        : { maxWait: options.maxWaitMs }),
+    },
+  )
 }
 
 export class InvalidUserIdError extends Error {
