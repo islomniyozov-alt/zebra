@@ -1,0 +1,68 @@
+# THE PRODUCTION SIGN-IN CHECK, ON A CLOCK.
+#
+# `npm run check:prod-signin` signs in to production once as the Live Check
+# account and FAILS if the sign-in does not complete or its first-query span
+# exceeds 3 s (AGENTS.md: production's Neon compute is always awake; a cold
+# start reads as 5 s or more). It is also the one instrument that exercises
+# every secret the Worker reads at request time from outside (GAPS 38).
+#
+# HOURLY FOR 24 HOURS AFTER THE HYPERDRIVE CUTOVER (owner's ruling 4,
+# 2026-10-26), then back to once a night: edit the cron below to
+# `'17 9 * * *'` when the window closes. Any `signin.error` or `unavailable`
+# on production in that window is a GAPS row and a report to the owner — not
+# a re-run.
+#
+# WHAT IT NEEDS, as repository secrets: PROD_CHECK_EMAIL and
+# PROD_CHECK_PASSWORD (the Live Check account, GAPS 8), CLOUDFLARE_TAIL_TOKEN
+# (tail scope only) and CLOUDFLARE_ACCOUNT_ID. Without them the check says
+# NOT OK by name, which is the right verdict for a check that cannot run.
+#
+# This workflow ships nothing and touches no database: it reads the worker
+# from outside, as a user would.
+name: production sign-in check
+
+on:
+  schedule:
+    # Hourly, at :17, for the 24 h after the cutover. Nightly afterwards.
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+# One check at a time, and never two tails on production (AGENTS.md).
+concurrency:
+  group: prod-signin
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx playwright install --with-deps chromium
+
+      - name: production sign-in
+        env:
+          PROD_CHECK_EMAIL: ${{ secrets.PROD_CHECK_EMAIL }}
+          PROD_CHECK_PASSWORD: ${{ secrets.PROD_CHECK_PASSWORD }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_TAIL_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          node scripts/run-status.mjs prod-signin -- npm run check:prod-signin > check.log 2>&1 || true
+          {
+            echo '## production sign-in'
+            echo
+            printf -- '- %s\n' "$(grep -E '^PRODUCTION SIGN-IN' check.log | tail -1 || echo 'no verdict line')"
+            printf -- '- wrapper: %s\n' "$(node scripts/run-status.mjs --check prod-signin | tail -1)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep -v -i 'password' check.log | tail -20
+          node scripts/run-status.mjs --check prod-signin
