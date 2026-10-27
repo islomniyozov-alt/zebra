@@ -45,7 +45,12 @@ jobs:
           node-version: '22'
           cache: npm
 
-      - run: npm ci
+      # NO POSTINSTALL. `npm ci` would run `prisma generate`, whose config
+      # refuses without NEON_BRANCH in a .env — the first run of this workflow
+      # (2026-10-27) died there. The check is a browser and a tail; it needs no
+      # Prisma client, no database and no .env, so the scripts are skipped and
+      # Playwright's browser is installed by name on the next line.
+      - run: npm ci --ignore-scripts
 
       - run: npx playwright install --with-deps chromium
 
