@@ -46,6 +46,16 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      sweep:
+        # THE NIGHTLY, BY HAND. `-f sweep=true` runs the six-role sweep in a
+        # dispatched run as the schedule would — added 2026-10-27 so the
+        # secrets GAPS 27 waited on could be proven the hour they landed
+        # rather than at the next 09:00 UTC. Everything else about the run is
+        # the push run: gate, then deploy dev.
+        description: 'Type true to run the nightly sweep of dev in this run'
+        required: false
+        default: 'false'
   schedule:
     # 04:00 Chicago. See the header: the nightly proves and sweeps, and
     # ships nothing.
@@ -361,7 +371,7 @@ jobs:
       # read back from the status file: `|| true` on the run is what lets
       # the file be the verdict instead of the shell.
       - name: nightly sweep of dev
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' || github.event.inputs.sweep == 'true'
         # GAPS 27. The six-role sweep (§6.8) signs in as every role and runs
         # `wrangler tail` for its whole length, and refuses without either —
         # so it has failed by name every night since 2026-10-10 on a runner
