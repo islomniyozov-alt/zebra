@@ -396,15 +396,21 @@ jobs:
         run: |
           set -euo pipefail
           npx playwright install --with-deps chromium
-          node scripts/run-status.mjs nightly-sweep -- npm run sweep > sweep.log 2>&1 || true
+          # THE LOG LIVES OUTSIDE THE TREE. On 2026-10-27 the first nightly run
+          # by hand swept clean and then failed its run: `sweep.log` sat
+          # untracked in the checkout and the deploy step's integration gate
+          # refused the dirty tree. The gate is right; the log was in the
+          # wrong place.
+          SWEEP_LOG="$RUNNER_TEMP/sweep.log"
+          node scripts/run-status.mjs nightly-sweep -- npm run sweep > "$SWEEP_LOG" 2>&1 || true
           {
             echo '## nightly'
             echo
             echo '- suite: green (this step does not run otherwise)'
             printf -- '- sweep: %s\n' "$(node scripts/run-status.mjs --check nightly-sweep | tail -1)"
-            printf -- '- %s\n' "$(grep -E '^SWEEP ' sweep.log | tail -1 || echo 'no sweep line')"
+            printf -- '- %s\n' "$(grep -E '^SWEEP ' "$SWEEP_LOG" | tail -1 || echo 'no sweep line')"
           } >> "$GITHUB_STEP_SUMMARY"
-          tail -40 sweep.log
+          tail -40 "$SWEEP_LOG"
           node scripts/run-status.mjs --check nightly-sweep
 
       # ── SHIPPING IS OPT-IN, BY A REPOSITORY VARIABLE ─────────────────
@@ -419,8 +425,10 @@ jobs:
       # allowed to move a worker. Set it to `true` when the runs are boring.
       - name: deploy dev
         # NEVER ON THE SCHEDULE. A nightly that redeployed the same sha would
-        # be a deploy nobody asked for, at an hour nobody is watching it.
-        if: vars.CI_DEPLOY == 'true' && github.event_name != 'schedule'
+        # be a deploy nobody asked for, at an hour nobody is watching it. A
+        # nightly run BY HAND (`-f sweep=true`) is the same run on a different
+        # clock and ships nothing either; the push run already deployed its sha.
+        if: vars.CI_DEPLOY == 'true' && github.event_name != 'schedule' && github.event.inputs.sweep != 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
