@@ -9,6 +9,8 @@ import {
   classify,
   credentialsFor,
   duplicateMatches,
+  FETCH_RETRY_AFTER_MS,
+  fetchTwice,
   knownGap,
   MATRIX_ROLES,
   markFor,
@@ -473,6 +475,90 @@ describe('a disagreement with the matrix', () => {
     expect(
       tally({ authed: [], anon: [], unresolved: [], findings }).problems,
     ).toBe(1)
+  })
+})
+
+// ── A FETCH THAT THROWS IS A FINDING, NOT A CRASH (nightly, 2026-10-27) ─────
+// The second nightly run by hand after GAPS 27 died on page nine with
+// `TypeError: fetch failed` (ECONNRESET) thrown through sweep(): 49 pages
+// unswept, nothing recorded. These hold the shape that replaces it.
+describe('a fetch that throws', () => {
+  const answer = { status: 200, body: 'ok', to: null, ray: 'r1' }
+  const reset = () =>
+    Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('read ECONNRESET'), {
+        code: 'ECONNRESET',
+      }),
+    })
+
+  it('is tried once more after a short wait, and the second answer is the answer', async () => {
+    let calls = 0
+    const waited: number[] = []
+    const got = await fetchTwice(
+      async () => {
+        calls += 1
+        if (calls === 1) throw reset()
+        return answer
+      },
+      async (ms) => {
+        waited.push(ms)
+      },
+    )
+    expect(got).toEqual(answer)
+    expect(calls).toBe(2)
+    expect(waited).toEqual([FETCH_RETRY_AFTER_MS])
+    expect(FETCH_RETRY_AFTER_MS).toBe(1_500)
+  })
+
+  it('after two throws is an UNREACHABLE answer — never a throw', async () => {
+    const got = await fetchTwice(
+      async () => {
+        throw reset()
+      },
+      async () => {},
+    )
+    expect(got.status).toBe(0)
+    expect(got.ray).toBeNull()
+    // The union narrows on the field itself: an answer has no `unreachable`.
+    expect('unreachable' in got && got.unreachable).toMatch(
+      /^ECONNRESET \(twice/,
+    )
+    expect(classify(got.status, got.body)).toBe('UNREACHABLE')
+    expect(markFor('UNREACHABLE')).toBe('FAIL ')
+  })
+
+  it('and the tally counts it as a problem, not as a page rendered', () => {
+    const sums = tally({
+      authed: [
+        { route: '/a', status: 200, verdict: 'ok' },
+        { route: '/b', status: 0, verdict: 'UNREACHABLE' },
+      ],
+      anon: [],
+      unresolved: [],
+    })
+    expect(sums.unreachable).toHaveLength(1)
+    expect(sums.rendered).toBe(1)
+    expect(sums.problems).toBe(1)
+  })
+
+  it('does not retry an answer — only a throw', async () => {
+    let calls = 0
+    const got = await fetchTwice(
+      async () => {
+        calls += 1
+        return { ...answer, status: 500, body: 'boom' }
+      },
+      async () => {},
+    )
+    expect(got.status).toBe(500)
+    expect(calls).toBe(1)
+  })
+
+  it('is what the sweep’s get() goes through', () => {
+    const script = readFileSync('scripts/sweep.mjs', 'utf8')
+    expect(script).toMatch(
+      /const get = async \(path, headers\) =>\s*fetchTwice\(async \(\) => \{\s*const response = await fetch\(/,
+    )
   })
 })
 

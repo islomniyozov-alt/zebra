@@ -193,6 +193,10 @@ export const markFor = (verdict) =>
   verdict === 'ok' ? 'ok   ' : verdict === 'redirect' ? 'redir' : 'FAIL '
 
 export const classify = (status, body) => {
+  // NO ANSWER AT ALL (status 0, from `fetchTwice` below): the runner could not
+  // reach the worker twice. A problem with the link, recorded against the
+  // route and role, never a pass — and never an abort of the whole sweep.
+  if (status === 0) return 'UNREACHABLE'
   if (status >= 500) return 'SERVER ERROR'
   if (BOUNDARY_WORDS.some((words) => body.includes(words)))
     return 'ERROR BOUNDARY'
@@ -207,6 +211,50 @@ export const classify = (status, body) => {
 
 /** How much of a failing page's body goes into the record. */
 export const BODY_BYTES = 2048
+
+// ── A FETCH THAT THROWS IS A FINDING, NOT A CRASH (nightly, 2026-10-27) ─────
+//
+// The first nightly sweep run by hand after GAPS 27 closed died on its ninth
+// page: `TypeError: fetch failed`, cause `read ECONNRESET`, from the runner
+// to dev's worker, thrown straight through `sweep()` — 49 pages unswept, no
+// verdict file, nothing recorded about the page it died on. One reset on a
+// 400-request sweep is the link, not the page. So an attempt that throws is
+// made once more after a short wait; if it throws again, the answer is a
+// status-0 record that `classify` names UNREACHABLE and the sweep counts as a
+// problem against that route and role, and goes on.
+
+/** How long to wait before the second attempt. */
+export const FETCH_RETRY_AFTER_MS = 1_500
+
+/**
+ * `attempt()` once, and once more after a throw; after two throws, the
+ * unreachable answer with the error's code. Never throws itself.
+ * @param {() => Promise<{status:number, body:string, to:string|null, ray:string|null}>} attempt
+ * @param {(ms:number) => Promise<void>} [wait]
+ */
+export async function fetchTwice(
+  attempt,
+  wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+) {
+  try {
+    return await attempt()
+  } catch (first) {
+    await wait(FETCH_RETRY_AFTER_MS)
+    try {
+      return await attempt()
+    } catch (second) {
+      const code =
+        second?.cause?.code ?? second?.code ?? second?.message ?? String(second)
+      return {
+        status: 0,
+        body: '',
+        to: null,
+        ray: null,
+        unreachable: `${String(code)} (twice; first: ${first?.cause?.code ?? first?.message ?? first})`,
+      }
+    }
+  }
+}
 
 /** The verdicts that are the server's failure, whatever the status line says. */
 export const isServerError = (verdict) =>
@@ -435,6 +483,9 @@ export const tally = ({ authed, anon, unresolved, findings = [] }) => {
     row.verdict.startsWith('CLIENT ERROR'),
   )
   const redirects = authed.filter((row) => row.verdict === 'redirect')
+  // No answer twice (`fetchTwice`): the link's failure, counted against the
+  // page like any other problem and never among the pages rendered.
+  const unreachable = authed.filter((row) => row.verdict === 'UNREACHABLE')
   const unrefused = anon.filter((row) => !row.refused)
   // THE MATRIX'S NEW DISAGREEMENTS. An owner page that errored or refused is
   // already counted above, so it is not counted twice here.
@@ -451,10 +502,15 @@ export const tally = ({ authed, anon, unresolved, findings = [] }) => {
   )
   return {
     rendered:
-      authed.length - errors.length - clientErrors.length - redirects.length,
+      authed.length -
+      errors.length -
+      clientErrors.length -
+      redirects.length -
+      unreachable.length,
     errors,
     clientErrors,
     redirects,
+    unreachable,
     unrefused,
     unresolved,
     known,
@@ -462,6 +518,7 @@ export const tally = ({ authed, anon, unresolved, findings = [] }) => {
     problems:
       errors.length +
       clientErrors.length +
+      unreachable.length +
       unrefused.length +
       unresolved.length +
       fresh.length,
@@ -845,24 +902,25 @@ async function sweep() {
   const cookie = cookies.owner
   await browser.close()
 
-  const get = async (path, headers) => {
-    const response = await fetch(new URL(path, BASE), {
-      headers,
-      redirect: 'manual',
+  const get = async (path, headers) =>
+    fetchTwice(async () => {
+      const response = await fetch(new URL(path, BASE), {
+        headers,
+        redirect: 'manual',
+      })
+      // A 5xx body is read too: it is half of what a server error is recorded
+      // with, and the ray is the other half.
+      const body =
+        response.status < 300 || response.status >= 500
+          ? await response.text()
+          : ''
+      return {
+        status: response.status,
+        body,
+        to: response.headers.get('location'),
+        ray: response.headers.get('cf-ray'),
+      }
     })
-    // A 5xx body is read too: it is half of what a server error is recorded
-    // with, and the ray is the other half.
-    const body =
-      response.status < 300 || response.status >= 500
-        ? await response.text()
-        : ''
-    return {
-      status: response.status,
-      body,
-      to: response.headers.get('location'),
-      ray: response.headers.get('cf-ray'),
-    }
-  }
 
   const authed = []
   const anon = []
@@ -885,7 +943,15 @@ async function sweep() {
 
     const withSession = await get(path, { cookie })
     const verdict = classify(withSession.status, withSession.body)
-    authed.push({ route, path, status: withSession.status, verdict })
+    authed.push({
+      route,
+      path,
+      status: withSession.status,
+      verdict,
+      ...(withSession.unreachable
+        ? { unreachable: withSession.unreachable }
+        : {}),
+    })
     if (isServerError(verdict))
       serverErrors.push(
         serverErrorRecord({
@@ -1011,6 +1077,10 @@ async function sweep() {
   for (const row of sums.clientErrors)
     console.log(`   ${row.verdict}: ${row.route}`)
   for (const row of sums.errors) console.log(`   ${row.verdict}: ${row.route}`)
+  for (const row of sums.unreachable)
+    console.log(
+      `   UNREACHABLE: ${row.route} — ${row.unreachable ?? 'no answer twice'}`,
+    )
   for (const row of sums.unrefused) console.log(`   NOT REFUSED: ${row.route}`)
   console.log(
     `ROUTE MATRIX (§6.8): ${seen.length / MATRIX_ROLES.length} page(s) x ${MATRIX_ROLES.length} roles; ` +
