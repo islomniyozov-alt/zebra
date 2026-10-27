@@ -24,19 +24,35 @@ describe('the nightly', () => {
     )
   })
 
-  it('never deploys on the schedule', () => {
+  it('never deploys on the schedule, nor on a nightly run by hand', () => {
+    // A dispatched run with `sweep=true` is the nightly on a different clock
+    // (2026-10-27): the push run already deployed its sha, and the first such
+    // run proved what a deploy after the sweep does — refuses the tree the
+    // sweep had dirtied. So it ships nothing either.
     expect(step('deploy dev')).toContain(
-      "if: vars.CI_DEPLOY == 'true' && github.event_name != 'schedule'",
+      "if: vars.CI_DEPLOY == 'true' && github.event_name != 'schedule' && github.event.inputs.sweep != 'true'",
     )
   })
 
-  it('sweeps dev on the schedule only, and reads the verdict from the file', () => {
+  it('can be run by hand, through one named input and nothing else', () => {
+    expect(ci).toMatch(
+      /\n  workflow_dispatch:\n    inputs:\n      sweep:\n(?:\s+#.*\n)*\s+description: .*\n\s+required: false\n\s+default: 'false'\n/,
+    )
+  })
+
+  it('sweeps dev on the schedule or when asked by name, and reads the verdict from the file', () => {
     const sweep = step('nightly sweep of dev')
-    expect(sweep).toContain("if: github.event_name == 'schedule'")
+    expect(sweep).toContain(
+      "if: github.event_name == 'schedule' || github.event.inputs.sweep == 'true'",
+    )
     expect(sweep).toContain('run-status.mjs nightly-sweep -- npm run sweep')
     // THE FILE IS THE VERDICT: the run is allowed to "fail" the shell, and the
-    // step's own exit comes from `--check` reading the status file.
-    expect(sweep).toMatch(/npm run sweep > sweep\.log 2>&1 \|\| true/)
+    // step's own exit comes from `--check` reading the status file. THE LOG
+    // LIVES OUTSIDE THE TREE: a `sweep.log` in the checkout dirtied the tree
+    // for the step after it (2026-10-27).
+    expect(sweep).toMatch(/SWEEP_LOG="\$RUNNER_TEMP\/sweep\.log"/)
+    expect(sweep).toMatch(/npm run sweep > "\$SWEEP_LOG" 2>&1 \|\| true/)
+    expect(sweep).not.toMatch(/> sweep\.log/)
     // THE LAST COMMAND OF THE STEP, after the comment block that introduces
     // the next step is set aside: a `--check` that was followed by anything
     // would hand the step's exit code to that something.
