@@ -6,10 +6,14 @@
 # start reads as 5 s or more). It is also the one instrument that exercises
 # every secret the Worker reads at request time from outside (GAPS 38).
 #
-# HOURLY FOR 24 HOURS AFTER THE HYPERDRIVE CUTOVER (owner's ruling 4,
-# 2026-10-26), then back to once a night: edit the cron below to
-# `'17 9 * * *'` when the window closes. Any `signin.error` or `unavailable`
-# on production in that window is a GAPS row and a report to the owner — not
+# ONCE A NIGHT (owner's ruling 7, 2026-10-28). It was hourly for the 24 h
+# after the Hyperdrive cutover (ruling 4, 2026-10-26); GitHub's cron is
+# best-effort and delivered four of those slots — 21:16, 00:33, 06:50 UTC and
+# one run by hand — all clean (first query 119 / 532 / 363 / 432 ms), and the
+# window closed on the runs that fell. So NO WATCH DEPENDS ON THIS SCHEDULE
+# ALONE: the nightly `ci.yml` carries the same check as a step of its own,
+# and the run list, not the clock, is what gets read. Any `signin.error` or
+# `unavailable` on production is a GAPS row and a report to the owner — not
 # a re-run.
 #
 # WHAT IT NEEDS, as repository secrets: PROD_CHECK_EMAIL and
@@ -23,8 +27,9 @@ name: production sign-in check
 
 on:
   schedule:
-    # Hourly, at :17, for the 24 h after the cutover. Nightly afterwards.
-    - cron: '17 * * * *'
+    # 09:17 UTC, seventeen minutes after the nightly ci.yml starts — so the
+    # two production tails of the night are never open at once.
+    - cron: '17 9 * * *'
   workflow_dispatch:
 
 # One check at a time, and never two tails on production (AGENTS.md).

@@ -116,22 +116,31 @@ Rules that are cheap to state and expensive to rediscover:
   — a binding that is production's id, or no binding — never dev's id.
   So the rollback, from a clean tree on `main`:
 
-      node scripts/hyperdrive-unbind.mjs \
-        && git commit -am "Rollback: production off Hyperdrive (unbind env.production)" \
-        && git push origin main \
-        && gh workflow run deploy-production.yml --ref main -f confirm=production
+          node scripts/hyperdrive-unbind.mjs \
+            && git commit -am "Rollback: production off Hyperdrive (unbind env.production)" \
+            && git push origin main \
+            && gh workflow run deploy-production.yml --ref main -f confirm=production
 
   The script removes exactly that block and refuses if it is not there;
   CI gates the push as always (about ten minutes), production follows.
   There is nothing else to change: no secret, no code, no test.
 
-  AND FOR 24 HOURS AFTER THE CUTOVER THE PRODUCTION SIGN-IN CHECK RUNS
-  HOURLY (`.github/workflows/prod-signin.yml`, owner's ruling 4), then
-  goes back to once a night. Any `signin.error` or `unavailable` on
-  production in that window is a GAPS row and a report to the owner — not
-  a re-run. The check needs `PROD_CHECK_EMAIL` / `PROD_CHECK_PASSWORD`
-  and the tail token as repository secrets, and says NOT OK by name
-  without them.
+  AND THE PRODUCTION SIGN-IN CHECK RUNS EVERY NIGHT, TWICE, FROM TWO
+  SCHEDULES — because GITHUB'S CRON IS BEST-EFFORT AND NO WATCH MAY DEPEND
+  ON IT ALONE. Owner's ruling 7, 2026-10-28. The 24 h hourly watch after
+  the cutover (ruling 4) was delivered by GitHub as four runs, not
+  twenty-four: 21:16, 00:33 and 06:50 UTC fired, 22:17 and 23:17 and most
+  of the rest did not, with the workflow active the whole time. All four
+  (one by hand) were clean, and the window closed on the runs that fell.
+  So `.github/workflows/prod-signin.yml` runs at 09:17 UTC on its own cron,
+  AND the nightly `ci.yml` carries `check:prod-signin` as a step of its own
+  after the sweep, with its own verdict, run even when the sweep was NOT
+  OK. What gets read is the RUN LIST — the workflow's runs as `gh run list`
+  prints them — never the clock: a slot that did not fire is a gap to
+  name, not a pass. Any `signin.error` or `unavailable` on production is a
+  GAPS row and a report to the owner — not a re-run. Both need
+  `PROD_CHECK_EMAIL` / `PROD_CHECK_PASSWORD` and the tail token as
+  repository secrets, and say NOT OK by name without them.
 
 - Prisma 7 syntax. The datasource block has no `url` on purpose and
   `driverAdapters` is no longer a preview feature. Do not "fix" either back.
