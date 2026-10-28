@@ -413,6 +413,34 @@ jobs:
           tail -40 "$SWEEP_LOG"
           node scripts/run-status.mjs --check nightly-sweep
 
+      # THE PRODUCTION SIGN-IN, EVERY NIGHT, IN THIS RUN (owner's ruling 7,
+      # 2026-10-28). `prod-signin.yml` has its own cron, and GitHub's cron is
+      # best-effort: on 2026-10-27 it skipped the 22:17 and 23:17 slots of an
+      # hourly watch. So no watch depends on one schedule alone — the nightly
+      # that already proves and sweeps also signs in to production once, with
+      # its own verdict. It reads the worker from outside through the tail
+      # token (the only caller allowed a tail on production: AGENTS.md); it
+      # needs PROD_CHECK_EMAIL / PROD_CHECK_PASSWORD and says NOT OK by name
+      # without them. It runs even when the sweep step above was NOT OK:
+      # production's answer is worth reading whatever dev did.
+      - name: nightly production sign-in
+        if: always() && (github.event_name == 'schedule' || github.event.inputs.sweep == 'true')
+        env:
+          PROD_CHECK_EMAIL: ${{ secrets.PROD_CHECK_EMAIL }}
+          PROD_CHECK_PASSWORD: ${{ secrets.PROD_CHECK_PASSWORD }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_TAIL_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          PROD_LOG="$RUNNER_TEMP/prod-signin.log"
+          node scripts/run-status.mjs nightly-prod-signin -- npm run check:prod-signin > "$PROD_LOG" 2>&1 || true
+          {
+            printf -- '- production sign-in: %s\n' "$(grep -E '^PRODUCTION SIGN-IN' "$PROD_LOG" | tail -1 || echo 'no verdict line')"
+            printf -- '- wrapper: %s\n' "$(node scripts/run-status.mjs --check nightly-prod-signin | tail -1)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep -v -i 'password' "$PROD_LOG" | tail -20
+          node scripts/run-status.mjs --check nightly-prod-signin
+
       # ── SHIPPING IS OPT-IN, BY A REPOSITORY VARIABLE ─────────────────
       #
       # `CI_DEPLOY` is a repository VARIABLE (Settings -> Secrets and
