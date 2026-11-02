@@ -296,8 +296,14 @@ export default async function BatchPage({
     />
   )
 
+  // THE PAGE IS THE SCROLL REGION, as every other page under the shell is
+  // (§6.1: content is the only scrolling region; layout.tsx is h-screen +
+  // overflow-hidden). Without min-h-0 / flex-1 / overflow-y-auto this column
+  // grew to its trips (~4,300 px for fifty) and the shell clipped the rest:
+  // no scrollbar at 100% zoom, the remaining rows reachable only by zooming
+  // out (2026-11-02).
   return (
-    <div className="flex flex-col gap-z5 p-z5">
+    <div className="flex min-h-0 flex-1 flex-col gap-z5 overflow-y-auto p-z5">
       <header className="flex flex-wrap items-baseline gap-z3">
         <h1 className="font-mono text-lg font-medium text-ink">
           {batch.batchNumber ?? batch.status}
