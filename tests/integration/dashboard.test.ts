@@ -269,7 +269,7 @@ describe('the fleet at a glance', () => {
 describe('this week, per authority', () => {
   it('gives every authority a row, including one that hauled nothing', async () => {
     const week = await inOrg((tx) =>
-      thisWeek(tx, [alphaId, betaId], new Date('2026-11-05T12:00:00Z')),
+      thisWeek(tx, [alphaId, betaId], new Date('2031-11-06T12:00:00Z')),
     )
 
     // A MISSING row reads as a bug; a zero reads as a quiet week.
@@ -286,13 +286,20 @@ describe('this week, per authority', () => {
       transitionOperational(tx, load.id, 'DELIVERED', {
         source: 'MANUAL',
         userId,
-        occurredAt: new Date(Date.UTC(2026, 10, 4, 9, 0)),
+        occurredAt: new Date(Date.UTC(2031, 10, 5, 9, 0)),
       }),
     )
 
-    // Wednesday 4 November 2026 is in the week beginning Monday the 2nd.
+    // A WEEK THE CLOCK WILL NOT REACH. These tests pinned the week beginning
+    // Monday 2 November 2026 while that week was in the future; the rest of
+    // this file delivers its loads at `now`, and on 2026-11-02 the clock
+    // walked into the pinned week — CI counted the whole file's deliveries
+    // here (395,000 cents against 150,000) and the gate went red on a sha
+    // that touched one page's CSS. Wednesday 5 November 2031 is in the week
+    // beginning Monday the 3rd; nothing else in this file, and no `now` for
+    // five years, lands in it.
     const inWeek = await inOrg((tx) =>
-      thisWeek(tx, [alphaId], new Date('2026-11-06T12:00:00Z')),
+      thisWeek(tx, [alphaId], new Date('2031-11-07T12:00:00Z')),
     )
     expect(inWeek[0]).toMatchObject({
       delivered: 1,
@@ -309,14 +316,14 @@ describe('this week, per authority', () => {
     // The following week does not see it — revenue is earned when the freight
     // moves, and it moves once.
     const nextWeek = await inOrg((tx) =>
-      thisWeek(tx, [alphaId], new Date('2026-11-13T12:00:00Z')),
+      thisWeek(tx, [alphaId], new Date('2031-11-14T12:00:00Z')),
     )
     expect(nextWeek[0]).toMatchObject({ delivered: 0, revenueCents: 0 })
   }, 300_000)
 
   it('keeps the two authorities apart', async () => {
     const week = await inOrg((tx) =>
-      thisWeek(tx, [alphaId, betaId], new Date('2026-11-06T12:00:00Z')),
+      thisWeek(tx, [alphaId, betaId], new Date('2031-11-07T12:00:00Z')),
     )
     const alpha = week.find((row) => row.companyId === alphaId)
     const beta = week.find((row) => row.companyId === betaId)
