@@ -318,8 +318,14 @@ describe('what a Gemini call costs', () => {
 // THE FALLBACK (owner's ruling, after a 429 stopped a walkthrough).
 //
 // A quota or a dropped connection means nobody read the document, and retrying
-// on Sonnet beats telling a dispatcher to try again. A BAD ANSWER is not an
-// outage — that is the pair, and it is the whole rule.
+// on the fallback beats telling a dispatcher to try again. A BAD ANSWER is not
+// an outage — that is the pair, and it is the whole rule.
+//
+// THESE RUN WITH NO PROVIDER NAMED, so the fallback is the floor — Sonnet.
+// Both deployed workers name DeepSeek through `LLM_FALLBACK_PROVIDER` (owner's
+// ruling 2026-11-05); `tests/llm-provider.test.ts` holds that, reading
+// `wrangler.jsonc`. What is asserted here is the RULE — when the fallback
+// fires and when it does not — not where it lands.
 // ---------------------------------------------------------------------------
 
 /** A spy whose first call fails and whose second succeeds. */

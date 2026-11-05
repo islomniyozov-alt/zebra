@@ -372,7 +372,9 @@ describe('the shipped default', () => {
     )
   })
 
-  it('and Sonnet stays priced, because it stays the fallback', () => {
+  it('and Sonnet stays priced, because a NAMED read may still ask for it', () => {
+    // No longer the fallback on either worker (owner's ruling 2026-11-05,
+    // `tests/llm-provider.test.ts`), still allowlisted for the accuracy run.
     expect(MODEL_PRICES['claude-sonnet-5']).toEqual({
       input: 300,
       output: 1_500,

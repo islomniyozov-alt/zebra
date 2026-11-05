@@ -22,9 +22,11 @@
  *
  * GEMINI 3.6 FLASH SINCE THE ENGINE TABLE (owner's ruling, 2026-08-11): 94.5%
  * on the invoice-making fields against Sonnet's 96.6%, no refusals across the
- * corpus, and roughly a quarter of the cost. Sonnet stays allowlisted as the
- * fallback — one word in this constant moves the whole pipeline back, and the
- * adapter seam means nothing else changes when it does.
+ * corpus, and roughly a quarter of the cost. Sonnet stays allowlisted for a
+ * NAMED read; the fallback is whatever `LLM_FALLBACK_PROVIDER` names — DeepSeek
+ * on both workers since 2026-11-05 (`fallbackProviderFor`, model-engine.ts).
+ * One word in this constant moves the whole pipeline, and the adapter seam
+ * means nothing else changes when it does.
  */
 export const EXTRACTION_MODEL = 'gemini-3.6-flash'
 
@@ -212,6 +214,23 @@ export function configuredProvider(
       ? { name: providerVarFor(kind as ReadKind), value: named }
       : { name: 'LLM_PROVIDER', value: env.LLM_PROVIDER }
 
+  return providerNamed(source)
+}
+
+/**
+ * One variable's value as a provider — THE ONE PLACE THE WORDS ARE PARSED.
+ *
+ * `configuredProvider` (the primary: per type, or the floor) and
+ * `fallbackProviderFor` in `model-engine.ts` both come here, so a misspelling
+ * refuses the same way wherever it was found, naming the variable it was
+ * found in. Empty is ANTHROPIC, the floor; the CALLER decides whether an
+ * empty value means "the floor" or "ask something else first", because the
+ * two variables answer that differently.
+ */
+export function providerNamed(source: {
+  name: string
+  value: string | undefined
+}): LlmProvider {
   const raw = (source.value ?? '').trim().toUpperCase()
   if (raw === '' || raw === 'ANTHROPIC') return 'ANTHROPIC'
   if (raw === 'DEEPSEEK') return 'DEEPSEEK'
@@ -222,19 +241,24 @@ export function configuredProvider(
 }
 
 /**
- * What the configured provider sends this document to.
+ * The model a provider sends this media type to — the one mime→model rule.
  *
  * A PDF GOES TO THE VISION MODEL. It is not text — it is a page, and on
  * DeepSeek the text model cannot see one. Only a `text/plain` paste, which is
  * already language, takes the text model.
  */
+export function modelOf(provider: LlmProvider, mimeType: string): string {
+  const config = PROVIDERS[provider]
+  return mimeType === 'text/plain' ? config.textModel : config.visionModel
+}
+
+/** What the configured provider sends this document to. */
 export function defaultModelFor(
   mimeType: string,
   kind: ReadKind | null = null,
   env: Record<string, string | undefined> = process.env,
 ): string {
-  const provider = PROVIDERS[configuredProvider(kind, env)]
-  return mimeType === 'text/plain' ? provider.textModel : provider.visionModel
+  return modelOf(configuredProvider(kind, env), mimeType)
 }
 
 /** What the response may cost. Generous for a rate confirmation; finite. */
@@ -506,7 +530,10 @@ export type ClaudeFailure =
   | 'pdf_not_supported'
   /** A model name nothing in `ALLOWED_MODELS` covers. Configuration, not luck. */
   | 'unknown_model'
-  /** `LLM_PROVIDER` set to something that is not a provider. */
+  /**
+   * `LLM_PROVIDER`, `LLM_PROVIDER_<KIND>` or `LLM_FALLBACK_PROVIDER` set to
+   * something that is not a provider. The message names which.
+   */
   | 'unknown_provider'
   | 'document_too_large'
   | 'unsupported_media_type'

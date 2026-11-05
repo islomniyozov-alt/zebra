@@ -166,6 +166,22 @@
     // all-null extraction on a substantial document is reported as "read
     // nothing" by every reader that can tell the difference.
 
+    // ── THE FALLBACK IS DEEPSEEK, BY ITS OWN VARIABLE (owner's ruling,
+    // 2026-11-05) ──────────────────────────────────────────────────────
+    //
+    // The Anthropic console key was disabled on 2026-11-02. Readers stay on
+    // Gemini — `LLM_PROVIDER` and the per-type variables above stay UNSET,
+    // because they move the PRIMARY read (`askModel` resolves the default
+    // through `explicitProviderFor`) — and a Gemini outage lands on DeepSeek
+    // instead of a dead key. Read by `fallbackProviderFor`
+    // (src/lib/model-engine.ts). ABSENT would mean the configured provider,
+    // i.e. the ANTHROPIC floor, which `tests/llm-provider.test.ts` refuses on
+    // either worker by reading this file. The key is DEEPSEEK_API_KEY, a
+    // secret. A PDF never goes to the fallback — it does not read them, the
+    // freeze above — and is reported as the outage; images and pastes do.
+    // EXTRACTION-CONTRACT.md, "Which provider answers", has the whole rule.
+    "LLM_FALLBACK_PROVIDER": "DEEPSEEK",
+
     // Where password-reset links point. A deployment fact, not a request
     // fact: taken from the Host header, a worker reached through a preview
     // URL would mint links back to the preview.
@@ -234,15 +250,19 @@
         "NEON_BRANCH": "production",
         "R2_BUCKET": "zebra-docs",
 
-        // NO PROVIDER VARIABLES HERE EITHER (owner's ruling, 2026-09-12).
+        // NO PRIMARY PROVIDER VARIABLE HERE (owner's ruling, 2026-09-12).
+        // `LLM_PROVIDER` and `LLM_PROVIDER_<KIND>` stay absent, so every read
+        // is `EXTRACTION_MODEL` — Gemini. When a switch is ruled, it is
+        // `LLM_PROVIDER_<KIND>` added here, one line naming one document type,
+        // visible in the diff.
         //
-        // Bindings do not come down into a named environment, so this block
-        // would have needed its own copy of every one of them — and the point
-        // of this deploy is that NOTHING SWITCHES. Absent resolves to
-        // ANTHROPIC, which is where production already reads.
-        //
-        // When a switch is ruled, it is `LLM_PROVIDER_<KIND>` added here, one
-        // line naming one document type, visible in the diff.
+        // THE FALLBACK IS NAMED HERE TOO, because `vars` do not come down into
+        // a named environment: production has its OWN line (owner's ruling,
+        // 2026-11-05 — the Anthropic key is dead; the dev block above has the
+        // reasoning). `tests/llm-provider.test.ts` reads THIS block, not the
+        // top level, for production. (No trailing comment on the value line:
+        // `parseWranglerConfig` strips whole-line comments only.)
+        "LLM_FALLBACK_PROVIDER": "DEEPSEEK",
         // NOT CREDENTIALS, AND THEREFORE NOT SECRETS. The account id is
         // printed by `wrangler whoami` and the endpoint is derived from it;
         // neither protects anything. Only R2_ACCESS_KEY_ID and
