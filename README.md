@@ -155,31 +155,31 @@ Each step assumes the ones above it.
    printf '%s\n' "<secret>"  | npx wrangler secret put R2_SECRET_ACCESS_KEY --env production
    printf '%s\n' "<url>"     | npx wrangler secret put R2_ENDPOINT         --env production
    printf '%s\n' "<key>"     | npx wrangler secret put RESEND_API_KEY      --env production
-   printf '%s
-   ' "<key>"     | npx wrangler secret put ANTHROPIC_API_KEY   --env production
+   printf '%s\n' "<key>"     | npx wrangler secret put GEMINI_API_KEY      --env production
+   printf '%s\n' "<key>"     | npx wrangler secret put DEEPSEEK_API_KEY    --env production
    ```
 
-   `ANTHROPIC_API_KEY` arrived with Phase 5. Without it the extraction service
-   throws `no_api_key` by name rather than returning empty extractions that
-   look like documents nothing could be read from — the same discipline as
-   `RESEND_API_KEY`, and for the same reason. The dev worker needs it too, with
-   the flag omitted:
+   **Two model keys, both workers** (`EXTRACTION-CONTRACT.md`, "Which provider
+   answers"). `GEMINI_API_KEY` is what every reader uses — production has read
+   on Gemini since the engine table (2026-08-11), and the earlier version of
+   this paragraph calling it "experiment-only, dev alone" was stale from that
+   day. `DEEPSEEK_API_KEY` is the fallback's key: `LLM_FALLBACK_PROVIDER` is
+   `DEEPSEEK` in `wrangler.jsonc` on both workers (owner's ruling 2026-11-05),
+   so a Gemini outage on an image or a paste is read by DeepSeek. Without
+   either key the service throws `no_api_key` NAMING THE VARIABLE rather than
+   returning empty extractions that look like documents nothing could be read
+   from — the same discipline as `RESEND_API_KEY`, and for the same reason.
+   The dev worker needs both too, with the flag omitted:
 
    ```bash
-   printf '%s
-   ' "<key>" | npx wrangler secret put ANTHROPIC_API_KEY
+   printf '%s\n' "<key>" | npx wrangler secret put GEMINI_API_KEY
+   printf '%s\n' "<key>" | npx wrangler secret put DEEPSEEK_API_KEY
    ```
 
-   `GEMINI_API_KEY` is **experiment-only** and is needed on the DEV worker
-   alone. It exists so the corpus table can be run against Gemini beside
-   Anthropic; nothing in the shipped path asks for it, and without it a Gemini
-   model answers `no_api_key` by name exactly as Anthropic's does. Production
-   does not need it unless the owner rules for Gemini.
-
-   ```bash
-   printf '%s
-   ' "<key>" | npx wrangler secret put GEMINI_API_KEY
-   ```
+   `ANTHROPIC_API_KEY` is NOT in this list any more. The console key was
+   disabled on 2026-11-02 and nothing in the shipped path resolves to
+   Anthropic — `tests/llm-provider.test.ts` fails if either worker's `vars`
+   ever do. GAPS 40 records the order in which the secret leaves both workers.
 
    `DATABASE_URL` is `zebra_app` at the **pooled** production endpoint.
    `sslmode=require&channel_binding=require` is what Neon hands you and it is

@@ -142,8 +142,9 @@ documents are 12 loads.
   walkthrough passes 11/11 on Gemini.
 
   The owner ruled that the answer is not a bigger quota but a fallback:
-  **`askModel` retries on Sonnet when the default engine cannot answer**, and
-  the swap is recorded rather than silent. `AskResult.fellBackFrom` carries who
+  **`askModel` retries on the fallback provider when the default engine cannot
+  answer** — Sonnet when this was written, DeepSeek since 2026-11-05 (the next
+  section) — and the swap is recorded rather than silent. `AskResult.fellBackFrom` carries who
   was asked, why they failed and with what status; it is persisted into
   `extractedJson` beside the model that did answer, returned on the wire, and
   counted by the accuracy run — because a default-model column could otherwise
@@ -161,6 +162,61 @@ documents are 12 loads.
   measurement column cannot secretly become Sonnet; and a parse failure cannot
   reach the fallback at all, because parsing happens downstream — asserted
   anyway, since "it cannot happen" is a claim with a history.
+
+### Which provider answers, and who the fallback is (owner's ruling, 2026-11-05)
+
+Three facts, in the order they are decided. GAPS 40 holds the order of the
+secret changes that follow from them.
+
+- **Every reader asks Gemini first, on both workers.** `EXTRACTION_MODEL` is
+  `gemini-3.6-flash`; every reader passes a `kind` and names no model; a named
+  model (the accuracy run's one knob) never falls back. `LLM_PROVIDER` and the
+  per-type `LLM_PROVIDER_<KIND>` stay UNSET on both workers, because they move
+  the PRIMARY read — `askModel` resolves the default through
+  `explicitProviderFor`, which is the 2026-09-13 fix for the inert variable —
+  and a production block that set `LLM_PROVIDER=DEEPSEEK` would have moved
+  every read onto DeepSeek and refused every PDF. Unchanged, and now pinned:
+  `tests/llm-provider.test.ts` resolves the default model for every read kind
+  and every media type from each worker's own `vars` and fails by name if any
+  of them is not a Gemini model.
+
+- **The fallback is DeepSeek, named by its own variable on both workers.**
+  `LLM_FALLBACK_PROVIDER=DEEPSEEK` is a `vars` line in `wrangler.jsonc` —
+  once at the top level (dev) and once under `env.production`, because `vars`
+  do not inherit into a named environment. A Gemini outage on an image or a
+  paste lands on `deepseek-v4-flash-vision-exp` / `deepseek-v4-pro`, billed
+  to DeepSeek, keyed by `DEEPSEEK_API_KEY`, and `AskResult.fellBackFrom`
+  records the swap as before. **Anthropic is no longer a fallback anywhere**:
+  the console key was disabled on 2026-11-02, and from that day until this
+  ruling shipped, both workers resolved their fallback to `claude-sonnet-5`
+  through the unset floor — so every Gemini outage would have answered with a
+  401 from a dead key. The floor itself is unchanged (unset is still
+  ANTHROPIC, a misspelling still refuses by name — owner's ruling 2026-09-12),
+  which is why the deployment is pinned by the test rather than by the code:
+  the same test fails by name if the fallback provider for any read kind, or
+  the fallback model for an image, a PDF or a paste, resolves to ANTHROPIC on
+  either worker. When `LLM_FALLBACK_PROVIDER` is absent the fallback is the
+  configured provider, as it always was — so a worker that names nothing
+  behaves exactly as before, and the test is what says that is not allowed
+  here.
+
+- **A PDF never reaches the fallback, because the fallback does not read
+  PDFs.** `readsPdf: false` on DeepSeek is the measurement above (13 rate
+  confirmations, 0.0% by answering) and stays. So a Gemini outage on a rate
+  confirmation or a certificate of insurance is reported as THE OUTAGE —
+  `http_error` with Gemini's status, the message saying that the fallback
+  was refused before anything was sent — and the reader classifies it
+  `call_failed`, "try again", which is the truth: nobody read the document,
+  and photographing it again would not help. DeepSeek is billed nothing; the
+  one network call is Gemini's. Held by the same test, with the harness
+  forcing the 429 — never by taking Gemini down on a worker.
+
+What this leaves as it was: the DeepSeek rows in `MODEL_PRICES` at the peak
+rate, so a fallback read's cost is an upper bound; the per-type seam; the
+refusal of a typo by name. What it corrects beside itself: `GEMINI_API_KEY`
+is REQUIRED on both workers and has been since production moved to Gemini —
+the README's "experiment-only, dev alone" line was stale and is fixed in the
+same commit.
 
 ---
 
