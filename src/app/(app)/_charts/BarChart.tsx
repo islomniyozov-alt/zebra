@@ -1,5 +1,5 @@
 import { formatCents } from '@/lib/money'
-import { ChartLegend } from './ChartLegend'
+import { ChartLegend, HATCH } from './ChartLegend'
 
 // ---------------------------------------------------------------------------
 // THE BAR CHART. HTML AND CSS. §6.1.1 as amended 2026-10-02.
@@ -25,12 +25,26 @@ import { ChartLegend } from './ChartLegend'
 // maximum would draw a $30k pay bar as tall as a $100k gross bar, which is the
 // misreading the chart exists to prevent.
 //
-// ── A BUCKET WITH UNKNOWN PAY IS HATCHED, NOT ZEROED ─────────────────────
+// ── UNKNOWN PAY IS HATCHED, NOT ZEROED — AND THE GROSS STAYS SOLID ───────
 //
 // `driverPayCents` is null before Zebra was settling. A zero-height pay bar
 // would say that freight cost nothing to drive — §6.1.1 calls it the most
-// expensive wrong number on the page — so the gross bar is hatched instead and
+// expensive wrong number on the page — so the PAY SLOT is hatched instead and
 // the legend says what the hatch means.
+//
+// Owner's second-round review on dev, 2026-11-06: until then the whole gross
+// bar was hatched and dimmed, so a figure the carrier knows exactly read as
+// doubtful. The doubt is the pay's alone. The gross bar is always solid; the
+// pay slot (the half-width grey bar known buckets carry) is drawn hatched TO
+// THE GROSS BAR'S TOP, because unknown pay has no height of its own and any
+// guessed height would be a number.
+//
+// ── THE LEGEND IS UNDER THE X AXIS ───────────────────────────────────────
+//
+// Same review. The value above the tallest bar sits in the 12px above the
+// plot, which is where a legend above the plot sat, so the two met on every
+// period. The labels were the owner's own review (2026-10-02); the legend
+// moved.
 // ---------------------------------------------------------------------------
 
 export interface Bar {
@@ -138,7 +152,6 @@ export function BarChart({ bars, locale, labels }: Props) {
   return (
     <div>
       <h3 className="text-sm font-medium text-ink">{labels.heading}</h3>
-      {legend}
 
       {/* THE EMPTY CASE KEEPS THE AXIS AND THE LEGEND and says what is absent.
        * Never a blank panel, never "No data available" (§14). */}
@@ -190,25 +203,28 @@ export function BarChart({ bars, locale, labels }: Props) {
                           ? 'w-full rounded-t-[2px] border-t-2 border-dashed border-accent'
                           : 'w-full rounded-t-[2px]'
                       }
+                      // ALWAYS SOLID. The gross is a figure the carrier knows
+                      // exactly; the doubt below belongs to the pay alone.
                       style={{
                         height: `${String(height(bar.grossCents))}%`,
                         backgroundColor: 'var(--color-accent)',
-                        // HATCHED WHERE PAY IS UNRECORDED, and dimmed, so the
-                        // bar reads as "cannot be compared" rather than as
-                        // "compared and favourable".
-                        ...(unknown
-                          ? {
-                              opacity: 0.45,
-                              backgroundImage:
-                                'repeating-linear-gradient(45deg, var(--color-border-strong) 0 1px, transparent 1px 4px)',
-                            }
-                          : {}),
                       }}
                     />
 
                     {/* THE PAY BAR, INSIDE THE SAME SCALE, drawn over the gross
-                     * one. Absent entirely when unknown — never zero-height. */}
-                    {unknown ? null : (
+                     * one. Known: grey, to its own height. Unknown: HATCHED,
+                     * to the gross bar's top — never zero-height, and never a
+                     * guessed height, because either would be a number. */}
+                    {unknown ? (
+                      <span
+                        aria-hidden
+                        className="absolute bottom-0 left-1/2 w-1/2 -translate-x-1/2 rounded-t-[2px]"
+                        style={{
+                          height: `${String(height(bar.grossCents))}%`,
+                          backgroundImage: HATCH,
+                        }}
+                      />
+                    ) : (
                       <span
                         aria-hidden
                         className="absolute bottom-0 left-1/2 w-1/2 -translate-x-1/2 rounded-t-[2px]"
@@ -298,6 +314,9 @@ export function BarChart({ bars, locale, labels }: Props) {
           </ol>
         </div>
       </div>
+
+      {/* ── THE LEGEND, UNDER THE AXIS (§6.1.1, second-round review) ───── */}
+      {legend}
 
       {/* ── THE FIGURES, READABLE WITHOUT THE BARS (§13) ───────────────── */}
       <table className="sr-only">

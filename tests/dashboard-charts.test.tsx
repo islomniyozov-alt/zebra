@@ -194,8 +194,52 @@ describe('BarChart owes the reader four things (owner review 2026-10-02)', () =>
         'repeating-linear-gradient',
       ),
     )
-    // The bar itself plus the legend swatch.
+    // The pay slot plus the legend swatch.
     expect(hatched.length).toBeGreaterThanOrEqual(2)
+  })
+
+  // OWNER'S SECOND-ROUND REVIEW ON DEV, 2026-11-06 (§6.1.1): the gross bar is
+  // ALWAYS solid; only the pay slot is hatched, and it is drawn to the gross
+  // bar's top because unknown pay has no height of its own.
+  it('keeps the gross bar solid and hatches only the pay slot, to the top', () => {
+    const { container } = render(
+      <BarChart
+        bars={[
+          bar({ grossCents: 100_000, driverPayCents: null, marginCents: null }),
+        ]}
+        locale="en-US"
+        labels={barLabels}
+      />,
+    )
+    const bars = [...container.querySelectorAll('li span')].filter(
+      (node) => (node as HTMLElement).style.height !== '',
+    ) as HTMLElement[]
+    // Two sized spans in the bucket: the gross bar and the pay slot.
+    expect(bars).toHaveLength(2)
+    const [gross, slot] = bars
+    expect(gross!.style.backgroundColor).toBe('var(--color-accent)')
+    expect(gross!.style.backgroundImage).toBe('')
+    expect(gross!.style.opacity).toBe('')
+    expect(slot!.style.backgroundImage).toContain('repeating-linear-gradient')
+    // To the gross bar's top — the same height, not a guessed one.
+    expect(slot!.style.height).toBe(gross!.style.height)
+  })
+
+  // SAME REVIEW: the legend row is UNDER the x axis. The value above the
+  // tallest bar sits in the 12px above the plot, which is where a legend above
+  // the plot sat, and the two met on every period.
+  it('places the legend after the plot, not before it', () => {
+    const { container } = render(
+      <BarChart bars={[bar({})]} locale="en-US" labels={barLabels} />,
+    )
+    const plot = container.querySelector('ol')!
+    const legend = [...container.querySelectorAll('ul')].find((node) =>
+      node.textContent?.includes(barLabels.unrecorded),
+    )!
+    expect(legend).toBeDefined()
+    expect(
+      plot.compareDocumentPosition(legend) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
   })
 
   it('and its tooltip says so rather than printing a zero', () => {

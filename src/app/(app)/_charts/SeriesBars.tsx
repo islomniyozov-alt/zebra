@@ -135,22 +135,6 @@ export function SeriesBars({
     <div>
       <h3 className="text-sm font-medium text-ink">{labels.heading}</h3>
 
-      {/* THE LEGEND, IN WORDS. Part 2b: a colour nobody can name is a
-       * decoration. Not `ChartLegend`, which names the money series' three
-       * fixed roles — these series are whatever the caller says they are. */}
-      <ul className="mt-z1 flex flex-wrap items-center gap-z3 text-xs text-ink-2">
-        {series.map((entry, index) => (
-          <li key={entry.key} className="flex items-center gap-z2">
-            <span
-              aria-hidden
-              className="h-z2 w-z3 shrink-0 rounded-[2px]"
-              style={styleFor(index)}
-            />
-            {entry.label}
-          </li>
-        ))}
-      </ul>
-
       {buckets.length === 0 ? (
         <p className="mt-z3 text-sm text-ink-3">{labels.empty}</p>
       ) : null}
@@ -259,6 +243,24 @@ export function SeriesBars({
           </ol>
         </div>
       </div>
+
+      {/* THE LEGEND, IN WORDS, UNDER THE AXIS (§6.1.1, second-round review
+       * 2026-11-06: the value above the tallest bar met a legend above the
+       * plot). Part 2b: a colour nobody can name is a decoration. Not
+       * `ChartLegend`, which names the money series' three fixed roles —
+       * these series are whatever the caller says they are. */}
+      <ul className="mt-z2 flex flex-wrap items-center gap-z3 text-xs text-ink-2">
+        {series.map((entry, index) => (
+          <li key={entry.key} className="flex items-center gap-z2">
+            <span
+              aria-hidden
+              className="h-z2 w-z3 shrink-0 rounded-[2px]"
+              style={styleFor(index)}
+            />
+            {entry.label}
+          </li>
+        ))}
+      </ul>
 
       {/* THE SAME FIGURES AS A TABLE (§6.1.1, §13), in full rather than
        * compacted: a screen reader gets no benefit from "$12.4k". */}
