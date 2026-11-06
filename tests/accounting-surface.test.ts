@@ -279,7 +279,7 @@ describe('the controls each list carries', () => {
   it.each(['invoices', 'payments', 'charges'] as const)(
     '%s offers the company filter',
     (name) => {
-      expect(pageSource(name)).toContain('<CompanyChips')
+      expect(pageSource(name)).toContain('<AuthorityFilter')
     },
   )
 
@@ -288,8 +288,8 @@ describe('the controls each list carries', () => {
     // 2026-09-11), so there is no company on a run or on a statement to filter
     // by — and a chip there would imply a per-authority payroll that does not
     // exist. The BREAKDOWN rows carry the authorities instead.
-    expect(pageSource('batches')).not.toContain('<CompanyChips')
-    expect(pageSource('statements')).not.toContain('<CompanyChips')
+    expect(pageSource('batches')).not.toContain('<AuthorityFilter')
+    expect(pageSource('statements')).not.toContain('<AuthorityFilter')
   })
 
   // REPORTS IS NOT A LIST IN TWO OF ITS THREE CUTS. The company and week cuts
@@ -318,7 +318,7 @@ describe('the controls each list carries', () => {
   it('reports takes its window from the rolling picker, not a date range', () => {
     const source = pageSource('reports')
     expect(source).toContain('<PeriodPicker')
-    expect(source).toContain('<CompanyChips')
+    expect(source).toContain('<AuthorityFilter')
     expect(source).not.toMatch(/\n\s+range=\{\{/)
     // THE TOGGLE IS GONE TOO: a month is not a whole number of settlement
     // weeks, so it cannot be drawn on an axis aligned to them (v10.17).
@@ -615,7 +615,9 @@ describe('client components in these two groups take no callbacks', () => {
     // The same guard `this-week-shape.test.ts` carries, for the same reason: a
     // renamed directory would otherwise turn this suite green by emptying it.
     expect(clientFiles.length).toBeGreaterThanOrEqual(5)
-    expect(clientFiles.map((file) => file.name)).toContain('CompanyChips.tsx')
+    expect(clientFiles.map((file) => file.name)).toContain(
+      'AuthorityFilter.tsx',
+    )
   })
 
   it.each(clientFiles.map((file) => file.name))(

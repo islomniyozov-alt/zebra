@@ -37,7 +37,7 @@ import {
   settlementsPaidSeries,
 } from '@/lib/accounting-reports'
 import { agingSums } from '@/lib/factoring'
-import { CompanyChips } from '../../_grid/CompanyChips'
+import { AuthorityFilter } from '../../_grid/AuthorityFilter'
 import { PeriodPicker } from '../../_charts/PeriodPicker'
 import { BarChart, type Bar } from '../../_charts/BarChart'
 import { SeriesBars } from '../../_charts/SeriesBars'
@@ -298,7 +298,7 @@ export default async function ReportsPage({
        * THE SEARCH BOX STAYS, on the driver cut only, because searching a list
        * of drivers is not a window. */}
       <div className="flex flex-wrap items-center justify-between gap-z3 border-b border-border bg-surface px-gutter py-z2">
-        <CompanyChips
+        <AuthorityFilter
           companies={data.charts.companies}
           label={t('accounting.company')}
           allLabel={t('accounting.allCompanies')}

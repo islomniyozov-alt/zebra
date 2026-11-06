@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
@@ -10,6 +9,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { RecordForm } from '@/components/forms/RecordForm'
 import { registerFor } from '@/lib/accidents'
 import { recordAccidentAction, voidAccidentAction } from './actions'
+import { AuthorityFilter } from '../../_grid/AuthorityFilter'
 import { VoidEntry } from './VoidEntry'
 import type { FieldSpec } from '@/components/forms/RecordForm'
 
@@ -176,22 +176,17 @@ export default async function AccidentRegisterPage({
         </p>
       </div>
 
-      {/* WHICH REGISTER. Not a filter — the document is per authority. */}
+      {/* WHICH REGISTER. Not a filter — the document is per authority, so
+       * there is no All: the dropdown shows the chosen register's name and
+       * lists the others only while open (§6.3, 2026-11-06). It used to be a
+       * row of links naming every authority. */}
       {companies.length > 1 ? (
         <div className="flex items-center gap-z4 border-b border-border bg-surface-2 px-gutter py-z2 print:hidden">
-          {companies.map((company) => (
-            <Link
-              key={company.id}
-              href={`/safety/accidents?company=${company.id}`}
-              className={
-                company.id === chosen
-                  ? 'text-sm font-medium text-accent'
-                  : 'text-sm text-ink-2 hover:text-accent'
-              }
-            >
-              {company.name}
-            </Link>
-          ))}
+          <AuthorityFilter
+            companies={companies}
+            label={t('ref.authority')}
+            defaultTo={chosen ?? undefined}
+          />
         </div>
       ) : null}
 

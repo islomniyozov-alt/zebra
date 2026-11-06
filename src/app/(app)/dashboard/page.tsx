@@ -30,7 +30,7 @@ import { formatCents } from '@/lib/money'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { TONE_STRIPE } from '@/lib/status'
-import { CompanyChips } from '../_grid/CompanyChips'
+import { AuthorityFilter } from '../_grid/AuthorityFilter'
 import { PeriodPicker } from '../_charts/PeriodPicker'
 import { CashPanel, CompliancePanel, FleetPanel } from './Panels'
 import { BarChart } from '../_charts/BarChart'
@@ -370,7 +370,7 @@ export default async function DashboardPage({
 
       {/* ── THE CONTROLS, ONCE, AT THE TOP ───────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-z3 border-b border-border bg-surface px-gutter py-z2">
-        <CompanyChips
+        <AuthorityFilter
           companies={companies}
           label={t('accounting.company')}
           allLabel={t('accounting.allCompanies')}

@@ -33,7 +33,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterBar } from '@/components/ui/FilterBar'
 import { Tabs } from '@/components/ui/Tabs'
-import { CompanyChips } from '../../_grid/CompanyChips'
+import { AuthorityFilter } from '../../_grid/AuthorityFilter'
 import { PageHeader } from '../../_grid/PageHeader'
 import { GridToolbar } from '../../_grid/GridToolbar'
 import { GridFooterNav } from '../../_grid/GridFooterNav'
@@ -533,7 +533,7 @@ export default async function ChargesPage({
           clearLabel={t('filter.clear')}
           moreLabel={t('filter.more')}
         />
-        {/* NO `CompanyChips`. These rows carry no authority — see the data read. */}
+        {/* NO `AuthorityFilter`. These rows carry no authority — see the data read. */}
         <div className="flex items-center justify-end gap-z2 border-b border-border bg-surface px-gutter py-z2">
           <GridToolbar
             grid="charges.standing"
@@ -1049,7 +1049,7 @@ export default async function ChargesPage({
         moreLabel={t('filter.more')}
       />
       <div className="flex items-center justify-between gap-z2 border-b border-border bg-surface px-gutter py-z2">
-        <CompanyChips
+        <AuthorityFilter
           companies={data.companies}
           label={t('accounting.company')}
           allLabel={t('accounting.allCompanies')}

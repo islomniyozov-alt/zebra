@@ -28,7 +28,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterBar } from '@/components/ui/FilterBar'
 import { Tabs } from '@/components/ui/Tabs'
 import { ReadyQueue, type ReadyRow } from '../../invoices/ReadyQueue'
-import { CompanyChips } from '../../_grid/CompanyChips'
+import { AuthorityFilter } from '../../_grid/AuthorityFilter'
 import { PeriodPicker } from '../../_charts/PeriodPicker'
 import { SummaryStrip } from '../../_grid/SummaryStrip'
 import { invoiceStrip } from '@/lib/accounting-reports'
@@ -545,7 +545,7 @@ export default async function AccountingInvoicesPage({
         ]}
       />
       <div className="flex flex-wrap items-center justify-between gap-z3 border-b border-border bg-surface px-gutter py-z2">
-        <CompanyChips
+        <AuthorityFilter
           companies={data.companies}
           label={t('accounting.company')}
           allLabel={t('accounting.allCompanies')}
@@ -582,7 +582,7 @@ export default async function AccountingInvoicesPage({
         moreLabel={t('filter.more')}
       />
       <div className="flex items-center justify-between gap-z2 border-b border-border bg-surface px-gutter py-z2">
-        <CompanyChips
+        <AuthorityFilter
           companies={data.companies}
           label={t('accounting.company')}
           allLabel={t('accounting.allCompanies')}

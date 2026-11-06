@@ -14,7 +14,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterBar } from '@/components/ui/FilterBar'
 import { Tabs } from '@/components/ui/Tabs'
 import { Button } from '@/components/ui/Button'
-import { CompanyChips } from '../../_grid/CompanyChips'
+import { AuthorityFilter } from '../../_grid/AuthorityFilter'
 import { PeriodPicker } from '../../_charts/PeriodPicker'
 import { SummaryStrip } from '../../_grid/SummaryStrip'
 import { paymentStrip } from '@/lib/accounting-reports'
@@ -324,7 +324,7 @@ export default async function AccountingPaymentsPage({
         ]}
       />
       <div className="flex flex-wrap items-center justify-between gap-z3 border-b border-border bg-surface px-gutter py-z2">
-        <CompanyChips
+        <AuthorityFilter
           companies={data.companies}
           label={t('accounting.company')}
           allLabel={t('accounting.allCompanies')}
@@ -371,7 +371,7 @@ export default async function AccountingPaymentsPage({
         moreLabel={t('filter.more')}
       />
       <div className="flex items-center justify-between gap-z2 border-b border-border bg-surface px-gutter py-z2">
-        <CompanyChips
+        <AuthorityFilter
           companies={data.companies}
           label={t('accounting.company')}
           allLabel={t('accounting.allCompanies')}

@@ -14,7 +14,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { BatchTripsGrid } from '../BatchTripsGrid'
 import { FilterBar } from '@/components/ui/FilterBar'
 import { PageHeader } from '../../../_grid/PageHeader'
-import { CompanyChips } from '../../../_grid/CompanyChips'
+import { AuthorityFilter } from '../../../_grid/AuthorityFilter'
 import { gridView, pagedFooterLabel } from '../../../_grid/grid-page'
 import { CreateBatch } from './CreateBatch'
 import type { MessageKey } from '@/lib/i18n'
@@ -178,11 +178,15 @@ export default async function OpenBatchPage({
         moreLabel={t('filter.more')}
       />
 
-      <CompanyChips
-        companies={data.companies}
-        label={t('accounting.company')}
-        allLabel={t('accounting.allCompanies')}
-      />
+      {/* The bar the chips used to bring with them; the dropdown is inline
+       * and the screen owns the row (§6.3, 2026-11-06). */}
+      <div className="flex items-center gap-z3 border-b border-border bg-surface px-gutter py-z2">
+        <AuthorityFilter
+          companies={data.companies}
+          label={t('accounting.company')}
+          allLabel={t('accounting.allCompanies')}
+        />
+      </div>
 
       {/* ── WHAT CREATE WOULD ACTUALLY DO ─────────────────────────────────
        * Said before the button is pressed, because the two facts that

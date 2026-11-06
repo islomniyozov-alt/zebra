@@ -11,7 +11,7 @@ import { formatCents } from '@/lib/money'
 // ── IN `_grid` AND NOT `_charts`, BECAUSE IT IS NOT A CHART ───────────────
 //
 // No axis, no series, no scale. It belongs with the other things that sit above
-// a grid — `PageHeader`, `GridToolbar`, `CompanyChips` — and Invoices and
+// a grid — `PageHeader`, `GridToolbar`, `AuthorityFilter` — and Invoices and
 // Payments both use it, which is the only reason it is a component at all.
 //
 // ── IT FORMATS AND LINKS, AND DECIDES NOTHING ────────────────────────────

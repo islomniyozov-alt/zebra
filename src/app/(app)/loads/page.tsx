@@ -22,6 +22,7 @@ import { SavedViews } from './SavedViews'
 import { ColumnsChooser } from '../_grid/ColumnsChooser'
 import { DensityControl } from './DensityControl'
 import { LoadFilters } from './LoadFilters'
+import { AuthorityFilter } from '../_grid/AuthorityFilter'
 import type {
   LoadBillingStatus,
   LoadOperationalStatus,
@@ -282,7 +283,7 @@ export default async function LoadsPage({
         layout="twoRows"
         clearLabel={t('loads.filter.clear')}
         moreLabel={t('loads.filter.more')}
-        extraParams={['view', 'from', 'to', 'customer', 'driver']}
+        extraParams={['view', 'from', 'to', 'customer', 'driver', 'company']}
         groups={[
           {
             param: 'status',
@@ -316,22 +317,10 @@ export default async function LoadsPage({
               count: counts.billing[status] ?? 0,
             })),
           },
-          // AUTHORITY, only when there is a choice to make (§6.3). No counts:
-          // a narrowing, not a report.
-          ...(authorities.length > 1
-            ? [
-                {
-                  param: 'company',
-                  label: t('loads.filter.authority'),
-                  // Legal names run long; the full name is the chip's title.
-                  truncate: true,
-                  choices: authorities.map((company) => ({
-                    value: company.id,
-                    label: company.name,
-                  })),
-                },
-              ]
-            : []),
+          // THE AUTHORITY IS NOT A CHIP GROUP ANY MORE. It is the dropdown
+          // among the children below (§6.3, 2026-11-06): the names appear only
+          // while it is open. `company` is in `extraParams` above, so Clear
+          // filters stays honest about it.
         ]}
         search={{
           param: 'ref',
@@ -339,6 +328,15 @@ export default async function LoadsPage({
           placeholder: t('loads.filter.referencePlaceholder'),
         }}
       >
+        {/* THE AUTHORITY, AS A DROPDOWN (§6.3, 2026-11-06): closed it reads
+         * "Authority: All"; the names appear only while it is open. No counts
+         * here — a narrowing, not a report — and nothing when there is one
+         * authority, which the component decides. */}
+        <AuthorityFilter
+          companies={authorities}
+          label={t('loads.filter.authority')}
+          allLabel={t('accounting.allCompanies')}
+        />
         <LoadFilters
           selected={filterLabels}
           labels={{

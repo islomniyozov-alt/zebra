@@ -280,9 +280,9 @@ export type CompanyScopeFilter = { companyId?: { in: string[] } }
  *
  * AND IT NEVER WIDENS. A chip naming an authority outside the session's scope
  * is IGNORED — the scope is returned unchanged — rather than honoured or turned
- * into a sentinel. `CompanyChips` only renders authorities in scope, so this is
- * a URL-tampering path; row-level security would refuse the rows anyway, and
- * ignoring the parameter keeps the figures consistent with the chips on screen.
+ * into a sentinel. `AuthorityFilter` only offers authorities in scope, so this
+ * is a URL-tampering path; row-level security would refuse the rows anyway, and
+ * ignoring the parameter keeps the figures consistent with the control on screen.
  */
 export function narrowCompanyScope(
   companyScopes: readonly string[],
