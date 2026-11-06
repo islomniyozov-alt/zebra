@@ -445,6 +445,24 @@ Rules about instruments, which are the ones that cost whole sessions:
   HEAD, and HEAD equal to `origin/main`. A report that ends any other way is
   incomplete, by the same rule that makes "dev behind" incomplete.
 
+  **EXCEPT A VISUAL CHAIN, WHICH DEPLOYS TO DEV AND STOPS.** Owner's
+  standing rule, 2026-11-06, on accepting the look chain at `de0543e`. A
+  chain whose PURPOSE is visual — colours, spacing, layout, density, the
+  shell's look — runs the ritual through the dev dispatch and CI's receipt,
+  and then WAITS: Islom reviews it on dev and says "ship", and only then is
+  production dispatched. The look chain went to production the same hour it
+  was written, on gates that prove nothing about how a navy sidebar reads
+  at 6am; the one instrument for that is a pair of eyes on dev, and it had
+  not been used. A code or behaviour chain keeps the full ritual, dev then
+  production, as above. Where a chain is both, it is a behaviour chain for
+  the deploy and a visual chain for the review — production still waits.
+
+  So a visual chain's report ends with dev at HEAD, production BEHIND BY
+  NAME with the sha it is waiting to receive, and the words "awaiting your
+  ship on dev". That is the one report where "dev ahead" is the finished
+  state and not the incomplete one — and `check:drift` still prints both,
+  so the gap is read from the workers, not remembered.
+
 - **FROM THE MOMENT THE INTEGRATION GATE STARTS UNTIL THE RITUAL'S LAST STEP
   REPORTS: NO EDIT, NO COMMIT, NO WATCHER, NO DRY RUN. The working directory
   is UNTOUCHED. Queue the change; start it after.** Owner's rulings,
