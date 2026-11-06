@@ -103,11 +103,18 @@ Each step assumes the ones above it.
    rather than on the thing that acts. The check that inspects the file is:
 
    ```powershell
-   (Get-Content .env | Select-String 'PROD_DIRECT_DATABASE_URL').Count
+   (Get-Content .env | Select-String '^PROD_DIRECT_DATABASE_URL=').Count
    ```
 
    One is right. Zero means the append was swallowed; two means it went in
    twice and dotenv will take the first.
+
+   THE `^` IS LOAD-BEARING TOO. On 2026-11-06 the unanchored form counted one
+   for a `.env` whose `PROD_DIRECT_DATABASE_URL=` had been glued onto the END
+   of a stray pasted line — an append without a trailing newline on the line
+   before it — so the name was in the file and dotenv read the variable under
+   the stray line's own first word. Anchored to the line start, that file
+   counts zero, which is the truth.
 
    THE ANCHOR IS LOAD-BEARING. `-match 'proud-union'` unanchored matched a
    COMMENT in an instruction block during that same session. `^postgresql://`

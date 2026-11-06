@@ -4,9 +4,11 @@ import { neonConfig, Pool } from '@neondatabase/serverless'
 // ---------------------------------------------------------------------------
 // ONE REAL EXTRACTION, ON THE DEPLOYED WORKER (Phase 5).
 //
-// The model keys (`GEMINI_API_KEY`, `DEEPSEEK_API_KEY`) live on the workers
-// and deliberately not on this machine, so the only way to prove one works is
-// to go through a worker —
+// The keys the READERS use (`GEMINI_API_KEY`, `DEEPSEEK_API_KEY`) live on the
+// workers. A local .env may hold copies (owner's ruling, 2026-11-06; both are
+// listed blank in .env.example), but a key on this machine proves nothing
+// about the worker's, so the only way to prove the deployed one works is to
+// go through a worker —
 // which is also the only way the rest of the phase will ever call it.
 //
 // The document is a rate confirmation this script BUILDS: a hand-written PDF in
