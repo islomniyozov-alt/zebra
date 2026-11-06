@@ -150,10 +150,8 @@ Each step assumes the ones above it.
    ```bash
    printf '%s\n' "<url>"     | npx wrangler secret put DATABASE_URL        --env production
    printf '%s\n' "<secret>"  | npx wrangler secret put AUTH_SECRET         --env production
-   printf '%s\n' "<id>"      | npx wrangler secret put R2_ACCOUNT_ID       --env production
    printf '%s\n' "<key id>"  | npx wrangler secret put R2_ACCESS_KEY_ID    --env production
    printf '%s\n' "<secret>"  | npx wrangler secret put R2_SECRET_ACCESS_KEY --env production
-   printf '%s\n' "<url>"     | npx wrangler secret put R2_ENDPOINT         --env production
    printf '%s\n' "<key>"     | npx wrangler secret put RESEND_API_KEY      --env production
    printf '%s\n' "<key>"     | npx wrangler secret put GEMINI_API_KEY      --env production
    printf '%s\n' "<key>"     | npx wrangler secret put DEEPSEEK_API_KEY    --env production
@@ -859,8 +857,10 @@ measurement of runtime behaviour a measurement of the build. Add
 per request.
 
 Secrets the worker needs, none of which belong in `wrangler.jsonc`:
-`DATABASE_URL`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
-`R2_ENDPOINT`.
+`DATABASE_URL`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`. `R2_ACCOUNT_ID` and
+`R2_ENDPOINT` are NOT secrets — they are `vars`, on both workers since GAPS 41
+(production since `8e553f9`): the account id is what `wrangler whoami` prints,
+and a var can be read back where a secret cannot.
 
 `npm run preview` is not optional before deploying. `next dev` runs on Node; the
 deployed app runs on workerd. Things that work in one and not the other —
@@ -956,9 +956,12 @@ screen that mattered.
 ## Secrets
 
 Nothing secret belongs in `wrangler.jsonc`. `vars` there holds the non-secret
-configuration — `NEON_BRANCH`, `R2_BUCKET`, `APP_ORIGIN`, `RESEND_FROM`.
-Connection strings, R2 keys, `AUTH_SECRET` and `RESEND_API_KEY` go in via
-`wrangler secret put` per environment, and in `.env` locally.
+configuration — `NEON_BRANCH`, `R2_BUCKET`, `R2_ACCOUNT_ID`, `R2_ENDPOINT`,
+`APP_ORIGIN`, `RESEND_FROM`, `LLM_FALLBACK_PROVIDER`, `INBOUND_EMAIL_ORG_ID`.
+Connection strings, the R2 key pair, `AUTH_SECRET`, `RESEND_API_KEY` and the
+model keys go in via `wrangler secret put` per environment, and in `.env`
+locally. The two workers' secret lists are meant to be IDENTICAL in names
+(GAPS 41, 2026-11-05); a name on one and not the other is a finding.
 
 ### Email (Resend)
 
