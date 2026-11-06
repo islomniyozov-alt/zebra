@@ -92,10 +92,29 @@ export const trimEvent = (event) => ({
   logs: (event?.logs ?? []).map((entry) => ({
     level: entry?.level ?? null,
     message: Array.isArray(entry?.message)
-      ? entry.message.map((part) => String(part)).join(' ')
-      : String(entry?.message ?? ''),
+      ? entry.message.map(logPart).join(' ')
+      : logPart(entry?.message ?? ''),
   })),
 })
+
+/**
+ * One `console.*` argument as text. An OBJECT IS SERIALISED, NOT STRINGIFIED:
+ * `String({status: 403})` is "[object Object]", and on 2026-11-05 that is
+ * exactly what a capture of dev's password-reset path held for
+ * "[zebra.email] Resend refused the message {status, body}" — the two fields
+ * the error path exists to log, flattened out of the one instrument that
+ * reads them (GAPS 41). Strings pass through unchanged, so `rayOf` and the
+ * sign-in timing readers see what they always saw.
+ */
+export const logPart = (part) => {
+  if (typeof part === 'string') return part
+  if (part === null || typeof part !== 'object') return String(part)
+  try {
+    return JSON.stringify(part)
+  } catch {
+    return String(part)
+  }
+}
 
 /** Whether a tail event is a sign-in: the login form's server action. */
 export const isSignInPost = (event) => {

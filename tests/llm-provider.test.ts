@@ -237,7 +237,8 @@ describe('a Gemini outage, on a worker configured like the real two', () => {
 
   it('names DEEPSEEK_API_KEY, not Anthropic’s, when the fallback key is missing', async () => {
     // Production between the deploy and Islom's `wrangler secret put`.
-    deployed({ DEEPSEEK_API_KEY: '' })
+    deployed()
+    vi.stubEnv('DEEPSEEK_API_KEY', '')
     const { calls, impl } = geminiDown()
     await expect(
       askModel({ ...read(), kind: 'cdl', fetchImpl: impl }),

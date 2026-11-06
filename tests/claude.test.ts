@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   ClaudeError,
   MODEL_PRICES,
@@ -450,16 +450,26 @@ describe('the provider seam', () => {
     // A worker set to DeepSeek that says "ANTHROPIC_API_KEY is not set" sends
     // somebody to check the wrong secret — the failure this message exists to
     // prevent, and the reason it is built from the resolved provider.
-    await expect(
-      askAboutDocument({
-        ...ask(),
-        model: 'deepseek-v4-pro',
-        apiKey: undefined,
-      }),
-    ).rejects.toMatchObject({
-      reason: 'no_api_key',
-      message: 'DEEPSEEK_API_KEY is not set on this worker.',
-    })
+    //
+    // THE KEY IS MADE ABSENT HERE, not assumed absent. Until 2026-11-05 this
+    // relied on the machine holding no DeepSeek key; the day one landed in
+    // the local .env the call went past the key check and failed on the PDF
+    // refusal instead — a test about one message, red for another reason.
+    vi.stubEnv('DEEPSEEK_API_KEY', '')
+    try {
+      await expect(
+        askAboutDocument({
+          ...ask(),
+          model: 'deepseek-v4-pro',
+          apiKey: undefined,
+        }),
+      ).rejects.toMatchObject({
+        reason: 'no_api_key',
+        message: 'DEEPSEEK_API_KEY is not set on this worker.',
+      })
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it('sends the same body to both hosts, document block and all', async () => {

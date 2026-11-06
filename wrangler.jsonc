@@ -89,6 +89,16 @@
     "INBOUND_EMAIL_ORG_ID": "cms5d2etl0000ncvsjz5bgdh9",
     "NEON_BRANCH": "dev",
     "R2_BUCKET": "zebra-docs-dev",
+    // NOT CREDENTIALS, AND THEREFORE NOT SECRETS — the same two values and
+    // the same reasoning as production's block below (`8e553f9`, 2026-08-15):
+    // the account id is what `wrangler whoami` prints and the endpoint is
+    // derived from it, and a value here is diffable and readable back where a
+    // secret's is not. Production moved on 2026-08-15; dev stayed a secret
+    // until GAPS 41 (owner's ruling, 2026-11-05) — same account, same values.
+    // The dev worker's two secrets of the same names are Islom's to delete
+    // after this deploys; until then the worker carries both.
+    "R2_ACCOUNT_ID": "0253064d6b8ffd36abf9c263372a3c7a",
+    "R2_ENDPOINT": "https://0253064d6b8ffd36abf9c263372a3c7a.r2.cloudflarestorage.com",
 
     // WHICH LLM PROVIDER THE ANTHROPIC-COMPATIBLE TRANSPORT TALKS TO.
     //

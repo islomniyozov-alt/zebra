@@ -13,6 +13,7 @@ import {
   signInTimingOf,
   startTail,
   TAIL_MAX_MS,
+  logPart,
   tailRefusal,
   takeJsonObjects,
   timingLinesOf,
@@ -91,6 +92,42 @@ describe('the tail’s stream', () => {
       logs: [{ level: 'error', message: '⨯ Error: boom' }],
     })
     expect(JSON.stringify(kept)).not.toContain('SECRET')
+  })
+
+  it('serialises an object argument instead of flattening it to [object Object]', () => {
+    // 2026-11-05, GAPS 41: dev's reset path logged
+    // "[zebra.email] Resend refused the message {status, body}" and the capture
+    // held "[object Object]" — the two fields the error path exists to log,
+    // destroyed by the one instrument that reads them. The status was 401,
+    // "API key is invalid", and it took a second probe to learn it.
+    const kept = trimEvent(
+      event('e5', {
+        logs: [
+          {
+            level: 'error',
+            message: [
+              '[zebra.email] Resend refused the message',
+              {
+                to: 'gmail.com',
+                status: 401,
+                body: '{"message":"API key is invalid"}',
+              },
+            ],
+          },
+        ],
+      }),
+    )
+    expect(kept.logs[0].message).toBe(
+      '[zebra.email] Resend refused the message {"to":"gmail.com","status":401,"body":"{\\"message\\":\\"API key is invalid\\"}"}',
+    )
+    expect(kept.logs[0].message).not.toContain('[object Object]')
+    // Strings still pass through untouched — the sign-in timing readers
+    // match on them byte for byte.
+    expect(logPart('signin.timing {"firstQueryMs":484}')).toBe(
+      'signin.timing {"firstQueryMs":484}',
+    )
+    expect(logPart(42)).toBe('42')
+    expect(logPart(null)).toBe('null')
   })
 
   it('tails a workers.dev origin and nothing else', () => {
