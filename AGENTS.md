@@ -69,6 +69,22 @@ Rules that are cheap to state and expensive to rediscover:
   when the check prints OK with the first-query span. The same holds for
   `AUTH_SECRET`, the R2 keys and anything else the Worker reads at request
   time — the check is the one instrument that exercises them from outside.
+- **ON WINDOWS A SECRET IS ENTERED AT `wrangler secret put`'s INTERACTIVE
+  PROMPT, NEVER PIPED INTO IT.** Owner's ruling, 2026-11-06, closing GAPS 41. Piping a value into `wrangler secret put` from PowerShell appends a
+  `\r` to it; the worker then sends the key with the carriage return
+  attached and the far end answers "Invalid header value" or, as Resend did
+  on 2026-11-05, `401 API key is invalid` — for a key that was correct on
+  the clipboard. Two reset probes on dev read that 401 before the cause was
+  the pipe. So: run `npx wrangler secret put NAME` (with `--env production`
+  for production), paste the value at the prompt it opens, press Enter, and
+  then PROVE it from outside — `check:prod-signin` for anything production
+  reads at request time, `scripts/verify-reset-mail.mjs` for
+  `RESEND_API_KEY` on dev. The README's `printf '%s\n' … |` lines are the
+  bash form for a Unix shell and CI; they are not a Windows command. A value
+  that must be read back later is not a secret at all and goes in `vars`
+  (`R2_ACCOUNT_ID`, `R2_ENDPOINT`) — and deploying a var with a secret's
+  name REPLACES the secret, so a secret-to-var move is "vars first, nothing
+  to delete" (GAPS 41, `0cd04c5`).
 - **EVERY `wrangler tail` RUNS UNDER `startTail` (`scripts/worker-tail.mjs`),
   WHICH KILLS THE CHILD AT ITS DEADLINE, AND NO CHAIN OPENS A TAIL ON
   PRODUCTION — only `check:prod-signin`, for its own duration.** Owner's

@@ -850,6 +850,13 @@ ends up _inside_ the secret; the first deploy shipped an R2_ENDPOINT of
 `[dotenv@17.2.3] injecting env...https://...` and every presigned URL threw
 `TypeError: Invalid URL string`. Parse `.env` directly.
 
+**And on Windows, do not pipe at all** (owner's ruling 2026-11-06, GAPS 41).
+From PowerShell the pipe appends a `\r`, the key reaches the far end with it,
+and the answer is "Invalid header value" or a 401 for a key that was right on
+the clipboard. Run `npx wrangler secret put NAME` and paste at its prompt. The
+`printf` lines in this file are the bash form, for a Unix shell and CI; see
+AGENTS.md.
+
 **A GET route handler that reads nothing dynamic gets prerendered.** Next will
 run it on Node at build time and serve the frozen result, which makes any
 measurement of runtime behaviour a measurement of the build. Add
