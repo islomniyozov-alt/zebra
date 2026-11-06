@@ -4,15 +4,25 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cx } from '@/lib/cx'
 
-// §6.2. Seventeen destinations grouped into five, with the group label at 11px
-// ink-3, uppercase, 0.06em tracking.
+// §6.2 — the destinations, grouped (Operations, Fleet, Accounting, Payroll,
+// Records, Admin), on §3.6's navy. The owner's brief (2026-11-06): a sidebar
+// "stronger and darker, closer to Datatruck's", the content area light, accent
+// secondary. The navy is this column and nothing to the right of its edge.
 //
 // The groups arriving here have already been filtered by `navigationFor`, so a
 // dispatcher without financial permission is not handed a Money group to hide
 // — the group is absent from the data. §7: never send it and hide it with CSS.
+// Nothing about WHAT is in the sidebar changed with its colour.
 //
-// Active item: accent-soft fill, accent text, 2px accent bar on the LEADING
-// edge — inline-start, so it lands on the right in Farsi without a second rule.
+// Wordmark in a 48px row so its rule meets the topbar's at the corner. Group
+// labels nav-ink-2, 11px, uppercase, 0.08em, with more room above than below
+// so each reads as a heading for the items under it.
+//
+// Active item: nav-active fill, nav-ink text, 2px ACCENT bar on the LEADING
+// edge — inline-start, so it lands on the right in Farsi without a second
+// rule. The bar is the one accent on the navy: accent means "you can do
+// something here", and the current page is where the navigation still says so.
+// No accent fill and no accent text (§3.6).
 
 // Pre-translated by the layout. A translator is a closure, and a closure
 // cannot cross the server/client boundary — React refuses to serialise it.
@@ -41,18 +51,18 @@ export function Sidebar({ groups, appName, navLabel }: SidebarProps) {
   return (
     <nav
       aria-label={navLabel}
-      className="flex h-full w-sidebar shrink-0 flex-col gap-z4 border-e border-border bg-surface py-z3"
+      className="flex h-full w-sidebar shrink-0 flex-col border-e border-nav-border bg-nav-bg"
     >
-      <div className="px-z4">
-        <span className="text-md font-medium tracking-[0.08em] text-ink">
+      <div className="flex h-topbar shrink-0 items-center border-b border-nav-border px-z4">
+        <span className="text-md font-medium tracking-[0.08em] text-nav-ink">
           {appName.toUpperCase()}
         </span>
       </div>
 
-      <div className="flex flex-col gap-z4">
+      <div className="flex flex-col gap-z3 py-z3">
         {groups.map((group) => (
           <div key={group.key} className="flex flex-col gap-[2px]">
-            <span className="px-z4 pb-z1 text-xs font-medium uppercase tracking-[0.06em] text-ink-3">
+            <span className="px-z4 pt-z2 pb-z1 text-xs font-medium uppercase tracking-[0.08em] text-nav-ink-2">
               {group.label}
             </span>
             {group.items.map((item) => {
@@ -73,8 +83,8 @@ export function Sidebar({ groups, appName, navLabel }: SidebarProps) {
                     'relative flex h-control items-center px-z4 text-base',
                     'transition-colors duration-120 ease-out',
                     active
-                      ? 'bg-accent-soft font-medium text-accent'
-                      : 'text-ink-2 hover:bg-surface-3',
+                      ? 'bg-nav-active font-medium text-nav-ink'
+                      : 'text-nav-ink-2 hover:bg-nav-surface hover:text-nav-ink',
                   )}
                 >
                   {active ? (

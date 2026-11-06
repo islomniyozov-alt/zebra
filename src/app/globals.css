@@ -40,26 +40,39 @@
   --color-accent-hover: #3457c4;
   --color-accent-soft: #eaefff; /* selected row, active nav item */
 
-  /* --- §3.3 status, semantically fixed. Never mix pairs. ---------------- */
-  --color-neutral: #64748b;
-  --color-neutral-soft: #f1f5f9; /* available, draft, uninvoiced */
+  /* --- §3.3 status, semantically fixed. Never mix pairs. ----------------
+   * Each soft fill is the DEEPEST value at its hue that still clears 4.5:1
+   * against its text (§3.3 as amended 2026-11-06); tests/shell-look.test.ts
+   * recomputes that from these bytes. Neutral's text darkened one step for
+   * the same reason. Muted is below 4.5 by design and the test says so. */
+  --color-neutral: #5c6b82;
+  --color-neutral-soft: #ebeff4; /* available, draft, uninvoiced */
   --color-progress: #0e7490;
-  --color-progress-soft: #ecfeff; /* dispatched, in transit, sent */
+  --color-progress-soft: #daf0f6; /* dispatched, in transit, sent */
   --color-success: #15803d;
-  --color-success-soft: #f0fdf4; /* delivered, POD received, paid */
+  --color-success-soft: #e5f8ec; /* delivered, POD received, paid */
   --color-warning: #b45309;
-  --color-warning-soft: #fffbeb; /* POD missing, due soon, partially paid */
+  --color-warning-soft: #fdf1e7; /* POD missing, due soon, partially paid */
   --color-danger: #b91c1c;
-  --color-danger-soft: #fef2f2; /* overdue, disputed, out of service */
+  --color-danger-soft: #f8cece; /* overdue, disputed, out of service */
   --color-muted: #94a3b8;
-  --color-muted-soft: #f8fafc; /* cancelled, inactive, void */
+  --color-muted-soft: #eef2f6; /* cancelled, inactive, void */
 
-  /* --- §3.5 wall display. The only dark surface in the system. ---------- */
+  /* --- §3.5 wall display. Near-black, for a room. ----------------------- */
   --color-wall-bg: #0d1014;
   --color-wall-surface: #171a20;
   --color-wall-border: #2a2f38;
   --color-wall-ink: #e8eaed;
   --color-wall-ink-2: #9aa2ae;
+
+  /* --- §3.6 navigation. Navy, for a desk — the sidebar and the sign-in
+   * card's band, and nothing to the right of the sidebar's edge. ---------- */
+  --color-nav-bg: #1b2231;
+  --color-nav-surface: #242d3f; /* item hover */
+  --color-nav-active: #2c3850; /* the active item's fill */
+  --color-nav-border: #303b50; /* the wordmark's rule */
+  --color-nav-ink: #eef1f5; /* wordmark, hover and active text */
+  --color-nav-ink-2: #9aa5b8; /* item text at rest, group labels */
 
   /* --- §4 typography ---------------------------------------------------- */
   --font-ui: 'IBM Plex Sans', system-ui, sans-serif;
@@ -119,7 +132,11 @@
   --z-row-height: 36px;
   --z-body-size: var(--text-sm);
   --z-body-line: var(--text-sm--line-height);
-  --z-cell-pad-y: 8px; /* §5's table cell padding, and Standard's */
+  /* 6px, not §5's old 8px (amended 2026-11-06): a 22px badge plus 2 × 6 is
+   * 34, UNDER the 36px minimum, so the minimum governs and a Standard row
+   * with a badge measures 36px — the first time the number below has been
+   * true. At 8px it was 38 + 1 and measured 39 (the note under this block). */
+  --z-cell-pad-y: 6px;
 }
 [data-density='compact'] {
   --z-row-height: 32px;

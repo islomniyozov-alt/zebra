@@ -20,10 +20,17 @@ import {
 // §6.1 — the app shell. Sidebar 224px, topbar 48px, content the only scrolling
 // region.
 //
-// Standing rule 6 / design-system rule 10: NO INNER SCROLL CONTAINER except
-// designated table bodies. That is why this is h-screen with min-h-0 on the
-// column rather than a page that grows and scrolls the body — the table body
-// owns the scroll, and nothing else does.
+// Design-system rule 10, as clarified 2026-11-06: NO INNER SCROLL CONTAINER
+// except designated table bodies — and the CONTENT COLUMN IS THE SCROLLING
+// REGION, not a second one. The shell is h-screen with overflow-hidden; the
+// column under the topbar is min-h-0 flex-1 AND overflow-y-auto. A page that
+// owns a table body gives it min-h-0 flex-1 and the body scrolls under its
+// sticky header while the column never overflows; a page with no table body
+// (a detail form, the draft batch's fifty trips) grows past the column and the
+// column scrolls. Until this the column was a bounded box that did not scroll,
+// so every page had to carry `min-h-0 flex-1 overflow-y-auto` itself, and the
+// one that did not (2026-11-02, `e104482`) was clipped at 100% zoom with no
+// scrollbar. tests/batch-page-scroll.test.ts pins the column.
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   // GAPS 26, MEASUREMENT ONLY: the three reads every page pays before its
@@ -153,7 +160,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             dataFrom: t('topbar.dataFrom').replace('{branch}', dataFrom ?? ''),
           }}
         />
-        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          {children}
+        </div>
       </div>
     </div>
   )

@@ -757,16 +757,21 @@ function KpiStrip({
 
   return (
     <section>
+      {/* §7.3 AS WRITTEN (amended 2026-11-06): label ink-2 at weight 500,
+       * value 24px weight 600 mono, 16px padding. This strip had drifted to
+       * ink-3 and 18px/400, which is what the owner's "stronger KPI cards"
+       * was looking at. Nothing added — the spec was already strong; the
+       * cells now match it. */}
       <dl className="grid grid-cols-2 gap-z3 md:grid-cols-3 xl:grid-cols-6">
         {cells.map((cell) => (
           <div
             key={cell.key}
-            className="rounded-card border border-border bg-surface p-z3"
+            className="rounded-card border border-border bg-surface p-z4"
           >
-            <dt className="text-xs uppercase tracking-[0.04em] text-ink-3">
+            <dt className="text-xs font-medium uppercase tracking-[0.06em] text-ink-2">
               {t(cell.label)}
             </dt>
-            <dd className="mt-z1 font-mono text-lg tabular-nums text-ink">
+            <dd className="mt-z1 font-mono text-xl font-semibold tabular-nums text-ink">
               {cell.value}
             </dd>
             {/* THE SHAPE BESIDE THE FIGURE. §6.1.1: a figure without a
