@@ -27,6 +27,26 @@ export interface Column<Row> {
   align?: ColumnAlign
   /** Addresses and commodity, yes. Identifiers and money, never. */
   truncate?: boolean
+  /**
+   * §7.1 (amended 2026-11-07) — THE COLUMN IS AS WIDE AS WHAT IT HOLDS.
+   *
+   * For a column that is never truncated: an identifier, a date, a badge, a
+   * unit number, money. The header's width is zero and nothing in the column
+   * wraps, so the browser settles it at its widest cell and not a pixel more,
+   * and the width it would have taken goes to the truncating columns instead.
+   *
+   * MEASURED BEFORE, on dev at 1920: the browser's own distribution gave DEL
+   * date 202 px for a twelve-character date and Status 201 px for a badge,
+   * while Driver had 123 px and cut 70 rows of 100.
+   */
+  fit?: 'content'
+  /**
+   * §7.1 — this truncating column's share of what the fitted columns leave.
+   * Default 1; the loads list's Driver is 2 because it holds two seats. It is
+   * applied only in a grid that fits at least one column (`fit` above); a grid
+   * that fits none keeps the browser's distribution unchanged.
+   */
+  share?: number
   render: (row: Row) => ReactNode
   /**
    * §7.1.1 — this header becomes a link that sorts by this column.
@@ -283,6 +303,22 @@ export function Table<Row>({
     )
   }
 
+  // §7.1 (amended 2026-11-07) — WHERE THE WIDTH GOES. A grid that fits at
+  // least one column to its content hands the rest of the row to its
+  // truncating columns as percentages of the table, by `share`. A percentage
+  // on a header is a width the auto layout honours ahead of content, and the
+  // `max-w-[1px]` on the cells below keeps their content from bidding for
+  // more. With NO fitted column nothing here applies, so every grid that has
+  // not opted in is laid out exactly as it was.
+  const fitted = columns.some((column) => column.fit === 'content')
+  const totalShare = columns
+    .filter((column) => column.truncate)
+    .reduce((sum, column) => sum + (column.share ?? 1), 0)
+  const widthOf = (column: Column<Row>): string | undefined =>
+    fitted && column.truncate && totalShare > 0
+      ? `${(((column.share ?? 1) / totalShare) * 100).toFixed(2)}%`
+      : undefined
+
   return (
     <div className="min-h-0 flex-1 overflow-auto bg-surface">
       <table className="w-full border-collapse text-start">
@@ -326,7 +362,13 @@ export function Table<Row>({
                     'text-xs font-semibold uppercase tracking-[0.04em]',
                     active ? 'text-ink' : 'text-ink-2',
                     column.align === 'end' ? 'text-end' : 'text-start',
+                    // §7.1: a fitted column's header asks for nothing, so the
+                    // column settles at its widest cell.
+                    column.fit === 'content' && 'w-0 whitespace-nowrap',
                   )}
+                  // §7.1: a truncating column's share of the rest, in a grid
+                  // that fits any column. `undefined` renders no attribute.
+                  style={{ width: widthOf(column) }}
                 >
                   {sort && column.sortable ? (
                     <Link
@@ -449,6 +491,9 @@ export function Table<Row>({
                         'px-z3 py-[var(--z-cell-pad-y)] text-[length:var(--z-body-size)]/[var(--z-body-line)] text-ink',
                         column.align === 'end' ? 'text-end' : 'text-start',
                         column.truncate && 'max-w-[1px] truncate',
+                        // §7.1: nothing in a fitted column wraps, so its
+                        // widest cell is its width.
+                        column.fit === 'content' && 'whitespace-nowrap',
                         // THE CELL IS THE CONTAINING BLOCK (§7.1, amended
                         // 2026-10-07). Chromium does not let a positioned
                         // <tr> contain the anchor's ::after, so a stretch

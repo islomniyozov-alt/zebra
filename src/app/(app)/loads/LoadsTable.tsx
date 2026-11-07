@@ -165,10 +165,19 @@ export function LoadsTable({
       return next
     })
 
+  // §6.7 COLUMN WIDTHS (2026-11-07, owner's review on dev): the columns that
+  // are never truncated — load, DEL date, truck, status, billing, rate,
+  // warnings — are FITTED to their content, and the five that truncate share
+  // what is left: authority, broker, pickup and delivery at one each, driver
+  // at two because it holds two seats. Before this, the browser gave a
+  // twelve-character date 202 px while Driver had 123 px and cut 70 rows of
+  // 100. `tests/table-column-widths.test.tsx` renders this and reads the
+  // declarations below.
   const columns: Column<LoadRow>[] = [
     {
       key: 'loadNumber',
       header: labels.load,
+      fit: 'content',
       // THE REFERENCE RIDES WITH THE LOAD NUMBER RATHER THAN IN A COLUMN OF
       // ITS OWN. The reason given here was §7.1's cap "with anything past that
       // behind a column chooser this application does not have" — it has one
@@ -238,6 +247,7 @@ export function LoadsTable({
     {
       key: 'deliveryDate',
       header: labels.deliveryDate,
+      fit: 'content',
       render: (row) => (
         <span className="font-mono tabular-nums">{row.deliveryDate}</span>
       ),
@@ -246,6 +256,7 @@ export function LoadsTable({
       key: 'driver',
       header: labels.driver,
       truncate: true,
+      share: 2,
       // BOTH SEATS, each its own link. An empty seat is an em dash, never blank.
       render: (row) =>
         row.drivers.length === 0
@@ -266,6 +277,7 @@ export function LoadsTable({
     {
       key: 'truck',
       header: labels.truck,
+      fit: 'content',
       render: (row) =>
         mayOpen.truck && row.truckId !== null ? (
           <span className="z-identifier">
@@ -278,6 +290,7 @@ export function LoadsTable({
     {
       key: 'status',
       header: labels.status,
+      fit: 'content',
       render: (row) => (
         // Operational: filled. Billing: outlined. Same hue vocabulary,
         // different construction, so the two are distinguishable at a glance
@@ -292,6 +305,7 @@ export function LoadsTable({
     {
       key: 'billing',
       header: labels.billing,
+      fit: 'content',
       render: (row) => (
         <StatusBadge
           tone={billingTone(row.billingStatus)}
@@ -304,12 +318,14 @@ export function LoadsTable({
       key: 'rate',
       header: labels.rate,
       align: 'end',
+      fit: 'content',
       // Money: right-aligned, tabular, mono, never truncated (§8).
       render: (row) => <span className="z-identifier">{row.rate}</span>,
     },
     {
       key: 'warnings',
       header: labels.warnings,
+      fit: 'content',
       render: (row) => (
         <WarningCell
           warnings={row.warnings}
