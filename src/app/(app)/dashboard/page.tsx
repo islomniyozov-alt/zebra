@@ -36,6 +36,7 @@ import { CashPanel, CompliancePanel, FleetPanel } from './Panels'
 import { BarChart } from '../_charts/BarChart'
 import { Sparkline } from '../_charts/Sparkline'
 import { Donut } from '../_charts/Donut'
+import { Breakdown } from '../_charts/Breakdown'
 import { DayBars } from '../_charts/DayBars'
 import type { RawParams } from '@/lib/list-view'
 import type { MessageKey } from '@/lib/i18n'
@@ -450,23 +451,36 @@ export default async function DashboardPage({
                   />
                 </div>
                 <div className="mt-z5 grid gap-z5 lg:grid-cols-2">
-                  <Donut
-                    slices={money.byCompany.map((row) => ({
-                      key: row.companyId,
-                      label: row.companyName,
-                      cents: row.grossCents,
-                    }))}
-                    locale={locale}
+                  {/* BY AUTHORITY IS CLOSED BY DEFAULT (§6.3, round five,
+                   * 2026-11-07): a donut naming every authority with its
+                   * gross beside it is the list the dropdown stopped showing.
+                   * Open for this view only, never persisted. The customer
+                   * donut beside it is not that list and stays open. */}
+                  <Breakdown
+                    heading={t('dash.chart.byCompany')}
                     labels={{
-                      heading: t('dash.chart.byCompany'),
-                      other: (count) =>
-                        `${t('dash.chart.other')} (${String(count)})`,
-                      name: t('accounting.company'),
-                      value: t('dash.kpi.gross'),
-                      share: t('dash.chart.share'),
-                      empty: t('dash.chart.noRevenue'),
+                      show: t('chart.showBreakdown'),
+                      hide: t('chart.hideBreakdown'),
                     }}
-                  />
+                  >
+                    <Donut
+                      slices={money.byCompany.map((row) => ({
+                        key: row.companyId,
+                        label: row.companyName,
+                        cents: row.grossCents,
+                      }))}
+                      locale={locale}
+                      labels={{
+                        heading: t('dash.chart.byCompany'),
+                        other: (count) =>
+                          `${t('dash.chart.other')} (${String(count)})`,
+                        name: t('accounting.company'),
+                        value: t('dash.kpi.gross'),
+                        share: t('dash.chart.share'),
+                        empty: t('dash.chart.noRevenue'),
+                      }}
+                    />
+                  </Breakdown>
                   <Donut
                     slices={money.byCustomer.map((row) => ({
                       key: row.customerId || '__none',

@@ -43,6 +43,7 @@ import { BarChart, type Bar } from '../../_charts/BarChart'
 import { SeriesBars } from '../../_charts/SeriesBars'
 import { AgingBar } from '../../_charts/AgingBar'
 import { Donut } from '../../_charts/Donut'
+import { Breakdown } from '../../_charts/Breakdown'
 import type { MessageKey } from '@/lib/i18n'
 import { Table, type Column } from '@/components/ui/Table'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -880,142 +881,161 @@ export default async function ReportsPage({
   return (
     <>
       {header}
-      {/* ── BY COMPANY: WEEKLY BARS PER AUTHORITY (§6.2.7) ────────────────
-       *
-       * `BarChart` unchanged, which is the point: this is exactly the money
-       * series it was built for — gross, driver pay, after driver pay, and the
-       * hatch where pay was never recorded. One chart per authority, because
-       * four authorities' gross on one axis is four series nobody asked to
-       * compare bar-by-bar; the matrix below is where they are read together.
-       *
-       * THE PERIODS COME FROM THE REPORT, not from the axis: this chart is the
-       * table's own figures drawn, and a bucket the table does not have is a
-       * bucket this chart must not invent. */}
-      <div className="flex flex-col gap-z5 border-b border-border bg-surface-2 px-gutter py-z4">
-        {authorities.map((authority) => (
-          <section
-            key={authority.companyId}
-            className="rounded-card border border-border bg-surface p-z4"
-          >
-            <BarChart
-              bars={authority.bars}
-              locale={locale}
-              labels={{
-                heading: `${authority.companyName} — ${t('reports.chart.byCompany')}`,
-                gross: t('reports.gross'),
-                driverPay: t('reports.chart.driverPay'),
-                unrecorded: t('reports.chart.unrecorded'),
-                afterDriverPay: t('reports.afterDriverPay'),
-                loads: t('reports.chart.loads'),
-                empty: t('reports.chart.empty'),
-                partial: t('reports.chart.partial'),
-                bucket:
-                  grain === 'day' ? t('dash.chart.day') : t('reports.week'),
-              }}
-            />
-          </section>
-        ))}
-      </div>
-      {charts}
       {report.firstSettledPeriodStart === null ? (
         <p className="border-b border-border bg-warning-soft px-gutter py-z2 text-xs text-warning">
           {t('reports.noneSettled')}
         </p>
       ) : null}
-
-      {periods.length === 0 ? (
-        <EmptyState
-          title={t('reports.emptyPeriods')}
-          body={t('reports.emptyPeriodsHint')}
-        />
-      ) : (
-        <div className="min-h-0 flex-1 overflow-auto bg-surface">
-          <table className="w-full border-collapse text-start">
-            <caption className="sr-only">
-              {cut === 'week' ? t('reports.byWeek') : t('reports.byCompany')}
-            </caption>
-            <thead>
-              <tr>
-                <th
-                  scope="col"
-                  className="sticky top-0 z-10 border-b border-border bg-surface-2 px-z3 py-z2 text-start text-xs font-semibold uppercase tracking-[0.04em] text-ink-2"
-                >
-                  {grouping === 'week' ? t('reports.week') : t('reports.month')}
-                </th>
-                <th
-                  scope="col"
-                  className="sticky top-0 z-10 border-b border-border bg-surface-2 px-z3 py-z2 text-start text-xs font-semibold uppercase tracking-[0.04em] text-ink-2"
-                >
-                  {t('reports.authority')}
-                </th>
-                <th
-                  scope="col"
-                  className="sticky top-0 z-10 border-b border-border bg-surface-2 px-z3 py-z2 text-end text-xs font-semibold uppercase tracking-[0.04em] text-ink-2"
-                >
-                  {t('reports.gross')}
-                </th>
-                <th
-                  scope="col"
-                  className="sticky top-0 z-10 border-b border-border bg-surface-2 px-z3 py-z2 text-end text-xs font-semibold uppercase tracking-[0.04em] text-ink-2"
-                >
-                  {t('reports.atRate')}
-                </th>
-                <th
-                  scope="col"
-                  className="sticky top-0 z-10 border-b border-border bg-surface-2 px-z3 py-z2 text-end text-xs font-semibold uppercase tracking-[0.04em] text-ink-2"
-                >
-                  {t('reports.afterDriverPay')}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {periods.map((period) =>
-                [period.all, ...period.companies].map((cell, index) => (
-                  <tr
-                    key={`${period.periodStart.getTime()}-${cell.companyId}`}
-                    className="h-[var(--z-row-height)] border-b border-border hover:bg-surface-3"
-                  >
-                    {/* THE PERIOD ONCE PER GROUP, not repeated down every
-                     * authority — rule 1, and a column of identical dates is
-                     * four rows of nothing to compare. */}
-                    <td className="px-z3 py-[var(--z-cell-pad-y)] font-mono text-[length:var(--z-body-size)]/[var(--z-body-line)] text-ink">
-                      {index === 0 ? (
-                        <Link
-                          href={`/accounting/payroll?week=${day(period.periodStart)}`}
-                          className="font-medium text-ink hover:text-accent"
-                          dir="ltr"
-                        >
-                          {day(period.periodStart)}
-                        </Link>
-                      ) : null}
-                    </td>
-                    <td
-                      className={`px-z3 py-[var(--z-cell-pad-y)] text-[length:var(--z-body-size)]/[var(--z-body-line)] ${
-                        index === 0 ? 'font-medium text-ink' : 'text-ink-2'
-                      }`}
-                    >
-                      {index === 0
-                        ? t('reports.allCompanies')
-                        : cell.companyName}
-                    </td>
-                    <td className="px-z3 py-[var(--z-cell-pad-y)] text-end text-[length:var(--z-body-size)]/[var(--z-body-line)] text-ink">
-                      {money(cell.grossCents)}
-                    </td>
-                    <td className="px-z3 py-[var(--z-cell-pad-y)] text-end text-[length:var(--z-body-size)]/[var(--z-body-line)] text-ink-2">
-                      {money(cell.atRateCents)}
-                    </td>
-                    <td className="px-z3 py-[var(--z-cell-pad-y)] text-end text-[length:var(--z-body-size)]/[var(--z-body-line)] text-ink">
-                      {cell.afterDriverPayCents === null
-                        ? dash
-                        : money(cell.afterDriverPayCents)}
-                    </td>
-                  </tr>
-                )),
-              )}
-            </tbody>
-          </table>
+      {/* THE BREAKDOWN BY AUTHORITY IS CLOSED BY DEFAULT (§6.3, round five,
+       * 2026-11-07). The per-authority charts and the matrix below name every
+       * authority with money beside each — the list the dropdown stopped
+       * showing, with figures attached — so both sit behind "Show breakdown",
+       * open for this view only and never persisted. The By week tab is the
+       * same breakdown ordered the other way and gets the same control. The
+       * receivables and settlements sections (`charts`) name no authority and
+       * render outside it. */}
+      <Breakdown
+        heading={t('reports.byCompany')}
+        labels={{
+          show: t('chart.showBreakdown'),
+          hide: t('chart.hideBreakdown'),
+        }}
+        className="border-b border-border bg-surface px-gutter py-z2"
+      >
+        {/* ── BY COMPANY: WEEKLY BARS PER AUTHORITY (§6.2.7) ────────────────
+         *
+         * `BarChart` unchanged, which is the point: this is exactly the money
+         * series it was built for — gross, driver pay, after driver pay, and the
+         * hatch where pay was never recorded. One chart per authority, because
+         * four authorities' gross on one axis is four series nobody asked to
+         * compare bar-by-bar; the matrix below is where they are read together.
+         *
+         * THE PERIODS COME FROM THE REPORT, not from the axis: this chart is the
+         * table's own figures drawn, and a bucket the table does not have is a
+         * bucket this chart must not invent. */}
+        <div className="flex flex-col gap-z5 rounded-card bg-surface-2 p-z4">
+          {authorities.map((authority) => (
+            <section
+              key={authority.companyId}
+              className="rounded-card border border-border bg-surface p-z4"
+            >
+              <BarChart
+                bars={authority.bars}
+                locale={locale}
+                labels={{
+                  heading: `${authority.companyName} — ${t('reports.chart.byCompany')}`,
+                  gross: t('reports.gross'),
+                  driverPay: t('reports.chart.driverPay'),
+                  unrecorded: t('reports.chart.unrecorded'),
+                  afterDriverPay: t('reports.afterDriverPay'),
+                  loads: t('reports.chart.loads'),
+                  empty: t('reports.chart.empty'),
+                  partial: t('reports.chart.partial'),
+                  bucket:
+                    grain === 'day' ? t('dash.chart.day') : t('reports.week'),
+                }}
+              />
+            </section>
+          ))}
         </div>
-      )}
+
+        {periods.length === 0 ? (
+          <EmptyState
+            title={t('reports.emptyPeriods')}
+            body={t('reports.emptyPeriodsHint')}
+          />
+        ) : (
+          <div className="min-h-0 flex-1 overflow-auto bg-surface">
+            <table className="w-full border-collapse text-start">
+              <caption className="sr-only">
+                {cut === 'week' ? t('reports.byWeek') : t('reports.byCompany')}
+              </caption>
+              <thead>
+                <tr>
+                  <th
+                    scope="col"
+                    className="sticky top-0 z-10 border-b border-border bg-surface-2 px-z3 py-z2 text-start text-xs font-semibold uppercase tracking-[0.04em] text-ink-2"
+                  >
+                    {grouping === 'week'
+                      ? t('reports.week')
+                      : t('reports.month')}
+                  </th>
+                  <th
+                    scope="col"
+                    className="sticky top-0 z-10 border-b border-border bg-surface-2 px-z3 py-z2 text-start text-xs font-semibold uppercase tracking-[0.04em] text-ink-2"
+                  >
+                    {t('reports.authority')}
+                  </th>
+                  <th
+                    scope="col"
+                    className="sticky top-0 z-10 border-b border-border bg-surface-2 px-z3 py-z2 text-end text-xs font-semibold uppercase tracking-[0.04em] text-ink-2"
+                  >
+                    {t('reports.gross')}
+                  </th>
+                  <th
+                    scope="col"
+                    className="sticky top-0 z-10 border-b border-border bg-surface-2 px-z3 py-z2 text-end text-xs font-semibold uppercase tracking-[0.04em] text-ink-2"
+                  >
+                    {t('reports.atRate')}
+                  </th>
+                  <th
+                    scope="col"
+                    className="sticky top-0 z-10 border-b border-border bg-surface-2 px-z3 py-z2 text-end text-xs font-semibold uppercase tracking-[0.04em] text-ink-2"
+                  >
+                    {t('reports.afterDriverPay')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {periods.map((period) =>
+                  [period.all, ...period.companies].map((cell, index) => (
+                    <tr
+                      key={`${period.periodStart.getTime()}-${cell.companyId}`}
+                      className="h-[var(--z-row-height)] border-b border-border hover:bg-surface-3"
+                    >
+                      {/* THE PERIOD ONCE PER GROUP, not repeated down every
+                       * authority — rule 1, and a column of identical dates is
+                       * four rows of nothing to compare. */}
+                      <td className="px-z3 py-[var(--z-cell-pad-y)] font-mono text-[length:var(--z-body-size)]/[var(--z-body-line)] text-ink">
+                        {index === 0 ? (
+                          <Link
+                            href={`/accounting/payroll?week=${day(period.periodStart)}`}
+                            className="font-medium text-ink hover:text-accent"
+                            dir="ltr"
+                          >
+                            {day(period.periodStart)}
+                          </Link>
+                        ) : null}
+                      </td>
+                      <td
+                        className={`px-z3 py-[var(--z-cell-pad-y)] text-[length:var(--z-body-size)]/[var(--z-body-line)] ${
+                          index === 0 ? 'font-medium text-ink' : 'text-ink-2'
+                        }`}
+                      >
+                        {index === 0
+                          ? t('reports.allCompanies')
+                          : cell.companyName}
+                      </td>
+                      <td className="px-z3 py-[var(--z-cell-pad-y)] text-end text-[length:var(--z-body-size)]/[var(--z-body-line)] text-ink">
+                        {money(cell.grossCents)}
+                      </td>
+                      <td className="px-z3 py-[var(--z-cell-pad-y)] text-end text-[length:var(--z-body-size)]/[var(--z-body-line)] text-ink-2">
+                        {money(cell.atRateCents)}
+                      </td>
+                      <td className="px-z3 py-[var(--z-cell-pad-y)] text-end text-[length:var(--z-body-size)]/[var(--z-body-line)] text-ink">
+                        {cell.afterDriverPayCents === null
+                          ? dash
+                          : money(cell.afterDriverPayCents)}
+                      </td>
+                    </tr>
+                  )),
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Breakdown>
+      {charts}
     </>
   )
 }
