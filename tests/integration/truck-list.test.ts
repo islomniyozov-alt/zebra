@@ -322,9 +322,10 @@ describe('the export is the list, every row of it', () => {
       expect(lines.filter((line) => line !== '')).toHaveLength(
         exported.rowCount + 1,
       )
-      // The default visible columns of a single-authority fleet, as codes.
+      // The default visible columns of a single-authority fleet, as codes:
+      // the brief's eleven less the authority column (ruling 5, 2026-11-10).
       expect(lines[0]).toBe(
-        'unit_number,make,plate,year,state,driver,status,warnings',
+        'unit_number,make,model,plate,year,state,driver,odometer,status,warnings',
       )
       expect(exported.filename).toBe(
         `zebra-trucks-${params.view}-2026-11-10.csv`,
