@@ -101,6 +101,23 @@ export function isTruckStatus(value: unknown): value is TruckStatus {
   )
 }
 
+/**
+ * The URL keys the Filters popover owns, for its badge and for Clear filters.
+ * HERE AND NOT IN THE CLIENT COMPONENT: a value exported from a 'use client'
+ * module reaches a server component as a client reference, not a value — the
+ * trucks page answered 500 on dev (2026-11-10, `TRUCK_FILTER_PARAMS is not
+ * iterable`) until this moved. `tests/client-module-imports.test.ts` holds
+ * every server page to it.
+ */
+export const TRUCK_FILTER_PARAMS = [
+  'status',
+  'fleet',
+  'make',
+  'yearFrom',
+  'yearTo',
+  'attention',
+] as const
+
 /** The views a Sold or Removed truck can appear in (§6.5 part 1, the footer). */
 export function viewHoldsInactive(view: TruckViewName): boolean {
   return view === 'all' || view === 'inactive'

@@ -17,7 +17,7 @@ import { ColumnsChooser } from '../_grid/ColumnsChooser'
 import { DataHealthRow } from '../_grid/DataHealthRow'
 import { keepColumns } from '../_grid/grid-page'
 import { CopyLoadNumber } from '../loads/CopyLoadNumber'
-import { TRUCK_FILTER_PARAMS, TruckFilters } from './TruckFilters'
+import { TruckFilters } from './TruckFilters'
 import { readGridColumns } from '@/lib/grid-columns'
 import { countTruckHealth, TRUCK_HEALTH_CHECKS } from '@/lib/data-health'
 import { FLEET_STATUSES } from '@/lib/fleet-codes'
@@ -29,6 +29,7 @@ import {
 import type { StatusTone } from '@/lib/status'
 import {
   readTruckListParams,
+  TRUCK_FILTER_PARAMS,
   TRUCK_STATUS_ORDER,
   TRUCK_VIEWS,
   viewHoldsInactive,

@@ -29,15 +29,11 @@ interface Props {
   }
 }
 
-/** The URL keys this popover owns, for the badge and for Clear filters. */
-export const TRUCK_FILTER_PARAMS = [
-  'status',
-  'fleet',
-  'make',
-  'yearFrom',
-  'yearTo',
-  'attention',
-] as const
+// THE URL KEYS THIS POPOVER OWNS ARE `TRUCK_FILTER_PARAMS` IN THE LIB, not
+// here. A value exported from a 'use client' module and imported by a server
+// component arrives as a client REFERENCE, not the value: on dev, 2026-11-10,
+// `TypeError: TRUCK_FILTER_PARAMS is not iterable` answered 500 on every
+// /trucks request until the export moved. Only components cross that line.
 
 const INPUT =
   'h-control-compact rounded-control border border-border-strong bg-surface px-z2 font-mono text-xs text-ink focus:border-accent focus:outline-none'
