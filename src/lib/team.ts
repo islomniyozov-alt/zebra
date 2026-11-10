@@ -1,3 +1,4 @@
+import type { Prisma } from '@/generated/prisma/client'
 import type { TxClient } from './tenancy'
 import { ReferenceError } from './reference'
 
@@ -52,10 +53,23 @@ export function teamMateOf<T extends { id: string; kind: string }>(
 }
 
 /**
- * Who holds this truck: live drivers (not removed, not terminated) whose
- * `assignedTruckId` is it, oldest pairing first so the first seat is stable.
- * VACATION and OFF_DUTY still hold their seat — a truck is not re-crewed
- * because its driver took a week off.
+ * A LIVE SEAT: a driver who is not removed and not terminated holds the truck
+ * their `assignedTruckId` names. VACATION and OFF_DUTY still hold their seat —
+ * a truck is not re-crewed because its driver took a week off.
+ *
+ * ONE DEFINITION, FOUR READERS: the truck record's crew, the team-mate
+ * suggestion, the trucks list's Driver column and its Unassigned view (§6.5
+ * part 1, "no live driver holds it"). `truck-list-counts` restates it in SQL
+ * and the agreement test holds the two together.
+ */
+export const HOLDS_SEAT = {
+  deletedAt: null,
+  status: { not: 'INACTIVE' },
+} as const satisfies Prisma.DriverWhereInput
+
+/**
+ * Who holds this truck: live drivers (`HOLDS_SEAT`) whose `assignedTruckId`
+ * is it, oldest pairing first so the first seat is stable.
  */
 export async function crewOfTruck(
   tx: TxClient,
@@ -65,14 +79,50 @@ export async function crewOfTruck(
   return tx.driver.findMany({
     where: {
       assignedTruckId: truckId,
-      deletedAt: null,
-      status: { not: 'INACTIVE' },
+      ...HOLDS_SEAT,
       ...(exceptDriverId ? { id: { not: exceptDriverId } } : {}),
     },
     orderBy: { updatedAt: 'asc' },
     take: TRUCK_SEATS + 1,
     select: { id: true, firstName: true, lastName: true, kind: true },
   })
+}
+
+/**
+ * The crew of many trucks in ONE statement, for the list (§6.5 part 1): the
+ * same seat definition and the same seat order as `crewOfTruck`, keyed by
+ * truck. Every id gets an entry, so a truck nobody holds reads `[]` rather
+ * than `undefined`.
+ */
+export async function crewOfTrucks(
+  tx: TxClient,
+  truckIds: readonly string[],
+): Promise<Map<string, CrewMember[]>> {
+  const crews = new Map<string, CrewMember[]>()
+  for (const id of truckIds) crews.set(id, [])
+  if (truckIds.length === 0) return crews
+  const rows = await tx.driver.findMany({
+    where: { assignedTruckId: { in: [...truckIds] }, ...HOLDS_SEAT },
+    orderBy: { updatedAt: 'asc' },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      kind: true,
+      assignedTruckId: true,
+    },
+  })
+  for (const row of rows) {
+    const crew = crews.get(row.assignedTruckId ?? '')
+    if (!crew) continue
+    crew.push({
+      id: row.id,
+      firstName: row.firstName,
+      lastName: row.lastName,
+      kind: row.kind,
+    })
+  }
+  return crews
 }
 
 export interface TeamMate {

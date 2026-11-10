@@ -104,7 +104,11 @@ describe('the row on the list', () => {
 
   it('counts in the same transaction, filters by the same where, links every figure', () => {
     expect(page).toContain('countTruckHealth(tx')
-    expect(page).toContain('truckHealthWhere(')
+    // §6.5 part 1: the list's `where` is built in the lib, and the health
+    // filter is one element of its AND — read from the artefact that acts.
+    expect(readFileSync(join('src', 'lib', 'truck-list.ts'), 'utf8')).toContain(
+      'truckHealthWhere(params.missing)',
+    )
     expect(page).toContain('<DataHealthRow')
     const row = readFileSync(
       join('src', 'app', '(app)', '_grid', 'DataHealthRow.tsx'),
@@ -118,8 +122,12 @@ describe('the row on the list', () => {
     expect(row).not.toMatch(/TRUCK_HEALTH_CHECKS|DRIVER_HEALTH_CHECKS/)
     // The link carries `missing=` through the page's own URL builder, so the
     // other filters survive the click.
-    expect(page).toContain('missing: missing ?? undefined')
     expect(page).toContain('withParams({ missing: check ?? undefined })')
+    // And the builder starts from EVERY current parameter, so the view and
+    // the popover's filters survive the click (§6.5 part 1).
+    expect(page).toMatch(
+      /for \(const \[key, value\] of Object\.entries\(params\)\)/,
+    )
   })
 })
 

@@ -41,6 +41,15 @@ export interface FilterGroup {
   label: string
   choices: readonly FilterChoice[]
   /**
+   * The chip that is lit when the URL carries no value for this group — the
+   * trucks list's Active view (§6.5 part 1), which is what `/trucks` with no
+   * `?view=` lists. Pressing it DELETES the key rather than writing the
+   * default, so the URL a reader copies is the one they had; pressing the lit
+   * non-default chip returns to the default. A group with a default always has
+   * exactly one chip lit, which is what makes it a view and not a filter.
+   */
+  defaultValue?: string
+  /**
    * Cap each chip's width and truncate, with the full label as its title. For
    * chips that are names (the authorities), so a long legal name cannot push a
    * one-row bar past 1920 (§6.7 chain two).
@@ -133,9 +142,9 @@ export function FilterBar({
   const params = useSearchParams()
 
   const toggle = useCallback(
-    (param: string, value: string) => {
+    (param: string, value: string, defaultValue?: string) => {
       const next = new URLSearchParams(params.toString())
-      if (next.get(param) === value) {
+      if (next.get(param) === value || value === defaultValue) {
         next.delete(param)
       } else {
         next.set(param, value)
@@ -220,13 +229,17 @@ export function FilterBar({
               {group.label}
             </span>
             {group.choices.map((choice) => {
-              const selected = params.get(group.param) === choice.value
+              const selected =
+                (params.get(group.param) ?? group.defaultValue ?? null) ===
+                choice.value
               return (
                 <button
                   key={choice.value}
                   type="button"
                   aria-pressed={selected}
-                  onClick={() => toggle(group.param, choice.value)}
+                  onClick={() =>
+                    toggle(group.param, choice.value, group.defaultValue)
+                  }
                   title={group.truncate ? choice.label : undefined}
                   className={cx(
                     'h-control-compact rounded-control border px-z2 text-xs font-medium',

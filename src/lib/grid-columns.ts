@@ -4,6 +4,7 @@ import {
   LOAD_COLUMNS_ADDED_SINCE_LEGACY,
   readColumnMemory,
   TABLE_COLUMN_CAP,
+  TRUCK_COLUMNS_ADDED_SINCE_LEGACY,
   visibleFromMemory,
 } from './list-columns'
 import type { Resource } from './permissions'
@@ -183,6 +184,7 @@ export function gridColumnCap(grid: GridId): number {
 /** Per grid, the columns an old "shown" list never had the chance to show. */
 const ADDED_SINCE_LEGACY: Partial<Record<GridId, readonly string[]>> = {
   'loads.loads': LOAD_COLUMNS_ADDED_SINCE_LEGACY,
+  'trucks.trucks': TRUCK_COLUMNS_ADDED_SINCE_LEGACY,
 }
 
 export type SaveColumnsFailure = 'unknown_grid' | 'no_columns'

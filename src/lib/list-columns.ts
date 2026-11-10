@@ -158,14 +158,24 @@ export const LOAD_COLUMNS_ADDED_SINCE_LEGACY = [
 ] as const
 
 // ── /trucks ───────────────────────────────────────────────────────────────
+//
+// DATATRUCK'S ORDER (§6.5 part 1, the owner's brief of 2026-11-10): unit ·
+// make · model · plate · VIN · year · state · authority · driver · owner name
+// · odometer · status · warnings, with the three columns the list already had
+// — fleet status, aging, heading to — after status. Sixteen declared with the
+// authority column, nine shown.
 
 export const TRUCK_COLUMN_KEYS = [
   'unitNumber',
-  'company',
   'make',
   'model',
-  'year',
   'plate',
+  'vin',
+  'year',
+  'plateState',
+  'company',
+  'driver',
+  'ownerName',
   'odometer',
   'status',
   'fleetStatus',
@@ -175,11 +185,36 @@ export const TRUCK_COLUMN_KEYS = [
 ] as const
 
 /**
- * §7.1.7: specifications identify a unit at a desk, once. This list is read for
- * where the unit is and whether it can run. Make and plate stay, because they
- * are how a truck gets described on the phone.
+ * §6.5 part 1: the brief's four — owner name, VIN, fleet status, aging — and
+ * heading to, which the brief drops from the default set. AND MODEL AND
+ * ODOMETER, by §7.1.7's reason: specifications identify a unit at a desk,
+ * once, and this list is read for where the unit is and whether it can run.
+ * Make and plate stay, because they are how a truck gets described on the
+ * phone; year comes out from behind the chooser because it is Datatruck's and
+ * four characters. FLAGGED in §6.5: the brief's default set is eleven and
+ * §7.1's cap is nine; the ruling that raises `/trucks` is one line in
+ * `GRID_COLUMN_CAP`, and model and odometer come out the day it is made.
  */
-export const TRUCK_COLUMNS_HIDDEN = ['model', 'year', 'odometer'] as const
+export const TRUCK_COLUMNS_HIDDEN = [
+  'ownerName',
+  'vin',
+  'fleetStatus',
+  'aging',
+  'headingTo',
+  'model',
+  'odometer',
+] as const
+
+/**
+ * The columns `/trucks` gained on 2026-11-10 (§6.5 part 1): an old saved
+ * choice never saw them, so its migration does not count them as hidden.
+ */
+export const TRUCK_COLUMNS_ADDED_SINCE_LEGACY = [
+  'vin',
+  'plateState',
+  'driver',
+  'ownerName',
+] as const
 
 // ── /drivers (§6.4 part 1) ────────────────────────────────────────────────
 //

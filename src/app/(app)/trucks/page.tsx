@@ -1,44 +1,51 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import type { TruckStatus } from '@/generated/prisma/client'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { companyScopeFilter } from '@/lib/tenancy'
+import type { MessageKey } from '@/lib/i18n'
 import { Table, type Column } from '@/components/ui/Table'
+import { FilterBar } from '@/components/ui/FilterBar'
 import { WarningCell, warningLabels } from '@/components/WarningCell'
-import { headingToForTrucks } from '@/lib/dispatch-fields'
-import { agingDaysFrom, fleetStatusChangedForTrucks } from '@/lib/fleet-codes'
-import { truckWarningFacts, truckWarnings, type Warning } from '@/lib/warnings'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
 import { orDash } from '../_reference/shared'
 import { truckStatusKey } from './fields'
+import { AuthorityFilter } from '../_grid/AuthorityFilter'
 import { ColumnsChooser } from '../_grid/ColumnsChooser'
-import { keepColumns } from '../_grid/grid-page'
-import { readGridColumns } from '@/lib/grid-columns'
-import {
-  countTruckHealth,
-  TRUCK_HEALTH_CHECKS,
-  truckHealthCheckFor,
-  truckHealthWhere,
-  type TruckHealthCheck,
-} from '@/lib/data-health'
 import { DataHealthRow } from '../_grid/DataHealthRow'
-import type { MessageKey } from '@/lib/i18n'
+import { keepColumns } from '../_grid/grid-page'
+import { CopyLoadNumber } from '../loads/CopyLoadNumber'
+import { TRUCK_FILTER_PARAMS, TruckFilters } from './TruckFilters'
+import { readGridColumns } from '@/lib/grid-columns'
+import { countTruckHealth, TRUCK_HEALTH_CHECKS } from '@/lib/data-health'
+import { FLEET_STATUSES } from '@/lib/fleet-codes'
 import {
   columnKeysFor,
   TRUCK_COLUMN_KEYS,
   TRUCK_COLUMNS_HIDDEN,
 } from '@/lib/list-columns'
 import type { StatusTone } from '@/lib/status'
-import type { TruckStatus } from '@/generated/prisma/client'
+import {
+  readTruckListParams,
+  TRUCK_STATUS_ORDER,
+  TRUCK_VIEWS,
+  viewHoldsInactive,
+} from '@/lib/truck-list'
+import { readTruckListData } from '@/lib/truck-list-page'
+import type { TruckListRow } from '@/lib/truck-list-rows'
 
-// §7.1.7 — ELEVEN COLUMNS DECLARED, TWELVE WITH THE AUTHORITY ONE (§6.3), AND
-// NINE SHOWN. §7.1 caps a table at nine and `Table` throws above it, so this
-// page returned 500 for every organization from 2026-09-20 — when the warnings
-// column landed — until the chooser arrived. The comment here used to say "eight
-// columns at most", which was true when it was written and is how a count stops
-// being checked.
+// §6.5 part 1 — THE TRUCKS LIST TAKES DATATRUCK'S SHAPE (the owner's brief of
+// 2026-11-10). Four views as chips with counts, Datatruck's columns, a search,
+// the authority dropdown, a Filters popover, the chooser, an export, and the
+// status counts in the footer above the data-health row.
+//
+// WHAT IT READS IS `readTruckListData` in `src/lib/truck-list-page.ts`: the
+// rows, every number on the bar and in the footer from ONE grouped statement,
+// the authorities and the fleet's makes. The page renders. Sixteen columns
+// declared (§7.1.7), nine shown; `Table` throws above the cap, and the chooser
+// is what keeps this page legal.
 //
 // The stripe means availability on this screen, and the header says so (§2).
 
@@ -51,25 +58,34 @@ const TRUCK_TONE: Record<TruckStatus, StatusTone> = {
   SOLD: 'muted',
 }
 
-interface Row {
-  id: string
-  unitNumber: string
-  companyName: string
-  make: string | null
-  model: string | null
-  year: number | null
-  plate: string | null
-  odometer: string
-  status: TruckStatus
-  isRetired: boolean
-  warnings: readonly Warning[]
-  /** Derived: the last stop of the load this truck is on. Null when idle. */
-  headingTo: string | null
-  /** Item 12. Null until somebody classifies the unit. */
-  fleetStatus: string | null
-  /** Derived from the audit log. Null when nothing has ever changed it. */
-  agingDays: number | null
-}
+/** The page reads this many and says so past it (§6.5 part 1). */
+const PAGE_CAP = 500
+
+/**
+ * The chooser's labels, keyed by column (§7.1.7). TYPED AGAINST
+ * `TRUCK_COLUMN_KEYS`, so a column added to the list and not to this map is a
+ * type error rather than a checkbox labelled `undefined`.
+ */
+const truckColumnHeaders = (
+  t: (key: MessageKey) => string,
+): Record<(typeof TRUCK_COLUMN_KEYS)[number], string> => ({
+  unitNumber: t('fleet.unitNumber'),
+  make: t('trucks.make'),
+  model: t('trucks.model'),
+  plate: t('fleet.plate'),
+  vin: t('fleet.vin'),
+  year: t('fleet.year'),
+  plateState: t('trucks.column.state'),
+  company: t('ref.authority'),
+  driver: t('trucks.column.driver'),
+  ownerName: t('trucks.column.ownerName'),
+  odometer: t('trucks.odometer'),
+  status: t('ref.status'),
+  fleetStatus: t('trucks.fleetStatus'),
+  aging: t('trucks.aging'),
+  headingTo: t('dispatch.headingTo'),
+  warnings: t('warning.column'),
+})
 
 export default async function TrucksPage({
   searchParams,
@@ -79,166 +95,202 @@ export default async function TrucksPage({
   const params = await searchParams
   const { t, locale } = await getLocaleContext()
 
-  const showRetired = params['removed'] === '1'
-  const companyParam =
-    typeof params['company'] === 'string' ? params['company'] : undefined
-
-  // Attention narrows the rows already fetched — warnings are computed and
-  // there is nothing stored to filter on. The tag filter is a real query
-  // filter: tags are stored and GIN-indexed.
-  const needsAttention = params['attention'] === '1'
-  const tagParam = typeof params['tag'] === 'string' ? params['tag'] : undefined
-  // THE DATA-HEALTH FILTER (§6.5 part 0): the same definition the footer's
-  // count used, applied as a query filter. An unrecognised value filters
-  // nothing rather than failing the page.
-  const missing: TruckHealthCheck | null = truckHealthCheckFor(
-    params['missing'],
-  )
+  // THE URL, READ ONCE, in the lib: the view (`?view=`, Active by default and
+  // for any unknown name), the search, the popover's filters, the tag and the
+  // data-health check. The page never parses a parameter itself.
+  const listParams = readTruckListParams(params)
 
   // §6.8: a role without the read is REFUSED as a 404, never a 500 (sweep).
   if (!(await currentUserCan('read', 'truck'))) notFound()
-  const { rows, companyCount, visible, health } = await withCurrentOrg(
-    'read',
-    'truck',
-    async (tx, session) => {
-      const scope = companyScopeFilter(session.companyScopes)
-      const companyCount = await tx.company.count()
 
-      // THE FIVE COUNTS, ONE STATEMENT, IN THIS TRANSACTION (§6.5 part 0).
-      // Over the fleet the user may see — scope and the authority filter —
-      // and not over this view: attention, tag and the health filter itself
-      // narrow the rows, not the row that says how much of the fleet is
-      // incomplete.
-      const health = await countTruckHealth(tx, {
-        companyIds: companyParam ? [companyParam] : session.companyScopes,
-      })
+  const [mayCreate, mayOpenDriver] = await Promise.all([
+    currentUserCan('create', 'truck'),
+    currentUserCan('read', 'driver'),
+  ])
 
-      const trucks = await tx.truck.findMany({
-        where: {
-          ...(tagParam ? { tags: { has: tagParam } } : {}),
-          ...scope,
-          ...(companyParam ? { companyId: companyParam } : {}),
-          ...(showRetired ? {} : { deletedAt: null }),
-          ...(missing ? truckHealthWhere(missing) : {}),
-        },
-        orderBy: [{ company: { name: 'asc' } }, { unitNumber: 'asc' }],
-        take: 200,
-        select: {
-          id: true,
-          unitNumber: true,
-          make: true,
-          model: true,
-          year: true,
-          plate: true,
-          currentOdometer: true,
-          status: true,
-          fleetStatus: true,
-          deletedAt: true,
-          tags: true,
-          company: { select: { name: true } },
-          // NOT selected: purchasePriceCents. It is money, and no role in this
-          // phase has a resource that grants it — see the Step 2 report.
-        },
-      })
+  const {
+    data: { rows, counts, authorities, makes },
+    health,
+    visible,
+  } = await withCurrentOrg('read', 'truck', async (tx, session) => {
+    const data = await readTruckListData(
+      tx,
+      session.companyScopes,
+      listParams,
+      {
+        now: new Date(),
+        take: PAGE_CAP,
+      },
+    )
+    // THE FIVE DATA-HEALTH COUNTS, ONE STATEMENT, IN THIS TRANSACTION (§6.5
+    // part 0). Over the fleet the user may see — scope and the authority
+    // filter — and never over this view: the row says how much of the fleet
+    // is incomplete, not how much of this view.
+    const health = await countTruckHealth(tx, {
+      companyIds: listParams.company
+        ? [listParams.company]
+        : session.companyScopes,
+    })
+    // §7.1.7, in the same transaction. One `UserPreference` read.
+    const visible = await readGridColumns(
+      tx,
+      session.userId,
+      'trucks.trucks',
+      columnKeysFor(TRUCK_COLUMN_KEYS, data.authorities.length > 1),
+      TRUCK_COLUMNS_HIDDEN,
+    )
+    return { data, health, visible }
+  })
 
-      const miles = new Intl.NumberFormat(locale)
+  const showCompany = authorities.length > 1
+  const headers = truckColumnHeaders(t)
+  const warningNames = warningLabels(t)
+  const miles = new Intl.NumberFormat(locale)
 
-      // ONE QUERY EACH FOR THE PAGE, not one per row.
-      const ids = trucks.map((truck) => truck.id)
-      const [facts, headingTo, statusChanged] = await Promise.all([
-        truckWarningFacts(tx, ids),
-        headingToForTrucks(tx, ids),
-        fleetStatusChangedForTrucks(tx, ids),
-      ])
-      const now = new Date()
+  /**
+   * Every current parameter, with `over` applied — a key set to `undefined`
+   * is dropped. The data-health links and the export carry the view and every
+   * filter forward, because a link that silently drops the view is worse than
+   * no link.
+   */
+  const withParams = (over: Record<string, string | undefined>) => {
+    const query = new URLSearchParams()
+    for (const [key, value] of Object.entries(params)) {
+      if (typeof value === 'string' && value !== '') query.set(key, value)
+    }
+    for (const [key, value] of Object.entries(over)) {
+      if (value === undefined) query.delete(key)
+      else query.set(key, value)
+    }
+    const text = query.toString()
+    return text ? `/trucks?${text}` : '/trucks'
+  }
 
-      const rows: Row[] = trucks.map((truck) => ({
-        id: truck.id,
-        unitNumber: truck.unitNumber,
-        companyName: truck.company.name,
-        make: truck.make,
-        model: truck.model,
-        year: truck.year,
-        plate: truck.plate,
-        odometer:
-          truck.currentOdometer === null
-            ? '—'
-            : miles.format(truck.currentOdometer),
-        status: truck.status,
-        isRetired: truck.deletedAt !== null,
-        warnings: truckWarnings(facts.get(truck.id) ?? { compliance: [] }, now),
-        headingTo: headingTo.get(truck.id) ?? null,
-        fleetStatus: truck.fleetStatus,
-        agingDays: agingDaysFrom(statusChanged.get(truck.id) ?? null, now),
-      }))
+  /** The same query string, for the export: the file is this view. */
+  const exportHref = `/trucks/export${withParams({}).slice('/trucks'.length)}`
 
-      // IN THE SAME TRANSACTION as the rows, not a second one. This is one
-      // `UserPreference` read; a round trip of its own for it would be a second
-      // RLS session variable set and a second socket turn for a list of strings.
-      const visible = await readGridColumns(
-        tx,
-        session.userId,
-        'trucks.trucks',
-        columnKeysFor(TRUCK_COLUMN_KEYS, companyCount > 1),
-        TRUCK_COLUMNS_HIDDEN,
-      )
-
-      return { rows, companyCount, visible, health }
-    },
+  /** A name that opens its record, above the row's overlay (§7.1). */
+  const recordLink = (href: string, text: string) => (
+    <Link
+      href={href}
+      className="relative z-10 text-ink underline-offset-2 hover:text-accent hover:underline"
+    >
+      {text}
+    </Link>
   )
 
-  const mayCreate = await currentUserCan('create', 'truck')
-  const showCompany = companyCount > 1
-
-  const warningNames = warningLabels(t)
-
-  const columns: Column<Row>[] = [
+  // DECLARED IN `TRUCK_COLUMN_KEYS`' ORDER — Datatruck's — and the test reads
+  // the keys off this file to prove it. Widths per §7.1: the identifiers, the
+  // year, the state, the odometer, the badge, the aging and the warnings are
+  // fitted; the names share what is left, driver at two for its two seats.
+  const columns: Column<TruckListRow>[] = [
     {
       key: 'unitNumber',
-      header: t('fleet.unitNumber'),
+      header: headers.unitNumber,
+      fit: 'content',
       // Never truncated — it is the field people copy and read aloud (§7.1).
       render: (row) => <span className="font-mono">{row.unitNumber}</span>,
+      // §6.7 item 4, here: the copy icon sits OUTSIDE the row's named anchor.
+      trailing: (row) => (
+        <CopyLoadNumber
+          value={row.unitNumber}
+          labels={{
+            copy: t('trucks.copyUnit'),
+            copied: t('trucks.copiedUnit'),
+            failed: t('trucks.copyFailed'),
+          }}
+        />
+      ),
+    },
+    {
+      key: 'make',
+      header: headers.make,
+      truncate: true,
+      render: (row) => orDash(row.make),
+    },
+    {
+      key: 'model',
+      header: headers.model,
+      truncate: true,
+      render: (row) => orDash(row.model),
+    },
+    {
+      key: 'plate',
+      header: headers.plate,
+      fit: 'content',
+      render: (row) => <span className="font-mono">{orDash(row.plate)}</span>,
+    },
+    {
+      key: 'vin',
+      header: headers.vin,
+      fit: 'content',
+      render: (row) => <span className="font-mono">{orDash(row.vin)}</span>,
+    },
+    {
+      key: 'year',
+      header: headers.year,
+      fit: 'content',
+      align: 'end',
+      render: (row) => orDash(row.year),
+    },
+    {
+      key: 'plateState',
+      header: headers.plateState,
+      fit: 'content',
+      render: (row) => orDash(row.plateState),
     },
     ...(showCompany
       ? [
           {
             key: 'company',
-            header: t('ref.authority'),
+            header: headers.company,
             truncate: true,
-            render: (row: Row) => row.companyName,
+            render: (row: TruckListRow) => row.companyName,
           },
         ]
       : []),
     {
-      key: 'make',
-      header: t('trucks.make'),
-      render: (row) => orDash(row.make),
+      key: 'driver',
+      header: headers.driver,
+      truncate: true,
+      share: 2,
+      // BOTH SEATS of a team truck, each its own link where the role may open
+      // a driver (§6.7 item 3). An empty seat is an em dash, never blank.
+      render: (row) =>
+        row.crew.length === 0
+          ? '—'
+          : row.crew.map((seat, index) => (
+              <span key={seat.id}>
+                {index > 0 ? ' · ' : null}
+                {mayOpenDriver
+                  ? recordLink(`/drivers/${seat.id}`, seat.name)
+                  : seat.name}
+              </span>
+            )),
     },
     {
-      key: 'model',
-      header: t('trucks.model'),
-      render: (row) => orDash(row.model),
-    },
-    {
-      key: 'year',
-      header: t('fleet.year'),
-      align: 'end',
-      render: (row) => orDash(row.year),
-    },
-    {
-      key: 'plate',
-      header: t('fleet.plate'),
-      render: (row) => <span className="font-mono">{orDash(row.plate)}</span>,
+      key: 'ownerName',
+      header: headers.ownerName,
+      truncate: true,
+      // Null means the carrier owns it (the schema's own rule): the dash is
+      // the honest cell, not the authority's name repeated.
+      render: (row) => orDash(row.ownerName),
     },
     {
       key: 'odometer',
-      header: t('trucks.odometer'),
+      header: headers.odometer,
+      fit: 'content',
       align: 'end',
-      render: (row) => <span className="font-mono">{row.odometer}</span>,
+      render: (row) => (
+        <span className="font-mono">
+          {row.odometer === null ? '—' : miles.format(row.odometer)}
+        </span>
+      ),
     },
     {
       key: 'status',
-      header: t('ref.status'),
+      header: headers.status,
+      fit: 'content',
       render: (row) =>
         row.isRetired ? (
           <span className="text-ink-3">{t('ref.retired')}</span>
@@ -251,7 +303,8 @@ export default async function TrucksPage({
     },
     {
       key: 'fleetStatus',
-      header: t('trucks.fleetStatus'),
+      header: headers.fleetStatus,
+      fit: 'content',
       // A SECOND AXIS, BESIDE the status column and not instead of it. One
       // says where the freight has the unit, the other whether it can run —
       // and the pair that disagrees is the row worth finding.
@@ -259,13 +312,11 @@ export default async function TrucksPage({
     },
     {
       key: 'aging',
-      header: t('trucks.aging'),
-      // DERIVED FROM THE AUDIT LOG, never stored. Datatruck ships an
-      // `Aging days` column that was true the day it was written.
-      //
-      // A BLANK IS NOT ZERO DAYS. Nothing has ever changed this unit's
-      // fleet status, so there is no date to count from — and "0 d" would
-      // read as "changed today", which is the one thing it cannot mean.
+      header: headers.aging,
+      fit: 'content',
+      // DERIVED FROM THE AUDIT LOG, never stored. A BLANK IS NOT ZERO DAYS:
+      // nothing has ever changed this unit's fleet status, so there is no
+      // date to count from, and "0 d" would read as "changed today".
       render: (row) =>
         row.agingDays === null
           ? '—'
@@ -273,15 +324,15 @@ export default async function TrucksPage({
     },
     {
       key: 'headingTo',
-      header: t('dispatch.headingTo'),
+      header: headers.headingTo,
       truncate: true,
-      // DERIVED, NEVER STORED. A blank cell is a truck on nothing, which
-      // is a fact rather than a gap — see dispatch-fields.ts.
+      // DERIVED, NEVER STORED. A blank cell is a truck on nothing.
       render: (row) => row.headingTo ?? '—',
     },
     {
       key: 'warnings',
-      header: t('warning.column'),
+      header: headers.warnings,
+      fit: 'content',
       render: (row) => (
         <WarningCell
           warnings={row.warnings}
@@ -295,34 +346,33 @@ export default async function TrucksPage({
     },
   ]
 
-  const shown = needsAttention
-    ? rows.filter((row) => row.warnings.length > 0)
-    : rows
+  // Whether anything narrows the list beyond the default view, for the empty
+  // state's wording: "no trucks yet" and "none match" are different sentences.
+  const filtered =
+    listParams.view !== 'active' ||
+    Boolean(
+      listParams.company ||
+        listParams.q ||
+        listParams.status ||
+        listParams.fleet ||
+        listParams.make ||
+        listParams.yearFrom !== undefined ||
+        listParams.yearTo !== undefined ||
+        listParams.attention ||
+        listParams.tag ||
+        listParams.missing,
+    )
 
-  // ── EVERY TOGGLE KEEPS THE OTHERS ──────────────────────────────────
-  //
-  // This was `showRetired ? '/trucks' : '/trucks?removed=1'`, which dropped
-  // the company filter on every click and would now drop the attention and
-  // tag filters too — turning on "needs attention" and then "show retired"
-  // would quietly show everything again.
-  const withParams = (over: Record<string, string | undefined>) => {
-    const query = new URLSearchParams()
-    const all = {
-      company: companyParam,
-      removed: showRetired ? '1' : undefined,
-      attention: needsAttention ? '1' : undefined,
-      tag: tagParam,
-      missing: missing ?? undefined,
-      ...over,
-    }
-    for (const [key, value] of Object.entries(all)) {
-      if (value !== undefined) query.set(key, value)
-    }
-    const text = query.toString()
-    return text ? `/trucks?${text}` : '/trucks'
-  }
-
-  const toggleHref = withParams({ removed: showRetired ? undefined : '1' })
+  // THE FOOTER'S STATUS CHIPS (§6.5 part 1): the brief's five, then Sold and
+  // Removed only on the views that can hold them. Read-only — the status
+  // FILTER is in the popover, and a chip that both reported and narrowed would
+  // be two controls in one. Zero is shown.
+  const statusChips: (TruckStatus | 'REMOVED')[] = [
+    ...TRUCK_STATUS_ORDER.filter(
+      (status) => status !== 'SOLD' || viewHoldsInactive(listParams.view),
+    ),
+    ...(viewHoldsInactive(listParams.view) ? (['REMOVED'] as const) : []),
+  ]
 
   return (
     <>
@@ -330,6 +380,14 @@ export default async function TrucksPage({
         <h1 className="text-lg font-medium text-ink">{t('trucks.title')}</h1>
         <div className="flex items-center gap-z3">
           <p className="text-xs text-ink-3">{t('trucks.stripeMeaning')}</p>
+          {/* §6.5 part 1: this view, every row of it, as CSV. A plain link:
+           * the browser downloads, middle-click works, nothing is posted. */}
+          <a
+            href={exportHref}
+            className="inline-flex h-control-compact items-center rounded-control border border-border-strong bg-surface px-z2 text-xs font-medium text-ink-2 hover:bg-surface-3"
+          >
+            {t('trucks.export')}
+          </a>
           {mayCreate ? (
             <Link href="/trucks/new">
               <Button variant="primary" size="compact">
@@ -340,77 +398,150 @@ export default async function TrucksPage({
         </div>
       </div>
 
-      <div className="flex items-center gap-z3 border-b border-border bg-surface-2 px-gutter py-z2">
-        <Link
-          href={withParams({ attention: needsAttention ? undefined : '1' })}
-          className={
-            needsAttention
-              ? 'text-sm font-medium text-accent'
-              : 'text-sm font-medium text-ink-2 hover:text-accent'
-          }
-        >
-          {needsAttention ? t('warning.all') : t('warning.attention')}
-        </Link>
-        <Link
-          href={toggleHref}
-          className="text-sm font-medium text-ink-2 hover:text-accent"
-        >
-          {showRetired ? t('ref.hideRetired') : t('ref.showRetired')}
-        </Link>
-        {/* THE CHOOSER IS WHY THIS TABLE IS LEGAL (§7.1.7). Eleven columns,
-         * nine shown, and the specifications are a tick away rather than gone.
-         * `ms-auto` puts it at the end of the row the two filters start. */}
-        <div className="ms-auto">
-          <ColumnsChooser
-            grid="trucks.trucks"
-            columns={columns.map((column) => ({
-              key: column.key,
-              header: String(column.header),
-            }))}
-            visible={visible}
-            labels={{
-              open: t('grid.columns'),
-              apply: t('grid.columns.apply'),
-              cancel: t('grid.columns.cancel'),
-              firstLocked: t('grid.columns.firstLocked'),
-            }}
-            errors={{
-              'grid.columns.errorEmpty': t('grid.columns.errorEmpty'),
-              'grid.columns.errorGrid': t('grid.columns.errorGrid'),
-            }}
-          />
-        </div>
-      </div>
+      {/* §7.4, two rows as on /loads: row one the four view chips with their
+       * counts; row two the search, the authority dropdown, Filters, the
+       * chooser and Clear filters. */}
+      <FilterBar
+        layout="twoRows"
+        clearLabel={t('trucks.filter.clear')}
+        moreLabel={t('trucks.filter.more')}
+        extraParams={['company', 'tag', 'missing', ...TRUCK_FILTER_PARAMS]}
+        groups={[
+          {
+            param: 'view',
+            label: t('trucks.filter.view'),
+            // ACTIVE IS THE DEFAULT CHIP: lit with no `?view=`, and pressing
+            // it deletes the key (§6.5 part 1).
+            defaultValue: 'active',
+            choices: TRUCK_VIEWS.map((name) => ({
+              value: name,
+              label: t(`trucks.view.${name}` as MessageKey),
+              count: counts.views[name],
+            })),
+          },
+        ]}
+        search={{
+          param: 'q',
+          label: t('trucks.filter.search'),
+          placeholder: t('trucks.filter.searchPlaceholder'),
+        }}
+      >
+        <AuthorityFilter
+          companies={authorities}
+          label={t('ref.authority')}
+          allLabel={t('accounting.allCompanies')}
+        />
+        <TruckFilters
+          statuses={TRUCK_STATUS_ORDER.map((status) => ({
+            value: status,
+            label: t(truckStatusKey(status)),
+          }))}
+          fleetStatuses={FLEET_STATUSES}
+          makes={makes}
+          labels={{
+            open: t('trucks.filters'),
+            status: t('trucks.filter.status'),
+            fleetStatus: t('trucks.filter.fleetStatus'),
+            make: t('trucks.filter.make'),
+            anyMake: t('trucks.filter.anyMake'),
+            year: t('trucks.filter.year'),
+            yearFrom: t('trucks.filter.yearFrom'),
+            yearTo: t('trucks.filter.yearTo'),
+            warnings: t('trucks.filter.warnings'),
+            needsAttention: t('warning.attention'),
+          }}
+        />
+        <ColumnsChooser
+          grid="trucks.trucks"
+          columns={columnKeysFor(TRUCK_COLUMN_KEYS, showCompany).map((key) => ({
+            key,
+            header: headers[key],
+          }))}
+          visible={visible}
+          labels={{
+            open: t('grid.columns'),
+            apply: t('grid.columns.apply'),
+            cancel: t('grid.columns.cancel'),
+            firstLocked: t('grid.columns.firstLocked'),
+          }}
+          errors={{
+            'grid.columns.errorEmpty': t('grid.columns.errorEmpty'),
+            'grid.columns.errorGrid': t('grid.columns.errorGrid'),
+          }}
+        />
+      </FilterBar>
 
       <Table
         caption={t('trucks.title')}
         columns={keepColumns(columns, visible)}
-        rows={shown}
+        rows={rows}
         rowKey={(row) => row.id}
         rowHref={(row) => `/trucks/${row.id}`}
         stripeTone={(row) => TRUCK_TONE[row.status]}
         isCancelled={(row) => row.isRetired}
         empty={
-          <EmptyState
-            title={t('trucks.empty.title')}
-            body={t('trucks.empty.body')}
-            action={
-              mayCreate ? (
-                <Link href="/trucks/new">
-                  <Button variant="primary">{t('trucks.add')}</Button>
+          filtered ? (
+            <EmptyState
+              title={t('trucks.emptyFiltered.title')}
+              body={t('trucks.emptyFiltered.body')}
+              action={
+                <Link href="/trucks">
+                  <Button variant="secondary">
+                    {t('trucks.filter.clear')}
+                  </Button>
                 </Link>
-              ) : null
-            }
-          />
+              }
+            />
+          ) : (
+            <EmptyState
+              title={t('trucks.empty.title')}
+              body={t('trucks.empty.body')}
+              action={
+                mayCreate ? (
+                  <Link href="/trucks/new">
+                    <Button variant="primary">{t('trucks.add')}</Button>
+                  </Link>
+                ) : null
+              }
+            />
+          )
         }
       />
 
+      {/* THE STATUS COUNTS (§6.5 part 1): read-only chips in the footer's
+       * register, over the rows this view selects, by the Status column's own
+       * predicate. */}
+      <div
+        role="status"
+        aria-label={t('trucks.statusCounts')}
+        className="flex flex-wrap items-center gap-x-z4 gap-y-z1 border-t border-border bg-surface px-gutter py-z2 text-xs"
+      >
+        <span className="uppercase tracking-[0.04em] text-ink-3">
+          {t('trucks.statusCounts')}
+        </span>
+        {statusChips.map((chip) => (
+          <span
+            key={chip}
+            data-status-chip={chip}
+            className="inline-flex items-baseline gap-z1 text-ink-2"
+          >
+            <span>
+              {chip === 'REMOVED' ? t('ref.retired') : t(truckStatusKey(chip))}
+            </span>
+            <span className="font-mono tabular-nums">
+              {counts.status[chip] ?? 0}
+            </span>
+          </span>
+        ))}
+      </div>
+
       {/* THE DATA-HEALTH ROW (§6.5 part 0): five counts under the grid, each a
-       * link to this list filtered by the same definition. Zero is shown. */}
+       * link to this list filtered by the same definition, with the view and
+       * the other filters kept. Zero is shown. */}
       <DataHealthRow
         checks={TRUCK_HEALTH_CHECKS}
         counts={health}
-        active={missing}
+        active={listParams.missing}
         hrefFor={(check) => withParams({ missing: check ?? undefined })}
         labels={{
           title: t('trucks.health.title'),
@@ -418,6 +549,14 @@ export default async function TrucksPage({
           check: (check) => t(`trucks.health.${check}` as MessageKey),
         }}
       />
+
+      {/* THE CAP, SAID IN WORDS (§6.5 part 1): the view selected more than the
+       * page read, and the rest exist. */}
+      {rows.length >= PAGE_CAP ? (
+        <p className="border-t border-border bg-warning-soft px-gutter py-z2 text-xs text-ink-2">
+          {t('trucks.capped').replace('{n}', String(PAGE_CAP))}
+        </p>
+      ) : null}
     </>
   )
 }
