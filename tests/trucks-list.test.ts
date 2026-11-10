@@ -542,4 +542,19 @@ describe('the page, held to the section', () => {
     expect(ROUTE).toContain('readTruckListParams(')
     expect(ROUTE).not.toContain('prisma')
   })
+
+  it('hands Table its cap, because Table throws above nine without it', () => {
+    // 59aa8a2: the cap went to eleven in `GRID_COLUMN_CAP` and
+    // `readGridColumns` returned eleven, and `Table` threw "A table may show
+    // 9 columns at most; this one has 11" on every /trucks request on dev,
+    // because nothing had handed it the cap. Nothing before the deploy renders
+    // the page; the dev probe read it out of the tail. Every grid with a cap
+    // above nine has a page that passes it, line-anchored.
+    expect(PAGE).toMatch(
+      /^\s*columnCap=\{gridColumnCap\('trucks\.trucks'\)\}$/m,
+    )
+    expect(
+      readFileSync(join('src', 'app', '(app)', 'loads', 'page.tsx'), 'utf8'),
+    ).toMatch(/^\s*columnCap=\{gridColumnCap\('loads\.loads'\)\}$/m)
+  })
 })

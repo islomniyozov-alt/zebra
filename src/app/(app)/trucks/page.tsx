@@ -18,7 +18,7 @@ import { DataHealthRow } from '../_grid/DataHealthRow'
 import { keepColumns } from '../_grid/grid-page'
 import { CopyLoadNumber } from '../loads/CopyLoadNumber'
 import { TruckFilters } from './TruckFilters'
-import { readGridColumns } from '@/lib/grid-columns'
+import { gridColumnCap, readGridColumns } from '@/lib/grid-columns'
 import { countTruckHealth, TRUCK_HEALTH_CHECKS } from '@/lib/data-health'
 import { FLEET_STATUSES } from '@/lib/fleet-codes'
 import {
@@ -474,6 +474,13 @@ export default async function TrucksPage({
 
       <Table
         caption={t('trucks.title')}
+        // §7.1.7 as amended 2026-11-10: eleven on this list. `Table` THROWS
+        // above nine unless the page hands it its grid's cap — which this page
+        // did not on 59aa8a2, and every /trucks request on dev answered 500
+        // for the half hour the probe took to read "A table may show 9
+        // columns at most" out of the tail. `readGridColumns` already bounds
+        // the count by the same cap; the prop is what lets the table agree.
+        columnCap={gridColumnCap('trucks.trucks')}
         columns={keepColumns(columns, visible)}
         rows={rows}
         rowKey={(row) => row.id}
