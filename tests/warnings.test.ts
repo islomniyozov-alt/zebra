@@ -88,6 +88,9 @@ const load = (over: Partial<LoadFacts> = {}): LoadFacts => ({
   hasTruck: true,
   isCancelled: false,
   closedHistory: false,
+  isFinished: false,
+  truckRemoved: false,
+  truckUnit: '1234',
   directSettled: false,
   rateCents: 100_000,
   remittedCents: 0,
@@ -264,6 +267,33 @@ describe('a cancelled load', () => {
       NOW,
     )
     expect(out).toEqual([])
+  })
+})
+
+// §6.5 part 1, owner's ruling (b) of 2026-11-10: the seed's placeholder trucks
+// became removed and the open loads naming them kept the link. The load says
+// so; a finished load, a cancelled load and closed history say nothing.
+describe('an open load on a truck that left the fleet', () => {
+  it('says "truck inactive", naming the unit', () => {
+    const out = loadWarnings(load({ truckRemoved: true }), NOW)
+    expect(names(out)).toEqual(['truck_inactive'])
+    expect(out[0]!.detail).toBe('1234')
+  })
+
+  it('is silent once the movement is over', () => {
+    expect(
+      loadWarnings(load({ truckRemoved: true, isFinished: true }), NOW),
+    ).toEqual([])
+  })
+
+  it('and a cancelled load says only that it is cancelled', () => {
+    expect(
+      names(loadWarnings(load({ truckRemoved: true, isCancelled: true }), NOW)),
+    ).toEqual(['cancelled_but_assigned'])
+  })
+
+  it('and a live truck says nothing of the kind', () => {
+    expect(names(loadWarnings(load({ truckRemoved: false }), NOW))).toEqual([])
   })
 })
 

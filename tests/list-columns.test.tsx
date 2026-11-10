@@ -152,7 +152,9 @@ describe('whatever is stored, the table gets nine columns or fewer', () => {
         const cap =
           grid.name === '/loads'
             ? gridColumnCap('loads.loads')
-            : TABLE_COLUMN_CAP
+            : grid.name === '/trucks'
+              ? gridColumnCap('trucks.trucks')
+              : TABLE_COLUMN_CAP
         // FIVE STORED STATES: never chosen, a hidden set naming nothing (every
         // column shown), a hidden set naming everything, and the two OLD
         // shapes a real row can still hold — a "shown" list of everything and
@@ -432,9 +434,11 @@ describe('what is never default-hidden', () => {
       'status',
       'warnings',
     ])
-    // Ten is over §7.1's nine, which is why `/loads` alone is capped at ten.
+    // Ten is over §7.1's nine, which is why `/loads` is capped at ten — and
+    // `/trucks` at eleven, the owner's ruling of 2026-11-10 (§6.5 part 1).
     expect(gridColumnCap('loads.loads')).toBe(10)
-    expect(gridColumnCap('trucks.trucks')).toBe(TABLE_COLUMN_CAP)
+    expect(gridColumnCap('trucks.trucks')).toBe(11)
+    expect(gridColumnCap('drivers.drivers')).toBe(TABLE_COLUMN_CAP)
   })
 })
 

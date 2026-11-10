@@ -533,6 +533,7 @@ const en = {
   'warning.settlement_line_held': 'Settlement held',
   'warning.settlement_net_negative': 'Settlement below zero',
   'warning.dqf_incomplete': 'DQF incomplete',
+  'warning.truck_inactive': 'Truck inactive',
   'dqf.title': 'Driver qualification file',
   'dqf.hint':
     '49 CFR 391.51. Computed from the records on file — nothing here is stored.',
@@ -3586,6 +3587,7 @@ const ru: Dictionary = {
   'warning.settlement_line_held': 'Расчёт задержан',
   'warning.settlement_net_negative': 'Расчёт ниже нуля',
   'warning.dqf_incomplete': 'Досье водителя неполное',
+  'warning.truck_inactive': 'Машина неактивна',
   'dqf.title': 'Досье водителя (DQF)',
   'dqf.hint':
     '49 CFR 391.51. Вычисляется по имеющимся записям — ничего не хранится.',
@@ -6606,6 +6608,7 @@ const fa: Dictionary = {
   'warning.settlement_line_held': 'تسویه متوقف',
   'warning.settlement_net_negative': 'تسویه زیر صفر',
   'warning.dqf_incomplete': 'پرونده راننده ناقص',
+  'warning.truck_inactive': 'کامیون غیرفعال',
   'dqf.title': 'پرونده صلاحیت راننده',
   'dqf.hint':
     '49 CFR 391.51. از روی سوابق موجود محاسبه می‌شود — چیزی ذخیره نمی‌شود.',

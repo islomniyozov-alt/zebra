@@ -378,35 +378,38 @@ describe("the columns are Datatruck's, inside the cap (§7.1.7)", () => {
     ])
   })
 
-  it("hides the brief's four, heading to, and §7.1.7's model and odometer — never warnings", () => {
+  it("hides the brief's four and heading to — never warnings, model or odometer", () => {
     expect([...TRUCK_COLUMNS_HIDDEN].sort()).toEqual(
-      [
-        'aging',
-        'fleetStatus',
-        'headingTo',
-        'model',
-        'odometer',
-        'ownerName',
-        'vin',
-      ].sort(),
+      ['aging', 'fleetStatus', 'headingTo', 'ownerName', 'vin'].sort(),
     )
     expect(TRUCK_COLUMNS_HIDDEN as readonly string[]).not.toContain('warnings')
     expect(TRUCK_COLUMNS_HIDDEN as readonly string[]).not.toContain('year')
   })
 
-  it('shows exactly nine with the authority column, eight without', () => {
+  it("shows the brief's eleven with the authority column, ten without (owner's ruling 2026-11-10)", () => {
     const shown = (multi: boolean) =>
       columnKeysFor(TRUCK_COLUMN_KEYS, multi).filter(
         (key) => !(TRUCK_COLUMNS_HIDDEN as readonly string[]).includes(key),
       )
+    expect(shown(true)).toEqual([
+      'unitNumber',
+      'make',
+      'model',
+      'plate',
+      'year',
+      'plateState',
+      'company',
+      'driver',
+      'odometer',
+      'status',
+      'warnings',
+    ])
     expect(shown(true)).toHaveLength(gridColumnCap('trucks.trucks'))
-    expect(gridColumnCap('trucks.trucks')).toBe(TABLE_COLUMN_CAP)
-    expect(shown(false)).toHaveLength(8)
-    // THE FLAG, PINNED: the brief's default set is eleven. When the owner
-    // raises the cap, this is the assertion that moves with it.
-    expect(DOC).toContain(
-      "the brief's\n  default set is eleven columns and §7.1 caps a grid at nine",
-    )
+    expect(gridColumnCap('trucks.trucks')).toBe(11)
+    expect(gridColumnCap('trucks.trucks')).toBeGreaterThan(TABLE_COLUMN_CAP)
+    expect(shown(false)).toHaveLength(10)
+    // THE RULING, PINNED in the section that carries it.
+    expect(DOC).toContain('**`/trucks` IS CAPPED AT ELEVEN**')
   })
 
   it('the columns the list gained are not counted as hidden by an old saved choice', () => {

@@ -608,6 +608,10 @@ const SEED_WRITERS = [
 const RULING_SCRIPTS = [
   'correct-direct-settled.ts',
   'breakdown-ready-to-invoice.ts',
+  // §6.5 part 1, owner's ruling (b) of 2026-11-10: the seed's placeholder
+  // trucks become removed. Preview by default, `--write` to act, `--production`
+  // guarded through `assertTenancy`; the rule is `src/lib/truck-retirement.ts`.
+  'remove-datatruck-inactive-trucks.ts',
 ]
 
 const ALLOWED = [

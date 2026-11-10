@@ -52,6 +52,7 @@ export type WarningName =
   | 'settlement_net_negative'
   | 'cancelled_but_assigned'
   | 'dqf_incomplete'
+  | 'truck_inactive'
 
 export interface Warning {
   name: WarningName
@@ -158,6 +159,12 @@ export interface LoadFacts {
   isCancelled: boolean
   /** Datatruck's. Silent by ruling — see the header. */
   closedHistory: boolean
+  /** DELIVERED or POD_RECEIVED: the movement is over, whatever the truck did. */
+  isFinished: boolean
+  /** The load's truck is REMOVED (§6.5 part 1, owner's ruling 2026-11-10). */
+  truckRemoved: boolean
+  /** That truck's unit number, for the warning's detail. */
+  truckUnit: string | null
   directSettled: boolean
   rateCents: number
   remittedCents: number
@@ -326,6 +333,16 @@ export function loadWarnings(facts: LoadFacts, now: Date): Warning[] {
     return found
   }
 
+  // AN OPEN LOAD ON A TRUCK THAT LEFT THE FLEET (§6.5 part 1, owner's ruling
+  // 2026-11-10). The 66 seed placeholders became removed and six open loads
+  // kept their link, by ruling: the link is history worth keeping, and this is
+  // the sentence the row needs — a dispatcher reads "truck inactive" and
+  // reassigns, where a silently kept link reads as a truck still moving. A
+  // finished load says nothing: its movement is over.
+  if (facts.truckRemoved && !facts.isFinished) {
+    found.push({ name: 'truck_inactive', detail: facts.truckUnit ?? '' })
+  }
+
   if (facts.pickupAt !== null && (!facts.hasDriver || !facts.hasTruck)) {
     const hours = (facts.pickupAt.getTime() - now.getTime()) / 3_600_000
     // PAST COUNTS TOO. A pickup that was due yesterday and still has nobody on
@@ -486,6 +503,9 @@ export async function loadWarningFacts(
       has_truck: boolean
       is_cancelled: boolean
       closed_history: boolean
+      is_finished: boolean
+      truck_removed: boolean
+      truck_unit: string | null
       direct_settled: boolean
       rate_cents: number
       remitted_cents: number
@@ -502,6 +522,12 @@ export async function loadWarningFacts(
       (l."truckId" IS NOT NULL) AS has_truck,
       l."isCancelled" AS is_cancelled,
       (l."billingStatus" = 'CLOSED_IN_DATATRUCK') AS closed_history,
+      (l."operationalStatus" IN ('DELIVERED', 'POD_RECEIVED')) AS is_finished,
+      -- THE SAME STATEMENT, one more column: the truck's removal and its unit
+      -- (§6.5 part 1). A fourth loader would be a fourth round trip per list.
+      COALESCE((SELECT t."deletedAt" IS NOT NULL FROM "Truck" t
+                 WHERE t."id" = l."truckId"), false) AS truck_removed,
+      (SELECT t."unitNumber" FROM "Truck" t WHERE t."id" = l."truckId") AS truck_unit,
       l."directSettled" AS direct_settled,
       l."totalRevenueCents" AS rate_cents,
       COALESCE((SELECT SUM(pla."amountCents")::int FROM "PaymentLoadApplication" pla
@@ -520,6 +546,9 @@ export async function loadWarningFacts(
       hasTruck: row.has_truck,
       isCancelled: row.is_cancelled,
       closedHistory: row.closed_history,
+      isFinished: row.is_finished,
+      truckRemoved: row.truck_removed,
+      truckUnit: row.truck_unit,
       directSettled: row.direct_settled,
       rateCents: row.rate_cents,
       remittedCents: row.remitted_cents,

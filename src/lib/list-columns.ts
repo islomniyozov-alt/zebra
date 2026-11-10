@@ -186,14 +186,11 @@ export const TRUCK_COLUMN_KEYS = [
 
 /**
  * §6.5 part 1: the brief's four — owner name, VIN, fleet status, aging — and
- * heading to, which the brief drops from the default set. AND MODEL AND
- * ODOMETER, by §7.1.7's reason: specifications identify a unit at a desk,
- * once, and this list is read for where the unit is and whether it can run.
- * Make and plate stay, because they are how a truck gets described on the
- * phone; year comes out from behind the chooser because it is Datatruck's and
- * four characters. FLAGGED in §6.5: the brief's default set is eleven and
- * §7.1's cap is nine; the ruling that raises `/trucks` is one line in
- * `GRID_COLUMN_CAP`, and model and odometer come out the day it is made.
+ * heading to, which the brief drops from the default set. Model and odometer
+ * sat here for a day to keep the default set inside §7.1's nine; the owner's
+ * ruling of 2026-11-10 caps `/trucks` at eleven (`GRID_COLUMN_CAP`) and they
+ * are in the default set — the brief's eleven, shown with the authority
+ * column, ten without.
  */
 export const TRUCK_COLUMNS_HIDDEN = [
   'ownerName',
@@ -201,8 +198,6 @@ export const TRUCK_COLUMNS_HIDDEN = [
   'fleetStatus',
   'aging',
   'headingTo',
-  'model',
-  'odometer',
 ] as const
 
 /**

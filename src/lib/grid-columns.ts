@@ -171,10 +171,13 @@ export async function readGridColumns(
 /**
  * How many columns a grid may show (§7.1.7). Nine, except `/loads`, which the
  * owner's ruling of 2026-10-09 gives ten: its default names ten columns for a
- * multi-authority carrier.
+ * multi-authority carrier — and `/trucks`, which the owner's ruling of
+ * 2026-11-10 gives eleven: the brief's default set (§6.5 part 1), unit, make,
+ * model, plate, year, state, authority, driver, odometer, status, warnings.
  */
 export const GRID_COLUMN_CAP: Partial<Record<GridId, number>> = {
   'loads.loads': 10,
+  'trucks.trucks': 11,
 }
 
 export function gridColumnCap(grid: GridId): number {

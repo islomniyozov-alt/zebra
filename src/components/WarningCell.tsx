@@ -79,6 +79,7 @@ export const WARNING_LABEL_KEYS: Record<WarningName, MessageKey> = {
   settlement_net_negative: 'warning.settlement_net_negative',
   cancelled_but_assigned: 'warning.cancelled_but_assigned',
   dqf_incomplete: 'warning.dqf_incomplete',
+  truck_inactive: 'warning.truck_inactive',
 }
 
 /** The same, translated for this request. */
