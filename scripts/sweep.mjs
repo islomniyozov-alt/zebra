@@ -48,6 +48,7 @@ import { describeReadBack, readBackHyperdrive } from './hyperdrive-config.mjs'
 import { chromium } from 'playwright'
 import { neonConfig, Pool } from '@neondatabase/serverless'
 import {
+  rayKey,
   rayOf,
   isSignInPost,
   READY_WINDOW_MS,
@@ -303,6 +304,23 @@ export function duplicateMatches(rows) {
     for (const ray of new Set(row.matchedRays ?? []))
       claims.set(ray, [...(claims.get(ray) ?? []), row])
   return new Map([...claims].filter(([, claimants]) => claimants.length > 1))
+}
+
+/**
+ * ONE RAY, ONE CLAIMANT (§6.8, owner's brief 2026-11-10). `claims` maps a
+ * ray key to the `role#attempt` that holds it. The first claimant keeps the
+ * ray and gets true; a later one gets false and records it as unmatched, so
+ * an invocation can never be measured under two roles — which is what the
+ * nightlies of 11-08 and 11-09 reported as `SHARED MATCH`. A claimant may
+ * claim its own ray again. No ray is no claim: an event without a cf-ray is
+ * nobody's and stays unclaimed.
+ */
+export function claimRay(claims, ray, claimant) {
+  const key = rayKey(ray)
+  if (!key) return false
+  if (claims.has(key)) return claims.get(key) === claimant
+  claims.set(key, claimant)
+  return true
 }
 
 // ── THE WARM-UP (§6.8, owner's ruling 2026-10-12, closing GAPS 24) ─────────
@@ -613,11 +631,27 @@ async function sweep() {
       signIns.flatMap((row) => [row.ray, row.renderGet?.ray]).filter(Boolean),
       30_000,
     )
+    // A RAY IS CLAIMED ONCE (§6.8, 2026-11-10): the first sign-in to claim
+    // an invocation keeps it; a later claimant records `unmatched` and is
+    // said by name in the verdict. No invocation is measured under two roles.
+    const claims = new Map()
     for (const row of signIns) {
+      const claimant = `${row.role}#${row.attempt}`
+      row.unmatched = []
+      /** True when this attempt may read `event`; false records why not. */
+      const claim = (event, what) => {
+        const ray = rayOf(event)
+        if (!ray) return true
+        if (claimRay(claims, ray, claimant)) return true
+        row.unmatched.push(
+          `${what}: ray ${ray} already claimed by ${claims.get(ray)}`,
+        )
+        return false
+      }
       const byRay = row.ray ? tail.lookup(row.ray) : null
       const from = Date.parse(row.startedAt) - 2_000
       const to = Date.parse(row.endedAt) + 2_000
-      const events = byRay
+      const candidates = byRay
         ? [byRay]
         : tail
             .all()
@@ -627,15 +661,21 @@ async function sweep() {
                 event.eventTimestamp >= from &&
                 event.eventTimestamp <= to,
             )
+      const events = candidates.filter((event) =>
+        claim(event, byRay ? 'sign-in POST' : 'sign-in POST in the window'),
+      )
       row.worker = events.map((event) => ({
         ...trimEvent(event),
         timing: signInTimingOf(event),
       }))
       row.matchedRays = events.map(rayOf).filter(Boolean)
       if (events.length === 0)
-        row.workerNote = row.ray
-          ? 'no tail event for this ray within 30 s'
-          : 'no sign-in POST in the tail inside this attempt'
+        row.workerNote =
+          candidates.length > 0
+            ? 'every candidate invocation was already claimed by another sign-in'
+            : row.ray
+              ? 'no tail event for this ray within 30 s'
+              : 'no sign-in POST in the tail inside this attempt'
       // THE DASHBOARD RENDER, ON ITS OWN REQUEST, BY ITS OWN RAY (§6.10,
       // owner's ruling 2026-10-23). The sign-in POST renders the dashboard
       // inside its own response, but nothing written during that render
@@ -643,7 +683,8 @@ async function sweep() {
       // sign-in the sweep GETs /dashboard with the new session (`renderGet`
       // below) and reads `shell.timing` and `dashboard.timing` from THAT
       // invocation, matched by its ray and nothing else: no time window.
-      const render = row.renderGet?.ray ? tail.lookup(row.renderGet.ray) : null
+      const found = row.renderGet?.ray ? tail.lookup(row.renderGet.ray) : null
+      const render = found && claim(found, 'dashboard GET') ? found : null
       const lines = render
         ? timingLinesOf(render).filter((line) => line.event !== 'signin.timing')
         : []
@@ -666,7 +707,9 @@ async function sweep() {
           ? 'no dashboard GET was made after this sign-in'
           : render
             ? 'the dashboard GET carries no shell or dashboard line'
-            : 'no tail event for the dashboard GET’s ray within 30 s'
+            : found
+              ? 'the dashboard GET’s invocation was already claimed by another sign-in'
+              : 'no tail event for the dashboard GET’s ray within 30 s'
     }
   }
 
@@ -1116,6 +1159,16 @@ async function sweep() {
       `   SHARED MATCH ${ray}: ${rows.map((row) => `${row.role}#${row.attempt}`).join(', ')}`,
     )
   sums.problems += shared.size
+
+  // A SECOND CLAIMANT IS NAMED, NOT MEASURED (§6.8, 2026-11-10). The claim
+  // above makes a shared match impossible; what remains is the sign-in that
+  // got nothing, and a sign-in without its measurement is a missing reading
+  // — unreadable is not clean — so it is a problem, by name.
+  const unmatched = signIns.filter((row) => (row.unmatched ?? []).length > 0)
+  for (const row of unmatched)
+    for (const line of row.unmatched)
+      console.log(`   UNMATCHED ${row.role}#${row.attempt}: ${line}`)
+  sums.problems += unmatched.length
 
   if (sums.problems === 0) {
     console.log(`SWEEP CLEAN — OK. ${authed.length} PAGE(S), 0 PROBLEM(S).`)

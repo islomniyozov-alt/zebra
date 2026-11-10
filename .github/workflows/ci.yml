@@ -413,6 +413,21 @@ jobs:
           tail -40 "$SWEEP_LOG"
           node scripts/run-status.mjs --check nightly-sweep
 
+      # THE SWEEP'S DETAIL FILE LEAVES WITH THE RUN (§6.8, owner's brief of
+      # 2026-11-10). The nightlies of 11-08 and 11-09 both reported one
+      # problem, `SHARED MATCH … accounting#1, driver#1`, and the cause could
+      # not be read from here: the detail JSON that names every claimed ray
+      # stayed on the runner and died with it. Pass or fail, every nightly.
+      - name: keep the sweep's detail
+        if: always() && (github.event_name == 'schedule' || github.event.inputs.sweep == 'true')
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-sweep-${{ github.run_id }}
+          path: |
+            .run-status/nightly-sweep.detail.json
+            ${{ runner.temp }}/sweep.log
+          if-no-files-found: warn
+
       # THE PRODUCTION SIGN-IN, EVERY NIGHT, IN THIS RUN (owner's ruling 7,
       # 2026-10-28). `prod-signin.yml` has its own cron, and GitHub's cron is
       # best-effort: on 2026-10-27 it skipped the 22:17 and 23:17 slots of an

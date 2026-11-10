@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 // `@ts-expect-error` is itself a type error here, which is the compiler making
 // the same point this file makes about guards that assert nothing.
 import {
+  claimRay,
   classify,
   credentialsFor,
   duplicateMatches,
@@ -91,8 +92,9 @@ describe('the two-request capture', () => {
     expect(script).toMatch(
       /if \(found\) row\.renderGet = await timedGet\('\/dashboard', found\)/,
     )
+    // By the GET's ray and nothing else — then claimed once (2026-11-10).
     expect(script).toMatch(
-      /const render = row\.renderGet\?\.ray \? tail\.lookup\(row\.renderGet\.ray\) : null/,
+      /const found = row\.renderGet\?\.ray \? tail\.lookup\(row\.renderGet\.ray\) : null/,
     )
     expect(script).not.toMatch(/renderFrom|renderTo|isRedirectRender/)
     // GAPS 37, owner's ruling (a): the GET's record keeps the invocation's
@@ -118,6 +120,47 @@ describe('the two-request capture', () => {
     expect(duplicateMatches(rows.slice(0, 2)).size).toBe(0)
     expect(script).toMatch(
       /const shared = duplicateMatches\(signIns\)[\s\S]*?sums\.problems \+= shared\.size/,
+    )
+  })
+
+  // §6.8, owner's brief 2026-11-10: the nightlies of 11-08 and 11-09 were
+  // both NOT OK on `SHARED MATCH … accounting#1, driver#1`. A ray is now
+  // claimed once; the second claimant is recorded and named, never measured.
+  it('a ray is claimed once: the first sign-in keeps it, a later one is refused', () => {
+    const claims = new Map<string, string>()
+    expect(claimRay(claims, 'a57f384c3b6f5086-ORD', 'accounting#1')).toBe(true)
+    // The same invocation, its colo suffix or not, is one ray.
+    expect(claimRay(claims, 'a57f384c3b6f5086', 'driver#1')).toBe(false)
+    expect(claims.get('a57f384c3b6f5086')).toBe('accounting#1')
+    // The holder may claim its own ray again; another ray is free.
+    expect(claimRay(claims, 'a57f384c3b6f5086-ORD', 'accounting#1')).toBe(true)
+    expect(claimRay(claims, 'b1', 'driver#1')).toBe(true)
+    // No ray is no claim.
+    expect(claimRay(claims, null, 'driver#1')).toBe(false)
+    expect(claimRay(claims, '', 'driver#1')).toBe(false)
+    expect(claims.size).toBe(2)
+  })
+
+  it('the matcher claims every invocation it reads — the POST, the window, the render', () => {
+    // One `claims` map per attachment, before the loop over sign-ins.
+    expect(script).toMatch(
+      /const claims = new Map\(\)\n\s+for \(const row of signIns\) \{\n\s+const claimant = `\$\{row\.role\}#\$\{row\.attempt\}`/,
+    )
+    expect(script).toMatch(
+      /const events = candidates\.filter\(\(event\) =>\s*claim\(event, byRay \? 'sign-in POST' : 'sign-in POST in the window'\),?\s*\)/,
+    )
+    expect(script).toMatch(
+      /const render = found && claim\(found, 'dashboard GET'\) \? found : null/,
+    )
+    // What a refused claimant records, word for word.
+    expect(script).toContain(
+      '`${what}: ray ${ray} already claimed by ${claims.get(ray)}`',
+    )
+  })
+
+  it('a second claimant is said by name in the verdict and is a problem', () => {
+    expect(script).toMatch(
+      /const unmatched = signIns\.filter\(\(row\) => \(row\.unmatched \?\? \[\]\)\.length > 0\)[\s\S]*?console\.log\(`   UNMATCHED \$\{row\.role\}#\$\{row\.attempt\}: \$\{line\}`\)[\s\S]*?sums\.problems \+= unmatched\.length/,
     )
   })
 

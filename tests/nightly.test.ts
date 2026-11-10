@@ -65,6 +65,26 @@ describe('the nightly', () => {
     )
   })
 
+  it("keeps the sweep's detail file as an artifact, pass or fail, every nightly", () => {
+    // §6.8, owner's brief 2026-11-10: two nightlies reported SHARED MATCH and
+    // the detail JSON that names every claimed ray had died with the runner.
+    const keep = step("keep the sweep's detail")
+    expect(keep).toContain(
+      "if: always() && (github.event_name == 'schedule' || github.event.inputs.sweep == 'true')",
+    )
+    expect(keep).toContain('uses: actions/upload-artifact@v4')
+    expect(keep).toContain('name: nightly-sweep-${{ github.run_id }}')
+    expect(keep).toContain('.run-status/nightly-sweep.detail.json')
+    expect(keep).toContain('${{ runner.temp }}/sweep.log')
+    // Right after the sweep, before production's sign-in.
+    expect(ci.indexOf('- name: nightly sweep of dev')).toBeLessThan(
+      ci.indexOf("- name: keep the sweep's detail"),
+    )
+    expect(ci.indexOf("- name: keep the sweep's detail")).toBeLessThan(
+      ci.indexOf('- name: nightly production sign-in'),
+    )
+  })
+
   it('signs in to production once a night too, with its own verdict, whatever the sweep did', () => {
     // Owner's ruling 7, 2026-10-28: GitHub's cron is best-effort (it skipped
     // two hourly slots on the 27th), so no watch depends on one schedule
