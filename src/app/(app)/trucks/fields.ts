@@ -4,7 +4,22 @@ import type { Translate } from '@/lib/i18n'
 import type { MessageKey } from '@/lib/i18n'
 import type { OwnershipType, TruckStatus } from '@/generated/prisma/client'
 import { FLEET_STATUSES, FUEL_TYPES } from '@/lib/fleet-codes'
+import { TRUCK_OVERRIDES } from '@/lib/truck-list'
 
+/**
+ * What the form offers (§6.5 part 1 round two): Automatic — stored as
+ * `AVAILABLE`, derived from the open loads — and the three manual overrides.
+ * `DISPATCHED` and `IN_TRANSIT` are derived values now and nothing writes them.
+ */
+export const TRUCK_STATUS_OPTIONS: TruckStatus[] = [
+  'AVAILABLE',
+  ...TRUCK_OVERRIDES,
+]
+
+/**
+ * The enum's six, for the TRAILERS form, which keeps the stored word: a
+ * trailer carries no loads of its own to derive from. Not the trucks form's.
+ */
 export const TRUCK_STATUSES: TruckStatus[] = [
   'AVAILABLE',
   'DISPATCHED',
@@ -126,9 +141,16 @@ export function truckFields(
       kind: 'select',
       name: 'status',
       label: t('ref.status'),
-      options: TRUCK_STATUSES.map((status) => ({
+      // ROUND TWO (§6.5 part 1): the stored column keeps only the manual
+      // overrides. Automatic is stored as AVAILABLE and means "derive from
+      // the open loads"; Dispatched and In transit are no longer words a
+      // person types, because they were never true for longer than a day.
+      options: TRUCK_STATUS_OPTIONS.map((status) => ({
         value: status,
-        label: t(truckStatusKey(status)),
+        label:
+          status === 'AVAILABLE'
+            ? t('fleet.status.automatic')
+            : t(truckStatusKey(status)),
       })),
     },
     {

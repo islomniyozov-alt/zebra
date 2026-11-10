@@ -1,12 +1,14 @@
 import type { Prisma, TruckStatus } from '@/generated/prisma/client'
+import { NOT_CLOSED_HISTORY } from './billing-status'
 import {
   truckHealthCheckFor,
   truckHealthWhere,
   type TruckHealthCheck,
 } from './data-health'
+import { ACTIVE_LOAD, MOVING } from './dispatch-fields'
 import { isFleetStatus } from './fleet-codes'
 import { HOLDS_SEAT } from './team'
-import type { CompanyScopeFilter } from './tenancy'
+import type { CompanyScopeFilter, TxClient } from './tenancy'
 
 // ---------------------------------------------------------------------------
 // THE TRUCKS LIST'S VIEWS AND ITS WHERE, BUILT ONCE (TMS-DESIGN-SYSTEM.md
@@ -99,6 +101,117 @@ export function isTruckStatus(value: unknown): value is TruckStatus {
     typeof value === 'string' &&
     (TRUCK_STATUS_ORDER as readonly string[]).includes(value)
   )
+}
+
+// ── STATUS DERIVES FROM THE OPEN LOADS (§6.5 part 1 round two) ─────────────
+//
+// The stored column was a word somebody typed — the ruling of 2026-09-21 the
+// dispatch board already lives by (`ACTIVE_LOAD`): a truck hauling a load to
+// Gastonia read Available for as long as nobody went back to its page. So the
+// column is DERIVED, in this order: an OVERRIDE if the stored column holds
+// one; else In transit on a MOVING load; else Dispatched on any other OPEN
+// load; else Available. One predicate, read by the column, the stripe, the
+// status filter, the footer's chips and the export; `truck-list-counts.ts`
+// restates it in SQL and the agreement test holds the two together, and both
+// to the loads list's own predicates.
+
+/** The three the stored column still means: a yard's own word, which wins. */
+export const TRUCK_OVERRIDES = [
+  'MAINTENANCE',
+  'OUT_OF_SERVICE',
+  'SOLD',
+] as const satisfies readonly TruckStatus[]
+
+export type TruckOverride = (typeof TRUCK_OVERRIDES)[number]
+
+export function isTruckOverride(value: unknown): value is TruckOverride {
+  return (
+    typeof value === 'string' &&
+    (TRUCK_OVERRIDES as readonly string[]).includes(value)
+  )
+}
+
+/** The stored override, or null for "derive" (AVAILABLE, or a pre-round-two DISPATCHED / IN_TRANSIT). */
+export function truckOverrideOf(stored: TruckStatus): TruckOverride | null {
+  return isTruckOverride(stored) ? stored : null
+}
+
+/**
+ * A load that keeps a truck busy: not finished, not cancelled, not removed,
+ * and NOT closed history, for `BOARD_LOAD`'s reason — an imported load still
+ * DISPATCHED on paper would otherwise dispatch a truck for ever.
+ */
+export const OPEN_LOAD = {
+  ...ACTIVE_LOAD,
+  ...NOT_CLOSED_HISTORY,
+} as const satisfies Prisma.LoadWhereInput
+
+/** An open load that is on the road: the board's own `MOVING` set. */
+export const MOVING_LOAD = {
+  ...OPEN_LOAD,
+  operationalStatus: { in: [...MOVING] },
+} as const satisfies Prisma.LoadWhereInput
+
+/** What the page's one open-loads read says about a truck. */
+export type OpenLoadState = 'moving' | 'open' | null
+
+/** Pure: the Status column's value, from the stored word and the loads. */
+export function derivedTruckStatus(
+  stored: TruckStatus,
+  loads: OpenLoadState,
+): TruckStatus {
+  const override = truckOverrideOf(stored)
+  if (override) return override
+  if (loads === 'moving') return 'IN_TRANSIT'
+  if (loads === 'open') return 'DISPATCHED'
+  return 'AVAILABLE'
+}
+
+/** The same, as a Prisma filter — what `?status=` and the footer's chips read. */
+export function derivedStatusWhere(
+  status: TruckStatus,
+): Prisma.TruckWhereInput {
+  if (isTruckOverride(status)) return { status }
+  const derive: Prisma.TruckWhereInput = {
+    status: { notIn: [...TRUCK_OVERRIDES] },
+  }
+  switch (status) {
+    case 'IN_TRANSIT':
+      return { ...derive, loads: { some: MOVING_LOAD } }
+    case 'DISPATCHED':
+      return {
+        ...derive,
+        AND: [{ loads: { none: MOVING_LOAD } }, { loads: { some: OPEN_LOAD } }],
+      }
+    case 'AVAILABLE':
+      return { ...derive, loads: { none: OPEN_LOAD } }
+  }
+}
+
+/**
+ * The open-load state of many trucks in ONE statement, for the rows: the
+ * strongest state wins — moving over merely open — so a truck on two loads
+ * reads by the one that is on the road.
+ */
+export async function openLoadStatesForTrucks(
+  tx: TxClient,
+  truckIds: readonly string[],
+): Promise<Map<string, OpenLoadState>> {
+  const states = new Map<string, OpenLoadState>()
+  for (const id of truckIds) states.set(id, null)
+  if (truckIds.length === 0) return states
+  const rows = await tx.load.findMany({
+    where: { ...OPEN_LOAD, truckId: { in: [...truckIds] } },
+    select: { truckId: true, operationalStatus: true },
+  })
+  for (const row of rows) {
+    if (!row.truckId) continue
+    const moving = (MOVING as readonly string[]).includes(row.operationalStatus)
+    if (moving) states.set(row.truckId, 'moving')
+    else if (states.get(row.truckId) !== 'moving')
+      states.set(row.truckId, 'open')
+  }
+  return states
 }
 
 /**
@@ -237,7 +350,8 @@ export function truckListWhere(
   return {
     base,
     view: truckViewWhere(params.view),
-    status: params.status ? { status: params.status } : {},
+    // THE DERIVED STATUS, never the stored word (round two).
+    status: params.status ? derivedStatusWhere(params.status) : {},
   }
 }
 
@@ -276,6 +390,6 @@ export function statusChipWhere(
     listWhere(where),
     chip === 'REMOVED'
       ? { deletedAt: { not: null } }
-      : { deletedAt: null, status: chip },
+      : { deletedAt: null, ...derivedStatusWhere(chip) },
   )
 }

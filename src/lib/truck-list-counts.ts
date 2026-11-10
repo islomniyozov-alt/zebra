@@ -1,7 +1,9 @@
 import { Prisma } from '@/generated/prisma/client'
 import type { TruckHealthCheck } from './data-health'
+import { FINISHED, MOVING } from './dispatch-fields'
 import type { TxClient } from './tenancy'
 import {
+  TRUCK_OVERRIDES,
   TRUCK_STATUS_ORDER,
   TRUCK_VIEWS,
   type TruckListParams,
@@ -119,6 +121,25 @@ const SOMEBODY_HOLDS = Prisma.sql`EXISTS (
      AND d."status" <> 'INACTIVE'
 )`
 
+/**
+ * THE DERIVED STATUS IN SQL (§6.5 part 1 round two) — `derivedTruckStatus`
+ * and `derivedStatusWhere` restated: an override wins; else a MOVING open
+ * load reads In transit; else any open load reads Dispatched; else Available.
+ * `OPEN_LOAD` is not finished, not cancelled, not removed, not closed history.
+ */
+const OPEN_LOAD_SQL = Prisma.sql`l."truckId" = t."id"
+     AND l."deletedAt" IS NULL
+     AND l."isCancelled" = false
+     AND l."billingStatus" <> 'CLOSED_IN_DATATRUCK'
+     AND l."operationalStatus"::text <> ALL(${[...FINISHED]}::text[])`
+
+const DERIVED_STATUS = Prisma.sql`CASE
+  WHEN t."status"::text = ANY(${[...TRUCK_OVERRIDES]}::text[]) THEN t."status"::text
+  WHEN EXISTS (SELECT 1 FROM "Load" l WHERE ${OPEN_LOAD_SQL}
+                 AND l."operationalStatus"::text = ANY(${[...MOVING]}::text[])) THEN 'IN_TRANSIT'
+  WHEN EXISTS (SELECT 1 FROM "Load" l WHERE ${OPEN_LOAD_SQL}) THEN 'DISPATCHED'
+  ELSE 'AVAILABLE' END`
+
 const VIEW_SQL: Record<Exclude<TruckViewName, 'all'>, Prisma.Sql> = {
   active: Prisma.sql`(${LIVE} AND ${NOT_SOLD})`,
   unassigned: Prisma.sql`(${LIVE} AND ${NOT_SOLD} AND NOT ${SOMEBODY_HOLDS})`,
@@ -176,7 +197,7 @@ export async function truckCountGroups(
   companyScopes: readonly string[],
 ): Promise<TruckCountGroup[]> {
   const statusOk = params.status
-    ? Prisma.sql`t."status"::text = ${params.status}`
+    ? Prisma.sql`(${DERIVED_STATUS}) = ${params.status}`
     : Prisma.sql`true`
   const rows = await tx.$queryRaw<
     {
@@ -190,7 +211,7 @@ export async function truckCountGroups(
     }[]
   >`
     SELECT
-      t."status"::text AS status,
+      (${DERIVED_STATUS}) AS status,
       (t."deletedAt" IS NOT NULL) AS removed,
       ${VIEW_SQL.active} AS active,
       ${VIEW_SQL.unassigned} AS unassigned,

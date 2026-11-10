@@ -27,10 +27,20 @@ import { NOT_CLOSED_HISTORY } from './billing-status'
 type TxClient = Prisma.TransactionClient
 
 /** A load is somebody's current work while it is none of these. */
-const FINISHED = ['DELIVERED', 'POD_RECEIVED'] as const
+export const FINISHED = ['DELIVERED', 'POD_RECEIVED'] as const
 
-/** …and it is actually moving once it reaches one of these. */
-const MOVING = ['AT_PICKUP', 'LOADED', 'IN_TRANSIT', 'AT_DELIVERY'] as const
+/**
+ * …and it is actually moving once it reaches one of these. EXPORTED for the
+ * trucks list (§6.5 part 1 round two), whose derived status reads the same
+ * set: the board, the drivers' dispatch column and the trucks' Status column
+ * must not disagree about one movement.
+ */
+export const MOVING = [
+  'AT_PICKUP',
+  'LOADED',
+  'IN_TRANSIT',
+  'AT_DELIVERY',
+] as const
 
 /**
  * Freight that is somebody's current work, as a Prisma filter.

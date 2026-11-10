@@ -1139,6 +1139,7 @@ const en = {
     'That asset already has an open period. Reload and try again.',
 
   'fleet.status.AVAILABLE': 'Available',
+  'fleet.status.automatic': 'Automatic (from the loads)',
   'fleet.status.DISPATCHED': 'Dispatched',
   'fleet.status.IN_TRANSIT': 'In transit',
   'fleet.status.MAINTENANCE': 'In maintenance',
@@ -4189,6 +4190,7 @@ const ru: Dictionary = {
     'У этого объекта уже есть открытый период. Обновите страницу и повторите.',
 
   'fleet.status.AVAILABLE': 'Свободен',
+  'fleet.status.automatic': 'Автоматически (по рейсам)',
   'fleet.status.DISPATCHED': 'Назначен',
   'fleet.status.IN_TRANSIT': 'В пути',
   'fleet.status.MAINTENANCE': 'На обслуживании',
@@ -7197,6 +7199,7 @@ const fa: Dictionary = {
     'این دارایی دورهٔ باز دارد. صفحه را تازه کنید و دوباره تلاش کنید.',
 
   'fleet.status.AVAILABLE': 'آزاد',
+  'fleet.status.automatic': 'خودکار (از بارها)',
   'fleet.status.DISPATCHED': 'اعزام‌شده',
   'fleet.status.IN_TRANSIT': 'در مسیر',
   'fleet.status.MAINTENANCE': 'در تعمیر',

@@ -13,12 +13,18 @@ import {
 import { gridColumnCap } from '@/lib/grid-columns'
 import {
   DEFAULT_TRUCK_VIEW,
+  derivedStatusWhere,
+  derivedTruckStatus,
   listWhere,
+  MOVING_LOAD,
+  OPEN_LOAD,
   readTruckListParams,
   statusChipWhere,
+  TRUCK_OVERRIDES,
   TRUCK_STATUS_ORDER,
   TRUCK_VIEWS,
   truckListWhere,
+  truckOverrideOf,
   truckSearchWhere,
   truckViewFor,
   truckViewWhere,
@@ -205,7 +211,11 @@ describe('the where, built once', () => {
       {},
     )
     expect(viewCountWhere(where, 'unassigned')).toEqual({
-      AND: [where.base, { status: 'AVAILABLE' }, truckViewWhere('unassigned')],
+      AND: [
+        where.base,
+        derivedStatusWhere('AVAILABLE'),
+        truckViewWhere('unassigned'),
+      ],
     })
   })
 
@@ -214,9 +224,130 @@ describe('the where, built once', () => {
     expect(statusChipWhere(where, 'SOLD')).toEqual({
       AND: [listWhere(where), { deletedAt: null, status: 'SOLD' }],
     })
+    expect(statusChipWhere(where, 'IN_TRANSIT')).toEqual({
+      AND: [
+        listWhere(where),
+        { deletedAt: null, ...derivedStatusWhere('IN_TRANSIT') },
+      ],
+    })
     expect(statusChipWhere(where, 'REMOVED')).toEqual({
       AND: [listWhere(where), { deletedAt: { not: null } }],
     })
+  })
+})
+
+// §6.5 part 1 round two, owner's brief 2026-11-10: the status DERIVES from the
+// open loads, and the stored column keeps only the manual overrides.
+describe('the status derives from the open loads (round two)', () => {
+  it('keeps exactly three manual overrides, and they win', () => {
+    expect([...TRUCK_OVERRIDES]).toEqual([
+      'MAINTENANCE',
+      'OUT_OF_SERVICE',
+      'SOLD',
+    ])
+    for (const override of TRUCK_OVERRIDES) {
+      expect(derivedTruckStatus(override, 'moving')).toBe(override)
+      expect(truckOverrideOf(override)).toBe(override)
+    }
+    for (const stored of ['AVAILABLE', 'DISPATCHED', 'IN_TRANSIT'] as const) {
+      expect(truckOverrideOf(stored)).toBeNull()
+    }
+  })
+
+  it('reads the loads when there is no override: moving, open, none', () => {
+    expect(derivedTruckStatus('AVAILABLE', 'moving')).toBe('IN_TRANSIT')
+    expect(derivedTruckStatus('AVAILABLE', 'open')).toBe('DISPATCHED')
+    expect(derivedTruckStatus('AVAILABLE', null)).toBe('AVAILABLE')
+    // A stored DISPATCHED or IN_TRANSIT from before this round is a word,
+    // not a fact: the loads decide.
+    expect(derivedTruckStatus('IN_TRANSIT', null)).toBe('AVAILABLE')
+    expect(derivedTruckStatus('DISPATCHED', 'moving')).toBe('IN_TRANSIT')
+  })
+
+  it("an open load is the board's: not finished, not cancelled, not removed, not closed history", () => {
+    expect(OPEN_LOAD).toEqual({
+      deletedAt: null,
+      isCancelled: false,
+      operationalStatus: { notIn: ['DELIVERED', 'POD_RECEIVED'] },
+      billingStatus: { not: 'CLOSED_IN_DATATRUCK' },
+    })
+    expect(MOVING_LOAD).toEqual({
+      ...OPEN_LOAD,
+      operationalStatus: {
+        in: ['AT_PICKUP', 'LOADED', 'IN_TRANSIT', 'AT_DELIVERY'],
+      },
+    })
+  })
+
+  it('the predicate per status, for the filter and the chips', () => {
+    const derive = { status: { notIn: [...TRUCK_OVERRIDES] } }
+    expect(derivedStatusWhere('IN_TRANSIT')).toEqual({
+      ...derive,
+      loads: { some: MOVING_LOAD },
+    })
+    expect(derivedStatusWhere('DISPATCHED')).toEqual({
+      ...derive,
+      AND: [{ loads: { none: MOVING_LOAD } }, { loads: { some: OPEN_LOAD } }],
+    })
+    expect(derivedStatusWhere('AVAILABLE')).toEqual({
+      ...derive,
+      loads: { none: OPEN_LOAD },
+    })
+    expect(derivedStatusWhere('MAINTENANCE')).toEqual({ status: 'MAINTENANCE' })
+  })
+
+  it('the status filter reads the derived predicate, never the stored word', () => {
+    const where = truckListWhere(
+      readTruckListParams({ status: 'DISPATCHED' }),
+      {},
+    )
+    expect(where.status).toEqual(derivedStatusWhere('DISPATCHED'))
+  })
+
+  it('the record form offers Automatic and the three overrides, nothing else', () => {
+    const fields = readFileSync(
+      join('src', 'app', '(app)', 'trucks', 'fields.ts'),
+      'utf8',
+    )
+    expect(fields).toMatch(
+      /export const TRUCK_STATUS_OPTIONS: TruckStatus\[\] = \[\s*'AVAILABLE',\s*\.\.\.TRUCK_OVERRIDES,?\s*\]/,
+    )
+    expect(fields).toContain("t('fleet.status.automatic')")
+    // The status select reads the options list and names neither derived
+    // value; the enum's six below it belong to the trailers form.
+    const select = fields.slice(
+      fields.indexOf("name: 'status'"),
+      fields.indexOf("name: 'ownershipType'"),
+    )
+    expect(select).toContain('TRUCK_STATUS_OPTIONS.map(')
+    expect(select).not.toMatch(/'DISPATCHED'|'IN_TRANSIT'|TRUCK_STATUSES/)
+    // And the service stores only an override or AVAILABLE.
+    const fleet = readFileSync(join('src', 'lib', 'fleet.ts'), 'utf8')
+    // Line-anchored, create and update each: a substring match let the
+    // create line be broken while the update line still satisfied it (the
+    // guard that did not fire, 2026-11-10).
+    expect(fleet).toMatch(/^\s+status: storedTruckStatus\(input\.status\),$/m)
+    expect(fleet).toMatch(
+      /^\s+\.\.\.\(input\.status \? \{ status: storedTruckStatus\(input\.status\) \} : \{\}\),$/m,
+    )
+    // (The trailers' create and update keep `input.status`: a trailer has no
+    // loads of its own to derive from, so no negative match over the file.)
+  })
+
+  it('the counts statement restates the predicate: an override, then moving, then open', () => {
+    const counts = readFileSync(
+      join('src', 'lib', 'truck-list-counts.ts'),
+      'utf8',
+    )
+    expect(counts).toMatch(
+      /WHEN t\."status"::text = ANY\(\$\{\[\.\.\.TRUCK_OVERRIDES\]\}::text\[\]\) THEN t\."status"::text/,
+    )
+    expect(counts).toContain("THEN 'IN_TRANSIT'")
+    expect(counts).toContain("THEN 'DISPATCHED'")
+    expect(counts).toContain("ELSE 'AVAILABLE' END")
+    expect(counts).toContain('(${DERIVED_STATUS}) = ${params.status}')
+    expect(counts).toContain('(${DERIVED_STATUS}) AS status')
+    expect(counts).not.toContain('t."status"::text AS status')
   })
 })
 
@@ -311,6 +442,7 @@ describe('the file (§7.1.5)', () => {
     ownerName: null,
     odometer: 412000,
     status: 'OUT_OF_SERVICE',
+    override: 'OUT_OF_SERVICE',
     isRetired: false,
     fleetStatus: null,
     agingDays: null,
@@ -334,16 +466,21 @@ describe('the file (§7.1.5)', () => {
           unitNumber: '1002',
           isRetired: true,
           status: 'AVAILABLE',
+          override: null,
           warnings: [{ name: 'compliance_expired', detail: 'REGISTRATION' }],
         }),
       ],
       ['unitNumber', 'plateState', 'driver', 'status', 'warnings', 'nonsense'],
     )
     const lines = csv.replace(/^﻿/, '').split('\r\n')
-    expect(lines[0]).toBe('unit_number,state,driver,status,warnings')
-    expect(lines[1]).toBe('1001,IL,A One / B Two,OUT_OF_SERVICE,')
+    // The Status column is two in the file: the derived status and the
+    // stored override (round two).
+    expect(lines[0]).toBe('unit_number,state,driver,status,override,warnings')
+    expect(lines[1]).toBe(
+      '1001,IL,A One / B Two,OUT_OF_SERVICE,OUT_OF_SERVICE,',
+    )
     // A removed truck says so in the status column, as the screen does.
-    expect(lines[2]).toBe('1002,IL,,REMOVED,compliance_expired')
+    expect(lines[2]).toBe('1002,IL,,REMOVED,,compliance_expired')
   })
 
   it('names the file by the view and the day', () => {

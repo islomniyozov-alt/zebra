@@ -3,6 +3,12 @@ import { headingToForTrucks } from './dispatch-fields'
 import { agingDaysFrom, fleetStatusChangedForTrucks } from './fleet-codes'
 import { crewOfTrucks } from './team'
 import type { TxClient } from './tenancy'
+import {
+  derivedTruckStatus,
+  openLoadStatesForTrucks,
+  truckOverrideOf,
+  type TruckOverride,
+} from './truck-list'
 import { truckWarningFacts, truckWarnings, type Warning } from './warnings'
 
 // ---------------------------------------------------------------------------
@@ -32,7 +38,10 @@ export interface TruckListRow {
   /** Null means the carrier owns it (the schema's own rule). */
   ownerName: string | null
   odometer: number | null
+  /** DERIVED from the override and the open loads (round two), never stored. */
   status: TruckStatus
+  /** The stored manual override — In maintenance, Out of service, Sold — or null. */
+  override: TruckOverride | null
   isRetired: boolean
   fleetStatus: string | null
   /** Derived from the audit log; null when nothing has ever changed it. */
@@ -87,12 +96,17 @@ export async function readTruckRows(
   })
 
   const ids = trucks.map((truck) => truck.id)
-  const [facts, crews, headingTo, statusChanged] = await Promise.all([
-    truckWarningFacts(tx, ids),
-    crewOfTrucks(tx, ids),
-    headingToForTrucks(tx, ids),
-    fleetStatusChangedForTrucks(tx, ids),
-  ])
+  const [facts, crews, headingTo, statusChanged, loadStates] =
+    await Promise.all([
+      truckWarningFacts(tx, ids),
+      crewOfTrucks(tx, ids),
+      headingToForTrucks(tx, ids),
+      fleetStatusChangedForTrucks(tx, ids),
+      // THE SIXTH STATEMENT (round two): the open loads, for the derived
+      // status. Not folded into heading-to, which keeps closed history by
+      // design.
+      openLoadStatesForTrucks(tx, ids),
+    ])
 
   const rows = trucks.map(
     (truck): TruckListRow => ({
@@ -107,7 +121,13 @@ export async function readTruckRows(
       vin: truck.vin,
       ownerName: truck.ownerName,
       odometer: truck.currentOdometer,
-      status: truck.status,
+      // DERIVED (§6.5 part 1 round two): the override if there is one, else
+      // what the open loads say. The stored word is never shown as such.
+      status: derivedTruckStatus(
+        truck.status,
+        loadStates.get(truck.id) ?? null,
+      ),
+      override: truckOverrideOf(truck.status),
       isRetired: truck.deletedAt !== null,
       fleetStatus: truck.fleetStatus,
       agingDays: agingDaysFrom(

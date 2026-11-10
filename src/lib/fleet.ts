@@ -7,6 +7,17 @@ import {
 import { readFleetStatus, readFuelType } from './fleet-codes'
 import type { TxClient } from './tenancy'
 import { assertSeatFree } from './team'
+import { isTruckOverride } from './truck-list'
+
+/**
+ * What the stored status column may hold (§6.5 part 1 round two): a manual
+ * override — In maintenance, Out of service, Sold — or AVAILABLE, which means
+ * "derive from the open loads". DISPATCHED and IN_TRANSIT are derived values
+ * now; a caller that still sends one is stored as AVAILABLE, so the column
+ * never again carries a word that was true for a day.
+ */
+const storedTruckStatus = (status: TruckStatus | undefined): TruckStatus =>
+  status !== undefined && isTruckOverride(status) ? status : 'AVAILABLE'
 import { assertDriverKind, DEFAULT_DRIVER_KIND } from './driver-kind'
 import { parseTags } from './tags'
 import {
@@ -399,7 +410,7 @@ export async function createTruck(
         plate: optionalText(input.plate),
         plateState: stateCode(input.plateState),
         currentOdometer: odometer(input.currentOdometer),
-        status: input.status ?? 'AVAILABLE',
+        status: storedTruckStatus(input.status),
         ownershipType: input.ownershipType ?? 'OWNED',
         notes: optionalText(input.notes),
         ...itemTwelveFields(input),
@@ -474,7 +485,7 @@ export async function updateTruck(
         plate: optionalText(input.plate),
         plateState: stateCode(input.plateState),
         currentOdometer: odometer(input.currentOdometer),
-        ...(input.status ? { status: input.status } : {}),
+        ...(input.status ? { status: storedTruckStatus(input.status) } : {}),
         ...(input.ownershipType ? { ownershipType: input.ownershipType } : {}),
         notes: optionalText(input.notes),
         ...itemTwelveFields(input),

@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation'
 import { SELECTABLE_AUTHORITY } from '@/lib/companies'
+import { truckOverrideOf } from '@/lib/truck-list'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import Link from 'next/link'
 import { crewOfTruck } from '@/lib/team'
@@ -152,7 +153,10 @@ export default async function EditTruckPage({
               truck.currentOdometer === null
                 ? ''
                 : String(truck.currentOdometer),
-            status: truck.status,
+            // Round two: the form offers Automatic and the three overrides,
+            // so a stored DISPATCHED or IN_TRANSIT from before reads as
+            // Automatic here and is rewritten as AVAILABLE on save.
+            status: truckOverrideOf(truck.status) ?? 'AVAILABLE',
             ownershipType: truck.ownershipType,
             notes: truck.notes ?? '',
           }}
