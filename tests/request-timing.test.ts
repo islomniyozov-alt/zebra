@@ -109,7 +109,7 @@ describe('the spans', () => {
   it('the shell and the dashboard write their lines', () => {
     const layout = readFileSync('src/app/(app)/layout.tsx', 'utf8')
     expect(layout).toMatch(
-      /const \{ value: session, ms: sessionMs \} = await timed\(/,
+      /const \{ value: shell, ms: sessionMs \} = await timed\(/,
     )
     // Through `after()`, not a bare console.log: a render inside a sign-in's
     // POST response logged nothing the tail could see (§6.10, 2026-10-13).

@@ -382,6 +382,9 @@ describe('child-table triggers', () => {
       'zebra_org_from_payment',
       'zebra_org_from_payment_load',
       'zebra_org_from_settlement',
+      // Migration 71: the shell's one read, owner-level so it can read the
+      // viewer's own density under the preference table's policy.
+      'zebra_shell_context',
     ])
     for (const row of rows) {
       expect(row.config, row.proname).toContain('search_path=public, pg_temp')
