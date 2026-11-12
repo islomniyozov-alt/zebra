@@ -7,6 +7,7 @@ import { operationalLabelKey } from '@/lib/status'
 import {
   DRIVER_STEPS,
   recordPortalStatus,
+  tappedAtFrom,
   type PortalStatusFailure,
 } from '@/lib/portal-status'
 import { toFormState } from '../../(app)/_reference/shared'
@@ -41,11 +42,14 @@ export async function advanceStatusAction(
   if (!isStep(to)) {
     return { error: t('portal.status.error.notTheNextStep'), movedTo: null }
   }
+  // The tap's own time — set by the phone, carried by a replay from the
+  // offline queue (step 6). The one function decides whether to trust it.
+  const tappedAt = tappedAtFrom(formData.get('tappedAt'))
 
   let outcome
   try {
     outcome = await withCurrentOrg('update', 'portal.load', (tx, session) =>
-      recordPortalStatus(tx, session, loadId, to),
+      recordPortalStatus(tx, session, loadId, to, { tappedAt }),
     )
   } catch (error) {
     return { error: toFormState(error, t).error, movedTo: null }

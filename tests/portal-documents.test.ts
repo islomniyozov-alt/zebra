@@ -87,7 +87,12 @@ describe('the portal’s upload routes ask the portal’s gate and the predicate
 
   it('the capture is camera-first, through the portal’s endpoints', () => {
     expect(capture).toMatch(/capture="environment"/)
-    expect(capture).toMatch(/mint: '\/api\/portal\/documents\/upload-url'/)
-    expect(capture).toMatch(/confirm: '\/api\/portal\/documents\/confirm'/)
+    // Named once in the upload client (step 6), so the live capture and the
+    // queue's replay cannot send to different routes.
+    expect(capture).toMatch(/endpoints: PORTAL_ENDPOINTS/)
+    const client = read('src', 'lib', 'upload-client.ts')
+    expect(client).toMatch(
+      /PORTAL_ENDPOINTS: UploadEndpoints = \{\s*mint: '\/api\/portal\/documents\/upload-url',\s*confirm: '\/api\/portal\/documents\/confirm',/,
+    )
   })
 })

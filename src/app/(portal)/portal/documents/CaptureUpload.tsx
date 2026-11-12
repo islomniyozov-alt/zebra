@@ -3,7 +3,14 @@
 import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Select } from '@/components/ui/Select'
-import { uploadDocument, type UploadPhase } from '@/lib/upload-client'
+import { isNetworkFailure, newQueueId } from '@/lib/offline-queue'
+import { enqueue } from '@/lib/offline-queue-store'
+import {
+  compressImage,
+  PORTAL_ENDPOINTS,
+  uploadDocument,
+  type UploadPhase,
+} from '@/lib/upload-client'
 
 // CAMERA-FIRST UPLOAD (§9; Phase 7 step 5). **Take photo** is the primary
 // control — 52 px, the camera opened directly by `capture="environment"` —
@@ -14,10 +21,16 @@ import { uploadDocument, type UploadPhase } from '@/lib/upload-client'
 // preparing and uploading, because on one bar of signal a slow phone and a
 // stalled upload call for different responses.
 //
-// ONE CAPTURE PER UPLOAD. §9 asks multi-page captures to combine into one
-// PDF on the device; there is no PDF library in the dependencies and writing
-// one is its own step — flagged in the brief (flag 9). A second page is a
-// second upload of the same type.
+// ONE CAPTURE PER UPLOAD — ruled (flag 9, 2026-11-12): no assembler; a
+// second page is a second upload of the same type, and the office sees them
+// grouped by type on the load (§7.8).
+//
+// OFFLINE, THE CAPTURE IS KEPT (step 6; §9). If the phone says it is
+// offline, or the upload dies before the office answers, the compressed
+// bytes go to the phone's queue — under a megabyte, not the camera's 8 — and
+// the shell replays them through the same mint → PUT → confirm. A refusal
+// the office answered (a type it will not take, a load that is not the
+// driver's) is shown here in words and never kept.
 
 interface Props {
   loadId: string
@@ -33,9 +46,12 @@ interface Props {
     preparing: string
     uploading: string
     done: string
+    queued: string
     failed: string
   }
 }
+
+type Phase = UploadPhase | 'queued'
 
 export function CaptureUpload({
   loadId,
@@ -46,28 +62,49 @@ export function CaptureUpload({
 }: Props) {
   const router = useRouter()
   const [type, setType] = useState(defaultType)
-  const [phase, setPhase] = useState<UploadPhase>('idle')
+  const [phase, setPhase] = useState<Phase>('idle')
   const [error, setError] = useState<string | null>(null)
   const cameraRef = useRef<HTMLInputElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const busy = phase === 'preparing' || phase === 'uploading'
 
+  const keep = async (file: File) => {
+    setPhase('preparing')
+    const prepared = await compressImage(file)
+    await enqueue({
+      kind: 'upload',
+      id: newQueueId(),
+      loadId,
+      documentType: type,
+      label: types.find((option) => option.value === type)?.label ?? type,
+      filename: prepared.name,
+      mimeType: prepared.type,
+      bytes: prepared,
+      queuedAt: new Date().toISOString(),
+      failure: null,
+    })
+    setPhase('queued')
+  }
+
   const send = async (file: File) => {
     setError(null)
     try {
-      await uploadDocument(
-        file,
-        { entity: 'load', entityId: loadId, documentType: type },
-        (progress) => setPhase(progress.phase),
-        {
-          endpoints: {
-            mint: '/api/portal/documents/upload-url',
-            confirm: '/api/portal/documents/confirm',
-          },
-          mintBody: { loadId },
-        },
-      )
-      router.refresh()
+      if (!navigator.onLine) {
+        await keep(file)
+        return
+      }
+      try {
+        await uploadDocument(
+          file,
+          { entity: 'load', entityId: loadId, documentType: type },
+          (progress) => setPhase(progress.phase),
+          { endpoints: PORTAL_ENDPOINTS, mintBody: { loadId } },
+        )
+        router.refresh()
+      } catch (failure) {
+        if (!isNetworkFailure(failure)) throw failure
+        await keep(file)
+      }
     } catch (failure) {
       setPhase('failed')
       setError(failure instanceof Error ? failure.message : labels.failed)
@@ -134,6 +171,14 @@ export function CaptureUpload({
       {phase === 'done' && !error ? (
         <p role="status" className="text-sm text-ink-2">
           {labels.done}
+        </p>
+      ) : null}
+      {phase === 'queued' && !error ? (
+        <p
+          role="status"
+          className="rounded-card border border-border bg-warning-soft p-z3 text-sm text-ink"
+        >
+          {labels.queued}
         </p>
       ) : null}
       {error ? (

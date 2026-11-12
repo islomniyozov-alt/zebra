@@ -82,6 +82,41 @@ export interface StampedClock {
 }
 
 /**
+ * How far back a replayed tap may carry its clock (step 6; §9 offline
+ * queue). A phone that kept "At pickup" for a day of no signal still knows
+ * when the truck arrived; one that kept it for a week is telling a story the
+ * office should hear from the driver, not from a clock.
+ */
+export const TAP_WINDOW_MS = 24 * 60 * 60 * 1000
+
+/**
+ * The time a stop is clocked at: THE TAP, when the queue replays one the
+ * phone kept, as long as it is inside the window and not in the future (a
+ * phone's clock ahead of ours is not an arrival that has not happened); else
+ * the write. The status event keeps the write's time either way — when the
+ * office learned — and the stop's clock is when the truck was there.
+ */
+export function clockTimeFor(tappedAt: Date | undefined, now: Date): Date {
+  if (!tappedAt || Number.isNaN(tappedAt.getTime())) return now
+  const age = now.getTime() - tappedAt.getTime()
+  if (age < 0 || age > TAP_WINDOW_MS) return now
+  return tappedAt
+}
+
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/
+
+/**
+ * The form's `tappedAt`: an ISO instant with a Z, as the portal writes it,
+ * or nothing. A bare date or a word is nothing — the stop then clocks at the
+ * write, never at midnight.
+ */
+export function tappedAtFrom(value: unknown): Date | undefined {
+  if (typeof value !== 'string' || !ISO_INSTANT.test(value)) return undefined
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed
+}
+
+/**
  * Stamp the clock a rung means, on the first stop of that type whose clock
  * is still empty — "At pickup" the pickup's arrival, "Loaded" its departure,
  * the same pair for delivery. NEVER OVER A VALUE THE OFFICE PUT THERE: a
@@ -141,6 +176,10 @@ export async function recordPortalStatus(
   session: { userId: string },
   loadId: string,
   to: LoadOperationalStatus,
+  options: {
+    /** When the driver tapped — a replayed tap from the phone's queue. */
+    tappedAt?: Date
+  } = {},
 ): Promise<PortalStatusOutcome> {
   const driver = await ownDriver(tx, session)
   if (!driver) return { ok: false, reason: 'no_driver_row' }
@@ -189,8 +228,15 @@ export async function recordPortalStatus(
     // THE TAP IS THE STOP'S CHECK-IN (flag 8, ruled 2026-11-12): the rung
     // stamps the clock it means, in the same transaction, under the driver's
     // own attribution — so the load's stop table and its timeline both say
-    // the driver, and the office's later edit is a second audited write.
-    const stamped = await stampStopForStep(tx, loadId, next, new Date())
+    // the driver, and the office's later edit is a second audited write. A
+    // tap the phone kept while offline carries its own time (step 6), and
+    // the clock is that time when it is inside the window.
+    const stamped = await stampStopForStep(
+      tx,
+      loadId,
+      next,
+      clockTimeFor(options.tappedAt, new Date()),
+    )
     return { ok: true, from: outcome.from, to: next, stamped }
   }
   if (outcome.result === 'unchanged') return { ok: true, already: next }

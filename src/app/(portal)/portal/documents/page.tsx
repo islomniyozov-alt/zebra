@@ -17,7 +17,8 @@ import { CaptureUpload } from './CaptureUpload'
 // DOCUMENTS (§9; brief §1.3): the driver's own — on their loads, or filed
 // under them (CDL copy, medical card) — and, since step 5, THE UPLOAD: camera
 // first, one of the seven types, onto the current load, through the portal's
-// own routes under the own-load predicate. The offline queue is step 6.
+// own routes under the own-load predicate. A capture the office never
+// answered is kept on the phone and replayed by the shell (step 6).
 // Opening one goes through the portal's own download route, gated by the
 // own-documents predicate, never the operator's.
 
@@ -65,6 +66,7 @@ export default async function PortalDocumentsPage() {
             preparing: t('portal.upload.preparing'),
             uploading: t('portal.upload.uploading'),
             done: t('portal.upload.done'),
+            queued: t('portal.upload.queued'),
             failed: t('portal.upload.failed'),
           }}
         />

@@ -3171,6 +3171,20 @@ const en = {
   'portal.upload.uploading': 'Uploading…',
   'portal.upload.done': 'Uploaded. The office can see it on the load.',
   'portal.upload.failed': 'The upload did not finish. Try again.',
+  'portal.upload.queued':
+    'Kept on this phone. It sends when the signal is back.',
+  'portal.status.queued':
+    'Kept on this phone: {status}. It sends when the signal is back.',
+  'portal.status.failed': 'Could not reach the office. Try again.',
+  'portal.queue.offline':
+    'No signal. Taps and photos are kept on this phone and sent when it is back.',
+  'portal.queue.waiting': '{n} waiting to send',
+  'portal.queue.sending': 'Sending…',
+  'portal.queue.retrying': 'Retrying when the signal allows',
+  'portal.queue.kept': 'Kept until the signal is back',
+  'portal.queue.notSent': 'Not sent:',
+  'portal.queue.dismiss': 'Dismiss',
+  'portal.queue.status': 'Status: {status}',
   'portal.upload.noLoad': 'No current load to attach a document to.',
   'portal.settlements.title': 'My settlements',
   'portal.settlements.none': 'No finalised settlements yet.',
@@ -6298,6 +6312,20 @@ const ru: Dictionary = {
   'portal.upload.uploading': 'Загрузка…',
   'portal.upload.done': 'Загружено. Офис видит документ на рейсе.',
   'portal.upload.failed': 'Загрузка не завершилась. Попробуйте ещё раз.',
+  'portal.upload.queued':
+    'Сохранено на телефоне. Отправится, когда появится связь.',
+  'portal.status.queued':
+    'Сохранено на телефоне: {status}. Отправится, когда появится связь.',
+  'portal.status.failed': 'Не удалось связаться с офисом. Попробуйте ещё раз.',
+  'portal.queue.offline':
+    'Нет связи. Нажатия и фото сохраняются на телефоне и отправятся, когда она появится.',
+  'portal.queue.waiting': 'Ожидают отправки: {n}',
+  'portal.queue.sending': 'Отправка…',
+  'portal.queue.retrying': 'Повтор, когда позволит связь',
+  'portal.queue.kept': 'Хранится до появления связи',
+  'portal.queue.notSent': 'Не отправлено:',
+  'portal.queue.dismiss': 'Убрать',
+  'portal.queue.status': 'Статус: {status}',
   'portal.upload.noLoad':
     'Нет текущего рейса, к которому можно добавить документ.',
   'portal.settlements.title': 'Мои расчёты',
@@ -9388,6 +9416,20 @@ const fa: Dictionary = {
   'portal.upload.uploading': 'در حال بارگذاری…',
   'portal.upload.done': 'بارگذاری شد. دفتر آن را روی بار می‌بیند.',
   'portal.upload.failed': 'بارگذاری کامل نشد. دوباره تلاش کنید.',
+  'portal.upload.queued':
+    'روی این گوشی نگه داشته شد. با برگشتن سیگنال فرستاده می‌شود.',
+  'portal.status.queued':
+    'روی این گوشی نگه داشته شد: {status}. با برگشتن سیگنال فرستاده می‌شود.',
+  'portal.status.failed': 'ارتباط با دفتر برقرار نشد. دوباره تلاش کنید.',
+  'portal.queue.offline':
+    'سیگنال نیست. ضربه‌ها و عکس‌ها روی این گوشی نگه داشته می‌شوند و با برگشتن سیگنال فرستاده می‌شوند.',
+  'portal.queue.waiting': '{n} در انتظار ارسال',
+  'portal.queue.sending': 'در حال ارسال…',
+  'portal.queue.retrying': 'تلاش دوباره وقتی سیگنال اجازه دهد',
+  'portal.queue.kept': 'تا برگشتن سیگنال نگه داشته می‌شود',
+  'portal.queue.notSent': 'فرستاده نشد:',
+  'portal.queue.dismiss': 'بستن',
+  'portal.queue.status': 'وضعیت: {status}',
   'portal.upload.noLoad': 'بار فعلی‌ای برای افزودن مدرک وجود ندارد.',
   'portal.settlements.title': 'تسویه‌های من',
   'portal.settlements.none': 'هنوز تسویهٔ نهایی‌شده‌ای نیست.',

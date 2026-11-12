@@ -4,6 +4,7 @@ import { getSession } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { ribbonBranch } from '@/lib/environment'
 import { PortalTabs } from './PortalTabs'
+import { PendingQueue } from './PendingQueue'
 
 // §9 — THE DRIVER PORTAL'S SHELL (Phase 7 step 2). A separate shell, not a
 // responsive squeeze of the operator app: no sidebar, a bottom tab bar of
@@ -42,6 +43,22 @@ export default async function PortalLayout({
           </span>
         )}
       </header>
+
+      {/* THE PENDING STRIP (§9; step 6): mounted once, here, so the offline
+       * queue's indicator and its replay are on every portal screen. Renders
+       * nothing while the phone is online and nothing waits. */}
+      <PendingQueue
+        labels={{
+          offline: t('portal.queue.offline'),
+          waiting: t('portal.queue.waiting'),
+          sending: t('portal.queue.sending'),
+          retrying: t('portal.queue.retrying'),
+          kept: t('portal.queue.kept'),
+          notSent: t('portal.queue.notSent'),
+          dismiss: t('portal.queue.dismiss'),
+          status: t('portal.queue.status'),
+        }}
+      />
 
       <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
 

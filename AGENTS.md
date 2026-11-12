@@ -12,8 +12,10 @@ Current phase: **Phase 5 — smart load creation.** Read `PHASE-5-BRIEF.md`
 first; §7 lists what has been flagged against it. Phase 4 is closed — its §7
 records how each acceptance box was met and §8 what this phase inherits.
 `PHASE-6-BRIEF.md` is Create Load v2; `PHASE-7-BRIEF.md` is the driver portal
-(numbered by the owner 2026-11-12), brief only — no code until its §4 is
-ruled in full.
+(numbered by the owner 2026-11-12): its §4 was ruled in full and steps 0–6
+built on dev the same day; §9 records how each §6 box closed and §10 what
+the next phase inherits. It closes on the owner's ship and the three boxes
+only a phone can tick.
 
 Phases 1, 2, 3 and 4 are closed and all still binding: Phase 1 for the
 mechanisms in its §6–§10, Phase 2 for its engine patterns, Phase 3 for money,

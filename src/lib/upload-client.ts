@@ -169,6 +169,15 @@ const OFFICE_ENDPOINTS: UploadEndpoints = {
   confirm: '/api/documents/confirm',
 }
 
+/**
+ * The driver portal's two routes (Phase 7 step 5), named once: the live
+ * capture and the offline queue's replay (step 6) both send here.
+ */
+export const PORTAL_ENDPOINTS: UploadEndpoints = {
+  mint: '/api/portal/documents/upload-url',
+  confirm: '/api/portal/documents/confirm',
+}
+
 export async function uploadDocument(
   file: File,
   target: UploadTarget,

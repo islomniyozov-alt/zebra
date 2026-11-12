@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { DRIVER_STEPS, nextStatusFor } from '@/lib/portal-status'
@@ -75,6 +75,34 @@ describe('the button is the driver of record’s, and the write is the engine’
 
   it('the action asks portal.load:update and calls the one function', () => {
     expect(action).toMatch(/withCurrentOrg\('update', 'portal\.load'/)
-    expect(action).toMatch(/recordPortalStatus\(tx, session, loadId, to\)/)
+    expect(action).toMatch(
+      /recordPortalStatus\(tx, session, loadId, to, \{ tappedAt \}\)/,
+    )
+  })
+})
+
+describe('nothing under the portal writes the roster (§6: `Driver.userId` is the office’s)', () => {
+  const walk = (dir: string): string[] =>
+    readdirSync(dir).flatMap((name) => {
+      const path = join(dir, name)
+      if (statSync(path).isDirectory()) return walk(path)
+      return /\.tsx?$/.test(name) ? [path] : []
+    })
+  const portal = [
+    ...walk(join(process.cwd(), 'src', 'app', '(portal)')),
+    ...walk(join(process.cwd(), 'src', 'app', 'api', 'portal')),
+    ...readdirSync(join(process.cwd(), 'src', 'lib'))
+      .filter((name) => /^portal.*\.ts$/.test(name))
+      .map((name) => join(process.cwd(), 'src', 'lib', name)),
+  ]
+
+  it('reads the driver row and never creates, updates or links one', () => {
+    expect(portal.length).toBeGreaterThan(5)
+    const writers = portal.filter((path) =>
+      /driver\.(create|update|upsert|delete)\(|linkDriverSignIn|unlinkDriverSignIn/.test(
+        readFileSync(path, 'utf8'),
+      ),
+    )
+    expect(writers).toEqual([])
   })
 })

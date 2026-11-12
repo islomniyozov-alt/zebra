@@ -48,6 +48,7 @@ let userA = ''
 let userB = ''
 let openA = ''
 let deliveredA = ''
+let laterA = ''
 let openB = ''
 /** B's load with A in the second seat (§4.5: a co-driver sees it). */
 let teamB = ''
@@ -247,6 +248,13 @@ beforeAll(async () => {
     where: { id: teamB },
     data: { coDriverId: driverA },
   })
+
+  // Later than teamB's pickup, so A's CURRENT load stays openA; this one is
+  // for the replayed tap's clock (step 6).
+  laterA = await load('laterA', driverA, 'DISPATCHED', [
+    { type: 'PICKUP', city: 'El Paso', at: '2026-11-28T14:00:00Z' },
+    { type: 'DELIVERY', city: 'Odessa', at: '2026-11-29T09:00:00Z' },
+  ])
 
   podA = await document('podA', 'POD', { loadId: deliveredA })
   cdlA = await document('cdlA', 'CDL_COPY', { driverId: driverA })
@@ -627,6 +635,68 @@ describe('the tap is the stop’s check-in', () => {
     })
     const [, after] = await stopsOf(openA)
     expect(after!.departedAt).not.toBeNull()
+  })
+})
+
+describe('a replayed tap carries its time (step 6; §9 offline queue)', () => {
+  const asDriver = <T>(
+    userId: string,
+    fn: Parameters<typeof withOrg<T>>[1],
+  ): Promise<T> =>
+    withOrg(org.organizationId, fn, {
+      attribution: { userId, ip: null, userAgent: 'portal.test' },
+      maxWaitMs: 15_000,
+      timeoutMs: LOAD_WRITE_TIMEOUT_MS,
+    })
+  const stopsOf = (loadId: string) =>
+    owner.loadStop.findMany({
+      where: { loadId },
+      orderBy: { sequence: 'asc' },
+      select: { id: true, type: true, arrivedAt: true, departedAt: true },
+    })
+
+  it('inside the window the stop is clocked at the tap; the event at the write', async () => {
+    const tappedAt = new Date(Date.now() - 20 * 60 * 1000)
+    tappedAt.setMilliseconds(0)
+    const outcome = await asDriver(userA, (tx) =>
+      recordPortalStatus(tx, { userId: userA }, laterA, 'AT_PICKUP', {
+        tappedAt,
+      }),
+    )
+    expect(outcome).toMatchObject({
+      ok: true,
+      to: 'AT_PICKUP',
+      stamped: { clock: 'arrivedAt' },
+    })
+    const [pickup] = await stopsOf(laterA)
+    expect(pickup!.arrivedAt?.toISOString()).toBe(tappedAt.toISOString())
+    // The status event is when the office learned — the write, twenty
+    // minutes after the tap — not when the truck arrived.
+    const event = await owner.loadStatusEvent.findFirst({
+      where: { loadId: laterA, toStatus: 'AT_PICKUP' },
+      orderBy: { occurredAt: 'desc' },
+    })
+    expect(event?.source).toBe('DRIVER_PORTAL')
+    expect(event!.occurredAt.getTime()).toBeGreaterThan(
+      tappedAt.getTime() + 15 * 60 * 1000,
+    )
+  })
+
+  it('a tap older than the window stamps the write, not the story', async () => {
+    const stale = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
+    const before = Date.now() - 1000
+    const outcome = await asDriver(userA, (tx) =>
+      recordPortalStatus(tx, { userId: userA }, laterA, 'LOADED', {
+        tappedAt: stale,
+      }),
+    )
+    expect(outcome).toMatchObject({
+      ok: true,
+      to: 'LOADED',
+      stamped: { clock: 'departedAt' },
+    })
+    const [pickup] = await stopsOf(laterA)
+    expect(pickup!.departedAt!.getTime()).toBeGreaterThanOrEqual(before)
   })
 })
 

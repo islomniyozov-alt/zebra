@@ -108,6 +108,9 @@ export default async function PortalHomePage() {
               ),
               setting: t('portal.status.setting'),
               landed: t('portal.status.landed'),
+              word: t(operationalLabelKey(nextStatus)),
+              queued: t('portal.status.queued'),
+              failed: t('portal.status.failed'),
             }}
           />
         ) : (
