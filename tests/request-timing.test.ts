@@ -3,9 +3,11 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   DASHBOARD_READS,
   dashboardTimingLine,
+  pageTimingLine,
   shellIsolateMark,
   shellTimingLine,
   timed,
+  writeTimingLater,
   writeTimingLine,
 } from '@/lib/request-timing'
 
@@ -138,5 +140,92 @@ describe('the spans', () => {
     } finally {
       log.mockRestore()
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE PAGE'S LINE (GAPS 42, owner's instruction 2026-11-12): statements and
+// wall, built once the response has gone out.
+// ---------------------------------------------------------------------------
+
+describe('the page timing line', () => {
+  it('carries exactly the named fields, and a count that was not kept is null', () => {
+    const line = JSON.parse(
+      pageTimingLine({
+        role: 'ACCOUNTING',
+        statements: 17,
+        totalMs: 1288,
+        startedAt: Date.UTC(2026, 10, 12, 18, 45, 0),
+      }),
+    )
+    expect(line).toEqual({
+      event: 'page.timing',
+      role: 'ACCOUNTING',
+      statements: 17,
+      totalMs: 1288,
+      startedAt: '2026-11-12T18:45:00.000Z',
+    })
+    expect(Object.keys(line)).toEqual([
+      'event',
+      'role',
+      'statements',
+      'totalMs',
+      'startedAt',
+    ])
+    expect(
+      JSON.parse(
+        pageTimingLine({
+          role: null,
+          statements: null,
+          totalMs: 0,
+          startedAt: 0,
+        }),
+      ).statements,
+    ).toBeNull()
+  })
+
+  it('is BUILT when after() runs it, not when it is scheduled — the count read then is the final one', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      let statements = 2
+      let task: (() => void) | null = null
+      writeTimingLater(
+        () => JSON.stringify({ event: 'page.timing', statements }),
+        (t) => void (task = t),
+      )
+      statements = 9 // the page's own reads, after the layout scheduled the line
+      expect(log).not.toHaveBeenCalled()
+      task!()
+      expect(log).toHaveBeenCalledWith('{"event":"page.timing","statements":9}')
+      log.mockClear()
+      writeTimingLater(
+        () => '{"event":"page.timing","statements":1}',
+        () => {
+          throw new Error('`after` was called outside a request scope')
+        },
+      )
+      expect(log).toHaveBeenCalledWith('{"event":"page.timing","statements":1}')
+    } finally {
+      log.mockRestore()
+    }
+  })
+
+  it('both shells write it from the thunk, reading the request’s one client', () => {
+    for (const path of [
+      'src/app/(app)/layout.tsx',
+      'src/app/(portal)/layout.tsx',
+    ]) {
+      const layout = readFileSync(path, 'utf8')
+      expect(layout, path).toMatch(
+        /writeTimingLater\(\(\) =>\s*pageTimingLine\(\{/,
+      )
+      expect(layout, path).toMatch(/statements: statementsOf\(client\)/)
+      expect(layout, path).toMatch(/const client = requestClient\(\)/)
+      expect(layout, path).not.toMatch(/writeTimingLine\(\s*pageTimingLine\(/)
+    }
+    // The counter is kept where the client is built, and only there.
+    const db = readFileSync('src/lib/db.ts', 'utf8')
+    expect(db).toMatch(/log: \[\{ emit: 'event', level: 'query' \}\]/)
+    expect(db).toMatch(/client\.\$on\('query'/)
   })
 })

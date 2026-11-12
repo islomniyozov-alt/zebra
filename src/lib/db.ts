@@ -71,6 +71,11 @@ export function createPrismaClient(
     idleTimeoutMillis: POOL_IDLE_TIMEOUT_MS,
   }
   const client = new PrismaClient({
+    // THE STATEMENT COUNTER (GAPS 42, owner's instruction 2026-11-12). Query
+    // events are the same source the integration tests' budgets read, so what
+    // `page.timing` prints and what the budget counts agree — BEGIN,
+    // set_config, the read, COMMIT, each one.
+    log: [{ emit: 'event', level: 'query' }],
     // THE CONNECTION PATH (§6.10, GAPS 33). Hyperdrive speaks plain Postgres
     // over TCP, so its path is `pg` (Workers sockets under nodejs_compat);
     // everywhere else — production, tests, seeds — Neon's WebSocket driver.
@@ -96,7 +101,26 @@ export function createPrismaClient(
           })
         : new PrismaNeon(pool),
   })
-  return client.$extends(auditExtension) as unknown as PrismaClient
+  const counter = { statements: 0 }
+  client.$on('query', () => {
+    counter.statements += 1
+  })
+  const extended = client.$extends(auditExtension) as unknown as PrismaClient
+  STATEMENTS.set(extended, counter)
+  return extended
+}
+
+/** One counter per client built here, keyed by the handle callers hold. */
+const STATEMENTS = new WeakMap<object, { statements: number }>()
+
+/**
+ * How many statements `client` has sent so far — every one, from its first.
+ * `null` for a client not built by `createPrismaClient`: a count that is not
+ * being kept is not zero, and a line that said 0 for it would be the
+ * "sees no rows" vacuity in a number.
+ */
+export function statementsOf(client: PrismaClient): number | null {
+  return STATEMENTS.get(client)?.statements ?? null
 }
 
 /**

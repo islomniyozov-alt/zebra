@@ -10,12 +10,15 @@ import { Topbar } from '@/components/shell/Topbar'
 import { ribbonBranch } from '@/lib/environment'
 import type { MessageKey } from '@/lib/i18n'
 import {
+  pageTimingLine,
   shellIsolateMark,
   shellTimingLine,
   stopwatch,
   timed,
+  writeTimingLater,
   writeTimingLine,
 } from '@/lib/request-timing'
+import { requestClient, statementsOf } from '@/lib/db'
 
 // §6.1 — the app shell. Sidebar 224px, topbar 48px, content the only scrolling
 // region.
@@ -127,6 +130,19 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         totalMs: clock.ms(),
       },
       isolate,
+      startedAt: clock.startedAt,
+    }),
+  )
+  // THE PAGE'S LINE (GAPS 42): built when `after()` runs it, once the
+  // response has gone out — so the count is the request's whole count, the
+  // page's reads included, and the wall is this clock read then. The handle
+  // is the request's one client (GAPS 32), the one every read goes through.
+  const client = requestClient()
+  writeTimingLater(() =>
+    pageTimingLine({
+      role: session.role,
+      statements: statementsOf(client),
+      totalMs: clock.ms(),
       startedAt: clock.startedAt,
     }),
   )

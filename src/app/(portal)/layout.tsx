@@ -3,6 +3,12 @@ import type { ReactNode } from 'react'
 import { getSession } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { ribbonBranch } from '@/lib/environment'
+import { requestClient, statementsOf } from '@/lib/db'
+import {
+  pageTimingLine,
+  stopwatch,
+  writeTimingLater,
+} from '@/lib/request-timing'
 import { PortalTabs } from './PortalTabs'
 import { PendingQueue } from './PendingQueue'
 
@@ -25,8 +31,21 @@ export default async function PortalLayout({
 }: {
   children: ReactNode
 }) {
+  const clock = stopwatch()
   const session = await getSession()
   if (!session) redirect('/login')
+  // THE PAGE'S LINE (GAPS 42), as the operator shell writes it: statements
+  // and wall, built once the response has gone out. The portal's budget is
+  // §9's two statements on Load, and this is where it reads in the tail.
+  const client = requestClient()
+  writeTimingLater(() =>
+    pageTimingLine({
+      role: session.role,
+      statements: statementsOf(client),
+      totalMs: clock.ms(),
+      startedAt: clock.startedAt,
+    }),
+  )
 
   const { t } = await getLocaleContext()
   // §6.1.2 — which database this worker reads; null on production, and then

@@ -160,3 +160,47 @@ export function dashboardTimingLine(input: {
     startedAt: new Date(input.startedAt).toISOString(),
   })
 }
+
+// ── THE PAGE'S LINE: STATEMENTS AND WALL, READ AFTER THE RESPONSE ──────────
+//
+// GAPS 42 (owner's instruction 2026-11-12): the accounting pages could be
+// ranked by the worker's wall and not by query count, because nothing wrote
+// one. The shell layout cannot know the page's count while it renders — the
+// page renders beside it — so the line is BUILT when `after()` runs it, once
+// the response has gone out, from a thunk: the count read then is the
+// request's whole count, and the wall is the layout's clock read then.
+
+/**
+ * Schedule a line to be BUILT and written from `after()` — the thunk runs
+ * once the response is sent, so a count it reads is the request's final one.
+ * Outside a request `after()` throws, and the line is built and written now.
+ */
+export function writeTimingLater(
+  build: () => string,
+  schedule: (task: () => void) => void = after,
+): void {
+  try {
+    schedule(() => {
+      console.log(build())
+    })
+  } catch {
+    console.log(build())
+  }
+}
+
+export function pageTimingLine(input: {
+  role: string | null
+  /** Every statement the request's client sent; null when nothing counted. */
+  statements: number | null
+  /** The layout's clock, read when the line is built. */
+  totalMs: number
+  startedAt: number
+}): string {
+  return JSON.stringify({
+    event: 'page.timing',
+    role: input.role,
+    statements: input.statements,
+    totalMs: input.totalMs,
+    startedAt: new Date(input.startedAt).toISOString(),
+  })
+}
