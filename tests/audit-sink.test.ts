@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   analyticsEngine,
   ensureAuditSink,
+  hasCloudflareContext,
+  nodeDebugNames,
   resetSinkHealth,
   sinkHealth,
 } from '@/lib/audit-sink'
@@ -226,7 +228,7 @@ describe('ensureAuditSink', () => {
     expect(getAuditHealth().gaps.noContext).toBe(1)
   })
 
-  // ── AND THE SILENCE IS NO LONGER SILENT ────────────────────────────────
+  // ── AND THE SILENCE IS NO LONGER SILENT — ON A WORKER ──────────────────
   //
   // The quiet return above is correct for tests and `next dev`, and it also
   // covers a real production fault: the context symbol renamed, the binding
@@ -234,15 +236,26 @@ describe('ensureAuditSink', () => {
   // look. In that state failures and gaps stop being recorded fleet-wide and the
   // only evidence is an ABSENCE of datapoints — indistinguishable from a clean
   // week. So the absence is counted and announced once.
-  it('counts an event it could not record, and says so once', async () => {
+  //
+  // TWO SILENCES, AND ONLY ONE IS THE FAULT (GAPS 41, owner's ruling
+  // 2026-11-12: "Node has no Analytics Engine; the line is noise outside the
+  // Worker"). Until then the Node branch printed the fault's words on every
+  // script run, every `npm run check` and 56 times per integration run, and a
+  // health signal that cries on every Node run cannot be read the one time it
+  // is real. So the three cases below hold the split: a Worker without the
+  // binding WARNS once; Node says nothing; Node under `NODE_DEBUG=zebra.audit`
+  // says so once at debug level.
+  it('on a Worker whose context has no AUDIT_EVENTS, counts the drops and warns once', async () => {
     resetSinkHealth()
     const warnings: unknown[][] = []
     const original = console.warn
     console.warn = (...args: unknown[]) => void warnings.push(args)
     try {
       ensureAuditSink()
-      await provokeGap()
-      await provokeGap()
+      await withContext({ SOMETHING_ELSE: {} }, async () => {
+        await provokeGap()
+        await provokeGap()
+      })
     } finally {
       console.warn = original
     }
@@ -263,6 +276,98 @@ describe('ensureAuditSink', () => {
     // AND IT SAYS THE TABLE IS FINE, because the first question somebody asks on
     // reading it is whether the audit trail itself is broken. It is not.
     expect(JSON.stringify(mine[0])).toContain('AuditLog table is')
+  })
+
+  it('in Node — no Cloudflare context — counts the drops and prints nothing', async () => {
+    resetSinkHealth()
+    const warnings: unknown[][] = []
+    const debugs: unknown[][] = []
+    const originalWarn = console.warn
+    const originalDebug = console.debug
+    const originalNodeDebug = process.env.NODE_DEBUG
+    console.warn = (...args: unknown[]) => void warnings.push(args)
+    console.debug = (...args: unknown[]) => void debugs.push(args)
+    delete process.env.NODE_DEBUG
+    try {
+      ensureAuditSink()
+      await provokeGap()
+      await provokeGap()
+    } finally {
+      console.warn = originalWarn
+      console.debug = originalDebug
+      if (originalNodeDebug !== undefined)
+        process.env.NODE_DEBUG = originalNodeDebug
+    }
+
+    // STILL COUNTED: the number is what `sinkHealth()` is for.
+    expect(sinkHealth().dropped).toBe(2)
+    // NOT A WARNING, because this is not the fault — and not a debug line
+    // either, because nobody asked: a script's console carries nothing from
+    // the sink.
+    const sink = (lines: unknown[][]) =>
+      lines.filter((args) => String(args[0]).includes('zebra.audit.sink'))
+    expect(sink(warnings)).toHaveLength(0)
+    expect(sink(debugs)).toHaveLength(0)
+  })
+
+  it('in Node under NODE_DEBUG=zebra.audit, says so once at debug level', async () => {
+    resetSinkHealth()
+    const warnings: unknown[][] = []
+    const debugs: unknown[][] = []
+    const originalWarn = console.warn
+    const originalDebug = console.debug
+    const originalNodeDebug = process.env.NODE_DEBUG
+    console.warn = (...args: unknown[]) => void warnings.push(args)
+    console.debug = (...args: unknown[]) => void debugs.push(args)
+    process.env.NODE_DEBUG = 'http, ZEBRA.AUDIT'
+    try {
+      ensureAuditSink()
+      await provokeGap()
+      await provokeGap()
+    } finally {
+      console.warn = originalWarn
+      console.debug = originalDebug
+      if (originalNodeDebug === undefined) delete process.env.NODE_DEBUG
+      else process.env.NODE_DEBUG = originalNodeDebug
+    }
+
+    expect(sinkHealth().dropped).toBe(2)
+    const sink = (lines: unknown[][]) =>
+      lines.filter((args) => String(args[0]).includes('zebra.audit.sink'))
+    // ONCE, at debug, naming the silence it is in — and never the fault's
+    // words, which are reserved for a Worker.
+    expect(sink(warnings)).toHaveLength(0)
+    expect(sink(debugs)).toHaveLength(1)
+    expect(JSON.stringify(sink(debugs)[0])).toContain('no Cloudflare context')
+    expect(JSON.stringify(sink(debugs)[0])).not.toContain('NOT being recorded')
+  })
+
+  it('reads NODE_DEBUG the way Node does: names, separated, case-insensitive', () => {
+    const originalNodeDebug = process.env.NODE_DEBUG
+    try {
+      delete process.env.NODE_DEBUG
+      expect(nodeDebugNames('zebra.audit')).toBe(false)
+      process.env.NODE_DEBUG = ''
+      expect(nodeDebugNames('zebra.audit')).toBe(false)
+      process.env.NODE_DEBUG = 'zebra.audit'
+      expect(nodeDebugNames('zebra.audit')).toBe(true)
+      process.env.NODE_DEBUG = 'net,Zebra.Audit'
+      expect(nodeDebugNames('zebra.audit')).toBe(true)
+      // A prefix is not a name: `zebra` does not switch on `zebra.audit`.
+      process.env.NODE_DEBUG = 'zebra'
+      expect(nodeDebugNames('zebra.audit')).toBe(false)
+    } finally {
+      if (originalNodeDebug === undefined) delete process.env.NODE_DEBUG
+      else process.env.NODE_DEBUG = originalNodeDebug
+    }
+  })
+
+  it('tells a Worker from Node by the context, not by the binding', async () => {
+    expect(hasCloudflareContext()).toBe(false)
+    await withContext({}, () => {
+      expect(hasCloudflareContext()).toBe(true)
+      expect(analyticsEngine()).toBeNull()
+    })
   })
 
   it('and counts nothing when the binding is there', async () => {

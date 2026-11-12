@@ -723,7 +723,12 @@ Two properties that file must keep, and that `tests/audit-sink.test.ts` holds
 it to:
 
 - **A missing binding is a no-op, never an error.** Node, `next dev` and every
-  test have no binding, and audit must behave identically without one.
+  test have no binding, and audit must behave identically without one. And
+  the sink tells its two silences apart (GAPS 41, 2026-11-12): no Cloudflare
+  context at all is Node, where Analytics Engine does not exist — noise,
+  printed once at debug level only under `NODE_DEBUG=zebra.audit`; a Worker
+  whose context lacks `AUDIT_EVENTS` warns once per isolate, because that is
+  the fault.
 - **Nothing tenant-identifying leaves.** A datapoint carries the _shape_ of the
   problem — model, operation, gap kind, error message — never a row id and
   never a value out of a diff. Analytics Engine sits outside the row-level

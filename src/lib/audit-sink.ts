@@ -90,11 +90,31 @@ export function ensureAuditSink(): void {
       dropped += 1
       if (!warned) {
         warned = true
-        console.warn(
-          '[zebra.audit.sink] no AUDIT_EVENTS dataset — audit failures and ' +
-            'gaps are NOT being recorded fleet-wide. The AuditLog table is ' +
-            'unaffected; this is the health signal, and it is off.',
-        )
+        if (hasCloudflareContext()) {
+          // THE FAULT. A Worker is running and its context has no dataset:
+          // the binding fell out of `wrangler.jsonc` for this environment, or
+          // the context moved. This is the one line this file exists for.
+          console.warn(
+            '[zebra.audit.sink] no AUDIT_EVENTS dataset on this Worker — ' +
+              'audit failures and gaps are NOT being recorded fleet-wide. ' +
+              'The AuditLog table is unaffected; this is the health signal, ' +
+              'and it is off.',
+          )
+        } else if (nodeDebugNames('zebra.audit')) {
+          // NOT THE FAULT. Node has no Analytics Engine; the line is noise
+          // outside the Worker (GAPS 41, owner's ruling 2026-11-12). For a
+          // month this branch wore the fault's words, once per script run,
+          // once per `npm run check`, 56 times per integration run — and a
+          // health signal that cries on every Node run cannot be read the
+          // one time it is real. So: debug level, behind Node's own switch,
+          // `NODE_DEBUG=zebra.audit`. Still counted in `dropped`, which is
+          // the number a test reads.
+          console.debug(
+            '[zebra.audit.sink] no Cloudflare context: Node has no Analytics ' +
+              'Engine, so this process records no audit event fleet-wide. ' +
+              'On the Workers the events go to AUDIT_EVENTS.',
+          )
+        }
       }
       return
     }
@@ -146,16 +166,57 @@ export function ensureAuditSink(): void {
  */
 const CLOUDFLARE_CONTEXT = Symbol.for('__cloudflare-context__')
 
-export function analyticsEngine(): AnalyticsEngineDataset | null {
+/**
+ * The Worker's `env`, or null outside a Worker.
+ *
+ * TWO SILENCES, TOLD APART HERE. `analyticsEngine()` answers null for both
+ * "there is no Cloudflare context at all" — Node: tsx, vitest, `next dev`,
+ * every script — and "there is a context and it carries no dataset", which is
+ * a Worker whose binding was lost. The first is the designed state of every
+ * non-Worker runtime; the second is the fault. `ensureAuditSink` reads
+ * `hasCloudflareContext()` to say which one it is in, because for a month it
+ * said the fault's words in both (GAPS 41).
+ */
+function cloudflareEnv(): Record<string, unknown> | null {
   const context = (globalThis as Record<symbol, unknown>)[CLOUDFLARE_CONTEXT]
   if (!context || typeof context !== 'object') return null
 
   const env = (context as { env?: unknown }).env
   if (!env || typeof env !== 'object') return null
+  return env as Record<string, unknown>
+}
 
-  const binding = (env as Record<string, unknown>)['AUDIT_EVENTS']
+export function hasCloudflareContext(): boolean {
+  return cloudflareEnv() !== null
+}
+
+export function analyticsEngine(): AnalyticsEngineDataset | null {
+  const env = cloudflareEnv()
+  if (!env) return null
+
+  const binding = env['AUDIT_EVENTS']
   if (binding && typeof binding === 'object' && 'writeDataPoint' in binding) {
     return binding as AnalyticsEngineDataset
   }
   return null
+}
+
+/**
+ * Node's own debug switch, read without `node:util`.
+ *
+ * `util.debuglog(section)` prints only when `NODE_DEBUG` names the section;
+ * that is the level the owner asked the Node line down to. The module is
+ * loaded by `db.ts` in both runtimes, and `node:util` is not an import this
+ * file will put in front of every Worker request for one log line — so the
+ * variable is read directly, the way Node reads it: comma- or
+ * space-separated section names, case-insensitive. Exported for the test;
+ * not a production surface.
+ */
+export function nodeDebugNames(section: string): boolean {
+  const process = (globalThis as { process?: { env?: Record<string, string> } })
+    .process
+  const value = process?.env?.['NODE_DEBUG']
+  if (typeof value !== 'string' || value === '') return false
+  const wanted = section.toLowerCase()
+  return value.split(/[\s,]+/).some((name) => name.toLowerCase() === wanted)
 }
