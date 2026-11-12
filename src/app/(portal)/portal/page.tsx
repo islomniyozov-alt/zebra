@@ -7,8 +7,10 @@ import { formatAddress } from '@/lib/locations'
 import { renderStopTime } from '@/lib/stop-time'
 import { operationalLabelKey, operationalTone } from '@/lib/status'
 import { currentLoad, documentsNeeded, nextStop, ownDriver } from '@/lib/portal'
+import { nextStatusFor } from '@/lib/portal-status'
 import type { MessageKey } from '@/lib/i18n'
 import { NoDriverRow } from '../NoDriverRow'
+import { StatusStep } from './StatusStep'
 
 // HOME = THE CURRENT LOAD (§9; PHASE-7-BRIEF.md §1.1). The one open load the
 // driver is on, stops in sequence with the facility's memory, every
@@ -50,6 +52,7 @@ export default async function PortalHomePage() {
 
   const next = nextStop(load)
   const needed = documentsNeeded(load)
+  const nextStatus = nextStatusFor(load.operationalStatus)
   const when = (
     at: Date | null,
     stop: {
@@ -88,6 +91,33 @@ export default async function PortalHomePage() {
           <p className="text-sm text-ink-2">{t('portal.home.coDriver')}</p>
         ) : null}
       </header>
+
+      {/* THE ONE PRIMARY ACTION (§9; step 4). The next rung for the DRIVER OF
+       * RECORD; a co-driver reads a sentence instead, and a finished load says
+       * the office takes it from here. The write refuses what the button could
+       * not, so the absence of the button is never the rule. */}
+      {load.driverId === driver.id ? (
+        nextStatus ? (
+          <StatusStep
+            loadId={load.id}
+            to={nextStatus}
+            labels={{
+              set: t('portal.status.set').replace(
+                '{status}',
+                t(operationalLabelKey(nextStatus)),
+              ),
+              setting: t('portal.status.setting'),
+              landed: t('portal.status.landed'),
+            }}
+          />
+        ) : (
+          <p className="text-sm text-ink-2">{t('portal.status.finished')}</p>
+        )
+      ) : (
+        <p className="rounded-card border border-border bg-surface p-z3 text-sm text-ink-2">
+          {t('portal.status.coDriver')}
+        </p>
+      )}
 
       <ol className="flex flex-col gap-z3">
         {load.stops.map((stop) => {

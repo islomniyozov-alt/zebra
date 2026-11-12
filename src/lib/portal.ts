@@ -191,17 +191,30 @@ export async function currentLoad(
   return [...open].sort((a, b) => soonest(a) - soonest(b))[0] ?? null
 }
 
+/** Statuses at or past LOADED: the freight is on the truck. */
+const PAST_PICKUP: readonly LoadOperationalStatus[] = [
+  'LOADED',
+  'IN_TRANSIT',
+  'AT_DELIVERY',
+  'DELIVERED',
+  'POD_RECEIVED',
+]
+
 /**
  * What the current load still needs from the driver, as the upload
- * invitation Home shows (§1.1 of the brief): a BOL once a pickup has been
- * left without one on file, a POD once the load is delivered without one.
+ * invitation Home shows (§1.1 of the brief): a BOL once the freight is
+ * loaded — the status says so (the driver's own tap, step 4) or a pickup's
+ * departure was checked in by the office — a POD once delivered, without
+ * one on file.
  */
 export function documentsNeeded(load: CurrentLoad): DocumentType[] {
   const has = new Set(load.documents.map((document) => document.type))
   const needed: DocumentType[] = []
-  const leftPickup = load.stops.some(
-    (stop) => stop.type === 'PICKUP' && stop.departedAt !== null,
-  )
+  const leftPickup =
+    PAST_PICKUP.includes(load.operationalStatus) ||
+    load.stops.some(
+      (stop) => stop.type === 'PICKUP' && stop.departedAt !== null,
+    )
   if (leftPickup && !has.has('BOL')) needed.push('BOL')
   const delivered = (FINISHED as readonly LoadOperationalStatus[]).includes(
     load.operationalStatus,

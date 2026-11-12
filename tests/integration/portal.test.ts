@@ -15,6 +15,7 @@ import {
   ownLoads,
   ownSettlements,
 } from '@/lib/portal'
+import { recordPortalStatus } from '@/lib/portal-status'
 import { dropOrganization, seedOrganization, type OrgFixture } from './fixtures'
 import type { PrismaClient } from '@/generated/prisma/client'
 
@@ -432,5 +433,115 @@ describe('Settlements', () => {
       false,
     )
     expect(await inOrg((tx) => isOwnSettlement(tx, driverA, paidB))).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE ONE WRITE: ONE FORWARD STEP (Phase 7 step 4; §4.4 and §4.5).
+// ---------------------------------------------------------------------------
+
+describe('the driver’s status step', () => {
+  // The DRIVER'S sign-in is the actor: the event row names them.
+  const asDriver = <T>(
+    userId: string,
+    fn: Parameters<typeof withOrg<T>>[1],
+  ): Promise<T> =>
+    withOrg(org.organizationId, fn, {
+      attribution: { userId, ip: null, userAgent: 'portal.test' },
+      maxWaitMs: 15_000,
+      timeoutMs: LOAD_WRITE_TIMEOUT_MS,
+    })
+
+  it('moves the own open load one rung, source DRIVER_PORTAL, the driver named', async () => {
+    const outcome = await asDriver(userA, (tx) =>
+      recordPortalStatus(tx, { userId: userA }, openA, 'AT_PICKUP'),
+    )
+    expect(outcome).toEqual({ ok: true, from: 'DISPATCHED', to: 'AT_PICKUP' })
+    const load = await owner.load.findUniqueOrThrow({
+      where: { id: openA },
+      select: { operationalStatus: true },
+    })
+    expect(load.operationalStatus).toBe('AT_PICKUP')
+    const event = await owner.loadStatusEvent.findFirst({
+      where: { loadId: openA, toStatus: 'AT_PICKUP' },
+      orderBy: { occurredAt: 'desc' },
+    })
+    expect(event?.source).toBe('DRIVER_PORTAL')
+    expect(event?.changedByUserId).toBe(userA)
+    expect(event?.outcome).toBe('APPLIED')
+    expect(event?.fromStatus).toBe('DISPATCHED')
+  })
+
+  it('refuses a step that is not the next one — a stale tap is never a jump', async () => {
+    // The screen offered AT_PICKUP; the load is already there. The engine
+    // would have said "unchanged"; the portal says the step moved on.
+    expect(
+      await asDriver(userA, (tx) =>
+        recordPortalStatus(tx, { userId: userA }, openA, 'IN_TRANSIT'),
+      ),
+    ).toEqual({ ok: false, reason: 'not_the_next_step', at: 'AT_PICKUP' })
+    // Backwards is refused the same way, and nothing is written by the
+    // portal for it — the engine's REFUSED_STALE row is for the office's
+    // late click, not for a screen that offered the wrong rung.
+    expect(
+      await asDriver(userA, (tx) =>
+        recordPortalStatus(tx, { userId: userA }, openA, 'DISPATCHED'),
+      ),
+    ).toEqual({ ok: false, reason: 'not_the_next_step', at: 'AT_PICKUP' })
+    const events = await owner.loadStatusEvent.count({
+      where: { loadId: openA, source: 'DRIVER_PORTAL' },
+    })
+    expect(events).toBe(1)
+  })
+
+  it('a double tap on the real next rung lands once', async () => {
+    const first = await asDriver(userA, (tx) =>
+      recordPortalStatus(tx, { userId: userA }, openA, 'LOADED'),
+    )
+    expect(first).toEqual({ ok: true, from: 'AT_PICKUP', to: 'LOADED' })
+    const second = await asDriver(userA, (tx) =>
+      recordPortalStatus(tx, { userId: userA }, openA, 'LOADED'),
+    )
+    expect(second).toEqual({
+      ok: false,
+      reason: 'not_the_next_step',
+      at: 'LOADED',
+    })
+    const events = await owner.loadStatusEvent.count({
+      where: { loadId: openA, source: 'DRIVER_PORTAL' },
+    })
+    expect(events).toBe(2)
+  })
+
+  it('a co-driver is refused by name, and the other driver’s load is not theirs', async () => {
+    expect(
+      await asDriver(userA, (tx) =>
+        recordPortalStatus(tx, { userId: userA }, teamB, 'AT_PICKUP'),
+      ),
+    ).toEqual({ ok: false, reason: 'co_driver', at: 'DISPATCHED' })
+    expect(
+      await asDriver(userA, (tx) =>
+        recordPortalStatus(tx, { userId: userA }, openB, 'AT_PICKUP'),
+      ),
+    ).toEqual({ ok: false, reason: 'not_own_load' })
+    // And B, the driver of record on the team load, moves it.
+    expect(
+      await asDriver(userB, (tx) =>
+        recordPortalStatus(tx, { userId: userB }, teamB, 'AT_PICKUP'),
+      ),
+    ).toEqual({ ok: true, from: 'DISPATCHED', to: 'AT_PICKUP' })
+  })
+
+  it('a delivered load has no next step; an unlinked sign-in has no row', async () => {
+    expect(
+      await asDriver(userA, (tx) =>
+        recordPortalStatus(tx, { userId: userA }, deliveredA, 'DELIVERED'),
+      ),
+    ).toEqual({ ok: false, reason: 'no_next_step', at: 'DELIVERED' })
+    expect(
+      await inOrg((tx) =>
+        recordPortalStatus(tx, { userId: org.userId }, openA, 'IN_TRANSIT'),
+      ),
+    ).toEqual({ ok: false, reason: 'no_driver_row' })
   })
 })

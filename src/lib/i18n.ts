@@ -3131,6 +3131,21 @@ const en = {
   'portal.home.needsHint':
     'Uploading from here arrives with a later step. Until then, send it to the office.',
   'portal.home.dispatcherNotes': 'From dispatch',
+  'portal.status.set': 'Set: {status}',
+  'portal.status.setting': 'Setting…',
+  'portal.status.landed': 'Now',
+  'portal.status.coDriver':
+    'The driver of record sets the status. You see the load and can upload to it.',
+  'portal.status.finished':
+    'Delivered. The office confirms the paperwork from here.',
+  'portal.status.error.notOwn': 'This load is not yours.',
+  'portal.status.error.coDriver':
+    'The driver of record sets the status, not the co-driver.',
+  'portal.status.error.cancelled': 'This load was cancelled.',
+  'portal.status.error.noNextStep':
+    'There is no next step for you on this load.',
+  'portal.status.error.notTheNextStep':
+    'The load has moved since this screen loaded. Reload to see the next step.',
   'portal.stop.when': 'Appointment',
   'portal.stop.window': 'Window',
   'portal.stop.puRef': 'PU#',
@@ -6234,6 +6249,20 @@ const ru: Dictionary = {
   'portal.home.needsHint':
     'Загрузка отсюда появится на следующем шаге. Пока отправьте документ в офис.',
   'portal.home.dispatcherNotes': 'От диспетчера',
+  'portal.status.set': 'Отметить: {status}',
+  'portal.status.setting': 'Отмечаем…',
+  'portal.status.landed': 'Сейчас',
+  'portal.status.coDriver':
+    'Статус отмечает основной водитель. Вы видите рейс и можете загрузить документы.',
+  'portal.status.finished': 'Доставлено. Дальше офис подтверждает документы.',
+  'portal.status.error.notOwn': 'Это не ваш рейс.',
+  'portal.status.error.coDriver':
+    'Статус отмечает основной водитель, а не второй.',
+  'portal.status.error.cancelled': 'Этот рейс отменён.',
+  'portal.status.error.noNextStep':
+    'Для вас на этом рейсе нет следующего шага.',
+  'portal.status.error.notTheNextStep':
+    'Рейс изменился после открытия экрана. Обновите, чтобы увидеть следующий шаг.',
   'portal.stop.when': 'Время',
   'portal.stop.window': 'Окно',
   'portal.stop.puRef': 'PU#',
@@ -9300,6 +9329,19 @@ const fa: Dictionary = {
   'portal.home.needsHint':
     'بارگذاری از اینجا در گام بعدی می‌آید. تا آن زمان مدرک را به دفتر بفرستید.',
   'portal.home.dispatcherNotes': 'از دیسپچ',
+  'portal.status.set': 'ثبت: {status}',
+  'portal.status.setting': 'در حال ثبت…',
+  'portal.status.landed': 'اکنون',
+  'portal.status.coDriver':
+    'رانندهٔ اصلی وضعیت را ثبت می‌کند. شما بار را می‌بینید و می‌توانید مدرک بارگذاری کنید.',
+  'portal.status.finished': 'تحویل شد. از اینجا دفتر مدارک را تأیید می‌کند.',
+  'portal.status.error.notOwn': 'این بار متعلق به شما نیست.',
+  'portal.status.error.coDriver':
+    'رانندهٔ اصلی وضعیت را ثبت می‌کند، نه رانندهٔ دوم.',
+  'portal.status.error.cancelled': 'این بار لغو شده است.',
+  'portal.status.error.noNextStep': 'برای شما در این بار گام بعدی وجود ندارد.',
+  'portal.status.error.notTheNextStep':
+    'بار پس از باز شدن این صفحه تغییر کرده است. برای دیدن گام بعدی، صفحه را تازه کنید.',
   'portal.stop.when': 'زمان قرار',
   'portal.stop.window': 'بازه',
   'portal.stop.puRef': 'PU#',
