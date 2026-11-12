@@ -25,6 +25,7 @@ import {
   openFirstPeriod,
   type FleetKind,
 } from './asset-transfer'
+import { deactivateLinkedSignIn } from './driver-link'
 import type {
   DriverStatus,
   DriverType,
@@ -964,14 +965,17 @@ export async function setRosterStatus(
   const name = `${current.firstName} ${current.lastName}`.trim()
   if (current.deletedAt !== null) return { ok: false, reason: 'removed', name }
 
+  const terminating = status === 'INACTIVE' && current.terminationDate === null
   await tx.driver.update({
     where: { id },
     data: {
       status: assertRosterStatus(status) ?? ACTIVE_ROSTER,
-      ...(status === 'INACTIVE' && current.terminationDate === null
-        ? { terminationDate: new Date() }
-        : {}),
+      ...(terminating ? { terminationDate: new Date() } : {}),
     },
   })
+  // THE SIGN-IN DIES WITH THE TERMINATION DATE, IN THE SAME WRITE (Phase 7
+  // §4.7, owner's ruling 2026-11-12): deactivated, sessions revoked, link
+  // dropped. Coming back is a new link by OWNER or ADMIN on the record.
+  if (terminating) await deactivateLinkedSignIn(tx, id)
   return { ok: true, name }
 }

@@ -36,12 +36,12 @@ export const RECORD_TABS = [
 
 export type RecordTab = (typeof RECORD_TABS)[number]
 
-/** The tabs with NOTHING behind them today. Each renders one sentence (§6.4). */
-export const EMPTY_TABS: readonly RecordTab[] = [
-  'mobile',
-  'recruiting',
-  'tasks',
-]
+/**
+ * The tabs with NOTHING behind them today. Each renders one sentence (§6.4).
+ * `mobile` left this list on 2026-11-12 (Phase 7 step 1): it holds the
+ * sign-in link, for the roles that may set it.
+ */
+export const EMPTY_TABS: readonly RecordTab[] = ['recruiting', 'tasks']
 
 /**
  * The tab in the URL, Main by default; an unrecognised value opens Main
@@ -63,10 +63,17 @@ export function visibleRecordTabs(viewer: {
   maySeePay: boolean
   maySeeCompliance: boolean
   maySeeInspections: boolean
+  /**
+   * `user:update` — OWNER and ADMIN. The Sign-in tab is the link between
+   * this roster row and a sign-in (Phase 7 §4.6), and a role that may not
+   * set it does not see the tab (§6.4 part 2's rule, not a disabled form).
+   */
+  maySetSignIn: boolean
 }): RecordTab[] {
   return RECORD_TABS.filter((tab) => {
     if (tab === 'accounting') return viewer.maySeePay
     if (tab === 'documents' || tab === 'safety') return viewer.maySeeCompliance
+    if (tab === 'mobile') return viewer.maySetSignIn
     return true
   })
 }

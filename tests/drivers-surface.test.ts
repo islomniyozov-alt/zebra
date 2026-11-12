@@ -107,12 +107,14 @@ describe('the driver record (§6.4 part 2)', () => {
   })
 
   it('renders every one of the eleven under its own guard', () => {
-    // The three empty tabs render through EMPTY_TABS; the other eight each
-    // have a `tab === '…'` guard. A tab added to the lib and never rendered
-    // fails here by name.
+    // The two empty tabs render through EMPTY_TABS; the other nine each
+    // have a `tab === '…'` guard — `mobile` since 2026-11-12, when it became
+    // the Sign-in tab (Phase 7 step 1). A tab added to the lib and never
+    // rendered fails here by name.
     for (const tab of [
       'main',
       'documents',
+      'mobile',
       'accounting',
       'safety',
       'assets',

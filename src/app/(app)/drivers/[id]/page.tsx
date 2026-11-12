@@ -24,6 +24,9 @@ import { ActivityTimeline } from '../../loads/[id]/ActivityTimeline'
 import { teamMateFor } from '@/lib/team'
 import { tagsToInput } from '@/lib/tags'
 import { PayToForm } from './PayToForm'
+import { SignInLink } from './SignInLink'
+import { signInLinkFor } from '@/lib/driver-link'
+import { can } from '@/lib/permissions'
 import { SELECTABLE_AUTHORITY } from '@/lib/companies'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
@@ -250,6 +253,12 @@ export default async function EditDriverPage({
       stats,
       netByWeek,
       activity,
+      // THE SIGN-IN CARD'S DATA, FOR OWNER AND ADMIN ONLY (Phase 7 step 1,
+      // §4.6). Read inside the one transaction, and only for a role holding
+      // `user:update` — everyone else gets no payload, not a hidden card.
+      signIn: can(session, 'update', 'user')
+        ? await signInLinkFor(tx, session.organizationId, id)
+        : null,
       documents: documents.map((document) => ({
         id: document.id,
         filename: document.filename,
@@ -283,6 +292,7 @@ export default async function EditDriverPage({
     stats,
     netByWeek,
     activity,
+    signIn,
   } = data
   const maySeeCompliance = await currentUserCan('read', 'compliance')
   // §6.9: the selections panel exists only for a role that reads the pool.
@@ -306,10 +316,13 @@ export default async function EditDriverPage({
 
   // A TAB A ROLE MAY NOT SEE IS NOT RENDERED (§6.4 part 2) — and a URL
   // naming one opens Main, the way an unknown tab does.
+  // The Sign-in tab is `user:update` — OWNER and ADMIN (Phase 7 §4.6).
+  const maySetSignIn = await currentUserCan('update', 'user')
   const tabs = visibleRecordTabs({
     maySeePay,
     maySeeCompliance,
     maySeeInspections,
+    maySetSignIn,
   })
   const tab: RecordTab = tabs.includes(requestedTab) ? requestedTab : 'main'
 
@@ -594,6 +607,48 @@ export default async function EditDriverPage({
               />
             ) : null}
           </RecordForm>
+        ) : null}
+
+        {/* THE SIGN-IN TAB (Phase 7 step 1; §6.4 part 2, §9 "The link").
+         * The tab is rendered for OWNER and ADMIN only, and `signIn` is null
+         * for every other role — left out of the payload, the rule — so the
+         * two guards agree and nobody else gets a card, hidden or not. */}
+        {tab === 'mobile' && signIn ? (
+          <SignInLink
+            driverId={id}
+            linked={
+              signIn.linked
+                ? {
+                    ...signIn.linked,
+                    lastSignIn: signIn.linked.lastLoginAt
+                      ? new Intl.DateTimeFormat(locale, {
+                          dateStyle: 'medium',
+                          timeStyle: 'short',
+                          timeZone: timezone,
+                        }).format(signIn.linked.lastLoginAt)
+                      : null,
+                  }
+                : null
+            }
+            candidates={signIn.candidates}
+            terminated={driver.terminationDate !== null}
+            labels={{
+              title: t('drivers.signIn'),
+              hint: t('drivers.signIn.hint'),
+              none: t('drivers.signIn.none'),
+              linked: t('drivers.signIn.linked'),
+              deactivated: t('drivers.signIn.deactivated'),
+              lastSignIn: t('drivers.signIn.lastSignIn'),
+              never: t('drivers.signIn.never'),
+              pick: t('drivers.signIn.pick'),
+              noCandidates: t('drivers.signIn.noCandidates'),
+              terminated: t('drivers.signIn.terminated'),
+              link: t('drivers.signIn.link'),
+              linking: t('drivers.signIn.linking'),
+              unlink: t('drivers.signIn.unlink'),
+              saved: t('drivers.signIn.saved'),
+            }}
+          />
         ) : null}
 
         {/* NEVER SENT TO A ROLE THAT CANNOT SEE IT. A dispatcher gets no

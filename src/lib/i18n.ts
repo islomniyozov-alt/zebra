@@ -908,7 +908,7 @@ const en = {
   'drivers.health.truck': 'No truck',
   'drivers.recordTab.main': 'Main',
   'drivers.recordTab.documents': 'Documents',
-  'drivers.recordTab.mobile': 'Mobile app login',
+  'drivers.recordTab.mobile': 'Sign-in',
   'drivers.recordTab.recruiting': 'Recruiting',
   'drivers.recordTab.accounting': 'Accounting',
   'drivers.recordTab.safety': 'Safety',
@@ -929,6 +929,37 @@ const en = {
   'drivers.accounting.payToSource':
     'The next statement is made out to this name and address. Statements already issued keep what they were generated with.',
   'drivers.accounting.payToSaved': 'Saved. It applies from the next statement.',
+  'drivers.signIn': 'Sign-in',
+  'drivers.signIn.hint':
+    'The driver portal reads this link. Owner and Admin set it; a termination deactivates the sign-in, and linking again reactivates it.',
+  'drivers.signIn.none': 'No sign-in is linked to this driver.',
+  'drivers.signIn.linked': 'Linked sign-in',
+  'drivers.signIn.deactivated': 'deactivated',
+  'drivers.signIn.pick': 'User with the Driver role',
+  'drivers.signIn.noCandidates':
+    'No user with the Driver role is waiting to be linked. Mint one under Users first.',
+  'drivers.signIn.terminated':
+    'This driver is terminated. Clear the termination before linking a sign-in.',
+  'drivers.signIn.link': 'Link',
+  'drivers.signIn.linking': 'Linking…',
+  'drivers.signIn.unlink': 'Unlink',
+  'drivers.signIn.saved': 'Saved.',
+  'drivers.signIn.lastSignIn': 'Last sign-in',
+  'drivers.signIn.never': 'never',
+  'drivers.signIn.error.driverNotFound': 'This driver no longer exists.',
+  'drivers.signIn.error.driverRemoved':
+    'This driver is removed. Restore the record first.',
+  'drivers.signIn.error.driverTerminated':
+    'This driver is terminated. Clear the termination first.',
+  'drivers.signIn.error.driverAlreadyLinked':
+    'This driver already has a sign-in. Unlink it first.',
+  'drivers.signIn.error.notAMember':
+    'That user is not a member of this organization.',
+  'drivers.signIn.error.notADriverRole':
+    'That user does not hold the Driver role.',
+  'drivers.signIn.error.userAlreadyLinked':
+    'That sign-in is already linked to another driver.',
+  'drivers.signIn.error.notLinked': 'No sign-in is linked to this driver.',
   'drivers.safety.draws': 'Random testing',
   'drivers.safety.drawsNone': 'No random draw has selected this driver.',
   'drivers.safety.quarter': 'Quarter',
@@ -3959,7 +3990,7 @@ const ru: Dictionary = {
   'drivers.health.truck': 'Нет тягача',
   'drivers.recordTab.main': 'Основное',
   'drivers.recordTab.documents': 'Документы',
-  'drivers.recordTab.mobile': 'Вход в приложение',
+  'drivers.recordTab.mobile': 'Вход в систему',
   'drivers.recordTab.recruiting': 'Рекрутинг',
   'drivers.recordTab.accounting': 'Бухгалтерия',
   'drivers.recordTab.safety': 'Безопасность',
@@ -3981,6 +4012,37 @@ const ru: Dictionary = {
     'Следующая ведомость будет выписана на это имя и адрес. Уже выпущенные ведомости сохраняют то, с чем были сформированы.',
   'drivers.accounting.payToSaved':
     'Сохранено. Действует со следующей ведомости.',
+  'drivers.signIn': 'Вход в систему',
+  'drivers.signIn.hint':
+    'Портал водителя читает эту привязку. Её задают владелец и администратор; увольнение отключает вход, повторная привязка включает его снова.',
+  'drivers.signIn.none': 'К этому водителю не привязан вход.',
+  'drivers.signIn.linked': 'Привязанный вход',
+  'drivers.signIn.deactivated': 'отключён',
+  'drivers.signIn.pick': 'Пользователь с ролью «Водитель»',
+  'drivers.signIn.noCandidates':
+    'Нет пользователя с ролью «Водитель», ожидающего привязки. Сначала создайте его в разделе «Пользователи».',
+  'drivers.signIn.terminated':
+    'Водитель уволен. Снимите увольнение, прежде чем привязывать вход.',
+  'drivers.signIn.link': 'Привязать',
+  'drivers.signIn.linking': 'Привязка…',
+  'drivers.signIn.unlink': 'Отвязать',
+  'drivers.signIn.saved': 'Сохранено.',
+  'drivers.signIn.lastSignIn': 'Последний вход',
+  'drivers.signIn.never': 'не было',
+  'drivers.signIn.error.driverNotFound': 'Этого водителя больше нет.',
+  'drivers.signIn.error.driverRemoved':
+    'Водитель удалён. Сначала восстановите запись.',
+  'drivers.signIn.error.driverTerminated':
+    'Водитель уволен. Сначала снимите увольнение.',
+  'drivers.signIn.error.driverAlreadyLinked':
+    'У этого водителя уже есть вход. Сначала отвяжите его.',
+  'drivers.signIn.error.notAMember':
+    'Этот пользователь не состоит в организации.',
+  'drivers.signIn.error.notADriverRole':
+    'У этого пользователя нет роли «Водитель».',
+  'drivers.signIn.error.userAlreadyLinked':
+    'Этот вход уже привязан к другому водителю.',
+  'drivers.signIn.error.notLinked': 'К этому водителю не привязан вход.',
   'drivers.safety.draws': 'Случайное тестирование',
   'drivers.safety.drawsNone': 'Ни одна жеребьёвка не выбирала этого водителя.',
   'drivers.safety.quarter': 'Квартал',
@@ -6973,7 +7035,7 @@ const fa: Dictionary = {
   'drivers.health.truck': 'بدون کامیون',
   'drivers.recordTab.main': 'اصلی',
   'drivers.recordTab.documents': 'مدارک',
-  'drivers.recordTab.mobile': 'ورود به اپلیکیشن',
+  'drivers.recordTab.mobile': 'ورود به سامانه',
   'drivers.recordTab.recruiting': 'جذب نیرو',
   'drivers.recordTab.accounting': 'حسابداری',
   'drivers.recordTab.safety': 'ایمنی',
@@ -6994,6 +7056,35 @@ const fa: Dictionary = {
   'drivers.accounting.payToSource':
     'صورت‌حساب بعدی به این نام و نشانی صادر می‌شود. صورت‌حساب‌های صادرشده همان را نگه می‌دارند که با آن ساخته شده‌اند.',
   'drivers.accounting.payToSaved': 'ذخیره شد. از صورت‌حساب بعدی اعمال می‌شود.',
+  'drivers.signIn': 'ورود به سامانه',
+  'drivers.signIn.hint':
+    'پورتال راننده این پیوند را می‌خواند. مالک و مدیر آن را تعیین می‌کنند؛ پایان همکاری ورود را غیرفعال می‌کند و پیوند دوباره آن را فعال می‌کند.',
+  'drivers.signIn.none': 'هیچ ورودی به این راننده پیوند نخورده است.',
+  'drivers.signIn.linked': 'ورود پیوندخورده',
+  'drivers.signIn.deactivated': 'غیرفعال',
+  'drivers.signIn.pick': 'کاربر با نقش راننده',
+  'drivers.signIn.noCandidates':
+    'هیچ کاربری با نقش راننده منتظر پیوند نیست. ابتدا در بخش کاربران یکی بسازید.',
+  'drivers.signIn.terminated':
+    'همکاری این راننده پایان یافته است. پیش از پیوند ورود، پایان همکاری را بردارید.',
+  'drivers.signIn.link': 'پیوند',
+  'drivers.signIn.linking': 'در حال پیوند…',
+  'drivers.signIn.unlink': 'برداشتن پیوند',
+  'drivers.signIn.saved': 'ذخیره شد.',
+  'drivers.signIn.lastSignIn': 'آخرین ورود',
+  'drivers.signIn.never': 'هرگز',
+  'drivers.signIn.error.driverNotFound': 'این راننده دیگر وجود ندارد.',
+  'drivers.signIn.error.driverRemoved':
+    'این راننده حذف شده است. ابتدا رکورد را بازگردانید.',
+  'drivers.signIn.error.driverTerminated':
+    'همکاری این راننده پایان یافته است. ابتدا پایان همکاری را بردارید.',
+  'drivers.signIn.error.driverAlreadyLinked':
+    'این راننده از قبل ورود دارد. ابتدا پیوند را بردارید.',
+  'drivers.signIn.error.notAMember': 'این کاربر عضو این سازمان نیست.',
+  'drivers.signIn.error.notADriverRole': 'این کاربر نقش راننده ندارد.',
+  'drivers.signIn.error.userAlreadyLinked':
+    'این ورود از قبل به راننده‌ی دیگری پیوند خورده است.',
+  'drivers.signIn.error.notLinked': 'هیچ ورودی به این راننده پیوند نخورده است.',
   'drivers.safety.draws': 'آزمایش تصادفی',
   'drivers.safety.drawsNone': 'هیچ قرعه‌ای این راننده را انتخاب نکرده است.',
   'drivers.safety.quarter': 'فصل',

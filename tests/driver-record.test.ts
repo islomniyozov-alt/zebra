@@ -23,7 +23,9 @@ describe('the eleven tabs', () => {
     for (const word of [
       '**Main**',
       '**Documents**',
-      '**Mobile app login**',
+      // "Mobile app login" until 2026-11-12; the brief's transcript keeps
+      // the old name, the doc carries the new one beside it.
+      '**Sign-in**',
       '**Recruiting**',
       '**Accounting**',
       '**Safety**',
@@ -57,8 +59,10 @@ describe('the eleven tabs', () => {
     expect(recordTabFor('safety')).toBe('safety')
   })
 
-  it('names the three tabs that say so in words, and no more', () => {
-    expect([...EMPTY_TABS]).toEqual(['mobile', 'recruiting', 'tasks'])
+  it('names the two tabs that say so in words, and no more', () => {
+    // Three until 2026-11-12: `mobile` became the Sign-in tab (Phase 7 step
+    // 1) and holds the link, so it left this list.
+    expect([...EMPTY_TABS]).toEqual(['recruiting', 'tasks'])
   })
 
   it('does not render a tab a role may not see', () => {
@@ -66,17 +70,23 @@ describe('the eleven tabs', () => {
       maySeePay: false,
       maySeeCompliance: true,
       maySeeInspections: true,
+      maySetSignIn: false,
     })
     expect(dispatcher).not.toContain('accounting')
     expect(dispatcher).toContain('safety')
+    // THE SIGN-IN TAB IS OWNER/ADMIN'S (`user:update`, Phase 7 §4.6): a
+    // MANAGER edits the driver and never sees who signs in as them.
+    expect(dispatcher).not.toContain('mobile')
 
     const nobody = visibleRecordTabs({
       maySeePay: false,
       maySeeCompliance: false,
       maySeeInspections: false,
+      maySetSignIn: false,
     })
     expect(nobody).not.toContain('documents')
     expect(nobody).not.toContain('safety')
+    expect(nobody).not.toContain('mobile')
     expect(nobody).toContain('main')
     expect(nobody).toContain('log')
 
@@ -84,6 +94,7 @@ describe('the eleven tabs', () => {
       maySeePay: true,
       maySeeCompliance: true,
       maySeeInspections: true,
+      maySetSignIn: true,
     })
     expect(owner).toEqual([...RECORD_TABS])
   })
