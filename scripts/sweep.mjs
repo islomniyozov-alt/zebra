@@ -190,8 +190,14 @@ async function resolveIds(pool) {
  * rows directly above "0 PROBLEMS" — the exact contradiction the redirect
  * rule below was written to remove, surviving one line further down.
  */
-export const markFor = (verdict) =>
-  verdict === 'ok' ? 'ok   ' : verdict === 'redirect' ? 'redir' : 'FAIL '
+export const markFor = (verdict, refusedByTable = false) =>
+  verdict === 'ok'
+    ? 'ok   '
+    : verdict === 'redirect'
+      ? 'redir'
+      : refusedByTable && verdict.startsWith('CLIENT ERROR')
+        ? 'refus'
+        : 'FAIL '
 
 export const classify = (status, body) => {
   // NO ANSWER AT ALL (status 0, from `fetchTwice` below): the runner could not
@@ -504,14 +510,33 @@ export function matrixFindings(seen, matrix) {
  * that was never reached counts as a problem: "we did not look" must never
  * arrive dressed as "we looked and it was fine".
  *
- * @param {{ authed: any[], anon: any[], unresolved: string[], findings?: any[] }} input
+ * THE OWNER'S PASS HONOURS THE TABLE (§6.8, 2026-11-12). Until the driver
+ * portal every row said `reach` for the owner, so any 4xx on the owner's pass
+ * was a fault by construction. The four portal rows say `refuse` for the
+ * owner — the portal is the driver's surface — and the first deploy sweep
+ * after them read `CLIENT ERROR 404: /portal` four times and was NOT OK on
+ * the table's own answer. So a 4xx on a route whose row refuses the owner is
+ * `refusedByTable`: neither rendered nor a problem, listed by name. A 4xx
+ * anywhere the table says `reach` is the fault it always was.
+ *
+ * @param {{ authed: any[], anon: any[], unresolved: string[], findings?: any[], matrix?: Map<string, any> }} input
  */
-export const tally = ({ authed, anon, unresolved, findings = [] }) => {
+export const tally = ({
+  authed,
+  anon,
+  unresolved,
+  findings = [],
+  matrix = new Map(),
+}) => {
   const errors = authed.filter(
     (row) => row.verdict === 'SERVER ERROR' || row.verdict === 'ERROR BOUNDARY',
   )
-  const clientErrors = authed.filter((row) =>
-    row.verdict.startsWith('CLIENT ERROR'),
+  const ownerRefused = (row) => matrix.get(row.route)?.owner === 'refuse'
+  const refusedByTable = authed.filter(
+    (row) => row.verdict.startsWith('CLIENT ERROR') && ownerRefused(row),
+  )
+  const clientErrors = authed.filter(
+    (row) => row.verdict.startsWith('CLIENT ERROR') && !ownerRefused(row),
   )
   const redirects = authed.filter((row) => row.verdict === 'redirect')
   // No answer twice (`fetchTwice`): the link's failure, counted against the
@@ -536,10 +561,12 @@ export const tally = ({ authed, anon, unresolved, findings = [] }) => {
       authed.length -
       errors.length -
       clientErrors.length -
+      refusedByTable.length -
       redirects.length -
       unreachable.length,
     errors,
     clientErrors,
+    refusedByTable,
     redirects,
     unreachable,
     unrefused,
@@ -1040,7 +1067,7 @@ async function sweep() {
         }),
       )
     console.log(
-      `${markFor(verdict)} ${String(withSession.status).padEnd(3)} ${route.padEnd(34)} ${verdict === 'ok' ? '' : verdict}${withSession.to ? ` → ${withSession.to}` : ''}`,
+      `${markFor(verdict, matrix.get(route)?.owner === 'refuse')} ${String(withSession.status).padEnd(3)} ${route.padEnd(34)} ${verdict === 'ok' ? '' : verdict}${withSession.to ? ` → ${withSession.to}` : ''}`,
     )
 
     // THE ANONYMOUS HALF. Auth pages are supposed to render to a stranger; every
@@ -1137,7 +1164,7 @@ async function sweep() {
     if (!protectedRoutes.has(route))
       unresolved.push(`${route} (matrix row, no page)`)
   }
-  const sums = tally({ authed, anon, unresolved, findings })
+  const sums = tally({ authed, anon, unresolved, findings, matrix })
 
   console.log('\n' + '='.repeat(70))
   console.log(
@@ -1145,12 +1172,15 @@ async function sweep() {
   )
   console.log(
     `      ${sums.rendered} rendered, ${sums.redirects.length} redirected, ` +
+      `${sums.refusedByTable.length} refused by the table, ` +
       `${sums.clientErrors.length} refused, ${sums.errors.length} SERVER ERROR`,
   )
   console.log(
     `ANONYMOUS: ${anon.length} checked, ${sums.unrefused.length} NOT REFUSED`,
   )
   for (const row of sums.redirects) console.log(`   redirect: ${row.route}`)
+  for (const row of sums.refusedByTable)
+    console.log(`   refused by the table (owner: refuse): ${row.route}`)
   for (const row of sums.clientErrors)
     console.log(`   ${row.verdict}: ${row.route}`)
   for (const row of sums.errors) console.log(`   ${row.verdict}: ${row.route}`)

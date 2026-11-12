@@ -326,6 +326,51 @@ describe('what a response means', () => {
 describe('the verdict', () => {
   const ok = { route: '/a', verdict: 'ok' }
 
+  it("the owner's pass honours the table: a 404 where the row refuses the owner is not a problem", () => {
+    // §6.8, 2026-11-12. The four portal rows refuse the owner; the first
+    // deploy sweep after them was NOT OK on four `CLIENT ERROR 404`s that
+    // were the table's own answer.
+    const matrix = new Map([
+      ['/portal', { owner: 'refuse', driver: 'reach', note: '' }],
+      ['/loads', { owner: 'reach', driver: 'refuse', note: '' }],
+    ])
+    const sums = tally({
+      authed: [ok, { route: '/portal', verdict: 'CLIENT ERROR 404' }],
+      anon: [],
+      unresolved: [],
+      matrix,
+    })
+    expect(sums.problems).toBe(0)
+    expect(sums.refusedByTable.map((row) => row.route)).toEqual(['/portal'])
+    // NEITHER RENDERED NOR A PROBLEM — the arithmetic that keeps "rendered"
+    // honest about what was looked at.
+    expect(sums.rendered).toBe(1)
+    expect(sums.clientErrors).toEqual([])
+
+    // AND A 404 WHERE THE TABLE SAYS REACH IS THE FAULT IT ALWAYS WAS.
+    const fault = tally({
+      authed: [ok, { route: '/loads', verdict: 'CLIENT ERROR 404' }],
+      anon: [],
+      unresolved: [],
+      matrix,
+    })
+    expect(fault.problems).toBe(1)
+    expect(fault.clientErrors.map((row) => row.route)).toEqual(['/loads'])
+
+    // WITHOUT A TABLE, EVERY 4xx IS A FAULT, as before.
+    expect(
+      tally({
+        authed: [{ route: '/portal', verdict: 'CLIENT ERROR 404' }],
+        anon: [],
+        unresolved: [],
+      }).problems,
+    ).toBe(1)
+    // The row's mark says so too.
+    expect(markFor('CLIENT ERROR 404', true)).toBe('refus')
+    expect(markFor('CLIENT ERROR 404', false)).toBe('FAIL ')
+    expect(markFor('ok', true)).toBe('ok   ')
+  })
+
   it('is clean when every page rendered and every stranger was refused', () => {
     const sums = tally({
       authed: [ok, { route: '/b', verdict: 'ok' }],
