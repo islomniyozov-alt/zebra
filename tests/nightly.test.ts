@@ -6,7 +6,11 @@ import { describe, expect, it } from 'vitest'
 //
 // Read out of ci.yml rather than asserted about it: a schedule that quietly
 // lost its deploy gate would redeploy dev at four in the morning, and a sweep
-// step that ran on every push would add a browser install to every commit.
+// step that ran on every push would add a browser install to every commit —
+// which, since the owner's brief of 2026-11-11 (§6.8), every push that
+// DEPLOYS now pays on purpose: the second block below pins the rendered-page
+// check to the deploy's own condition, so a push that ships nothing still
+// installs no browser.
 // ---------------------------------------------------------------------------
 const ci = readFileSync('.github/workflows/ci.yml', 'utf8')
 
@@ -118,6 +122,98 @@ describe('the nightly', () => {
     // And it comes AFTER the sweep: one tail at a time, dev's then production's.
     expect(ci.indexOf('- name: nightly sweep of dev')).toBeLessThan(
       ci.indexOf('- name: nightly production sign-in'),
+    )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE DEV DEPLOY IS NOT FINISHED UNTIL EVERY PAGE HAS RENDERED (§6.8, owner's
+// brief 2026-11-11). Twice on 2026-11-10 a /trucks that answered 500 to every
+// role reached dev on a green CI: nothing before the deploy renders a page.
+// ---------------------------------------------------------------------------
+describe('the dev deploy ends with the rendered-page check', () => {
+  const DEPLOY_IF =
+    "if: vars.CI_DEPLOY == 'true' && github.event_name != 'schedule' && github.event.inputs.sweep != 'true'"
+  const commandsOf = (text: string): string[] =>
+    text
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line !== '' && !line.startsWith('#'))
+  const at = (name: string): number => {
+    const index = ci.indexOf(`- name: ${name}\n`)
+    expect(index, name).toBeGreaterThan(-1)
+    return index
+  }
+
+  it('first asks Cloudflare that dev serves HEAD, and reads that verdict from the file', () => {
+    const serves = step('dev serves HEAD')
+    // The deploy's own condition: never on the schedule, never on a nightly
+    // run by hand, never when CI_DEPLOY has not been set.
+    expect(serves).toContain(DEPLOY_IF)
+    // THE BASELINE IS READ FROM THE WORKER, with the strict flag that refuses
+    // unless dev's stamp is HEAD — a clean sweep of the previous version is
+    // the false green this step exists to prevent.
+    expect(serves).toContain(
+      'run-status.mjs deploy-drift -- node scripts/check-deploy-drift.mjs --require-current dev',
+    )
+    expect(serves).toContain(
+      'CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}',
+    )
+    expect(commandsOf(serves).at(-1)).toBe(
+      'node scripts/run-status.mjs --check deploy-drift',
+    )
+  })
+
+  it('then sweeps every page as six roles, and the file is the verdict', () => {
+    const sweep = step('rendered pages after the dev deploy')
+    expect(sweep).toContain(DEPLOY_IF)
+    expect(sweep).toContain('run-status.mjs deploy-sweep -- npm run sweep')
+    expect(sweep).toMatch(/SWEEP_LOG="\$RUNNER_TEMP\/deploy-sweep\.log"/)
+    expect(sweep).toMatch(/npm run sweep > "\$SWEEP_LOG" 2>&1 \|\| true/)
+    expect(sweep).not.toMatch(/> sweep\.log/)
+    expect(commandsOf(sweep).at(-1)).toBe(
+      'node scripts/run-status.mjs --check deploy-sweep',
+    )
+    // Six roles, or the sweep says NO <ROLE> CREDENTIALS and is NOT OK.
+    for (const role of [
+      'ADMIN',
+      'MANAGER',
+      'DISPATCHER',
+      'ACCOUNTING',
+      'DRIVER',
+    ]) {
+      expect(sweep).toContain(
+        `SEED_${role}_EMAIL: \${{ secrets.SEED_${role}_EMAIL }}`,
+      )
+      expect(sweep).toContain(
+        `SEED_${role}_PASSWORD: \${{ secrets.SEED_${role}_PASSWORD }}`,
+      )
+    }
+    // The tail token, never the deploy token.
+    expect(sweep).toContain(
+      'CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_TAIL_TOKEN }}',
+    )
+  })
+
+  it("keeps the deploy sweep's detail as an artifact, pass or fail", () => {
+    const keep = step("keep the deploy sweep's detail")
+    expect(keep).toContain(`if: always() && ${DEPLOY_IF.slice('if: '.length)}`)
+    expect(keep).toContain('uses: actions/upload-artifact@v4')
+    expect(keep).toContain('name: deploy-sweep-${{ github.run_id }}')
+    expect(keep).toContain('.run-status/deploy-sweep.detail.json')
+    expect(keep).toContain('${{ runner.temp }}/deploy-sweep.log')
+  })
+
+  it('and they follow the deploy, in that order, before the housekeeping', () => {
+    expect(at('deploy dev')).toBeLessThan(at('dev serves HEAD'))
+    expect(at('dev serves HEAD')).toBeLessThan(
+      at('rendered pages after the dev deploy'),
+    )
+    expect(at('rendered pages after the dev deploy')).toBeLessThan(
+      at("keep the deploy sweep's detail"),
+    )
+    expect(at("keep the deploy sweep's detail")).toBeLessThan(
+      at('keep the failure log'),
     )
   })
 })

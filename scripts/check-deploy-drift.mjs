@@ -5,6 +5,7 @@ import {
   commitFromStamp,
   isMissingCredentials,
   looksLikeCommit,
+  currentRefusal,
   unreadableRefusal,
 } from './deploy-drift-rules.mjs'
 
@@ -149,6 +150,34 @@ const wrangler = (args) => {
 
 const head = git('rev-parse', '--short', 'HEAD')
 console.log(`HEAD is ${head}`)
+
+// ── `--require-current <label>` ──────────────────────────────────────────
+//
+// The dev deploy's rendered-page check (§6.8, owner's brief 2026-11-11)
+// sweeps whatever dev SERVES, so it first asks this script to refuse unless
+// dev's stamp is HEAD: a clean sweep of the previous version would be the
+// false green the check exists to prevent. STRICT: an unknown argument fails
+// rather than being ignored — an argument nobody reads cannot be forgotten,
+// and cannot be relied on either (AGENTS.md, breach 5).
+const args = process.argv.slice(2)
+let requireCurrent = null
+for (let i = 0; i < args.length; i += 1) {
+  const label = args[i + 1]
+  if (
+    args[i] === '--require-current' &&
+    ENVIRONMENTS.some((environment) => environment.label === label)
+  ) {
+    requireCurrent = label
+    i += 1
+    continue
+  }
+  console.error(
+    `check-deploy-drift: unknown argument ${args[i]} — the only one is --require-current <${ENVIRONMENTS.map((e) => e.label).join('|')}>`,
+  )
+  process.exit(2)
+}
+/** label -> classify().state, for every worker this run could read. */
+const served = new Map()
 
 let productionTrailsSource = false
 let artifactDisagrees = false
@@ -304,6 +333,7 @@ for (const environment of ENVIRONMENTS) {
     isKnownCommit,
     changedSourceFiles,
   })
+  served.set(environment.label, verdict.state)
   const prefix = `  ${environment.label.padEnd(11)} ${shortVersion}  ${stamp}`
 
   if (verdict.state === 'current') {
@@ -438,9 +468,18 @@ if (productionTrailsSource) {
 // learn to skip. Being unable to READ production is not the normal state, and
 // an exit code of 0 over it is indistinguishable from "no drift" to every
 // reader there is. Owner's ruling, 2026-09-18.
-const refusal = unreadableRefusal(unreadable)
+const unread = unreadableRefusal(unreadable)
+// And the one caller that asked for a gate — `--require-current <label>`,
+// the dev deploy's rendered-page check (§6.8) — is refused unless that worker
+// was read and serves HEAD. Both refusals print; the worse exit code wins.
+const current = currentRefusal(requireCurrent, served)
+const refusal = {
+  ok: unread.ok && current.ok,
+  exitCode: Math.max(unread.exitCode, current.exitCode),
+  lines: [...unread.lines, ...current.lines],
+}
 for (const line of refusal.lines) console.log(line)
 
 // Otherwise 0, even when it shouts. See the note at the top: it reports drift,
-// it does not gate on it.
+// it does not gate on it — unless a caller said `--require-current`.
 process.exit(refusal.exitCode)

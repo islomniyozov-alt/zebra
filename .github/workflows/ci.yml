@@ -477,6 +477,80 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npm run deploy:dev
 
+      # ── THE DEV DEPLOY IS NOT FINISHED UNTIL EVERY PAGE HAS RENDERED ──
+      #
+      # §6.8, owner's brief 2026-11-11. Twice on 2026-11-10 a /trucks that
+      # answered 500 to every role reached dev on a green CI (GAPS, the
+      # process row): the unit tests read the page's source and the
+      # integration tests call the lib, so nothing before the deploy rendered
+      # the page. So the deploy ends with three steps on its own condition.
+      #
+      # FIRST, which commit does dev serve NOW? The drift read asks Cloudflare
+      # and REFUSES unless dev's stamp is HEAD — a clean sweep of the previous
+      # version (a PoP still holding it, an upload never promoted) would be
+      # the false green this exists to prevent. The baseline is read from the
+      # thing measured, never supplied (AGENTS.md). The deploy token can list
+      # deployments; the step says NOT OK by name if it cannot.
+      - name: dev serves HEAD
+        if: vars.CI_DEPLOY == 'true' && github.event_name != 'schedule' && github.event.inputs.sweep != 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          node scripts/run-status.mjs deploy-drift -- node scripts/check-deploy-drift.mjs --require-current dev || true
+          node scripts/run-status.mjs --check deploy-drift
+
+      # THEN the same six-role sweep the nightly runs: every page.tsx under
+      # src/app, with and without a session, the Worker's log tailed for its
+      # length, the ids resolved through this run's fork of dev. WHAT FAILS
+      # IT: a 5xx or an error-boundary render for any role, an anonymous
+      # request not refused, a NEW matrix disagreement, a stalled sign-in, an
+      # invocation claimed twice. The verdict is read from the status file,
+      # never from the shell. Cost: the browser install and about fifteen
+      # minutes on every push that deploys — the price of the two 500s above.
+      - name: rendered pages after the dev deploy
+        if: vars.CI_DEPLOY == 'true' && github.event_name != 'schedule' && github.event.inputs.sweep != 'true'
+        env:
+          SEED_ADMIN_EMAIL: ${{ secrets.SEED_ADMIN_EMAIL }}
+          SEED_ADMIN_PASSWORD: ${{ secrets.SEED_ADMIN_PASSWORD }}
+          SEED_MANAGER_EMAIL: ${{ secrets.SEED_MANAGER_EMAIL }}
+          SEED_MANAGER_PASSWORD: ${{ secrets.SEED_MANAGER_PASSWORD }}
+          SEED_DISPATCHER_EMAIL: ${{ secrets.SEED_DISPATCHER_EMAIL }}
+          SEED_DISPATCHER_PASSWORD: ${{ secrets.SEED_DISPATCHER_PASSWORD }}
+          SEED_ACCOUNTING_EMAIL: ${{ secrets.SEED_ACCOUNTING_EMAIL }}
+          SEED_ACCOUNTING_PASSWORD: ${{ secrets.SEED_ACCOUNTING_PASSWORD }}
+          SEED_DRIVER_EMAIL: ${{ secrets.SEED_DRIVER_EMAIL }}
+          SEED_DRIVER_PASSWORD: ${{ secrets.SEED_DRIVER_PASSWORD }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_TAIL_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx playwright install --with-deps chromium
+          # THE LOG LIVES OUTSIDE THE TREE, as the nightly's does (2026-10-27).
+          SWEEP_LOG="$RUNNER_TEMP/deploy-sweep.log"
+          node scripts/run-status.mjs deploy-sweep -- npm run sweep > "$SWEEP_LOG" 2>&1 || true
+          {
+            echo '## rendered pages after the dev deploy'
+            echo
+            printf -- '- sweep: %s\n' "$(node scripts/run-status.mjs --check deploy-sweep | tail -1)"
+            printf -- '- %s\n' "$(grep -E '^SWEEP ' "$SWEEP_LOG" | tail -1 || echo 'no sweep line')"
+          } >> "$GITHUB_STEP_SUMMARY"
+          tail -40 "$SWEEP_LOG"
+          node scripts/run-status.mjs --check deploy-sweep
+
+      # Its detail file leaves with the run, pass or fail, as the nightly's
+      # does: a 500 after a deploy is read from the artifact, not re-run.
+      - name: keep the deploy sweep's detail
+        if: always() && vars.CI_DEPLOY == 'true' && github.event_name != 'schedule' && github.event.inputs.sweep != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-sweep-${{ github.run_id }}
+          path: |
+            .run-status/deploy-sweep.detail.json
+            ${{ runner.temp }}/deploy-sweep.log
+          if-no-files-found: warn
+
       - name: say why nothing was deployed
         if: vars.CI_DEPLOY != 'true' && github.event_name != 'schedule'
         run: |

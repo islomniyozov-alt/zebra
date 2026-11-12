@@ -196,3 +196,38 @@ export function isMissingCredentials(text) {
     text ?? '',
   )
 }
+
+/**
+ * Does the worker a caller named serve HEAD?
+ *
+ * ── WHY A SECOND REFUSAL ─────────────────────────────────────────────────
+ *
+ * Drift reports and does not gate (above). The one caller that needs a gate
+ * is the dev deploy's rendered-page check (§6.8, owner's brief 2026-11-11):
+ * it sweeps whatever dev SERVES, so a sweep of the previous version — a PoP
+ * still holding it, an upload never promoted — would be a clean verdict about
+ * the wrong code. That caller says `--require-current dev`, and this refuses
+ * unless the worker's state was read and is `current`. Not read is a refusal
+ * too: "could not look" is not "looked and it is HEAD".
+ *
+ * @param {string | null} required the label a caller asked about, or null
+ * @param {Map<string, string>} served label -> classify().state, workers read
+ * @returns {{ ok: boolean, exitCode: number, lines: string[] }}
+ */
+export function currentRefusal(required, served) {
+  if (required === null) return { ok: true, exitCode: 0, lines: [] }
+  const state = served.get(required)
+  if (state === 'current') return { ok: true, exitCode: 0, lines: [] }
+  return {
+    ok: false,
+    exitCode: 1,
+    lines: [
+      '',
+      '  ' + '='.repeat(70),
+      `  ${required.toUpperCase()} DOES NOT SERVE HEAD (${state ?? 'not read'}). NOT OK.`,
+      '  A rendered-page check of what it serves now would vouch for the',
+      '  wrong commit, so nothing after this may read as a verdict on HEAD.',
+      '  ' + '='.repeat(70),
+    ],
+  }
+}

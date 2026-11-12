@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import {
   classify,
   commitFromStamp,
+  currentRefusal,
   isMissingCredentials,
   looksLikeCommit,
   stampFor,
@@ -385,6 +386,73 @@ describe('check-deploy-drift.mjs', () => {
     // The old `process.exit(0)` at the bottom is what this replaced. If one
     // comes back, the refusal above it is decoration.
     expect(source).not.toMatch(/\nprocess\.exit\(0\)/)
+  })
+
+  // ── `--require-current`, THE ONE GATE (§6.8, owner's brief 2026-11-11) ──
+  //
+  // The dev deploy's rendered-page check sweeps whatever dev SERVES, so it
+  // asks this script first and takes a refusal unless dev is at HEAD. Read out
+  // of the source for the reason above: the script shells out on import.
+  it('records what every worker it read serves, and folds the current refusal into the exit', () => {
+    expect(source).toContain('served.set(environment.label, verdict.state)')
+    expect(source).toContain('currentRefusal(requireCurrent, served)')
+    expect(source).toContain(
+      'exitCode: Math.max(unread.exitCode, current.exitCode)',
+    )
+  })
+
+  it('refuses an argument it does not know, rather than ignoring it', () => {
+    // Breach 5's lesson (AGENTS.md): an argument nobody reads cannot be
+    // forgotten — and a caller that mistyped the flag must not get a report.
+    expect(source).toMatch(/unknown argument \$\{args\[i\]\}/)
+    expect(source).toContain('process.exit(2)')
+  })
+})
+
+describe('a worker that must serve HEAD', () => {
+  const refuse = currentRefusal as (
+    required: string | null,
+    served: Map<string, string>,
+  ) => { ok: boolean; exitCode: number; lines: string[] }
+
+  it('is nobody, by default: drift reports and does not gate', () => {
+    const refusal = refuse(null, new Map([['dev', 'behind-source']]))
+    expect(refusal.ok).toBe(true)
+    expect(refusal.exitCode).toBe(0)
+    expect(refusal.lines).toEqual([])
+  })
+
+  it('passes in silence when the named worker is current', () => {
+    const refusal = refuse('dev', new Map([['dev', 'current']]))
+    expect(refusal).toEqual({ ok: true, exitCode: 0, lines: [] })
+  })
+
+  it('refuses, by name, a worker that is behind', () => {
+    const refusal = refuse('dev', new Map([['dev', 'behind-source']]))
+    expect(refusal.ok).toBe(false)
+    expect(refusal.exitCode).toBe(1)
+    const text = refusal.lines.join('\n')
+    expect(text).toContain('DEV DOES NOT SERVE HEAD (behind-source)')
+    expect(text).toContain('NOT OK')
+  })
+
+  it('and a worker it could not read — not looked is not current', () => {
+    const refusal = refuse('dev', new Map([['production', 'current']]))
+    expect(refusal.exitCode).toBe(1)
+    expect(refusal.lines.join('\n')).toContain(
+      'DEV DOES NOT SERVE HEAD (not read)',
+    )
+  })
+
+  it('reads only the worker it was asked about', () => {
+    const refusal = refuse(
+      'dev',
+      new Map([
+        ['dev', 'current'],
+        ['production', 'behind-source'],
+      ]),
+    )
+    expect(refusal.ok).toBe(true)
   })
 })
 
