@@ -1,6 +1,7 @@
-# ZEBRA — DRIVER PORTAL BRIEF
+# ZEBRA — PHASE 7 BRIEF: THE DRIVER PORTAL
 
-**Version 1** — 2026-11-11, brief only, no code
+**Version 1.1** — 2026-11-12, numbered Phase 7 and four rulings recorded;
+brief only, no code. Version 1 was `DRIVER-PORTAL-BRIEF.md`, 2026-11-11.
 **For:** Claude Code, working in the zebra repo
 **Reads with:** `TMS-DESIGN-SYSTEM.md` §6.8 (the route matrix) and §9 (the
 driver portal), `src/lib/permissions.ts`, `prisma/schema.prisma`, and the five
@@ -12,8 +13,9 @@ closed briefs. Every standing rule carries.
 > been flagged against it**, in the Phase 1 style — the first flag is the
 > file's own name. The owner's instruction was "Phase 6 driver portal"; the
 > repository's `PHASE-6-BRIEF.md` is Create Load v2 and the Amazon pipeline,
-> and `AGENTS.md` still names Phase 5 as current. So this brief carries no
-> phase number until the owner gives it one.
+> and `AGENTS.md` still names Phase 5 as current. **Ruled 2026-11-12: this is
+> Phase 7; Phase 6 stays Create Load v2.** The same ruling settled §4.2, §4.3
+> and §4.6; §4.4, §4.5, §4.7 and §4.8 are open with proposed answers sent.
 
 The goal, stated honestly: a driver standing in a yard, in gloves, in
 sunlight, holding a phone, sees **their current load, their own documents, and
@@ -86,10 +88,11 @@ read exactly this until a fixture gives it a roster row — §3.3).
    nothing to press.
 2. **My loads.** Their own loads, newest first: open ones, then the last
    thirty days of finished ones. Status word and stripe (§2), stops as
-   city-to-city, date, and the driver's **own pay for the load** when the
-   settlement line exists — never the broker rate, never revenue, never the
-   company's totals (§9; §4 ruling 3 asks whether pay before settlement is
-   shown at all).
+   city-to-city, date, and the driver's **own pay for the load, only once the
+   settlement that includes it is finalised** (APPROVED or PAID) — no
+   projected pay, never the broker rate, never revenue, never the company's
+   totals (§9; §4.3, ruled 2026-11-12). A load whose settlement is still
+   DRAFT, or has none, shows no money at all.
 3. **Documents.** Their own: documents on their loads plus documents with
    their `driverId` (CDL copy, medical card — read only, the compliance desk
    owns those). **Take photo** is the primary control, the file picker
@@ -102,7 +105,10 @@ read exactly this until a fixture gives it a roster row — §3.3).
    reconnect, never silently lost (§9).
 4. **Settlements.** Their own statements, newest first: period, gross,
    deductions, net, paid date, and the statement PDF `statement-pdf.ts`
-   already renders. Which statuses are visible is §4 ruling 2.
+   already renders. **Finalised only** — APPROVED and PAID, their own, and
+   nothing before finalisation: a DRAFT never reaches the portal in any form
+   (§4.2, ruled 2026-11-12). On dev today that is 35 statements visible and
+   107 not.
 5. **Account.** The existing `/account` (name, email, password change, sign
    out), restyled to the portal's type scale. Locale switch here, because a
    Farsi-speaking driver is the portal's first user (§12).
@@ -119,26 +125,32 @@ ruling 4.
 
 ## 2. What §6.8 already grants, and what it does not
 
-| Need                                  | Granted today                                            | Missing                                                                               |
-| ------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| A driver signs in and reaches nothing | Yes — 53 refusals, one reach, proven nightly             | They land on a 404; the portal needs a landing and the login a role-aware redirect    |
-| Read own loads                        | `portal.load:read`                                       | A route, the own-row predicate, a lib function, an integration test with two drivers  |
-| Set a status                          | `portal.load:update`; `StatusSource.DRIVER_PORTAL`       | The action and its narrowing to forward steps on an own load                          |
-| See own documents                     | `portal.document:read`                                   | A route and the predicate (`loadId IN own loads OR driverId = own`)                   |
-| Upload a document                     | `portal.document:create`; `PendingUpload`; presigned put | Camera-first client, type limited to seven, attach to own load only, offline queue    |
-| See own settlements                   | `portal.settlement:read`; statement PDF                  | A route, the predicate (`Settlement.driverId = own`), the status rule (§4.2)          |
-| A driver IS a roster row              | `Driver.userId`                                          | **Nothing writes it.** `createUser` makes a User and a Membership, never the link     |
-| The portal is not the operator app    | `portal.*` is its own vocabulary; §9 is its own shell    | The shell: a `(portal)` route group, no sidebar, its own layout, its own type scale   |
-| Farsi                                 | `fa` locale, RTL direction, logical properties app-wide  | Every portal string in three languages from the first component                       |
-| The sweep covers it                   | Routes come from the filesystem; six roles already       | A seed driver WITH a roster row and loads, or every portal page sweeps as empty state |
+| Need                                  | Granted today                                            | Missing                                                                                |
+| ------------------------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| A driver signs in and reaches nothing | Yes — 53 refusals, one reach, proven nightly             | They land on a 404; the portal needs a landing and the login a role-aware redirect     |
+| Read own loads                        | `portal.load:read`                                       | A route, the own-row predicate, a lib function, an integration test with two drivers   |
+| Set a status                          | `portal.load:update`; `StatusSource.DRIVER_PORTAL`       | The action and its narrowing to forward steps on an own load                           |
+| See own documents                     | `portal.document:read`                                   | A route and the predicate (`loadId IN own loads OR driverId = own`)                    |
+| Upload a document                     | `portal.document:create`; `PendingUpload`; presigned put | Camera-first client, type limited to seven, attach to own load only, offline queue     |
+| See own settlements                   | `portal.settlement:read`; statement PDF                  | A route, the predicate (`Settlement.driverId = own AND status IN (APPROVED, PAID)`)    |
+| A driver IS a roster row              | `Driver.userId`                                          | **Nothing writes it.** The writer is a picker on the driver's record, OWNER/ADMIN only |
+| The portal is not the operator app    | `portal.*` is its own vocabulary; §9 is its own shell    | The shell: a `(portal)` route group, no sidebar, its own layout, its own type scale    |
+| Farsi                                 | `fa` locale, RTL direction, logical properties app-wide  | Every portal string in three languages from the first component                        |
+| The sweep covers it                   | Routes come from the filesystem; six roles already       | A seed driver WITH a roster row and loads, or every portal page sweeps as empty state  |
 
 ## 3. What is missing, as work — no code in this brief
 
-1. **The link.** A way to say "this sign-in is that driver": the Users screen
-   gains, for role DRIVER only, a required picker over live roster rows with
-   no user yet, and `createUser` writes `Driver.userId` in the same
-   transaction. A roster row with a terminated date refuses the link. The
-   dev seed gives the sweep's DRIVER account a roster row with two loads, one
+1. **The link.** A way to say "this sign-in is that driver" — **on the
+   driver's record, by OWNER or ADMIN, never by the driver** (§4.6, ruled
+   2026-11-12). The Users screen keeps minting the DRIVER sign-in as it does
+   today; the driver's own page (`/drivers/[id]`) gains a "Sign-in" picker
+   over users holding the DRIVER membership and no roster row yet, and the
+   save writes `Driver.userId` in `src/lib/`. The picker is gated by
+   `user:update`, which OWNER and ADMIN hold alone — not by `driver:update`,
+   which MANAGER holds through `FLEET_WRITE` — and the gate is decided in
+   `permissions.ts` and nowhere else. A roster row with a terminated date
+   refuses the link; nothing under `(portal)` can set the column. The dev
+   seed gives the sweep's DRIVER account a roster row with two loads, one
    open and one delivered, and one POD — so the sweep's driver column reads
    a portal with content, not empty states.
 2. **The shell.** `src/app/(portal)/…` with its own `layout.tsx`: no sidebar,
@@ -174,44 +186,62 @@ ruling 4.
 ## 4. For the owner's ruling, before any step starts
 
 1. **The number.** Is this Phase 7, or does it displace Create Load v2 as
-   Phase 6? The file is renamed on the ruling; nothing else changes.
+   Phase 6? **RULED 2026-11-12: Phase 7. Phase 6 stays Create Load v2.** The
+   file is `PHASE-7-BRIEF.md`; nothing else changed.
 2. **Which settlements a driver sees.** APPROVED and PAID only (the office's
    DRAFT is still being worked), or DRAFT too with the word on it? Dev holds
-   107 drafts to 35 approved-or-paid; the answer decides whether the
-   settlements tab is mostly empty for most of a week.
+   107 drafts to 35 approved-or-paid. **RULED 2026-11-12, the owner's words:
+   "a driver sees only settlements that are finalised, and only his own;
+   nothing before finalisation."** Finalised is read as APPROVED or PAID — the
+   two statuses after the office's approval — and a DRAFT is absent from the
+   portal, not shown with a word on it.
 3. **Pay on the load before settlement.** Show `Load.driverPayCents` on My
-   loads as soon as it is set, or only once a settlement line exists?
+   loads as soon as it is set, or only once a settlement line exists? **RULED
+   2026-11-12, the owner's words: "pay shows per load only after the
+   settlement that includes it is finalised — no projected pay."** So the
+   number on My loads is the settlement line's, read through the finalised
+   settlement, never `Load.driverPayCents` on its own. This also settles §8
+   flag 2: a driver sees their own pay and no broker rate.
 4. **Status steps.** Strictly one forward step at a time, or may a driver
    jump (`DISPATCHED → LOADED` when they forgot to tap at the pickup)? The
    dispatch board's engine already answers one way; the portal should not
-   answer differently without a ruling.
+   answer differently without a ruling. _Proposed: one forward step at a
+   time, the engine's own rule; a missed tap is the office's correction on
+   the board, where the timeline shows who moved what._
 5. **Co-drivers.** `Load.coDriverId` exists. Does a co-driver see the load,
-   and may they set its status? Suggested: sees, cannot set.
+   and may they set its status? _Proposed: sees it on Home and My loads, may
+   upload a document to it, cannot set its status — one driver of record per
+   status change._
 6. **Who links.** The Users screen (OWNER/ADMIN) per §3.1, or the driver
-   record's own page (Fleet, which MANAGER reaches)? Suggested: the Users
-   screen, because it is where the sign-in is minted and the link is a
-   sign-in fact.
+   record's own page? **RULED 2026-11-12, the owner's words: "linking a
+   sign-in to a roster row is done by Owner/Admin on the driver's record
+   (pick the user), never by the driver."** §3.1 is rewritten to match: the
+   picker lives on `/drivers/[id]`, gated by a permission only OWNER and
+   ADMIN hold.
 7. **Termination.** When `Driver.terminationDate` is set, is the user
    deactivated in the same write (sessions revoked, `setUserActive`), or
-   does the office do it by hand? Suggested: the same write.
+   does the office do it by hand? _Proposed: the same write — a terminated
+   driver's sign-in dies with the termination date, and reactivating the
+   driver does not reactivate the sign-in._
 8. **Onboarding mail.** A driver's first password is set by Forgot password
    only once production sends from a verified domain (README "Parked" step
    4; today's sender delivers only to the Resend account owner). Until then
    the temporary password from the Users screen, over Telegram, is the
-   hand-over. The portal's first real driver waits on that step or on that
-   hand-over — the owner picks which.
+   hand-over. _Proposed: the Telegram hand-over for the first drivers, as
+   for the accountant; the verified domain is its own item and does not
+   block step 1._
 
 ## 5. Order of work — one step per session, doc first at every step
 
-| Step | Work                                                                                                                                                                                                              |
-| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0    | Rulings 1–8 recorded in this file's §4; §6.8's table gains the portal rows as `refuse` for five roles and `reach` for DRIVER; `TMS-DESIGN-SYSTEM.md` §9 gains the tab bar and the landing rule, in its own commit |
-| 1    | The link: Users screen picker for role DRIVER, `createUser` writes `Driver.userId`, seed gives the sweep's driver a roster row and loads; integration test with two drivers                                       |
-| 2    | The shell and Home: `(portal)` group, layout, redirect by role, `portal.ts` predicates, the current load with stops and the one primary action; RTL pass; sweep green with the new rows                           |
-| 3    | My loads and Settlements, read-only, with rulings 2, 3 and 5 applied; statement PDF reachable                                                                                                                     |
-| 4    | Status write: `recordPortalStatus`, `DRIVER_PORTAL` events on the load's timeline, the dispatch board shows the source word                                                                                       |
-| 5    | Documents: camera-first upload through `PendingUpload`, seven types, attach to own load; the office sees it on the load the same minute                                                                           |
-| 6    | Offline queue and pending badge; measured on a phone on cellular; acceptance run; brief closed with flags in the Phase 3/4 style                                                                                  |
+| Step | Work                                                                                                                                                                                                                                                              |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Rulings 4, 5, 7 and 8 recorded in this file's §4 (1, 2, 3 and 6 were ruled 2026-11-12); §6.8's table gains the portal rows as `refuse` for five roles and `reach` for DRIVER; `TMS-DESIGN-SYSTEM.md` §9 gains the tab bar and the landing rule, in its own commit |
+| 1    | The link: the "Sign-in" picker on the driver's record for OWNER/ADMIN writes `Driver.userId`; seed gives the sweep's driver a roster row and loads; integration test with two drivers                                                                             |
+| 2    | The shell and Home: `(portal)` group, layout, redirect by role, `portal.ts` predicates, the current load with stops and the one primary action; RTL pass; sweep green with the new rows                                                                           |
+| 3    | My loads and Settlements, read-only, with rulings 2, 3 and 5 applied; statement PDF reachable                                                                                                                                                                     |
+| 4    | Status write: `recordPortalStatus`, `DRIVER_PORTAL` events on the load's timeline, the dispatch board shows the source word                                                                                                                                       |
+| 5    | Documents: camera-first upload through `PendingUpload`, seven types, attach to own load; the office sees it on the load the same minute                                                                                                                           |
+| 6    | Offline queue and pending badge; measured on a phone on cellular; acceptance run; brief closed with flags in the Phase 3/4 style                                                                                                                                  |
 
 ## 6. Acceptance excerpt
 
@@ -233,8 +263,12 @@ ruling 4.
       left-to-right
 - [ ] An upload started offline is sent on reconnect and shown pending
       until then; killing the app mid-queue loses nothing (measured)
-- [ ] The Users screen refuses to mint a DRIVER without a roster row, and
-      refuses a terminated one
+- [ ] The driver record's "Sign-in" picker is reachable by OWNER and ADMIN
+      only, lists users with the DRIVER role and no roster row, refuses a
+      terminated driver, and nothing under `(portal)` can write
+      `Driver.userId` (the two-driver test asserts it)
+- [ ] A DRAFT settlement appears nowhere in the portal, and a load shows no
+      pay until the settlement that includes it is APPROVED or PAID
 
 ## 7. Parked, with names
 
@@ -253,14 +287,16 @@ Recorded rather than resolved, per Phase 1's discipline.
 
 1. **The name.** The instruction said "Phase 6 driver portal". `PHASE-6-BRIEF.md`
    is Create Load v2 and the Amazon pipeline; UAT 2026-10-04 wrote "Driver
-   portal: Phase 6" before Phase 6 was assigned. This file is
-   `DRIVER-PORTAL-BRIEF.md` until §4.1 is ruled.
+   portal: Phase 6" before Phase 6 was assigned. This file was
+   `DRIVER-PORTAL-BRIEF.md` until §4.1 was ruled; **Phase 7 since
+   2026-11-12.**
 2. **§9 says "no broker rates beyond their own load", which can be read two
    ways** — a driver sees the rate on their own load, or a driver sees no
    broker rate at all. §1.2 above takes the second reading (own pay, never
    the broker's rate) because §6.8's owner's words name "loads, statements
    and documents" and not money, and because `Load.driverPayCents` is the
-   number a driver has a claim to. §4.3 asks the owner to confirm.
+   number a driver has a claim to. **Confirmed by §4.3's ruling of
+   2026-11-12,** which goes further: own pay only after finalisation.
 3. **The sweep's DRIVER account has no roster row**, so every portal page
    would sweep as an empty state and the matrix would say `reach` about a
    screen with nothing on it — the "sees no rows" vacuity AGENTS.md names.
