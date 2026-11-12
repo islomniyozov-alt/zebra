@@ -18,6 +18,7 @@ import {
   matrixFindings,
   outcomeOf,
   readRouteMatrix,
+  roleNamedBy,
   routesUnder,
   SIGN_IN_ATTEMPTS,
   tally,
@@ -156,6 +157,46 @@ describe('the two-request capture', () => {
     expect(script).toContain(
       '`${what}: ray ${ray} already claimed by ${claims.get(ray)}`',
     )
+  })
+
+  // §6.10, amended 2026-11-12: the first deploy sweep's artifact read the
+  // cause of the two nights' shared match — the dispatcher's own POST had no
+  // tail event, the window handed it accounting's invocation, and that
+  // invocation's own timing line said `role: ACCOUNTING`.
+  it('the window serves a stalled sign-in only; a completed one with no event gets no neighbour', () => {
+    expect(script).toMatch(
+      /const seen = byRay\s*\?\s*\[byRay\]\s*:\s*row\.ray\s*\?\s*\[\]\s*:\s*tail\s*\.all\(\)/,
+    )
+    expect(script).toContain("'no tail event for this ray within 30 s'")
+  })
+
+  it('an invocation that names another role is refused by name, on either path', () => {
+    const timing = (role: string | null) => ({
+      logs: [
+        {
+          level: 'log',
+          message: JSON.stringify({
+            event: 'signin.timing',
+            outcome: 'ok',
+            role,
+          }),
+        },
+      ],
+    })
+    expect(roleNamedBy(timing('ACCOUNTING'))).toBe('ACCOUNTING')
+    expect(roleNamedBy(timing('accounting'))).toBe('ACCOUNTING')
+    // A failed sign-in names nobody, and so does an invocation with no line.
+    expect(roleNamedBy(timing(null))).toBeNull()
+    expect(roleNamedBy({ logs: [] })).toBeNull()
+    expect(roleNamedBy(undefined)).toBeNull()
+    // The matcher asks before it claims, and records the mismatch in words.
+    expect(script).toMatch(
+      /const named = roleNamedBy\(event\)\s*\n\s*if \(named === null \|\| named === own\) return true/,
+    )
+    expect(script).toContain(
+      '`${what}: ray ${rayOf(event)} names ${named}, not ${own}`',
+    )
+    expect(script).toContain("'every invocation seen names another role'")
   })
 
   it('a second claimant is said by name in the verdict and is a problem', () => {

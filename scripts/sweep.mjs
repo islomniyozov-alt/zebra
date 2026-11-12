@@ -323,6 +323,19 @@ export function claimRay(claims, ray, claimant) {
   return true
 }
 
+/**
+ * The role an invocation's own `signin.timing` line names, upper-case, or
+ * null when it names none (a failed sign-in logs `role: null`; an invocation
+ * with no timing line at all names nobody). §6.10, amended 2026-11-12: the
+ * matcher refuses, by name, an invocation that names a role other than the
+ * sign-in's — the first deploy sweep's artifact showed the dispatcher's
+ * window claim carrying `role: ACCOUNTING`.
+ */
+export function roleNamedBy(event) {
+  const role = signInTimingOf(event)?.role
+  return typeof role === 'string' && role !== '' ? role.toUpperCase() : null
+}
+
 // ── THE WARM-UP (§6.8, owner's ruling 2026-10-12, closing GAPS 24) ─────────
 //
 // Dev keeps Neon's scale-to-zero by choice, so the first thing to touch the
@@ -651,16 +664,35 @@ async function sweep() {
       const byRay = row.ray ? tail.lookup(row.ray) : null
       const from = Date.parse(row.startedAt) - 2_000
       const to = Date.parse(row.endedAt) + 2_000
-      const candidates = byRay
+      // THE WINDOW IS FOR A STALLED SIGN-IN ONLY (§6.10, amended 2026-11-12).
+      // A completed sign-in has a ray; when the tail never delivered that
+      // ray's event, the answer is "no tail event for this ray" — never the
+      // nearest invocation in time. On 11-08, 11-09 and 11-12 that neighbour
+      // was another role's POST, and its own timing line said so.
+      const seen = byRay
         ? [byRay]
-        : tail
-            .all()
-            .filter(
-              (event) =>
-                isSignInPost(event) &&
-                event.eventTimestamp >= from &&
-                event.eventTimestamp <= to,
-            )
+        : row.ray
+          ? []
+          : tail
+              .all()
+              .filter(
+                (event) =>
+                  isSignInPost(event) &&
+                  event.eventTimestamp >= from &&
+                  event.eventTimestamp <= to,
+              )
+      // AND AN INVOCATION NAMES ITS ROLE: its `signin.timing` line carries
+      // `role`, so one that names another role is nobody's here, by name.
+      const what = byRay ? 'sign-in POST' : 'sign-in POST in the window'
+      const own = row.role.toUpperCase()
+      const candidates = seen.filter((event) => {
+        const named = roleNamedBy(event)
+        if (named === null || named === own) return true
+        row.unmatched.push(
+          `${what}: ray ${rayOf(event)} names ${named}, not ${own}`,
+        )
+        return false
+      })
       const events = candidates.filter((event) =>
         claim(event, byRay ? 'sign-in POST' : 'sign-in POST in the window'),
       )
@@ -673,9 +705,11 @@ async function sweep() {
         row.workerNote =
           candidates.length > 0
             ? 'every candidate invocation was already claimed by another sign-in'
-            : row.ray
-              ? 'no tail event for this ray within 30 s'
-              : 'no sign-in POST in the tail inside this attempt'
+            : seen.length > 0
+              ? 'every invocation seen names another role'
+              : row.ray
+                ? 'no tail event for this ray within 30 s'
+                : 'no sign-in POST in the tail inside this attempt'
       // THE DASHBOARD RENDER, ON ITS OWN REQUEST, BY ITS OWN RAY (§6.10,
       // owner's ruling 2026-10-23). The sign-in POST renders the dashboard
       // inside its own response, but nothing written during that render
