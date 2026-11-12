@@ -120,8 +120,10 @@ AT_DELIVERY → DELIVERED` — recorded as a `LoadStatusEvent` with
 `source: DRIVER_PORTAL` and `changedByUserId`, through the same engine the
 dispatch board uses, which already owns the transition rules. No backwards
 step, no cancel, no billing axis, no `POD_RECEIVED` (that is the office
-confirming the document arrived). Whether a driver may skip a step is §4
-ruling 4.
+confirming the document arrived). One forward step at a time — the engine's
+own rule — and a missed tap is the office's correction on the board (§4.4,
+ruled). A co-driver on the load sees it and may upload a document to it, and
+never sets its status (§4.5, ruled).
 
 ## 2. What §6.8 already grants, and what it does not
 
@@ -149,7 +151,10 @@ ruling 4.
    `user:update`, which OWNER and ADMIN hold alone — not by `driver:update`,
    which MANAGER holds through `FLEET_WRITE` — and the gate is decided in
    `permissions.ts` and nowhere else. A roster row with a terminated date
-   refuses the link; nothing under `(portal)` can set the column. The dev
+   refuses the link; setting `Driver.terminationDate` deactivates the
+   sign-in in the same write, and bringing a driver back is a new link by
+   OWNER or ADMIN whose audit row names who (§4.7, ruled); nothing under
+   `(portal)` can set the column. The dev
    seed gives the sweep's DRIVER account a roster row with two loads, one
    open and one delivered, and one POD — so the sweep's driver column reads
    a portal with content, not empty states.
@@ -205,13 +210,13 @@ ruling 4.
 4. **Status steps.** Strictly one forward step at a time, or may a driver
    jump (`DISPATCHED → LOADED` when they forgot to tap at the pickup)? The
    dispatch board's engine already answers one way; the portal should not
-   answer differently without a ruling. _Proposed: one forward step at a
-   time, the engine's own rule; a missed tap is the office's correction on
-   the board, where the timeline shows who moved what._
+   answer differently without a ruling. **RULED 2026-11-12: one forward
+   step, the engine's own rule; a missed tap is the office's correction on
+   the board,** where the timeline shows who moved what.
 5. **Co-drivers.** `Load.coDriverId` exists. Does a co-driver see the load,
-   and may they set its status? _Proposed: sees it on Home and My loads, may
-   upload a document to it, cannot set its status — one driver of record per
-   status change._
+   and may they set its status? **RULED 2026-11-12: a co-driver sees the
+   load and uploads to it, never sets its status** — one driver of record
+   per status change.
 6. **Who links.** The Users screen (OWNER/ADMIN) per §3.1, or the driver
    record's own page? **RULED 2026-11-12, the owner's words: "linking a
    sign-in to a roster row is done by Owner/Admin on the driver's record
@@ -220,28 +225,34 @@ ruling 4.
    ADMIN hold.
 7. **Termination.** When `Driver.terminationDate` is set, is the user
    deactivated in the same write (sessions revoked, `setUserActive`), or
-   does the office do it by hand? _Proposed: the same write — a terminated
-   driver's sign-in dies with the termination date, and reactivating the
-   driver does not reactivate the sign-in._
+   does the office do it by hand? **RULED 2026-11-12: the same write —
+   termination date set means the sign-in is deactivated in that write;
+   reactivation needs OWNER or ADMIN to re-link on the driver record, and
+   the audit row names who.** So reactivating the driver never reactivates
+   the sign-in by itself, and the re-link is a second audited act.
 8. **Onboarding mail.** A driver's first password is set by Forgot password
    only once production sends from a verified domain (README "Parked" step
    4; today's sender delivers only to the Resend account owner). Until then
    the temporary password from the Users screen, over Telegram, is the
-   hand-over. _Proposed: the Telegram hand-over for the first drivers, as
-   for the accountant; the verified domain is its own item and does not
-   block step 1._
+   hand-over. **RULED 2026-11-12: the Telegram hand-over for the first
+   drivers,** as for the accountant; the verified domain is its own item and
+   blocks no step.
+
+All eight ruled on 2026-11-12. "Finalised" is APPROVED or PAID, confirmed by
+the owner the same day. The rules are transcribed into
+`TMS-DESIGN-SYSTEM.md` §9 (v10.85), which is what a screen is held to.
 
 ## 5. Order of work — one step per session, doc first at every step
 
-| Step | Work                                                                                                                                                                                                                                                              |
-| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0    | Rulings 4, 5, 7 and 8 recorded in this file's §4 (1, 2, 3 and 6 were ruled 2026-11-12); §6.8's table gains the portal rows as `refuse` for five roles and `reach` for DRIVER; `TMS-DESIGN-SYSTEM.md` §9 gains the tab bar and the landing rule, in its own commit |
-| 1    | The link: the "Sign-in" picker on the driver's record for OWNER/ADMIN writes `Driver.userId`; seed gives the sweep's driver a roster row and loads; integration test with two drivers                                                                             |
-| 2    | The shell and Home: `(portal)` group, layout, redirect by role, `portal.ts` predicates, the current load with stops and the one primary action; RTL pass; sweep green with the new rows                                                                           |
-| 3    | My loads and Settlements, read-only, with rulings 2, 3 and 5 applied; statement PDF reachable                                                                                                                                                                     |
-| 4    | Status write: `recordPortalStatus`, `DRIVER_PORTAL` events on the load's timeline, the dispatch board shows the source word                                                                                                                                       |
-| 5    | Documents: camera-first upload through `PendingUpload`, seven types, attach to own load; the office sees it on the load the same minute                                                                                                                           |
-| 6    | Offline queue and pending badge; measured on a phone on cellular; acceptance run; brief closed with flags in the Phase 3/4 style                                                                                                                                  |
+| Step | Work                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | DONE 2026-11-12: all eight rulings recorded in §4; `TMS-DESIGN-SYSTEM.md` v10.85 §9 gains the tab bar, the landing rule, the money, write and link rules and Load's two-statement budget, in its own commit; §6.8 records the four portal routes' INTENT in prose — the rows enter the table at step 2 with the pages, because the matrix test refuses a row that names no page (flag 5) |
+| 1    | The link: the "Sign-in" picker on the driver's record for OWNER/ADMIN writes `Driver.userId`; seed gives the sweep's driver a roster row and loads; integration test with two drivers                                                                                                                                                                                                    |
+| 2    | The shell and Home: `(portal)` group, layout, redirect by role, `portal.ts` predicates, the current load with stops and the one primary action; RTL pass; sweep green with the new rows                                                                                                                                                                                                  |
+| 3    | My loads and Settlements, read-only, with rulings 2, 3 and 5 applied; statement PDF reachable                                                                                                                                                                                                                                                                                            |
+| 4    | Status write: `recordPortalStatus`, `DRIVER_PORTAL` events on the load's timeline, the dispatch board shows the source word                                                                                                                                                                                                                                                              |
+| 5    | Documents: camera-first upload through `PendingUpload`, seven types, attach to own load; the office sees it on the load the same minute                                                                                                                                                                                                                                                  |
+| 6    | Offline queue and pending badge; measured on a phone on cellular; acceptance run; brief closed with flags in the Phase 3/4 style                                                                                                                                                                                                                                                         |
 
 ## 6. Acceptance excerpt
 
@@ -269,6 +280,11 @@ ruling 4.
       `Driver.userId` (the two-driver test asserts it)
 - [ ] A DRAFT settlement appears nowhere in the portal, and a load shows no
       pay until the settlement that includes it is APPROVED or PAID
+- [ ] Setting a termination date signs the driver out and refuses the next
+      sign-in; the re-link is a second act by OWNER or ADMIN and its audit
+      row names them
+- [ ] Load (`/portal`) renders in two statements inside the tenant
+      transaction, counted by the query log, before the screen ships
 
 ## 7. Parked, with names
 
@@ -304,3 +320,12 @@ Recorded rather than resolved, per Phase 1's discipline.
 4. **`Driver.userId` has existed since Phase 1 and nothing has ever written
    it** — 167 drivers, 0 links on dev. A column with a writer nobody built is
    the ComplianceItem lesson again; §3.1 is where it gets one.
+5. **Step 0 said §6.8's table gains the portal rows, and the table cannot
+   take them yet.** `tests/sweep.test.ts` fails by name on a row that names
+   no page, and `scripts/sweep.mjs` counts one as a problem (`matrix row, no
+page`), so four rows written before the pages would turn the deploy sweep
+   and every nightly red. Where a brief disagrees with the design system's
+   instruments, the instruments win (AGENTS.md): §6.8 carries the four
+   routes' intent in prose (v10.85) and the rows enter the markers in step
+   2's commit with the pages, where the pin "a driver reaches only
+   `/account`" also moves. Flagged 2026-11-12 at step 0.
