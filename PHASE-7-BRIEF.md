@@ -390,13 +390,15 @@ page`), so four rows written before the pages would turn the deploy sweep
     pins that nothing under `src/app` or `src/lib` registers a worker. For
     the owner's ruling: a worker scoped to `/portal/` with Background Sync
     for Android, as its own step, or the open page as it is. Flagged
-    2026-11-12 at step 6.
+    2026-11-12 at step 6. **AGREED 2026-11-12 (owner): the open page as it
+    is; no service worker.**
 11. **The phone measurements were not taken.** §3.5 asks for one POD
     photo's bytes before and after compression and the upload's wall time
     from a phone on cellular; §6's offline box says "(measured)". There is
     no phone in a session: the numbers are the owner's to take on dev, and
     the procedure is in §9 against the open box. Flagged 2026-11-12 at
-    step 6.
+    step 6. **AGREED 2026-11-12 (owner): the phone checks are the owner's,
+    later;** the three open boxes in §9 wait on them.
 
 ## 9. How §6 closed
 
