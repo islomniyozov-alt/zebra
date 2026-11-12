@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@/generated/prisma/client'
+import type { PrismaClient, Role } from '@/generated/prisma/client'
 import {
   dummyHash,
   hashPassword,
@@ -77,7 +77,7 @@ export type LoginFailure =
   | { reason: 'no_membership' }
 
 export type LoginResult =
-  | ({ ok: true; locale: string | null } & IssuedSession)
+  | ({ ok: true; locale: string | null; role: Role } & IssuedSession)
   | ({ ok: false } & LoginFailure)
 
 export function normalizeEmail(email: string): string {
@@ -310,8 +310,10 @@ export async function login(
   }
 
   // THE LOCALE TRAVELS WITH THE RESULT so the caller needs no second read. See
-  // the `select` above.
-  return { ok: true, locale: user.locale, ...issued }
+  // the `select` above. THE ROLE TOO (Phase 7 step 2): the landing differs by
+  // it — a DRIVER lands on the portal, everyone else on the dashboard — and
+  // the membership was already in hand.
+  return { ok: true, locale: user.locale, role: membership.role, ...issued }
 }
 
 export async function logout(

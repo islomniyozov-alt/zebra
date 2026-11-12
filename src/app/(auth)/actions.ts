@@ -160,8 +160,10 @@ export async function signInAction(
   // Every operator role holds `dashboard:read` — OWNER and ADMIN through
   // EVERYTHING, MANAGER and DISPATCHER through OPERATIONS_READ, ACCOUNTING
   // explicitly. A DRIVER holds neither this nor `load:read`, so the operator
-  // application refuses them here exactly as it refused them at /loads.
-  redirect('/dashboard')
+  // application refuses them there — and since Phase 7 step 2 (§9's landing
+  // rule) a DRIVER is sent to the portal instead, where their own current
+  // load is the first screen of the day.
+  redirect(result.role === 'DRIVER' ? '/portal' : '/dashboard')
 }
 
 export async function signOutAction(): Promise<void> {

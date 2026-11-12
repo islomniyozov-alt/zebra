@@ -400,9 +400,10 @@ describe('the route matrix covers every protected page, and only those', () => {
 
   it('reads the rows out of the design system', () => {
     expect(MATRIX.size).toBe(protectedRoutes.length)
-    // 54 at §6.8's writing; 55 since §6.9's testing summary (2026-10-11). A
+    // 54 at §6.8's writing; 55 since §6.9's testing summary (2026-10-11); 59
+    // since the driver portal's four pages (Phase 7 step 2, 2026-11-12). A
     // pinned number so a page cannot appear or vanish without this line moving.
-    expect(protectedRoutes.length).toBe(55)
+    expect(protectedRoutes.length).toBe(59)
   })
 
   it.each(ROUTES.filter((route) => !PUBLIC.has(route)))(
@@ -456,12 +457,34 @@ describe('the route matrix covers every protected page, and only those', () => {
     ).toThrow(/dispatcher/)
   })
 
-  it('a driver reaches nothing org-wide: only their own account', () => {
-    // The owner's words, 2026-10-10. Every one of these pages is org-wide.
+  it('a driver reaches nothing org-wide: their own account and the portal', () => {
+    // The owner's words, 2026-10-10: every office page is org-wide. Since
+    // Phase 7 step 2 (2026-11-12) the driver's own surface is the portal —
+    // four pages, each reading the driver's own rows and nothing else — and
+    // the five office roles are refused there in turn.
     const reached = [...MATRIX]
       .filter(([, row]) => (row as Record<string, string>).driver === 'reach')
       .map(([route]) => route)
-    expect(reached).toEqual(['/account'])
+      .sort()
+    expect(reached).toEqual([
+      '/account',
+      '/portal',
+      '/portal/documents',
+      '/portal/loads',
+      '/portal/settlements',
+    ])
+    for (const route of reached.filter((r) => r.startsWith('/portal'))) {
+      const row = MATRIX.get(route) as Record<string, string>
+      for (const role of [
+        'owner',
+        'admin',
+        'manager',
+        'dispatcher',
+        'accounting',
+      ]) {
+        expect(row[role], `${route} ${role}`).toBe('refuse')
+      }
+    }
   })
 
   it('credentials come from SEED_<ROLE>_EMAIL / _PASSWORD', () => {

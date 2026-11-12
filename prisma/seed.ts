@@ -298,7 +298,172 @@ async function seedSweepRoles(db: PrismaClient): Promise<void> {
     console.log(
       `  sweep ${role.toLowerCase()} ${email} — ${role}, all authorities`,
     )
+    if (role === 'DRIVER')
+      await seedSweepDriverRoster(db, organization.id, user.id)
   }
+}
+
+/**
+ * THE SWEEP DRIVER'S ROSTER ROW AND LOADS (Phase 7 step 2; brief §3.1).
+ *
+ * The portal's four pages read the driver's OWN rows, so a sweep account
+ * with no roster row would render every one as an empty state and the
+ * matrix would say `reach` about a screen with nothing on it — the "sees no
+ * rows" vacuity AGENTS.md names. So the DRIVER account gets a roster row
+ * linked to its sign-in, one open load and one delivered load, each with
+ * two stops, under a broker made for the purpose.
+ *
+ * DEV ONLY, like the account it belongs to: this runs beside the isolation
+ * counterpart and never against production, and the rows are identified by
+ * their own `externalId` so a re-seed changes nothing. The seed's charter —
+ * no invented freight — still holds for the operating group's data; this
+ * freight exists for one account that holds one column of the matrix.
+ */
+async function seedSweepDriverRoster(
+  db: PrismaClient,
+  organizationId: string,
+  userId: string,
+): Promise<void> {
+  const company = await db.company.findFirstOrThrow({
+    where: { organizationId },
+    orderBy: { name: 'asc' },
+    select: { id: true },
+  })
+  const driver = await db.driver.upsert({
+    where: {
+      organizationId_externalId: { organizationId, externalId: 'sweep-driver' },
+    },
+    update: { userId, deletedAt: null, terminationDate: null },
+    create: {
+      organizationId,
+      companyId: company.id,
+      externalId: 'sweep-driver',
+      userId,
+      firstName: 'Sweep',
+      lastName: 'Driver',
+      status: 'AVAILABLE',
+    },
+    select: { id: true },
+  })
+  // THE HISTORY STARTS WHERE THE ASSET DOES (asset-transfer.ts): a driver with
+  // a companyId and no open period fails tests/integrity.test.ts by name —
+  // which is how the first seed of this row was caught, 2026-11-12. A stated
+  // date, not the seed-run date, for the reason the fleet seeds give.
+  const period = await db.assetAssignment.findFirst({
+    where: { driverId: driver.id, effectiveTo: null },
+    select: { id: true },
+  })
+  if (!period) {
+    await db.assetAssignment.create({
+      data: {
+        organizationId,
+        companyId: company.id,
+        driverId: driver.id,
+        effectiveFrom: new Date('2026-11-01T00:00:00Z'),
+      },
+    })
+  }
+  const broker =
+    (await db.customer.findFirst({
+      where: { organizationId, name: 'Sweep Broker' },
+      select: { id: true },
+    })) ??
+    (await db.customer.create({
+      data: { organizationId, name: 'Sweep Broker', type: 'BROKER' },
+      select: { id: true },
+    }))
+
+  const loads = [
+    {
+      externalId: 'sweep-load-open',
+      loadNumber: 'SWEEP-1',
+      referenceNumber: 'SWEEP-OPEN',
+      operationalStatus: 'DISPATCHED' as const,
+      stops: [
+        {
+          type: 'PICKUP' as const,
+          name: 'Sweep pickup yard',
+          city: 'Dallas',
+          state: 'TX',
+          scheduledAt: new Date('2026-11-20T14:00:00Z'),
+          referenceNumber: 'PU-SWEEP',
+        },
+        {
+          type: 'DELIVERY' as const,
+          name: 'Sweep delivery dock',
+          city: 'Houston',
+          state: 'TX',
+          scheduledAt: new Date('2026-11-21T09:00:00Z'),
+          referenceNumber: 'DEL-SWEEP',
+        },
+      ],
+    },
+    {
+      externalId: 'sweep-load-delivered',
+      loadNumber: 'SWEEP-2',
+      referenceNumber: 'SWEEP-DONE',
+      operationalStatus: 'DELIVERED' as const,
+      stops: [
+        {
+          type: 'PICKUP' as const,
+          name: 'Sweep pickup yard',
+          city: 'Austin',
+          state: 'TX',
+          scheduledAt: new Date('2026-11-02T14:00:00Z'),
+          referenceNumber: 'PU-SWEEP-2',
+        },
+        {
+          type: 'DELIVERY' as const,
+          name: 'Sweep delivery dock',
+          city: 'Waco',
+          state: 'TX',
+          scheduledAt: new Date('2026-11-03T09:00:00Z'),
+          referenceNumber: 'DEL-SWEEP-2',
+        },
+      ],
+    },
+  ]
+  for (const load of loads) {
+    await db.load.upsert({
+      where: {
+        organizationId_externalId: {
+          organizationId,
+          externalId: load.externalId,
+        },
+      },
+      update: {
+        driverId: driver.id,
+        operationalStatus: load.operationalStatus,
+      },
+      create: {
+        organizationId,
+        companyId: company.id,
+        customerId: broker.id,
+        externalId: load.externalId,
+        loadNumber: load.loadNumber,
+        referenceNumber: load.referenceNumber,
+        driverId: driver.id,
+        operationalStatus: load.operationalStatus,
+        stops: {
+          create: load.stops.map((stop, index) => ({
+            organizationId,
+            sequence: index + 1,
+            type: stop.type,
+            name: stop.name,
+            city: stop.city,
+            state: stop.state,
+            scheduledAt: stop.scheduledAt,
+            referenceNumber: stop.referenceNumber,
+            departedAt:
+              load.operationalStatus === 'DELIVERED' ? stop.scheduledAt : null,
+          })),
+        },
+      },
+    })
+  }
+  console.log(
+    '  sweep driver roster row linked, SWEEP-1 open and SWEEP-2 delivered',
+  )
 }
 
 async function main(): Promise<void> {

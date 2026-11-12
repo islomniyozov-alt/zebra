@@ -637,7 +637,7 @@ describe('Export PDF points at the statement, not the retired stub', () => {
 })
 
 describe('the statement route refuses nothing', () => {
-  const route = readFileSync(
+  const routeFile = readFileSync(
     join(
       process.cwd(),
       'src',
@@ -650,6 +650,15 @@ describe('the statement route refuses nothing', () => {
     ),
     'utf8',
   )
+  // THE BODY MOVED (Phase 7 step 2, 2026-11-12): the route keeps the office's
+  // gate and the response, and the rendering lives in `statementPdfFor` so
+  // the driver portal's route renders the same sheet. The guards below are
+  // about the rendering, so they read the renderer; the 409 guard reads both.
+  const renderer = readFileSync(
+    join(process.cwd(), 'src', 'lib', 'statement-document.ts'),
+    'utf8',
+  )
+  const route = renderer
 
   it('has no 409 left in it', () => {
     // Owner's ruling, 2026-09-30. The refusal is what the watermark replaced.
@@ -658,8 +667,16 @@ describe('the statement route refuses nothing', () => {
     // failed against the comments explaining why the refusal is gone — one of
     // which literally says "there is no 409 left in this file". Second time
     // this session a negative guard has fired on its own prose.
-    expect(route).not.toMatch(/apiError\(\s*409/)
-    expect(route).not.toMatch(/'draft' as const/)
+    expect(routeFile).not.toMatch(/apiError\(\s*409/)
+    expect(routeFile).not.toMatch(/'draft' as const/)
+    expect(renderer).not.toMatch(/apiError\(\s*409/)
+    expect(renderer).not.toMatch(/'draft' as const/)
+  })
+
+  it('the route calls the one renderer, under the office’s gate', () => {
+    expect(routeFile).toMatch(
+      /withCurrentOrg\('read', 'settlement', \(tx\) =>\s*statementPdfFor\(tx, id\)/,
+    )
   })
 
   it('stamps on the settlement own status, not the batch one', () => {
