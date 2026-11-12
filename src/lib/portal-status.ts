@@ -63,8 +63,67 @@ export type PortalStatusFailure =
   | 'no_next_step'
   | 'not_the_next_step'
 
+/** Which stop clock a rung stamps (flag 8, ruled 2026-11-12). */
+export const STOP_CLOCK_FOR_STEP: Partial<
+  Record<
+    DriverStep,
+    { type: 'PICKUP' | 'DELIVERY'; clock: 'arrivedAt' | 'departedAt' }
+  >
+> = {
+  AT_PICKUP: { type: 'PICKUP', clock: 'arrivedAt' },
+  LOADED: { type: 'PICKUP', clock: 'departedAt' },
+  AT_DELIVERY: { type: 'DELIVERY', clock: 'arrivedAt' },
+  DELIVERED: { type: 'DELIVERY', clock: 'departedAt' },
+}
+
+export interface StampedClock {
+  stopId: string
+  clock: 'arrivedAt' | 'departedAt'
+}
+
+/**
+ * Stamp the clock a rung means, on the first stop of that type whose clock
+ * is still empty — "At pickup" the pickup's arrival, "Loaded" its departure,
+ * the same pair for delivery. NEVER OVER A VALUE THE OFFICE PUT THERE: a
+ * stop already clocked is left alone, and the tap stamps nothing, which is
+ * what `null` says. A departure on a stop with no arrival stamps both, since
+ * a truck that left was there. Intermediate stops are not on the ladder and
+ * are the office's to clock.
+ */
+export async function stampStopForStep(
+  tx: TxClient,
+  loadId: string,
+  step: DriverStep,
+  at: Date,
+): Promise<StampedClock | null> {
+  const rule = STOP_CLOCK_FOR_STEP[step]
+  if (!rule) return null
+  const stop = await tx.loadStop.findFirst({
+    where: { loadId, type: rule.type, [rule.clock]: null },
+    orderBy: { sequence: 'asc' },
+    select: { id: true, arrivedAt: true },
+  })
+  if (!stop) return null
+  await tx.loadStop.update({
+    where: { id: stop.id },
+    data: {
+      [rule.clock]: at,
+      ...(rule.clock === 'departedAt' && stop.arrivedAt === null
+        ? { arrivedAt: at }
+        : {}),
+    },
+  })
+  return { stopId: stop.id, clock: rule.clock }
+}
+
 export type PortalStatusOutcome =
-  | { ok: true; from: LoadOperationalStatus; to: DriverStep }
+  | {
+      ok: true
+      from: LoadOperationalStatus
+      to: DriverStep
+      /** The clock the tap stamped, or null when the office had it already. */
+      stamped: StampedClock | null
+    }
   /** The load was already there — a double tap. Nothing written. */
   | { ok: true; already: DriverStep }
   | { ok: false; reason: PortalStatusFailure; at?: LoadOperationalStatus }
@@ -127,7 +186,12 @@ export async function recordPortalStatus(
     userId: session.userId,
   })
   if (outcome.result === 'moved') {
-    return { ok: true, from: outcome.from, to: next }
+    // THE TAP IS THE STOP'S CHECK-IN (flag 8, ruled 2026-11-12): the rung
+    // stamps the clock it means, in the same transaction, under the driver's
+    // own attribution — so the load's stop table and its timeline both say
+    // the driver, and the office's later edit is a second audited write.
+    const stamped = await stampStopForStep(tx, loadId, next, new Date())
+    return { ok: true, from: outcome.from, to: next, stamped }
   }
   if (outcome.result === 'unchanged') return { ok: true, already: next }
   if (outcome.result === 'cancelled') {

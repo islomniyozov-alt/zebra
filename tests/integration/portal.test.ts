@@ -16,6 +16,7 @@ import {
   ownSettlements,
 } from '@/lib/portal'
 import { recordPortalStatus } from '@/lib/portal-status'
+import { ownPendingUpload, uploadTargetFor } from '@/lib/portal-documents'
 import { dropOrganization, seedOrganization, type OrgFixture } from './fixtures'
 import type { PrismaClient } from '@/generated/prisma/client'
 
@@ -456,7 +457,11 @@ describe('the driver’s status step', () => {
     const outcome = await asDriver(userA, (tx) =>
       recordPortalStatus(tx, { userId: userA }, openA, 'AT_PICKUP'),
     )
-    expect(outcome).toEqual({ ok: true, from: 'DISPATCHED', to: 'AT_PICKUP' })
+    expect(outcome).toMatchObject({
+      ok: true,
+      from: 'DISPATCHED',
+      to: 'AT_PICKUP',
+    })
     const load = await owner.load.findUniqueOrThrow({
       where: { id: openA },
       select: { operationalStatus: true },
@@ -498,7 +503,7 @@ describe('the driver’s status step', () => {
     const first = await asDriver(userA, (tx) =>
       recordPortalStatus(tx, { userId: userA }, openA, 'LOADED'),
     )
-    expect(first).toEqual({ ok: true, from: 'AT_PICKUP', to: 'LOADED' })
+    expect(first).toMatchObject({ ok: true, from: 'AT_PICKUP', to: 'LOADED' })
     const second = await asDriver(userA, (tx) =>
       recordPortalStatus(tx, { userId: userA }, openA, 'LOADED'),
     )
@@ -529,7 +534,7 @@ describe('the driver’s status step', () => {
       await asDriver(userB, (tx) =>
         recordPortalStatus(tx, { userId: userB }, teamB, 'AT_PICKUP'),
       ),
-    ).toEqual({ ok: true, from: 'DISPATCHED', to: 'AT_PICKUP' })
+    ).toMatchObject({ ok: true, from: 'DISPATCHED', to: 'AT_PICKUP' })
   })
 
   it('a delivered load has no next step; an unlinked sign-in has no row', async () => {
@@ -543,5 +548,174 @@ describe('the driver’s status step', () => {
         recordPortalStatus(tx, { userId: org.userId }, openA, 'IN_TRANSIT'),
       ),
     ).toEqual({ ok: false, reason: 'no_driver_row' })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE TAP IS THE STOP'S CHECK-IN (flag 8, ruled 2026-11-12) — read after the
+// taps above moved openA to LOADED.
+// ---------------------------------------------------------------------------
+
+describe('the tap is the stop’s check-in', () => {
+  const asDriver = <T>(
+    userId: string,
+    fn: Parameters<typeof withOrg<T>>[1],
+  ): Promise<T> =>
+    withOrg(org.organizationId, fn, {
+      attribution: { userId, ip: null, userAgent: 'portal.test' },
+      maxWaitMs: 15_000,
+      timeoutMs: LOAD_WRITE_TIMEOUT_MS,
+    })
+  const stopsOf = (loadId: string) =>
+    owner.loadStop.findMany({
+      where: { loadId },
+      orderBy: { sequence: 'asc' },
+      select: { id: true, type: true, arrivedAt: true, departedAt: true },
+    })
+
+  it('At pickup stamped the pickup’s arrival and Loaded its departure; delivery untouched', async () => {
+    const [pickup, delivery] = await stopsOf(openA)
+    expect(pickup!.type).toBe('PICKUP')
+    expect(pickup!.arrivedAt).not.toBeNull()
+    expect(pickup!.departedAt).not.toBeNull()
+    expect(delivery!.arrivedAt).toBeNull()
+    expect(delivery!.departedAt).toBeNull()
+    // AND THE AUDIT ROW NAMES THE DRIVER: the stop's check-in is attributed
+    // to the sign-in that tapped, which is what the office's stop table reads.
+    const audit = await owner.auditLog.findFirst({
+      where: { entityType: 'LoadStop', entityId: pickup!.id, userId: userA },
+      orderBy: { createdAt: 'desc' },
+    })
+    expect(audit).not.toBeNull()
+    expect(JSON.stringify(audit!.changes)).toContain('departedAt')
+  })
+
+  it('the office’s own value stands: a clock already set is not overwritten', async () => {
+    const [, delivery] = await stopsOf(openA)
+    const officeArrival = new Date('2026-11-21T08:30:00Z')
+    await owner.loadStop.update({
+      where: { id: delivery!.id },
+      data: { arrivedAt: officeArrival },
+    })
+    // IN_TRANSIT stamps nothing; AT_DELIVERY would stamp the delivery's
+    // arrival, but the office already has it.
+    const transit = await asDriver(userA, (tx) =>
+      recordPortalStatus(tx, { userId: userA }, openA, 'IN_TRANSIT'),
+    )
+    expect(transit).toMatchObject({ ok: true, to: 'IN_TRANSIT', stamped: null })
+    const arrived = await asDriver(userA, (tx) =>
+      recordPortalStatus(tx, { userId: userA }, openA, 'AT_DELIVERY'),
+    )
+    expect(arrived).toMatchObject({
+      ok: true,
+      to: 'AT_DELIVERY',
+      stamped: null,
+    })
+    const [, after] = await stopsOf(openA)
+    expect(after!.arrivedAt?.toISOString()).toBe(officeArrival.toISOString())
+    expect(after!.departedAt).toBeNull()
+  })
+
+  it('Delivered stamps the delivery’s departure', async () => {
+    const delivered = await asDriver(userA, (tx) =>
+      recordPortalStatus(tx, { userId: userA }, openA, 'DELIVERED'),
+    )
+    expect(delivered).toMatchObject({
+      ok: true,
+      to: 'DELIVERED',
+      stamped: { clock: 'departedAt' },
+    })
+    const [, after] = await stopsOf(openA)
+    expect(after!.departedAt).not.toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE DRIVER'S UPLOAD (step 5): the predicates the two portal routes ask.
+// ---------------------------------------------------------------------------
+
+describe('the driver’s upload target', () => {
+  it('an upload lands only on a load the driver is on — either seat', async () => {
+    expect(
+      await inOrg((tx) => uploadTargetFor(tx, { userId: userA }, openA)),
+    ).toMatchObject({ ok: true, driverId: driverA })
+    // The second seat may upload (§4.5), though it never sets the status.
+    expect(
+      await inOrg((tx) => uploadTargetFor(tx, { userId: userA }, teamB)),
+    ).toMatchObject({ ok: true, driverId: driverA })
+    expect(
+      await inOrg((tx) => uploadTargetFor(tx, { userId: userA }, openB)),
+    ).toEqual({ ok: false, reason: 'not_own_load' })
+    expect(
+      await inOrg((tx) => uploadTargetFor(tx, { userId: org.userId }, openA)),
+    ).toEqual({ ok: false, reason: 'no_driver_row' })
+  })
+
+  it('a pending upload confirms only onto the driver’s own load, and only a portal type', async () => {
+    const mine = await owner.pendingUpload.create({
+      data: {
+        organizationId: org.organizationId,
+        companyId: org.companyId,
+        r2Key: `portal-test/pending-${nonce}.jpg`,
+        filename: 'pod.jpg',
+        mimeType: 'image/jpeg',
+        sizeBytes: 100,
+        sha256: 'x'.repeat(44),
+        type: 'POD',
+        targetEntity: 'load',
+        targetId: openA,
+        expiresAt: new Date(Date.now() + 300_000),
+      },
+      select: { id: true },
+    })
+    const theirs = await owner.pendingUpload.create({
+      data: {
+        organizationId: org.organizationId,
+        companyId: org.companyId,
+        r2Key: `portal-test/pending-b-${nonce}.jpg`,
+        filename: 'bol.jpg',
+        mimeType: 'image/jpeg',
+        sizeBytes: 100,
+        sha256: 'x'.repeat(44),
+        type: 'BOL',
+        targetEntity: 'load',
+        targetId: openB,
+        expiresAt: new Date(Date.now() + 300_000),
+      },
+      select: { id: true },
+    })
+    const officeType = await owner.pendingUpload.create({
+      data: {
+        organizationId: org.organizationId,
+        companyId: org.companyId,
+        r2Key: `portal-test/pending-rc-${nonce}.pdf`,
+        filename: 'rc.pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: 100,
+        sha256: 'x'.repeat(44),
+        type: 'RATE_CONFIRMATION',
+        targetEntity: 'load',
+        targetId: openA,
+        expiresAt: new Date(Date.now() + 300_000),
+      },
+      select: { id: true },
+    })
+    expect(
+      await inOrg((tx) => ownPendingUpload(tx, { userId: userA }, mine.id)),
+    ).toBe(true)
+    expect(
+      await inOrg((tx) => ownPendingUpload(tx, { userId: userA }, theirs.id)),
+    ).toBe(false)
+    expect(
+      await inOrg((tx) =>
+        ownPendingUpload(tx, { userId: userA }, officeType.id),
+      ),
+    ).toBe(false)
+    expect(
+      await inOrg((tx) => ownPendingUpload(tx, { userId: userB }, theirs.id)),
+    ).toBe(true)
+    await owner.pendingUpload.deleteMany({
+      where: { id: { in: [mine.id, theirs.id, officeType.id] } },
+    })
   })
 })

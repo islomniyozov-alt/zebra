@@ -154,12 +154,34 @@ interface MintResponse {
  * "Preparing" and "Uploading" as two different things without knowing why they
  * are two different things.
  */
+/**
+ * Where the mint and the confirm go. The office's two routes by default; the
+ * driver portal names its own (Phase 7 step 5), which ask the portal's gate
+ * and predicates and then call the same server functions.
+ */
+export interface UploadEndpoints {
+  mint: string
+  confirm: string
+}
+
+const OFFICE_ENDPOINTS: UploadEndpoints = {
+  mint: '/api/documents/upload-url',
+  confirm: '/api/documents/confirm',
+}
+
 export async function uploadDocument(
   file: File,
   target: UploadTarget,
   onProgress: (progress: UploadProgress) => void = () => {},
-  options: { compression?: CompressionOptions; signal?: AbortSignal } = {},
+  options: {
+    compression?: CompressionOptions
+    signal?: AbortSignal
+    endpoints?: UploadEndpoints
+    /** Extra fields the mint route wants — the portal's names its `loadId`. */
+    mintBody?: Record<string, string>
+  } = {},
 ): Promise<UploadResult> {
+  const endpoints = options.endpoints ?? OFFICE_ENDPOINTS
   try {
     // --- preparing: local CPU, no network yet ------------------------------
     onProgress({ phase: 'preparing', fraction: 0 })
@@ -171,11 +193,12 @@ export async function uploadDocument(
     const sha256 = await digestOf(prepared)
     onProgress({ phase: 'preparing', fraction: 1 })
 
-    const mintResponse = await fetch('/api/documents/upload-url', {
+    const mintResponse = await fetch(endpoints.mint, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       ...(options.signal ? { signal: options.signal } : {}),
       body: JSON.stringify({
+        ...(options.mintBody ?? {}),
         entity: target.entity,
         entityId: target.entityId,
         filename: prepared.name,
@@ -207,7 +230,7 @@ export async function uploadDocument(
     }
     onProgress({ phase: 'uploading', fraction: 1 })
 
-    const confirmResponse = await fetch('/api/documents/confirm', {
+    const confirmResponse = await fetch(endpoints.confirm, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       ...(options.signal ? { signal: options.signal } : {}),
