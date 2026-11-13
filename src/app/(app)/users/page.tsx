@@ -8,7 +8,19 @@ import { Table, type Column } from '@/components/ui/Table'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
-import { setUserActiveAction } from './actions'
+import { changeUserRoleAction, setUserActiveAction } from './actions'
+import { roleChoicesFor, type ChangeRoleFailure } from '@/lib/users'
+
+/** Each refusal of a role change, in words (§6.11). */
+const ROLE_REFUSALS: Record<ChangeRoleFailure, MessageKey> = {
+  not_found: 'users.error.notFound',
+  cannot_change_self: 'users.error.cannotChangeSelf',
+  unchanged: 'users.error.unchanged',
+  role_not_grantable: 'users.error.roleNotGrantable',
+  owner_needs_owner: 'users.error.ownerNeedsOwner',
+  last_owner: 'users.error.lastOwner',
+  driver_via_link: 'users.error.driverViaLink',
+}
 import type { Role } from '@/generated/prisma/client'
 import type { MessageKey } from '@/lib/i18n'
 
@@ -31,13 +43,17 @@ interface Row {
   isSelf: boolean
 }
 
-export default async function UsersPage() {
+export default async function UsersPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
   // §4: a route a role may not use should not exist for that role either.
   if (!(await currentUserCan('read', 'user'))) notFound()
 
   const { t, locale } = await getLocaleContext()
 
-  const { rows, zone } = await withCurrentOrg(
+  const { rows, zone, actor } = await withCurrentOrg(
     'read',
     'user',
     async (tx, session) => {
@@ -48,6 +64,7 @@ export default async function UsersPage() {
 
       return {
         zone: company?.timezone ?? 'America/Chicago',
+        actor: { userId: session.userId, role: session.role },
         rows: users.map((user) => ({
           ...user,
           isSelf: user.id === session.userId,
@@ -55,6 +72,17 @@ export default async function UsersPage() {
       }
     },
   )
+
+  // §6.11 — the outcome of a role change, carried back in the query.
+  const params = await searchParams
+  const refused =
+    typeof params.refused === 'string' && params.refused in ROLE_REFUSALS
+      ? ROLE_REFUSALS[params.refused as ChangeRoleFailure]
+      : null
+  const changed =
+    typeof params.changed === 'string'
+      ? rows.find((user) => user.id === params.changed)
+      : undefined
 
   const mayCreate = await currentUserCan('create', 'user')
   const mayUpdate = await currentUserCan('update', 'user')
@@ -94,7 +122,36 @@ export default async function UsersPage() {
     {
       key: 'role',
       header: t('users.role'),
-      render: (row) => t(`roles.${row.role}` as MessageKey),
+      // §6.11: a select and a button where a change is allowed, the role's
+      // name everywhere else — yourself, a driver, an owner for an admin.
+      render: (row) => {
+        const choices = mayUpdate
+          ? roleChoicesFor(actor, { id: row.id, role: row.role })
+          : null
+        if (!choices) return t(`roles.${row.role}` as MessageKey)
+        return (
+          <form
+            action={changeUserRoleAction.bind(null, row.id)}
+            className="flex items-center gap-z2"
+          >
+            <select
+              name="role"
+              defaultValue={row.role}
+              aria-label={t('users.roleFor').replace('{name}', row.name)}
+              className="h-control rounded-control border border-border-strong bg-surface px-z2 text-sm text-ink"
+            >
+              {choices.map((role) => (
+                <option key={role} value={role}>
+                  {t(`roles.${role}` as MessageKey)}
+                </option>
+              ))}
+            </select>
+            <Button type="submit" variant="ghost" size="compact">
+              {t('users.changeRole')}
+            </Button>
+          </form>
+        )
+      },
     },
     {
       key: 'scope',
@@ -164,6 +221,24 @@ export default async function UsersPage() {
           </Link>
         ) : null}
       </div>
+
+      {refused ? (
+        <p
+          role="alert"
+          className="border-b border-border bg-surface px-gutter py-z2 text-base text-danger"
+        >
+          {t(refused)}
+        </p>
+      ) : changed ? (
+        <p
+          role="status"
+          className="border-b border-border bg-surface px-gutter py-z2 text-base text-success"
+        >
+          {t('users.roleChanged')
+            .replace('{name}', changed.name)
+            .replace('{role}', t(`roles.${changed.role}` as MessageKey))}
+        </p>
+      ) : null}
 
       <Table
         caption={t('users.title')}

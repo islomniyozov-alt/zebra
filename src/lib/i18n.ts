@@ -3101,6 +3101,17 @@ const en = {
   'users.error.companyNotInOrg': 'Choose an authority you work under.',
   'users.error.notFound': 'That user is no longer here.',
   'users.error.cannotDeactivateSelf': 'You cannot deactivate your own account.',
+  'users.changeRole': 'Change',
+  'users.roleFor': 'Role for {name}',
+  'users.roleChanged':
+    '{name} is now {role}. Their open sessions have ended; they sign in again.',
+  'users.error.cannotChangeSelf': 'You cannot change your own role.',
+  'users.error.unchanged': 'That is already their role.',
+  'users.error.ownerNeedsOwner': 'Only an owner can change an owner’s role.',
+  'users.error.lastOwner':
+    'This is the only owner. Make somebody else an owner first.',
+  'users.error.driverViaLink':
+    'A driver’s sign-in is managed from the driver’s record, not here.',
   'documents.download': 'Download',
   'documents.downloadFailed': 'That document could not be opened.',
   'email.reset.subject': 'Reset your Zebra password',
@@ -6244,6 +6255,18 @@ const ru: Dictionary = {
   'users.error.notFound': 'Этого пользователя здесь больше нет.',
   'users.error.cannotDeactivateSelf':
     'Нельзя отключить собственную учётную запись.',
+  'users.changeRole': 'Изменить',
+  'users.roleFor': 'Роль для {name}',
+  'users.roleChanged':
+    '{name} теперь {role}. Открытые сеансы завершены; нужно войти снова.',
+  'users.error.cannotChangeSelf': 'Нельзя изменить собственную роль.',
+  'users.error.unchanged': 'У пользователя уже эта роль.',
+  'users.error.ownerNeedsOwner':
+    'Роль владельца может изменить только владелец.',
+  'users.error.lastOwner':
+    'Это единственный владелец. Сначала назначьте владельцем кого-то ещё.',
+  'users.error.driverViaLink':
+    'Вход водителя управляется из карточки водителя, а не здесь.',
   'documents.download': 'Скачать',
   'documents.downloadFailed': 'Не удалось открыть документ.',
   'email.reset.subject': 'Сброс пароля в Zebra',
@@ -9348,6 +9371,16 @@ const fa: Dictionary = {
   'users.error.companyNotInOrg': 'شرکتی را انتخاب کنید که با آن کار می‌کنید.',
   'users.error.notFound': 'این کاربر دیگر اینجا نیست.',
   'users.error.cannotDeactivateSelf': 'نمی‌توانید حساب خودتان را غیرفعال کنید.',
+  'users.changeRole': 'تغییر',
+  'users.roleFor': 'نقش برای {name}',
+  'users.roleChanged':
+    '{name} اکنون {role} است. نشست‌های باز پایان یافت؛ باید دوباره وارد شود.',
+  'users.error.cannotChangeSelf': 'نمی‌توانید نقش خودتان را تغییر دهید.',
+  'users.error.unchanged': 'این نقش از قبل نقش اوست.',
+  'users.error.ownerNeedsOwner': 'فقط مالک می‌تواند نقش یک مالک را تغییر دهد.',
+  'users.error.lastOwner': 'این تنها مالک است. ابتدا شخص دیگری را مالک کنید.',
+  'users.error.driverViaLink':
+    'ورود راننده از پرونده راننده مدیریت می‌شود، نه از اینجا.',
   'documents.download': 'دریافت',
   'documents.downloadFailed': 'این سند باز نشد.',
   'email.reset.subject': 'بازنشانی گذرواژهٔ زبرا',

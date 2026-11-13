@@ -227,3 +227,115 @@ export async function setUserActive(
 
   return { ok: true }
 }
+
+// ── CHANGING A MEMBER'S ROLE (§6.11, owner's instruction 2026-11-13) ────────
+
+export type ChangeRoleFailure =
+  | 'not_found'
+  | 'cannot_change_self'
+  | 'unchanged'
+  | 'role_not_grantable'
+  | 'owner_needs_owner'
+  | 'last_owner'
+  | 'driver_via_link'
+
+export type ChangeRoleOutcome =
+  | { ok: true; from: Role; to: Role; sessionsEnded: number }
+  | { ok: false; reason: ChangeRoleFailure }
+
+/**
+ * Change one member's role in THIS organization.
+ *
+ * WHO MAY CALL IT is `user:update`, decided in `permissions.ts` and checked by
+ * the action's `withCurrentOrg` — OWNER and ADMIN hold it and nobody else.
+ * What this function decides is which CHANGES are allowed, in the order the
+ * refusals are most informative:
+ *
+ *   1. never yourself — the next screen is decided by the role, and a slip
+ *      would end the very session that could undo it;
+ *   2. the target must be a member here — `User` is not tenant-scoped, so the
+ *      membership lookup is what stands between a posted id and somebody
+ *      else's employee (the same reasoning as `setUserActive`);
+ *   3. DRIVER is neither granted nor removed here — the driver link owns that
+ *      sign-in and ties it to a Driver record (§6.11, for the owner's ruling);
+ *   4. an ADMIN may not change an OWNER's role, and may grant only what
+ *      `grantableRoles` lets an ADMIN create — demoting the owner is minting
+ *      one reached from the other side;
+ *   5. never the LAST OWNER — counted inside this transaction, so two changes
+ *      at once cannot both see a second owner who is about to stop being one.
+ *
+ * THE UPDATE IS BY ID, so the audit extension reads the row before it and
+ * writes `Membership` / `update` with `changes.role` `{ from, to }`. Then
+ * every live session whose active organization is this one is revoked: the
+ * role is copied onto the session at sign-in, and a demoted ADMIN would
+ * otherwise keep ADMIN until the cookie expired. Other organizations'
+ * sessions are left alone — this is a change in this organization.
+ */
+export async function changeUserRole(
+  tx: TxClient,
+  organizationId: string,
+  actor: { userId: string; role: Role },
+  userId: string,
+  to: Role,
+): Promise<ChangeRoleOutcome> {
+  if (userId === actor.userId)
+    return { ok: false, reason: 'cannot_change_self' }
+
+  const membership = await tx.membership.findFirst({
+    where: { organizationId, userId },
+    select: { id: true, role: true },
+  })
+  if (!membership) return { ok: false, reason: 'not_found' }
+  const from = membership.role
+
+  if (from === to) return { ok: false, reason: 'unchanged' }
+  if (from === 'DRIVER' || to === 'DRIVER') {
+    return { ok: false, reason: 'driver_via_link' }
+  }
+  if (actor.role !== 'OWNER' && from === 'OWNER') {
+    return { ok: false, reason: 'owner_needs_owner' }
+  }
+  if (!grantableRoles(actor.role).includes(to)) {
+    return { ok: false, reason: 'role_not_grantable' }
+  }
+  if (from === 'OWNER') {
+    // LOCKED, NOT JUST COUNTED. Two owners demoting each other at the same
+    // moment would each count two owners under READ COMMITTED and leave the
+    // organization with none. `FOR UPDATE` makes the second wait for the
+    // first and re-read the rows after it commits — by then the first's
+    // target is no longer an OWNER, so the second counts one and is refused.
+    const owners = await tx.$queryRaw<{ id: string }[]>`
+      SELECT m."id" FROM "Membership" m
+       WHERE m."organizationId" = ${organizationId} AND m."role" = 'OWNER'
+       FOR UPDATE
+    `
+    if (owners.length <= 1) return { ok: false, reason: 'last_owner' }
+  }
+
+  await tx.membership.update({
+    where: { id: membership.id },
+    data: { role: to },
+  })
+  const { count } = await tx.session.updateMany({
+    where: { userId, activeOrganizationId: organizationId, revokedAt: null },
+    data: { revokedAt: new Date() },
+  })
+
+  return { ok: true, from, to, sessionsEnded: count }
+}
+
+/**
+ * The roles the `/users` screen offers for one row, or null for no control —
+ * the same refusals `changeUserRole` makes, asked before the click so the
+ * screen does not offer what the server will refuse. The server still asks
+ * them all again; this only decides what is drawn.
+ */
+export function roleChoicesFor(
+  actor: { userId: string; role: Role },
+  target: { id: string; role: Role },
+): Role[] | null {
+  if (target.id === actor.userId) return null
+  if (target.role === 'DRIVER') return null
+  if (actor.role !== 'OWNER' && target.role === 'OWNER') return null
+  return grantableRoles(actor.role).filter((role) => role !== 'DRIVER')
+}

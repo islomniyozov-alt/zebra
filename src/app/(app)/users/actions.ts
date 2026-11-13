@@ -2,7 +2,8 @@
 
 import { revalidatePath } from 'next/cache'
 import { withCurrentOrg } from '@/lib/auth-context'
-import { createUser, setUserActive } from '@/lib/users'
+import { redirect } from 'next/navigation'
+import { changeUserRole, createUser, setUserActive } from '@/lib/users'
 import { CREATE_USER_INITIAL, type CreateUserState } from './user-state'
 import type { MessageKey } from '@/lib/i18n'
 import type { Role } from '@/generated/prisma/client'
@@ -58,6 +59,33 @@ export async function createUserAction(
       temporaryPassword: outcome.temporaryPassword,
     },
   }
+}
+
+/**
+ * §6.11. Reads the form, calls `changeUserRole`, revalidates, and returns to
+ * `/users` with the outcome in the query — the rules live in the function,
+ * and this file only carries its answer back to the screen.
+ */
+export async function changeUserRoleAction(
+  userId: string,
+  formData: FormData,
+): Promise<void> {
+  const to = String(formData.get('role') ?? '') as Role
+  const outcome = await withCurrentOrg('update', 'user', (tx, session) =>
+    changeUserRole(
+      tx,
+      session.organizationId,
+      { userId: session.userId, role: session.role },
+      userId,
+      to,
+    ),
+  )
+  revalidatePath('/users')
+  redirect(
+    outcome.ok
+      ? `/users?changed=${encodeURIComponent(userId)}`
+      : `/users?refused=${encodeURIComponent(outcome.reason)}`,
+  )
 }
 
 export async function setUserActiveAction(
