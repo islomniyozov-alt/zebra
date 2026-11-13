@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 // `@ts-expect-error` is itself a type error here, which is the compiler making
 // the same point this file makes about guards that assert nothing.
 import {
+  ceilingKeys,
   claimRay,
   classify,
   credentialsFor,
@@ -394,6 +395,146 @@ describe('the verdict', () => {
     // AND IT IS NOT COUNTED AS RENDERED, which is the arithmetic that made the
     // first draft print "55 answered" beside "0 problems".
     expect(sums.rendered).toBe(1)
+  })
+
+  // ── THE MEMORY CEILING IS NAMED, NOT COUNTED (§6.8 v10.94; GAPS 44) ────
+  // Owner's ruling 2026-11-13. The condition is the worker's own account of
+  // the ray; `ceilingKeys` turns the recorded server errors into the set
+  // `tally` exempts on. Four shapes, each the one the rule could get wrong.
+
+  it('a 5xx whose worker account names the ceiling is named, not counted — owner pass and matrix half alike', () => {
+    const recorded = [
+      {
+        role: 'owner',
+        route: '/b',
+        worker: {
+          exceptions: [
+            {
+              name: 'Error',
+              message: 'Dynamic import exceeded memory limits.',
+            },
+          ],
+          logs: [],
+        },
+      },
+      {
+        role: 'accounting',
+        route: '/b',
+        worker: {
+          exceptions: [],
+          logs: [{ level: 'error', message: 'Worker exceeded memory limit.' }],
+        },
+      },
+    ]
+    const ceiling = ceilingKeys(recorded)
+    expect([...ceiling]).toEqual(['owner|/b', 'accounting|/b'])
+    const matrix = new Map([
+      ['/b', { owner: 'reach', accounting: 'reach', note: '' }],
+    ])
+    const findings = matrixFindings(
+      [
+        { route: '/b', role: 'owner', status: 500, verdict: 'SERVER ERROR' },
+        {
+          route: '/b',
+          role: 'accounting',
+          status: 500,
+          verdict: 'SERVER ERROR',
+        },
+      ],
+      matrix,
+    )
+    const sums = tally({
+      authed: [ok, { route: '/b', verdict: 'SERVER ERROR' }],
+      anon: [],
+      unresolved: [],
+      findings,
+      matrix,
+      ceiling,
+    })
+    expect(sums.problems).toBe(0)
+    expect(sums.errors).toEqual([])
+    expect(sums.ceilingErrors.map((row) => row.route)).toEqual(['/b'])
+    expect(sums.ceilingFindings.map((row) => row.role)).toEqual(['accounting'])
+    expect(sums.fresh).toEqual([])
+    // NAMED, NOT RENDERED: the arithmetic that keeps "rendered" honest.
+    expect(sums.rendered).toBe(1)
+  })
+
+  it('a 5xx with NO worker account still counts — unreadable is not clean', () => {
+    const ceiling = ceilingKeys([
+      { role: 'owner', route: '/b', worker: null },
+      {
+        role: 'owner',
+        route: '/c',
+        workerNote: 'no tail event for this ray within 30 s',
+      },
+    ])
+    expect(ceiling.size).toBe(0)
+    const sums = tally({
+      authed: [ok, { route: '/b', verdict: 'SERVER ERROR' }],
+      anon: [],
+      unresolved: [],
+      ceiling,
+    })
+    expect(sums.problems).toBe(1)
+  })
+
+  it('any other exception still counts', () => {
+    const ceiling = ceilingKeys([
+      {
+        role: 'owner',
+        route: '/b',
+        worker: {
+          exceptions: [{ name: 'TypeError', message: 'x is not a function' }],
+          logs: [{ level: 'error', message: 'a memory of something else' }],
+        },
+      },
+    ])
+    expect(ceiling.size).toBe(0)
+    expect(
+      tally({
+        authed: [ok, { route: '/b', verdict: 'SERVER ERROR' }],
+        anon: [],
+        unresolved: [],
+        ceiling,
+      }).problems,
+    ).toBe(1)
+  })
+
+  it("the exemption is per role and route: another role's 5xx on the same route is not covered by the owner's", () => {
+    const ceiling = ceilingKeys([
+      {
+        role: 'owner',
+        route: '/b',
+        worker: {
+          exceptions: [
+            {
+              name: 'Error',
+              message: 'Dynamic import exceeded memory limits.',
+            },
+          ],
+          logs: [],
+        },
+      },
+    ])
+    const matrix = new Map([
+      ['/b', { owner: 'reach', driver: 'reach', note: '' }],
+    ])
+    const findings = matrixFindings(
+      [{ route: '/b', role: 'driver', status: 500, verdict: 'SERVER ERROR' }],
+      matrix,
+    )
+    const sums = tally({
+      authed: [ok, { route: '/b', verdict: 'SERVER ERROR' }],
+      anon: [],
+      unresolved: [],
+      findings,
+      matrix,
+      ceiling,
+    })
+    expect(sums.ceilingErrors.length).toBe(1)
+    expect(sums.fresh.map((row) => row.role)).toEqual(['driver'])
+    expect(sums.problems).toBe(1)
   })
 
   it('counts a page a stranger could read', () => {

@@ -111,7 +111,7 @@ const isDynamic = (route) => /\[[^\]]+\]/.test(route)
 // isolation counterpart — whose page correctly 404s for the signed-in owner. A
 // sweep that did that would report a working tenant boundary as a broken screen,
 // and the obvious "fix" would be to weaken the boundary.
-const ID_SOURCES = [
+export const ID_SOURCES = [
   ['/brokers/[id]', 'Customer'],
   ['/companies/[id]', 'Company'],
   ['/drivers/[id]', 'Driver'],
@@ -266,6 +266,43 @@ export async function fetchTwice(
 /** The verdicts that are the server's failure, whatever the status line says. */
 export const isServerError = (verdict) =>
   verdict === 'SERVER ERROR' || verdict === 'ERROR BOUNDARY'
+
+// ── THE MEMORY CEILING IS NAMED, NOT COUNTED — UNTIL GAPS 44 READS CLEAN ──
+//
+// Owner's ruling, 2026-11-13 (§6.8 v10.94). Five deploy sweeps in a row on
+// 2026-11-12/13 were NOT OK on `Dynamic import exceeded memory limits` —
+// 21–28 of their 30–33 server errors — across four commits, three of them
+// doc-only and one the revert of the day's only code change, while
+// production's persisted logs held zero such outcomes for the week. A receipt
+// red on a fault the commit did not cause vouches for nothing, so a 5xx whose
+// WORKER ACCOUNT names the ceiling is printed by name and kept in the detail
+// file, and not counted. The condition is the runtime's own word for its own
+// ray: a 5xx with no tail event stays the fault it always was — "unreadable
+// is not clean" — and so does any other exception.
+
+/** The runtime's two wordings for the same ceiling, matched on the words they share. */
+export const CEILING_WORDS = /exceeded memory limit/i
+
+/** Whether a worker account (a trimmed tail event) names the memory ceiling. */
+export const namesCeiling = (worker) =>
+  Boolean(worker) &&
+  [
+    ...(worker.exceptions ?? []).map(
+      (entry) => `${entry?.name ?? ''}: ${entry?.message ?? ''}`,
+    ),
+    ...(worker.logs ?? []).map((entry) => entry?.message ?? ''),
+  ].some((line) => CEILING_WORDS.test(String(line)))
+
+/**
+ * The `role|route` keys of every recorded server error whose worker account
+ * names the ceiling — the one condition `tally` exempts on.
+ */
+export const ceilingKeys = (serverErrors) =>
+  new Set(
+    serverErrors
+      .filter((row) => namesCeiling(row.worker))
+      .map((row) => `${row.role}|${row.route}`),
+  )
 
 /**
  * One server error as the verdict file keeps it: who asked, for what, the ray
@@ -519,7 +556,7 @@ export function matrixFindings(seen, matrix) {
  * `refusedByTable`: neither rendered nor a problem, listed by name. A 4xx
  * anywhere the table says `reach` is the fault it always was.
  *
- * @param {{ authed: any[], anon: any[], unresolved: string[], findings?: any[], matrix?: Map<string, any> }} input
+ * @param {{ authed: any[], anon: any[], unresolved: string[], findings?: any[], matrix?: Map<string, any>, ceiling?: Set<string> }} input
  */
 export const tally = ({
   authed,
@@ -527,9 +564,20 @@ export const tally = ({
   unresolved,
   findings = [],
   matrix = new Map(),
+  ceiling = new Set(),
 }) => {
-  const errors = authed.filter(
+  // THE CEILING, NAMED AND NOT COUNTED (§6.8 v10.94; GAPS 44). `ceiling` is
+  // the set of `role|route` keys whose server error's worker account names
+  // the memory ceiling — `ceilingKeys(serverErrors)` — and the owner's pass
+  // is the `owner` role. Nothing else is exempt: a 5xx with no worker
+  // account is in `errors` as before.
+  const atCeiling = (role, route) => ceiling.has(`${role}|${route}`)
+  const serverErrors = authed.filter(
     (row) => row.verdict === 'SERVER ERROR' || row.verdict === 'ERROR BOUNDARY',
+  )
+  const errors = serverErrors.filter((row) => !atCeiling('owner', row.route))
+  const ceilingErrors = serverErrors.filter((row) =>
+    atCeiling('owner', row.route),
   )
   const ownerRefused = (row) => matrix.get(row.route)?.owner === 'refuse'
   const refusedByTable = authed.filter(
@@ -551,20 +599,36 @@ export const tally = ({
   // disagreement while the owner rules; it may not park a 500.
   const isKnown = (row) => row.known !== null && row.got !== 'error'
   const known = findings.filter(isKnown)
+  // A role's 5xx at the ceiling is the same fault seen from the matrix half:
+  // named in `ceilingFindings`, not in `fresh`, on the same condition.
+  // The owner's own 5xx is already `ceilingErrors`; here the other roles.
+  const ceilingFindings = findings.filter(
+    (row) =>
+      row.got === 'error' &&
+      row.role !== 'owner' &&
+      atCeiling(row.role, row.route),
+  )
   const fresh = findings.filter(
     (row) =>
       !isKnown(row) &&
-      !(row.role === 'owner' && (row.got === 'error' || row.got === 'refuse')),
+      !(
+        row.role === 'owner' &&
+        (row.got === 'error' || row.got === 'refuse')
+      ) &&
+      !ceilingFindings.includes(row),
   )
   return {
     rendered:
       authed.length -
       errors.length -
+      ceilingErrors.length -
       clientErrors.length -
       refusedByTable.length -
       redirects.length -
       unreachable.length,
     errors,
+    ceilingErrors,
+    ceilingFindings,
     clientErrors,
     refusedByTable,
     redirects,
@@ -1136,7 +1200,7 @@ async function sweep() {
     console.log(`SERVER ERRORS, RECORDED IN ${detail}:`)
     for (const row of serverErrors) {
       console.log(
-        `   ${row.role.padEnd(10)} ${row.route.padEnd(30)} ${row.status} ray ${row.ray ?? '(none)'}`,
+        `   ${row.role.padEnd(10)} ${row.route.padEnd(30)} ${row.status} ray ${row.ray ?? '(none)'}${namesCeiling(row.worker) ? ' — MEMORY CEILING (named, not counted)' : ''}`,
       )
       const said = [
         ...(row.worker?.exceptions ?? []).map(
@@ -1164,7 +1228,10 @@ async function sweep() {
     if (!protectedRoutes.has(route))
       unresolved.push(`${route} (matrix row, no page)`)
   }
-  const sums = tally({ authed, anon, unresolved, findings, matrix })
+  // The exemption's one condition: the worker's own word for the ray, read
+  // from the tail above. A 5xx the tail never accounted for is not in it.
+  const ceiling = ceilingKeys(serverErrors)
+  const sums = tally({ authed, anon, unresolved, findings, matrix, ceiling })
 
   console.log('\n' + '='.repeat(70))
   console.log(
@@ -1234,8 +1301,29 @@ async function sweep() {
       console.log(`   UNMATCHED ${row.role}#${row.attempt}: ${line}`)
   sums.problems += unmatched.length
 
+  // THE CEILING, BY NAME (§6.8 v10.94; GAPS 44): every 5xx the worker's own
+  // account calls the memory ceiling, the owner's pass and the matrix half
+  // alike, with the ray that names the request. Not in `problems`; never
+  // silent either — a clean read and a named read are different lines.
+  const named = sums.ceilingErrors.length + sums.ceilingFindings.length
+  if (named > 0) {
+    console.log(
+      `MEMORY-CEILING 500(S) — NAMED, NOT COUNTED (GAPS 44, until its probe reads clean): ${named}`,
+    )
+    for (const row of sums.ceilingErrors)
+      console.log(`   CEILING owner      ${row.route}`)
+    for (const row of sums.ceilingFindings)
+      console.log(
+        `   CEILING ${row.role.padEnd(10)} ${row.route.padEnd(30)} matrix ${row.expected}, got ${row.got} (${row.status})`,
+      )
+  }
+
   if (sums.problems === 0) {
-    console.log(`SWEEP CLEAN — OK. ${authed.length} PAGE(S), 0 PROBLEM(S).`)
+    console.log(
+      named > 0
+        ? `SWEEP CLEAN EXCEPT THE CEILING — OK. ${authed.length} PAGE(S), 0 PROBLEM(S), ${named} MEMORY-CEILING 500(S) NAMED.`
+        : `SWEEP CLEAN — OK. ${authed.length} PAGE(S), 0 PROBLEM(S).`,
+    )
     console.log('='.repeat(70))
     return 0
   }
