@@ -57,15 +57,16 @@ describe('the shell loads for a role with no organization read', () => {
   // read is asked for first.
   const layout = readFileSync(join(APP, 'layout.tsx'), 'utf8')
 
-  // SINCE 2026-11-12 (GAPS 42 item 3, v10.93) BOTH COME FROM THE ONE READ:
-  // the name beside the session's columns, the density through the function's
-  // own predicate — no `company:read` question, no tenant transaction, so a
-  // role without the permission is served the same way as every other.
-  it('takes the name and the density from the one shell read, under no permission question', () => {
-    expect(layout).toMatch(/const account = shell\.account/)
-    expect(layout).toMatch(/const density: Density = shell\.density/)
-    expect(layout).not.toMatch(/ownAccountDb/)
-    expect(layout).not.toMatch(/currentUserCan\('read', 'company'\)/)
-    expect(layout).not.toMatch(/readDensity/)
+  it('reads the name through the own-account handle', () => {
+    expect(layout).toMatch(/ownAccountDb\(\)\.user\.findUnique\(/)
+  })
+
+  it('asks before the density read, and falls back to the default', () => {
+    // The read is timed since GAPS 26 (`timed(() => withCurrentOrg(...))`);
+    // the question still comes first and the fallback is still the default.
+    expect(layout).toMatch(
+      /\(await currentUserCan\('read', 'company'\)\)\s*\?\s*await timed\(\(\) =>\s*withCurrentOrg\('read', 'company'/,
+    )
+    expect(layout).toMatch(/densityRead\?\.value \?\? DEFAULT_DENSITY/)
   })
 })

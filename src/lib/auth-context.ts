@@ -7,10 +7,10 @@ import { withOrg, type TransactionTimeouts, type TxClient } from './tenancy'
 import {
   SESSION_COOKIE,
   SESSION_TTL_MS,
+  resolveSession,
   type RequestMetadata,
   type SessionContext,
 } from './session'
-import { resolveShellContext, type ShellContext } from './shell-context'
 
 // ---------------------------------------------------------------------------
 // THE REQUEST'S SESSION
@@ -45,22 +45,10 @@ export class ForbiddenError extends Error {
 }
 
 /** Cached per request: one session lookup however many times it is asked for. */
-/**
- * THE SHELL'S ONE READ (GAPS 42 item 3; §6.10 v10.93; migration 71): the
- * session, the viewer's own name and email, and the density preference in
- * one statement, cached for the request. `getSession` below is DERIVED from
- * it, so a route or an action pays the same one statement it always paid,
- * with two more columns — never a second read of the session row.
- */
-export const getShellContext = cache(async (): Promise<ShellContext | null> => {
+export const getSession = cache(async (): Promise<SessionContext | null> => {
   const store = await cookies()
-  return resolveShellContext(prisma, store.get(SESSION_COOKIE)?.value)
+  return resolveSession(prisma, store.get(SESSION_COOKIE)?.value)
 })
-
-export const getSession = cache(
-  async (): Promise<SessionContext | null> =>
-    (await getShellContext())?.session ?? null,
-)
 
 export async function requireSession(): Promise<SessionContext> {
   const session = await getSession()

@@ -90,7 +90,7 @@ function toJsonInput(
   return overrides ? (overrides as unknown as Prisma.InputJsonValue) : undefined
 }
 
-export function parseOverrides(value: unknown): PermissionOverrides | null {
+function parseOverrides(value: unknown): PermissionOverrides | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return null
   }
