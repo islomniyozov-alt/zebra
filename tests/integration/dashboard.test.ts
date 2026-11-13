@@ -18,7 +18,28 @@ import {
   panelFigures,
   topDriversByGross,
 } from '@/lib/dashboard-counts'
-import { complianceCount, complianceHorizons } from '@/lib/compliance'
+import {
+  complianceCount,
+  complianceHorizons,
+  complianceOnce,
+} from '@/lib/compliance'
+import {
+  customerRows,
+  dayRows,
+  moneyRows,
+  weekCompanyRows,
+} from '@/lib/dashboard-kpis'
+import { firstSettledPeriodStart } from '@/lib/by-company'
+import {
+  dqfChecklist,
+  dqfFactsForDrivers,
+  dqfIncompleteCount,
+  dqfRoster,
+  isQualifiable,
+} from '@/lib/dqf'
+import { readDashboard } from '@/lib/dashboard-page'
+import { createPrismaClient, statementsOf } from '@/lib/db'
+import { DEFAULT_PERIOD, grainOf, periodWindow } from '@/lib/rolling-period'
 import { recordPayment } from '@/lib/payments'
 import { isLoadViewName, viewContext, viewWhere } from '@/lib/load-views'
 import type { AuthorizedSession } from '@/lib/permissions'
@@ -1264,5 +1285,175 @@ describe('the three panels read real state (part 3)', () => {
     // live truck's inspection, not the sold truck's registration.
     expect(rowAfter.count - rowBefore.count).toBe(2)
     expect(rowAfter.expired - rowBefore.expired).toBe(1)
+  }, 300_000)
+
+  // ── ONE STATEMENT PER CARD AGREES WITH THE READS IT REPLACES (v10.95) ──
+  //
+  // Run LAST in this file on purpose: every fixture above — the sold truck,
+  // the superseded registration, the payee, the INACTIVE driver, loads with
+  // and without a customer, a FINAL batch — is in the organization by now,
+  // so each agreement is over state that exercises the rule, not over an
+  // empty table where any two reads agree.
+
+  it('the money card: one statement equals the four reads, on the same state', async () => {
+    // THE WHOLE YEAR, not the panels' window: the loads this file books are
+    // delivered across November, and the agreement must be over rows.
+    const input = {
+      from: new Date(Date.UTC(2026, 0, 1)),
+      to: new Date(Date.UTC(2027, 0, 1)),
+      companyId: null,
+      grain: 'week' as const,
+    }
+    const [one, weeks, customers, days, payKnownFrom] = await inOrg((tx) =>
+      Promise.all([
+        moneyRows(tx, input),
+        weekCompanyRows(tx, input),
+        customerRows(tx, input),
+        dayRows(tx, input),
+        firstSettledPeriodStart(tx),
+      ]),
+    )
+    expect(one.rows).toEqual(weeks)
+    expect(one.customers).toEqual(customers)
+    expect(one.days).toEqual(days)
+    expect(one.payKnownFrom).toEqual(payKnownFrom)
+    // ABOVE ZERO: the window holds freight, so the agreement is not vacuous.
+    expect(weeks.length).toBeGreaterThan(0)
+    expect(days.length).toBeGreaterThan(0)
+    // The daily grain too — the bucket expression is the one thing that
+    // differs between the presets.
+    const daily = { ...input, grain: 'day' as const }
+    const [oneDaily, weeksDaily] = await inOrg((tx) =>
+      Promise.all([moneyRows(tx, daily), weekCompanyRows(tx, daily)]),
+    )
+    expect(oneDaily.rows).toEqual(weeksDaily)
+  }, 300_000)
+
+  it('the DQF ring: the roster-with-facts statement equals the roster plus the facts reads, driver by driver', async () => {
+    const roster = await inOrg((tx) => dqfRoster(tx, [alphaId]))
+    const reference = await inOrg(async (tx) => {
+      const drivers = await tx.driver.findMany({
+        where: { companyId: alphaId },
+        select: {
+          id: true,
+          hireDate: true,
+          status: true,
+          deletedAt: true,
+          kind: true,
+        },
+      })
+      const facts = await dqfFactsForDrivers(
+        tx,
+        drivers.map((d) => d.id),
+      )
+      return { drivers, facts }
+    })
+    expect(roster.length).toBe(reference.drivers.length)
+    expect(roster.length).toBeGreaterThan(2)
+    for (const row of roster) {
+      const driver = reference.drivers.find((d) => d.id === row.id)!
+      expect({
+        status: row.status,
+        deletedAt: row.deletedAt,
+        kind: row.kind,
+        hireDate: row.hireDate,
+      }).toEqual({
+        status: driver.status,
+        deletedAt: driver.deletedAt,
+        kind: driver.kind,
+        hireDate: driver.hireDate,
+      })
+      expect(row.facts).toEqual(
+        reference.facts.get(row.id) ?? {
+          hireDate: driver.hireDate,
+          documents: [],
+          compliance: [],
+        },
+      )
+    }
+    // And the figure the ring shows is the same figure, by the same rule.
+    const split = await inOrg((tx) => dqfSplit(tx, [alphaId], NOW))
+    const qualifiable = reference.drivers.filter((d) => isQualifiable(d))
+    const incomplete = qualifiable.filter(
+      (d) =>
+        dqfIncompleteCount(
+          dqfChecklist(
+            reference.facts.get(d.id) ?? {
+              hireDate: d.hireDate,
+              documents: [],
+              compliance: [],
+            },
+            NOW,
+          ),
+        ) > 0,
+    ).length
+    expect(split).toEqual({
+      complete: qualifiable.length - incomplete,
+      incomplete,
+    })
+    expect(qualifiable.length).toBeLessThan(reference.drivers.length)
+  }, 300_000)
+
+  it('the compliance read: one statement equals the row at the lead days and the panel at 90, over the sold, superseded and renewed rows', async () => {
+    const scope = { companyId: { in: [alphaId] } }
+    const [once, row, panel] = await inOrg((tx) =>
+      Promise.all([
+        complianceOnce(tx, [alphaId], NOW),
+        complianceCount(tx, scope, NOW),
+        complianceHorizons(tx, [alphaId], NOW),
+      ]),
+    )
+    expect(once.queueCount).toBe(row.count)
+    expect(once.queueExpired).toBe(row.expired)
+    expect(once.horizons).toEqual(panel)
+    expect(once.horizons.d90).toBeGreaterThan(0)
+    expect(row.count).toBeGreaterThan(0)
+    // Unscoped too — the organization's whole fleet, every authority.
+    const [onceAll, rowAll, panelAll] = await inOrg((tx) =>
+      Promise.all([
+        complianceOnce(tx, [], NOW),
+        complianceCount(tx, {}, NOW),
+        complianceHorizons(tx, [], NOW),
+      ]),
+    )
+    expect(onceAll.queueCount).toBe(rowAll.count)
+    expect(onceAll.horizons).toEqual(panelAll)
+  }, 300_000)
+
+  it('the whole dashboard read is at most nine statements for the owner, named — set_config and COMMIT included', async () => {
+    const client = createPrismaClient(process.env.DIRECT_DATABASE_URL!)
+    try {
+      const window = periodWindow(DEFAULT_PERIOD, NOW)
+      const before = statementsOf(client)!
+      const reads = await client.$transaction(
+        async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.current_org_id', ${organizationId}, true)`
+          return readDashboard(tx, asOwner(), {
+            companyParam: null,
+            window,
+            grain: grainOf(DEFAULT_PERIOD),
+            now: NOW,
+            may: { money: true, panels: true, fleet: true, compliance: true },
+          })
+        },
+        { maxWait: 20_000, timeout: LOAD_WRITE_TIMEOUT_MS },
+      )
+      const count = statementsOf(client)! - before
+      // The count is read from the client's own query events (`statementsOf`,
+      // GAPS 42 item 2) — the same source the tail's page.timing reads.
+      expect(count).toBeLessThanOrEqual(9)
+      // Every card ran, and every span is a number: nothing was skipped to
+      // make the budget.
+      expect(reads.money).not.toBeNull()
+      expect(reads.panels).not.toBeNull()
+      expect(reads.dqf).not.toBeNull()
+      expect(reads.horizons).not.toBeNull()
+      for (const span of Object.values(reads.spans)) expect(span).not.toBeNull()
+      // With the shell's one read the owner's page.timing reads ten; over
+      // twelve is the owner's line, and this is where it would be crossed.
+      expect(count + 1).toBeLessThan(12)
+    } finally {
+      await client.$disconnect()
+    }
   }, 300_000)
 })

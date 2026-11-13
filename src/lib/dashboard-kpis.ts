@@ -1,7 +1,6 @@
 import { Prisma } from '@/generated/prisma/client'
 import { bucketExprSql } from './week-sql'
 import { bucketsIn, type Grain, type PeriodWindow } from '@/lib/rolling-period'
-import { firstSettledPeriodStart } from './by-company'
 
 /** Plain transaction client, as the other reporting modules declare it. */
 type TxClient = Prisma.TransactionClient
@@ -316,6 +315,163 @@ export async function dayRows(
   return rows.map((row) => ({ day: row.day, loads: Number(row.loads) }))
 }
 
+/** What `moneyRows` answers in one statement: the four reads above, split. */
+export interface MoneyRows {
+  rows: WeekCompanyRow[]
+  customers: CustomerRow[]
+  days: DayRow[]
+  payKnownFrom: Date | null
+}
+
+/**
+ * THE MONEY CARD IN ONE STATEMENT (§6.1.1 v10.95; owner's instruction
+ * 2026-11-13: one statement per card, one predicate).
+ *
+ * Q1, Q2, Q3 and `firstSettledPeriodStart` read the same delivered loads
+ * three times for three groupings and then asked a fourth question — four
+ * statements, three scans of the window. Here the ONE predicate —
+ * `deliveredIn`'s window and scope — is evaluated once into `delivered`,
+ * priced once, and the three groupings and the first settled period come
+ * back as one result set split by a `kind` column. The four functions above
+ * stay as they are: `tests/integration/dashboard.test.ts` holds this
+ * statement's split equal to the four of them on the same state, which is
+ * the agreement that lets one SQL text replace three.
+ *
+ * ORDER IS RESTORED HERE, NOT IN SQL. A UNION ALL does not promise the order
+ * of its branches' rows, so each part is sorted as its own query sorted it:
+ * weeks by bucket then company name, customers by gross descending, days by
+ * day. `assembleDashboard` sees exactly what it saw.
+ */
+export async function moneyRows(
+  tx: TxClient,
+  input: {
+    from: Date
+    to: Date
+    companyId: string | null
+    grain: Grain
+  },
+): Promise<MoneyRows> {
+  const bucket = bucketOf(input.grain)
+  const rows = await tx.$queryRaw<
+    {
+      kind: 'week' | 'customer' | 'day' | 'paystart'
+      bucket_at: Date | null
+      key_id: string | null
+      label: string | null
+      gross: bigint
+      pay: bigint
+      loads: bigint
+      miles: bigint
+    }[]
+  >`
+    WITH delivered AS (${deliveredIn(input.from, input.to, input.companyId)}),
+    priced AS (
+      SELECT
+        d."companyId",
+        d."customerId",
+        ${bucket} AS week_start,
+        date_trunc('day', d.del_date) AS day,
+        ${GROSS_CENTS} AS gross,
+        COALESCE(pay.amount, 0) AS pay,
+        d.miles AS miles
+      FROM delivered d
+      ${INVOICED}
+      LEFT JOIN LATERAL (
+        SELECT SUM(line."amountCents")::int AS amount
+        FROM "SettlementLoadLine" line
+        JOIN "Settlement" st ON st."id" = line."settlementId"
+        JOIN "SettlementBatch" b ON b."id" = st."batchId"
+        WHERE line."loadId" = d."id" AND b."status" IN ('FINAL', 'PAID')
+      ) pay ON TRUE
+    )
+    SELECT
+      'week'::text AS kind,
+      p.week_start AS bucket_at,
+      p."companyId"::text AS key_id,
+      c."name"::text AS label,
+      SUM(p.gross)::bigint AS gross,
+      SUM(p.pay)::bigint AS pay,
+      COUNT(*)::bigint AS loads,
+      SUM(p.miles)::bigint AS miles
+    FROM priced p
+    JOIN "Company" c ON c."id" = p."companyId"
+    GROUP BY p.week_start, p."companyId", c."name"
+    UNION ALL
+    SELECT
+      'customer'::text,
+      NULL::timestamp,
+      p."customerId"::text,
+      cu."name"::text,
+      SUM(p.gross)::bigint,
+      0::bigint,
+      COUNT(*)::bigint,
+      0::bigint
+    FROM priced p
+    LEFT JOIN "Customer" cu ON cu."id" = p."customerId"
+    GROUP BY p."customerId", cu."name"
+    UNION ALL
+    SELECT
+      'day'::text,
+      p.day,
+      NULL::text,
+      NULL::text,
+      0::bigint,
+      0::bigint,
+      COUNT(*)::bigint,
+      0::bigint
+    FROM priced p
+    GROUP BY p.day
+    UNION ALL
+    SELECT
+      'paystart'::text,
+      (
+        SELECT MIN(b."periodStart")
+        FROM "SettlementBatch" b
+        WHERE b."status" IN ('FINAL', 'PAID')
+      ),
+      NULL::text,
+      NULL::text,
+      0::bigint,
+      0::bigint,
+      0::bigint,
+      0::bigint
+  `
+
+  const weeks: WeekCompanyRow[] = rows
+    .filter((row) => row.kind === 'week')
+    .map((row) => ({
+      weekStart: row.bucket_at!,
+      companyId: row.key_id ?? '',
+      companyName: row.label ?? '',
+      grossCents: Number(row.gross),
+      driverPayCents: Number(row.pay),
+      loads: Number(row.loads),
+      miles: Number(row.miles),
+    }))
+    .sort(
+      (a, b) =>
+        a.weekStart.getTime() - b.weekStart.getTime() ||
+        a.companyName.localeCompare(b.companyName),
+    )
+  const customers: CustomerRow[] = rows
+    .filter((row) => row.kind === 'customer')
+    .map((row) => ({
+      customerId: row.key_id ?? '',
+      customerName: row.label ?? '',
+      grossCents: Number(row.gross),
+      loads: Number(row.loads),
+    }))
+    .sort((a, b) => b.grossCents - a.grossCents)
+  const days: DayRow[] = rows
+    .filter((row) => row.kind === 'day')
+    .map((row) => ({ day: row.bucket_at!, loads: Number(row.loads) }))
+    .sort((a, b) => a.day.getTime() - b.day.getTime())
+  const payKnownFrom =
+    rows.find((row) => row.kind === 'paystart')?.bucket_at ?? null
+
+  return { rows: weeks, customers, days, payKnownFrom }
+}
+
 // ---------------------------------------------------------------------------
 // THE PURE HALF. No clock, no database.
 // ---------------------------------------------------------------------------
@@ -587,21 +743,18 @@ export async function dashboardFor(
   // so tests can pin one.
   const grain = options.grain
 
-  const [rows, customers, days, payKnownFrom] = await Promise.all([
-    weekCompanyRows(tx, {
-      from: period.from,
-      to: period.to,
-      companyId,
-      grain,
-    }),
-    customerRows(tx, { from: period.from, to: period.to, companyId }),
-    dayRows(tx, { from: period.from, to: period.to, companyId }),
-    // THE FOURTH STATEMENT EARNS ITS PLACE: without it every period before
-    // Zebra started settling reports a confident margin made of unknown driver
-    // pay. Measured on dev, $2,571,007.51 against $184,774.65 actually
-    // recorded.
-    firstSettledPeriodStart(tx),
-  ])
+  // ONE STATEMENT (§6.1.1 v10.95). These were four — `weekCompanyRows`,
+  // `customerRows`, `dayRows` and `firstSettledPeriodStart`, three scans of
+  // the same window in parallel. `moneyRows` is the four in one result set,
+  // and the integration suite holds it equal to them. The first settled
+  // period still earns its place in it: without it every period before Zebra
+  // started settling reports a confident margin made of unknown driver pay.
+  const { rows, customers, days, payKnownFrom } = await moneyRows(tx, {
+    from: period.from,
+    to: period.to,
+    companyId,
+    grain,
+  })
 
   // EVERY BUCKET IN THE WINDOW, including the ones that earned nothing — a
   // bucket with no freight returns no row, and a series driven only by rows

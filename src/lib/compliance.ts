@@ -1,7 +1,7 @@
-import type {
-  ComplianceType,
-  DocumentType,
+import {
   Prisma,
+  type ComplianceType,
+  type DocumentType,
 } from '@/generated/prisma/client'
 import {
   companyScopeFilter,
@@ -554,6 +554,207 @@ export async function complianceHorizons(
     d30: within(PANEL_HORIZON_DAYS[0]),
     d60: within(PANEL_HORIZON_DAYS[1]),
     d90: within(PANEL_HORIZON_DAYS[2]),
+  }
+}
+
+/** What the dashboard reads from the compliance table, once. */
+export interface ComplianceOnce {
+  /** The Needs-you row: the queue at the authorities' own lead days. */
+  queueCount: number
+  queueExpired: number
+  /** The panel: the queue at 90 days, bucketed. */
+  horizons: ComplianceHorizons
+  leadDays: number
+}
+
+/**
+ * THE COMPLIANCE QUEUE IN ONE STATEMENT, READ ONCE FOR TWO CARDS (§6.1.1
+ * v10.95; owner's instruction 2026-11-13: one statement per card, one
+ * predicate).
+ *
+ * The dashboard read `complianceQueue` TWICE — `complianceCount` for the
+ * Needs-you row at the authorities' lead days, `complianceHorizons` for the
+ * panel at 90 — and each was THREE statements: the lead days from
+ * `CompanySettings`, the items inside the horizon, the latest expiry per
+ * subject and type over every record. Six statements for two numbers that
+ * are the same rows read at two horizons.
+ *
+ * Here it is ONE statement: the items inside the LONGER horizon (the lead
+ * days or 90, whichever is more, plus the queue's one-day margin), each row
+ * carrying its own latest expiry per subject and type and the scope's lead
+ * days as columns, under the ACTIONABLE-SUBJECT predicate written in SQL
+ * once — a live truck, a live driver, any trailer, or a record attached to
+ * nothing — the same four alternatives `ACTIONABLE_SUBJECT` spells for
+ * Prisma. `shapeRecords` then applies every rule it applied before (status,
+ * superseded, the fleet-policy key, the malformed-row drop), twice over the
+ * same rows: at the lead days for the row, at 90 for the panel.
+ *
+ * ONE DIFFERENCE, WRITTEN DOWN: `complianceQueue` takes the first 500 rows
+ * inside ITS horizon; this takes the first 500 inside the longer one, so the
+ * two can differ only when a scope holds more than 500 actionable records
+ * within 90 days. `tests/integration/dashboard.test.ts` holds this equal to
+ * `complianceCount` and `complianceHorizons` on fixtures with a sold truck,
+ * a superseded registration and a record attached to nothing — the rows the
+ * predicate and the rule exist for.
+ */
+export async function complianceOnce(
+  tx: TxClient,
+  companyIds: readonly string[],
+  now: Date = new Date(),
+): Promise<ComplianceOnce> {
+  const ids = [...companyIds]
+  const scoped = ids.length > 0
+  const panelDays = PANEL_HORIZON_DAYS[2]
+  const rows = await tx.$queryRaw<
+    {
+      id: string
+      company_id: string
+      type: ComplianceType
+      identifier: string | null
+      issuer: string | null
+      issued_at: Date | null
+      expires_at: Date
+      notes: string | null
+      company_name: string
+      truck_id: string | null
+      truck_unit: string | null
+      trailer_id: string | null
+      trailer_unit: string | null
+      driver_id: string | null
+      driver_first: string | null
+      driver_last: string | null
+      documents: number
+      latest_at: Date | null
+      lead_days: number
+    }[]
+  >`
+    WITH lead AS (
+      SELECT COALESCE(MAX(cs."complianceWarnDays"), 30)::int AS days
+      FROM "CompanySettings" cs
+      WHERE ${scoped ? Prisma.sql`cs."companyId" = ANY(${ids})` : Prisma.sql`TRUE`}
+    )
+    SELECT ci."id",
+           ci."companyId" AS company_id,
+           ci."type",
+           ci."identifier",
+           ci."issuer",
+           ci."issuedAt" AS issued_at,
+           ci."expiresAt" AS expires_at,
+           ci."notes",
+           c."name" AS company_name,
+           t."id" AS truck_id,
+           t."unitNumber" AS truck_unit,
+           tr."id" AS trailer_id,
+           tr."unitNumber" AS trailer_unit,
+           d."id" AS driver_id,
+           d."firstName" AS driver_first,
+           d."lastName" AS driver_last,
+           (
+             SELECT COUNT(*)::int FROM "Document" doc
+              WHERE doc."complianceItemId" = ci."id"
+           ) AS documents,
+           -- THE LATEST EXPIRY FOR THIS ROW'S SUBJECT AND TYPE, over every
+           -- record of the pair — the renewal that supersedes this one is by
+           -- definition outside the horizon, so it is looked for without one.
+           (
+             SELECT MAX(o."expiresAt") FROM "ComplianceItem" o
+              WHERE o."deletedAt" IS NULL
+                AND o."type" = ci."type"
+                AND ${scoped ? Prisma.sql`o."companyId" = ANY(${ids})` : Prisma.sql`TRUE`}
+                AND (
+                  (ci."truckId" IS NOT NULL AND o."truckId" = ci."truckId")
+                  OR (ci."truckId" IS NULL AND ci."trailerId" IS NOT NULL AND o."trailerId" = ci."trailerId")
+                  OR (ci."truckId" IS NULL AND ci."trailerId" IS NULL AND ci."driverId" IS NOT NULL AND o."driverId" = ci."driverId")
+                )
+           ) AS latest_at,
+           lead.days AS lead_days
+      FROM "ComplianceItem" ci
+      CROSS JOIN lead
+      JOIN "Company" c ON c."id" = ci."companyId"
+      LEFT JOIN "Truck" t ON t."id" = ci."truckId"
+      LEFT JOIN "Trailer" tr ON tr."id" = ci."trailerId"
+      LEFT JOIN "Driver" d ON d."id" = ci."driverId"
+     WHERE ci."deletedAt" IS NULL
+       AND ${scoped ? Prisma.sql`ci."companyId" = ANY(${ids})` : Prisma.sql`TRUE`}
+       AND ci."expiresAt" <= ${now}::timestamp + make_interval(days => GREATEST(lead.days, ${panelDays}) + 1)
+       -- ACTIONABLE_SUBJECT, in SQL: a live truck, a live driver, any
+       -- trailer, or a record attached to none of the three.
+       AND (
+         (t."id" IS NOT NULL AND t."status" NOT IN ('OUT_OF_SERVICE', 'SOLD'))
+         OR (d."id" IS NOT NULL AND d."status" <> 'INACTIVE')
+         OR ci."trailerId" IS NOT NULL
+         OR (ci."truckId" IS NULL AND ci."driverId" IS NULL AND ci."trailerId" IS NULL)
+       )
+     ORDER BY ci."expiresAt" ASC
+     LIMIT 500
+  `
+
+  // With no rows there is nothing to count at any horizon, so the lead days
+  // are the default for the record and NOT a second statement — the budget
+  // holds in the empty case too.
+  const leadDays = rows[0]?.lead_days ?? 30
+  const shaped = rows.map((row) => ({
+    id: row.id,
+    companyId: row.company_id,
+    type: row.type,
+    identifier: row.identifier,
+    issuer: row.issuer,
+    issuedAt: row.issued_at,
+    expiresAt: row.expires_at,
+    notes: row.notes,
+    company: { name: row.company_name },
+    truck: row.truck_id
+      ? { id: row.truck_id, unitNumber: row.truck_unit ?? '' }
+      : null,
+    trailer: row.trailer_id
+      ? { id: row.trailer_id, unitNumber: row.trailer_unit ?? '' }
+      : null,
+    driver: row.driver_id
+      ? {
+          id: row.driver_id,
+          firstName: row.driver_first ?? '',
+          lastName: row.driver_last ?? '',
+        }
+      : null,
+    _count: { documents: row.documents },
+  }))
+  // The map `complianceQueue` builds over its second statement, keyed as it
+  // keys it — the subject column that is set, then the type; a row attached
+  // to nothing has no entry, as there.
+  const latestByKey = new Map<string, number>()
+  for (const row of rows) {
+    const subjectId = row.truck_id ?? row.trailer_id ?? row.driver_id
+    if (subjectId && row.latest_at)
+      latestByKey.set(`${subjectId}:${row.type}`, row.latest_at.getTime())
+  }
+  const live = (list: ComplianceRow[]) =>
+    list.filter((row) => row.status !== 'current' && !row.isSuperseded)
+
+  // The row: the queue's own horizon over the same rows.
+  const queueHorizon = new Date(now.getTime())
+  queueHorizon.setUTCDate(queueHorizon.getUTCDate() + leadDays + 1)
+  const queue = live(
+    shapeRecords(
+      shaped.filter((row) => row.expiresAt.getTime() <= queueHorizon.getTime()),
+      leadDays,
+      now,
+      latestByKey,
+    ),
+  )
+  // The panel: the same rows at 90 days, bucketed as `complianceHorizons`.
+  const panel = live(shapeRecords(shaped, panelDays, now, latestByKey))
+  const within = (days: number) =>
+    panel.filter((row) => row.daysLeft <= days).length
+
+  return {
+    queueCount: queue.length,
+    queueExpired: queue.filter((row) => row.status === 'expired').length,
+    horizons: {
+      d30: within(PANEL_HORIZON_DAYS[0]),
+      d60: within(PANEL_HORIZON_DAYS[1]),
+      d90: within(PANEL_HORIZON_DAYS[2]),
+    },
+    leadDays,
   }
 }
 

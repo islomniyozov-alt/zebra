@@ -279,6 +279,15 @@ export async function actionQueue(
   tx: TxClient,
   session: AuthorizedSession,
   scope: CompanyScopeFilter = {},
+  options: {
+    /**
+     * The compliance row's count, when the caller has already read the
+     * queue (§6.1.1 v10.95: `complianceOnce` reads it once for this row AND
+     * the 30/60/90 panel). Given, the row is not read again here; absent,
+     * it is read as it always was.
+     */
+    complianceCount?: number
+  } = {},
 ): Promise<ActionRow[]> {
   const permitted = ACTIONS.filter((action) =>
     can(session, 'read', action.resource),
@@ -314,7 +323,9 @@ export async function actionQueue(
     // second expression of a DOT rule to save one round trip. See
     // `dashboard-counts.ts`.
     permitted.some((action) => action.key === 'compliance')
-      ? complianceCount(tx, scope).then((result) => result.count)
+      ? options.complianceCount !== undefined
+        ? Promise.resolve(options.complianceCount)
+        : complianceCount(tx, scope).then((result) => result.count)
       : Promise.resolve(null),
   ])
 

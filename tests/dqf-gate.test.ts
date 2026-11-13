@@ -103,8 +103,13 @@ describe('accounting sees the flag and cannot open the roster', () => {
     expect(dashboard).toMatch(
       /const maySeeCompliance = await currentUserCan\('read', 'compliance'\)/,
     )
-    expect(dashboard).toMatch(
-      /maySeeCompliance\s*\?\s*withCurrentOrg\([\s\S]{0,120}dqfSplit\(/,
+    // Since v10.95 the page hands the flag to the one read, and the ring is
+    // gated there — on `compliance`, still, and nothing else.
+    expect(dashboard).toMatch(/compliance: maySeeCompliance,/)
+    const read = source('src/lib/dashboard-page.ts')
+    expect(read).toMatch(
+      /may\.compliance\s*\?\s*await timed\('dqf', \(\) => dqfSplit\(/,
     )
+    expect(read).not.toMatch(/may\.money[^\n]*dqfSplit/)
   })
 })

@@ -1,10 +1,9 @@
 import { Prisma } from '@/generated/prisma/client'
-import { companyScopeFilter } from '@/lib/tenancy'
 import { agingSumsSql } from '@/lib/factoring'
 import {
   dqfChecklist,
-  dqfFactsForDrivers,
   dqfIncompleteCount,
+  dqfRoster,
   isQualifiable,
 } from '@/lib/dqf'
 
@@ -648,47 +647,36 @@ export async function dqfSplit(
   companyIds: readonly string[],
   now: Date,
 ): Promise<DqfSplit> {
-  const roster = await tx.driver.findMany({
-    where: {
-      ...companyScopeFilter(companyIds),
-      // ── NO PREDICATE HERE. `isQualifiable` IS THE WHOLE RULE ───────────
-      //
-      // This query carried `deletedAt: null`, `status: { not: 'INACTIVE' }` and
-      // `PERSON_DRIVER` for one commit, which are precisely the three things
-      // `isQualifiable` refuses — the same rule written twice, once in SQL and
-      // once in TypeScript, over DOT data.
-      //
-      // IT WAS FOUND BY A BREAK THAT WOULD NOT FIRE. Deleting the
-      // `isQualifiable` filter below left the figure unchanged, because the
-      // query had already removed everything it would have caught; deleting the
-      // query's clauses left it unchanged for the mirror reason. Neither half
-      // was observably load-bearing, so the test could not say which one did
-      // the work — flag 88's shape exactly, and the guard is what exposed it.
-      //
-      // The duplication also had a live hazard: if `isQualifiable` ever admits
-      // somebody these clauses exclude — an INACTIVE driver whose file still
-      // matters at audit — the rows would be gone before the rule was asked.
-      //
-      // SO THE SCOPE IS THE ONLY FILTER, and the cost is reading the terminated
-      // drivers and referral payees before discarding them: 108 extra rows of
-      // five columns on dev, against a figure read for DOT exposure.
-    },
-    // EXACTLY WHAT `isQualifiable` ASKS FOR, plus the hire date the checklist
-    // needs. The compiler named the three I had left out.
-    select: {
-      id: true,
-      hireDate: true,
-      status: true,
-      deletedAt: true,
-      kind: true,
-    },
-  })
+  // ONE STATEMENT (§6.1.1 v10.95): the roster WITH its facts, `dqfRoster`,
+  // where this read the roster and then `dqfFactsForDrivers`' two. The
+  // paragraph below still holds, word for word — the scope is the only
+  // predicate in that statement too, and `isQualifiable` is applied here.
+  //
+  // ── NO PREDICATE IN IT BUT THE SCOPE. `isQualifiable` IS THE WHOLE RULE ──
+  //
+  // The roster query carried `deletedAt: null`, `status: { not: 'INACTIVE' }`
+  // and `PERSON_DRIVER` for one commit, which are precisely the three things
+  // `isQualifiable` refuses — the same rule written twice, once in SQL and
+  // once in TypeScript, over DOT data.
+  //
+  // IT WAS FOUND BY A BREAK THAT WOULD NOT FIRE. Deleting the `isQualifiable`
+  // filter below left the figure unchanged, because the query had already
+  // removed everything it would have caught; deleting the query's clauses
+  // left it unchanged for the mirror reason. Neither half was observably
+  // load-bearing, so the test could not say which one did the work — flag
+  // 88's shape exactly, and the guard is what exposed it.
+  //
+  // The duplication also had a live hazard: if `isQualifiable` ever admits
+  // somebody these clauses exclude — an INACTIVE driver whose file still
+  // matters at audit — the rows would be gone before the rule was asked.
+  //
+  // SO THE SCOPE IS THE ONLY FILTER, and the cost is reading the terminated
+  // drivers and referral payees — and now their facts — before discarding
+  // them: 108 extra rows on dev, against a figure read for DOT exposure.
+  const roster = await dqfRoster(tx, companyIds)
 
   const qualifiable = roster.filter((driver) => isQualifiable(driver))
-  const facts = await dqfFactsForDrivers(
-    tx,
-    qualifiable.map((driver) => driver.id),
-  )
+  const facts = new Map(roster.map((driver) => [driver.id, driver.facts]))
 
   let incomplete = 0
   for (const driver of qualifiable) {

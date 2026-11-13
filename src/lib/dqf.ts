@@ -1,4 +1,8 @@
-import type { ComplianceType, DocumentType } from '@/generated/prisma/client'
+import {
+  Prisma,
+  type ComplianceType,
+  type DocumentType,
+} from '@/generated/prisma/client'
 import type { TxClient } from './tenancy'
 import { daysUntil } from './compliance'
 import { isReferralPayee } from './driver-kind'
@@ -368,6 +372,95 @@ export function isQualifiable(driver: {
   // would show a clean driver page with a warning beside it.
   if (isReferralPayee(driver)) return false
   return driver.deletedAt === null && driver.status !== 'INACTIVE'
+}
+
+/** One driver of the scope's roster, with the facts the checklist needs. */
+export interface DqfRosterRow {
+  id: string
+  hireDate: Date | null
+  status: string
+  deletedAt: Date | null
+  kind: string
+  facts: DqfFacts
+}
+
+/**
+ * THE SCOPE'S ROSTER WITH ITS FACTS, IN ONE STATEMENT (§6.1.1 v10.95; owner's
+ * instruction 2026-11-13: one statement per card).
+ *
+ * `dqfSplit` read the roster, filtered it with `isQualifiable`, and then asked
+ * `dqfFactsForDrivers` for the facts in two more statements. Here the facts
+ * ride along as array subselects on the roster rows — the same three
+ * subqueries `dqfFactsForDrivers` runs, per driver, in the one SELECT — and
+ * the SCOPE IS STILL THE ONLY PREDICATE: `isQualifiable` stays the whole
+ * rule, applied in TypeScript over the rows, for the reason written on
+ * `dqfSplit` (a filter written twice, once in SQL and once in TypeScript, over
+ * DOT data). The cost is the facts of the drivers the rule then discards —
+ * three empty-ish subselects per terminated driver or payee.
+ *
+ * `tests/integration/dashboard.test.ts` holds `dqfSplit` through this equal
+ * to the roster-plus-facts path it replaces, which stays exported.
+ */
+export async function dqfRoster(
+  tx: TxClient,
+  companyIds: readonly string[],
+): Promise<DqfRosterRow[]> {
+  const ids = [...companyIds]
+  const rows = await tx.$queryRaw<
+    {
+      id: string
+      hire_date: Date | null
+      status: string
+      deleted_at: Date | null
+      kind: string
+      types: string[] | null
+      expiries: Date[] | null
+      documents: string[] | null
+    }[]
+  >`
+    SELECT d."id",
+           d."hireDate" AS hire_date,
+           d."status"::text AS status,
+           d."deletedAt" AS deleted_at,
+           d."kind" AS kind,
+           ARRAY(
+             SELECT ci."type"::text FROM "ComplianceItem" ci
+              WHERE ci."driverId" = d."id" AND ci."deletedAt" IS NULL
+              ORDER BY ci."expiresAt" DESC
+           ) AS types,
+           ARRAY(
+             SELECT ci."expiresAt" FROM "ComplianceItem" ci
+              WHERE ci."driverId" = d."id" AND ci."deletedAt" IS NULL
+              ORDER BY ci."expiresAt" DESC
+           ) AS expiries,
+           ARRAY(
+             SELECT DISTINCT doc."type"::text FROM "Document" doc
+              WHERE doc."driverId" = d."id" AND doc."deletedAt" IS NULL
+           ) AS documents
+      FROM "Driver" d
+     WHERE ${ids.length > 0 ? Prisma.sql`d."companyId" = ANY(${ids})` : Prisma.sql`TRUE`}
+  `
+  return rows.map((row) => {
+    const types = row.types ?? []
+    const expiries = row.expiries ?? []
+    return {
+      id: row.id,
+      hireDate: row.hire_date,
+      status: row.status,
+      deletedAt: row.deleted_at,
+      kind: row.kind,
+      facts: {
+        hireDate: row.hire_date,
+        // ORDERED IDENTICALLY — same subquery, same ORDER BY — so index i of
+        // one belongs with index i of the other, as in `dqfFactsForDrivers`.
+        compliance: types.map((type, index) => ({
+          type,
+          expiresAt: expiries[index]!,
+        })),
+        documents: row.documents ?? [],
+      },
+    }
+  })
 }
 
 // ── the loaders, one query each ──────────────────────────────────────────
