@@ -50,6 +50,12 @@ export interface DashboardInput {
     fleet: boolean
     compliance: boolean
   }
+  /**
+   * Skip the money card itself and nothing else: `readCards` sets it so the
+   * other six run with the role's real permissions — `topDrivers` and the
+   * panels' cash still need `may.money` — while money runs beside them.
+   */
+  cardsOnly?: boolean
 }
 
 export interface DashboardReads {
@@ -99,14 +105,21 @@ export async function readDashboard(
     return value
   }
 
-  const money = may.money
-    ? await timed('money', () =>
-        dashboardFor(tx, ctx.organizationId, input.companyParam, input.window, {
-          // THE PRESET DECIDES, not the span (§6.1.1).
-          grain: input.grain,
-        }),
-      )
-    : null
+  const money =
+    may.money && !input.cardsOnly
+      ? await timed('money', () =>
+          dashboardFor(
+            tx,
+            ctx.organizationId,
+            input.companyParam,
+            input.window,
+            {
+              // THE PRESET DECIDES, not the span (§6.1.1).
+              grain: input.grain,
+            },
+          ),
+        )
+      : null
 
   // THE COMPLIANCE TABLE, ONCE, FOR TWO CARDS. The Needs-you row's count at
   // the authorities' lead days and the panel's 30/60/90 are the same rows at
@@ -172,4 +185,50 @@ export async function readDashboard(
     companies,
     spans,
   }
+}
+
+// ── TWO TRANSACTIONS, MONEY BESIDE THE SIX (§6.1.1 v10.96) ────────────────
+//
+// Owner's ruling 2026-11-13 on the after-measurement: one transaction in
+// sequence read owner 31 → 10 statements and 568 → 949 ms on the median —
+// each card cheaper, their SUM where their MAX had been. So the page runs
+// `readMoney` and `readCards` in parallel, each in its own `withCurrentOrg`:
+// two statements more than `readDashboard` (owner at twelve, on the line),
+// and the wall is the longer of the two rather than the sum of seven.
+// `readDashboard` above stays as the one-transaction read the budget test
+// names statement by statement; these two are the same cards split.
+
+/** The money card alone: one statement, its own transaction. */
+export async function readMoney(
+  tx: TxClient,
+  ctx: AuthorizedSession,
+  input: DashboardInput,
+): Promise<{ money: Dashboard | null; ms: number | null }> {
+  if (!input.may.money) return { money: null, ms: null }
+  const started = performance.now()
+  const money = await dashboardFor(
+    tx,
+    ctx.organizationId,
+    input.companyParam,
+    input.window,
+    { grain: input.grain },
+  )
+  return { money, ms: Math.round(performance.now() - started) }
+}
+
+/** The other six cards, in sequence, in their own transaction. */
+export async function readCards(
+  tx: TxClient,
+  ctx: AuthorizedSession,
+  input: DashboardInput,
+): Promise<Omit<DashboardReads, 'money'>> {
+  // `readDashboard` with the money card itself skipped — the six run exactly
+  // as they run there, with the role's real permissions, because
+  // `topDrivers` and the panels' cash still need `may.money`.
+  const { money: _money, ...cards } = await readDashboard(tx, ctx, {
+    ...input,
+    cardsOnly: true,
+  })
+  void _money
+  return cards
 }

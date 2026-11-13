@@ -37,7 +37,7 @@ import {
   dqfRoster,
   isQualifiable,
 } from '@/lib/dqf'
-import { readDashboard } from '@/lib/dashboard-page'
+import { readCards, readDashboard, readMoney } from '@/lib/dashboard-page'
 import { createPrismaClient, statementsOf } from '@/lib/db'
 import { DEFAULT_PERIOD, grainOf, periodWindow } from '@/lib/rolling-period'
 import { recordPayment } from '@/lib/payments'
@@ -1449,9 +1449,59 @@ describe('the three panels read real state (part 3)', () => {
       expect(reads.dqf).not.toBeNull()
       expect(reads.horizons).not.toBeNull()
       for (const span of Object.values(reads.spans)) expect(span).not.toBeNull()
-      // With the shell's one read the owner's page.timing reads ten; over
-      // twelve is the owner's line, and this is where it would be crossed.
+      // With the shell's one read the owner's page.timing reads ten.
       expect(count + 1).toBeLessThan(12)
+    } finally {
+      await client.$disconnect()
+    }
+  }, 300_000)
+
+  it('split in two (v10.96): money is three statements, the six cards eight, the owner twelve with the shell — on the line, not over', async () => {
+    const client = createPrismaClient(process.env.DIRECT_DATABASE_URL!)
+    const input = {
+      companyParam: null,
+      window: periodWindow(DEFAULT_PERIOD, NOW),
+      grain: grainOf(DEFAULT_PERIOD),
+      now: NOW,
+      may: { money: true, panels: true, fleet: true, compliance: true },
+    }
+    const inTx = <T>(fn: (tx: Parameters<typeof readMoney>[0]) => Promise<T>) =>
+      client.$transaction(
+        async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.current_org_id', ${organizationId}, true)`
+          return fn(tx)
+        },
+        { maxWait: 20_000, timeout: LOAD_WRITE_TIMEOUT_MS },
+      )
+    try {
+      const atMoney = statementsOf(client)!
+      const money = await inTx((tx) => readMoney(tx, asOwner(), input))
+      const moneyCount = statementsOf(client)! - atMoney
+      const atCards = statementsOf(client)!
+      const cards = await inTx((tx) => readCards(tx, asOwner(), input))
+      const cardsCount = statementsOf(client)! - atCards
+      expect(moneyCount).toBeLessThanOrEqual(3)
+      expect(cardsCount).toBeLessThanOrEqual(8)
+      // THE OWNER'S LINE: twelve with the shell's one, and no more.
+      expect(moneyCount + cardsCount + 1).toBeLessThanOrEqual(12)
+      // Nothing skipped to make it: money ran, the six ran with the role's
+      // real permissions (top drivers needs money), and money's span is a
+      // number while the cards' read left it null for money to fill.
+      expect(money.money).not.toBeNull()
+      expect(money.ms).not.toBeNull()
+      expect(cards.topDrivers).not.toBeNull()
+      expect(cards.panels).not.toBeNull()
+      expect(cards.dqf).not.toBeNull()
+      expect(cards.spans.money).toBeNull()
+      for (const name of [
+        'queue',
+        'panels',
+        'topDrivers',
+        'dqf',
+        'horizons',
+        'companies',
+      ] as const)
+        expect(cards.spans[name], name).not.toBeNull()
     } finally {
       await client.$disconnect()
     }

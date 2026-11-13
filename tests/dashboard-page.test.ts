@@ -17,14 +17,16 @@ const dqf = readFileSync('src/lib/dqf.ts', 'utf8')
 const counts = readFileSync('src/lib/dashboard-counts.ts', 'utf8')
 const pageRead = readFileSync('src/lib/dashboard-page.ts', 'utf8')
 
-describe('the page opens one transaction', () => {
-  it('calls withCurrentOrg exactly once, and hands it readDashboard', () => {
+describe('the page opens two transactions, money beside the six (v10.96)', () => {
+  it('calls withCurrentOrg exactly twice, in parallel, one for readMoney and one for readCards', () => {
     const calls = page.match(/withCurrentOrg\(/g) ?? []
-    expect(calls.length, 'withCurrentOrg( occurrences').toBe(1)
+    expect(calls.length, 'withCurrentOrg( occurrences').toBe(2)
     expect(page).toContain(
-      "import { readDashboard } from '@/lib/dashboard-page'",
+      "import { readCards, readMoney } from '@/lib/dashboard-page'",
     )
-    expect(page).toMatch(/readDashboard\(tx, ctx, \{/)
+    expect(page).toMatch(/readMoney\(tx, ctx, input\)/)
+    expect(page).toMatch(/readCards\(tx, ctx, input\)/)
+    expect(page.match(/Promise\.all\(\[/g)?.length).toBe(1)
     // THE OLD SHAPE, BY NAME: no card is read by the page itself any more.
     for (const gone of [
       'dashboardFor(',
@@ -34,16 +36,21 @@ describe('the page opens one transaction', () => {
       'dqfSplit(',
       'complianceHorizons(',
       'listedAuthorities(',
-      'Promise.all([',
+      'readDashboard(',
     ])
       expect(page, gone).not.toContain(gone)
   })
 
-  it('keeps the seven spans under their names, from the one read', () => {
-    expect(page).toContain(
-      'const readMs: Record<DashboardRead, number | null> = reads.spans',
-    )
+  it('keeps the seven spans under their names, six from the cards read and money from its own', () => {
+    expect(page).toContain('...cards.spans,')
+    expect(page).toContain('money: moneyRead.ms,')
     expect([...DASHBOARD_ORDER].sort()).toEqual([...DASHBOARD_READS].sort())
+    // `readCards` skips the money card ITSELF and nothing else: the six run
+    // with the role's real permissions (top drivers and the panels' cash
+    // still ask may.money).
+    expect(pageRead).toContain('cardsOnly: true,')
+    expect(pageRead).toMatch(/may\.money && !input\.cardsOnly/)
+    expect(pageRead).not.toContain('may: { ...input.may, money: false }')
   })
 })
 

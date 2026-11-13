@@ -8,7 +8,7 @@ import {
   type DashboardRead,
   writeTimingLine,
 } from '@/lib/request-timing'
-import { readDashboard } from '@/lib/dashboard-page'
+import { readCards, readMoney } from '@/lib/dashboard-page'
 import type { Dashboard } from '@/lib/dashboard-kpis'
 import {
   DEFAULT_PERIOD,
@@ -178,29 +178,49 @@ export default async function DashboardPage({
   // statement; the spans keep their seven names as each card's own duration
   // and `fanOutMs` is the transaction's wall. A card a role is not shown is
   // `null` in the line, not a fast 0.
+  //
+  // TWO TRANSACTIONS, MONEY BESIDE THE SIX (v10.96, owner's ruling on the
+  // after-measurement): one transaction in sequence added 381 ms to the
+  // owner's median, the cards' sum where their max had been. The money card
+  // — the longest — runs in its own transaction beside the other six, so
+  // the wall is the longer of two and the count is twelve, on the line.
   const fanOutClock = stopwatch()
-  const reads = await withCurrentOrg(
-    'read',
-    'dashboard',
-    (tx, ctx) =>
-      readDashboard(tx, ctx, {
-        companyParam,
-        window,
-        // THE PRESET DECIDES, not the span. Omitting this is how `w4`
-        // (28 days) would have been drawn DAILY against the ruling.
-        grain: grainOf(period),
-        now,
-        may: {
-          money: maySeeMoney,
-          panels: maySeePanels,
-          fleet: maySeeFleet,
-          compliance: maySeeCompliance,
-        },
-      }),
-    { timeoutMs: 10_000 },
-  )
-  const { money, queue, panels, topDrivers, dqf, horizons, companies } = reads
-  const readMs: Record<DashboardRead, number | null> = reads.spans
+  const input = {
+    companyParam,
+    window,
+    // THE PRESET DECIDES, not the span. Omitting this is how `w4`
+    // (28 days) would have been drawn DAILY against the ruling.
+    grain: grainOf(period),
+    now,
+    may: {
+      money: maySeeMoney,
+      panels: maySeePanels,
+      fleet: maySeeFleet,
+      compliance: maySeeCompliance,
+    },
+  }
+  const [moneyRead, cards] = await Promise.all([
+    maySeeMoney
+      ? withCurrentOrg(
+          'read',
+          'dashboard',
+          (tx, ctx) => readMoney(tx, ctx, input),
+          { timeoutMs: 10_000 },
+        )
+      : Promise.resolve({ money: null, ms: null }),
+    withCurrentOrg(
+      'read',
+      'dashboard',
+      (tx, ctx) => readCards(tx, ctx, input),
+      { timeoutMs: 10_000 },
+    ),
+  ])
+  const money = moneyRead.money
+  const { queue, panels, topDrivers, dqf, horizons, companies } = cards
+  const readMs: Record<DashboardRead, number | null> = {
+    ...cards.spans,
+    money: moneyRead.ms,
+  }
   const fanOutMs = fanOutClock.ms()
   // From `after()`, into this invocation's log (§6.10 — a sign-in renders
   // this page inside its own POST response).
