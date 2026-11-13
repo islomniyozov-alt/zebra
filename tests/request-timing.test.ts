@@ -121,8 +121,9 @@ describe('the spans', () => {
     // All seven spans come from the ONE read (§6.1.1 v10.95), and every card
     // in it is timed under its own name, so a card added to the read without
     // a span fails here by name.
-    expect(page).toContain('...cards.spans,')
-    expect(page).toContain('money: moneyRead.ms,')
+    expect(page).toContain(
+      'const readMs: Record<DashboardRead, number | null> = reads.spans',
+    )
     const read = readFileSync('src/lib/dashboard-page.ts', 'utf8')
     for (const name of DASHBOARD_READS)
       expect(read, name).toContain(`timed('${name}', () =>`)

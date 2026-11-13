@@ -1,3 +1,4 @@
+import { Prisma } from '@/generated/prisma/client'
 import { companyIdScopeFilter, type TxClient } from './tenancy'
 import { optionalText, stateCode } from './reference'
 
@@ -90,6 +91,26 @@ export function listedAuthorities(
     // either way.
     select: { id: true, name: true, timezone: true, isDefault: true },
   })
+}
+
+/**
+ * `listedAuthorities` as SQL, for the dashboard's one-row statement only
+ * (§6.1.1 v10.97) — a CTE cannot hold a Prisma `findMany`. ITS PREDICATE IS
+ * `LISTED_AUTHORITY`'S ONE FIELD, `isActive`, and `tests/dashboard-page.test.ts`
+ * fails by name if that object ever gains a second field this text does not
+ * spell; the integration suite holds the rows equal to `listedAuthorities`'.
+ * Ordered by name in the one-row read's `json_agg`, as `findMany` orders.
+ */
+export function listedAuthoritiesSql(
+  companyScopes: readonly string[],
+): Prisma.Sql {
+  const ids = [...companyScopes]
+  return Prisma.sql`
+    SELECT c."id", c."name", c."timezone", c."isDefault"
+      FROM "Company" c
+     WHERE c."isActive" = true
+       AND ${ids.length > 0 ? Prisma.sql`c."id" = ANY(${ids})` : Prisma.sql`TRUE`}
+  `
 }
 
 export type AddCompanyFailure =

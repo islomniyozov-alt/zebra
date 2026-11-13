@@ -1,5 +1,6 @@
 import { Prisma } from '@/generated/prisma/client'
 import { bucketExprSql } from './week-sql'
+import { asDate, asNumber } from './sql-json'
 import { bucketsIn, type Grain, type PeriodWindow } from '@/lib/rolling-period'
 
 /** Plain transaction client, as the other reporting modules declare it. */
@@ -342,28 +343,39 @@ export interface MoneyRows {
  * weeks by bucket then company name, customers by gross descending, days by
  * day. `assembleDashboard` sees exactly what it saw.
  */
+export interface MoneyInput {
+  from: Date
+  to: Date
+  companyId: string | null
+  grain: Grain
+}
+
+/** One row of the money statement, from either transport (sql-json.ts). */
+export interface MoneyRow {
+  kind: 'week' | 'customer' | 'day' | 'paystart'
+  bucket_at: Date | string | null
+  key_id: string | null
+  label: string | null
+  gross: bigint | number
+  pay: bigint | number
+  loads: bigint | number
+  miles: bigint | number
+}
+
 export async function moneyRows(
   tx: TxClient,
-  input: {
-    from: Date
-    to: Date
-    companyId: string | null
-    grain: Grain
-  },
+  input: MoneyInput,
 ): Promise<MoneyRows> {
+  return moneyFrom(await tx.$queryRaw<MoneyRow[]>(moneySql(input)))
+}
+
+/**
+ * The money card's SQL — ONE TEXT, two readers (§6.1.1 v10.97): `moneyRows`
+ * sends it on its own, the dashboard's one-row statement names it `money`.
+ */
+export function moneySql(input: MoneyInput): Prisma.Sql {
   const bucket = bucketOf(input.grain)
-  const rows = await tx.$queryRaw<
-    {
-      kind: 'week' | 'customer' | 'day' | 'paystart'
-      bucket_at: Date | null
-      key_id: string | null
-      label: string | null
-      gross: bigint
-      pay: bigint
-      loads: bigint
-      miles: bigint
-    }[]
-  >`
+  return Prisma.sql`
     WITH delivered AS (${deliveredIn(input.from, input.to, input.companyId)}),
     priced AS (
       SELECT
@@ -436,17 +448,20 @@ export async function moneyRows(
       0::bigint,
       0::bigint
   `
+}
 
+/** The money statement's rows, split and ordered as the four reads were. */
+export function moneyFrom(rows: readonly MoneyRow[]): MoneyRows {
   const weeks: WeekCompanyRow[] = rows
     .filter((row) => row.kind === 'week')
     .map((row) => ({
-      weekStart: row.bucket_at!,
+      weekStart: asDate(row.bucket_at)!,
       companyId: row.key_id ?? '',
       companyName: row.label ?? '',
-      grossCents: Number(row.gross),
-      driverPayCents: Number(row.pay),
-      loads: Number(row.loads),
-      miles: Number(row.miles),
+      grossCents: asNumber(row.gross),
+      driverPayCents: asNumber(row.pay),
+      loads: asNumber(row.loads),
+      miles: asNumber(row.miles),
     }))
     .sort(
       (a, b) =>
@@ -458,16 +473,17 @@ export async function moneyRows(
     .map((row) => ({
       customerId: row.key_id ?? '',
       customerName: row.label ?? '',
-      grossCents: Number(row.gross),
-      loads: Number(row.loads),
+      grossCents: asNumber(row.gross),
+      loads: asNumber(row.loads),
     }))
     .sort((a, b) => b.grossCents - a.grossCents)
   const days: DayRow[] = rows
     .filter((row) => row.kind === 'day')
-    .map((row) => ({ day: row.bucket_at!, loads: Number(row.loads) }))
+    .map((row) => ({ day: asDate(row.bucket_at)!, loads: asNumber(row.loads) }))
     .sort((a, b) => a.day.getTime() - b.day.getTime())
-  const payKnownFrom =
-    rows.find((row) => row.kind === 'paystart')?.bucket_at ?? null
+  const payKnownFrom = asDate(
+    rows.find((row) => row.kind === 'paystart')?.bucket_at ?? null,
+  )
 
   return { rows: weeks, customers, days, payKnownFrom }
 }
@@ -749,13 +765,21 @@ export async function dashboardFor(
   // and the integration suite holds it equal to them. The first settled
   // period still earns its place in it: without it every period before Zebra
   // started settling reports a confident margin made of unknown driver pay.
-  const { rows, customers, days, payKnownFrom } = await moneyRows(tx, {
+  const money = await moneyRows(tx, {
     from: period.from,
     to: period.to,
     companyId,
     grain,
   })
+  return dashboardFrom(money, period, grain)
+}
 
+/** The money card's rows, assembled — the pure half both readers share. */
+export function dashboardFrom(
+  { rows, customers, days, payKnownFrom }: MoneyRows,
+  period: PeriodWindow,
+  grain: Grain,
+): Dashboard {
   // EVERY BUCKET IN THE WINDOW, including the ones that earned nothing — a
   // bucket with no freight returns no row, and a series driven only by rows
   // draws a dense week where there was a sparse one.

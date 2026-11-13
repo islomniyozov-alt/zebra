@@ -2,7 +2,11 @@ import type { CompanyScopeFilter, TxClient } from './tenancy'
 import { listedAuthorities } from './companies'
 import { readyToInvoiceWhere } from './invoices'
 import { complianceCount } from './compliance'
-import { needsYouCounts, type CountedRow } from './dashboard-counts'
+import {
+  needsYouCounts,
+  type CountedRow,
+  type NeedsYouCounts,
+} from './dashboard-counts'
 import {
   noRateWhere,
   podMissingWhere,
@@ -329,6 +333,24 @@ export async function actionQueue(
       : Promise.resolve(null),
   ])
 
+  return actionRowsFrom(session, counted, compliance)
+}
+
+/** Which Needs-you rows a session may see — counted or not. */
+export const permittedActions = (session: AuthorizedSession) =>
+  ACTIONS.filter((action) => can(session, 'read', action.resource))
+
+/**
+ * The queue's rows from the counts — the pure half both readers share
+ * (§6.1.1 v10.97). `permittedActions` decides what is RETURNED; a count the
+ * session may not see is never on a row.
+ */
+export function actionRowsFrom(
+  session: AuthorizedSession,
+  counted: NeedsYouCounts | null,
+  compliance: number | null,
+): ActionRow[] {
+  const permitted = permittedActions(session)
   const rows: ActionRow[] = permitted.map((action) => {
     const count =
       action.key === 'compliance'

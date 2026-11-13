@@ -8,6 +8,7 @@ import {
   type CompanyScopeFilter,
   type TxClient,
 } from './tenancy'
+import { asDate, asNumber } from './sql-json'
 
 // ---------------------------------------------------------------------------
 // COMPLIANCE (Phase 4 §5 step 1).
@@ -602,32 +603,44 @@ export async function complianceOnce(
   companyIds: readonly string[],
   now: Date = new Date(),
 ): Promise<ComplianceOnce> {
+  return complianceFrom(
+    await tx.$queryRaw<ComplianceSqlRow[]>(complianceSql(companyIds, now)),
+    now,
+  )
+}
+
+/** One compliance row, from either transport (sql-json.ts). */
+export interface ComplianceSqlRow {
+  id: string
+  company_id: string
+  type: ComplianceType
+  identifier: string | null
+  issuer: string | null
+  issued_at: Date | string | null
+  expires_at: Date | string
+  notes: string | null
+  company_name: string
+  truck_id: string | null
+  truck_unit: string | null
+  trailer_id: string | null
+  trailer_unit: string | null
+  driver_id: string | null
+  driver_first: string | null
+  driver_last: string | null
+  documents: number
+  latest_at: Date | string | null
+  lead_days: number
+}
+
+/** The compliance read's SQL — ONE TEXT, two readers (§6.1.1 v10.97). */
+export function complianceSql(
+  companyIds: readonly string[],
+  now: Date = new Date(),
+): Prisma.Sql {
   const ids = [...companyIds]
   const scoped = ids.length > 0
   const panelDays = PANEL_HORIZON_DAYS[2]
-  const rows = await tx.$queryRaw<
-    {
-      id: string
-      company_id: string
-      type: ComplianceType
-      identifier: string | null
-      issuer: string | null
-      issued_at: Date | null
-      expires_at: Date
-      notes: string | null
-      company_name: string
-      truck_id: string | null
-      truck_unit: string | null
-      trailer_id: string | null
-      trailer_unit: string | null
-      driver_id: string | null
-      driver_first: string | null
-      driver_last: string | null
-      documents: number
-      latest_at: Date | null
-      lead_days: number
-    }[]
-  >`
+  return Prisma.sql`
     WITH lead AS (
       SELECT COALESCE(MAX(cs."complianceWarnDays"), 30)::int AS days
       FROM "CompanySettings" cs
@@ -688,6 +701,27 @@ export async function complianceOnce(
      ORDER BY ci."expiresAt" ASC
      LIMIT 500
   `
+}
+
+/**
+ * The row's count and the panel's figures from the compliance rows — the
+ * pure half both readers share. ORDER IS NOT NEEDED HERE: the rows are
+ * counted, and `shapeRecords` is told the latest expiry per pair rather
+ * than inferring it from position.
+ */
+export function complianceFrom(
+  sqlRows: readonly ComplianceSqlRow[],
+  now: Date,
+): ComplianceOnce {
+  const panelDays = PANEL_HORIZON_DAYS[2]
+  const rows = sqlRows.map((row) => ({
+    ...row,
+    issued_at: asDate(row.issued_at),
+    expires_at: asDate(row.expires_at)!,
+    latest_at: asDate(row.latest_at),
+    documents: asNumber(row.documents),
+    lead_days: asNumber(row.lead_days),
+  }))
 
   // With no rows there is nothing to count at any horizon, so the lead days
   // are the default for the record and NOT a second statement — the budget

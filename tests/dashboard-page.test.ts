@@ -17,16 +17,20 @@ const dqf = readFileSync('src/lib/dqf.ts', 'utf8')
 const counts = readFileSync('src/lib/dashboard-counts.ts', 'utf8')
 const pageRead = readFileSync('src/lib/dashboard-page.ts', 'utf8')
 
-describe('the page opens two transactions, money beside the six (v10.96)', () => {
-  it('calls withCurrentOrg exactly twice, in parallel, one for readMoney and one for readCards', () => {
+const oneRow = readFileSync('src/lib/dashboard-one-row.ts', 'utf8')
+const companiesSrc = readFileSync('src/lib/companies.ts', 'utf8')
+
+describe('the page opens one transaction with one statement (v10.97)', () => {
+  it('calls withCurrentOrg exactly once, for readDashboardOneRow, with no parallel reads', () => {
     const calls = page.match(/withCurrentOrg\(/g) ?? []
-    expect(calls.length, 'withCurrentOrg( occurrences').toBe(2)
+    expect(calls.length, 'withCurrentOrg( occurrences').toBe(1)
     expect(page).toContain(
-      "import { readCards, readMoney } from '@/lib/dashboard-page'",
+      "import { readDashboardOneRow } from '@/lib/dashboard-one-row'",
     )
-    expect(page).toMatch(/readMoney\(tx, ctx, input\)/)
-    expect(page).toMatch(/readCards\(tx, ctx, input\)/)
-    expect(page.match(/Promise\.all\(\[/g)?.length).toBe(1)
+    expect(page).toMatch(/readDashboardOneRow\(tx, ctx, input\)/)
+    expect(page).not.toContain('Promise.all([')
+    for (const gone of ['readMoney(', 'readCards('])
+      expect(page, gone).not.toContain(gone)
     // THE OLD SHAPE, BY NAME: no card is read by the page itself any more.
     for (const gone of [
       'dashboardFor(',
@@ -41,16 +45,62 @@ describe('the page opens two transactions, money beside the six (v10.96)', () =>
       expect(page, gone).not.toContain(gone)
   })
 
-  it('keeps the seven spans under their names, six from the cards read and money from its own', () => {
-    expect(page).toContain('...cards.spans,')
-    expect(page).toContain('money: moneyRead.ms,')
+  it('keeps the seven spans under their names, from the one read', () => {
+    expect(page).toContain(
+      'const readMs: Record<DashboardRead, number | null> = reads.spans',
+    )
     expect([...DASHBOARD_ORDER].sort()).toEqual([...DASHBOARD_READS].sort())
+    for (const name of DASHBOARD_READS)
+      expect(oneRow, name).toMatch(new RegExp(`\\b${name}: [^\\n]*ms\\b`))
     // `readCards` skips the money card ITSELF and nothing else: the six run
     // with the role's real permissions (top drivers and the panels' cash
     // still ask may.money).
     expect(pageRead).toContain('cardsOnly: true,')
     expect(pageRead).toMatch(/may\.money && !input\.cardsOnly/)
     expect(pageRead).not.toContain('may: { ...input.may, money: false }')
+  })
+})
+
+describe('the one-row statement names each card, and each card has one SQL text', () => {
+  it('builds every CTE from the card’s own builder, and sends one $queryRaw', () => {
+    for (const builder of [
+      'moneySql(',
+      'needsYouSql(',
+      'complianceSql(',
+      'panelSql(',
+      'topDriversSql(',
+      'dqfRosterSql(',
+      'listedAuthoritiesSql(',
+    ])
+      expect(oneRow, builder).toContain(builder)
+    for (const name of [
+      "'money'",
+      "'needs'",
+      "'compliance'",
+      "'compliance_row'",
+      "'panels'",
+      "'top_drivers'",
+      "'dqf'",
+      "'authorities'",
+    ])
+      expect(oneRow, name).toContain(name)
+    expect(oneRow.match(/\$queryRaw/g)?.length).toBe(1)
+    // A card the role may not see has no CTE and a literal null column.
+    expect(oneRow).toContain('const absent = Prisma.sql`NULL::json`')
+    // The card readers send the SAME text the CTE uses.
+    expect(kpis).toContain('await tx.$queryRaw<MoneyRow[]>(moneySql(input))')
+    expect(counts).toContain('needsYouSql(companyIds, now)')
+    expect(counts).toContain('panelSql(companyIds, period, now, options)')
+    expect(counts).toContain('topDriversSql(companyIds, period)')
+    expect(dqf).toContain('dqfRosterSql(companyIds)')
+    expect(compliance).toContain('complianceSql(companyIds, now)')
+  })
+
+  it('the authorities twin spells LISTED_AUTHORITY, which has exactly one field', () => {
+    expect(companiesSrc).toContain(
+      'export const LISTED_AUTHORITY = { isActive: true } as const',
+    )
+    expect(companiesSrc).toContain('WHERE c."isActive" = true')
   })
 })
 

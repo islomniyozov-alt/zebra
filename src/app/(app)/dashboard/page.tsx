@@ -8,7 +8,7 @@ import {
   type DashboardRead,
   writeTimingLine,
 } from '@/lib/request-timing'
-import { readCards, readMoney } from '@/lib/dashboard-page'
+import { readDashboardOneRow } from '@/lib/dashboard-one-row'
 import type { Dashboard } from '@/lib/dashboard-kpis'
 import {
   DEFAULT_PERIOD,
@@ -184,6 +184,12 @@ export default async function DashboardPage({
   // owner's median, the cards' sum where their max had been. The money card
   // — the longest — runs in its own transaction beside the other six, so
   // the wall is the longer of two and the count is twelve, on the line.
+  //
+  // ONE STATEMENT, EACH CARD ITS OWN NAMED CTE (v10.97, the fallback the
+  // owner named): the split read owner 692 ms against 568 before, so the
+  // wall was not back. `readDashboardOneRow` sends the seven cards as one
+  // SELECT — three statements, four with the shell — and every card that
+  // ran settles with it, so each one's span is the statement's wall.
   const fanOutClock = stopwatch()
   const input = {
     companyParam,
@@ -199,28 +205,14 @@ export default async function DashboardPage({
       compliance: maySeeCompliance,
     },
   }
-  const [moneyRead, cards] = await Promise.all([
-    maySeeMoney
-      ? withCurrentOrg(
-          'read',
-          'dashboard',
-          (tx, ctx) => readMoney(tx, ctx, input),
-          { timeoutMs: 10_000 },
-        )
-      : Promise.resolve({ money: null, ms: null }),
-    withCurrentOrg(
-      'read',
-      'dashboard',
-      (tx, ctx) => readCards(tx, ctx, input),
-      { timeoutMs: 10_000 },
-    ),
-  ])
-  const money = moneyRead.money
-  const { queue, panels, topDrivers, dqf, horizons, companies } = cards
-  const readMs: Record<DashboardRead, number | null> = {
-    ...cards.spans,
-    money: moneyRead.ms,
-  }
+  const reads = await withCurrentOrg(
+    'read',
+    'dashboard',
+    (tx, ctx) => readDashboardOneRow(tx, ctx, input),
+    { timeoutMs: 10_000 },
+  )
+  const { money, queue, panels, topDrivers, dqf, horizons, companies } = reads
+  const readMs: Record<DashboardRead, number | null> = reads.spans
   const fanOutMs = fanOutClock.ms()
   // From `after()`, into this invocation's log (§6.10 — a sign-in renders
   // this page inside its own POST response).

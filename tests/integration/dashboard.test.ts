@@ -38,6 +38,7 @@ import {
   isQualifiable,
 } from '@/lib/dqf'
 import { readCards, readDashboard, readMoney } from '@/lib/dashboard-page'
+import { readDashboardOneRow } from '@/lib/dashboard-one-row'
 import { createPrismaClient, statementsOf } from '@/lib/db'
 import { DEFAULT_PERIOD, grainOf, periodWindow } from '@/lib/rolling-period'
 import { recordPayment } from '@/lib/payments'
@@ -1502,6 +1503,125 @@ describe('the three panels read real state (part 3)', () => {
         'companies',
       ] as const)
         expect(cards.spans[name], name).not.toBeNull()
+    } finally {
+      await client.$disconnect()
+    }
+  }, 300_000)
+})
+
+// ── THE ONE-ROW STATEMENT AGREES WITH THE PER-CARD READ (v10.97) ──────────
+//
+// Last in the file on purpose, after every fixture above. Three sessions, the
+// ones the CTE logic branches on: the owner unscoped, the owner with a chip
+// (the panel narrows, the row does not — `compliance_row` exists), and a
+// dispatcher (no money: no money CTE, no top drivers, no cash). Each result
+// is held equal to `readDashboard`'s, spans aside; and the whole read is three
+// statements on a real client.
+describe('the dashboard in one statement (v10.97)', () => {
+  const window = () =>
+    periodWindow(DEFAULT_PERIOD, new Date(Date.UTC(2026, 10, 30)))
+  const withoutSpans = <T extends { spans: unknown }>(reads: T) => {
+    const { spans: _spans, ...rest } = reads
+    void _spans
+    return rest
+  }
+  const cases = () =>
+    [
+      {
+        label: 'owner, unscoped',
+        session: asOwner(),
+        companyParam: null as string | null,
+        may: { money: true, panels: true, fleet: true, compliance: true },
+      },
+      {
+        label: 'owner, with a chip',
+        session: asOwner(),
+        companyParam: alphaId,
+        may: { money: true, panels: true, fleet: true, compliance: true },
+      },
+      {
+        label: 'dispatcher',
+        session: { ...asOwner(), role: 'DISPATCHER' } as AuthorizedSession,
+        companyParam: null as string | null,
+        may: { money: false, panels: true, fleet: true, compliance: true },
+      },
+    ] as const
+
+  it('equals the per-card read for the owner unscoped, the owner with a chip, and a dispatcher', async () => {
+    // THE CHIP CASE NEEDS THE TWO SCOPES TO DIFFER: every compliance record
+    // above is in Alpha, so the session scope and the Alpha chip would read
+    // the same rows and a row read on the wrong scope would still agree —
+    // the guard that read on the chip did not fire until this record. A
+    // trailer's registration in BETA, lapsing in ten days, is in the row
+    // (every authority) and not in the Alpha panel.
+    await inOrg(async (tx) => {
+      const trailer = await tx.trailer.create({
+        data: { organizationId, companyId: betaId, unitNumber: `B-${nonce}` },
+      })
+      await tx.complianceItem.create({
+        data: {
+          organizationId,
+          companyId: betaId,
+          type: 'REGISTRATION',
+          trailerId: trailer.id,
+          expiresAt: new Date(Date.UTC(2026, 11, 10)),
+        },
+      })
+    })
+    for (const c of cases()) {
+      const input = {
+        companyParam: c.companyParam,
+        window: window(),
+        grain: grainOf(DEFAULT_PERIOD),
+        now: new Date(Date.UTC(2026, 10, 30)),
+        may: c.may,
+      }
+      const [one, cards] = await inOrg((tx) =>
+        Promise.all([
+          readDashboardOneRow(tx, c.session, input),
+          readDashboard(tx, c.session, input),
+        ]),
+      )
+      expect(withoutSpans(one), c.label).toEqual(withoutSpans(cards))
+      // ABOVE ZERO, so the agreement is over something.
+      expect(one.companies.length, c.label).toBeGreaterThan(0)
+      expect(one.queue.length, c.label).toBeGreaterThan(0)
+      if (c.may.money) {
+        expect(one.money, c.label).not.toBeNull()
+        expect(one.money!.kpis.loads, c.label).toBeGreaterThan(0)
+      } else {
+        expect(one.money, c.label).toBeNull()
+        expect(one.topDrivers, c.label).toBeNull()
+        expect(one.panels?.aging, c.label).toBeNull()
+      }
+    }
+  }, 300_000)
+
+  it('is three statements on a real client — set_config, the read, COMMIT', async () => {
+    const client = createPrismaClient(process.env.DIRECT_DATABASE_URL!)
+    try {
+      const before = statementsOf(client)!
+      const reads = await client.$transaction(
+        async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.current_org_id', ${organizationId}, true)`
+          return readDashboardOneRow(tx, asOwner(), {
+            companyParam: alphaId,
+            window: window(),
+            grain: grainOf(DEFAULT_PERIOD),
+            now: new Date(Date.UTC(2026, 10, 30)),
+            may: { money: true, panels: true, fleet: true, compliance: true },
+          })
+        },
+        { maxWait: 20_000, timeout: LOAD_WRITE_TIMEOUT_MS },
+      )
+      expect(statementsOf(client)! - before).toBe(3)
+      // Every card ran — the chip case, so compliance_row ran too.
+      expect(reads.money).not.toBeNull()
+      expect(reads.panels).not.toBeNull()
+      expect(reads.topDrivers).not.toBeNull()
+      expect(reads.dqf).not.toBeNull()
+      expect(reads.horizons).not.toBeNull()
+      for (const span of Object.values(reads.spans)) expect(span).not.toBeNull()
     } finally {
       await client.$disconnect()
     }

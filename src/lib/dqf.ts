@@ -5,6 +5,7 @@ import {
 } from '@/generated/prisma/client'
 import type { TxClient } from './tenancy'
 import { daysUntil } from './compliance'
+import { asDate } from './sql-json'
 import { isReferralPayee } from './driver-kind'
 
 // ---------------------------------------------------------------------------
@@ -405,19 +406,27 @@ export async function dqfRoster(
   tx: TxClient,
   companyIds: readonly string[],
 ): Promise<DqfRosterRow[]> {
+  return dqfRosterFrom(
+    await tx.$queryRaw<DqfRosterSqlRow[]>(dqfRosterSql(companyIds)),
+  )
+}
+
+/** One driver's row, from either transport (sql-json.ts). */
+export interface DqfRosterSqlRow {
+  id: string
+  hire_date: Date | string | null
+  status: string
+  deleted_at: Date | string | null
+  kind: string
+  types: string[] | null
+  expiries: (Date | string)[] | null
+  documents: string[] | null
+}
+
+/** The roster's SQL — ONE TEXT, two readers (§6.1.1 v10.97). */
+export function dqfRosterSql(companyIds: readonly string[]): Prisma.Sql {
   const ids = [...companyIds]
-  const rows = await tx.$queryRaw<
-    {
-      id: string
-      hire_date: Date | null
-      status: string
-      deleted_at: Date | null
-      kind: string
-      types: string[] | null
-      expiries: Date[] | null
-      documents: string[] | null
-    }[]
-  >`
+  return Prisma.sql`
     SELECT d."id",
            d."hireDate" AS hire_date,
            d."status"::text AS status,
@@ -440,22 +449,29 @@ export async function dqfRoster(
       FROM "Driver" d
      WHERE ${ids.length > 0 ? Prisma.sql`d."companyId" = ANY(${ids})` : Prisma.sql`TRUE`}
   `
+}
+
+/** The roster rows as the ring reads them, from either transport. */
+export function dqfRosterFrom(
+  rows: readonly DqfRosterSqlRow[],
+): DqfRosterRow[] {
   return rows.map((row) => {
     const types = row.types ?? []
     const expiries = row.expiries ?? []
+    const hireDate = asDate(row.hire_date)
     return {
       id: row.id,
-      hireDate: row.hire_date,
+      hireDate,
       status: row.status,
-      deletedAt: row.deleted_at,
+      deletedAt: asDate(row.deleted_at),
       kind: row.kind,
       facts: {
-        hireDate: row.hire_date,
+        hireDate,
         // ORDERED IDENTICALLY — same subquery, same ORDER BY — so index i of
         // one belongs with index i of the other, as in `dqfFactsForDrivers`.
         compliance: types.map((type, index) => ({
           type,
-          expiresAt: expiries[index]!,
+          expiresAt: asDate(expiries[index])!,
         })),
         documents: row.documents ?? [],
       },

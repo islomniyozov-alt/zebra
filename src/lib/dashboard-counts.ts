@@ -1,9 +1,11 @@
 import { Prisma } from '@/generated/prisma/client'
 import { agingSumsSql } from '@/lib/factoring'
+import { asNumber } from '@/lib/sql-json'
 import {
   dqfChecklist,
   dqfIncompleteCount,
   dqfRoster,
+  type DqfRosterRow,
   isQualifiable,
 } from '@/lib/dqf'
 
@@ -119,6 +121,55 @@ export async function needsYouCounts(
   companyIds: readonly string[],
   now: Date = new Date(),
 ): Promise<NeedsYouCounts> {
+  const rows = await tx.$queryRaw<NeedsYouRow[]>(needsYouSql(companyIds, now))
+  const row = rows[0]
+  if (!row) {
+    throw new Error('needsYouCounts: no row from a single-row SELECT.')
+  }
+  return needsYouFrom(row)
+}
+
+/** The Needs-you row's one row, from either transport (sql-json.ts). */
+export interface NeedsYouRow {
+  pod_missing: bigint | number
+  no_rate: bigint | number
+  ready_to_invoice: bigint | number
+  unassigned_finished: bigint | number
+  unassigned_finished_cents: bigint | number
+  unassigned: bigint | number
+  overdue: bigint | number
+  unapplied: bigint | number
+  unapplied_cents: bigint | number
+  draft_settlements: bigint | number
+}
+
+export function needsYouFrom(row: NeedsYouRow): NeedsYouCounts {
+  return {
+    counts: {
+      podMissing: asNumber(row.pod_missing),
+      noRate: asNumber(row.no_rate),
+      readyToInvoice: asNumber(row.ready_to_invoice),
+      unassignedFinished: asNumber(row.unassigned_finished),
+      unassigned: asNumber(row.unassigned),
+      overdue: asNumber(row.overdue),
+      unapplied: asNumber(row.unapplied),
+      draftSettlements: asNumber(row.draft_settlements),
+    },
+    amounts: {
+      unassignedFinished: asNumber(row.unassigned_finished_cents),
+      unapplied: asNumber(row.unapplied_cents),
+    },
+  }
+}
+
+/**
+ * The Needs-you counts' SQL — ONE TEXT, two readers (§6.1.1 v10.97):
+ * `needsYouCounts` sends it on its own, the one-row statement names it.
+ */
+export function needsYouSql(
+  companyIds: readonly string[],
+  now: Date = new Date(),
+): Prisma.Sql {
   const scoped = companyIds.length > 0
   const loadScope = scoped
     ? Prisma.sql`AND l."companyId" = ANY(${[...companyIds]})`
@@ -143,20 +194,7 @@ export async function needsYouCounts(
     )
   `
 
-  const rows = await tx.$queryRaw<
-    {
-      pod_missing: bigint
-      no_rate: bigint
-      ready_to_invoice: bigint
-      unassigned_finished: bigint
-      unassigned_finished_cents: bigint
-      unassigned: bigint
-      overdue: bigint
-      unapplied: bigint
-      unapplied_cents: bigint
-      draft_settlements: bigint
-    }[]
-  >`
+  return Prisma.sql`
     SELECT
       -- ── FIVE LOAD ROWS, ONE SCAN ────────────────────────────────────
       (SELECT COUNT(*) FILTER (
@@ -227,31 +265,6 @@ export async function needsYouCounts(
        WHERE s."deletedAt" IS NULL AND s."status" = 'DRAFT'
          ${settlementScope}) AS draft_settlements
   `
-
-  const row = rows[0]
-  if (!row) {
-    // A SELECT of scalar subqueries always returns exactly one row, so this is
-    // unreachable — and it throws rather than returning zeros, because a queue
-    // of noughts is indistinguishable from a quiet morning.
-    throw new Error('needsYouCounts: no row from a single-row SELECT.')
-  }
-
-  return {
-    counts: {
-      podMissing: Number(row.pod_missing),
-      noRate: Number(row.no_rate),
-      readyToInvoice: Number(row.ready_to_invoice),
-      unassignedFinished: Number(row.unassigned_finished),
-      unassigned: Number(row.unassigned),
-      overdue: Number(row.overdue),
-      unapplied: Number(row.unapplied),
-      draftSettlements: Number(row.draft_settlements),
-    },
-    amounts: {
-      unassignedFinished: Number(row.unassigned_finished_cents),
-      unapplied: Number(row.unapplied_cents),
-    },
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -339,6 +352,69 @@ export async function panelFigures(
   now: Date = new Date(),
   options: { cash: boolean } = { cash: true },
 ): Promise<PanelFigures> {
+  const rows = await tx.$queryRaw<PanelRow[]>(
+    panelSql(companyIds, period, now, options),
+  )
+  const row = rows[0]
+  if (!row) {
+    throw new Error('panelFigures: no row from a single-row SELECT.')
+  }
+  return panelFrom(row, options)
+}
+
+/** The panels' one row, from either transport (sql-json.ts). */
+export interface PanelRow {
+  trucks_paired: bigint | number
+  trucks_idle: bigint | number
+  drivers_paired: bigint | number
+  drivers_idle: bigint | number
+  moving_now: bigint | number
+  d0_30?: bigint | number
+  d31_60?: bigint | number
+  d61_90?: bigint | number
+  d90plus?: bigint | number
+  draft_cents?: bigint | number
+  final_cents?: bigint | number
+  paid_cents?: bigint | number
+}
+
+export function panelFrom(
+  row: PanelRow,
+  options: { cash: boolean },
+): PanelFigures {
+  return {
+    fleet: {
+      trucksPaired: asNumber(row.trucks_paired),
+      trucksIdle: asNumber(row.trucks_idle),
+      driversPaired: asNumber(row.drivers_paired),
+      driversIdle: asNumber(row.drivers_idle),
+      movingNow: asNumber(row.moving_now),
+    },
+    aging: options.cash
+      ? {
+          d0_30: asNumber(row.d0_30),
+          d31_60: asNumber(row.d31_60),
+          d61_90: asNumber(row.d61_90),
+          d90plus: asNumber(row.d90plus),
+        }
+      : null,
+    pipeline: options.cash
+      ? {
+          draftCents: asNumber(row.draft_cents),
+          finalCents: asNumber(row.final_cents),
+          paidCents: asNumber(row.paid_cents),
+        }
+      : null,
+  }
+}
+
+/** The panels' SQL — ONE TEXT, two readers (§6.1.1 v10.97). */
+export function panelSql(
+  companyIds: readonly string[],
+  period: { from: Date; to: Date },
+  now: Date = new Date(),
+  options: { cash: boolean } = { cash: true },
+): Prisma.Sql {
   // ── THE CASH HALF IS A PROPERTY OF THE STATEMENT, NOT OF THE RESULT ────
   //
   // §6.1.1 makes Cash money-roles-only and the ruling is that its QUERY DOES
@@ -414,26 +490,7 @@ export async function panelFigures(
          AND s."periodStart" < ${period.to}) AS paid_cents
   `
     : Prisma.empty
-  const rows = await tx.$queryRaw<
-    {
-      trucks_paired: bigint
-      trucks_idle: bigint
-      drivers_paired: bigint
-      drivers_idle: bigint
-      moving_now: bigint
-      // OPTIONAL BECAUSE THE COLUMNS ARE OPTIONAL. A role without
-      // `load.financials` gets a SELECT that never named them, so these are
-      // absent rather than zero — and the compiler then insists the return
-      // decides which it is.
-      d0_30?: bigint
-      d31_60?: bigint
-      d61_90?: bigint
-      d90plus?: bigint
-      draft_cents?: bigint
-      final_cents?: bigint
-      paid_cents?: bigint
-    }[]
-  >`
+  return Prisma.sql`
     SELECT
       -- ── FLEET: FIVE TILES, TWO SCANS ────────────────────────────────
       --
@@ -480,39 +537,6 @@ export async function panelFigures(
       -- row's own reader now (complianceHorizons). See the header.
       ${cashColumns}
   `
-
-  const row = rows[0]
-  if (!row) {
-    throw new Error('panelFigures: no row from a single-row SELECT.')
-  }
-
-  return {
-    fleet: {
-      trucksPaired: Number(row.trucks_paired),
-      trucksIdle: Number(row.trucks_idle),
-      driversPaired: Number(row.drivers_paired),
-      driversIdle: Number(row.drivers_idle),
-      movingNow: Number(row.moving_now),
-    },
-    // NULL WHEN THE COLUMNS WERE NOT ASKED FOR, and the flag decides rather
-    // than the data: `Number(undefined)` is `NaN`, and a cash panel rendering
-    // "$NaN" would be the most expensive way to discover this.
-    aging: options.cash
-      ? {
-          d0_30: Number(row.d0_30),
-          d31_60: Number(row.d31_60),
-          d61_90: Number(row.d61_90),
-          d90plus: Number(row.d90plus),
-        }
-      : null,
-    pipeline: options.cash
-      ? {
-          draftCents: Number(row.draft_cents),
-          finalCents: Number(row.final_cents),
-          paidCents: Number(row.paid_cents),
-        }
-      : null,
-  }
 }
 
 export interface DriverGrossRow {
@@ -545,21 +569,69 @@ export async function topDriversByGross(
   companyIds: readonly string[],
   period: { from: Date; to: Date },
   limit = 10,
-): Promise<{ top: DriverGrossRow[]; restCount: number; restCents: number }> {
+): Promise<TopDrivers> {
+  return topDriversFrom(
+    await tx.$queryRaw<TopDriverRow[]>(topDriversSql(companyIds, period)),
+    limit,
+  )
+}
+
+export interface TopDrivers {
+  top: DriverGrossRow[]
+  restCount: number
+  restCents: number
+}
+
+/** One driver's row, from either transport (sql-json.ts). */
+export interface TopDriverRow {
+  driver_id: string
+  first_name: string
+  last_name: string
+  gross: bigint | number
+  loads: bigint | number
+}
+
+/**
+ * The rows, top and rest. ORDER RESTORED HERE: inside the one-row statement
+ * the rows arrive through `json_agg`, which promises no order, so they are
+ * sorted by gross as the query sorted them — ties broken by driver id, the
+ * same tie the query would leave to chance.
+ */
+export function topDriversFrom(
+  rows: readonly TopDriverRow[],
+  limit = 10,
+): TopDrivers {
+  const all = rows
+    .map((row) => ({
+      driverId: row.driver_id,
+      driverName: `${row.last_name}, ${row.first_name}`,
+      grossCents: asNumber(row.gross),
+      loads: asNumber(row.loads),
+    }))
+    .sort(
+      (a, b) =>
+        b.grossCents - a.grossCents || a.driverId.localeCompare(b.driverId),
+    )
+  const top = all.slice(0, limit)
+  const rest = all.slice(limit)
+  return {
+    top,
+    restCount: rest.length,
+    restCents: rest.reduce((sum, row) => sum + row.grossCents, 0),
+  }
+}
+
+/** Top drivers' SQL — ONE TEXT, two readers (§6.1.1 v10.97). */
+export function topDriversSql(
+  companyIds: readonly string[],
+  period: { from: Date; to: Date },
+): Prisma.Sql {
   const scoped = companyIds.length > 0
   const scope = scoped
     ? Prisma.sql`AND s."companyId" = ANY(${[...companyIds]})`
     : Prisma.empty
 
-  const rows = await tx.$queryRaw<
-    {
-      driver_id: string
-      first_name: string
-      last_name: string
-      gross: bigint
-      loads: bigint
-    }[]
-  >`
+  return Prisma.sql`
     SELECT
       d."id" AS driver_id,
       d."firstName" AS first_name,
@@ -593,23 +665,6 @@ export async function topDriversByGross(
     GROUP BY d."id", d."firstName", d."lastName"
     ORDER BY SUM(line."grossCents") DESC
   `
-
-  const all = rows.map((row) => ({
-    driverId: row.driver_id,
-    driverName: `${row.last_name}, ${row.first_name}`,
-    grossCents: Number(row.gross),
-    loads: Number(row.loads),
-  }))
-
-  // THE REMAINDER IS COUNTED AND SUMMED, not dropped. A list of ten out of
-  // ninety that does not say so reads as the whole fleet.
-  const top = all.slice(0, limit)
-  const rest = all.slice(limit)
-  return {
-    top,
-    restCount: rest.length,
-    restCents: rest.reduce((sum, row) => sum + row.grossCents, 0),
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -673,8 +728,14 @@ export async function dqfSplit(
   // SO THE SCOPE IS THE ONLY FILTER, and the cost is reading the terminated
   // drivers and referral payees — and now their facts — before discarding
   // them: 108 extra rows on dev, against a figure read for DOT exposure.
-  const roster = await dqfRoster(tx, companyIds)
+  return dqfSplitFrom(await dqfRoster(tx, companyIds), now)
+}
 
+/** The ring's figure from the roster — the pure half both readers share. */
+export function dqfSplitFrom(
+  roster: readonly DqfRosterRow[],
+  now: Date,
+): DqfSplit {
   const qualifiable = roster.filter((driver) => isQualifiable(driver))
   const facts = new Map(roster.map((driver) => [driver.id, driver.facts]))
 
