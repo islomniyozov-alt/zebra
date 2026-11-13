@@ -1,10 +1,9 @@
 import { redirect } from 'next/navigation'
 import type { ReactNode } from 'react'
-import { currentUserCan, getSession, withCurrentOrg } from '@/lib/auth-context'
-import { ownAccountDb } from '@/lib/auth-db'
+import { getShellContext } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { navigationFor } from '@/lib/permissions'
-import { DEFAULT_DENSITY, readDensity, type Density } from '@/lib/preferences'
+import type { Density } from '@/lib/preferences'
 import { Sidebar, type SidebarGroup } from '@/components/shell/Sidebar'
 import { Topbar } from '@/components/shell/Topbar'
 import { ribbonBranch } from '@/lib/environment'
@@ -41,8 +40,14 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // (`request-timing.ts`). Numbers and a role — nothing else.
   const clock = stopwatch()
   const isolate = shellIsolateMark(clock.startedAt)
-  const { value: session, ms: sessionMs } = await timed(() => getSession())
-  if (!session) redirect('/login')
+  // THE ONE READ (GAPS 42 item 3; §6.10 v10.93; migration 71): the session,
+  // the viewer's own name and email, and the density preference in one
+  // statement — where three reads in sequence used to stand, 840 ms median
+  // of this line on every page. `getSession()` elsewhere in the request is
+  // derived from this same cached read.
+  const { value: shell, ms: sessionMs } = await timed(() => getShellContext())
+  if (!shell) redirect('/login')
+  const session = shell.session
 
   const { t } = await getLocaleContext()
 
@@ -103,20 +108,16 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   //
   // So nothing about the shell's permission changes for the five roles that
   // load it today, and the sixth gets a shell instead of a 500.
-  const { value: account, ms: accountMs } = await timed(() =>
-    ownAccountDb().user.findUnique({
-      where: { id: session.userId },
-      select: { name: true, email: true },
-    }),
-  )
-  const densityRead = (await currentUserCan('read', 'company'))
-    ? await timed(() =>
-        withCurrentOrg('read', 'company', (tx, current) =>
-          readDensity(tx, current.userId),
-        ),
-      )
-    : null
-  const density: Density = densityRead?.value ?? DEFAULT_DENSITY
+  //
+  // AND SINCE 2026-11-12 (v10.93) BOTH COME FROM THE ONE READ ABOVE: the
+  // name and email beside the session's own columns, the density through the
+  // function's one predicate — the session's own user in the session's own
+  // organization — for every role, the driver's included; it is the person's
+  // own row, and a role with no grid does not use it. The `company:read`
+  // question that stood in front of the density read was a permission on a
+  // preference, and it is gone with the read.
+  const account = shell.account
+  const density: Density = shell.density
 
   // From `after()`, into this invocation's log — inline renders included
   // (§6.10: a sign-in renders this inside its own POST response).
@@ -125,8 +126,10 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       role: session.role,
       spans: {
         sessionMs,
-        accountMs,
-        densityMs: densityRead?.ms ?? null,
+        // The two reads the one read replaced did not run: null, not 0, so
+        // the sweep reads an absence and not a free read.
+        accountMs: null,
+        densityMs: null,
         totalMs: clock.ms(),
       },
       isolate,
@@ -167,7 +170,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           // "OW" badge it replaced: "everybody will call it account or admin
           // account or dispatch account; OW means nothing to anyone." A name
           // says the one thing the control needs to say — this is mine.
-          accountName={account?.name?.trim() || account?.email || ''}
+          accountName={account.name.trim() || account.email}
           // §6.1.2. `null` on production, and the Topbar renders nothing for it.
           dataFrom={dataFrom}
           labels={{
