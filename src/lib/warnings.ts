@@ -7,6 +7,7 @@ import {
   DQF_COMPLIANCE_TYPES,
   type DqfFacts,
 } from './dqf'
+import { asDate } from './sql-json'
 
 // ---------------------------------------------------------------------------
 // WARNINGS ARE COMPUTED. THERE IS NO WARNING COLUMN AND THERE WILL NOT BE ONE.
@@ -382,51 +383,72 @@ export function loadWarnings(facts: LoadFacts, now: Date): Warning[] {
 
 type TxClient = Prisma.TransactionClient
 
-/**
- * Compliance and settlement facts for many drivers, in ONE statement.
- *
- * A `UNION ALL` rather than two queries, because the ruling is one query and
- * because two would still be a fixed cost that somebody would later turn into
- * three. The shape is deliberately flat — id, kind, label, date — so adding a
- * fact source is a third arm and not a new round trip.
- */
-export async function driverWarningFacts(
-  tx: TxClient,
-  driverIds: readonly string[],
-): Promise<Map<string, DriverFacts>> {
-  const facts = new Map<string, DriverFacts>()
-  for (const id of driverIds) facts.set(id, { ...NO_DRIVER_FACTS })
-  if (driverIds.length === 0) return facts
+/** A driver with a negative settlement, one row per such settlement. */
+export interface NegativeNetSqlRow {
+  id: string
+}
 
-  const ids = [...driverIds]
-  const [rows, dqf, roster] = await Promise.all([
-    // ONLY THE SETTLEMENTS. The compliance rows used to be the other arm
-    // of a UNION here and are now read once, by the DQF loader below.
-    tx.$queryRaw<{ id: string }[]>`
+/** The roster columns `isQualifiable` reads, as `driverRosterSql` returns them. */
+export interface DriverRosterSqlRow {
+  id: string
+  status: string
+  deletedAt: Date | string | null
+  kind: string
+}
+
+/** A truck's live compliance item, as `truckComplianceSql` returns it. */
+export interface TruckComplianceSqlRow {
+  id: string
+  label: string | null
+  at: Date | string | null
+}
+
+/**
+ * THE TEXTS THE TWO LOADERS BELOW SEND, as builders, so `/drivers`' facts
+ * statement reads the same SQL as a CTE each (§6.4 part 1 v11.02).
+ */
+export function negativeNetSql(ids: readonly string[]): Prisma.Sql {
+  return Prisma.sql`
       SELECT s."driverId" AS id
         FROM "Settlement" s
-       WHERE s."driverId" = ANY(${ids}) AND s."netCents" < 0
-    `,
-    // The DQF evidence, from `dqf.ts` — the one loader, so the drivers
-    // list and the roster view cannot disagree about what is on file.
-    dqfFactsForDrivers(tx, ids),
-    // And whether each driver is somebody whose file must be current.
-    tx.driver.findMany({
-      where: { id: { in: ids } },
-      // `kind` BECAUSE A PAYEE HAS NO FILE. `isQualifiable` reads it, and
-      // leaving it out of this select is a type error rather than a silent
-      // false — which is the whole reason the predicate takes the row.
-      select: { id: true, status: true, deletedAt: true, kind: true },
-    }),
-  ])
+       WHERE s."driverId" = ANY(${[...ids]}) AND s."netCents" < 0
+    `
+}
 
-  for (const driver of roster) {
-    const entry = facts.get(driver.id)
+export function driverRosterSql(ids: readonly string[]): Prisma.Sql {
+  // `kind` BECAUSE A PAYEE HAS NO FILE. `isQualifiable` reads it.
+  return Prisma.sql`
+      SELECT d."id", d."status"::text AS status, d."deletedAt", d."kind"::text AS kind
+        FROM "Driver" d
+       WHERE d."id" = ANY(${[...ids]})
+    `
+}
+
+export function truckComplianceSql(ids: readonly string[]): Prisma.Sql {
+  return Prisma.sql`
+    SELECT ci."truckId" AS id, ci."type"::text AS label, ci."expiresAt" AS at
+      FROM "ComplianceItem" ci
+     WHERE ci."truckId" = ANY(${[...ids]}) AND ci."deletedAt" IS NULL
+  `
+}
+
+/** The three sources' rows, from either transport, as the facts per driver. */
+export function driverFactsFrom(
+  driverIds: readonly string[],
+  negative: readonly NegativeNetSqlRow[],
+  dqf: Map<string, DqfFacts>,
+  roster: readonly DriverRosterSqlRow[],
+): Map<string, DriverFacts> {
+  const facts = new Map<string, DriverFacts>()
+  for (const id of driverIds) facts.set(id, { ...NO_DRIVER_FACTS })
+
+  for (const row of roster) {
+    const entry = facts.get(row.id)
     if (!entry) continue
-    const evidence = dqf.get(driver.id)
-    facts.set(driver.id, {
+    const evidence = dqf.get(row.id)
+    facts.set(row.id, {
       ...entry,
-      qualifiable: isQualifiable(driver),
+      qualifiable: isQualifiable({ ...row, deletedAt: asDate(row.deletedAt) }),
       hireDate: evidence?.hireDate ?? null,
       documents: evidence?.documents ?? [],
       // THE COMPLIANCE ROWS COME FROM THE DQF LOADER, not from a second
@@ -436,7 +458,7 @@ export async function driverWarningFacts(
     })
   }
 
-  for (const row of rows) {
+  for (const row of negative) {
     const entry = facts.get(row.id)
     if (!entry) continue
     facts.set(row.id, {
@@ -448,36 +470,64 @@ export async function driverWarningFacts(
   return facts
 }
 
-/** The same, for trucks. */
-export async function truckWarningFacts(
-  tx: TxClient,
+/** The trucks' rows, from either transport, as the facts per truck. */
+export function truckFactsFrom(
   truckIds: readonly string[],
-): Promise<Map<string, TruckFacts>> {
+  rows: readonly TruckComplianceSqlRow[],
+): Map<string, TruckFacts> {
   const facts = new Map<string, TruckFacts>()
   for (const id of truckIds) facts.set(id, { compliance: [] })
-  if (truckIds.length === 0) return facts
-
-  const ids = [...truckIds]
-  const rows = await tx.$queryRaw<
-    { id: string; label: string | null; at: Date | null }[]
-  >`
-    SELECT ci."truckId" AS id, ci."type"::text AS label, ci."expiresAt" AS at
-      FROM "ComplianceItem" ci
-     WHERE ci."truckId" = ANY(${ids}) AND ci."deletedAt" IS NULL
-  `
-
   for (const row of rows) {
     const entry = facts.get(row.id)
     if (!entry) continue
     facts.set(row.id, {
       compliance: [
         ...entry.compliance,
-        { type: row.label ?? '', expiresAt: row.at },
+        { type: row.label ?? '', expiresAt: asDate(row.at) },
       ],
     })
   }
-
   return facts
+}
+
+/**
+ * Compliance and settlement facts for many drivers.
+ *
+ * A fixed number of statements however long the list — the negative
+ * settlements, the DQF evidence (its loader's two) and the roster — and on
+ * `/drivers` all of them are CTEs of one statement (v11.02). The shape is
+ * deliberately flat, so adding a fact source is another text and not a new
+ * round trip per row.
+ */
+export async function driverWarningFacts(
+  tx: TxClient,
+  driverIds: readonly string[],
+): Promise<Map<string, DriverFacts>> {
+  if (driverIds.length === 0) return driverFactsFrom([], [], new Map(), [])
+
+  const [negative, dqf, roster] = await Promise.all([
+    // ONLY THE SETTLEMENTS. The compliance rows used to be the other arm
+    // of a UNION here and are now read once, by the DQF loader below.
+    tx.$queryRaw<NegativeNetSqlRow[]>(negativeNetSql(driverIds)),
+    // The DQF evidence, from `dqf.ts` — the one loader, so the drivers
+    // list and the roster view cannot disagree about what is on file.
+    dqfFactsForDrivers(tx, driverIds),
+    // And whether each driver is somebody whose file must be current.
+    tx.$queryRaw<DriverRosterSqlRow[]>(driverRosterSql(driverIds)),
+  ])
+  return driverFactsFrom(driverIds, negative, dqf, roster)
+}
+
+/** The same, for trucks. */
+export async function truckWarningFacts(
+  tx: TxClient,
+  truckIds: readonly string[],
+): Promise<Map<string, TruckFacts>> {
+  if (truckIds.length === 0) return truckFactsFrom([], [])
+  const rows = await tx.$queryRaw<TruckComplianceSqlRow[]>(
+    truckComplianceSql(truckIds),
+  )
+  return truckFactsFrom(truckIds, rows)
 }
 
 /**

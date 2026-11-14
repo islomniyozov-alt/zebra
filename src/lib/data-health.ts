@@ -1,6 +1,7 @@
-import type { Prisma } from '@/generated/prisma/client'
+import { Prisma } from '@/generated/prisma/client'
 import type { TxClient } from './tenancy'
 import { activeDriversWhere } from './driver-list'
+import { asNumber } from './sql-json'
 
 // ---------------------------------------------------------------------------
 // DATA HEALTH (§6.5 part 0, queue item 18). "The office fixes data faster when
@@ -205,22 +206,17 @@ export function driverHealthWhere(
 
 export type DriverHealthCounts = Record<DriverHealthCheck, number>
 
-/** The five driver counts over the active people the caller may see, in ONE statement. */
-export async function countDriverHealth(
-  tx: TxClient,
+/**
+ * The five driver counts as one SELECT returning one row — the text
+ * `countDriverHealth` sends, and the `health` CTE in `/drivers`' head
+ * (§6.4 part 1 v11.02), so both read the same SQL.
+ */
+export function driverHealthSql(
   scope: { companyIds?: readonly string[] | null },
   now: Date,
-): Promise<DriverHealthCounts> {
+): Prisma.Sql {
   const ids = scopeIds(scope.companyIds)
-  const rows = await tx.$queryRaw<
-    {
-      cdl: number
-      medical: number
-      phone: number
-      payRule: number
-      truck: number
-    }[]
-  >`
+  return Prisma.sql`
     SELECT COUNT(*) FILTER (WHERE NOT EXISTS (
              SELECT 1 FROM "ComplianceItem" ci
               WHERE ci."driverId" = d.id AND ci."deletedAt" IS NULL AND ci.type = 'CDL'))::int AS cdl,
@@ -240,12 +236,29 @@ export async function countDriverHealth(
        AND d.kind <> 'PAYEE'
        AND (${ids === null} OR d."companyId" = ANY(${ids ?? []}::text[]))
   `
-  const row = rows[0]
+}
+
+/** `driverHealthSql`'s row, from either transport. */
+export function driverHealthFrom(
+  row: Partial<Record<DriverHealthCheck, unknown>> | null | undefined,
+): DriverHealthCounts {
   return {
-    cdl: Number(row?.cdl ?? 0),
-    medical: Number(row?.medical ?? 0),
-    phone: Number(row?.phone ?? 0),
-    payRule: Number(row?.payRule ?? 0),
-    truck: Number(row?.truck ?? 0),
+    cdl: asNumber(row?.cdl),
+    medical: asNumber(row?.medical),
+    phone: asNumber(row?.phone),
+    payRule: asNumber(row?.payRule),
+    truck: asNumber(row?.truck),
   }
+}
+
+/** The five driver counts over the active people the caller may see, in ONE statement. */
+export async function countDriverHealth(
+  tx: TxClient,
+  scope: { companyIds?: readonly string[] | null },
+  now: Date,
+): Promise<DriverHealthCounts> {
+  const rows = await tx.$queryRaw<
+    Partial<Record<DriverHealthCheck, unknown>>[]
+  >(driverHealthSql(scope, now))
+  return driverHealthFrom(rows[0])
 }

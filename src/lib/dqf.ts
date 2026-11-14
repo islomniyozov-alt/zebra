@@ -490,24 +490,26 @@ export function dqfRosterFrom(
  * happen is a number that grows with the length of the list, and the
  * integration suite counts it against twenty drivers.
  */
-export async function dqfFactsForDrivers(
-  tx: TxClient,
-  driverIds: readonly string[],
-): Promise<Map<string, DqfFacts>> {
-  const out = new Map<string, DqfFacts>()
-  if (driverIds.length === 0) return out
+/** One driver's compliance evidence, as `dqfDriversSql` returns it. */
+export interface DqfDriverSqlRow {
+  id: string
+  hire_date: Date | string | null
+  types: string[] | null
+  expiries: (Date | string)[] | null
+}
 
-  const ids = [...driverIds]
+/** One driver's filed document types, as `dqfDocumentsSql` returns them. */
+export interface DqfDocumentSqlRow {
+  id: string
+  types: string[] | null
+}
 
-  const [drivers, documents] = await Promise.all([
-    tx.$queryRaw<
-      {
-        id: string
-        hire_date: Date | null
-        types: string[] | null
-        expiries: Date[] | null
-      }[]
-    >`
+/**
+ * THE TWO TEXTS `dqfFactsForDrivers` SENDS, as builders, so `/drivers`' facts
+ * statement reads the same SQL as a CTE each (§6.4 part 1 v11.02).
+ */
+export function dqfDriversSql(ids: readonly string[]): Prisma.Sql {
+  return Prisma.sql`
       SELECT d."id",
              d."hireDate" AS hire_date,
              ARRAY(
@@ -521,17 +523,26 @@ export async function dqfFactsForDrivers(
                 ORDER BY ci."expiresAt" DESC
              ) AS expiries
         FROM "Driver" d
-       WHERE d."id" = ANY(${ids})
-    `,
-    tx.$queryRaw<{ id: string; types: string[] | null }[]>`
+       WHERE d."id" = ANY(${[...ids]})
+    `
+}
+
+export function dqfDocumentsSql(ids: readonly string[]): Prisma.Sql {
+  return Prisma.sql`
       SELECT doc."driverId" AS id,
              ARRAY_AGG(DISTINCT doc."type"::text) AS types
         FROM "Document" doc
-       WHERE doc."driverId" = ANY(${ids}) AND doc."deletedAt" IS NULL
+       WHERE doc."driverId" = ANY(${[...ids]}) AND doc."deletedAt" IS NULL
        GROUP BY doc."driverId"
-    `,
-  ])
+    `
+}
 
+/** The two texts' rows, from either transport, as the facts per driver. */
+export function dqfFactsFrom(
+  drivers: readonly DqfDriverSqlRow[],
+  documents: readonly DqfDocumentSqlRow[],
+): Map<string, DqfFacts> {
+  const out = new Map<string, DqfFacts>()
   const filed = new Map<string, string[]>()
   for (const row of documents) filed.set(row.id, row.types ?? [])
 
@@ -539,18 +550,31 @@ export async function dqfFactsForDrivers(
     const types = row.types ?? []
     const expiries = row.expiries ?? []
     out.set(row.id, {
-      hireDate: row.hire_date,
+      hireDate: asDate(row.hire_date),
       // THE TWO ARRAYS ARE ORDERED IDENTICALLY — same subquery, same ORDER BY
       // — so index `i` of one belongs with index `i` of the other. Zipping
       // them here rather than returning a composite type keeps the row shape
       // something the driver can decode without a custom parser.
       compliance: types.map((type, index) => ({
         type,
-        expiresAt: expiries[index]!,
+        expiresAt: asDate(expiries[index])!,
       })),
       documents: filed.get(row.id) ?? [],
     })
   }
 
   return out
+}
+
+export async function dqfFactsForDrivers(
+  tx: TxClient,
+  driverIds: readonly string[],
+): Promise<Map<string, DqfFacts>> {
+  if (driverIds.length === 0) return new Map()
+
+  const [drivers, documents] = await Promise.all([
+    tx.$queryRaw<DqfDriverSqlRow[]>(dqfDriversSql(driverIds)),
+    tx.$queryRaw<DqfDocumentSqlRow[]>(dqfDocumentsSql(driverIds)),
+  ])
+  return dqfFactsFrom(drivers, documents)
 }

@@ -1,5 +1,6 @@
-import type { DriverStatus, Prisma } from '@/generated/prisma/client'
+import { Prisma, type DriverStatus } from '@/generated/prisma/client'
 import type { TxClient } from './tenancy'
+import { asNumber } from './sql-json'
 
 // ---------------------------------------------------------------------------
 // THE DRIVERS LIST TAKES DATATRUCK'S SHAPE (§6.4 part 1, queue item 16).
@@ -95,25 +96,108 @@ export function driverTabWhere(
 }
 
 /**
+ * What every tab of the list is narrowed by before its own question: the
+ * session's authority scope (empty is unrestricted, as `companyScopeFilter`),
+ * the authority chip and the tag chip.
+ */
+export interface DriverListBase {
+  companyScopes: readonly string[]
+  companyId?: string | null
+  tag?: string | null
+}
+
+/** The base as the list's `driver.findMany` spreads it. */
+export function driverListBaseWhere(
+  base: DriverListBase,
+): Prisma.DriverWhereInput {
+  return {
+    ...(base.companyScopes.length > 0
+      ? { companyId: { in: [...base.companyScopes] } }
+      : {}),
+    ...(base.companyId ? { companyId: base.companyId } : {}),
+    ...(base.tag ? { tags: { has: base.tag } } : {}),
+  }
+}
+
+/**
+ * THE SAME BASE AND THE SAME TAB QUESTIONS, AS SQL OVER `"Driver" d` (§6.4
+ * part 1 v11.02). The five counts are one `COUNT(*) FILTER` each, so the head
+ * of `/drivers` is one statement and not five; `driverTabWhere` above stays
+ * the list's own predicate. TWO SPELLINGS OF ONE RULE, so the enforcer is
+ * named: `tests/integration/drivers-page.test.ts` holds every tab's count
+ * here equal to `driver.count` through `driverTabWhere`, with and without
+ * removed rows, scoped, chipped and tagged.
+ */
+function driverBaseSql(base: DriverListBase): Prisma.Sql {
+  const scopes = [...base.companyScopes]
+  return Prisma.sql`(${scopes.length === 0} OR d."companyId" = ANY(${scopes}::text[]))
+       AND (${base.companyId ?? null}::text IS NULL OR d."companyId" = ${base.companyId ?? null})
+       AND (${base.tag ?? null}::text IS NULL OR ${base.tag ?? null} = ANY(d."tags"))`
+}
+
+export function driverTabSql(
+  tab: DriverTab,
+  now: Date,
+  includeRemoved = false,
+): Prisma.Sql {
+  const kept = includeRemoved
+    ? Prisma.sql`TRUE`
+    : Prisma.sql`d."deletedAt" IS NULL`
+  const working = Prisma.sql`d."status"::text = ANY(${[...WORKING_STATUSES]}::text[])`
+  switch (tab) {
+    case 'active':
+      return Prisma.sql`${kept} AND ${working}`
+    case 'unassigned':
+      return Prisma.sql`${kept} AND ${working} AND d."assignedTruckId" IS NULL`
+    case 'all':
+      return kept
+    case 'terminated':
+      return Prisma.sql`${kept} AND d."status"::text = 'INACTIVE'`
+    case 'vacation':
+      return Prisma.sql`${kept} AND (d."status"::text = 'VACATION' OR d."offDutyUntil" > ${now})`
+  }
+}
+
+/** The five counts as one SELECT returning one row, a column per tab. */
+export function driverTabCountsSql(
+  base: DriverListBase,
+  now: Date,
+  includeRemoved = false,
+): Prisma.Sql {
+  return Prisma.sql`SELECT ${Prisma.join(
+    DRIVER_TABS.map(
+      (tab) =>
+        Prisma.sql`COUNT(*) FILTER (WHERE ${driverTabSql(tab, now, includeRemoved)})::int AS ${Prisma.raw(`"${tab}"`)}`,
+    ),
+    ', ',
+  )}
+      FROM "Driver" d
+     WHERE ${driverBaseSql(base)}`
+}
+
+/** `driverTabCountsSql`'s row, from either transport, as the page's record. */
+export function driverTabCountsFrom(
+  row: Partial<Record<DriverTab, unknown>> | null | undefined,
+): Record<DriverTab, number> {
+  return Object.fromEntries(
+    DRIVER_TABS.map((tab) => [tab, asNumber(row?.[tab])]),
+  ) as Record<DriverTab, number>
+}
+
+/**
  * Every tab's count, by a COUNT(*) of its own question (§6.2.8) — never by the
- * length of a capped list. Five statements for the whole page.
+ * length of a capped list. ONE statement for the whole page (v11.02).
  */
 export async function countDriverTabs(
   tx: TxClient,
-  base: Prisma.DriverWhereInput,
+  base: DriverListBase,
   now: Date,
   includeRemoved = false,
 ): Promise<Record<DriverTab, number>> {
-  const counts = await Promise.all(
-    DRIVER_TABS.map((tab) =>
-      tx.driver.count({
-        where: { AND: [base, driverTabWhere(tab, now, includeRemoved)] },
-      }),
-    ),
+  const rows = await tx.$queryRaw<Partial<Record<DriverTab, unknown>>[]>(
+    driverTabCountsSql(base, now, includeRemoved),
   )
-  return Object.fromEntries(
-    DRIVER_TABS.map((tab, index) => [tab, counts[index] ?? 0]),
-  ) as Record<DriverTab, number>
+  return driverTabCountsFrom(rows[0])
 }
 
 // ── ASSIGN STATUS — READY TO GO / NOT READY ────────────────────────────────

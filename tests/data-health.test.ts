@@ -219,7 +219,12 @@ describe('the five driver checks (part 0b)', () => {
       join('src', 'app', '(app)', 'drivers', 'page.tsx'),
       'utf8',
     )
-    expect(page).toMatch(/countDriverHealth\(\s*tx,/)
+    // THE COUNTS ARE THE HEAD'S `health` CTE (§6.4 part 1 v11.02), whose
+    // text is `countDriverHealth`'s own.
+    expect(page).toMatch(/readDriversHead\(\s*tx,/)
+    expect(readFileSync(join('src', 'lib', 'drivers-page.ts'), 'utf8')).toMatch(
+      /driverHealthSql\(/,
+    )
     expect(page).toContain('driverHealthWhere(')
     expect(page).toContain('driverHealthBase()')
     expect(page).toContain('<DataHealthRow')

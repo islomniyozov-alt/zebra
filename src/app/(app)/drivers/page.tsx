@@ -2,30 +2,22 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { companyScopeFilter } from '@/lib/tenancy'
 import { Table, type Column } from '@/components/ui/Table'
 import { Tabs } from '@/components/ui/Tabs'
 import { WarningCell, warningLabels } from '@/components/WarningCell'
-import {
-  dispatchFactsForDrivers,
-  dispatchStatusFrom,
-  lastActivityForDrivers,
-  type DispatchStatus,
-} from '@/lib/dispatch-fields'
+import { dispatchStatusFrom, type DispatchStatus } from '@/lib/dispatch-fields'
 import {
   dqfFactsOf,
-  driverWarningFacts,
   driverWarnings,
   NO_DRIVER_FACTS,
-  truckWarningFacts,
   truckWarnings,
   withoutDqfGaps,
   type Warning,
 } from '@/lib/warnings'
 import { dqfChecklist, dqfIncompleteCount } from '@/lib/dqf'
 import {
-  countDriverTabs,
   DRIVER_TABS,
+  driverListBaseWhere,
   driverTabWhere,
   isDriverTab,
   readinessFor,
@@ -44,7 +36,8 @@ import {
   type ListShape,
   type RawParams,
 } from '@/lib/list-view'
-import { DENSITIES, readDensity, readSavedViews } from '@/lib/preferences'
+import { DENSITIES } from '@/lib/preferences'
+import { readDriverFacts, readDriversHead } from '@/lib/drivers-page'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
@@ -53,7 +46,6 @@ import { ColumnsChooser } from '../_grid/ColumnsChooser'
 import { GridFooterNav } from '../_grid/GridFooterNav'
 import { DataHealthRow } from '../_grid/DataHealthRow'
 import {
-  countDriverHealth,
   DRIVER_HEALTH_CHECKS,
   driverHealthBase,
   driverHealthCheckFor,
@@ -199,25 +191,27 @@ export default async function DriversPage({
   const maySeeDqf = await currentUserCan('read', 'dqf')
   const { rows, companyCount, counts, visible, savedViews, density, health } =
     await withCurrentOrg('read', 'driver', async (tx, session) => {
-      const companyCount = await tx.company.count()
-      const base = {
-        ...companyScopeFilter(session.companyScopes),
-        ...(companyParam ? { companyId: companyParam } : {}),
-        ...(tagParam ? { tags: { has: tagParam } } : {}),
+      const listBase = {
+        companyScopes: session.companyScopes,
+        companyId: companyParam ?? null,
+        tag: tagParam ?? null,
       }
+      const base = driverListBaseWhere(listBase)
 
+      // THE HEAD, ONE STATEMENT (§6.4 part 1 v11.02): the authority count;
       // FIVE COUNTS, ONE PER TAB, BY COUNT(*) — never the length of a capped
-      // list (§6.2.8). In the same transaction as the rows they count.
-      const counts = await countDriverTabs(tx, base, now, showRetired)
-
-      // THE FIVE DATA-HEALTH COUNTS, ONE STATEMENT, IN THIS TRANSACTION (§6.5
-      // part 0b). Over the active people the user may see — scope and the
-      // authority filter — never over this view's tab, chip or tag.
-      const health = await countDriverHealth(
-        tx,
-        { companyIds: companyParam ? [companyParam] : session.companyScopes },
+      // list (§6.2.8), in the same transaction as the rows they count; THE
+      // FIVE DATA-HEALTH COUNTS (§6.5 part 0b), over the active people the
+      // user may see — scope and the authority filter — never over this
+      // view's tab, chip or tag; and the three preference rows.
+      const head = await readDriversHead(tx, {
+        userId: session.userId,
+        base: listBase,
+        healthCompanyIds: companyParam ? [companyParam] : session.companyScopes,
         now,
-      )
+        includeRemoved: showRetired,
+      })
+      const { companyCount, counts, health } = head
 
       const drivers = await tx.driver.findMany({
         where: {
@@ -254,10 +248,9 @@ export default async function DriversPage({
         },
       })
 
-      // ONE QUERY EACH FOR THE WHOLE PAGE, not one per row. Each loader takes
-      // every id at once; `tests/integration/warnings.test.ts` and
-      // `tests/integration/dispatch-fields.test.ts` count the statements and
-      // fail if the number moves with the length of the list. The trucks'
+      // ONE STATEMENT FOR THE WHOLE PAGE, not one per row (v11.02): each
+      // loader's text is a CTE taking every id at once, and
+      // `tests/integration/drivers-page.test.ts` counts it. The trucks'
       // compliance is read once for the trucks on the page, for the assign
       // status (§6.4).
       const ids = drivers.map((driver) => driver.id)
@@ -268,23 +261,22 @@ export default async function DriversPage({
           ),
         ),
       ]
-      const [facts, dispatchFacts, lastActivity, truckFacts, visible] =
-        await Promise.all([
-          driverWarningFacts(tx, ids),
-          dispatchFactsForDrivers(tx, ids),
-          lastActivityForDrivers(tx, ids),
-          truckWarningFacts(tx, truckIds),
-          // §7.1.7, in the same transaction as the preference reads below.
-          readGridColumns(
-            tx,
-            session.userId,
-            'drivers.drivers',
-            columnKeysFor(DRIVER_COLUMN_KEYS, companyCount > 1),
-            DRIVER_COLUMNS_HIDDEN,
-          ),
-        ])
-      const savedViews = await readSavedViews(tx, session.userId, 'drivers')
-      const density = await readDensity(tx, session.userId)
+      const {
+        facts,
+        dispatch: dispatchFacts,
+        lastActivity,
+        trucks: truckFacts,
+      } = await readDriverFacts(tx, ids, truckIds)
+      // §7.1.7, from the head's stored row, in the same transaction.
+      const visible = await readGridColumns(
+        tx,
+        session.userId,
+        'drivers.drivers',
+        columnKeysFor(DRIVER_COLUMN_KEYS, companyCount > 1),
+        DRIVER_COLUMNS_HIDDEN,
+        { row: head.columnsRow },
+      )
+      const { savedViews, density } = head
 
       const truckExpired = new Map<string, boolean>()
       for (const [truckId, truckFact] of truckFacts) {

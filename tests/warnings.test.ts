@@ -386,7 +386,12 @@ describe('the shape of the feature', () => {
     // must not grow with the length of a list. The first version of this
     // assertion matched the word `prisma` in an import line and would have
     // passed whatever the loaders actually did.
-    expect(source.match(/\$queryRaw/g) ?? []).toHaveLength(3)
+    //
+    // FOUR SINCE v11.02 (§6.4 part 1): the roster read became a SQL text
+    // (`driverRosterSql`) so `/drivers`' facts statement can carry it as a
+    // CTE — the same one statement it was as a `findMany`, now spelled as
+    // the other three are. Negative settlements, roster, trucks, loads.
+    expect(source.match(/\$queryRaw/g) ?? []).toHaveLength(4)
   })
 
   it('every warning name is produced by some rule', () => {

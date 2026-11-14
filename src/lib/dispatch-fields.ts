@@ -1,6 +1,7 @@
 import { Prisma, type DriverStatus } from '@/generated/prisma/client'
 import { ACTIVE_ROSTER } from './driver-roster'
 import { NOT_CLOSED_HISTORY } from './billing-status'
+import { asDate } from './sql-json'
 
 // ---------------------------------------------------------------------------
 // FOUR DISPATCH FIELDS, DERIVED. ONE FLAG, STORED.
@@ -325,24 +326,27 @@ export async function headingToForTrucks(
   return out
 }
 
-/** Dispatch facts for many drivers, in ONE statement. */
-export async function dispatchFactsForDrivers(
-  tx: TxClient,
-  driverIds: readonly string[],
-): Promise<Map<string, DispatchFacts>> {
-  const out = new Map<string, DispatchFacts>()
-  if (driverIds.length === 0) return out
+/** One driver's dispatch facts, as `dispatchFactsSql` returns them. */
+export interface DispatchFactsSqlRow {
+  id: string
+  roster_status: DriverStatus
+  is_off_duty: boolean
+  off_duty_until: Date | string | null
+  statuses: string[] | null
+}
 
-  const ids = [...driverIds]
-  const rows = await tx.$queryRaw<
-    {
-      id: string
-      roster_status: DriverStatus
-      is_off_duty: boolean
-      off_duty_until: Date | null
-      statuses: string[] | null
-    }[]
-  >`
+/** One driver's latest activity, as `lastActivitySql` returns it. */
+export interface LastActivitySqlRow {
+  id: string
+  at: Date | string | null
+}
+
+/**
+ * THE TEXTS THE TWO LOADERS BELOW SEND, as builders, so `/drivers`' facts
+ * statement reads the same SQL as a CTE each (§6.4 part 1 v11.02).
+ */
+export function dispatchFactsSql(ids: readonly string[]): Prisma.Sql {
+  return Prisma.sql`
     SELECT d."id",
            d."status" AS roster_status,
            d."isOffDuty" AS is_off_duty,
@@ -356,60 +360,88 @@ export async function dispatchFactsForDrivers(
                 AND l."operationalStatus" <> ALL(${[...FINISHED]}::text[]::"LoadOperationalStatus"[])
            ) AS statuses
       FROM "Driver" d
-     WHERE d."id" = ANY(${ids})
+     WHERE d."id" = ANY(${[...ids]})
   `
+}
 
+/**
+ * THREE SOURCES, UNIONED: a status event on freight they are crew on, a
+ * document filed against them, an assignment naming them. A `UNION ALL` fed
+ * into one `max` rather than three queries — and a fourth source later is a
+ * fourth arm, not a fourth round trip.
+ */
+export function lastActivitySql(ids: readonly string[]): Prisma.Sql {
+  const list = [...ids]
+  return Prisma.sql`
+    SELECT id, MAX(at) AS at FROM (
+      SELECT COALESCE(l."driverId", l."coDriverId") AS id, e."occurredAt" AS at
+        FROM "LoadStatusEvent" e
+        JOIN "Load" l ON l."id" = e."loadId"
+       WHERE (l."driverId" = ANY(${list}) OR l."coDriverId" = ANY(${list}))
+      UNION ALL
+      -- uploadedAt, not createdAt: Document has no createdAt, and when the
+      -- file arrived is the fact that matters anyway.
+      SELECT doc."driverId" AS id, doc."uploadedAt" AS at
+        FROM "Document" doc
+       WHERE doc."driverId" = ANY(${list}) AND doc."deletedAt" IS NULL
+      UNION ALL
+      SELECT a."driverId" AS id, a."assignedAt" AS at
+        FROM "LoadAssignment" a
+       WHERE a."driverId" = ANY(${list})
+    ) touched
+    WHERE id IS NOT NULL
+    GROUP BY id
+  `
+}
+
+/** `dispatchFactsSql`'s rows, from either transport. */
+export function dispatchFactsFrom(
+  rows: readonly DispatchFactsSqlRow[],
+): Map<string, DispatchFacts> {
+  const out = new Map<string, DispatchFacts>()
   for (const row of rows) {
     out.set(row.id, {
       rosterStatus: row.roster_status,
       isOffDuty: row.is_off_duty,
-      offDutyUntil: row.off_duty_until,
+      offDutyUntil: asDate(row.off_duty_until),
       activeStatuses: row.statuses ?? [],
     })
   }
   return out
 }
 
-/**
- * When each driver was last involved in anything, in ONE statement.
- *
- * THREE SOURCES, UNIONED: a status event on freight they are crew on, a
- * document filed against them, an assignment naming them. A `UNION ALL` fed
- * into one `max` rather than three queries — and a fourth source later is a
- * fourth arm, not a fourth round trip.
- */
+/** `lastActivitySql`'s rows, from either transport; a driver never touched is null. */
+export function lastActivityFrom(
+  driverIds: readonly string[],
+  rows: readonly LastActivitySqlRow[],
+): Map<string, Date | null> {
+  const out = new Map<string, Date | null>()
+  for (const id of driverIds) out.set(id, null)
+  for (const row of rows) out.set(row.id, asDate(row.at))
+  return out
+}
+
+/** Dispatch facts for many drivers, in ONE statement. */
+export async function dispatchFactsForDrivers(
+  tx: TxClient,
+  driverIds: readonly string[],
+): Promise<Map<string, DispatchFacts>> {
+  if (driverIds.length === 0) return new Map()
+  return dispatchFactsFrom(
+    await tx.$queryRaw<DispatchFactsSqlRow[]>(dispatchFactsSql(driverIds)),
+  )
+}
+
+/** When each driver was last involved in anything, in ONE statement. */
 export async function lastActivityForDrivers(
   tx: TxClient,
   driverIds: readonly string[],
 ): Promise<Map<string, Date | null>> {
-  const out = new Map<string, Date | null>()
-  for (const id of driverIds) out.set(id, null)
-  if (driverIds.length === 0) return out
-
-  const ids = [...driverIds]
-  const rows = await tx.$queryRaw<{ id: string; at: Date | null }[]>`
-    SELECT id, MAX(at) AS at FROM (
-      SELECT COALESCE(l."driverId", l."coDriverId") AS id, e."occurredAt" AS at
-        FROM "LoadStatusEvent" e
-        JOIN "Load" l ON l."id" = e."loadId"
-       WHERE (l."driverId" = ANY(${ids}) OR l."coDriverId" = ANY(${ids}))
-      UNION ALL
-      -- uploadedAt, not createdAt: Document has no createdAt, and when the
-      -- file arrived is the fact that matters anyway.
-      SELECT doc."driverId" AS id, doc."uploadedAt" AS at
-        FROM "Document" doc
-       WHERE doc."driverId" = ANY(${ids}) AND doc."deletedAt" IS NULL
-      UNION ALL
-      SELECT a."driverId" AS id, a."assignedAt" AS at
-        FROM "LoadAssignment" a
-       WHERE a."driverId" = ANY(${ids})
-    ) touched
-    WHERE id IS NOT NULL
-    GROUP BY id
-  `
-
-  for (const row of rows) out.set(row.id, row.at)
-  return out
+  if (driverIds.length === 0) return lastActivityFrom([], [])
+  return lastActivityFrom(
+    driverIds,
+    await tx.$queryRaw<LastActivitySqlRow[]>(lastActivitySql(driverIds)),
+  )
 }
 
 /**
