@@ -232,6 +232,12 @@ line haul), or whether the load's rate is the all-in payout (and then
 from `PERCENT_GROSS`). Severity **1 for the money path** — it does not stop
 anybody booking freight, and it changes what a driver is paid.
 
+**RULED 2026-11-14 (owner):** the load's rate is the total the broker pays;
+line haul and accessorials are lines under it. Recorded in
+`TMS-DESIGN-SYSTEM.md` §7.6 (v11.00). The columns stay separate, so
+`PERCENT_LINEHAUL` keeps paying on the line-haul line; the form change is
+`PHASE-6-BRIEF.md` step 6a.
+
 ---
 
 ## Tier 0 — prerequisites (production)
