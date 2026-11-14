@@ -33,6 +33,14 @@ import { describe, expect, it } from 'vitest'
 
 /** The one file allowed to skip the net-pay reads, and why. */
 const PERMITTED = 'this-week.ts'
+/**
+ * AND THE SECOND, NAMED (§6.2.9 v11.01, 2026-11-14): `weekTrouble`, the
+ * blockers strip on /payroll/batches — a screen that shows blockers and held
+ * lines and no net, and writes nothing. `payroll.ts` holds no batch writer;
+ * `tests/integration/payroll-page.test.ts` holds its blockers and held lines
+ * to the full read. Any third file is still a failure.
+ */
+const PERMITTED_STRIP = 'payroll.ts'
 
 function sourceFiles(dir: string): { name: string; text: string }[] {
   const found: { name: string; text: string }[] = []
@@ -60,15 +68,23 @@ describe('skipping the net-pay reads', () => {
     expect(files.some((file) => file.name.endsWith(PERMITTED))).toBe(true)
   })
 
-  it('happens in exactly one file, and it is the money screen', () => {
+  it('happens in exactly two files, the money screen and the week strip', () => {
     const askers = sourceFiles('src')
       .filter((file) => /netPay:\s*false/.test(file.text))
       .map((file) => file.name)
+      .sort()
 
     expect(
       askers,
-      'only the Tuesday screen may skip the net-pay reads',
-    ).toEqual([`src/lib/${PERMITTED}`])
+      'only the Tuesday screen and the payroll week strip may skip the net-pay reads',
+    ).toEqual([`src/lib/${PERMITTED_STRIP}`, `src/lib/${PERMITTED}`].sort())
+  })
+
+  it('and the week strip passes it to no batch writer', () => {
+    const source = readFileSync(`src/lib/${PERMITTED_STRIP}`, 'utf8')
+    expect(source).not.toMatch(
+      /\b(openBatch|refreshDraft|finaliseBatch|markBatchPaid)\(/,
+    )
   })
 
   it('and the default stays TRUE where it is declared', () => {

@@ -112,7 +112,14 @@ export function gridRevalidate(grid: GridId): {
   return { path: '/accounting', type: 'layout' }
 }
 
-const keyFor = (grid: GridId) => `columns.${grid}`
+/** The preference key a grid's column memory is stored under. */
+export const keyFor = (grid: GridId) => `columns.${grid}`
+
+/** A stored column preference, as `readGridColumns` reads it. */
+export interface StoredColumnRow {
+  value: Prisma.JsonValue
+  organizationId: string
+}
 
 /**
  * The columns this person sees on this grid, in the table's own order.
@@ -142,12 +149,20 @@ export async function readGridColumns(
   grid: GridId,
   available: readonly string[],
   defaultHidden: readonly string[] = [],
+  /**
+   * The stored row, when the caller has already read it inside a larger
+   * statement — the payroll page's `columns` CTE (§6.2.9 v11.01). Absent, the
+   * row is read here; present (null included: nothing stored), it is not.
+   */
+  preread?: { row: StoredColumnRow | null },
 ): Promise<string[]> {
   const key = keyFor(grid)
-  const row = await tx.userPreference.findFirst({
-    where: { userId, key },
-    select: { value: true, organizationId: true },
-  })
+  const row = preread
+    ? preread.row
+    : await tx.userPreference.findFirst({
+        where: { userId, key },
+        select: { value: true, organizationId: true },
+      })
   const memory = readColumnMemory(
     row?.value ?? null,
     available,

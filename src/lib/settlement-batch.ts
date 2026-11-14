@@ -201,7 +201,9 @@ export async function batchInputForOrg(
      * A BATCH MUST NEVER PASS FALSE. What it produces is a statement
      * somebody is paid on, and a settlement computed without its deductions
      * would overpay every driver who has any. The default is therefore the
-     * safe one, and the money screen is the single caller that opts out.
+     * safe one, and two callers opt out, neither of which shows net: the
+     * money screen and the payroll week's blockers strip (`weekTrouble`,
+     * §6.2.9 v11.01).
      */
     netPay?: boolean
   } = {},

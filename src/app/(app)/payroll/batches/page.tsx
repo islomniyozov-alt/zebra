@@ -4,7 +4,8 @@ import { getLocaleContext } from '@/lib/locale'
 import { formatCents } from '@/lib/money'
 import { companyScopeFilter } from '@/lib/tenancy'
 import { payWeekFor } from '@/lib/settlement-week'
-import { recentWeeks, weekBatch, weekFromParam } from '@/lib/payroll'
+import { recentWeeks, weekFromParam } from '@/lib/payroll'
+import { readPayrollBatchesPage } from '@/lib/payroll-batches-page'
 import { readGridColumns, type GridId } from '@/lib/grid-columns'
 import { BATCH_COLUMN_KEYS, BATCH_COLUMNS_HIDDEN } from '@/lib/list-columns'
 import {
@@ -17,7 +18,6 @@ import {
   balanceShape,
   batchShape,
   readBalances,
-  readBatches,
   type BalanceGridRow,
   type BatchGridRow,
 } from '@/lib/accounting-grids'
@@ -37,7 +37,6 @@ import {
   periodWindow,
   type PeriodKey,
 } from '@/lib/rolling-period'
-import { pipelineStrip } from '@/lib/accounting-reports'
 import { ColumnFunnel } from '../../_grid/ColumnFunnel'
 import { BulkStatus } from './BulkStatus'
 import { GridToolbar } from '../../_grid/GridToolbar'
@@ -195,36 +194,21 @@ export default async function PayrollPage({
       // to find the blockers — 8,493ms and nine statements against 408ms for
       // the grid — so the page waited nine seconds to render four rows. The
       // blockers stream in behind it, through `<WeekStrip>`.
-      const week = await weekBatch(tx, {
+      //
+      // AND THE CHEAP HALF IS ONE STATEMENT (§6.2.9 v11.01): the chosen
+      // week's batch, the opened weeks, the column preference and — on the
+      // Batches tab only, as before — the grid, its breakdown and the
+      // pipeline strip, AS OF TODAY and not windowed (§6.2.8's balance rule).
+      // Each is its own named CTE in `readPayrollBatchesPage`.
+      const reads = await readPayrollBatchesPage(tx, {
         organizationId: session.organizationId,
+        userId: session.userId,
+        companyScopes: session.companyScopes,
         period: chosen,
+        offered,
+        batchesTab: tab === 'batches',
+        grid: GRID_FOR[tab],
       })
-      const opened = await tx.settlementBatch.findMany({
-        where: {
-          organizationId: session.organizationId,
-          deletedAt: null,
-          periodStart: { in: offered.map((period) => period.start) },
-        },
-        select: { periodStart: true },
-      })
-
-      // ONLY THE TAB'S OWN ROWS. Reading both would be a query nobody asked
-      // for on every page load, and the batches grid walks every settlement's
-      // load lines to build the per-authority breakdown.
-      const batches = tab === 'batches' ? await readBatches(tx, scope) : []
-      // ── THE PIPELINE, AS OF TODAY (§6.2.9) ───────────────────────────
-      //
-      // One statement, three states. NOT windowed: "how much pay is sitting in
-      // draft" is not a question about a period (§6.2.8's balance rule), and the
-      // one with a deadline is FINAL — approved and unpaid.
-      //
-      // ONLY ON THE BATCHES TAB, like the grid above it: Balances is a year's
-      // totals and a pipeline figure there would answer a question that tab is
-      // not asking.
-      const pipeline =
-        tab === 'batches'
-          ? await pipelineStrip(tx, session.companyScopes)
-          : null
       const balances =
         tab === 'balances' ? await readBalances(tx, scope, year) : []
 
@@ -234,14 +218,15 @@ export default async function PayrollPage({
         GRID_FOR[tab],
         COLUMN_KEYS[tab],
         HIDDEN_BY_DEFAULT[tab],
+        { row: reads.columnsRow },
       )
 
       return {
-        week,
-        opened: opened.map((row) => row.periodStart.getTime()),
-        batches,
+        week: reads.week,
+        opened: reads.opened,
+        batches: reads.batches,
         balances,
-        pipeline,
+        pipeline: reads.pipeline,
         columns,
       }
     },

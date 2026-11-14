@@ -1,5 +1,6 @@
 import { Prisma, type DriverType } from '@/generated/prisma/client'
 import { companyScopeFilter } from './tenancy'
+import { asDate, asNumber } from './sql-json'
 import { listPayments, type PaymentRow } from './payments'
 import { listCharges, type ChargeRow } from './driver-deductions'
 import type { StandingChargeListRow } from './standing-charges'
@@ -310,23 +311,48 @@ export async function readBatches(
   // The crossover is soon and the old shape has no ceiling. That is a judgement
   // about the future, so it is written here as one rather than dressed up as a
   // speed-up: on today's data this change costs about 250ms.
-  const rows = await tx.$queryRaw<
-    {
-      id: string
-      batch_number: string | null
-      status: string
-      created_at: Date
-      check_date: Date
-      statement_date: Date
-      period_start: Date
-      period_end: Date
-      notes: string | null
-      statements: bigint
-      amount: bigint
-      gross: bigint
-      deductions: bigint
-    }[]
-  >`
+  const rows = await tx.$queryRaw<BatchSqlRow[]>(batchRowsSql())
+  if (rows.length === 0) return []
+
+  const ids = rows.map((row) => row.id)
+  const breakdownRows = await tx.$queryRaw<BatchBreakdownSqlRow[]>(
+    batchBreakdownSql(Prisma.join(ids)),
+  )
+  return batchesFrom(rows, breakdownRows, scope)
+}
+
+/** A batch row, as the driver (`bigint`, `Date`) or JSON sends it. */
+export interface BatchSqlRow {
+  id: string
+  batch_number: string | null
+  status: string
+  created_at: Date | string
+  check_date: Date | string
+  statement_date: Date | string
+  period_start: Date | string
+  period_end: Date | string
+  notes: string | null
+  statements: bigint | number
+  amount: bigint | number
+  gross: bigint | number
+  deductions: bigint | number
+}
+
+/** A batch's per-authority row, either transport. */
+export interface BatchBreakdownSqlRow {
+  batch_id: string
+  company_id: string
+  company_name: string
+  statements: bigint | number
+  amount: bigint | number
+}
+
+/**
+ * The batch rows' SQL text — sent by `readBatches` and named as the `batches`
+ * CTE of the payroll page's one-row statement (§6.2.9 v11.01).
+ */
+export function batchRowsSql(): Prisma.Sql {
+  return Prisma.sql`
     SELECT
       b."id"                                   AS id,
       b."batchNumber"                          AS batch_number,
@@ -347,13 +373,19 @@ export async function readBatches(
       ON st."batchId" = b."id" AND st."deletedAt" IS NULL
     WHERE b."deletedAt" IS NULL
     GROUP BY b."id"
-    ORDER BY b."periodStart" DESC
+    -- THE ID BREAKS A TIE, so the one-row statement's JSON array (ordered the
+    -- same way) and this read agree row for row. §6.2.9 v11.01.
+    ORDER BY b."periodStart" DESC, b."id"
     LIMIT 500
   `
-  if (rows.length === 0) return []
+}
 
-  const ids = rows.map((row) => row.id)
-
+/**
+ * The breakdown's SQL text, for the batches whose ids `batchIds` yields — a
+ * list of ids from `readBatches`, or `SELECT id FROM batches` inside the
+ * payroll page's one-row statement (§6.2.9 v11.01).
+ */
+export function batchBreakdownSql(batchIds: Prisma.Sql): Prisma.Sql {
   // ── THE BREAKDOWN, GROUPED IN POSTGRES ─────────────────────────────────
   //
   // `COUNT(DISTINCT st."id")` is the part worth reading twice: a driver counts
@@ -361,15 +393,7 @@ export async function readBatches(
   // they ran. The hand-rolled version needed a second pass over the same lines
   // to avoid counting a driver once per LOAD; here the database does it, and
   // getting it wrong would have inflated every authority's statement count.
-  const breakdownRows = await tx.$queryRaw<
-    {
-      batch_id: string
-      company_id: string
-      company_name: string
-      statements: bigint
-      amount: bigint
-    }[]
-  >`
+  return Prisma.sql`
     SELECT
       st."batchId"                    AS batch_id,
       l."companyId"                   AS company_id,
@@ -380,12 +404,19 @@ export async function readBatches(
     JOIN "Settlement" st ON st."id" = line."settlementId"
     JOIN "Load" l        ON l."id"  = line."loadId"
     JOIN "Company" c     ON c."id"  = l."companyId"
-    WHERE st."batchId" IN (${Prisma.join(ids)})
+    WHERE st."batchId" IN (${batchIds})
       AND st."deletedAt" IS NULL
     GROUP BY st."batchId", l."companyId", c."name"
-    ORDER BY c."name"
+    ORDER BY c."name", l."companyId"
   `
+}
 
+/** The grid rows from both reads, either transport (`sql-json.ts`). */
+export function batchesFrom(
+  rows: readonly BatchSqlRow[],
+  breakdownRows: readonly BatchBreakdownSqlRow[],
+  scope: Scope,
+): BatchGridRow[] {
   // THE COMPANY SCOPE NARROWS THE BREAKDOWN, NOT THE BATCH. A batch is org-wide
   // by ruling, so hiding one because a scoped user cannot see one of its
   // authorities would hide the week itself. What narrows is which authorities'
@@ -401,25 +432,26 @@ export async function readBatches(
     list.push({
       companyId: row.company_id,
       companyName: row.company_name,
-      statements: Number(row.statements),
-      amountCents: Number(row.amount),
+      statements: asNumber(row.statements),
+      amountCents: asNumber(row.amount),
     })
     breakdownOf.set(row.batch_id, list)
   }
 
+  const at = (value: Date | string) => asDate(value) as Date
   return rows.map((row) => ({
     id: row.id,
     batchNumber: row.batch_number,
     status: row.status,
-    createdAt: row.created_at,
-    checkDate: row.check_date,
-    statementDate: row.statement_date,
-    periodStart: row.period_start,
-    periodEnd: row.period_end,
-    statements: Number(row.statements),
-    amountCents: Number(row.amount),
-    grossCents: Number(row.gross),
-    deductionsCents: Number(row.deductions),
+    createdAt: at(row.created_at),
+    checkDate: at(row.check_date),
+    statementDate: at(row.statement_date),
+    periodStart: at(row.period_start),
+    periodEnd: at(row.period_end),
+    statements: asNumber(row.statements),
+    amountCents: asNumber(row.amount),
+    grossCents: asNumber(row.gross),
+    deductionsCents: asNumber(row.deductions),
     // Always null: the row's answer is "all authorities" and the names are on
     // `breakdown`. See the field's own note.
     payCompanyName: null,

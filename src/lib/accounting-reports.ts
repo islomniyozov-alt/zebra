@@ -1,5 +1,6 @@
 import { Prisma } from '@/generated/prisma/client'
 import { bucketExprSql } from './week-sql'
+import { asNumber } from './sql-json'
 import type { Grain, PeriodWindow } from './rolling-period'
 
 /** Plain transaction client, as the other reporting modules declare it. */
@@ -557,19 +558,26 @@ export interface PipelineStrip {
   paidCount: number
 }
 
-export async function pipelineStrip(
-  tx: TxClient,
-  companyIds: readonly string[],
-): Promise<PipelineStrip> {
+/** One row per batch status, as the driver or the JSON transport sends it. */
+export interface PipelineRow {
+  status: string
+  cents: bigint | number | string
+  count: bigint | number | string
+}
+
+/**
+ * The strip's SQL text — sent by `pipelineStrip` and named as the `pipeline`
+ * CTE of the payroll page's one-row statement (§6.2.9 v11.01), so there is
+ * one text for both.
+ */
+export function pipelineSql(companyIds: readonly string[]): Prisma.Sql {
   // SUMMED FROM THE SETTLEMENTS, grouped by the BATCH's status, because the
   // batch is what moves through the three states — a settlement's own status
   // does not carry "paid" (§6.2.7's note on the same join).
   //
   // SCOPED ON THE SETTLEMENT, which is where `companyId` lives: a batch is
   // org-wide and carries none.
-  const rows = await tx.$queryRaw<
-    { status: string; cents: bigint; count: bigint }[]
-  >`
+  return Prisma.sql`
     SELECT b."status"::text AS status,
            COALESCE(SUM(s."netCents"), 0)::bigint AS cents,
            COUNT(DISTINCT b."id")::bigint AS count
@@ -579,16 +587,28 @@ export async function pipelineStrip(
       ${scopeSql('s', companyIds)}
     GROUP BY 1
   `
+}
 
+/** The strip from its rows, either transport (`sql-json.ts`). */
+export function pipelineFrom(rows: readonly PipelineRow[]): PipelineStrip {
   const of = (status: string) => rows.find((row) => row.status === status)
   return {
-    draftCents: Number(of('DRAFT')?.cents ?? 0),
-    draftCount: Number(of('DRAFT')?.count ?? 0),
-    finalCents: Number(of('FINAL')?.cents ?? 0),
-    finalCount: Number(of('FINAL')?.count ?? 0),
-    paidCents: Number(of('PAID')?.cents ?? 0),
-    paidCount: Number(of('PAID')?.count ?? 0),
+    draftCents: asNumber(of('DRAFT')?.cents),
+    draftCount: asNumber(of('DRAFT')?.count),
+    finalCents: asNumber(of('FINAL')?.cents),
+    finalCount: asNumber(of('FINAL')?.count),
+    paidCents: asNumber(of('PAID')?.cents),
+    paidCount: asNumber(of('PAID')?.count),
   }
+}
+
+export async function pipelineStrip(
+  tx: TxClient,
+  companyIds: readonly string[],
+): Promise<PipelineStrip> {
+  return pipelineFrom(
+    await tx.$queryRaw<PipelineRow[]>(pipelineSql(companyIds)),
+  )
 }
 
 /**

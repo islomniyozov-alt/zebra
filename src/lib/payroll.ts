@@ -258,12 +258,22 @@ export async function weekTrouble(
     period: input.period,
     statementDate: input.period.end,
     checkDate: input.period.end,
-    drivers: await batchInputForOrg(tx, {
-      organizationId: input.organizationId,
-      period: input.period,
-      statementDate: input.period.end,
-      checkDate: input.period.end,
-    }),
+    drivers: await batchInputForOrg(
+      tx,
+      {
+        organizationId: input.organizationId,
+        period: input.period,
+        statementDate: input.period.end,
+        checkDate: input.period.end,
+      },
+      // THE GROSS HALF ONLY (§6.2.9 v11.01). This strip shows blockers and
+      // held lines and reads `netCents` nowhere. A blocker is raised per load
+      // from the pay rule in force, a held line from the load and its
+      // payments; deductions, escrow, balances, prior settlements, standing
+      // charges, fuel and tolls change neither list, and cost eight round
+      // trips. Held to the full read by `tests/integration/payroll-page.test.ts`.
+      { netPay: false },
+    ),
   })
 
   return {
