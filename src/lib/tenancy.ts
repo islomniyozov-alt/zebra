@@ -198,6 +198,90 @@ export function withOrg<T>(
   return retryOnStartFailure(() => runInOrg(prisma, orgId, fn, options))
 }
 
+// ── ONE READ, ONE ROUND TRIP (§6.2.9 v11.03) ─────────────────────────────
+//
+// `runInOrg` costs BEGIN, `set_config` and COMMIT around whatever it reads —
+// three trips that carry no data. `tenantReader` sends the tenant and ONE
+// read together, through `zebra_tenant_read` (migration 72): a SECURITY
+// INVOKER function that sets `app.current_org_id` LOCAL and then EXECUTEs the
+// read as a second statement. Row-level security is untouched — the function
+// runs as `zebra_app` — and the setting dies with the call's own implicit
+// transaction. `tests/integration/tenant-read.test.ts` is the proof, watched
+// failing with row-level security off.
+//
+// FOR READS ONLY, AND ONLY OUTSIDE A TRANSACTION. Inside one the setting
+// would outlive the call, so it takes the request client and nothing else.
+
+/** Something a one-statement page read can be sent through. */
+export interface TenantReader {
+  read<T>(sql: Prisma.Sql): Promise<T[]>
+}
+
+/** A reader over an open tenant transaction — the read costs one statement there. */
+export function txReader(tx: TxClient): TenantReader {
+  return { read: <T>(sql: Prisma.Sql) => tx.$queryRaw<T[]>(sql) }
+}
+
+/**
+ * Prisma's text and values as `zebra_tenant_read` takes them: each value
+ * becomes a typed cast of `$1 -> n` and travels in `args`. A value of a kind
+ * not listed here is refused rather than guessed at.
+ */
+export function tenantReadText(sql: Prisma.Sql): {
+  text: string
+  args: unknown[]
+} {
+  const args: unknown[] = []
+  let text = sql.strings[0] ?? ''
+  sql.values.forEach((value, index) => {
+    const at = args.length
+    let cast: string
+    if (value === null || value === undefined) {
+      cast = 'NULL'
+    } else if (typeof value === 'string') {
+      args.push(value)
+      cast = `($1->>${at})`
+    } else if (typeof value === 'boolean') {
+      args.push(value)
+      cast = `(($1->>${at})::boolean)`
+    } else if (typeof value === 'number' && Number.isInteger(value)) {
+      args.push(value)
+      cast = `(($1->>${at})::bigint)`
+    } else if (value instanceof Date) {
+      args.push(value.toISOString())
+      cast = `(($1->>${at})::timestamp(3))`
+    } else if (
+      Array.isArray(value) &&
+      value.every((item) => typeof item === 'string')
+    ) {
+      args.push(value)
+      cast = `(ARRAY(SELECT jsonb_array_elements_text($1->${at})))`
+    } else {
+      throw new Error(
+        `tenantReadText: value ${index} is a ${typeof value} this reader does not carry.`,
+      )
+    }
+    text += cast + (sql.strings[index + 1] ?? '')
+  })
+  return { text, args }
+}
+
+/** The tenant and one read, in one round trip. See the note above. */
+export function tenantReader(
+  client: Pick<PrismaClient, '$queryRaw'>,
+  orgId: string,
+): TenantReader {
+  assertOrgId(orgId)
+  return {
+    async read<T>(sql: Prisma.Sql): Promise<T[]> {
+      const { text, args } = tenantReadText(sql)
+      const rows = await client.$queryRaw<{ rows: T[] | null }[]>`
+        SELECT zebra_tenant_read(${orgId}, ${text}, ${JSON.stringify(args)}::jsonb) AS rows`
+      return rows[0]?.rows ?? []
+    },
+  }
+}
+
 /**
  * Run `fn` in a transaction that declares WHO is asking, rather than which
  * tenant they are acting as.

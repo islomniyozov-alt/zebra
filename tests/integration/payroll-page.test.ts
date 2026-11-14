@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
-import { companyScopeFilter, withOrg } from '@/lib/tenancy'
+import { companyScopeFilter, txReader, withOrg } from '@/lib/tenancy'
 import { createBroker } from '@/lib/brokers'
 import { transitionOperational } from '@/lib/load-status'
 import { createLoad, LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
@@ -362,7 +362,7 @@ describe('the page reads in one statement', () => {
     async (_label, scopesOf) => {
       const scopes = scopesOf()
       const { one, perRead } = await inOrg(async (tx) => ({
-        one: await readPayrollBatchesPage(tx, pageInput(scopes)),
+        one: await readPayrollBatchesPage(txReader(tx), pageInput(scopes)),
         perRead: {
           week: await weekBatch(tx, { organizationId, period: PERIOD }),
           opened: (
@@ -406,7 +406,7 @@ describe('the page reads in one statement', () => {
 
   it('on Balances, the grid and the strip are not read', async () => {
     const one = await inOrg((tx) =>
-      readPayrollBatchesPage(tx, pageInput([], false)),
+      readPayrollBatchesPage(txReader(tx), pageInput([], false)),
     )
     expect(one.batches).toEqual([])
     expect(one.pipeline).toBeNull()
@@ -421,7 +421,10 @@ describe('the page reads in one statement', () => {
         async (tx) => {
           await tx.$executeRaw`SELECT set_config('app.current_org_id', ${organizationId}, true)`
           const atRead = statementsOf(client)!
-          const reads = await readPayrollBatchesPage(tx, pageInput([]))
+          const reads = await readPayrollBatchesPage(
+            txReader(tx),
+            pageInput([]),
+          )
           const read = statementsOf(client)! - atRead
           const atColumns = statementsOf(client)!
           const columns = await readGridColumns(

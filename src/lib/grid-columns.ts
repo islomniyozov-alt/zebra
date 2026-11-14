@@ -163,24 +163,43 @@ export async function readGridColumns(
         where: { userId, key },
         select: { value: true, organizationId: true },
       })
+  const plan = gridColumnsFromRow(grid, available, defaultHidden, row)
+  // MIGRATED ONCE, ON READ (§6.7): an old "shown" list is rewritten as the new
+  // "hidden" shape in the same transaction, so the next read has nothing to do.
+  if (plan.rewrite && row) {
+    await writePreference(tx, row.organizationId, userId, key, {
+      hidden: plan.hidden,
+    })
+  }
+  return plan.visible
+}
+
+/**
+ * The visible set from a stored row, and whether the row is the legacy shape
+ * `readGridColumns` would rewrite. Pure, so a page that read the row outside
+ * a transaction (§6.2.9 v11.03) opens one only when there is a write to make.
+ */
+export function gridColumnsFromRow(
+  grid: GridId,
+  available: readonly string[],
+  defaultHidden: readonly string[],
+  row: StoredColumnRow | null,
+): { visible: string[]; hidden: string[] | null; rewrite: boolean } {
   const memory = readColumnMemory(
     row?.value ?? null,
     available,
     ADDED_SINCE_LEGACY[grid] ?? [],
   )
-  // MIGRATED ONCE, ON READ (§6.7): an old "shown" list is rewritten as the new
-  // "hidden" shape in the same transaction, so the next read has nothing to do.
-  if (memory.migrated && row) {
-    await writePreference(tx, row.organizationId, userId, key, {
-      hidden: memory.hidden,
-    })
+  return {
+    visible: visibleFromMemory(
+      available,
+      defaultHidden,
+      memory.hidden,
+      gridColumnCap(grid),
+    ),
+    hidden: memory.hidden,
+    rewrite: memory.migrated && row !== null,
   }
-  return visibleFromMemory(
-    available,
-    defaultHidden,
-    memory.hidden,
-    gridColumnCap(grid),
-  )
 }
 
 /**

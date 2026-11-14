@@ -3,7 +3,13 @@ import { cache } from 'react'
 import { cookies, headers } from 'next/headers'
 import { prisma, withRequestClient } from './db'
 import { can, type Action, type Resource } from './permissions'
-import { withOrg, type TransactionTimeouts, type TxClient } from './tenancy'
+import {
+  tenantReader,
+  withOrg,
+  type TenantReader,
+  type TransactionTimeouts,
+  type TxClient,
+} from './tenancy'
 import {
   SESSION_COOKIE,
   SESSION_TTL_MS,
@@ -139,6 +145,24 @@ export async function withCurrentOrg<T>(
         userAgent: options.userAgent ?? metadata.userAgent ?? null,
       },
     })
+  })
+}
+
+/**
+ * ONE PAGE READ, ONE ROUND TRIP (§6.2.9 v11.03). The same permission check
+ * and the same session as `withCurrentOrg`, but no transaction: the reader
+ * sends the tenant and the read together through `zebra_tenant_read`, which
+ * runs as `zebra_app` under every row-level security policy. For reads that
+ * write nothing; a page that may write opens `withCurrentOrg` for it.
+ */
+export async function readCurrentOrg<T>(
+  action: Action,
+  resource: Resource,
+  fn: (reader: TenantReader, session: SessionContext) => Promise<T>,
+): Promise<T> {
+  return withRequestClient(async () => {
+    const session = await requirePermission(action, resource)
+    return fn(tenantReader(prisma, session.organizationId), session)
   })
 }
 

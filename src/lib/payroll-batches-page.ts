@@ -1,6 +1,5 @@
 import { Prisma } from '@/generated/prisma/client'
-import type { TxClient } from './tenancy'
-import { companyScopeFilter } from './tenancy'
+import { companyScopeFilter, type TenantReader } from './tenancy'
 import {
   batchBreakdownSql,
   batchRowsSql,
@@ -89,7 +88,12 @@ interface OneRow {
 const absent = Prisma.sql`NULL::json`
 
 export async function readPayrollBatchesPage(
-  tx: TxClient,
+  /**
+   * Where the one statement goes (§6.2.9 v11.03): `tenantReader` on the
+   * Batches tab — the tenant and this read in one round trip, no
+   * transaction — or `txReader(tx)` inside the Balances tab's transaction.
+   */
+  reader: TenantReader,
   input: PayrollPageInput,
 ): Promise<PayrollPageReads> {
   const starts = input.offered.map((period) => period.start)
@@ -136,7 +140,7 @@ export async function readPayrollBatchesPage(
   }
 
   const tab = input.batchesTab
-  const rows = await tx.$queryRaw<OneRow[]>`
+  const rows = await reader.read<OneRow>(Prisma.sql`
     WITH ${Prisma.join(ctes, ',\n')}
     SELECT
       (SELECT row_to_json(x) FROM week x) AS week,
@@ -157,7 +161,7 @@ export async function readPayrollBatchesPage(
           ? Prisma.sql`(SELECT COALESCE(json_agg(x), '[]'::json) FROM pipeline x)`
           : absent
       } AS pipeline
-  `
+  `)
   const row = rows[0]
   if (!row)
     throw new Error('readPayrollBatchesPage: no row from a one-row SELECT.')
