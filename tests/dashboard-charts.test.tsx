@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { BarChart, type Bar } from '@/app/(app)/_charts/BarChart'
-import { Sparkline } from '@/app/(app)/_charts/Sparkline'
+import { Sparkline, sparklinePath } from '@/app/(app)/_charts/Sparkline'
 import { Donut } from '@/app/(app)/_charts/Donut'
 import { DayBars } from '@/app/(app)/_charts/DayBars'
 
@@ -284,11 +284,22 @@ describe('BarChart owes the reader four things (owner review 2026-10-02)', () =>
 })
 
 describe('Sparkline', () => {
+  // ONE CLOSED RECTANGLE PER COLUMN in a single path (v11.05): `M` starts
+  // each, at the bucket's own x.
+  const columnsOf = (container: HTMLElement) =>
+    (container.querySelector('path')?.getAttribute('d') ?? '')
+      .split('M')
+      .filter(Boolean)
+      .map((column) => Number(column.split(' ')[0]))
+
   it('draws one column per bucket', () => {
     const { container } = render(
       <Sparkline points={[1, 2, 3, 4]} label="Gross" />,
     )
-    expect(container.querySelectorAll('span')).toHaveLength(4)
+    expect(columnsOf(container)).toEqual([0, 1, 2, 3])
+    // The tallest column fills the strip; the shortest is a quarter of it.
+    expect(sparklinePath([1, 2, 3, 4])).toContain('M3 22V0h')
+    expect(sparklinePath([1, 2, 3, 4])).toContain('M0 22V16.5h')
   })
 
   // A NULL IS A GAP. A bucket whose pay was never recorded must not draw a bar
@@ -297,10 +308,11 @@ describe('Sparkline', () => {
     const { container } = render(
       <Sparkline points={[100, null, 100]} label="Driver pay" />,
     )
-    const columns = [...container.querySelectorAll('span')]
-    expect(columns).toHaveLength(3)
-    expect((columns[1] as HTMLElement).style.height).toBe('0px')
-    expect((columns[1] as HTMLElement).style.opacity).toBe('0')
+    expect(columnsOf(container)).toEqual([0, 2])
+  })
+
+  it('draws a flat series as one-pixel columns, not as nothing', () => {
+    expect(sparklinePath([0, 0])).toBe('M0 22V21h0.85V22ZM1 22V21h0.85V22Z')
   })
 
   it('still renders a baseline with no points at all', () => {

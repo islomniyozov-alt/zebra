@@ -25,11 +25,13 @@ import { TONE_STRIPE } from '@/lib/status'
 import { AuthorityFilter } from '../_grid/AuthorityFilter'
 import { PeriodPicker } from '../_charts/PeriodPicker'
 import { CashPanel, CompliancePanel, FleetPanel } from './Panels'
-import { BarChart } from '../_charts/BarChart'
 import { Sparkline } from '../_charts/Sparkline'
-import { Donut } from '../_charts/Donut'
 import { Breakdown } from '../_charts/Breakdown'
-import { DayBars } from '../_charts/DayBars'
+import {
+  BarChartAfterLoad,
+  DayBarsAfterLoad,
+  DonutAfterLoad,
+} from '../_charts/AfterLoad'
 import type { RawParams } from '@/lib/list-view'
 import type { MessageKey } from '@/lib/i18n'
 
@@ -290,9 +292,11 @@ export default async function DashboardPage({
              *
              * Four cuts of the series `dashboardFor` already returns — no
              * extra query, which is why this panel costs nothing it did not
-             * cost empty. All four are server-rendered inline SVG with a
-             * `<title>` for hover and a visually hidden table of the same
-             * figures (§6.1.1, §13).
+             * cost empty. All four carry a hover and a visually hidden table
+             * of the same figures (§6.1.1, §13), and all four are DRAWN IN
+             * THE BROWSER from their figures (v11.05): the server sends a
+             * slot of each chart's height, so the document carries the
+             * numbers once instead of the tree twice.
              *
              * MONEY ROLES ONLY, like the strip: `money` is null for a
              * dispatcher and the panel is not rendered rather than rendered
@@ -308,7 +312,7 @@ export default async function DashboardPage({
                  * v10.16 revoked that, because a quarter of bars beside a
                  * month of donuts is one screen saying two things. */}
                 <div className="mt-z3">
-                  <BarChart
+                  <BarChartAfterLoad
                     bars={money.weeks.map((point) => ({
                       key: bucketKey(point.weekStart),
                       label: bucketLabel(point.weekStart, money.grain, locale),
@@ -352,7 +356,7 @@ export default async function DashboardPage({
                       hide: t('chart.hideBreakdown'),
                     }}
                   >
-                    <Donut
+                    <DonutAfterLoad
                       slices={money.byCompany.map((row) => ({
                         key: row.companyId,
                         label: row.companyName,
@@ -361,8 +365,7 @@ export default async function DashboardPage({
                       locale={locale}
                       labels={{
                         heading: t('dash.chart.byCompany'),
-                        other: (count) =>
-                          `${t('dash.chart.other')} (${String(count)})`,
+                        other: t('dash.chart.other'),
                         name: t('accounting.company'),
                         value: t('dash.kpi.gross'),
                         share: t('dash.chart.share'),
@@ -370,7 +373,7 @@ export default async function DashboardPage({
                       }}
                     />
                   </Breakdown>
-                  <Donut
+                  <DonutAfterLoad
                     slices={money.byCustomer.map((row) => ({
                       key: row.customerId || '__none',
                       // A LOAD WITH NO CUSTOMER STILL EARNED MONEY, and
@@ -382,8 +385,7 @@ export default async function DashboardPage({
                     locale={locale}
                     labels={{
                       heading: t('dash.chart.byCustomer'),
-                      other: (count) =>
-                        `${t('dash.chart.other')} (${String(count)})`,
+                      other: t('dash.chart.other'),
                       name: t('loads.column.customer'),
                       value: t('dash.kpi.gross'),
                       share: t('dash.chart.share'),
@@ -393,7 +395,7 @@ export default async function DashboardPage({
                 </div>
 
                 <div className="mt-z5">
-                  <DayBars
+                  <DayBarsAfterLoad
                     days={money.perDay}
                     period={window}
                     labels={{
