@@ -52,6 +52,7 @@ const pageInput = (organizationId: string, userId: string) => ({
   offered: WEEKS,
   batchesTab: true,
   grid: 'payroll.batches' as const,
+  balancesYear: null,
 })
 
 beforeAll(async () => {

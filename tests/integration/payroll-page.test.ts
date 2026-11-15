@@ -368,6 +368,9 @@ const pageInput = (companyScopes: string[], batchesTab = true) => ({
   grid: batchesTab
     ? ('payroll.batches' as const)
     : ('payroll.balances' as const),
+  // Balances' own rows are `balances-sql.test.ts`'s claim; here the tab's
+  // other reads are, so the year is not asked for.
+  balancesYear: null,
 })
 
 describe('the page reads in one statement', () => {

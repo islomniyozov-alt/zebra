@@ -690,82 +690,89 @@ export interface BalanceGridRow {
   escrowHeldCents: number
 }
 
+/**
+ * THE BALANCES GRID AS ONE SELECT (§6.2.9 v11.06): per driver, the year's
+ * FINAL and PAID settlements summed, the NET_PAY opening balance and the
+ * escrow held, deleted drivers left out — what three reads and a name lookup
+ * returned. One text for both transports: `readBalances` sends it on its own
+ * (the export), the payroll page's one call carries it as a CTE.
+ * `tests/integration/balances-sql.test.ts` holds it equal to the Prisma
+ * reads it replaced.
+ */
+export function balancesSql(year: number): Prisma.Sql {
+  const from = new Date(Date.UTC(year, 0, 1))
+  const to = new Date(Date.UTC(year + 1, 0, 1))
+  return Prisma.sql`
+    SELECT s."driverId" AS "driverId",
+           d."firstName" || ' ' || d."lastName" AS "driverName",
+           COALESCE(SUM(s."earningsCents"), 0)::bigint AS "grossCents",
+           COALESCE(SUM(s."deductionsCents"), 0)::bigint AS "deductionsCents",
+           COALESCE(SUM(s."netCents"), 0)::bigint AS "netCents",
+           COUNT(*)::int AS weeks,
+           COALESCE((SELECT o."amountCents" FROM "DriverOpeningBalance" o
+                      WHERE o."driverId" = s."driverId" AND o.year = ${year}
+                        AND o.category::text = 'NET_PAY'), 0)::bigint AS "openingNetCents",
+           COALESCE((SELECT SUM(e."amountCents") FROM "DriverEscrowEntry" e
+                      WHERE e."driverId" = s."driverId"), 0)::bigint AS "escrowHeldCents"
+      FROM "Settlement" s
+      JOIN "SettlementBatch" b ON b.id = s."batchId"
+      JOIN "Driver" d ON d.id = s."driverId" AND d."deletedAt" IS NULL
+     WHERE s."deletedAt" IS NULL
+       AND b."deletedAt" IS NULL
+       AND b.status::text IN ('FINAL', 'PAID')
+       AND b."periodStart" >= ${from} AND b."periodStart" < ${to}
+     GROUP BY s."driverId", d."firstName", d."lastName"
+     ORDER BY "driverName", s."driverId"`
+}
+
+/** `balancesSql`'s row, from either transport. */
+export interface BalanceSqlRow {
+  driverId: string
+  driverName: string
+  grossCents: unknown
+  deductionsCents: unknown
+  netCents: unknown
+  weeks: unknown
+  openingNetCents: unknown
+  escrowHeldCents: unknown
+}
+
+export function balancesFrom(
+  rows: readonly BalanceSqlRow[],
+  year: number,
+): BalanceGridRow[] {
+  return rows.map((row) => {
+    const openingNetCents = asNumber(row.openingNetCents)
+    const netCents = asNumber(row.netCents)
+    return {
+      driverId: row.driverId,
+      driverName: row.driverName,
+      year,
+      openingNetCents,
+      grossCents: asNumber(row.grossCents),
+      deductionsCents: asNumber(row.deductionsCents),
+      netCents,
+      weeks: asNumber(row.weeks),
+      ytdNetCents: openingNetCents + netCents,
+      escrowHeldCents: asNumber(row.escrowHeldCents),
+    }
+  })
+}
+
+/**
+ * The year's balances per driver, in ONE statement. A DRIVER WHO WAS DELETED
+ * IS NOT LISTED: their settlements stay — a FINAL statement is a document
+ * somebody was handed — but they are not on a list of who to pay, and a row
+ * reading "—" would be a person nobody can act on sitting in a total.
+ */
 export async function readBalances(
   tx: TxClient,
   _scope: Scope,
   year: number,
 ): Promise<BalanceGridRow[]> {
-  const from = new Date(Date.UTC(year, 0, 1))
-  const to = new Date(Date.UTC(year + 1, 0, 1))
-
-  const [drivers, opening, escrow] = await Promise.all([
-    tx.settlement.groupBy({
-      by: ['driverId'],
-      where: {
-        deletedAt: null,
-        batch: {
-          deletedAt: null,
-          status: { in: ['FINAL', 'PAID'] },
-          periodStart: { gte: from, lt: to },
-        },
-      },
-      _sum: {
-        earningsCents: true,
-        deductionsCents: true,
-        netCents: true,
-      },
-      _count: { _all: true },
-    }),
-    tx.driverOpeningBalance.findMany({
-      where: { year, category: 'NET_PAY' },
-      select: { driverId: true, amountCents: true },
-    }),
-    tx.driverEscrowEntry.groupBy({
-      by: ['driverId'],
-      _sum: { amountCents: true },
-    }),
-  ])
-
-  const names = await tx.driver.findMany({
-    where: {
-      deletedAt: null,
-      id: { in: drivers.map((row) => row.driverId) },
-    },
-    select: { id: true, firstName: true, lastName: true },
-  })
-  const nameOf = new Map(
-    names.map((row) => [row.id, `${row.firstName} ${row.lastName}`]),
-  )
-  const openingOf = new Map(
-    opening.map((row) => [row.driverId, row.amountCents]),
-  )
-  const escrowOf = new Map(
-    escrow.map((row) => [row.driverId, row._sum.amountCents ?? 0]),
-  )
-
-  return (
-    drivers
-      // A DRIVER WITH NO NAME HERE IS A DELETED ONE. Their settlements stay — a
-      // FINAL statement is a document somebody was handed — but they are not on a
-      // list of who to pay, and a row reading "—" would be a person nobody can act
-      // on sitting in a total.
-      .filter((row) => nameOf.has(row.driverId))
-      .map((row) => {
-        const openingNetCents = openingOf.get(row.driverId) ?? 0
-        const netCents = row._sum.netCents ?? 0
-        return {
-          driverId: row.driverId,
-          driverName: nameOf.get(row.driverId) ?? '',
-          year,
-          openingNetCents,
-          grossCents: row._sum.earningsCents ?? 0,
-          deductionsCents: row._sum.deductionsCents ?? 0,
-          netCents,
-          weeks: row._count._all,
-          ytdNetCents: openingNetCents + netCents,
-          escrowHeldCents: escrowOf.get(row.driverId) ?? 0,
-        }
-      })
+  return balancesFrom(
+    await tx.$queryRaw<BalanceSqlRow[]>(balancesSql(year)),
+    year,
   )
 }
 

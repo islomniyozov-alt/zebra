@@ -1,9 +1,13 @@
 import { Prisma } from '@/generated/prisma/client'
 import { companyScopeFilter, type TenantReader } from './tenancy'
 import {
+  balancesFrom,
+  balancesSql,
   batchBreakdownSql,
   batchRowsSql,
   batchesFrom,
+  type BalanceGridRow,
+  type BalanceSqlRow,
   type BatchBreakdownSqlRow,
   type BatchGridRow,
   type BatchSqlRow,
@@ -40,6 +44,10 @@ import { asDate } from './sql-json'
 // exist only on the Batches tab, as the per-read code had it; on Balances
 // their columns are a literal null and their queries do not run.
 //
+// AND ON BALANCES, THE YEAR'S BALANCES (v11.06): `balancesSql`, the text the
+// export sends through `readBalances`, as a CTE. So both tabs are one call
+// through the tenant reader, and neither opens a transaction.
+//
 // THE COLUMN PREFERENCE COMES BACK AS ITS ROW, not as columns: deciding the
 // visible set, and the one-time legacy rewrite that may WRITE, stay in
 // `readGridColumns`, which the page calls with this row.
@@ -57,6 +65,8 @@ export interface PayrollPageInput {
   batchesTab: boolean
   /** The grid whose stored column preference to read. */
   grid: GridId
+  /** On the Balances tab, the year whose balances to read; else null. */
+  balancesYear: number | null
 }
 
 export interface PayrollPageReads {
@@ -66,6 +76,7 @@ export interface PayrollPageReads {
   batches: BatchGridRow[]
   pipeline: PipelineStrip | null
   columnsRow: StoredColumnRow | null
+  balances: BalanceGridRow[]
 }
 
 interface WeekSqlRow {
@@ -83,15 +94,16 @@ interface OneRow {
   batches: BatchSqlRow[] | null
   breakdown: BatchBreakdownSqlRow[] | null
   pipeline: PipelineRow[] | null
+  balances: BalanceSqlRow[] | null
 }
 
 const absent = Prisma.sql`NULL::json`
 
 export async function readPayrollBatchesPage(
   /**
-   * Where the one statement goes (§6.2.9 v11.03): `tenantReader` on the
-   * Batches tab — the tenant and this read in one round trip, no
-   * transaction — or `txReader(tx)` inside the Balances tab's transaction.
+   * Where the one statement goes (§6.2.9 v11.03): `tenantReader` — the
+   * tenant and this read in one round trip, no transaction — or
+   * `txReader(tx)` inside a transaction (the tests' path).
    */
   reader: TenantReader,
   input: PayrollPageInput,
@@ -138,6 +150,10 @@ export async function readPayrollBatchesPage(
       Prisma.sql`pipeline AS (${pipelineSql(input.companyScopes)})`,
     )
   }
+  const year = input.balancesYear
+  if (year !== null) {
+    ctes.push(Prisma.sql`balances AS (${balancesSql(year)})`)
+  }
 
   const tab = input.batchesTab
   const rows = await reader.read<OneRow>(Prisma.sql`
@@ -160,7 +176,12 @@ export async function readPayrollBatchesPage(
         tab
           ? Prisma.sql`(SELECT COALESCE(json_agg(x), '[]'::json) FROM pipeline x)`
           : absent
-      } AS pipeline
+      } AS pipeline,
+      ${
+        year !== null
+          ? Prisma.sql`(SELECT COALESCE(json_agg(x ORDER BY x."driverName", x."driverId"), '[]'::json) FROM balances x)`
+          : absent
+      } AS balances
   `)
   const row = rows[0]
   if (!row)
@@ -188,5 +209,7 @@ export async function readPayrollBatchesPage(
       : [],
     pipeline: row.pipeline ? pipelineFrom(row.pipeline) : null,
     columnsRow: row.columns,
+    balances:
+      year !== null && row.balances ? balancesFrom(row.balances, year) : [],
   }
 }

@@ -7,7 +7,6 @@ import {
 import type { SessionContext } from '@/lib/session'
 import { getLocaleContext } from '@/lib/locale'
 import { formatCents } from '@/lib/money'
-import { companyScopeFilter, txReader } from '@/lib/tenancy'
 import { payWeekFor } from '@/lib/settlement-week'
 import { recentWeeks, weekFromParam } from '@/lib/payroll'
 import { readPayrollBatchesPage } from '@/lib/payroll-batches-page'
@@ -26,7 +25,6 @@ import {
 import {
   balanceShape,
   batchShape,
-  readBalances,
   type BalanceGridRow,
   type BatchGridRow,
 } from '@/lib/accounting-grids'
@@ -212,56 +210,39 @@ export default async function PayrollPage({
     offered,
     batchesTab: tab === 'batches',
     grid: GRID_FOR[tab],
+    balancesYear: tab === 'balances' ? year : null,
   })
 
-  // ON THE BATCHES TAB IT IS ONE ROUND TRIP (§6.2.9 v11.03): the tenant and
-  // the read together, no transaction around them. A transaction opens only
-  // when the stored column row is the legacy shape and must be rewritten.
-  // Balances keeps its transaction — its own read sits beside this one.
-  const data =
-    tab === 'batches'
-      ? await readCurrentOrg('read', 'settlement', async (reader, session) => {
-          const reads = await readPayrollBatchesPage(reader, pageInput(session))
-          const plan = gridColumnsFromRow(
-            GRID_FOR[tab],
-            COLUMN_KEYS[tab],
-            HIDDEN_BY_DEFAULT[tab],
-            reads.columnsRow,
+  // ONE ROUND TRIP ON EITHER TAB (§6.2.9 v11.03, v11.06): the tenant and the
+  // read together, no transaction around them — Balances' year rides in the
+  // same statement as a CTE. A transaction opens only when the stored column
+  // row is the legacy shape and must be rewritten.
+  const data = await readCurrentOrg(
+    'read',
+    'settlement',
+    async (reader, session) => {
+      const reads = await readPayrollBatchesPage(reader, pageInput(session))
+      const plan = gridColumnsFromRow(
+        GRID_FOR[tab],
+        COLUMN_KEYS[tab],
+        HIDDEN_BY_DEFAULT[tab],
+        reads.columnsRow,
+      )
+      const columns = plan.rewrite
+        ? await withCurrentOrg('read', 'settlement', (tx) =>
+            readGridColumns(
+              tx,
+              session.userId,
+              GRID_FOR[tab],
+              COLUMN_KEYS[tab],
+              HIDDEN_BY_DEFAULT[tab],
+              { row: reads.columnsRow },
+            ),
           )
-          const columns = plan.rewrite
-            ? await withCurrentOrg('read', 'settlement', (tx) =>
-                readGridColumns(
-                  tx,
-                  session.userId,
-                  GRID_FOR[tab],
-                  COLUMN_KEYS[tab],
-                  HIDDEN_BY_DEFAULT[tab],
-                  { row: reads.columnsRow },
-                ),
-              )
-            : plan.visible
-          return { ...reads, balances: [] as BalanceGridRow[], columns }
-        })
-      : await withCurrentOrg('read', 'settlement', async (tx, session) => {
-          const reads = await readPayrollBatchesPage(
-            txReader(tx),
-            pageInput(session),
-          )
-          const balances = await readBalances(
-            tx,
-            companyScopeFilter(session.companyScopes),
-            year,
-          )
-          const columns = await readGridColumns(
-            tx,
-            session.userId,
-            GRID_FOR[tab],
-            COLUMN_KEYS[tab],
-            HIDDEN_BY_DEFAULT[tab],
-            { row: reads.columnsRow },
-          )
-          return { ...reads, balances, columns }
-        })
+        : plan.visible
+      return { ...reads, columns }
+    },
+  )
 
   const { week } = data
   const day = (value: Date) => value.toISOString().slice(0, 10)
