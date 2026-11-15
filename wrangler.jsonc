@@ -38,15 +38,8 @@
   // worker and it cost nothing (/login, which touches no database, stayed at
   // 33ms — no regression). It is NOT a proven win. Re-measure when this
   // carries real traffic. Numbers in the Step 2 report.
-  //
-  // THE HINT (owner's ruling 2026-11-15, GAPS 42): "enam", Eastern North
-  // America, where Neon's us-east-2 is — so dev starts beside its database
-  // instead of waiting for Smart Placement to learn it from traffic. Dev
-  // only, measured from Dushanbe before production gets it; production
-  // declares its own placement below so it does not inherit this.
   "placement": {
     "mode": "smart",
-    "hint": "enam",
   },
 
   // The durable end of `onAuditEvent`, owed since Phase 1 §8. Audit health
@@ -215,12 +208,6 @@
   "env": {
     "production": {
       "name": "zebra",
-      // ITS OWN PLACEMENT, WITHOUT THE HINT, until the dev measurement
-      // says the hint earns it (owner's ruling 2026-11-15). An inherited
-      // key would have moved production with dev.
-      "placement": {
-        "mode": "smart",
-      },
       "compatibility_date": "2026-07-22",
       "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
       "assets": {
