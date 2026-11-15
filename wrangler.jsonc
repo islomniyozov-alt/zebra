@@ -38,8 +38,19 @@
   // worker and it cost nothing (/login, which touches no database, stayed at
   // 33ms — no regression). It is NOT a proven win. Re-measure when this
   // carries real traffic. Numbers in the Step 2 report.
+  //
+  // THE HINT, ON BOTH WORKERS (owner's ruling 2026-11-15, GAPS 42): "enam",
+  // Eastern North America, beside Neon's us-east-2. Not for speed — measured
+  // from Dushanbe it gained nothing over Smart Placement's own choice once
+  // that had settled (410da0d) — but because EVERY DEPLOY RESETS SMART
+  // PLACEMENT: after b0da7c1 deployed, dev ran local-DYU on 5 of 5, every
+  // statement crossed from Dushanbe to Ohio, and /drivers' page wall read
+  // 296 → 770 ms for a change that halved its statements. The hint starts each
+  // deploy beside the database. Placement is inheritable, so production
+  // takes this block; it declares none of its own.
   "placement": {
     "mode": "smart",
+    "hint": "enam",
   },
 
   // The durable end of `onAuditEvent`, owed since Phase 1 §8. Audit health
