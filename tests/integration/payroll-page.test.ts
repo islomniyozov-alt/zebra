@@ -147,6 +147,23 @@ beforeAll(async () => {
     data: { email: `payroll-page-${nonce}@example.test`, name: 'Page Reader' },
   })
   userId = user.id
+
+  // ANOTHER TENANT'S BATCH, ON THIS PAGE'S OWN WEEK. Every read here is
+  // meant to see two batches; a read that escaped row-level security — the
+  // owner role has BYPASSRLS — sees three, whatever else the worker's
+  // database holds.
+  const other = await owner.organization.create({
+    data: { name: `Payroll other ${nonce}`, slug: `payroll-other-${nonce}` },
+  })
+  await owner.settlementBatch.create({
+    data: {
+      organizationId: other.id,
+      periodStart: PERIOD.start,
+      periodEnd: PERIOD.end,
+      statementDate: PERIOD.end,
+      checkDate: PERIOD.end,
+    },
+  })
   await owner.membership.create({
     data: { userId, organizationId, role: 'OWNER' },
   })
@@ -415,7 +432,11 @@ describe('the page reads in one statement', () => {
   }, 300_000)
 
   it('is ONE statement, and the columns from its row cost none', async () => {
-    const client = createPrismaClient(process.env.DIRECT_DATABASE_URL!)
+    // AS zebra_app, NOT THE OWNER. The owner role has BYPASSRLS, so the
+    // row count below was every tenant's batches in the worker database —
+    // right only while no other file there held any. Found 2026-11-14 when
+    // tests/integration/tenant-read.test.ts seeded batches beside it.
+    const client = createPrismaClient(process.env.DATABASE_URL!)
     try {
       const counts = await client.$transaction(
         async (tx) => {
@@ -496,7 +517,7 @@ describe('the blockers strip reads the gross half', () => {
   }, 300_000)
 
   it('costs at most four statements inside its transaction', async () => {
-    const client = createPrismaClient(process.env.DIRECT_DATABASE_URL!)
+    const client = createPrismaClient(process.env.DATABASE_URL!)
     try {
       const { count, blockers } = await client.$transaction(
         async (tx) => {
