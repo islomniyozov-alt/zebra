@@ -21,28 +21,26 @@ import {
   type RecordTab,
 } from '@/lib/driver-record'
 import { ActivityTimeline } from '../../loads/[id]/ActivityTimeline'
-import { teamMateFor } from '@/lib/team'
 import { tagsToInput } from '@/lib/tags'
 import { PayToForm } from './PayToForm'
 import { SignInLink } from './SignInLink'
-import { signInLinkFor } from '@/lib/driver-link'
 import { can } from '@/lib/permissions'
-import { SELECTABLE_AUTHORITY } from '@/lib/companies'
-import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
+import {
+  currentUserCan,
+  readCurrentOrg,
+  withCurrentOrg,
+} from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { companyIdScopeFilter } from '@/lib/tenancy'
-import { currentAuthority } from '@/lib/fleet'
 import { CompliancePanel } from '../../_reference/CompliancePanel'
-import { compliancePanelData } from '../../_reference/compliance-view'
+import { compliancePanelFrom } from '../../_reference/compliance-view'
 import { InspectionPanel } from '../../_reference/InspectionPanel'
 import { DriverDocuments } from '../../_reference/DriverDocuments'
-import { inspectionPanelData } from '../../_reference/inspection-view'
-import { PAY_RULE_TYPES, payRulesFor } from '@/lib/driver-pay'
+import { inspectionPanelFrom } from '../../_reference/inspection-view'
+import { PAY_RULE_TYPES } from '@/lib/driver-pay'
+import { readDriverRecordHead } from '@/lib/driver-record-head'
 import { DEDUCTION_TYPES } from '@/lib/driver-deductions'
-import { onTimeRateForDriver } from '@/lib/dispatch-fields'
 import {
   dqfChecklist,
-  dqfFactsForDrivers,
   dqfIncompleteCount,
   DQF_REQUIREMENTS,
   isQualifiable,
@@ -96,179 +94,107 @@ export default async function EditDriverPage({
 
   // §6.8: a role without the read is REFUSED as a 404, never a 500 (sweep).
   if (!(await currentUserCan('read', 'driver'))) notFound()
-  const data = await withCurrentOrg('read', 'driver', async (tx, session) => {
-    const driver = await tx.driver.findUnique({ where: { id } })
-    if (!driver) return null
-
-    const companies = await tx.company.findMany({
-      // `id`, not `companyId` — Company IS the authority. See tenancy.ts.
-      where: {
-        ...SELECTABLE_AUTHORITY,
-        ...companyIdScopeFilter(session.companyScopes),
-      },
-      orderBy: { name: 'asc' },
-      select: { id: true, name: true },
-    })
-
-    // Only this driver's OWN authority. On edit the authority is fixed — the
-    // way to move a driver is `transferAsset`, below — so there is no reason
-    // to offer a truck this pairing would have to refuse.
-    const trucks = await tx.truck.findMany({
-      where: {
-        companyId: driver.companyId,
-        deletedAt: null,
-        status: { not: 'SOLD' },
-      },
-      orderBy: { unitNumber: 'asc' },
-      select: {
-        id: true,
-        unitNumber: true,
-        company: { select: { name: true } },
-      },
-    })
-
-    // Item 12. Only this driver's own authority, for the reason the trucks
-    // query above says: on edit the authority is fixed.
-    const trailers = await tx.trailer.findMany({
-      where: {
-        companyId: driver.companyId,
-        deletedAt: null,
-        status: { not: 'SOLD' },
-      },
-      orderBy: { unitNumber: 'asc' },
-      select: { id: true, unitNumber: true },
-    })
-
-    // Pay rules ride along on the same transaction rather than a second
-    // round trip — this screen is one read.
-    const payRules = await payRulesFor(tx, id)
-    // WHAT COMES OFF THE CHEQUE AND WHAT CAME INTO THE YEAR. Read here with
-    // everything else rather than in their own round trips: the page is one
-    // transaction by design, and two more would be two more chances to render
-    // half a driver.
-    const deductions = await tx.recurringDeduction.findMany({
-      where: { driverId: id },
-      orderBy: [{ effectiveFrom: 'desc' }, { type: 'asc' }],
-    })
-    const openingBalances = await tx.driverOpeningBalance.findMany({
-      where: { driverId: id },
-      orderBy: [{ year: 'desc' }, { category: 'asc' }],
-    })
-
-    // ONE STATEMENT, BOTH SEATS, FINISHED FREIGHT ONLY. Derived on every
-    // read: nothing on `Driver` stores a score, so there is no stale
-    // number to go wrong when a check-in is corrected.
-    const onTimeRate = await onTimeRateForDriver(tx, id)
-
-    // The DQF evidence, from the same loader the roster view and the
-    // warnings use. One definition of required, one loader for what is on
-    // file — see dqf.ts.
-    const dqf = (await dqfFactsForDrivers(tx, [id])).get(id) ?? {
-      hireDate: null,
-      compliance: [],
-      documents: [],
-    }
-
-    const open = await currentAuthority(tx, 'driver', id)
-    const openCompany = open
-      ? (companies.find((c) => c.id === open.companyId)?.name ?? null)
-      : null
-
-    const compliance = await compliancePanelData(tx, 'driver', id, t)
-    const inspections = await inspectionPanelData(tx, 'driver', id, t)
-
-    // EVERY FILE ON THIS DRIVER, not only the ones under a compliance row.
-    // A cancelled rotation parks a document with no record to hang it under
-    // (owner's ruling, 2026-09-12), and a file on no screen is storage nobody
-    // will act on. Tenant-scoped by the transaction, like everything here.
-    const documents = await tx.document.findMany({
-      where: { driverId: id, deletedAt: null },
-      orderBy: { uploadedAt: 'desc' },
-      take: 50,
-      select: {
-        id: true,
-        filename: true,
-        type: true,
-        uploadedAt: true,
-        ocrStatus: true,
-        supersededByDocumentId: true,
-      },
-    })
-
-    // WHAT THE NEW TABS NEED, read only for the tab that is open (§6.4
-    // part 2). The viewer's money permission is applied by `activityEntries`
-    // through the one rule; it is read here so the stream is built once.
-    const maySeeMoneyInLog = await currentUserCan('read', 'driver.pay')
-    const company = await tx.company.findUnique({
-      where: { id: driver.companyId },
-      select: { timezone: true },
-    })
-    const now = new Date()
-    // SHOWN ON BOTH RECORDS (§6.4 part 3): the other live person on this
-    // driver's truck, in the header where the type already is.
-    const teamMate = await teamMateFor(tx, id)
-    const assignments =
-      requestedTab === 'assets' ? await assignmentHistoryFor(tx, id) : []
-    // §6.9: the pool, one person at a time — owner/safety only (Part 40).
-    // `drawsForDriver` refuses without `randomTesting:read` on its own.
-    const draws =
-      requestedTab === 'safety' ? await drawsForDriver(tx, id, session) : []
-    const stats =
-      requestedTab === 'statistics'
-        ? await thirteenWeekStats(tx, id, now)
+  // THE RECORD IN ONE CALL (§6.4 part 2 v11.07): every read the main tab
+  // makes is a CTE of one statement through the tenant reader, no
+  // transaction. A tab that reads more — assets, safety, statistics, the
+  // log — opens a transaction for those reads alone.
+  const maySeeMoneyInLog = await currentUserCan('read', 'driver.pay')
+  const data = await readCurrentOrg(
+    'read',
+    'driver',
+    async (reader, session) => {
+      const now = new Date()
+      const head = await readDriverRecordHead(reader, {
+        driverId: id,
+        organizationId: session.organizationId,
+        companyScopes: session.companyScopes,
+        withSignIn: can(session, 'update', 'user'),
+        now,
+      })
+      if (!head) return null
+      const { driver, companies, authority: open } = head
+      const openCompany = open
+        ? (companies.find((c) => c.id === open.companyId)?.name ?? null)
         : null
-    const netByWeek =
-      requestedTab === 'statistics' && maySeeMoneyInLog
-        ? ((
-            await netPayByDriverWeek(tx, [id], recentSundays(now, 13)[0] ?? now)
-          ).get(id) ?? [])
-        : []
-    const activity =
-      requestedTab === 'log'
-        ? await driverActivity(
-            tx,
-            id,
-            { maySeeMoney: maySeeMoneyInLog },
-            (note) => (isMessageKey(note) ? t(note) : note),
-          )
-        : { items: [], truncated: false }
 
-    return {
-      driver,
-      companies,
-      openCompany,
-      trucks,
-      trailers,
-      payRules,
-      deductions,
-      openingBalances,
-      onTimeRate,
-      dqf,
-      compliance,
-      inspections,
-      timezone: company?.timezone ?? 'America/Chicago',
-      teamMate,
-      assignments,
-      draws,
-      stats,
-      netByWeek,
-      activity,
-      // THE SIGN-IN CARD'S DATA, FOR OWNER AND ADMIN ONLY (Phase 7 step 1,
-      // §4.6). Read inside the one transaction, and only for a role holding
-      // `user:update` — everyone else gets no payload, not a hidden card.
-      signIn: can(session, 'update', 'user')
-        ? await signInLinkFor(tx, session.organizationId, id)
-        : null,
-      documents: documents.map((document) => ({
-        id: document.id,
-        filename: document.filename,
-        type: document.type,
-        uploadedAt: document.uploadedAt,
-        needsRotation: document.ocrStatus === 'NEEDS_ROTATION',
-        superseded: document.supersededByDocumentId !== null,
-      })),
-    }
-  })
+      const tabReads =
+        requestedTab === 'assets' ||
+        requestedTab === 'safety' ||
+        requestedTab === 'statistics' ||
+        requestedTab === 'log'
+          ? await withCurrentOrg('read', 'driver', async (tx) => ({
+              assignments:
+                requestedTab === 'assets'
+                  ? await assignmentHistoryFor(tx, id)
+                  : [],
+              draws:
+                requestedTab === 'safety'
+                  ? await drawsForDriver(tx, id, session)
+                  : [],
+              stats:
+                requestedTab === 'statistics'
+                  ? await thirteenWeekStats(tx, id, now)
+                  : null,
+              netByWeek:
+                requestedTab === 'statistics' && maySeeMoneyInLog
+                  ? ((
+                      await netPayByDriverWeek(
+                        tx,
+                        [id],
+                        recentSundays(now, 13)[0] ?? now,
+                      )
+                    ).get(id) ?? [])
+                  : [],
+              activity:
+                requestedTab === 'log'
+                  ? await driverActivity(
+                      tx,
+                      id,
+                      { maySeeMoney: maySeeMoneyInLog },
+                      (note: string) => (isMessageKey(note) ? t(note) : note),
+                    )
+                  : { items: [], truncated: false },
+            }))
+          : {
+              assignments: [],
+              draws: [],
+              stats: null,
+              netByWeek: [],
+              activity: { items: [], truncated: false },
+            }
+
+      return {
+        driver,
+        companies,
+        openCompany,
+        trucks: head.trucks,
+        trailers: head.trailers,
+        payRules: head.payRules,
+        deductions: head.deductions,
+        openingBalances: head.openingBalances,
+        onTimeRate: head.onTimeRate,
+        dqf: head.dqf,
+        compliance: compliancePanelFrom(
+          head.compliance,
+          head.complianceDocuments,
+          t,
+        ),
+        inspections: inspectionPanelFrom(head.inspections, t),
+        timezone: head.timezone ?? 'America/Chicago',
+        teamMate: head.teamMate,
+        ...tabReads,
+        signIn: head.signIn,
+        documents: head.documents.map((document) => ({
+          id: document.id,
+          filename: document.filename,
+          type: document.type,
+          uploadedAt: document.uploadedAt,
+          needsRotation: document.ocrStatus === 'NEEDS_ROTATION',
+          superseded: document.supersededByDocumentId !== null,
+        })),
+      }
+    },
+  )
 
   if (!data) notFound()
   const {

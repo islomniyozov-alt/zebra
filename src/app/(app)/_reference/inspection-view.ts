@@ -33,8 +33,20 @@ export async function inspectionPanelData(
   subjectId: string,
   t: Translate,
 ): Promise<InspectionPanelData> {
-  const rows = await inspectionsForSubject(tx, subject, subjectId)
+  return inspectionPanelFrom(
+    await inspectionsForSubject(tx, subject, subjectId),
+    t,
+  )
+}
 
+/**
+ * The panel from rows already read — by `inspectionsForSubject`, or by a
+ * page's one call (`/drivers/[id]`, §6.4 part 2 v11.07).
+ */
+export function inspectionPanelFrom(
+  rows: readonly InspectionRow[],
+  t: Translate,
+): InspectionPanelData {
   return {
     rows: rows.map((row) => ({
       id: row.id,

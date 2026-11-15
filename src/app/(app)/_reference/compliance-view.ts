@@ -3,6 +3,7 @@ import {
   documentTypeFor,
   documentsForRecords,
   recordsForSubject,
+  type ComplianceRow,
   type ComplianceSubject,
 } from '@/lib/compliance'
 import type { TxClient } from '@/lib/tenancy'
@@ -42,7 +43,18 @@ export async function compliancePanelData(
     tx,
     records.map((record) => record.id),
   )
+  return compliancePanelFrom(records, documents, t)
+}
 
+/**
+ * The panel from rows already read — by the two reads above, or by a page's
+ * one call (`/drivers/[id]`, §6.4 part 2 v11.07).
+ */
+export function compliancePanelFrom(
+  records: readonly ComplianceRow[],
+  documents: ReadonlyMap<string, { id: string; filename: string }[]>,
+  t: Translate,
+): CompliancePanelData {
   /** "in 14 days", "today", "40 days ago". Rendered here, not in the client. */
   const when = (daysLeft: number) => {
     if (daysLeft === 0) return t('safety.dueToday')

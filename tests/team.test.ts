@@ -66,7 +66,13 @@ describe('shown on both records, and offered on the load', () => {
   const doc = readFileSync('TMS-DESIGN-SYSTEM.md', 'utf8')
 
   it('names the team-mate on the driver record and the crew on the truck', () => {
-    expect(driverPage).toContain('teamMateFor(')
+    // THE RECORD READS ITS MATE IN ITS ONE CALL (§6.4 part 2 v11.07): the crew
+    // CTE through `teamMateOf`, held equal to `teamMateFor` by
+    // tests/integration/driver-record-head.test.ts.
+    expect(driverPage).toContain('teamMate: head.teamMate')
+    expect(
+      readFileSync(join('src', 'lib', 'driver-record-head.ts'), 'utf8'),
+    ).toContain('teamMateOf(crew, id)')
     expect(truckPage).toContain('crewOfTruck(')
     expect(doc).toContain('**3 — Team drivers.**')
   })
