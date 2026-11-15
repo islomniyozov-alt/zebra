@@ -204,6 +204,41 @@ export function driverHealthWhere(
   }
 }
 
+/**
+ * `driverHealthBase` AND `driverHealthWhere(check)` as SQL over `"Driver" d`
+ * — the FILTER the figure links to, spelled for `/drivers`' one-call list
+ * (§6.4 part 1 v11.04). It follows the link's `where`, not the count: a phone
+ * is missing when null or exactly empty. The enforcer is
+ * `tests/integration/drivers-page.test.ts`, which holds the list it filters
+ * equal to `driver.findMany` through these two, check by check.
+ */
+export function driverHealthFilterSql(
+  check: DriverHealthCheck,
+  now: Date,
+): Prisma.Sql {
+  const active = Prisma.sql`d."deletedAt" IS NULL
+       AND d.status IN ('AVAILABLE', 'DISPATCHED', 'ON_ROUTE', 'OFF_DUTY')
+       AND d.kind <> 'PAYEE'`
+  switch (check) {
+    case 'cdl':
+    case 'medical':
+      return Prisma.sql`${active} AND NOT EXISTS (
+        SELECT 1 FROM "ComplianceItem" ci
+         WHERE ci."driverId" = d.id AND ci."deletedAt" IS NULL
+           AND ci.type::text = ${check === 'cdl' ? 'CDL' : 'MEDICAL_CARD'})`
+    case 'phone':
+      return Prisma.sql`${active} AND (d.phone IS NULL OR d.phone = '')`
+    case 'payRule':
+      return Prisma.sql`${active} AND NOT EXISTS (
+        SELECT 1 FROM "DriverPayRule" r
+         WHERE r."driverId" = d.id
+           AND r."effectiveFrom" <= ${now}
+           AND (r."effectiveTo" IS NULL OR r."effectiveTo" >= ${now}))`
+    case 'truck':
+      return Prisma.sql`${active} AND d."assignedTruckId" IS NULL`
+  }
+}
+
 export type DriverHealthCounts = Record<DriverHealthCheck, number>
 
 /**

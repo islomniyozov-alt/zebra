@@ -1,14 +1,20 @@
 import { Prisma } from '@/generated/prisma/client'
-import type { TxClient } from './tenancy'
+import type { TenantReader } from './tenancy'
 import {
+  driverListFrom,
+  driverListSql,
   driverTabCountsFrom,
   driverTabCountsSql,
   type DriverListBase,
+  type DriverListRow,
+  type DriverListSqlRow,
   type DriverTab,
 } from './driver-list'
 import {
+  driverHealthFilterSql,
   driverHealthFrom,
   driverHealthSql,
+  type DriverHealthCheck,
   type DriverHealthCounts,
 } from './data-health'
 import { keyFor, type StoredColumnRow } from './grid-columns'
@@ -50,16 +56,18 @@ import {
 import { asNumber } from './sql-json'
 
 // ---------------------------------------------------------------------------
-// /drivers IN SIX STATEMENTS (§6.4 part 1 v11.02; owner's instruction
-// 2026-11-14, the slow-pages chain on GAPS 42).
+// /drivers IN THREE STATEMENTS (§6.4 part 1 v11.02, v11.04; the slow-pages
+// chain on GAPS 42).
 //
-// Before: 21 statements a request, each its own round trip — about 200 ms on
-// dev whatever it asked, so the count was the wall (4.6 s). The page's one
-// transaction now makes three reads:
+// Before v11.02: 21 statements a request, each its own round trip — about
+// 200 ms on dev whatever it asked, so the count was the wall (4.6 s). v11.02
+// made it one transaction of three reads; v11.04 drops the transaction, whose
+// `set_config` and COMMIT were two more trips, and sends two calls through a
+// `TenantReader` (`zebra_tenant_read`, §6.2.9 v11.03):
 //
 //   head    ONE SELECT: the authority count, the five tab counts, the five
-//           data-health counts, the three preference rows — a CTE each
-//   list    the page's own `driver.findMany`, unchanged
+//           data-health counts, the three preference rows, AND THE LIST
+//           (`driverListSql`, at most the page's cap) — a CTE each
 //   facts   ONE SELECT keyed on the listed ids: negative settlements, the
 //           DQF evidence, the roster columns, dispatch facts, last activity,
 //           the listed trucks' compliance — a CTE each
@@ -85,6 +93,8 @@ export interface DriversHeadInput {
   healthCompanyIds: readonly string[]
   now: Date
   includeRemoved: boolean
+  /** The list: the open tab, the health filter if any, and the row cap. */
+  list: { tab: DriverTab; missing: DriverHealthCheck | null; cap: number }
 }
 
 export interface DriversHead {
@@ -94,6 +104,7 @@ export interface DriversHead {
   columnsRow: StoredColumnRow | null
   savedViews: SavedView[]
   density: Density
+  drivers: DriverListRow[]
 }
 
 interface PreferenceRow {
@@ -107,10 +118,11 @@ interface HeadRow {
   tabs: Partial<Record<DriverTab, unknown>> | null
   health: Partial<Record<keyof DriverHealthCounts, unknown>> | null
   prefs: PreferenceRow[]
+  list: DriverListSqlRow[]
 }
 
 export async function readDriversHead(
-  tx: TxClient,
+  reader: TenantReader,
   input: DriversHeadInput,
 ): Promise<DriversHead> {
   const keys = [
@@ -118,7 +130,7 @@ export async function readDriversHead(
     PREFERENCE_KEYS.driversViews,
     PREFERENCE_KEYS.density,
   ]
-  const rows = await tx.$queryRaw<HeadRow[]>`
+  const rows = await reader.read<HeadRow>(Prisma.sql`
     WITH companies AS (SELECT COUNT(*)::int AS n FROM "Company"),
          tabs AS (${driverTabCountsSql(input.base, input.now, input.includeRemoved)}),
          health AS (${driverHealthSql({ companyIds: input.healthCompanyIds }, input.now)}),
@@ -126,12 +138,23 @@ export async function readDriversHead(
            SELECT p."key", p."value", p."organizationId"
              FROM "UserPreference" p
             WHERE p."userId" = ${input.userId} AND p."key" IN (${Prisma.join(keys)})
-         )
+         ),
+         list AS (${driverListSql({
+           base: input.base,
+           tab: input.list.tab,
+           now: input.now,
+           includeRemoved: input.includeRemoved,
+           filter: input.list.missing
+             ? driverHealthFilterSql(input.list.missing, input.now)
+             : null,
+           cap: input.list.cap,
+         })})
     SELECT (SELECT n FROM companies) AS companies,
            (SELECT row_to_json(x) FROM tabs x) AS tabs,
            (SELECT row_to_json(x) FROM health x) AS health,
-           (SELECT COALESCE(json_agg(x), '[]'::json) FROM prefs x) AS prefs
-  `
+           (SELECT COALESCE(json_agg(x), '[]'::json) FROM prefs x) AS prefs,
+           (SELECT COALESCE(json_agg(x ORDER BY x.ord), '[]'::json) FROM list x) AS list
+  `)
   const row = rows[0]
   if (!row) throw new Error('readDriversHead: no row from a one-row SELECT.')
 
@@ -148,6 +171,7 @@ export async function readDriversHead(
       pref(PREFERENCE_KEYS.driversViews)?.value ?? null,
     ),
     density: parseDensity(pref(PREFERENCE_KEYS.density)?.value ?? null),
+    drivers: driverListFrom(row.list),
   }
 }
 
@@ -185,7 +209,7 @@ const FACT_CTES = [
  * sends nothing.
  */
 export async function readDriverFacts(
-  tx: TxClient,
+  reader: TenantReader,
   driverIds: readonly string[],
   truckIds: readonly string[],
 ): Promise<DriverListFacts> {
@@ -206,7 +230,7 @@ export async function readDriverFacts(
     activity: lastActivitySql(driverIds),
     trucks: truckComplianceSql(truckIds),
   }
-  const rows = await tx.$queryRaw<FactsRow[]>`
+  const rows = await reader.read<FactsRow>(Prisma.sql`
     WITH ${Prisma.join(
       FACT_CTES.map(
         (name) => Prisma.sql`${Prisma.raw(name)} AS (${texts[name]})`,
@@ -220,7 +244,7 @@ export async function readDriverFacts(
       ),
       ',\n',
     )}
-  `
+  `)
   const row = rows[0]
   if (!row) throw new Error('readDriverFacts: no row from a one-row SELECT.')
 

@@ -220,13 +220,15 @@ describe('the five driver checks (part 0b)', () => {
       'utf8',
     )
     // THE COUNTS ARE THE HEAD'S `health` CTE (§6.4 part 1 v11.02), whose
-    // text is `countDriverHealth`'s own.
-    expect(page).toMatch(/readDriversHead\(\s*tx,/)
-    expect(readFileSync(join('src', 'lib', 'drivers-page.ts'), 'utf8')).toMatch(
-      /driverHealthSql\(/,
-    )
-    expect(page).toContain('driverHealthWhere(')
-    expect(page).toContain('driverHealthBase()')
+    // text is `countDriverHealth`'s own; THE FILTER the figure links to is
+    // the head's list through `driverHealthFilterSql` (v11.04), which
+    // `tests/integration/drivers-page.test.ts` holds equal to
+    // `driverHealthBase()` and `driverHealthWhere` check by check.
+    expect(page).toMatch(/readDriversHead\(\s*reader,/)
+    const head = readFileSync(join('src', 'lib', 'drivers-page.ts'), 'utf8')
+    expect(head).toMatch(/driverHealthSql\(/)
+    expect(head).toMatch(/driverHealthFilterSql\(input\.list\.missing/)
+    expect(page).toMatch(/list: \{ tab, missing, cap: PAGE_CAP \}/)
     expect(page).toContain('<DataHealthRow')
     expect(page).toContain("from '../_grid/DataHealthRow'")
   })

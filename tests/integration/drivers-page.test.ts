@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
-import { withOrg } from '@/lib/tenancy'
+import { tenantReader, txReader, withOrg } from '@/lib/tenancy'
 import { createBroker } from '@/lib/brokers'
 import { createLoad, LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import {
@@ -8,11 +8,13 @@ import {
   driverListBaseWhere,
   driverTabWhere,
   type DriverListBase,
+  type DriverTab,
 } from '@/lib/driver-list'
 import {
   DRIVER_HEALTH_CHECKS,
   driverHealthBase,
   driverHealthWhere,
+  type DriverHealthCheck,
 } from '@/lib/data-health'
 import { readDensity, readSavedViews } from '@/lib/preferences'
 import { isQualifiable } from '@/lib/dqf'
@@ -22,13 +24,13 @@ import {
   lastActivityForDrivers,
 } from '@/lib/dispatch-fields'
 import { readDriverFacts, readDriversHead } from '@/lib/drivers-page'
-import { createPrismaClient, statementsOf } from '@/lib/db'
+import { createPrismaClient, prisma, statementsOf } from '@/lib/db'
 import type { PrismaClient } from '@/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
-// /drivers IN SIX STATEMENTS (§6.4 part 1 v11.02).
+// /drivers IN THREE STATEMENTS (§6.4 part 1 v11.02, v11.04).
 //
-// THREE CLAIMS, EACH HELD TO WHAT IT REPLACED:
+// FIVE CLAIMS, EACH HELD TO WHAT IT REPLACED:
 //
 // 1. The head's tab counts equal `driver.count` through `driverTabWhere` —
 //    the list's own predicate — for every tab, with and without removed rows,
@@ -39,7 +41,16 @@ import type { PrismaClient } from '@/generated/prisma/client'
 //    old reads.
 // 2. The facts statement returns what the four loaders return, and the
 //    roster's `isQualifiable` equals the predicate on a Prisma read.
-// 3. Head and facts are ONE statement each; an empty list sends none.
+// 3. Head and facts are ONE statement each through the tenant reader, as
+//    `zebra_app` and outside any transaction; an empty list sends none.
+// 4. The list the head carries (`driverListSql`) equals `driver.findMany`
+//    through `driverTabWhere` and the health filter — ids in order and every
+//    column — for every tab, removed or not, scoped, chipped, tagged, under
+//    each health filter and under the cap. `driverListSql` and
+//    `driverHealthFilterSql` are spellings of those rules; THIS is their
+//    enforcer.
+// 5. Through the reader, a second organization's driver is in no count and
+//    no list. Watched failing with the reader handed that organization's id.
 //
 // EVERY SIDE IS SEEDED ABOVE EMPTY: a driver in every tab, a removed one, a
 // payee, two authorities, a tag, compliance on a driver and a truck, a
@@ -54,6 +65,8 @@ let betaId = ''
 let userId = ''
 const drivers: Record<string, string> = {}
 let truckId = ''
+let otherOrgId = ''
+let otherDriverId = ''
 const nonce = Math.random().toString(36).slice(2, 8)
 /** Whole milliseconds, so a timestamp(3) round trip compares equal. */
 const NOW = new Date(Math.floor(Date.now() / 1000) * 1000)
@@ -66,20 +79,65 @@ const inOrg = <T>(fn: Parameters<typeof withOrg<T>>[1]): Promise<T> =>
     maxWaitMs: 20_000,
   })
 
+const ACTIVE_LIST = { tab: 'active', missing: null, cap: 500 } as const
+
 const head = (input: {
   base?: DriverListBase
   healthCompanyIds?: string[]
   includeRemoved?: boolean
 }) =>
   inOrg((tx) =>
-    readDriversHead(tx, {
+    readDriversHead(txReader(tx), {
       userId,
       base: input.base ?? { companyScopes: [] },
       healthCompanyIds: input.healthCompanyIds ?? [],
       now: NOW,
       includeRemoved: input.includeRemoved ?? false,
+      list: ACTIVE_LIST,
     }),
   )
+
+/** The page's old list, with the id as the last key so ties have an order. */
+const listedByPrisma = (
+  tx: Parameters<Parameters<typeof withOrg>[1]>[0],
+  input: {
+    base: DriverListBase
+    tab: DriverTab
+    includeRemoved: boolean
+    missing: DriverHealthCheck | null
+    cap: number
+  },
+) =>
+  tx.driver.findMany({
+    where: {
+      AND: [
+        driverListBaseWhere(input.base),
+        driverTabWhere(input.tab, NOW, input.includeRemoved),
+        ...(input.missing
+          ? [driverHealthBase(), driverHealthWhere(input.missing, NOW)]
+          : []),
+      ],
+    },
+    orderBy: [{ company: { name: 'asc' } }, { lastName: 'asc' }, { id: 'asc' }],
+    take: input.cap,
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      phone: true,
+      email: true,
+      cdlNumber: true,
+      cdlState: true,
+      status: true,
+      driverType: true,
+      deletedAt: true,
+      terminationDate: true,
+      offDutyUntil: true,
+      tags: true,
+      company: { select: { name: true } },
+      assignedTruck: { select: { id: true, unitNumber: true } },
+    },
+  })
 
 beforeAll(async () => {
   owner = retryingClient(process.env.DIRECT_DATABASE_URL!)
@@ -265,6 +323,30 @@ beforeAll(async () => {
     },
   })
 
+  // ANOTHER ORGANIZATION, WITH A DRIVER ON A WORKING STATUS and the same
+  // last name, so a list that leaked it would show it on the active tab.
+  const other = await owner.organization.create({
+    data: {
+      name: `Drivers page other ${nonce}`,
+      slug: `drivers-page-other-${nonce}`,
+      companies: { create: [{ name: `Other ${nonce}` }] },
+    },
+    include: { companies: true },
+  })
+  otherOrgId = other.id
+  otherDriverId = (
+    await owner.driver.create({
+      data: {
+        organizationId: other.id,
+        companyId: other.companies[0]!.id,
+        firstName: 'Elsewhere',
+        lastName: `List ${nonce}`,
+        hireDate: new Date(Date.UTC(2026, 0, 5)),
+        status: 'AVAILABLE',
+      },
+    })
+  ).id
+
   // ALL THREE PREFERENCE ROWS.
   const preferences: [string, object | string][] = [
     ['columns.drivers.drivers', { hidden: ['phone'] }],
@@ -282,7 +364,7 @@ afterAll(async () => {
   await owner?.$disconnect()
 })
 
-describe('/drivers in six statements', () => {
+describe('/drivers in three statements', () => {
   it('counts every tab as driverTabWhere does — removed or not, scoped, chipped, tagged', async () => {
     const bases: { name: string; base: DriverListBase }[] = [
       { name: 'unscoped', base: { companyScopes: [] } },
@@ -297,12 +379,13 @@ describe('/drivers in six statements', () => {
     for (const { name, base } of bases) {
       for (const includeRemoved of [false, true]) {
         const [read, expected] = await inOrg(async (tx) => {
-          const read = await readDriversHead(tx, {
+          const read = await readDriversHead(txReader(tx), {
             userId,
             base,
             healthCompanyIds: [],
             now: NOW,
             includeRemoved,
+            list: ACTIVE_LIST,
           })
           const expected: Record<string, number> = {}
           for (const tab of DRIVER_TABS) {
@@ -342,12 +425,13 @@ describe('/drivers in six statements', () => {
     for (const companyIds of [[], [alphaId], [betaId]]) {
       const [read, expected, companies, views, density, stored] = await inOrg(
         async (tx) => {
-          const read = await readDriversHead(tx, {
+          const read = await readDriversHead(txReader(tx), {
             userId,
             base: { companyScopes: [] },
             healthCompanyIds: companyIds,
             now: NOW,
             includeRemoved: false,
+            list: ACTIVE_LIST,
           })
           const expected: Record<string, number> = {}
           for (const check of DRIVER_HEALTH_CHECKS) {
@@ -405,7 +489,7 @@ describe('/drivers in six statements', () => {
     const [one, warning, dispatch, activity, truckFacts] = await inOrg(
       async (tx) =>
         [
-          await readDriverFacts(tx, ids, trucks),
+          await readDriverFacts(txReader(tx), ids, trucks),
           await driverWarningFacts(tx, ids),
           await dispatchFactsForDrivers(tx, ids),
           await lastActivityForDrivers(tx, ids),
@@ -459,7 +543,7 @@ describe('/drivers in six statements', () => {
     const [one, warning] = await inOrg(
       async (tx) =>
         [
-          await readDriverFacts(tx, ids, []),
+          await readDriverFacts(txReader(tx), ids, []),
           await driverWarningFacts(tx, ids),
         ] as const,
     )
@@ -468,35 +552,166 @@ describe('/drivers in six statements', () => {
     expect(one.trucks.size).toBe(0)
   }, 300_000)
 
-  it('is ONE statement for the head and ONE for the facts; an empty list sends none', async () => {
-    const client = createPrismaClient(process.env.DIRECT_DATABASE_URL!)
-    try {
-      const counts = await client.$transaction(
-        async (tx) => {
-          await tx.$executeRaw`SELECT set_config('app.current_org_id', ${organizationId}, true)`
-          const atHead = statementsOf(client)!
-          await readDriversHead(tx, {
-            userId,
-            base: { companyScopes: [] },
-            healthCompanyIds: [],
-            now: NOW,
-            includeRemoved: false,
+  it('lists the rows driver.findMany lists — every tab, removed, scope, chip, tag, health filter, cap', async () => {
+    const bases: { name: string; base: DriverListBase }[] = [
+      { name: 'unscoped', base: { companyScopes: [] } },
+      { name: 'scoped to Alpha', base: { companyScopes: [alphaId] } },
+      {
+        name: 'chipped to Beta',
+        base: { companyScopes: [], companyId: betaId },
+      },
+      { name: 'tagged night', base: { companyScopes: [], tag: 'night' } },
+    ]
+    const cases: {
+      name: string
+      base: DriverListBase
+      tab: DriverTab
+      includeRemoved: boolean
+      missing: DriverHealthCheck | null
+      cap: number
+    }[] = []
+    for (const { name, base } of bases) {
+      for (const includeRemoved of [false, true]) {
+        for (const tab of DRIVER_TABS) {
+          cases.push({
+            name,
+            base,
+            tab,
+            includeRemoved,
+            missing: null,
+            cap: 500,
           })
-          const headCount = statementsOf(client)! - atHead
-          const atFacts = statementsOf(client)!
-          await readDriverFacts(tx, Object.values(drivers), [truckId])
-          const facts = statementsOf(client)! - atFacts
-          const atEmpty = statementsOf(client)!
-          await readDriverFacts(tx, [], [])
-          return {
-            head: headCount,
-            facts,
-            empty: statementsOf(client)! - atEmpty,
-          }
-        },
-        { maxWait: 20_000, timeout: LOAD_WRITE_TIMEOUT_MS },
+        }
+      }
+    }
+    for (const missing of DRIVER_HEALTH_CHECKS) {
+      for (const tab of ['active', 'all'] as const) {
+        cases.push({
+          name: `health ${missing}`,
+          base: { companyScopes: [] },
+          tab,
+          includeRemoved: false,
+          missing,
+          cap: 500,
+        })
+      }
+    }
+    // THE CAP: the first two rows in the list's own order.
+    cases.push({
+      name: 'capped at 2',
+      base: { companyScopes: [] },
+      tab: 'all',
+      includeRemoved: true,
+      missing: null,
+      cap: 2,
+    })
+
+    let rows = 0
+    for (const c of cases) {
+      const [read, expected] = await inOrg(
+        async (tx) =>
+          [
+            await readDriversHead(txReader(tx), {
+              userId,
+              base: c.base,
+              healthCompanyIds: [],
+              now: NOW,
+              includeRemoved: c.includeRemoved,
+              list: { tab: c.tab, missing: c.missing, cap: c.cap },
+            }),
+            await listedByPrisma(tx, c),
+          ] as const,
       )
-      expect(counts).toEqual({ head: 1, facts: 1, empty: 0 })
+      const label = `${c.name}, ${c.tab}, removed ${c.includeRemoved}`
+      expect(read.drivers, label).toEqual(expected)
+      rows += expected.length
+    }
+    expect(cases).toHaveLength(51)
+
+    // NOT VACUOUS: the lists carry rows, a truck, a tag, a removed row, dates.
+    expect(rows).toBeGreaterThan(80)
+    const all = (
+      await inOrg((tx) =>
+        readDriversHead(txReader(tx), {
+          userId,
+          base: { companyScopes: [] },
+          healthCompanyIds: [],
+          now: NOW,
+          includeRemoved: true,
+          list: { tab: 'all', missing: null, cap: 500 },
+        }),
+      )
+    ).drivers
+    expect(all).toHaveLength(8)
+    const working = all.find((d) => d.id === drivers.Working)!
+    expect(working.assignedTruck).toEqual({
+      id: truckId,
+      unitNumber: `T-${nonce}`,
+    })
+    expect(working.tags).toEqual(['night'])
+    expect(all.find((d) => d.id === drivers.Removed)!.deletedAt).toEqual(
+      day(-1),
+    )
+    expect(all.find((d) => d.id === drivers.Returning)!.offDutyUntil).toEqual(
+      day(10),
+    )
+    // Alpha's people before Beta's: the order is the authority's name first.
+    expect(
+      all.slice(0, 3).every((d) => d.company.name.startsWith('Alpha')),
+    ).toBe(true)
+  }, 600_000)
+
+  it('reads none of another organization’s drivers through the tenant reader', async () => {
+    const read = (orgId: string) =>
+      readDriversHead(tenantReader(prisma, orgId), {
+        userId,
+        base: { companyScopes: [] },
+        healthCompanyIds: [],
+        now: NOW,
+        includeRemoved: true,
+        list: { tab: 'all', missing: null, cap: 500 },
+      })
+    const mine = await read(organizationId)
+    expect(mine.drivers.map((d) => d.id)).not.toContain(otherDriverId)
+    expect(mine.drivers).toHaveLength(8)
+    expect(mine.counts.all).toBe(8)
+    expect(mine.companyCount).toBe(2)
+    // The other organization reads its own driver and none of ours.
+    const theirs = await read(otherOrgId)
+    expect(theirs.drivers.map((d) => d.id)).toEqual([otherDriverId])
+    expect(theirs.counts.all).toBe(1)
+    expect(theirs.columnsRow).toBeNull()
+  }, 300_000)
+
+  it('is ONE statement for the head and ONE for the facts through the reader; an empty list sends none', async () => {
+    // AS zebra_app, OUTSIDE ANY TRANSACTION — the page's own path. The owner
+    // role bypasses row-level security, so it would count a read the policy
+    // never filtered.
+    const client = createPrismaClient(process.env.DATABASE_URL!)
+    try {
+      const reader = tenantReader(client, organizationId)
+      const atHead = statementsOf(client)!
+      const headRead = await readDriversHead(reader, {
+        userId,
+        base: { companyScopes: [] },
+        healthCompanyIds: [],
+        now: NOW,
+        includeRemoved: false,
+        list: ACTIVE_LIST,
+      })
+      const headCount = statementsOf(client)! - atHead
+      const atFacts = statementsOf(client)!
+      await readDriverFacts(reader, Object.values(drivers), [truckId])
+      const facts = statementsOf(client)! - atFacts
+      const atEmpty = statementsOf(client)!
+      await readDriverFacts(reader, [], [])
+      expect({
+        head: headCount,
+        facts,
+        empty: statementsOf(client)! - atEmpty,
+      }).toEqual({ head: 1, facts: 1, empty: 0 })
+      // NOT VACUOUS: the one statement carried the list.
+      expect(headRead.drivers).toHaveLength(5)
     } finally {
       await client.$disconnect()
     }

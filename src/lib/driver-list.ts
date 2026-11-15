@@ -1,6 +1,10 @@
-import { Prisma, type DriverStatus } from '@/generated/prisma/client'
+import {
+  Prisma,
+  type DriverStatus,
+  type DriverType,
+} from '@/generated/prisma/client'
 import type { TxClient } from './tenancy'
-import { asNumber } from './sql-json'
+import { asDate, asNumber } from './sql-json'
 
 // ---------------------------------------------------------------------------
 // THE DRIVERS LIST TAKES DATATRUCK'S SHAPE (§6.4 part 1, queue item 16).
@@ -182,6 +186,112 @@ export function driverTabCountsFrom(
   return Object.fromEntries(
     DRIVER_TABS.map((tab) => [tab, asNumber(row?.[tab])]),
   ) as Record<DriverTab, number>
+}
+
+// ── THE LIST AS SQL (§6.4 part 1 v11.04) ─────────────────────────────────
+//
+// The page's `driver.findMany`, spelled as SQL so it can ride in the head's
+// one `zebra_tenant_read` call. A THIRD SPELLING OF THE TAB RULE, so its
+// enforcer is named: `tests/integration/drivers-page.test.ts` holds these rows
+// equal to `driver.findMany` through `driverTabWhere` and `driverHealthWhere`
+// — ids in order and every column — for every tab, removed or not, scoped,
+// chipped, tagged and under each health filter.
+
+/** One listed driver: the columns the page shows and nothing else (no pay). */
+export interface DriverListRow {
+  id: string
+  firstName: string
+  lastName: string
+  phone: string | null
+  email: string | null
+  cdlNumber: string | null
+  cdlState: string | null
+  status: DriverStatus
+  driverType: DriverType
+  deletedAt: Date | null
+  terminationDate: Date | null
+  offDutyUntil: Date | null
+  tags: string[]
+  company: { name: string }
+  assignedTruck: { id: string; unitNumber: string } | null
+}
+
+/**
+ * The listed drivers, at most `cap`, ordered by authority name, last name and
+ * then id — the id so two runs of the same question list the same order.
+ * The order is also a column, `ord`, so a caller that wraps this text (the
+ * head's `json_agg`) can keep it without restating it.
+ * `filter` is a further predicate over `d` (the health filter), or null.
+ */
+export function driverListSql(input: {
+  base: DriverListBase
+  tab: DriverTab
+  now: Date
+  includeRemoved: boolean
+  filter: Prisma.Sql | null
+  cap: number
+}): Prisma.Sql {
+  return Prisma.sql`
+    SELECT d.id, d."firstName", d."lastName", d.phone, d.email,
+           d."cdlNumber", d."cdlState", d.status::text AS status,
+           d."driverType"::text AS "driverType", d."deletedAt",
+           d."terminationDate", d."offDutyUntil", d.tags,
+           c.name AS "companyName", t.id AS "truckId",
+           t."unitNumber" AS "truckUnitNumber",
+           row_number() OVER (ORDER BY c.name ASC, d."lastName" ASC, d.id ASC) AS ord
+      FROM "Driver" d
+      JOIN "Company" c ON c.id = d."companyId"
+      LEFT JOIN "Truck" t ON t.id = d."assignedTruckId"
+     WHERE ${driverBaseSql(input.base)}
+       AND ${driverTabSql(input.tab, input.now, input.includeRemoved)}
+       AND ${input.filter ?? Prisma.sql`TRUE`}
+     ORDER BY ord
+     LIMIT ${input.cap}`
+}
+
+/** `driverListSql`'s row as JSON, from either transport. */
+export interface DriverListSqlRow {
+  id: string
+  firstName: string
+  lastName: string
+  phone: string | null
+  email: string | null
+  cdlNumber: string | null
+  cdlState: string | null
+  status: string
+  driverType: string
+  deletedAt: unknown
+  terminationDate: unknown
+  offDutyUntil: unknown
+  tags: string[] | null
+  companyName: string
+  truckId: string | null
+  truckUnitNumber: string | null
+}
+
+export function driverListFrom(
+  rows: readonly DriverListSqlRow[],
+): DriverListRow[] {
+  return rows.map((row) => ({
+    id: row.id,
+    firstName: row.firstName,
+    lastName: row.lastName,
+    phone: row.phone,
+    email: row.email,
+    cdlNumber: row.cdlNumber,
+    cdlState: row.cdlState,
+    status: row.status as DriverStatus,
+    driverType: row.driverType as DriverType,
+    deletedAt: asDate(row.deletedAt),
+    terminationDate: asDate(row.terminationDate),
+    offDutyUntil: asDate(row.offDutyUntil),
+    tags: row.tags ?? [],
+    company: { name: row.companyName },
+    assignedTruck:
+      row.truckId !== null && row.truckUnitNumber !== null
+        ? { id: row.truckId, unitNumber: row.truckUnitNumber }
+        : null,
+  }))
 }
 
 /**

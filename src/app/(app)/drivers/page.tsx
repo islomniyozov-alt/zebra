@@ -1,6 +1,10 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
+import {
+  currentUserCan,
+  readCurrentOrg,
+  withCurrentOrg,
+} from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { Table, type Column } from '@/components/ui/Table'
 import { Tabs } from '@/components/ui/Tabs'
@@ -17,14 +21,12 @@ import {
 import { dqfChecklist, dqfIncompleteCount } from '@/lib/dqf'
 import {
   DRIVER_TABS,
-  driverListBaseWhere,
-  driverTabWhere,
   isDriverTab,
   readinessFor,
   type DriverTab,
   type Readiness,
 } from '@/lib/driver-list'
-import { readGridColumns } from '@/lib/grid-columns'
+import { gridColumnsFromRow, readGridColumns } from '@/lib/grid-columns'
 import {
   columnKeysFor,
   DRIVER_COLUMN_KEYS,
@@ -47,9 +49,7 @@ import { GridFooterNav } from '../_grid/GridFooterNav'
 import { DataHealthRow } from '../_grid/DataHealthRow'
 import {
   DRIVER_HEALTH_CHECKS,
-  driverHealthBase,
   driverHealthCheckFor,
-  driverHealthWhere,
   type DriverHealthCheck,
 } from '@/lib/data-health'
 import { gridView, keepColumns, pagedFooterLabel } from '../_grid/grid-page'
@@ -190,63 +190,31 @@ export default async function DriversPage({
   // reads the file sees which items are missing (`withoutDqfGaps`).
   const maySeeDqf = await currentUserCan('read', 'dqf')
   const { rows, companyCount, counts, visible, savedViews, density, health } =
-    await withCurrentOrg('read', 'driver', async (tx, session) => {
+    await readCurrentOrg('read', 'driver', async (reader, session) => {
       const listBase = {
         companyScopes: session.companyScopes,
         companyId: companyParam ?? null,
         tag: tagParam ?? null,
       }
-      const base = driverListBaseWhere(listBase)
 
-      // THE HEAD, ONE STATEMENT (§6.4 part 1 v11.02): the authority count;
-      // FIVE COUNTS, ONE PER TAB, BY COUNT(*) — never the length of a capped
-      // list (§6.2.8), in the same transaction as the rows they count; THE
-      // FIVE DATA-HEALTH COUNTS (§6.5 part 0b), over the active people the
-      // user may see — scope and the authority filter — never over this
-      // view's tab, chip or tag; and the three preference rows.
-      const head = await readDriversHead(tx, {
+      // THE HEAD AND THE LIST, ONE CALL (§6.4 part 1 v11.02, v11.04): the
+      // authority count; FIVE COUNTS, ONE PER TAB, BY COUNT(*) — never the
+      // length of a capped list (§6.2.8), in the same statement as the rows
+      // they count; THE FIVE DATA-HEALTH COUNTS (§6.5 part 0b), over the
+      // active people the user may see — scope and the authority filter —
+      // never over this view's tab, chip or tag; the three preference rows;
+      // and the tab's rows, the health filter bringing its own base so the
+      // figure's link lists the same rows from any tab. No transaction: the
+      // reader sets the tenant and reads in one round trip (v11.03).
+      const head = await readDriversHead(reader, {
         userId: session.userId,
         base: listBase,
         healthCompanyIds: companyParam ? [companyParam] : session.companyScopes,
         now,
         includeRemoved: showRetired,
+        list: { tab, missing, cap: PAGE_CAP },
       })
-      const { companyCount, counts, health } = head
-
-      const drivers = await tx.driver.findMany({
-        where: {
-          AND: [
-            base,
-            driverTabWhere(tab, now, showRetired),
-            // The health filter brings its own base, so the figure's link
-            // lists the same rows from any tab.
-            ...(missing
-              ? [driverHealthBase(), driverHealthWhere(missing, now)]
-              : []),
-          ],
-        },
-        orderBy: [{ company: { name: 'asc' } }, { lastName: 'asc' }],
-        take: PAGE_CAP,
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          phone: true,
-          email: true,
-          cdlNumber: true,
-          cdlState: true,
-          status: true,
-          driverType: true,
-          deletedAt: true,
-          terminationDate: true,
-          offDutyUntil: true,
-          tags: true,
-          company: { select: { name: true } },
-          assignedTruck: { select: { id: true, unitNumber: true } },
-          // NOT selected: payRules. Driver pay is its own resource (§7) and
-          // this screen never asks for it, so it cannot leak from here.
-        },
-      })
+      const { companyCount, counts, health, drivers } = head
 
       // ONE STATEMENT FOR THE WHOLE PAGE, not one per row (v11.02): each
       // loader's text is a CTE taking every id at once, and
@@ -266,16 +234,28 @@ export default async function DriversPage({
         dispatch: dispatchFacts,
         lastActivity,
         trucks: truckFacts,
-      } = await readDriverFacts(tx, ids, truckIds)
-      // §7.1.7, from the head's stored row, in the same transaction.
-      const visible = await readGridColumns(
-        tx,
-        session.userId,
+      } = await readDriverFacts(reader, ids, truckIds)
+      // §7.1.7, from the head's stored row. A transaction opens only when that
+      // row is the legacy shape and is rewritten once (§6.7).
+      const available = columnKeysFor(DRIVER_COLUMN_KEYS, companyCount > 1)
+      const plan = gridColumnsFromRow(
         'drivers.drivers',
-        columnKeysFor(DRIVER_COLUMN_KEYS, companyCount > 1),
+        available,
         DRIVER_COLUMNS_HIDDEN,
-        { row: head.columnsRow },
+        head.columnsRow,
       )
+      const visible = plan.rewrite
+        ? await withCurrentOrg('read', 'driver', (tx) =>
+            readGridColumns(
+              tx,
+              session.userId,
+              'drivers.drivers',
+              available,
+              DRIVER_COLUMNS_HIDDEN,
+              { row: head.columnsRow },
+            ),
+          )
+        : plan.visible
       const { savedViews, density } = head
 
       const truckExpired = new Map<string, boolean>()
