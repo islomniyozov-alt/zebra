@@ -293,14 +293,32 @@ export async function headingToForTrucks(
   tx: TxClient,
   truckIds: readonly string[],
 ): Promise<Map<string, string | null>> {
-  const out = new Map<string, string | null>()
-  for (const id of truckIds) out.set(id, null)
-  if (truckIds.length === 0) return out
+  if (truckIds.length === 0) return headingToForTrucksFrom([], [])
+  return headingToForTrucksFrom(
+    truckIds,
+    await tx.$queryRaw<HeadingToSqlRow[]>(
+      headingToSql(Prisma.sql`l."truckId" = ANY(${[...truckIds]})`),
+    ),
+  )
+}
 
-  const rows = await tx.$queryRaw<
-    { truck_id: string; city: string | null; state: string | null }[]
-  >`
-    SELECT l."truckId" AS truck_id, s."city", s."state"
+/** One row of `headingToSql`, from either transport. */
+export interface HeadingToSqlRow {
+  truck_id: string
+  city: string | null
+  state: string | null
+  booked_at: Date | string
+}
+
+/**
+ * The trucks' unfinished loads with their last stop, newest booking first —
+ * over a predicate on `l."truckId"`, so the trucks list's one call (§6.5 part
+ * 1 v11.11) puts it over its own rows. One text, two callers.
+ */
+export function headingToSql(truckIdsWhere: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`
+    SELECT l."truckId" AS truck_id, s."city", s."state",
+           l."bookedAt" AS booked_at
       FROM "Load" l
       CROSS JOIN LATERAL (
         SELECT st."city", st."state"
@@ -309,17 +327,30 @@ export async function headingToForTrucks(
          ORDER BY st."sequence" DESC
          LIMIT 1
       ) s
-     WHERE l."truckId" = ANY(${[...truckIds]})
+     WHERE ${truckIdsWhere}
        AND l."deletedAt" IS NULL
        AND l."isCancelled" = false
        AND l."operationalStatus" <> ALL(${[...FINISHED]}::text[]::"LoadOperationalStatus"[])
      ORDER BY l."bookedAt" DESC
   `
+}
 
-  // The most recent unfinished load wins; the ORDER BY above puts it first,
-  // and a truck with two open loads is a dispatch problem rather than a
-  // rendering one.
-  for (const row of rows) {
+/** `headingToSql`'s rows as each truck's destination. */
+export function headingToForTrucksFrom(
+  truckIds: readonly string[],
+  rows: readonly HeadingToSqlRow[],
+): Map<string, string | null> {
+  const out = new Map<string, string | null>()
+  for (const id of truckIds) out.set(id, null)
+  // The most recent unfinished load wins — sorted here, so the order does not
+  // depend on the transport — and a truck with two open loads is a dispatch
+  // problem rather than a rendering one.
+  const newestFirst = [...rows].sort(
+    (a, b) =>
+      (asDate(b.booked_at)?.getTime() ?? 0) -
+      (asDate(a.booked_at)?.getTime() ?? 0),
+  )
+  for (const row of newestFirst) {
     if (out.get(row.truck_id)) continue
     out.set(row.truck_id, headingToFrom([{ city: row.city, state: row.state }]))
   }

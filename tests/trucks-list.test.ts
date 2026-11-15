@@ -603,7 +603,7 @@ describe('the page, held to the section', () => {
   it('reads through the lib and renders', () => {
     expect(PAGE).toContain("from '@/lib/truck-list'")
     expect(PAGE).toMatch(
-      /readTruckListData\(\s*tx,\s*session\.companyScopes,\s*listParams,/,
+      /readTruckListData\(\s*reader,\s*session\.companyScopes,\s*listParams,/,
     )
     expect(PAGE).toContain('readTruckListParams(params)')
     // The page parses no parameter of its own.

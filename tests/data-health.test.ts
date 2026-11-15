@@ -103,7 +103,13 @@ describe('the row on the list', () => {
   )
 
   it('counts in the same transaction, filters by the same where, links every figure', () => {
-    expect(page).toContain('countTruckHealth(tx')
+    // SINCE v11.11 THE COUNTS ARE A CTE OF THE PAGE'S ONE CALL: the same
+    // text `countTruckHealth` sends alone (`truckHealthSql`), over the fleet
+    // the page names.
+    expect(page).toContain('healthCompanyIds: listParams.company')
+    expect(
+      readFileSync(join('src', 'lib', 'truck-list-page.ts'), 'utf8'),
+    ).toContain('${truckHealthSql({ companyIds: options.healthCompanyIds })}')
     // §6.5 part 1: the list's `where` is built in the lib, and the health
     // filter is one element of its AND — read from the artefact that acts.
     expect(readFileSync(join('src', 'lib', 'truck-list.ts'), 'utf8')).toContain(

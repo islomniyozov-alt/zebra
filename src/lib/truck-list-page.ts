@@ -1,16 +1,59 @@
-import { listedAuthorities } from './companies'
-import { readGridColumns } from './grid-columns'
+import { Prisma } from '@/generated/prisma/client'
+import { listedAuthorities, listedAuthoritiesSql } from './companies'
+import { keyFor, readGridColumns, type StoredColumnRow } from './grid-columns'
+import {
+  truckHealthFrom,
+  truckHealthSql,
+  type TruckHealthCounts,
+  type TruckHealthSqlRow,
+} from './data-health'
+import {
+  headingToForTrucksFrom,
+  headingToSql,
+  type HeadingToSqlRow,
+} from './dispatch-fields'
+import {
+  fleetStatusChangedFrom,
+  fleetStatusChangedSql,
+  type FleetStatusChangedSqlRow,
+} from './fleet-codes'
+import { crewOfTrucksFrom, crewOfTrucksSql, type CrewSqlRow } from './team'
+import {
+  truckComplianceWhereSql,
+  truckFactsFrom,
+  type TruckComplianceSqlRow,
+} from './warnings'
 import {
   columnKeysFor,
   TRUCK_COLUMN_KEYS,
   TRUCK_COLUMNS_HIDDEN,
 } from './list-columns'
 import { viewContext } from './load-views'
-import { companyScopeFilter, type TxClient } from './tenancy'
-import { listWhere, truckListWhere, type TruckListParams } from './truck-list'
-import { truckListCounts, type TruckChipCounts } from './truck-list-counts'
+import { companyScopeFilter, type TenantReader, type TxClient } from './tenancy'
+import {
+  listWhere,
+  openLoadStatesFrom,
+  truckListWhere,
+  type TruckListParams,
+} from './truck-list'
+import {
+  openLoadStatesSql,
+  truckChipCounts,
+  truckCountGroupsFrom,
+  truckCountGroupsSql,
+  truckListRowsWhereSql,
+  type TruckChipCounts,
+  type TruckCountGroupRow,
+} from './truck-list-counts'
 import { trucksCsv, trucksCsvFilename } from './truck-list-csv'
-import { readTruckRows, type TruckListRow } from './truck-list-rows'
+import {
+  readTruckRows,
+  truckRowSourcesFrom,
+  truckRowsFrom,
+  truckRowsSql,
+  type TruckListRow,
+  type TruckRowSqlRow,
+} from './truck-list-rows'
 
 // ---------------------------------------------------------------------------
 // WHAT THE TRUCKS LIST READS, IN ONE PLACE (TMS-DESIGN-SYSTEM.md §6.5 part 1).
@@ -28,46 +71,124 @@ export interface TruckListData {
   authorities: Awaited<ReturnType<typeof listedAuthorities>>
   /** The makes in the viewer's live fleet, as stored, for the Filters popover. */
   makes: string[]
+  /** The five data-health counts over `healthCompanyIds` (§6.5 part 0). */
+  health: TruckHealthCounts
+  /** The stored column row; the page decides the visible set from it. */
+  columnsRow: StoredColumnRow | null
 }
 
+/** The trucks grid's id, for the column memory. */
+export const TRUCKS_GRID = 'trucks.trucks' as const
+
+interface PageRow {
+  authorities: Awaited<ReturnType<typeof listedAuthorities>>
+  listed: TruckRowSqlRow[]
+  groups: TruckCountGroupRow[]
+  health: TruckHealthSqlRow | null
+  makes: string[]
+  columns: StoredColumnRow | null
+  compliance: TruckComplianceSqlRow[]
+  crew: CrewSqlRow[]
+  heading: HeadingToSqlRow[]
+  changed: FleetStatusChangedSqlRow[]
+  load_states: { truckId: string | null; operationalStatus: string }[]
+}
+
+/**
+ * THE PAGE'S READS IN ONE CALL (§6.5 part 1 v11.11; owner's ruling
+ * 2026-11-15, the one-call reads). Measured on dev before: 14 statements, page
+ * 360 ms as the owner, 346 as a dispatcher — the authorities, the trucks, five
+ * per-list loaders, the counts, the makes, the health counts and the column
+ * row, in one transaction. Here they are named CTEs of ONE statement through
+ * the tenant reader, and no transaction.
+ *
+ * The rows' `where` is `truckListRowsWhereSql` (the counts' own fragments);
+ * the loaders' texts are their own (`headingToSql`, `fleetStatusChangedSql`,
+ * `truckComplianceWhereSql`) put over the listed ids, and the crews and open
+ * loads are second spellings (`crewOfTrucksSql`, `openLoadStatesSql`). The
+ * rows are shaped by `truckRowsFrom`, the function the export's Prisma rows go
+ * through too. `tests/integration/truck-list.test.ts` holds the call equal to
+ * the Prisma reads.
+ */
 export async function readTruckListData(
-  tx: TxClient,
+  reader: TenantReader,
   companyScopes: readonly string[],
   params: TruckListParams,
-  options: { now: Date; take: number },
+  options: {
+    now: Date
+    take: number
+    userId: string
+    /** The fleet the health counts cover: scope and the authority filter. */
+    healthCompanyIds: readonly string[]
+  },
 ): Promise<TruckListData> {
-  const scope = companyScopeFilter(companyScopes)
-  const authorities = await listedAuthorities(tx, companyScopes)
-  const where = truckListWhere(params, scope)
+  const ids = (column: string) =>
+    Prisma.sql`${Prisma.raw(column)} IN (SELECT id FROM listed)`
+  const scopes = [...companyScopes]
+  const [row] = await reader.read<PageRow>(Prisma.sql`
+    WITH authorities AS (${listedAuthoritiesSql(companyScopes)}),
+         listed AS (${truckRowsSql(
+           truckListRowsWhereSql(params, companyScopes),
+           options.take,
+         )}),
+         groups AS (${truckCountGroupsSql(params, companyScopes)}),
+         health AS (${truckHealthSql({ companyIds: options.healthCompanyIds })}),
+         makes AS (
+           SELECT DISTINCT t.make FROM "Truck" t
+            WHERE (${scopes.length === 0} OR t."companyId" = ANY(${scopes}::text[]))
+              AND ${params.company ? Prisma.sql`t."companyId" = ${params.company}` : Prisma.sql`true`}
+              AND t."deletedAt" IS NULL AND t.make IS NOT NULL
+         ),
+         columns AS (
+           SELECT p."value", p."organizationId" FROM "UserPreference" p
+            WHERE p."userId" = ${options.userId}
+              AND p."key" = ${keyFor(TRUCKS_GRID)}
+            LIMIT 1
+         ),
+         compliance AS (${truckComplianceWhereSql(ids('ci."truckId"'))}),
+         crew AS (${crewOfTrucksSql(ids('d."assignedTruckId"'))}),
+         heading AS (${headingToSql(ids('l."truckId"'))}),
+         changed AS (${fleetStatusChangedSql(ids('a."entityId"'))}),
+         load_states AS (${openLoadStatesSql(ids('t.id'))})
+    SELECT (SELECT COALESCE(json_agg(x ORDER BY x."name"), '[]'::json)
+              FROM authorities x) AS authorities,
+           (SELECT COALESCE(json_agg(x ORDER BY x.ord), '[]'::json)
+              FROM listed x) AS listed,
+           (SELECT COALESCE(json_agg(x), '[]'::json) FROM groups x) AS groups,
+           (SELECT row_to_json(x) FROM health x) AS health,
+           (SELECT COALESCE(json_agg(x.make ORDER BY x.make), '[]'::json)
+              FROM makes x) AS makes,
+           (SELECT row_to_json(x) FROM columns x) AS columns,
+           (SELECT COALESCE(json_agg(x), '[]'::json) FROM compliance x) AS compliance,
+           (SELECT COALESCE(json_agg(x ORDER BY x."updatedAt", x.id), '[]'::json)
+              FROM crew x) AS crew,
+           (SELECT COALESCE(json_agg(x), '[]'::json) FROM heading x) AS heading,
+           (SELECT COALESCE(json_agg(x), '[]'::json) FROM changed x) AS changed,
+           (SELECT COALESCE(json_agg(x), '[]'::json) FROM load_states x) AS load_states`)
+  if (!row) throw new Error('readTruckListData: no row from a one-row SELECT.')
 
-  const rows = await readTruckRows(tx, listWhere(where), {
-    now: options.now,
-    take: options.take,
-    attention: params.attention,
-  })
-
-  // EVERY NUMBER ON THE BAR AND IN THE FOOTER: ONE STATEMENT.
-  const counts = await truckListCounts(tx, params, companyScopes)
-
-  // THE MAKES ARE THE FLEET'S OWN SPELLINGS, over what the viewer may see
-  // (scope and the authority filter), live trucks only. One statement; the
-  // make filter itself is not applied, or choosing one would empty the list.
-  const makes = (
-    await tx.truck.findMany({
-      where: {
-        AND: [
-          scope,
-          params.company ? { companyId: params.company } : {},
-          { deletedAt: null, make: { not: null } },
-        ],
+  const trucks = truckRowSourcesFrom(row.listed)
+  const truckIds = trucks.map((truck) => truck.id)
+  return {
+    rows: truckRowsFrom(
+      trucks,
+      {
+        facts: truckFactsFrom(truckIds, row.compliance),
+        crews: crewOfTrucksFrom(truckIds, row.crew),
+        headingTo: headingToForTrucksFrom(truckIds, row.heading),
+        statusChanged: fleetStatusChangedFrom(truckIds, row.changed),
+        loadStates: openLoadStatesFrom(truckIds, row.load_states),
       },
-      distinct: ['make'],
-      select: { make: true },
-      orderBy: { make: 'asc' },
-    })
-  ).flatMap((truck) => (truck.make ? [truck.make] : []))
-
-  return { rows, counts, authorities, makes }
+      { now: options.now, attention: params.attention },
+    ),
+    counts: truckChipCounts(truckCountGroupsFrom(row.groups), params.view),
+    authorities: row.authorities,
+    makes: row.makes,
+    health: truckHealthFrom(row.health),
+    columnsRow: row.columns
+      ? { value: row.columns.value, organizationId: row.columns.organizationId }
+      : null,
+  }
 }
 
 /**
@@ -87,7 +208,7 @@ export async function readTruckListExport(
   const visible = await readGridColumns(
     tx,
     viewer.userId,
-    'trucks.trucks',
+    TRUCKS_GRID,
     columnKeysFor(TRUCK_COLUMN_KEYS, authorities.length > 1),
     TRUCK_COLUMNS_HIDDEN,
   )

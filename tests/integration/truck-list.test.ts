@@ -1,6 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
-import { companyScopeFilter, withOrg, type TxClient } from '@/lib/tenancy'
+import {
+  companyScopeFilter,
+  tenantReader,
+  txReader,
+  withOrg,
+  type TxClient,
+} from '@/lib/tenancy'
+import { createPrismaClient, prisma, statementsOf } from '@/lib/db'
+import { keyFor } from '@/lib/grid-columns'
+import { trucksByPrisma } from './truck-page-reference'
 import { LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import {
   listWhere,
@@ -13,7 +22,11 @@ import {
   type TruckViewName,
 } from '@/lib/truck-list'
 import { truckListCounts } from '@/lib/truck-list-counts'
-import { readTruckListData, readTruckListExport } from '@/lib/truck-list-page'
+import {
+  readTruckListData,
+  readTruckListExport,
+  TRUCKS_GRID,
+} from '@/lib/truck-list-page'
 import type { PrismaClient, TruckStatus } from '@/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -304,9 +317,11 @@ describe('the export is the list, every row of it', () => {
     async (query) => {
       const params = readTruckListParams(query)
       const { listed, exported } = await inOrg(async (tx) => ({
-        listed: await readTruckListData(tx, [], params, {
+        listed: await readTruckListData(txReader(tx), [], params, {
           now: NOW,
           take: 500,
+          userId,
+          healthCompanyIds: [],
         }),
         exported: await readTruckListExport(
           tx,
@@ -358,7 +373,12 @@ describe('the export is the list, every row of it', () => {
     })
     const params = readTruckListParams({ attention: '1' })
     const { listed, exported } = await inOrg(async (tx) => ({
-      listed: await readTruckListData(tx, [], params, { now: NOW, take: 500 }),
+      listed: await readTruckListData(txReader(tx), [], params, {
+        now: NOW,
+        take: 500,
+        userId,
+        healthCompanyIds: [],
+      }),
       exported: await readTruckListExport(
         tx,
         { userId, companyScopes: [] },
@@ -376,5 +396,163 @@ describe('the export is the list, every row of it', () => {
     expect(exported.body).toContain('compliance_expired')
     // The makes offered are the fleet's own spellings, live trucks only.
     expect(listed.makes).toEqual(['FRHT', 'VOLV'])
+  }, 300_000)
+})
+
+// ---------------------------------------------------------------------------
+// THE PAGE'S ONE CALL (§6.5 part 1 v11.11): `readTruckListData` through a
+// `TenantReader` is held equal to the Prisma reads it replaced
+// (`trucksByPrisma`) — the rows with all five loaders, the counts, the makes,
+// the health counts and the column row — view by view and filter by filter,
+// through both transports; and it is ONE statement as `zebra_app`.
+// ---------------------------------------------------------------------------
+
+describe('the page’s one call reads what the Prisma reads read', () => {
+  it('for every view and filter, through both transports', async () => {
+    // SOMETHING IN EVERY LOADER: a compliance item (one expired), a fleet
+    // status change in the audit log beside a CREATE that must not count, and
+    // a stored column row.
+    await owner.complianceItem.createMany({
+      data: [
+        {
+          organizationId,
+          companyId,
+          truckId: ids['held']!,
+          type: 'REGISTRATION',
+          expiresAt: new Date('2026-01-01T00:00:00Z'),
+        },
+        {
+          organizationId,
+          companyId,
+          truckId: ids['idle']!,
+          type: 'ANNUAL_INSPECTION',
+          expiresAt: new Date('2027-06-01T00:00:00Z'),
+        },
+      ],
+    })
+    await owner.auditLog.createMany({
+      data: [
+        {
+          organizationId,
+          action: 'UPDATE',
+          entityType: 'Truck',
+          entityId: ids['vacay']!,
+          changes: { fleetStatus: { from: null, to: 'In shop' } },
+          createdAt: new Date('2026-11-01T00:00:00Z'),
+        },
+        {
+          organizationId,
+          action: 'CREATE',
+          entityType: 'Truck',
+          entityId: ids['held']!,
+          changes: { fleetStatus: { from: null, to: 'Ready' } },
+        },
+      ],
+    })
+    await owner.userPreference.create({
+      data: {
+        organizationId,
+        userId,
+        key: keyFor(TRUCKS_GRID),
+        value: { hidden: ['odometer'] },
+      },
+    })
+    const cases: [Record<string, string>, string[]][] = [
+      ...TRUCK_VIEWS.map((view): [Record<string, string>, string[]] => [
+        { view },
+        [],
+      ]),
+      [{ view: 'all', make: 'VOLV' }, []],
+      [{ view: 'all', yearFrom: '2015', yearTo: '2019' }, []],
+      [{ view: 'all', q: 'team' }, []],
+      [{ fleet: 'In shop' }, [companyId]],
+      [{ missing: 'vin' }, []],
+      [{ view: 'all', status: 'AVAILABLE' }, []],
+      [{ status: 'OUT_OF_SERVICE' }, []],
+      [{ attention: '1' }, []],
+      [{ company: companyId }, [companyId]],
+    ]
+    let nonEmpty = 0
+    for (const [index, [query, healthCompanyIds]] of cases.entries()) {
+      const params = readTruckListParams(query)
+      const options = { now: NOW, take: 500, userId, healthCompanyIds }
+      const expected = await inOrg((tx) =>
+        trucksByPrisma(tx, [], params, options),
+      )
+      const viaReader = await readTruckListData(
+        tenantReader(prisma, organizationId),
+        [],
+        params,
+        options,
+      )
+      expect(viaReader, `${JSON.stringify(query)} via the reader`).toEqual(
+        expected,
+      )
+      if (index % 3 === 0) {
+        const inTx = await inOrg((tx) =>
+          readTruckListData(txReader(tx), [], params, options),
+        )
+        expect(inTx, `${JSON.stringify(query)} in a transaction`).toEqual(
+          expected,
+        )
+      }
+      if (expected.rows.length > 0) nonEmpty += 1
+    }
+    expect(nonEmpty).toBeGreaterThan(cases.length / 2)
+
+    // NOT VACUOUS: every loader shows up on some row.
+    const all = await readTruckListData(
+      tenantReader(prisma, organizationId),
+      [],
+      readTruckListParams({ view: 'all' }),
+      { now: NOW, take: 500, userId, healthCompanyIds: [] },
+    )
+    const byKey = (key: string) =>
+      all.rows.find((row) => row.unitNumber === unit(key))!
+    expect(byKey('team').crew).toHaveLength(2)
+    expect(byKey('vacay').agingDays).not.toBeNull()
+    expect(byKey('held').agingDays).toBeNull()
+    expect(byKey('held').warnings.length).toBeGreaterThan(0)
+    expect(all.makes).toEqual(['FRHT', 'VOLV'])
+    expect(all.health.vin).toBeGreaterThan(0)
+    expect(all.columnsRow?.value).toEqual({ hidden: ['odometer'] })
+  }, 600_000)
+
+  it('is ONE statement as zebra_app, and another organization reads none of these trucks', async () => {
+    const options = { now: NOW, take: 500, userId, healthCompanyIds: [] }
+    const client = createPrismaClient(process.env.DATABASE_URL!)
+    try {
+      const at = statementsOf(client)!
+      const data = await readTruckListData(
+        tenantReader(client, organizationId),
+        [],
+        readTruckListParams({ view: 'all' }),
+        options,
+      )
+      expect(statementsOf(client)! - at).toBe(1)
+      expect(data.rows.length).toBeGreaterThan(0)
+    } finally {
+      await client.$disconnect()
+    }
+    const other = await owner.organization.create({
+      data: {
+        name: `Truck list other ${nonce}`,
+        slug: `truck-list-o-${nonce}`,
+      },
+    })
+    try {
+      const asThem = tenantReader(prisma, other.id)
+      const theirs = await readTruckListData(
+        asThem,
+        [],
+        readTruckListParams({ view: 'all' }),
+        options,
+      )
+      expect(theirs.rows).toEqual([])
+      expect(theirs.makes).toEqual([])
+      expect(theirs.counts.matching).toBe(0)
+    } finally {
+      await owner.organization.delete({ where: { id: other.id } })
+    }
   }, 300_000)
 })

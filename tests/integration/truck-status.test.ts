@@ -1,6 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
-import { companyScopeFilter, withOrg, type TxClient } from '@/lib/tenancy'
+import {
+  companyScopeFilter,
+  tenantReader,
+  txReader,
+  withOrg,
+  type TxClient,
+} from '@/lib/tenancy'
+import { prisma } from '@/lib/db'
+import { trucksByPrisma } from './truck-page-reference'
 import { createBroker } from '@/lib/brokers'
 import { listedAuthorities } from '@/lib/companies'
 import { createLoad, LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
@@ -202,10 +210,12 @@ describe('each status, three ways', () => {
           }),
         ).toBe(EXPECTED[status]!.length)
         // The rows the page renders carry the same derived value.
-        const data = await readTruckListData(tx, [], readTruckListParams({}), {
-          now: NOW,
-          take: 500,
-        })
+        const data = await readTruckListData(
+          txReader(tx),
+          [],
+          readTruckListParams({}),
+          { now: NOW, take: 500, userId, healthCompanyIds: [] },
+        )
         expect(
           keysOf(data.rows.filter((row) => row.status === status)),
         ).toEqual(EXPECTED[status])
@@ -338,4 +348,39 @@ describe("against the loads list's own predicates", () => {
     )
     expect(stale.body).toContain(',AVAILABLE,,')
   }, 120_000)
+})
+
+// THE PAGE'S ONE CALL OVER LOADS (§6.5 part 1 v11.11): the open-load states
+// and the heading-to are read in the call; held equal to the Prisma loaders
+// on this file's freight, for the whole fleet and each status.
+describe('the trucks page’s one call reads the loads as the Prisma loaders do', () => {
+  it('for the fleet and each status, through the tenant reader', async () => {
+    const queries: Record<string, string>[] = [
+      { view: 'all' },
+      ...Object.keys(EXPECTED).map((status) => ({ view: 'all', status })),
+    ]
+    for (const query of queries) {
+      const params = readTruckListParams(query)
+      const options = { now: NOW, take: 500, userId, healthCompanyIds: [] }
+      const expected = await inOrg((tx) =>
+        trucksByPrisma(tx, [], params, options),
+      )
+      const got = await readTruckListData(
+        tenantReader(prisma, organizationId),
+        [],
+        params,
+        options,
+      )
+      expect(got, JSON.stringify(query)).toEqual(expected)
+    }
+    // NOT VACUOUS: some truck is heading somewhere and some is in transit.
+    const all = await readTruckListData(
+      tenantReader(prisma, organizationId),
+      [],
+      readTruckListParams({ view: 'all' }),
+      { now: NOW, take: 500, userId, healthCompanyIds: [] },
+    )
+    expect(all.rows.some((row) => row.headingTo !== null)).toBe(true)
+    expect(all.rows.some((row) => row.status === 'IN_TRANSIT')).toBe(true)
+  }, 300_000)
 })

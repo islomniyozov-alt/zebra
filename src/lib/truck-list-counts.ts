@@ -190,26 +190,59 @@ function baseSql(
   return Prisma.join(parts, ' AND ')
 }
 
-/** The groups, from the database. One statement. */
-export async function truckCountGroups(
-  tx: TxClient,
-  params: TruckListParams,
-  companyScopes: readonly string[],
-): Promise<TruckCountGroup[]> {
-  const statusOk = params.status
+/** One row of `truckCountGroupsSql`, from either transport. */
+export interface TruckCountGroupRow {
+  status: string
+  removed: boolean
+  active: boolean
+  unassigned: boolean
+  inactive: boolean
+  status_ok: boolean
+  n: number
+}
+
+const statusOkSql = (params: TruckListParams) =>
+  params.status
     ? Prisma.sql`(${DERIVED_STATUS}) = ${params.status}`
     : Prisma.sql`true`
-  const rows = await tx.$queryRaw<
-    {
-      status: string
-      removed: boolean
-      active: boolean
-      unassigned: boolean
-      inactive: boolean
-      status_ok: boolean
-      n: number
-    }[]
-  >`
+
+/**
+ * THE LIST'S ROWS' WHERE, in SQL (§6.5 part 1 v11.11): `listWhere` — the base,
+ * the view and the derived status — from the fragments the counts already use
+ * and hold equal to the Prisma predicates. `tests/integration/truck-list.test.ts`
+ * holds the rows it selects equal to `readTruckRows(listWhere(…))`.
+ */
+export function truckListRowsWhereSql(
+  params: TruckListParams,
+  companyScopes: readonly string[],
+): Prisma.Sql {
+  const view = params.view === 'all' ? Prisma.sql`true` : VIEW_SQL[params.view]
+  return Prisma.sql`${baseSql(params, companyScopes)}
+    AND ${view}
+    AND ${statusOkSql(params)}`
+}
+
+/**
+ * The open loads of the trucks a predicate on `l."truckId"` names, with their
+ * state — a SECOND SPELLING of `openLoadStatesForTrucks`' `findMany` from
+ * `OPEN_LOAD_SQL`, which the derived-status counts already hold equal.
+ */
+export function openLoadStatesSql(truckIdsWhere: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`
+    SELECT l."truckId", l."operationalStatus"::text AS "operationalStatus"
+      FROM "Truck" t
+      JOIN "Load" l ON ${OPEN_LOAD_SQL}
+     WHERE ${truckIdsWhere}
+  `
+}
+
+/** The groups as SQL — one statement alone, or a CTE of the list's call. */
+export function truckCountGroupsSql(
+  params: TruckListParams,
+  companyScopes: readonly string[],
+): Prisma.Sql {
+  const statusOk = statusOkSql(params)
+  return Prisma.sql`
     SELECT
       (${DERIVED_STATUS}) AS status,
       (t."deletedAt" IS NOT NULL) AS removed,
@@ -222,6 +255,25 @@ export async function truckCountGroups(
     WHERE ${baseSql(params, companyScopes)}
     GROUP BY 1, 2, 3, 4, 5, 6
   `
+}
+
+/** The groups, from the database. One statement. */
+export async function truckCountGroups(
+  tx: TxClient,
+  params: TruckListParams,
+  companyScopes: readonly string[],
+): Promise<TruckCountGroup[]> {
+  return truckCountGroupsFrom(
+    await tx.$queryRaw<TruckCountGroupRow[]>(
+      truckCountGroupsSql(params, companyScopes),
+    ),
+  )
+}
+
+/** `truckCountGroupsSql`'s rows as groups. */
+export function truckCountGroupsFrom(
+  rows: readonly TruckCountGroupRow[],
+): TruckCountGroup[] {
   return rows.map((row) => ({
     status: row.status,
     removed: row.removed,
@@ -229,7 +281,7 @@ export async function truckCountGroups(
     unassigned: row.unassigned,
     inactive: row.inactive,
     statusOk: row.status_ok,
-    n: row.n,
+    n: Number(row.n),
   }))
 }
 

@@ -197,13 +197,21 @@ export async function openLoadStatesForTrucks(
   tx: TxClient,
   truckIds: readonly string[],
 ): Promise<Map<string, OpenLoadState>> {
-  const states = new Map<string, OpenLoadState>()
-  for (const id of truckIds) states.set(id, null)
-  if (truckIds.length === 0) return states
+  if (truckIds.length === 0) return openLoadStatesFrom([], [])
   const rows = await tx.load.findMany({
     where: { ...OPEN_LOAD, truckId: { in: [...truckIds] } },
     select: { truckId: true, operationalStatus: true },
   })
+  return openLoadStatesFrom(truckIds, rows)
+}
+
+/** Open loads' trucks and states, from either spelling, as each truck's state. */
+export function openLoadStatesFrom(
+  truckIds: readonly string[],
+  rows: readonly { truckId: string | null; operationalStatus: string }[],
+): Map<string, OpenLoadState> {
+  const states = new Map<string, OpenLoadState>()
+  for (const id of truckIds) states.set(id, null)
   for (const row of rows) {
     if (!row.truckId) continue
     const moving = (MOVING as readonly string[]).includes(row.operationalStatus)

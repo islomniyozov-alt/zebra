@@ -1,15 +1,22 @@
-import type { Prisma, TruckStatus } from '@/generated/prisma/client'
+import { Prisma, type TruckStatus } from '@/generated/prisma/client'
+import { asDate } from './sql-json'
 import { headingToForTrucks } from './dispatch-fields'
 import { agingDaysFrom, fleetStatusChangedForTrucks } from './fleet-codes'
-import { crewOfTrucks } from './team'
 import type { TxClient } from './tenancy'
 import {
   derivedTruckStatus,
   openLoadStatesForTrucks,
   truckOverrideOf,
+  type OpenLoadState,
   type TruckOverride,
 } from './truck-list'
-import { truckWarningFacts, truckWarnings, type Warning } from './warnings'
+import { crewOfTrucks, type CrewMember } from './team'
+import {
+  truckWarningFacts,
+  truckWarnings,
+  type TruckFacts,
+  type Warning,
+} from './warnings'
 
 // ---------------------------------------------------------------------------
 // THE TRUCKS LIST'S ROWS, READ ONCE FOR THE PAGE AND THE EXPORT
@@ -107,7 +114,46 @@ export async function readTruckRows(
       // design.
       openLoadStatesForTrucks(tx, ids),
     ])
+  return truckRowsFrom(
+    trucks,
+    { facts, crews, headingTo, statusChanged, loadStates },
+    options,
+  )
+}
 
+/** One truck as the list reads it — the shape both spellings return. */
+export interface TruckRowSource {
+  id: string
+  unitNumber: string
+  make: string | null
+  model: string | null
+  year: number | null
+  plate: string | null
+  plateState: string | null
+  vin: string | null
+  ownerName: string | null
+  currentOdometer: number | null
+  status: TruckStatus
+  fleetStatus: string | null
+  deletedAt: Date | null
+  company: { name: string }
+}
+
+/** The per-truck facts the five loaders read. */
+export interface TruckRowFacts {
+  facts: ReadonlyMap<string, TruckFacts>
+  crews: ReadonlyMap<string, CrewMember[]>
+  headingTo: ReadonlyMap<string, string | null>
+  statusChanged: ReadonlyMap<string, Date | null>
+  loadStates: ReadonlyMap<string, OpenLoadState>
+}
+
+/** The rows as the page and the export take them — pure. */
+export function truckRowsFrom(
+  trucks: readonly TruckRowSource[],
+  { facts, crews, headingTo, statusChanged, loadStates }: TruckRowFacts,
+  options: Pick<ReadTruckRowsOptions, 'now' | 'attention'>,
+): TruckListRow[] {
   const rows = trucks.map(
     (truck): TruckListRow => ({
       id: truck.id,
@@ -149,4 +195,66 @@ export async function readTruckRows(
   return options.attention
     ? rows.filter((row) => row.warnings.length > 0)
     : rows
+}
+
+// ---------------------------------------------------------------------------
+// THE TRUCKS AS SQL, for the list's one call (§6.5 part 1 v11.11). A SECOND
+// SPELLING of `readTruckRows`' `truck.findMany` — its select, by authority
+// name then unit (then id, where `findMany` states nothing), the page's cap —
+// under a `where` already in SQL (`truckListRowsWhereSql`).
+// `tests/integration/truck-list.test.ts` holds the page's rows equal to
+// `readTruckRows(listWhere(…))`.
+// ---------------------------------------------------------------------------
+
+export function truckRowsSql(where: Prisma.Sql, take: number): Prisma.Sql {
+  return Prisma.sql`
+    SELECT t.id, t."unitNumber", t.make, t.model, t.year, t.plate,
+           t."plateState", t.vin, t."ownerName", t."currentOdometer",
+           t.status::text AS status, t."fleetStatus", t."deletedAt",
+           c.name AS company_name,
+           row_number() OVER (ORDER BY c.name, t."unitNumber", t.id) AS ord
+      FROM "Truck" t
+      JOIN "Company" c ON c.id = t."companyId"
+     WHERE ${where}
+     ORDER BY c.name, t."unitNumber", t.id
+     LIMIT ${take}`
+}
+
+export interface TruckRowSqlRow {
+  id: string
+  unitNumber: string
+  make: string | null
+  model: string | null
+  year: number | null
+  plate: string | null
+  plateState: string | null
+  vin: string | null
+  ownerName: string | null
+  currentOdometer: number | null
+  status: string
+  fleetStatus: string | null
+  deletedAt: Date | string | null
+  company_name: string
+}
+
+/** `truckRowsSql`'s rows as `truckRowsFrom` takes them, from either transport. */
+export function truckRowSourcesFrom(
+  rows: readonly TruckRowSqlRow[],
+): TruckRowSource[] {
+  return rows.map((row) => ({
+    id: row.id,
+    unitNumber: row.unitNumber,
+    make: row.make,
+    model: row.model,
+    year: row.year,
+    plate: row.plate,
+    plateState: row.plateState,
+    vin: row.vin,
+    ownerName: row.ownerName,
+    currentOdometer: row.currentOdometer,
+    status: row.status as TruckStatus,
+    fleetStatus: row.fleetStatus,
+    deletedAt: asDate(row.deletedAt),
+    company: { name: row.company_name },
+  }))
 }

@@ -1,7 +1,11 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import type { TruckStatus } from '@/generated/prisma/client'
-import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
+import {
+  currentUserCan,
+  readCurrentOrg,
+  withCurrentOrg,
+} from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import type { MessageKey } from '@/lib/i18n'
 import { Table, type Column } from '@/components/ui/Table'
@@ -18,8 +22,12 @@ import { DataHealthRow } from '../_grid/DataHealthRow'
 import { keepColumns } from '../_grid/grid-page'
 import { CopyLoadNumber } from '../loads/CopyLoadNumber'
 import { TruckFilters } from './TruckFilters'
-import { gridColumnCap, readGridColumns } from '@/lib/grid-columns'
-import { countTruckHealth, TRUCK_HEALTH_CHECKS } from '@/lib/data-health'
+import {
+  gridColumnCap,
+  gridColumnsFromRow,
+  readGridColumns,
+} from '@/lib/grid-columns'
+import { TRUCK_HEALTH_CHECKS } from '@/lib/data-health'
 import { FLEET_STATUSES } from '@/lib/fleet-codes'
 import {
   columnKeysFor,
@@ -34,7 +42,7 @@ import {
   TRUCK_VIEWS,
   viewHoldsInactive,
 } from '@/lib/truck-list'
-import { readTruckListData } from '@/lib/truck-list-page'
+import { readTruckListData, TRUCKS_GRID } from '@/lib/truck-list-page'
 import type { TruckListRow } from '@/lib/truck-list-rows'
 
 // §6.5 part 1 — THE TRUCKS LIST TAKES DATATRUCK'S SHAPE (the owner's brief of
@@ -109,39 +117,52 @@ export default async function TrucksPage({
     currentUserCan('read', 'driver'),
   ])
 
-  const {
-    data: { rows, counts, authorities, makes },
-    health,
-    visible,
-  } = await withCurrentOrg('read', 'truck', async (tx, session) => {
-    const data = await readTruckListData(
-      tx,
-      session.companyScopes,
-      listParams,
-      {
-        now: new Date(),
-        take: PAGE_CAP,
-      },
-    )
-    // THE FIVE DATA-HEALTH COUNTS, ONE STATEMENT, IN THIS TRANSACTION (§6.5
-    // part 0). Over the fleet the user may see — scope and the authority
-    // filter — and never over this view: the row says how much of the fleet
-    // is incomplete, not how much of this view.
-    const health = await countTruckHealth(tx, {
-      companyIds: listParams.company
-        ? [listParams.company]
-        : session.companyScopes,
+  // ONE CALL THROUGH THE TENANT READER, NO TRANSACTION (§6.5 part 1 v11.11):
+  // the trucks with their five loaders, the counts, the makes, the five
+  // data-health counts and the column row. The health counts cover the fleet
+  // the user may see — scope and the authority filter — and never this view:
+  // the row says how much of the fleet is incomplete, not how much of this view.
+  const { rows, counts, authorities, makes, health, visible } =
+    await readCurrentOrg('read', 'truck', async (reader, session) => {
+      const data = await readTruckListData(
+        reader,
+        session.companyScopes,
+        listParams,
+        {
+          now: new Date(),
+          take: PAGE_CAP,
+          userId: session.userId,
+          healthCompanyIds: listParams.company
+            ? [listParams.company]
+            : session.companyScopes,
+        },
+      )
+      // §7.1.7, from the call's stored row. A transaction opens only when that
+      // row is the legacy shape and is rewritten once (§6.7).
+      const available = columnKeysFor(
+        TRUCK_COLUMN_KEYS,
+        data.authorities.length > 1,
+      )
+      const plan = gridColumnsFromRow(
+        TRUCKS_GRID,
+        available,
+        TRUCK_COLUMNS_HIDDEN,
+        data.columnsRow,
+      )
+      const visible = plan.rewrite
+        ? await withCurrentOrg('read', 'truck', (tx) =>
+            readGridColumns(
+              tx,
+              session.userId,
+              TRUCKS_GRID,
+              available,
+              TRUCK_COLUMNS_HIDDEN,
+              { row: data.columnsRow },
+            ),
+          )
+        : plan.visible
+      return { ...data, visible }
     })
-    // §7.1.7, in the same transaction. One `UserPreference` read.
-    const visible = await readGridColumns(
-      tx,
-      session.userId,
-      'trucks.trucks',
-      columnKeysFor(TRUCK_COLUMN_KEYS, data.authorities.length > 1),
-      TRUCK_COLUMNS_HIDDEN,
-    )
-    return { data, health, visible }
-  })
 
   const showCompany = authorities.length > 1
   const headers = truckColumnHeaders(t)

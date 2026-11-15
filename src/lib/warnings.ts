@@ -425,10 +425,15 @@ export function driverRosterSql(ids: readonly string[]): Prisma.Sql {
 }
 
 export function truckComplianceSql(ids: readonly string[]): Prisma.Sql {
+  return truckComplianceWhereSql(Prisma.sql`ci."truckId" = ANY(${[...ids]})`)
+}
+
+/** The same text over a predicate on `ci."truckId"` (§6.5 part 1 v11.11). */
+export function truckComplianceWhereSql(idsWhere: Prisma.Sql): Prisma.Sql {
   return Prisma.sql`
     SELECT ci."truckId" AS id, ci."type"::text AS label, ci."expiresAt" AS at
       FROM "ComplianceItem" ci
-     WHERE ci."truckId" = ANY(${[...ids]}) AND ci."deletedAt" IS NULL
+     WHERE ${idsWhere} AND ci."deletedAt" IS NULL
   `
 }
 

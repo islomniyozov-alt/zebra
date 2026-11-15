@@ -102,16 +102,25 @@ export async function countTruckHealth(
   tx: TxClient,
   scope: { companyIds?: readonly string[] | null },
 ): Promise<TruckHealthCounts> {
+  const rows = await tx.$queryRaw<TruckHealthSqlRow[]>(truckHealthSql(scope))
+  return truckHealthFrom(rows[0] ?? null)
+}
+
+/** The row of `truckHealthSql`, from either transport. */
+export interface TruckHealthSqlRow {
+  vin: number
+  plate: number
+  odometer: number
+  registration: number
+  inspection: number
+}
+
+/** The five truck counts as one SELECT — alone, or a CTE of the list's call. */
+export function truckHealthSql(scope: {
+  companyIds?: readonly string[] | null
+}): Prisma.Sql {
   const ids = scopeIds(scope.companyIds)
-  const rows = await tx.$queryRaw<
-    {
-      vin: number
-      plate: number
-      odometer: number
-      registration: number
-      inspection: number
-    }[]
-  >`
+  return Prisma.sql`
     SELECT COUNT(*) FILTER (WHERE t.vin IS NULL OR btrim(t.vin) = '')::int AS vin,
            COUNT(*) FILTER (WHERE t.plate IS NULL OR btrim(t.plate) = '')::int AS plate,
            COUNT(*) FILTER (WHERE t."currentOdometer" IS NULL)::int AS odometer,
@@ -125,7 +134,12 @@ export async function countTruckHealth(
      WHERE t."deletedAt" IS NULL
        AND (${ids === null} OR t."companyId" = ANY(${ids ?? []}::text[]))
   `
-  const row = rows[0]
+}
+
+/** `truckHealthSql`'s row as the five counts. */
+export function truckHealthFrom(
+  row: TruckHealthSqlRow | null,
+): TruckHealthCounts {
   return {
     vin: Number(row?.vin ?? 0),
     plate: Number(row?.plate ?? 0),

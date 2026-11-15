@@ -1,4 +1,6 @@
+import { Prisma } from '@/generated/prisma/client'
 import { ReferenceError } from './reference'
+import { asDate } from './sql-json'
 import type { TxClient } from './tenancy'
 
 // ---------------------------------------------------------------------------
@@ -142,15 +144,32 @@ export async function fleetStatusChangedForTrucks(
   tx: TxClient,
   truckIds: readonly string[],
 ): Promise<Map<string, Date | null>> {
-  const out = new Map<string, Date | null>()
-  for (const id of truckIds) out.set(id, null)
-  if (truckIds.length === 0) return out
+  if (truckIds.length === 0) return fleetStatusChangedFrom([], [])
+  return fleetStatusChangedFrom(
+    truckIds,
+    await tx.$queryRaw<FleetStatusChangedSqlRow[]>(
+      fleetStatusChangedSql(Prisma.sql`a."entityId" = ANY(${[...truckIds]})`),
+    ),
+  )
+}
 
-  const rows = await tx.$queryRaw<{ id: string; at: Date | null }[]>`
+/** One row of `fleetStatusChangedSql`, from either transport. */
+export interface FleetStatusChangedSqlRow {
+  id: string
+  at: Date | string | null
+}
+
+/**
+ * When each truck's fleet status last changed, over a predicate on
+ * `a."entityId"` — the trucks list's one call puts it over its own rows
+ * (§6.5 part 1 v11.11). One text, two callers.
+ */
+export function fleetStatusChangedSql(idsWhere: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`
     SELECT a."entityId" AS id, MAX(a."createdAt") AS at
       FROM "AuditLog" a
      WHERE a."entityType" = 'Truck'
-       AND a."entityId" = ANY(${[...truckIds]})
+       AND ${idsWhere}
        -- A CREATE IS NOT A CHANGE OF STATUS, and the audit log records one as
        -- a diff from null in which EVERY column appears. Without this the
        -- number would read "0 d" for every truck ever entered, which is the
@@ -160,7 +179,15 @@ export async function fleetStatusChangedForTrucks(
        AND jsonb_exists(a."changes", 'fleetStatus')
      GROUP BY a."entityId"
   `
+}
 
-  for (const row of rows) out.set(row.id, row.at)
+/** `fleetStatusChangedSql`'s rows, by truck. */
+export function fleetStatusChangedFrom(
+  truckIds: readonly string[],
+  rows: readonly FleetStatusChangedSqlRow[],
+): Map<string, Date | null> {
+  const out = new Map<string, Date | null>()
+  for (const id of truckIds) out.set(id, null)
+  for (const row of rows) out.set(row.id, asDate(row.at))
   return out
 }

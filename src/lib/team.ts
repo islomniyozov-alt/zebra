@@ -1,4 +1,4 @@
-import type { Prisma } from '@/generated/prisma/client'
+import { Prisma } from '@/generated/prisma/client'
 import type { TxClient } from './tenancy'
 import { ReferenceError } from './reference'
 
@@ -98,9 +98,7 @@ export async function crewOfTrucks(
   tx: TxClient,
   truckIds: readonly string[],
 ): Promise<Map<string, CrewMember[]>> {
-  const crews = new Map<string, CrewMember[]>()
-  for (const id of truckIds) crews.set(id, [])
-  if (truckIds.length === 0) return crews
+  if (truckIds.length === 0) return crewOfTrucksFrom([], [])
   const rows = await tx.driver.findMany({
     where: { assignedTruckId: { in: [...truckIds] }, ...HOLDS_SEAT },
     orderBy: { updatedAt: 'asc' },
@@ -112,6 +110,42 @@ export async function crewOfTrucks(
       assignedTruckId: true,
     },
   })
+  return crewOfTrucksFrom(truckIds, rows)
+}
+
+/** One crew member as both spellings read them. */
+export interface CrewSqlRow {
+  id: string
+  firstName: string
+  lastName: string
+  kind: string
+  assignedTruckId: string | null
+}
+
+/**
+ * THE CREWS AS SQL, for the trucks list's one call (§6.5 part 1 v11.11): a
+ * SECOND SPELLING of `crewOfTrucks`' `findMany` — `HOLDS_SEAT` (not removed,
+ * not INACTIVE) over a predicate on `d."assignedTruckId"`. Its caller orders
+ * by `updatedAt` then id; `tests/integration/truck-list.test.ts` holds the
+ * crews equal.
+ */
+export function crewOfTrucksSql(truckIdsWhere: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`
+    SELECT d.id, d."firstName", d."lastName", d.kind::text AS kind,
+           d."assignedTruckId", d."updatedAt"
+      FROM "Driver" d
+     WHERE ${truckIdsWhere}
+       AND d."deletedAt" IS NULL AND d.status::text <> 'INACTIVE'
+  `
+}
+
+/** Crew rows, seat order kept, by truck. */
+export function crewOfTrucksFrom(
+  truckIds: readonly string[],
+  rows: readonly CrewSqlRow[],
+): Map<string, CrewMember[]> {
+  const crews = new Map<string, CrewMember[]>()
+  for (const id of truckIds) crews.set(id, [])
   for (const row of rows) {
     const crew = crews.get(row.assignedTruckId ?? '')
     if (!crew) continue
