@@ -1,6 +1,10 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
+import {
+  currentUserCan,
+  readCurrentOrg,
+  withCurrentOrg,
+} from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { isDeduction } from '@/lib/settlements'
 import { basisSentence, type BasisTemplates } from '@/lib/settlement-view'
@@ -10,18 +14,18 @@ import { statementTitle } from '@/lib/settlement-number'
 import { formatCents } from '@/lib/money'
 import { Button } from '@/components/ui/Button'
 import { Table, type Column } from '@/components/ui/Table'
+import { addableTrips } from '@/lib/statement-workbench'
 import {
-  addableTrips,
-  fuelAndTollsFor,
-  statementNeighbours,
-} from '@/lib/statement-workbench'
+  readSettlementPageHead,
+  SETTLEMENT_TRIPS_GRID,
+} from '@/lib/settlement-page-head'
 import { sumCents, totalsLabel } from '@/lib/list-view'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PageHeader } from '../../_grid/PageHeader'
 import { ColumnsChooser } from '../../_grid/ColumnsChooser'
 import { keepColumns } from '../../_grid/grid-page'
-import { readGridColumns } from '@/lib/grid-columns'
+import { gridColumnsFromRow, readGridColumns } from '@/lib/grid-columns'
 import { ChargeGrid, type ChargeRow } from './ChargeGrid'
 import {
   AddTrips,
@@ -182,114 +186,30 @@ export default async function SettlementPage({
   const mayApprove = await currentUserCan('approve', 'settlement')
   const mayVoid = await currentUserCan('delete', 'settlement')
 
-  const settlement = await withCurrentOrg('read', 'settlement', (tx) =>
-    tx.settlement.findUnique({
-      where: { id },
-      select: {
-        id: true,
-        settlementNumber: true,
-        periodStart: true,
-        periodEnd: true,
-        status: true,
-        grossCents: true,
-        earningsCents: true,
-        deductionsCents: true,
-        reimbursementsCents: true,
-        advancesCents: true,
-        otherPayCents: true,
-        netCents: true,
-        milesHundredths: true,
-        approvedAt: true,
-        paidAt: true,
-        paymentMethod: true,
-        paymentReference: true,
-        unitNumber: true,
-        payTariffLabel: true,
-        driverType: true,
-        payoutDate: true,
-        batchId: true,
-        company: { select: { name: true } },
-        driver: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            driverType: true,
-          },
-        },
-        _count: { select: { documents: true } },
-        batch: {
-          select: {
-            id: true,
-            batchNumber: true,
-            // READ FOR THE EXPORT GATE. The statement route refuses on the
-            // BATCH's status, not the settlement's — see the gate below.
-            status: true,
-            statementDate: true,
-            checkDate: true,
-          },
-        },
-        // ── THE TRIPS, FROM THE FROZEN SNAPSHOT ────────────────────────
-        //
-        // `SettlementLoadLine` carries the load's number, its two places, its
-        // two dates, its gross and its miles AS THEY WERE when the statement
-        // was cut. §7 freezes those at FINAL for exactly this reason: a load
-        // re-dated or re-rated afterwards must not change a document somebody
-        // was handed.
-        loadLines: {
-          orderBy: { sortOrder: 'asc' },
-          select: {
-            id: true,
-            loadId: true,
-            loadNumber: true,
-            companyName: true,
-            puPlace: true,
-            delPlace: true,
-            puDate: true,
-            delDate: true,
-            grossCents: true,
-            milesHundredths: true,
-            amountCents: true,
-            // THE FROZEN REFERENCE (migration 61). This was read live through
-            // the relation below until 2026-10-01, which meant a broker
-            // reference corrected next year changed the Trip column on a
-            // statement somebody had already been paid on — the exact drift
-            // this table exists to prevent.
-            referenceNumber: true,
-            // STILL LIVE, AND CORRECTLY SO. The operational status is a fact
-            // about the LOAD TODAY rather than about what was paid, and the
-            // grid shows it so somebody working a batch can see a trip that
-            // moved. `referenceNumber` stays in this select as the FALLBACK for
-            // rows written before the column existed — see the Trip column.
-            load: {
-              select: { referenceNumber: true, operationalStatus: true },
-            },
-          },
-        },
-        lines: {
-          orderBy: { sortOrder: 'asc' },
-          select: {
-            id: true,
-            type: true,
-            description: true,
-            amountCents: true,
-            payRuleSnapshot: true,
-            load: { select: { id: true, loadNumber: true } },
-          },
-        },
-      },
+  // THE PAGE'S OWN READS IN ONE CALL (§6.2.2 v11.09): the statement, fuel and
+  // tolls, the trips grid's column memory and the four neighbours, through
+  // the tenant reader and no transaction.
+  const head = await readCurrentOrg('read', 'settlement', (reader, session) =>
+    readSettlementPageHead(reader, {
+      settlementId: id,
+      userId: session.userId,
     }),
   )
+  if (!head) notFound()
+  const { settlement, fuel, neighbours } = head
 
-  if (!settlement) notFound()
-
-  // ── THE THREE READS THE HEADER NEEDS, AND NOTHING THE PAGE WILL NOT SHOW ─
-  //
   // `addable` is DRAFT-only: on an approved statement the panel would offer
   // buttons that `addTripsToSettlement` refuses, and the read costs a
-  // `batchInputForOrg`, which is not free.
-  const [addable, fuel, storedColumns, neighbours] = await Promise.all([
+  // `batchInputForOrg` — the engine's reader, in a transaction of its own, no
+  // second spelling of it (owner's ruling 2026-11-15). The column memory opens
+  // one only when its row is the legacy shape and is rewritten once (§6.7).
+  const plan = gridColumnsFromRow(
+    SETTLEMENT_TRIPS_GRID,
+    TRIP_COLUMN_KEYS,
+    [],
+    head.columnsRow,
+  )
+  const [addable, storedColumns] = await Promise.all([
     settlement.status === 'DRAFT' && mayEdit
       ? withCurrentOrg('read', 'settlement', (tx, session) =>
           addableTrips(tx, {
@@ -300,30 +220,18 @@ export default async function SettlementPage({
           }),
         )
       : Promise.resolve([]),
-    withCurrentOrg('read', 'settlement', (tx) =>
-      fuelAndTollsFor(tx, {
-        driverId: settlement.driver.id,
-        periodStart: settlement.periodStart,
-        periodEnd: settlement.periodEnd,
-      }),
-    ),
-    withCurrentOrg('read', 'settlement', (tx, session) =>
-      readGridColumns(
-        tx,
-        session.userId,
-        'settlements.trips',
-        TRIP_COLUMN_KEYS,
-      ),
-    ),
-    withCurrentOrg('read', 'settlement', (tx) =>
-      statementNeighbours(tx, {
-        settlementId: settlement.id,
-        batchId: settlement.batchId,
-        driverId: settlement.driver.id,
-        settlementNumber: settlement.settlementNumber,
-        periodStart: settlement.periodStart,
-      }),
-    ),
+    plan.rewrite
+      ? withCurrentOrg('read', 'settlement', (tx, session) =>
+          readGridColumns(
+            tx,
+            session.userId,
+            SETTLEMENT_TRIPS_GRID,
+            TRIP_COLUMN_KEYS,
+            [],
+            { row: head.columnsRow },
+          ),
+        )
+      : Promise.resolve(plan.visible),
   ])
 
   const day = (value: Date | null) =>
