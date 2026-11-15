@@ -1,6 +1,12 @@
-import type { Prisma } from '@/generated/prisma/client'
+import { Prisma } from '@/generated/prisma/client'
 import { SETTLEABLE_LOAD } from './settlements'
-import { payFor, ruleInForce, type PayFailure } from './driver-pay'
+import {
+  payFor,
+  ruleInForce,
+  type PayFailure,
+  type PayRule,
+} from './driver-pay'
+import { asDate } from './sql-json'
 
 type TxClient = Prisma.TransactionClient
 
@@ -114,6 +120,39 @@ export interface PreviewTrip {
    * its box starts UNTICKED. Always false on the picker, which has no batch yet.
    */
   excluded: boolean
+}
+
+/** One load as the preview reads it — the shape both spellings return. */
+export interface PreviewLoad {
+  id: string
+  loadNumber: string
+  referenceNumber: string | null
+  operationalStatus: string
+  companyId: string
+  driverId: string | null
+  linehaulCents: number
+  fuelSurchargeCents: number
+  accessorialsCents: number
+  totalRevenueCents: number
+  actualMiles: number | null
+  dispatchedMiles: number | null
+  company: { name: string }
+  driver: {
+    firstName: string
+    lastName: string
+    payToName: string | null
+    driverType: string
+    payRules: PayRule[]
+  } | null
+  stops: {
+    type: string
+    scheduledAt: Date | null
+    city: string | null
+    state: string | null
+    name: string | null
+  }[]
+  statusEvents: { occurredAt: Date }[]
+  settlementLoadLines: { settlement: { batchId: string | null } }[]
 }
 
 export interface BatchPreview {
@@ -250,6 +289,19 @@ export async function previewBatch(
       : [],
   )
 
+  return previewFrom(loads, excludedHere, input)
+}
+
+/**
+ * The classification, over loads already read — pure, so the batch screen can
+ * read its window in its one call (§6.2.10 part 2b, v11.08) and classify it
+ * here, through the same precedence the picker uses.
+ */
+export function previewFrom(
+  loads: readonly PreviewLoad[],
+  excludedHere: ReadonlySet<string>,
+  input: { from: Date; to: Date; forBatchId?: string | null },
+): BatchPreview {
   const unavailable: Record<UnavailableReason, PreviewTrip[]> = {
     inTransit: [],
     outsideRange: [],
@@ -367,4 +419,157 @@ export async function previewBatch(
   }
 
   return { available, unavailable, considered: loads.length }
+}
+
+// ---------------------------------------------------------------------------
+// THE SAME WINDOW AS SQL, for a page that reads it inside its one call
+// (§6.2.10 part 2b v11.08: the batch screen). A SECOND SPELLING of
+// `previewBatch`'s `load.findMany` — SETTLEABLE_LOAD, the authority, a
+// delivery stop within fourteen days of the range, ordered by load number,
+// capped at 2,000 — so the enforcer is named:
+// `tests/integration/batch-page-head.test.ts` holds `previewLoadsFrom` of this
+// equal to the `findMany`, row for row, on a window with a load on both sides
+// of every filter.
+//
+// The range and the authority are SQL EXPRESSIONS, because on the batch screen
+// they are the batch's own columns, read in the same statement.
+//
+// A load carries at most one statement line per driver; where a team load
+// has two, `findMany`'s `take: 1` picks one in no stated order, and this
+// picks the lowest id.
+// ---------------------------------------------------------------------------
+
+export function previewLoadsSql(window: {
+  from: Prisma.Sql
+  to: Prisma.Sql
+  companyId: Prisma.Sql
+}): Prisma.Sql {
+  return Prisma.sql`
+    SELECT l.id, l."loadNumber", l."referenceNumber",
+           l."operationalStatus"::text AS "operationalStatus",
+           l."companyId", l."driverId",
+           l."linehaulCents", l."fuelSurchargeCents", l."accessorialsCents",
+           l."totalRevenueCents", l."actualMiles", l."dispatchedMiles",
+           c.name AS company_name,
+           CASE WHEN d.id IS NULL THEN NULL ELSE json_build_object(
+             'firstName', d."firstName", 'lastName', d."lastName",
+             'payToName', d."payToName", 'driverType', d."driverType"::text,
+             'payRules', (
+               SELECT COALESCE(json_agg(json_build_object(
+                        'id', r.id, 'type', r.type::text,
+                        'percentBps', r."percentBps",
+                        'perMileCents', r."perMileCents",
+                        'flatCents', r."flatCents",
+                        'effectiveFrom', r."effectiveFrom",
+                        'effectiveTo', r."effectiveTo") ORDER BY r.id), '[]'::json)
+                 FROM "DriverPayRule" r WHERE r."driverId" = d.id)
+           ) END AS driver,
+           (SELECT COALESCE(json_agg(json_build_object(
+                     'type', st.type::text, 'scheduledAt', st."scheduledAt",
+                     'city', st.city, 'state', st.state, 'name', st.name)
+                   ORDER BY st.sequence), '[]'::json)
+              FROM "LoadStop" st WHERE st."loadId" = l.id) AS stops,
+           (SELECT e."occurredAt" FROM "LoadStatusEvent" e
+             WHERE e."loadId" = l.id AND e.axis::text = 'OPERATIONAL'
+               AND e."toStatus" = 'POD_RECEIVED' AND e.outcome::text = 'APPLIED'
+             ORDER BY e."occurredAt" LIMIT 1) AS pod_at,
+           (SELECT s."batchId" FROM "SettlementLoadLine" ll
+              JOIN "Settlement" s ON s.id = ll."settlementId"
+             WHERE ll."loadId" = l.id ORDER BY ll.id LIMIT 1) AS line_batch_id,
+           EXISTS (SELECT 1 FROM "SettlementLoadLine" ll
+                    WHERE ll."loadId" = l.id) AS on_statement
+      FROM "Load" l
+      JOIN "Company" c ON c.id = l."companyId"
+      LEFT JOIN "Driver" d ON d.id = l."driverId"
+     WHERE l."deletedAt" IS NULL AND l."isCancelled" = false
+       AND l."billingStatus"::text <> 'CLOSED_IN_DATATRUCK'
+       AND (${window.companyId} IS NULL OR l."companyId" = ${window.companyId})
+       AND EXISTS (
+         SELECT 1 FROM "LoadStop" st
+          WHERE st."loadId" = l.id AND st.type::text = 'DELIVERY'
+            AND st."scheduledAt" >= ${window.from} - interval '14 days'
+            AND st."scheduledAt" <= ${window.to} + interval '14 days')
+     ORDER BY l."loadNumber"
+     LIMIT 2000`
+}
+
+type Stamp = string | Date
+
+export interface PreviewLoadSqlRow {
+  id: string
+  loadNumber: string
+  referenceNumber: string | null
+  operationalStatus: string
+  companyId: string
+  driverId: string | null
+  linehaulCents: number
+  fuelSurchargeCents: number
+  accessorialsCents: number
+  totalRevenueCents: number
+  actualMiles: number | null
+  dispatchedMiles: number | null
+  company_name: string
+  driver: {
+    firstName: string
+    lastName: string
+    payToName: string | null
+    driverType: string
+    payRules: (Omit<PayRule, 'effectiveFrom' | 'effectiveTo'> & {
+      effectiveFrom: Stamp
+      effectiveTo: Stamp | null
+    })[]
+  } | null
+  stops: {
+    type: string
+    scheduledAt: Stamp | null
+    city: string | null
+    state: string | null
+    name: string | null
+  }[]
+  pod_at: Stamp | null
+  line_batch_id: string | null
+  on_statement: boolean
+}
+
+/** `previewLoadsSql`'s rows as `previewFrom` takes them, from either transport. */
+export function previewLoadsFrom(
+  rows: readonly PreviewLoadSqlRow[],
+): PreviewLoad[] {
+  return rows.map((row) => ({
+    id: row.id,
+    loadNumber: row.loadNumber,
+    referenceNumber: row.referenceNumber,
+    operationalStatus: row.operationalStatus,
+    companyId: row.companyId,
+    driverId: row.driverId,
+    linehaulCents: row.linehaulCents,
+    fuelSurchargeCents: row.fuelSurchargeCents,
+    accessorialsCents: row.accessorialsCents,
+    totalRevenueCents: row.totalRevenueCents,
+    actualMiles: row.actualMiles,
+    dispatchedMiles: row.dispatchedMiles,
+    company: { name: row.company_name },
+    driver: row.driver && {
+      firstName: row.driver.firstName,
+      lastName: row.driver.lastName,
+      payToName: row.driver.payToName,
+      driverType: row.driver.driverType,
+      payRules: row.driver.payRules.map((rule) => ({
+        ...rule,
+        effectiveFrom: asDate(rule.effectiveFrom) ?? new Date(NaN),
+        effectiveTo: asDate(rule.effectiveTo),
+      })),
+    },
+    stops: row.stops.map((stop) => ({
+      ...stop,
+      scheduledAt: asDate(stop.scheduledAt),
+    })),
+    statusEvents:
+      row.pod_at === null
+        ? []
+        : [{ occurredAt: asDate(row.pod_at) ?? new Date(NaN) }],
+    settlementLoadLines: row.on_statement
+      ? [{ settlement: { batchId: row.line_batch_id } }]
+      : [],
+  }))
 }

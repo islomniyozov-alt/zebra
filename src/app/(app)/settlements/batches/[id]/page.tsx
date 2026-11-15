@@ -1,6 +1,10 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
+import {
+  currentUserCan,
+  readCurrentOrg,
+  withCurrentOrg,
+} from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { formatCents } from '@/lib/money'
 import {
@@ -9,10 +13,10 @@ import {
 } from '@/lib/settlement-batch'
 import { computeBatch } from '@/lib/settlement-week'
 import {
-  previewBatch,
   UNAVAILABLE_REASONS,
   type UnavailableReason,
 } from '@/lib/batch-preview'
+import { readBatchPageHead } from '@/lib/batch-page-head'
 import { applyList, type RawParams } from '@/lib/list-view'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { gridView, pagedFooterLabel } from '../../../_grid/grid-page'
@@ -79,89 +83,48 @@ export default async function BatchPage({
   const mayWrite = await currentUserCan('update', 'settlement')
   const path = `/settlements/batches/${id}`
 
-  const data = await withCurrentOrg(
-    'read',
-    'settlement',
-    async (tx) => {
-      const batch = await tx.settlementBatch.findFirst({
-        where: { id, deletedAt: null },
-        select: {
-          id: true,
-          batchNumber: true,
-          status: true,
-          periodStart: true,
-          periodEnd: true,
-          statementDate: true,
-          checkDate: true,
-          organizationId: true,
-          companyId: true,
-          company: { select: { name: true } },
-          settlements: {
-            orderBy: { createdAt: 'asc' },
-            select: {
-              id: true,
-              settlementNumber: true,
-              status: true,
-              unitNumber: true,
-              earningsCents: true,
-              deductionsCents: true,
-              otherPayCents: true,
-              netCents: true,
-              driver: { select: { firstName: true, lastName: true } },
-              loadLines: { select: { id: true } },
-            },
-          },
-        },
-      })
-      if (!batch) return null
-
-      // THE GRID, FOR THIS BATCH: its week, its scope, the ticks from the
-      // persisted exclusions (§6.2.10 part 2b).
-      const preview = await previewBatch(tx, {
-        from: batch.periodStart,
-        to: batch.periodEnd,
-        companyId: batch.companyId,
-        forBatchId: batch.id,
-      })
-
-      const open = batch.status === 'DRAFT' || batch.status === 'PARTIAL'
-      if (!open) {
-        return { batch, preview, held: [], blockers: [], negative: [] }
-      }
-
-      // THE ITEM 3 FACTS: recomputed for display rather than stored, because
-      // they are facts about what is MISSING, and a stored absence goes stale
-      // the moment somebody supplies the thing. Over the same exclusions the
-      // grid shows unticked, so the two cannot disagree.
-      const drivers = await batchInputForOrg(tx, {
-        organizationId: batch.organizationId,
-        period: { start: batch.periodStart, end: batch.periodEnd },
-        statementDate: batch.statementDate,
-        checkDate: batch.checkDate,
-        companyId: batch.companyId,
-        excludeLoadIds: preview.available
-          .filter((trip) => trip.excluded)
-          .map((trip) => trip.loadId),
-      })
-      const computed = computeBatch({
-        period: { start: batch.periodStart, end: batch.periodEnd },
-        statementDate: batch.statementDate,
-        checkDate: batch.checkDate,
-        drivers,
-      })
-      return {
-        batch,
-        preview,
-        held: computed.held,
-        blockers: computed.blockers,
-        negative: computed.negative,
-      }
-    },
-    { timeoutMs: SETTLEMENT_BATCH_TIMEOUT_MS },
+  // THE PAGE'S OWN READS IN ONE CALL (§6.2.10 part 2b v11.08): the batch, its
+  // statements, the preview's window and the ticks, through the tenant reader
+  // and no transaction.
+  const head = await readCurrentOrg('read', 'settlement', (reader) =>
+    readBatchPageHead(reader, id),
   )
+  if (!head) notFound()
+  const { batch, preview } = head
 
-  if (!data) notFound()
-  const { batch, preview, held, blockers, negative } = data
+  // THE ITEM 3 FACTS, ON AN OPEN BATCH: recomputed for display rather than
+  // stored, because they are facts about what is MISSING, and a stored absence
+  // goes stale the moment somebody supplies the thing. Over the same
+  // exclusions the grid shows unticked, so the two cannot disagree. The
+  // engine's input is the engine's own reader, in a transaction of its own —
+  // no second spelling of it (owner's ruling 2026-11-15).
+  const { held, blockers, negative } =
+    batch.status === 'DRAFT' || batch.status === 'PARTIAL'
+      ? await withCurrentOrg(
+          'read',
+          'settlement',
+          async (tx) => {
+            const drivers = await batchInputForOrg(tx, {
+              organizationId: batch.organizationId,
+              period: { start: batch.periodStart, end: batch.periodEnd },
+              statementDate: batch.statementDate,
+              checkDate: batch.checkDate,
+              companyId: batch.companyId,
+              excludeLoadIds: preview.available
+                .filter((trip) => trip.excluded)
+                .map((trip) => trip.loadId),
+            })
+            return computeBatch({
+              period: { start: batch.periodStart, end: batch.periodEnd },
+              statementDate: batch.statementDate,
+              checkDate: batch.checkDate,
+              drivers,
+            })
+          },
+          { timeoutMs: SETTLEMENT_BATCH_TIMEOUT_MS },
+        )
+      : { held: [], blockers: [], negative: [] }
+
   const open = batch.status === 'DRAFT' || batch.status === 'PARTIAL'
   const day = (value: Date | null) =>
     value === null ? '—' : value.toISOString().slice(0, 10)
@@ -417,9 +380,7 @@ export default async function BatchPage({
                   </Link>
                   <span className="ms-z2 text-ink-3">{settlement.status}</span>
                 </td>
-                <td className="p-z3 text-end font-mono">
-                  {settlement.loadLines.length}
-                </td>
+                <td className="p-z3 text-end font-mono">{settlement.lines}</td>
                 <td className="p-z3 text-end font-mono">
                   {formatCents(settlement.earningsCents, locale)}
                 </td>
