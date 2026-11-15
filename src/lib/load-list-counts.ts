@@ -246,24 +246,48 @@ function baseSql(
   return Prisma.join(parts, ' AND ')
 }
 
-/** The groups, from the database. One statement. */
-export async function loadCountGroups(
-  tx: TxClient,
+/** One row of `loadCountGroupsSql`. */
+export interface CountGroupRow {
+  op: string
+  bs: string
+  in_view: boolean
+  ready: boolean
+  upcoming: boolean
+  unpaid: boolean
+  n: number
+}
+
+/**
+ * THE LIST'S ROWS' WHERE, in SQL (§6.7 v11.10): `listWhere` — the base, the
+ * status, the billing state and the view — spelled from the fragments the
+ * counts already use and hold equal to the Prisma predicates.
+ * `tests/integration/load-list-body.test.ts` holds the rows it selects equal
+ * to `readLoadRows(listWhere(…))`, filter by filter.
+ */
+export function loadListRowsWhereSql(
   params: LoadListParams,
   companyScopes: readonly string[],
   ctx: ViewContext,
-): Promise<CountGroup[]> {
-  const rows = await tx.$queryRaw<
-    {
-      op: string
-      bs: string
-      in_view: boolean
-      ready: boolean
-      upcoming: boolean
-      unpaid: boolean
-      n: number
-    }[]
-  >`
+): Prisma.Sql {
+  const billing =
+    params.billing === READY
+      ? READY_SQL
+      : params.billing
+        ? Prisma.sql`l."billingStatus"::text = ${params.billing}`
+        : Prisma.sql`true`
+  return Prisma.sql`${baseSql(params, companyScopes)}
+    AND ${params.status ? Prisma.sql`l."operationalStatus"::text = ${params.status}` : Prisma.sql`true`}
+    AND ${billing}
+    AND COALESCE(${viewSql(params, ctx)}, false)`
+}
+
+/** The groups as SQL — one statement alone, or a CTE of the list's call. */
+export function loadCountGroupsSql(
+  params: LoadListParams,
+  companyScopes: readonly string[],
+  ctx: ViewContext,
+): Prisma.Sql {
+  return Prisma.sql`
     SELECT
       l."operationalStatus"::text AS op,
       l."billingStatus"::text AS bs,
@@ -277,6 +301,24 @@ export async function loadCountGroups(
     WHERE ${baseSql(params, companyScopes)}
     GROUP BY 1, 2, 3, 4, 5, 6
   `
+}
+
+/** The groups, from the database. One statement. */
+export async function loadCountGroups(
+  tx: TxClient,
+  params: LoadListParams,
+  companyScopes: readonly string[],
+  ctx: ViewContext,
+): Promise<CountGroup[]> {
+  return countGroupsFrom(
+    await tx.$queryRaw<CountGroupRow[]>(
+      loadCountGroupsSql(params, companyScopes, ctx),
+    ),
+  )
+}
+
+/** `loadCountGroupsSql`'s rows as groups. */
+export function countGroupsFrom(rows: readonly CountGroupRow[]): CountGroup[] {
   return rows.map((row) => ({
     op: row.op,
     bs: row.bs,
@@ -284,7 +326,7 @@ export async function loadCountGroups(
     ready: row.ready,
     upcoming: row.upcoming,
     unpaid: row.unpaid,
-    n: row.n,
+    n: Number(row.n),
   }))
 }
 

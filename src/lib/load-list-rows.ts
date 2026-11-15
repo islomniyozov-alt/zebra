@@ -1,9 +1,15 @@
-import type {
-  LoadBillingStatus,
-  LoadOperationalStatus,
+import {
   Prisma,
+  type LoadBillingStatus,
+  type LoadOperationalStatus,
 } from '@/generated/prisma/client'
-import { loadWarningFacts, loadWarnings, type Warning } from './warnings'
+import {
+  loadWarningFacts,
+  loadWarnings,
+  type LoadFacts,
+  type Warning,
+} from './warnings'
+import { asDate } from './sql-json'
 import { renderStopTime, stopLocalDate } from './stop-time'
 import type { TxClient } from './tenancy'
 
@@ -122,7 +128,40 @@ export async function readLoadRows(
     tx,
     loads.map((load) => load.id),
   )
+  return loadRowsFrom(loads, warningFacts, options)
+}
 
+/** One load as the list reads it — the shape both spellings return. */
+export interface LoadRowSource {
+  id: string
+  loadNumber: string
+  referenceNumber: string | null
+  isCancelled: boolean
+  directSettled: boolean
+  operationalStatus: LoadOperationalStatus
+  billingStatus: LoadBillingStatus
+  linehaulCents: number
+  company: { name: string; timezone: string }
+  customer: { id: string; name: string }
+  driver: { id: string; firstName: string; lastName: string } | null
+  coDriver: { id: string; firstName: string; lastName: string } | null
+  truck: { id: string; unitNumber: string } | null
+  stops: {
+    type: LoadListStop['type']
+    name: string | null
+    city: string | null
+    state: string | null
+    scheduledAt: Date | null
+    windowStart: Date | null
+  }[]
+}
+
+/** The rows as the page and the export take them — pure. */
+export function loadRowsFrom(
+  loads: readonly LoadRowSource[],
+  warningFacts: ReadonlyMap<string, LoadFacts>,
+  options: { now: Date; locale: string },
+): LoadListRow[] {
   return loads.map((load) => {
     const zone = load.company.timezone
     const finalDelivery = [...load.stops]
@@ -173,4 +212,104 @@ export async function readLoadRows(
       })),
     }
   })
+}
+
+// ---------------------------------------------------------------------------
+// THE ROWS AS SQL, for the list's one call (§6.7 v11.10). A SECOND SPELLING of
+// `readLoadRows`' `load.findMany` — its select, newest booking first, the page's
+// skip and take — under a `where` already in SQL (`loadListRowsWhereSql`).
+// `tests/integration/load-list-body.test.ts` holds `loadRowSourcesFrom` of
+// this equal to the `findMany`, row for row and filter by filter. Ties on
+// `bookedAt` are broken by id here, where `findMany` states no order.
+// ---------------------------------------------------------------------------
+
+export function loadRowsSql(
+  where: Prisma.Sql,
+  page: { skip: number; take: number },
+): Prisma.Sql {
+  return Prisma.sql`
+    SELECT l.id, l."loadNumber", l."referenceNumber", l."isCancelled",
+           l."directSettled", l."operationalStatus"::text AS "operationalStatus",
+           l."billingStatus"::text AS "billingStatus", l."linehaulCents",
+           l."bookedAt",
+           c.name AS company_name, c.timezone AS company_timezone,
+           cu.id AS customer_id, cu.name AS customer_name,
+           (SELECT json_build_object('id', d.id, 'firstName', d."firstName",
+                     'lastName', d."lastName")
+              FROM "Driver" d WHERE d.id = l."driverId") AS driver,
+           (SELECT json_build_object('id', d.id, 'firstName', d."firstName",
+                     'lastName', d."lastName")
+              FROM "Driver" d WHERE d.id = l."coDriverId") AS co_driver,
+           (SELECT json_build_object('id', t.id, 'unitNumber', t."unitNumber")
+              FROM "Truck" t WHERE t.id = l."truckId") AS truck,
+           (SELECT COALESCE(json_agg(json_build_object(
+                     'type', st.type::text, 'name', st.name, 'city', st.city,
+                     'state', st.state, 'scheduledAt', st."scheduledAt",
+                     'windowStart', st."windowStart") ORDER BY st.sequence),
+                   '[]'::json)
+              FROM "LoadStop" st WHERE st."loadId" = l.id) AS stops
+      FROM "Load" l
+      JOIN "Company" c ON c."id" = l."companyId"
+      JOIN "Customer" cu ON cu.id = l."customerId"
+     WHERE ${where}
+     ORDER BY l."bookedAt" DESC, l.id
+     OFFSET ${page.skip} LIMIT ${page.take}`
+}
+
+type Stamp = string | Date
+type Seat = { id: string; firstName: string; lastName: string }
+
+export interface LoadRowSqlRow {
+  id: string
+  loadNumber: string
+  referenceNumber: string | null
+  isCancelled: boolean
+  directSettled: boolean
+  operationalStatus: string
+  billingStatus: string
+  linehaulCents: number
+  company_name: string
+  company_timezone: string
+  customer_id: string
+  customer_name: string
+  driver: Seat | null
+  co_driver: Seat | null
+  truck: { id: string; unitNumber: string } | null
+  stops: {
+    type: string
+    name: string | null
+    city: string | null
+    state: string | null
+    scheduledAt: Stamp | null
+    windowStart: Stamp | null
+  }[]
+}
+
+/** `loadRowsSql`'s rows as `loadRowsFrom` takes them, from either transport. */
+export function loadRowSourcesFrom(
+  rows: readonly LoadRowSqlRow[],
+): LoadRowSource[] {
+  return rows.map((row) => ({
+    id: row.id,
+    loadNumber: row.loadNumber,
+    referenceNumber: row.referenceNumber,
+    isCancelled: row.isCancelled,
+    directSettled: row.directSettled,
+    operationalStatus: row.operationalStatus as LoadOperationalStatus,
+    billingStatus: row.billingStatus as LoadBillingStatus,
+    linehaulCents: row.linehaulCents,
+    company: { name: row.company_name, timezone: row.company_timezone },
+    customer: { id: row.customer_id, name: row.customer_name },
+    driver: row.driver,
+    coDriver: row.co_driver,
+    truck: row.truck,
+    stops: row.stops.map((stop) => ({
+      type: stop.type as LoadListStop['type'],
+      name: stop.name,
+      city: stop.city,
+      state: stop.state,
+      scheduledAt: asDate(stop.scheduledAt),
+      windowStart: asDate(stop.windowStart),
+    })),
+  }))
 }

@@ -114,9 +114,11 @@ describe('every authority list reads one rule', () => {
       )
     }
     // The loads list's chips: its reads moved to `readLoadListData` (§6.7
-    // chain two), which the page calls with the session's scopes.
-    expect(readFileSync('src/lib/load-list-page.ts', 'utf8')).toMatch(
-      /^\s*const authorities = await listedAuthorities\(tx, companyScopes\)$/m,
+    // chain two), which the page calls with the session's scopes — since
+    // v11.10 as `listedAuthoritiesSql`, held equal to `listedAuthorities` by
+    // tests/integration/load-list.test.ts.
+    expect(readFileSync('src/lib/load-list-page.ts', 'utf8')).toContain(
+      'WITH authorities AS (${listedAuthoritiesSql(companyScopes)})',
     )
     expect(readFileSync('src/lib/dashboard.ts', 'utf8')).toMatch(
       /listedAuthorities\(tx, companyIds\)/,

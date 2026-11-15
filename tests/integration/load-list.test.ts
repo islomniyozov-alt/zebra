@@ -1,6 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { retryingClient } from '../retrying-client'
-import { companyScopeFilter, withOrg, type TxClient } from '@/lib/tenancy'
+import {
+  companyScopeFilter,
+  tenantReader,
+  txReader,
+  withOrg,
+  type TxClient,
+} from '@/lib/tenancy'
 import { readyToInvoiceCount } from '@/lib/invoices'
 import { createBroker } from '@/lib/brokers'
 import { LOAD_WRITE_TIMEOUT_MS, createLoad } from '@/lib/loads'
@@ -17,7 +23,16 @@ import {
   viewCountWhere,
 } from '@/lib/load-list'
 import { loadListCounts } from '@/lib/load-list-counts'
-import { readLoadListData, readLoadListExport } from '@/lib/load-list-page'
+import {
+  LOADS_GRID,
+  readLoadListData,
+  readLoadListExport,
+} from '@/lib/load-list-page'
+import { readLoadRows } from '@/lib/load-list-rows'
+import { loadFilterLabels } from '@/lib/load-filter-options'
+import { readDensity, readSavedViews } from '@/lib/preferences'
+import { keyFor } from '@/lib/grid-columns'
+import { createPrismaClient, prisma, statementsOf } from '@/lib/db'
 import { zoneMidnight, zoneWallClock } from '@/lib/stop-time'
 import type {
   LoadBillingStatus,
@@ -575,86 +590,173 @@ describe('the export is the list, every row of it', () => {
   }, 300_000)
 })
 
-describe('the budget: a render makes at most one counting statement', () => {
-  /**
-   * A transaction that counts its counting statements: every `count`,
-   * `groupBy` and `aggregate` on any model, and every raw statement that
-   * GROUPS. The warnings read is raw too, but reads rows, not totals.
-   */
-  function counting(tx: TxClient): { tx: TxClient; counted: () => number } {
-    let counted = 0
-    const COUNTING = new Set(['count', 'groupBy', 'aggregate'])
-    const proxy = new Proxy(tx as object, {
-      get(target, prop) {
-        const value = Reflect.get(target, prop)
-        if (prop === '$queryRaw') {
-          return (strings: TemplateStringsArray, ...values: unknown[]) => {
-            if (/GROUP BY/i.test(strings.join(''))) counted++
-            return (value as (...a: unknown[]) => unknown).call(
-              target,
-              strings,
-              ...values,
-            )
-          }
-        }
-        if (
-          value !== null &&
-          typeof value === 'object' &&
-          'findMany' in value
-        ) {
-          return new Proxy(value as object, {
-            get(model, method) {
-              const fn = Reflect.get(model, method)
-              if (typeof method === 'string' && COUNTING.has(method)) {
-                return (...args: unknown[]) => {
-                  counted++
-                  return (fn as (...a: unknown[]) => unknown).apply(model, args)
-                }
-              }
-              return typeof fn === 'function' ? fn.bind(model) : fn
-            },
-          })
-        }
-        return typeof value === 'function' ? value.bind(target) : value
-      },
+// ---------------------------------------------------------------------------
+// THE PAGE'S TWO CALLS (§6.7 v11.10).
+//
+// `readLoadListData` reads the head (authorities, preferences, labels) and the
+// body (rows, warnings, every chip) through a `TenantReader`, and its rows are
+// a SECOND SPELLING of `readLoadRows(listWhere(…))` built from the counts'
+// SQL fragments. So the Prisma reads are the reference here, view by view and
+// filter by filter, through both transports — and the page is TWO statements
+// as `zebra_app`, which is the budget this block used to state as "at most
+// one counting statement".
+// ---------------------------------------------------------------------------
+
+async function byPrisma(query: Record<string, string>, page = 1, size = 100) {
+  return inOrg(async (tx) => {
+    const authorities = await listedAuthorities(tx, [])
+    const ctx = viewContext(authorities, NOW)
+    const params = readLoadListParams(query)
+    const where = loadListWhere(params, {}, ctx)
+    const columns = await tx.userPreference.findFirst({
+      where: { userId, key: keyFor(LOADS_GRID) },
+      select: { value: true, organizationId: true },
     })
-    return { tx: proxy as TxClient, counted: () => counted }
-  }
+    return {
+      rows: await readLoadRows(tx, listWhere(where), {
+        skip: (page - 1) * size,
+        take: size,
+        now: NOW,
+        locale: 'en-US',
+      }),
+      counts: await loadListCounts(tx, params, [], ctx),
+      authorities,
+      ctx,
+      filterLabels: await loadFilterLabels(tx, {
+        customer: params.customer,
+        driver: params.driver,
+      }),
+      savedViews: await readSavedViews(tx, userId, 'loads'),
+      density: await readDensity(tx, userId),
+      columnsRow: columns,
+    }
+  })
+}
 
-  it.each([
-    {},
-    { view: 'upcoming', status: 'BOOKED' },
-    { view: 'pickup', from: '2026-11-01', to: '2026-11-30', billing: READY },
-  ])(
-    'for %j',
-    async (query) => {
-      const used = await inOrg(async (tx) => {
-        const probe = counting(tx)
-        await readLoadListData(probe.tx, [], readLoadListParams(query), {
-          page: 1,
-          pageSize: 100,
-          now: NOW,
-          locale: 'en-US',
-        })
-        return probe.counted()
-      })
-      expect(used).toBe(1)
-    },
-    300_000,
-  )
-
-  it('and the broker and driver labels add reads, not counts', async () => {
-    const used = await inOrg(async (tx) => {
-      const probe = counting(tx)
-      await readLoadListData(
-        probe.tx,
+describe('the page’s two calls read what the Prisma reads read', () => {
+  it('for every view, every filter set, and filters with a view, through both transports', async () => {
+    // A STORED DENSITY AND A SAVED VIEW, so the preferences have something to
+    // read and another user's rows would be told apart.
+    await owner.userPreference.createMany({
+      data: [
+        { organizationId, userId, key: 'density', value: 'compact' },
+        {
+          organizationId,
+          userId,
+          key: 'view.loads',
+          value: [{ name: 'Mine', slug: 'mine', query: 'view=unpaid' }],
+        },
+      ],
+    })
+    // EVERY VIEW ONCE, EVERY FILTER SET ONCE, AND TWO CROSSINGS — not the full
+    // product, which ran 572 s on its own; each fragment is exercised on both
+    // sides by a case of its own, and the counts' block above crosses them.
+    const cases: Record<string, string>[] = [
+      ...Object.keys(LOAD_VIEWS).map((view) => ({ view })),
+      ...FILTER_SETS,
+      { customer: brokerId },
+      { driver: driverId },
+      { ref: numbers['owed']! },
+      { view: 'pickup', from: '2026-11-01', to: '2026-11-30', billing: READY },
+      { view: 'upcoming', status: 'BOOKED' },
+    ]
+    let nonEmpty = 0
+    for (const [index, query] of cases.entries()) {
+      const params = readLoadListParams(query)
+      const options = {
+        page: 1,
+        pageSize: 100,
+        now: NOW,
+        locale: 'en-US',
+        userId,
+      }
+      const expected = await byPrisma(query)
+      const viaReader = await readLoadListData(
+        tenantReader(prisma, organizationId),
         [],
-        readLoadListParams({ customer: brokerId, driver: driverId }),
-        { page: 1, pageSize: 100, now: NOW, locale: 'en-US' },
+        params,
+        options,
       )
-      return probe.counted()
+      expect(viaReader, `${JSON.stringify(query)} via the reader`).toEqual(
+        expected,
+      )
+      // THE OTHER TRANSPORT ON EVERY FOURTH CASE: `$queryRaw` hands back
+      // Dates and bigints where the reader hands back JSON.
+      if (index % 4 === 0) {
+        const inTx = await inOrg((tx) =>
+          readLoadListData(txReader(tx), [], params, options),
+        )
+        expect(inTx, `${JSON.stringify(query)} in a transaction`).toEqual(
+          expected,
+        )
+      }
+      if (expected.rows.length > 0) nonEmpty += 1
+    }
+    // NOT VACUOUS: most cases list something, and the labels were read.
+    expect(nonEmpty).toBeGreaterThan(cases.length / 2)
+    const labelled = await readLoadListData(
+      tenantReader(prisma, organizationId),
+      [],
+      readLoadListParams({ customer: brokerId, driver: driverId }),
+      { page: 1, pageSize: 100, now: NOW, locale: 'en-US', userId },
+    )
+    expect(labelled.filterLabels.customer).toBeTruthy()
+    expect(labelled.filterLabels.driver).toBeTruthy()
+    expect(labelled.density).toBe('compact')
+  }, 600_000)
+
+  it('pages the same rows, newest booking first', async () => {
+    for (const page of [1, 2, 3]) {
+      const expected = await byPrisma({}, page, 4)
+      const got = await readLoadListData(
+        tenantReader(prisma, organizationId),
+        [],
+        readLoadListParams({}),
+        { page, pageSize: 4, now: NOW, locale: 'en-US', userId },
+      )
+      expect(got.rows, `page ${page}`).toEqual(expected.rows)
+      expect(got.rows.length, `page ${page}`).toBeGreaterThan(0)
+    }
+  }, 300_000)
+
+  it('is TWO statements as zebra_app, and another organization reads none of these loads', async () => {
+    const options = {
+      page: 1,
+      pageSize: 100,
+      now: NOW,
+      locale: 'en-US',
+      userId,
+    }
+    const client = createPrismaClient(process.env.DATABASE_URL!)
+    try {
+      const at = statementsOf(client)!
+      const data = await readLoadListData(
+        tenantReader(client, organizationId),
+        [],
+        readLoadListParams({}),
+        options,
+      )
+      expect(statementsOf(client)! - at).toBe(2)
+      expect(data.rows.length).toBeGreaterThan(0)
+    } finally {
+      await client.$disconnect()
+    }
+    const other = await owner.organization.create({
+      data: { name: `Load list other ${nonce}`, slug: `load-list-o-${nonce}` },
     })
-    expect(used).toBe(1)
+    try {
+      const asThem = tenantReader(prisma, other.id)
+      const theirs = await readLoadListData(
+        asThem,
+        [],
+        readLoadListParams({}),
+        options,
+      )
+      expect(theirs.rows).toEqual([])
+      expect(theirs.counts.matching).toBe(0)
+    } finally {
+      await owner.organization.delete({ where: { id: other.id } })
+    }
   }, 300_000)
 })
 

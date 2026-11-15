@@ -170,11 +170,16 @@ describe('the loads list resolves the view it is given', () => {
     expect(source).toMatch(
       /^\s*const listParams = readLoadListParams\(params\)$/m,
     )
+    // SINCE v11.10 THE PAGE READS THROUGH THE TENANT READER, and the rows'
+    // `where` is the SQL the counts use; the export keeps the Prisma
+    // `loadListWhere`, and tests/integration/load-list.test.ts holds the two
+    // equal view by view.
     expect(source).toMatch(
-      /readLoadListData\(tx, session\.companyScopes, listParams, \{/,
+      /readLoadListData\(\s*reader,\s*session\.companyScopes,\s*listParams,/,
     )
+    expect(reader).toContain('loadListRowsWhereSql(params, companyScopes, ctx)')
     expect(reader).toMatch(
-      /^\s*const where = loadListWhere\(params, companyScopeFilter\(companyScopes\), ctx\)$/m,
+      /^\s*const where = loadListWhere\(\s*params,\s*companyScopeFilter\(viewer\.companyScopes\),\s*ctx,?\s*\)$/m,
     )
     expect(builder).toContain("view: one('view')")
     expect(builder).toMatch(/^\s*view: viewWhere\(params\.view, \{$/m)
@@ -184,8 +189,14 @@ describe('the loads list resolves the view it is given', () => {
   // applying the view to only one produces "1–50 of 13,500" over a list of
   // 101 — the same disagreement the ruling closed, one level down.
   it('applies it to the rows AND the footer total', () => {
-    expect(reader).toMatch(/readLoadRows\(tx, listWhere\(where\), \{/)
-    expect(reader).toMatch(/loadListCounts\(tx, params, companyScopes, ctx\)/)
+    expect(reader).toContain('loadListRowsWhereSql(params, companyScopes, ctx)')
+    expect(reader).toContain('loadCountGroupsSql(params, companyScopes, ctx)')
+    expect(
+      readFileSync(
+        join(process.cwd(), 'src', 'lib', 'load-list-counts.ts'),
+        'utf8',
+      ),
+    ).toMatch(/AND COALESCE\(\$\{viewSql\(params, ctx\)\}, false\)`/)
     expect(source).toMatch(/^\s*const matching = counts\.matching$/m)
     expect(builder).toMatch(
       /return and\(where\.base, where\.status, where\.billing, where\.view\)/,

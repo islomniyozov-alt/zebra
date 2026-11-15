@@ -26,7 +26,7 @@ export interface FilterOption {
 export const FILTER_OPTION_LIMIT = 3000
 
 /** A driver's name the way the loads list prints it: first, then last. */
-const driverLabel = (driver: { firstName: string; lastName: string }) =>
+export const driverLabel = (driver: { firstName: string; lastName: string }) =>
   `${driver.firstName} ${driver.lastName}`.trim()
 
 /**

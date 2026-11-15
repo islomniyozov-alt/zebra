@@ -1,7 +1,11 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { warningLabels } from '@/components/WarningCell'
-import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
+import {
+  currentUserCan,
+  readCurrentOrg,
+  withCurrentOrg,
+} from '@/lib/auth-context'
 import { Button } from '@/components/ui/Button'
 import { getLocaleContext } from '@/lib/locale'
 import type { MessageKey } from '@/lib/i18n'
@@ -9,10 +13,14 @@ import { FilterBar } from '@/components/ui/FilterBar'
 import { LoadsTable, type LoadRow } from './LoadsTable'
 import { billingLabelKey, operationalLabelKey } from '@/lib/status'
 import { readLoadListParams, READY } from '@/lib/load-list'
-import { readLoadListData } from '@/lib/load-list-page'
+import { LOADS_GRID, readLoadListData } from '@/lib/load-list-page'
 import { renderDateOnly } from '@/lib/stop-time'
-import { DENSITIES, readDensity, readSavedViews } from '@/lib/preferences'
-import { gridColumnCap, readGridColumns } from '@/lib/grid-columns'
+import { DENSITIES } from '@/lib/preferences'
+import {
+  gridColumnCap,
+  gridColumnsFromRow,
+  readGridColumns,
+} from '@/lib/grid-columns'
 import {
   columnKeysFor,
   LOAD_COLUMN_KEYS,
@@ -114,29 +122,55 @@ export default async function LoadsPage({
       currentUserCan('create', 'document'),
     ])
 
+  // TWO CALLS THROUGH THE TENANT READER, NO TRANSACTION (§6.7 v11.10): the
+  // authorities, preferences and labels, then the rows, warnings and chips
+  // bounded by the day the first names.
   const {
-    data: { rows: listRows, counts, authorities, filterLabels },
+    rows: listRows,
+    counts,
+    authorities,
+    filterLabels,
     savedViews,
     density,
     visibleLoadColumns,
-  } = await withCurrentOrg('read', 'load', async (tx, session) => {
-    const data = await readLoadListData(tx, session.companyScopes, listParams, {
-      page,
-      pageSize: PAGE_SIZE,
-      now: new Date(),
-      locale,
-    })
-    const savedViews = await readSavedViews(tx, session.userId, 'loads')
-    const density = await readDensity(tx, session.userId)
-    // §7.1.7, in the same transaction as the two preference reads above it.
-    const visibleLoadColumns = await readGridColumns(
-      tx,
-      session.userId,
-      'loads.loads',
-      columnKeysFor(LOAD_COLUMN_KEYS, data.authorities.length > 1),
-      LOAD_COLUMNS_HIDDEN,
+  } = await readCurrentOrg('read', 'load', async (reader, session) => {
+    const data = await readLoadListData(
+      reader,
+      session.companyScopes,
+      listParams,
+      {
+        page,
+        pageSize: PAGE_SIZE,
+        now: new Date(),
+        locale,
+        userId: session.userId,
+      },
     )
-    return { data, savedViews, density, visibleLoadColumns }
+    // §7.1.7, from the head's stored row. A transaction opens only when that
+    // row is the legacy shape and is rewritten once (§6.7).
+    const available = columnKeysFor(
+      LOAD_COLUMN_KEYS,
+      data.authorities.length > 1,
+    )
+    const plan = gridColumnsFromRow(
+      LOADS_GRID,
+      available,
+      LOAD_COLUMNS_HIDDEN,
+      data.columnsRow,
+    )
+    const visibleLoadColumns = plan.rewrite
+      ? await withCurrentOrg('read', 'load', (tx) =>
+          readGridColumns(
+            tx,
+            session.userId,
+            LOADS_GRID,
+            available,
+            LOAD_COLUMNS_HIDDEN,
+            { row: data.columnsRow },
+          ),
+        )
+      : plan.visible
+    return { ...data, visibleLoadColumns }
   })
 
   const companyCount = authorities.length

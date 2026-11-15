@@ -541,28 +541,38 @@ export async function loadWarningFacts(
   tx: TxClient,
   loadIds: readonly string[],
 ): Promise<Map<string, LoadFacts>> {
-  const facts = new Map<string, LoadFacts>()
-  if (loadIds.length === 0) return facts
+  if (loadIds.length === 0) return new Map()
+  const rows = await tx.$queryRaw<LoadWarningFactRow[]>(
+    loadWarningFactsSql(Prisma.sql`l."id" = ANY(${[...loadIds]})`),
+  )
+  return loadWarningFactsFrom(rows)
+}
 
-  const ids = [...loadIds]
-  const rows = await tx.$queryRaw<
-    {
-      id: string
-      pickup_at: Date | null
-      has_driver: boolean
-      has_truck: boolean
-      is_cancelled: boolean
-      closed_history: boolean
-      is_finished: boolean
-      truck_removed: boolean
-      truck_unit: string | null
-      direct_settled: boolean
-      rate_cents: number
-      remitted_cents: number
-      remittance_count: number
-      confirmed_cents: number | null
-    }[]
-  >`
+/** One row of `loadWarningFactsSql`, from either transport. */
+export interface LoadWarningFactRow {
+  id: string
+  pickup_at: Date | string | null
+  has_driver: boolean
+  has_truck: boolean
+  is_cancelled: boolean
+  closed_history: boolean
+  is_finished: boolean
+  truck_removed: boolean
+  truck_unit: string | null
+  direct_settled: boolean
+  rate_cents: number
+  remitted_cents: number
+  remittance_count: number
+  confirmed_cents: number | null
+}
+
+/**
+ * The warning facts of the loads `idsWhere` names (a predicate on `l."id"`),
+ * as SQL — the list's one call puts it over its own rows (§6.7 v11.10), and
+ * `loadWarningFacts` sends it alone. One text, two callers.
+ */
+export function loadWarningFactsSql(idsWhere: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`
     SELECT
       l."id",
       (SELECT st."scheduledAt" FROM "LoadStop" st
@@ -586,12 +596,18 @@ export async function loadWarningFacts(
                  WHERE pla."loadId" = l."id"), 0) AS remittance_count,
       l."settledGrossCents" AS confirmed_cents
     FROM "Load" l
-    WHERE l."id" = ANY(${ids}) AND l."deletedAt" IS NULL
+    WHERE ${idsWhere} AND l."deletedAt" IS NULL
   `
+}
 
+/** `loadWarningFactsSql`'s rows, by load. */
+export function loadWarningFactsFrom(
+  rows: readonly LoadWarningFactRow[],
+): Map<string, LoadFacts> {
+  const facts = new Map<string, LoadFacts>()
   for (const row of rows) {
     facts.set(row.id, {
-      pickupAt: row.pickup_at,
+      pickupAt: asDate(row.pickup_at),
       hasDriver: row.has_driver,
       hasTruck: row.has_truck,
       isCancelled: row.is_cancelled,
