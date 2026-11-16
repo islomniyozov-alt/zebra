@@ -274,7 +274,7 @@ export default async function AccountingPaymentsPage({
     <>
       <PageHeader
         title={t('accounting.payments.title')}
-        breadcrumb={[t('nav.group.accounting'), t('accounting.payments.title')]}
+        breadcrumb={[t('nav.group.billing'), t('accounting.payments.title')]}
         action={
           mayRecord ? (
             <div className="flex items-center gap-z2">

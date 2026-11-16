@@ -265,7 +265,7 @@ export default async function ReportsPage({
     <>
       <PageHeader
         title={t('accounting.reports.title')}
-        breadcrumb={[t('nav.group.accounting'), t('accounting.reports.title')]}
+        breadcrumb={[t('nav.group.billing'), t('accounting.reports.title')]}
       />
       <Tabs
         tabs={[

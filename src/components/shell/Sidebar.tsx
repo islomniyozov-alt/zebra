@@ -3,9 +3,10 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cx } from '@/lib/cx'
+import { activeNavHref } from '@/lib/nav-active'
 
-// §6.2 — the destinations, grouped (Operations, Fleet, Accounting, Payroll,
-// Records, Admin), on §3.6's navy. The owner's brief (2026-11-06): a sidebar
+// §6.2 — the destinations, grouped in Datatruck's words (Dashboard alone, then
+// Load Management through Admin; amended 2026-11-16), on §3.6's navy. The owner's brief (2026-11-06): a sidebar
 // "stronger and darker, closer to Datatruck's", the content area light, accent
 // secondary. The navy is this column and nothing to the right of its edge.
 //
@@ -35,7 +36,8 @@ export interface SidebarItem {
 
 export interface SidebarGroup {
   key: string
-  label: string
+  /** `null` draws the group under no heading — Dashboard's. */
+  label: string | null
   items: readonly SidebarItem[]
 }
 
@@ -47,6 +49,10 @@ interface SidebarProps {
 
 export function Sidebar({ groups, appName, navLabel }: SidebarProps) {
   const pathname = usePathname()
+  const active = activeNavHref(
+    pathname,
+    groups.flatMap((group) => group.items.map((item) => item.href)),
+  )
 
   return (
     <nav
@@ -62,32 +68,31 @@ export function Sidebar({ groups, appName, navLabel }: SidebarProps) {
       <div className="flex flex-col gap-z3 py-z3">
         {groups.map((group) => (
           <div key={group.key} className="flex flex-col gap-[2px]">
-            <span className="px-z4 pt-z2 pb-z1 text-xs font-medium uppercase tracking-[0.08em] text-nav-ink-2">
-              {group.label}
-            </span>
+            {group.label ? (
+              <span className="px-z4 pt-z2 pb-z1 text-xs font-medium uppercase tracking-[0.08em] text-nav-ink-2">
+                {group.label}
+              </span>
+            ) : null}
             {group.items.map((item) => {
-              // Exact match for the dashboard, prefix for everything else, so
-              // /loads/123 keeps Loads lit.
-              const active =
-                item.href === '/'
-                  ? pathname === '/'
-                  : pathname === item.href ||
-                    pathname.startsWith(`${item.href}/`)
+              // ONE item lit: the longest href the path sits under, so
+              // /loads/123 keeps All Loads lit and /safety/dqf lights DQF, not
+              // Compliance beside it (§6.2, 2026-11-16).
+              const isActive = item.href === active
 
               return (
                 <Link
                   key={item.key}
                   href={item.href}
-                  aria-current={active ? 'page' : undefined}
+                  aria-current={isActive ? 'page' : undefined}
                   className={cx(
                     'relative flex h-control items-center px-z4 text-base',
                     'transition-colors duration-120 ease-out',
-                    active
+                    isActive
                       ? 'bg-nav-active font-medium text-nav-ink'
                       : 'text-nav-ink-2 hover:bg-nav-surface hover:text-nav-ink',
                   )}
                 >
-                  {active ? (
+                  {isActive ? (
                     <span
                       aria-hidden
                       className="absolute inset-y-0 start-0 w-[2px] bg-accent"

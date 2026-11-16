@@ -309,47 +309,60 @@ describe('permissionsOf', () => {
 })
 
 describe('navigationFor', () => {
-  it('shows an owner all six groups', () => {
-    // SIX SINCE THE SPLIT (§6.2, 2026-09-28). `money` became `accounting`, and
-    // then `accounting` became Accounting and Payroll — money in and money out.
-    // The order is the order the sidebar renders, and asserting the whole list
-    // is what makes a group added in the middle a failure rather than a surprise.
+  it('shows an owner all eleven groups', () => {
+    // DATATRUCK'S GROUPS SINCE 2026-11-16 (§6.2): Dashboard under no heading,
+    // then ten. Six before that (2026-09-28), when `money` had become
+    // Accounting and Payroll. The order is the order the sidebar renders, and
+    // asserting the whole list is what makes a group added in the middle a
+    // failure rather than a surprise.
     expect(navigationFor(session('OWNER')).map((group) => group.key)).toEqual([
-      'operations',
-      'fleet',
-      'accounting',
+      'home',
+      'loads',
+      'planning',
+      'billing',
       'payroll',
-      'records',
+      'customers',
+      'safety',
+      'fleet',
+      'maintenance',
+      'hr',
       'admin',
     ])
   })
 
-  it('never shows a dispatcher an empty Accounting heading', () => {
+  it('never shows a dispatcher an empty Billing heading', () => {
     // §7, stated as a UI rule but enforced here: a group with no permitted
     // child does not render at all. Rendering the heading and hiding the items
     // tells someone exactly what they are missing.
     const groups = navigationFor(session('DISPATCHER'))
     expect(groups.map((group) => group.key)).toEqual([
-      'operations',
+      'home',
+      'loads',
+      'planning',
+      'customers',
+      'safety',
       'fleet',
-      'records',
+      'maintenance',
+      'hr',
     ])
-    expect(groups.find((group) => group.key === 'accounting')).toBeUndefined()
+    expect(groups.find((group) => group.key === 'billing')).toBeUndefined()
   })
 
   it('drops individual items too, not just whole groups', () => {
-    // A DISPATCHER holds `document:read` and `customer:read` but not
-    // `report:read`, so Records loses Reports on permission and keeps the other
-    // two. Documents joined the list when Phase 4 step 6 built the browser —
-    // and the browser is permission-aware per ENTITY, so what they see INSIDE
-    // it is a separate question with its own tests.
-    const records = navigationFor(session('DISPATCHER')).find(
-      (g) => g.key === 'records',
+    // A MANAGER reads invoices, payments and reports but does not hold
+    // `receivable:update`, so Billing keeps three entries and loses Factoring
+    // (ruled 22). And an ADMIN-only entry leaves HR Management with Drivers
+    // alone for a dispatcher, who holds `document:read` and not `report:read`.
+    const billing = navigationFor(session('MANAGER')).find(
+      (g) => g.key === 'billing',
     )
-    expect(records?.items.map((item) => item.key)).toEqual([
-      'brokers',
-      'documents',
+    expect(billing?.items.map((item) => item.key)).toEqual([
+      'invoices',
+      'payments',
+      'reports',
     ])
+    const hr = navigationFor(session('DISPATCHER')).find((g) => g.key === 'hr')
+    expect(hr?.items.map((item) => item.key)).toEqual(['drivers'])
 
     // The permission half of that is still true and still worth asserting,
     // separately from the built half — the two filters must not be confused
@@ -358,9 +371,9 @@ describe('navigationFor', () => {
     expect(can(session('DISPATCHER'), 'read', 'report')).toBe(false)
   })
 
-  it('shows accounting the Accounting group but not Admin', () => {
+  it('shows accounting the Billing group but not Admin', () => {
     const keys = navigationFor(session('ACCOUNTING')).map((group) => group.key)
-    expect(keys).toContain('accounting')
+    expect(keys).toContain('billing')
     expect(keys).not.toContain('admin')
   })
 
@@ -372,14 +385,16 @@ describe('navigationFor', () => {
   // that may read a batch total does not thereby get to see somebody's insurance
   // instalment, and asserting the LIST here is what stops the next entry being
   // added under whatever permission was nearest.
-  it('offers accounting the three money-in pages', () => {
+  it('offers accounting the four money-in pages', () => {
+    // Factoring joined Billing on 2026-11-16 — ruled 22, Accounting's.
     const group = navigationFor(session('ACCOUNTING')).find(
-      (candidate) => candidate.key === 'accounting',
+      (candidate) => candidate.key === 'billing',
     )
     expect(group?.items.map((item) => item.key)).toEqual([
       'invoices',
       'payments',
       'reports',
+      'factoring',
     ])
   })
 
@@ -400,7 +415,7 @@ describe('navigationFor', () => {
 
   it('shows a dispatcher neither money group', () => {
     const keys = navigationFor(session('DISPATCHER')).map((group) => group.key)
-    expect(keys).not.toContain('accounting')
+    expect(keys).not.toContain('billing')
     expect(keys).not.toContain('payroll')
   })
 
@@ -448,7 +463,9 @@ describe('navigationFor', () => {
     // EN, RU and FA from the first component. Retrofitting this cost a
     // session on the portal.
     for (const group of navigationFor(session('OWNER'))) {
-      expect(group.labelKey).toMatch(/^nav\./)
+      // Dashboard's group is the one drawn under no heading — and no other.
+      if (group.key === 'home') expect(group.labelKey).toBeNull()
+      else expect(group.labelKey).toMatch(/^nav\./)
       for (const item of group.items) {
         expect(item.labelKey).toMatch(/^nav\./)
         expect(item.href).toMatch(/^\//)
@@ -721,11 +738,16 @@ describe('the sidebar only offers screens that exist', () => {
     // The ruling was "hide unbuilt entries, keep the group structure". If
     // hiding ever empties a group, the sidebar rearranges and this says so.
     expect(navigationFor(owner).map((group) => group.key)).toEqual([
-      'operations',
-      'fleet',
-      'accounting',
+      'home',
+      'loads',
+      'planning',
+      'billing',
       'payroll',
-      'records',
+      'customers',
+      'safety',
+      'fleet',
+      'maintenance',
+      'hr',
       'admin',
     ])
   })

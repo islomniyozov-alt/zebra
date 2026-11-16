@@ -62,7 +62,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // closure cannot be serialised across to a client component.
   const groups: SidebarGroup[] = navigationFor(session).map((group) => ({
     key: group.key,
-    label: t(group.labelKey as MessageKey),
+    label: group.labelKey ? t(group.labelKey as MessageKey) : null,
     items: group.items.map((item) => ({
       key: item.key,
       label: t(item.labelKey as MessageKey),

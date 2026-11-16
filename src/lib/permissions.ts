@@ -549,7 +549,8 @@ export interface NavItem {
 
 export interface NavGroup {
   key: string
-  labelKey: string
+  /** `null` for the one group drawn under no heading — Dashboard's (§6.2). */
+  labelKey: string | null
   items: NavItem[]
 }
 
@@ -592,70 +593,67 @@ const unbuilt = (
   returnsIn,
 })
 
+// ── THE GROUPS ARE DATATRUCK'S (§6.2, amended 2026-11-16) ─────────────────
+//
+// Owner's ruling: the sidebar speaks the vocabulary RAM's and Dolphins' people
+// read every day before Zebra. LABELS AND GROUPS ONLY — every href, resource
+// and action below is the one it was, so no role reaches a page it did not
+// reach before (§6.8 holds that, by route). The item KEYS are unchanged too:
+// they name the destination, and the label is the i18n value under them.
+//
+// Where the products differ, Zebra's word stayed: Authorities (Datatruck has
+// no twin), Payments (never "Bill"), and Charges under Payroll — Datatruck's
+// Transactions are fuel, tolls and advances, and ours are driver deductions
+// with free-text labels. Before this: Operations, Fleet, Accounting, Payroll,
+// Records, Admin (2026-09-28), and Money before that.
 export const NAVIGATION: readonly NavGroup[] = [
+  // Dashboard stands alone at the top, under no heading.
   {
-    key: 'operations',
-    labelKey: 'nav.group.operations',
+    key: 'home',
+    labelKey: null,
+    items: [item('dashboard', '/dashboard', 'dashboard')],
+  },
+  {
+    key: 'loads',
+    labelKey: 'nav.group.loads',
     items: [
-      item('dashboard', '/dashboard', 'dashboard'),
-      item('dispatch', '/dispatch', 'dispatch'),
       item('loads', '/loads', 'load'),
       // Mail waiting to become freight (Phase 6 §4 step 4). Gated on `create`
       // rather than `read`, because opening a row leads to the create form —
       // a queue a role cannot act on is a queue that should not be offered.
       item('incoming', '/loads/incoming', 'load', 'create'),
+      // Phase 4 step 6 — the reading room over the pipeline, here because most
+      // of its files are a load's. `document:read` is held by everyone who
+      // uploads one, and the screen is permission-aware per ENTITY rather than
+      // per role: a dispatcher sees the PODs they filed and not the settlement
+      // PDFs beside them. See document-browser.ts.
+      item('documents', '/documents', 'document'),
+    ],
+  },
+  {
+    key: 'planning',
+    labelKey: 'nav.group.planning',
+    items: [
+      // Its own key so the label can say "Dispatch Board" while the page's
+      // heading keeps `nav.dispatch`.
+      item('dispatchBoard', '/dispatch', 'dispatch'),
       unbuilt('calendar', '/calendar', 'calendar', 'Phase 5'),
     ],
   },
+  // ── BILLING AND PAYROLL: MONEY IN AND MONEY OUT (§6.2, split 2026-09-28) ──
+  //
+  // Two jobs and often two people. THE ORDER IS THE WEEK'S ORDER, not an
+  // alphabet: money is invoiced, then it arrives, then it is paid out.
   {
-    key: 'fleet',
-    labelKey: 'nav.group.fleet',
-    items: [
-      item('trucks', '/trucks', 'truck'),
-      item('trailers', '/trailers', 'trailer'),
-      item('drivers', '/drivers', 'driver'),
-      // Compliance dates are OPERATIONAL, not financial: a dispatcher reads
-      // them because they gate a real dispatch decision (§2.5). `compliance`
-      // has been in FLEET_READ since Phase 1, so no permission changes.
-      item('safety', '/safety', 'compliance'),
-      // Phase 4 step 3. `maintenance` is in FLEET_READ, so a dispatcher gets
-      // the screen — and not the cost column on it, which is
-      // `truck.financials` and is decided by the page rather than by the nav.
-      item('maintenance', '/maintenance', 'maintenance'),
-    ],
-  },
-  // ── ACCOUNTING (§6.2, amended 2026-09-28) ────────────────────────────────
-  //
-  // Was MONEY, with eight entries. Three of them — `/money/this-week`,
-  // `/settlements` and `/settlements/batches` — were one week's pay seen from
-  // three distances, so the group had to be tried in turn rather than read.
-  //
-  // FIVE DESTINATIONS, EACH ANSWERING SOMETHING THE OTHER FOUR DO NOT: who owes
-  // us, what came in, what a week costs per driver, what comes off cheques every
-  // week, and the same money cut three ways. §6.2 states that as a table, so a
-  // sixth entry has to say which question is missing.
-  //
-  // THE ORDER IS THE WEEK'S ORDER, not an alphabet: money is invoiced, then it
-  // arrives, then it is paid out, and Charges and Reports are what you open when
-  // one of the first three is wrong.
-  // ── ACCOUNTING AND PAYROLL (§6.2, split 2026-09-28) ──────────────────────
-  //
-  // MONEY IN AND MONEY OUT, which is two jobs and often two people. This was one
-  // group of five that morning; the owner read §6.2.1's divergence table, saw
-  // that Datatruck splits them, and ruled that theirs is better. One list of
-  // five made the reader scan past three entries to reach the one their
-  // afternoon was about.
-  //
-  // THE SPLIT IS NOT DATATRUCK'S EXACTLY. Theirs is by payee kind — Driver,
-  // Dispatcher, Vendor — and Zebra settles drivers and pays neither of the other
-  // two. Ours is by direction.
-  {
-    key: 'accounting',
-    labelKey: 'nav.group.accounting',
+    key: 'billing',
+    labelKey: 'nav.group.billing',
     items: [
       item('invoices', '/accounting/invoices', 'invoice'),
       item('payments', '/accounting/payments', 'payment'),
       item('reports', '/accounting/reports', 'settlement'),
+      // Ruled 22: Accounting's, not a manager's — `receivable:update`, the
+      // check the page itself makes, so the entry and the page cannot disagree.
+      item('factoring', '/receivables/factoring', 'receivable', 'update'),
       // §2.6: Expenses and Fuel move to Phase 5. Kept unbuilt rather than
       // dropped — the marker is data, so building one is a one-word edit.
       unbuilt('expenses', '/expenses', 'expense', 'Phase 5'),
@@ -666,9 +664,9 @@ export const NAVIGATION: readonly NavGroup[] = [
     key: 'payroll',
     labelKey: 'nav.group.payroll',
     items: [
-      // BATCHES CARRIES BALANCES as a tab: both are a run's totals. The week
-      // selector and the Tuesday strip live here, because this is where somebody
-      // opens, refreshes and finalises a run.
+      // DRIVER PAY IS THE BATCHES SCREEN, and carries Balances as a tab: both
+      // are a run's totals. The week selector and the Tuesday strip live here,
+      // because this is where somebody opens, refreshes and finalises a run.
       item('batches', '/payroll/batches', 'settlement'),
       // STATEMENTS EARNS ITS OWN DESTINATION rather than a tab under Batches.
       // It is the document a driver is handed, and it is what people arrive
@@ -688,25 +686,57 @@ export const NAVIGATION: readonly NavGroup[] = [
     ],
   },
   {
-    key: 'records',
-    labelKey: 'nav.group.records',
+    key: 'customers',
+    labelKey: 'nav.group.customers',
+    // No Locations page exists, so Customers stands alone.
+    items: [item('brokers', '/brokers', 'customer')],
+  },
+  {
+    key: 'safety',
+    labelKey: 'nav.group.safety',
     items: [
-      item('brokers', '/brokers', 'customer'),
-      // Phase 4 step 6 — the reading room over the pipeline. `document:read`
-      // is held by everyone who uploads one, and the screen is permission-aware
-      // per ENTITY rather than per role: a dispatcher sees the PODs they filed
-      // and not the settlement PDFs beside them. See document-browser.ts.
-      item('documents', '/documents', 'document'),
-      // Reports LEFT THIS GROUP for Accounting (§6.2). It was `unbuilt` here
-      // under a Phase 5 marker and is now a real screen there — the person who
-      // reconciles is already in Accounting when the question occurs to them.
+      // Compliance dates are OPERATIONAL, not financial: a dispatcher reads
+      // them because they gate a real dispatch decision (§2.5). `compliance`
+      // has been in FLEET_READ since Phase 1, so no permission changes.
+      item('safety', '/safety', 'compliance'),
+      // A tab of Safety until 2026-11-16; the same `dqf:read` its page checks.
+      item('dqf', '/safety/dqf', 'dqf'),
+    ],
+  },
+  {
+    key: 'fleet',
+    labelKey: 'nav.group.fleet',
+    items: [
+      item('trucks', '/trucks', 'truck'),
+      item('trailers', '/trailers', 'trailer'),
+      // A tab of Safety until 2026-11-16; the same `inspection:read` its page
+      // checks. The route stays under /safety — labels and groups only.
+      item('inspections', '/safety/inspections', 'inspection'),
+    ],
+  },
+  {
+    key: 'maintenance',
+    labelKey: 'nav.group.maintenance',
+    items: [
+      // Phase 4 step 3. `maintenance` is in FLEET_READ, so a dispatcher gets
+      // the screen — and not the cost column on it, which is
+      // `truck.financials` and is decided by the page rather than by the nav.
+      item('maintenance', '/maintenance', 'maintenance'),
+    ],
+  },
+  {
+    key: 'hr',
+    labelKey: 'nav.group.hr',
+    items: [
+      item('drivers', '/drivers', 'driver'),
+      // Moved from Admin on 2026-11-16; still `user:read`, OWNER and ADMIN.
+      item('users', '/users', 'user'),
     ],
   },
   {
     key: 'admin',
     labelKey: 'nav.group.admin',
     items: [
-      item('users', '/users', 'user'),
       // Phase 6 §7 flag 11. GATED ON `create`, NOT `read`.
       //
       // Every operator role holds `company:read` — the authority switcher in
@@ -737,8 +767,8 @@ export const NAVIGATION: readonly NavGroup[] = [
  * question — hiding it from an OWNER and from a DISPATCHER for two different
  * reasons would be two bugs waiting to disagree.
  *
- * The GROUP STRUCTURE SURVIVES this: every one of the five groups still has at
- * least one real screen in it, so the sidebar keeps its shape and nothing
+ * The GROUP STRUCTURE SURVIVES this: every group still has at least one real
+ * screen in it, so the sidebar keeps its shape and nothing
  * rearranges when the missing screens land.
  */
 export function navigationFor(

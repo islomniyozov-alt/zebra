@@ -287,7 +287,7 @@ export default async function AccountingInvoicesPage({
     <>
       <PageHeader
         title={t('accounting.invoices.title')}
-        breadcrumb={[t('nav.group.accounting'), t('accounting.invoices.title')]}
+        breadcrumb={[t('nav.group.billing'), t('accounting.invoices.title')]}
       />
       <Tabs
         tabs={[
