@@ -4,6 +4,19 @@
 // owner's ruling 2026-11-13 on GAPS 43; GAPS 44).
 //
 //   node scripts/isolate-probe.mjs [--role accounting] [--base <origin>]
+//   node scripts/isolate-probe.mjs --role all
+//
+// `--role all` IS THE SWEEP'S OWN SEQUENCE ON ONE CLIENT (owner's ruling
+// 2026-11-15, after the driver's 1102 on `/payments/import` in run
+// 43758082319): every route of the §6.8 table in the table's order, and for
+// each route all six roles in `MATRIX_ROLES` order — owner first, driver
+// last, refused cells INCLUDED, because the 1102 came on a page the matrix
+// refuses, asked for by the last role on an isolate that had served the
+// other five. A single role's `reach` routes never ask for that page, which
+// is why two driver probes read clean beside it. Every 5xx carries its ray,
+// the runtime's word if the tail delivered one, and whether the body is
+// Cloudflare's 1102 page (`namesResourceLimit`), so a 1102 with no tail
+// event is still recorded by ray rather than lost as "unaccounted".
 //
 // WHAT IT READS. The deploy sweep asks one dev isolate for every page as six
 // roles inside twenty minutes and, on 2026-11-12/13, read `Dynamic import
@@ -40,6 +53,7 @@ import {
   classify,
   credentialsFor,
   ID_SOURCES,
+  MATRIX_ROLES,
   namesCeiling,
   readRouteMatrix,
 } from './sweep.mjs'
@@ -48,6 +62,11 @@ import { startTail, trimEvent, workerNameFor } from './worker-tail.mjs'
 export const DEFAULT_BASE = 'https://zebra-dev.tajikcargollc.workers.dev'
 export const PASSES = 2
 export const TAIL_WAIT_MS = 30_000
+/** The `--role` value that runs the sweep's six-role sequence. */
+export const ALL_ROLES = 'all'
+/** Cloudflare's own page for a worker over its limits — error 1102. */
+export const RESOURCE_LIMIT_WORDS =
+  /Error 1102|Worker exceeded resource limits/i
 
 /** `--role x --base y` as an object; an unknown flag is an error, not a default. */
 export function parseArgs(argv) {
@@ -74,6 +93,31 @@ export function routesFor(matrix, role) {
 }
 
 /**
+ * The requests one probe makes in a pass, in order: for one role, its
+ * `reach` routes; for `all`, every route of the table in the table's order
+ * and, for each, every role in `MATRIX_ROLES` order whatever the cell says —
+ * refused cells included, which is the sweep's own sequence.
+ * @returns {{ route: string, role: string, expected: string }[]}
+ */
+export function sequenceFor(matrix, role) {
+  if (role !== ALL_ROLES)
+    return routesFor(matrix, role).map((route) => ({
+      route,
+      role,
+      expected: 'reach',
+    }))
+  const out = []
+  for (const [route, row] of matrix)
+    for (const name of MATRIX_ROLES)
+      out.push({ route, role: name, expected: row[name] })
+  return out
+}
+
+/** Whether a response is Cloudflare's 1102 page — a 5xx whose body says so. */
+export const namesResourceLimit = (status, body) =>
+  status >= 500 && RESOURCE_LIMIT_WORDS.test(String(body ?? ''))
+
+/**
  * The rows with their distinct-route counts: how many different routes the
  * isolate has been asked for up to and including this request. Pass 2 adds
  * nothing to the count, which is the point of pass 2.
@@ -98,7 +142,7 @@ export function withDistinctCounts(rows) {
  * account names the ceiling (`namesCeiling`).
  */
 export function probeVerdict(rows) {
-  /** @type {Record<number, { requests: number, failed: number, firstAtDistinct: number | null, ceiling: number, unaccounted: number, otherFault: number }>} */
+  /** @type {Record<number, { requests: number, failed: number, firstAtDistinct: number | null, ceiling: number, resourceLimit: number, unaccounted: number, otherFault: number }>} */
   const passes = {}
   for (const pass of [1, 2]) {
     const mine = rows.filter((row) => row.pass === pass)
@@ -109,6 +153,10 @@ export function probeVerdict(rows) {
       failed: failed.length,
       firstAtDistinct: first ? first.distinct : null,
       ceiling: failed.filter((row) => namesCeiling(row.worker)).length,
+      // Cloudflare's 1102 page, by the body — counted beside the ceiling and
+      // the unaccounted, not instead of them: a 1102 with no tail event is
+      // both, and the ray is in the row either way.
+      resourceLimit: failed.filter((row) => row.resourceLimit).length,
       unaccounted: failed.filter((row) => !row.worker).length,
       otherFault: failed.filter(
         (row) => row.worker && !namesCeiling(row.worker),
@@ -146,7 +194,7 @@ export function probeVerdict(rows) {
 export function verdictLine(verdict, role) {
   const p1 = verdict.passes[1]
   const p2 = verdict.passes[2]
-  const counts = `pass 1: ${p1.failed} of ${p1.requests} answered 5xx (first at distinct route ${p1.firstAtDistinct ?? '—'}, ${p1.ceiling} the ceiling, ${p1.unaccounted} unaccounted); pass 2: ${p2.failed} of ${p2.requests} (${p2.ceiling} the ceiling, ${p2.unaccounted} unaccounted)`
+  const counts = `pass 1: ${p1.failed} of ${p1.requests} answered 5xx (first at distinct route ${p1.firstAtDistinct ?? '—'}, ${p1.ceiling} the ceiling, ${p1.resourceLimit} 1102, ${p1.unaccounted} unaccounted); pass 2: ${p2.failed} of ${p2.requests} (${p2.ceiling} the ceiling, ${p2.resourceLimit} 1102, ${p2.unaccounted} unaccounted)`
   if (verdict.clean)
     return `ISOLATE PROBE CLEAN — OK. role ${role}; ${counts}; every ray accounted for.`
   return `ISOLATE PROBE READ ${verdict.shape.toUpperCase()} — NOT OK. role ${role}; ${counts}; ${verdict.undelivered.length} ray(s) the tail never delivered.`
@@ -164,44 +212,65 @@ async function main() {
     throw new Error(
       'isolate-probe: DIRECT_DATABASE_URL is not the dev branch (little-lake) — refusing.',
     )
-  const { email, password } = credentialsFor(role, process.env)
-  if (!email || !password)
-    throw new Error(`isolate-probe: no SEED_${role.toUpperCase()}_* in .env`)
+  const roles = role === ALL_ROLES ? MATRIX_ROLES : [role]
+  const credentials = new Map()
+  for (const name of roles) {
+    const { email, password } = credentialsFor(name, process.env)
+    if (!email || !password)
+      throw new Error(`isolate-probe: no SEED_${name.toUpperCase()}_* in .env`)
+    credentials.set(name, { email, password })
+  }
 
   // ── the fixed route set, in the table's order ──────────────────────────
   const matrix = readRouteMatrix(
     readFileSync(join(root, 'TMS-DESIGN-SYSTEM.md'), 'utf8'),
   )
-  const routes = routesFor(matrix, role)
-  console.log(`${routes.length} route(s) reach for ${role}, in §6.8's order`)
-
-  // ── ids, from the role's own organization on dev ───────────────────────
-  const pool = new Pool({ connectionString: dbUrl, max: 1 })
-  const { rows: who } = await pool.query(
-    `select m."organizationId" from "Membership" m join "User" u on u.id = m."userId" where u.email = $1 limit 1`,
-    [email],
+  const sequence = sequenceFor(matrix, role)
+  console.log(
+    role === ALL_ROLES
+      ? `${sequence.length} request(s) a pass: ${matrix.size} route(s) × ${roles.length} roles, in §6.8's order, refused cells included`
+      : `${sequence.length} route(s) reach for ${role}, in §6.8's order`,
   )
-  const organizationId = who[0]?.organizationId
-  if (!organizationId) {
-    await pool.end()
-    throw new Error(`isolate-probe: ${email} has no membership on dev`)
+
+  // ── ids, from each role's own organization on dev ──────────────────────
+  const pool = new Pool({ connectionString: dbUrl, max: 1 })
+  const organizationOf = new Map()
+  for (const [name, { email }] of credentials) {
+    const { rows: who } = await pool.query(
+      `select m."organizationId" from "Membership" m join "User" u on u.id = m."userId" where u.email = $1 limit 1`,
+      [email],
+    )
+    if (!who[0]?.organizationId) {
+      await pool.end()
+      throw new Error(`isolate-probe: ${email} has no membership on dev`)
+    }
+    organizationOf.set(name, who[0].organizationId)
   }
   const models = new Map(ID_SOURCES)
+  const idCache = new Map()
   const paths = []
   const skipped = []
-  for (const route of routes) {
+  for (const entry of sequence) {
+    const { route } = entry
     const model = models.get(route)
     if (!model) {
-      if (/\[[^\]]+\]/.test(route)) skipped.push(`${route} (no id source)`)
-      else paths.push({ route, path: route })
+      if (/\[[^\]]+\]/.test(route))
+        skipped.push(`${route} as ${entry.role} (no id source)`)
+      else paths.push({ ...entry, path: route })
       continue
     }
-    const { rows } = await pool.query(
-      `select id from "${model}" where "organizationId" = $1 order by "createdAt" desc limit 1`,
-      [organizationId],
-    )
-    if (rows[0]) paths.push({ route, path: route.replace('[id]', rows[0].id) })
-    else skipped.push(`${route} (no ${model} row)`)
+    const organizationId = organizationOf.get(entry.role)
+    const key = `${model}|${organizationId}`
+    if (!idCache.has(key)) {
+      const { rows } = await pool.query(
+        `select id from "${model}" where "organizationId" = $1 order by "createdAt" desc limit 1`,
+        [organizationId],
+      )
+      idCache.set(key, rows[0]?.id ?? null)
+    }
+    const id = idCache.get(key)
+    if (id) paths.push({ ...entry, path: route.replace('[id]', id) })
+    else skipped.push(`${route} as ${entry.role} (no ${model} row)`)
   }
   await pool.end()
   for (const line of skipped) console.log(`  skipped ${line}`)
@@ -217,47 +286,58 @@ async function main() {
   }
   console.log(`tail ready on ${worker}`)
 
-  // ── one sign-in, one role ──────────────────────────────────────────────
+  // ── one sign-in per role, in MATRIX_ROLES order ────────────────────────
   const browser = await chromium.launch(
     process.env.SHOT_CHROME ? { executablePath: process.env.SHOT_CHROME } : {},
   )
-  const context = await browser.newContext()
-  const page = await context.newPage()
-  await page.goto(`${base}/login`, { waitUntil: 'domcontentloaded' })
-  await page.fill('input[name="email"]', email)
-  await page.fill('input[name="password"]', password)
-  await Promise.all([
-    page.waitForURL((url) => !url.pathname.startsWith('/login'), {
-      timeout: 90_000,
-    }),
-    page.click('button[type="submit"]'),
-  ])
-  const cookie = (await context.cookies()).find(
-    (c) => c.name === 'zebra_session',
-  )
-  await browser.close()
-  if (!cookie?.value) {
-    tail.stop()
-    throw new Error(`isolate-probe: no zebra_session after the ${role} sign-in`)
+  const cookies = new Map()
+  for (const [name, { email, password }] of credentials) {
+    const context = await browser.newContext()
+    const page = await context.newPage()
+    await page.goto(`${base}/login`, { waitUntil: 'domcontentloaded' })
+    await page.fill('input[name="email"]', email)
+    await page.fill('input[name="password"]', password)
+    await Promise.all([
+      page.waitForURL((url) => !url.pathname.startsWith('/login'), {
+        timeout: 90_000,
+      }),
+      page.click('button[type="submit"]'),
+    ])
+    const cookie = (await context.cookies()).find(
+      (c) => c.name === 'zebra_session',
+    )
+    await context.close()
+    if (!cookie?.value) {
+      await browser.close()
+      tail.stop()
+      throw new Error(
+        `isolate-probe: no zebra_session after the ${name} sign-in`,
+      )
+    }
+    cookies.set(name, cookie.value)
+    console.log(`signed in as ${name}`)
   }
-  console.log(`signed in as ${role}`)
+  await browser.close()
 
   // ── the two passes ─────────────────────────────────────────────────────
   const fetched = []
   for (let pass = 1; pass <= PASSES; pass++) {
-    for (const { route, path } of paths) {
+    for (const { route, role: as, expected, path } of paths) {
       const started = performance.now()
       const response = await fetch(new URL(path, base), {
-        headers: { cookie: `zebra_session=${cookie.value}` },
+        headers: { cookie: `zebra_session=${cookies.get(as)}` },
         redirect: 'manual',
       })
       const body = await response.text()
       fetched.push({
         pass,
         route,
+        role: as,
+        expected,
         path,
         status: response.status,
         verdict: classify(response.status, body),
+        resourceLimit: namesResourceLimit(response.status, body),
         ray: response.headers.get('cf-ray'),
         clientMs: Math.round(performance.now() - started),
       })
@@ -275,19 +355,21 @@ async function main() {
 
   // ── the table ──────────────────────────────────────────────────────────
   console.log(
-    '\npass distinct status  wall   cpu  route                               worker',
+    '\npass distinct role        status  wall   cpu  route                               worker',
   )
   for (const row of rows) {
     const w = row.worker
-    const said = w
-      ? namesCeiling(w)
-        ? 'MEMORY CEILING'
-        : (w.exceptions[0] &&
-            `${w.exceptions[0].name}: ${w.exceptions[0].message}`) ||
-          w.outcome
-      : 'no tail event'
+    const said = row.resourceLimit
+      ? `1102 RESOURCE LIMIT, ray ${row.ray}${w ? ` (${w.outcome})` : ', no tail event'}`
+      : w
+        ? namesCeiling(w)
+          ? 'MEMORY CEILING'
+          : (w.exceptions[0] &&
+              `${w.exceptions[0].name}: ${w.exceptions[0].message}`) ||
+            w.outcome
+        : 'no tail event'
     console.log(
-      `${String(row.pass).padStart(4)} ${String(row.distinct).padStart(8)} ${String(row.status).padStart(6)} ${String(w?.wallTime ?? '-').padStart(5)} ${String(w?.cpuTime ?? '-').padStart(5)}  ${row.route.padEnd(35)} ${String(said).slice(0, 60)}`,
+      `${String(row.pass).padStart(4)} ${String(row.distinct).padStart(8)} ${row.role.padEnd(11)} ${String(row.status).padStart(6)} ${String(w?.wallTime ?? '-').padStart(5)} ${String(w?.cpuTime ?? '-').padStart(5)}  ${row.route.padEnd(35)} ${String(said).slice(0, 60)}`,
     )
   }
 

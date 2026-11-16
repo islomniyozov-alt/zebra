@@ -1,13 +1,16 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
+  ALL_ROLES,
+  namesResourceLimit,
   parseArgs,
   probeVerdict,
   routesFor,
+  sequenceFor,
   verdictLine,
   withDistinctCounts,
 } from '../scripts/isolate-probe.mjs'
-import { readRouteMatrix } from '../scripts/sweep.mjs'
+import { MATRIX_ROLES, readRouteMatrix } from '../scripts/sweep.mjs'
 
 // ---------------------------------------------------------------------------
 // THE ISOLATE PROBE'S PURE HALF (§6.10 v10.94; GAPS 44). The fetching needs a
@@ -61,6 +64,98 @@ describe('the fixed route set', () => {
     expect(parseArgs(['--role', 'driver']).role).toBe('driver')
     expect(parseArgs([]).role).toBe('accounting')
     expect(() => parseArgs(['--root', 'x'])).toThrow(/unknown argument/)
+  })
+})
+
+describe('the six-role sequence (`--role all`, owner’s ruling 2026-11-15)', () => {
+  const matrix = readRouteMatrix(readFileSync('TMS-DESIGN-SYSTEM.md', 'utf8'))
+
+  it('is every route of the table in the table’s order, each asked for by all six roles, owner first and driver last', () => {
+    const sequence = sequenceFor(matrix, ALL_ROLES)
+    expect(sequence.length).toBe(matrix.size * MATRIX_ROLES.length)
+    // Route-major, as the sweep asks: the first six requests are the
+    // table's first route, as each role in MATRIX_ROLES order.
+    const first = [...matrix.keys()][0]
+    expect(sequence.slice(0, 6)).toEqual(
+      MATRIX_ROLES.map((role) => ({
+        route: first,
+        role,
+        expected: matrix.get(first)?.[role],
+      })),
+    )
+    const routesInOrder = sequence
+      .filter((entry) => entry.role === 'owner')
+      .map((entry) => entry.route)
+    expect(routesInOrder).toEqual([...matrix.keys()])
+    expect(sequence.at(-1)?.role).toBe('driver')
+  })
+
+  it('includes the cells the table refuses — the 1102 came on one', () => {
+    const sequence = sequenceFor(matrix, ALL_ROLES)
+    const driverImport = sequence.find(
+      (entry) => entry.route === '/payments/import' && entry.role === 'driver',
+    )
+    expect(driverImport).toEqual({
+      route: '/payments/import',
+      role: 'driver',
+      expected: 'refuse',
+    })
+    expect(
+      sequence.filter((entry) => entry.expected === 'refuse').length,
+    ).toBeGreaterThan(20)
+  })
+
+  it('one role is still that role’s reach routes alone', () => {
+    expect(sequenceFor(matrix, 'driver').map((entry) => entry.route)).toEqual(
+      routesFor(matrix, 'driver'),
+    )
+    expect(parseArgs(['--role', 'all']).role).toBe(ALL_ROLES)
+  })
+})
+
+describe('the 1102, by the body', () => {
+  const page =
+    '<title>Worker exceeded resource limits | zebra-dev.tajikcargollc.workers.dev | Cloudflare</title><span>Error 1102</span>'
+
+  it('names Cloudflare’s page on a 5xx, and nothing else', () => {
+    expect(namesResourceLimit(503, page)).toBe(true)
+    expect(namesResourceLimit(503, 'Error 1102')).toBe(true)
+    expect(namesResourceLimit(500, '<h1>Application error</h1>')).toBe(false)
+    // A 200 that quotes the words (a GAPS page, a help text) is not a 1102.
+    expect(namesResourceLimit(200, page)).toBe(false)
+  })
+
+  it('is counted by ray beside the unaccounted, so a 1102 with no tail event is still a 1102', () => {
+    const verdict = probeVerdict(
+      withDistinctCounts([
+        { pass: 1, route: '/a', status: 200, ray: 'r1', worker: fine },
+        {
+          pass: 1,
+          route: '/payments/import',
+          status: 503,
+          ray: 'a5b10b7b58e9a9b4-IAD',
+          worker: null,
+          resourceLimit: true,
+        },
+        { pass: 2, route: '/a', status: 200, ray: 'r3', worker: fine },
+        {
+          pass: 2,
+          route: '/payments/import',
+          status: 200,
+          ray: 'r4',
+          worker: fine,
+        },
+      ]),
+    )
+    expect(verdict.passes[1]).toMatchObject({
+      failed: 1,
+      resourceLimit: 1,
+      unaccounted: 1,
+      ceiling: 0,
+    })
+    expect(verdict.passes[2]?.resourceLimit).toBe(0)
+    expect(verdict.notOk).toBe(true)
+    expect(verdictLine(verdict, ALL_ROLES)).toContain('1 1102, 1 unaccounted')
   })
 })
 
