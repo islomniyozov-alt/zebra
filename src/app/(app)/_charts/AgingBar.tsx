@@ -116,23 +116,25 @@ export function AgingBar({
         <p className="mt-z2 text-sm text-ink-3">{labels.empty}</p>
       ) : null}
 
-      <table className="sr-only">
-        <caption>{labels.heading}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{labels.bucket}</th>
-            <th scope="col">{labels.amount}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {buckets.map((bucket) => (
-            <tr key={bucket.key}>
-              <th scope="row">{bucket.label}</th>
-              <td>{formatCents(bucket.cents, locale)}</td>
+      <div className="sr-only">
+        <table>
+          <caption>{labels.heading}</caption>
+          <thead>
+            <tr>
+              <th scope="col">{labels.bucket}</th>
+              <th scope="col">{labels.amount}</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {buckets.map((bucket) => (
+              <tr key={bucket.key}>
+                <th scope="row">{bucket.label}</th>
+                <td>{formatCents(bucket.cents, locale)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

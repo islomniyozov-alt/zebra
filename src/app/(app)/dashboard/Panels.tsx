@@ -161,32 +161,34 @@ export function FleetPanel({
             </ol>
           )}
 
-          <table className="sr-only">
-            <caption>{labels.topDrivers}</caption>
-            <thead>
-              <tr>
-                <th scope="col">{labels.driver}</th>
-                <th scope="col">{labels.gross}</th>
-                <th scope="col">{labels.loads}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {drivers.top.map((row) => (
-                <tr key={row.driverId}>
-                  <th scope="row">{row.driverName}</th>
-                  <td>{formatCents(row.grossCents, locale)}</td>
-                  <td>{String(row.loads)}</td>
-                </tr>
-              ))}
-              {drivers.restCount > 0 ? (
+          <div className="sr-only">
+            <table>
+              <caption>{labels.topDrivers}</caption>
+              <thead>
                 <tr>
-                  <th scope="row">{labels.other(drivers.restCount)}</th>
-                  <td>{formatCents(drivers.restCents, locale)}</td>
-                  <td />
+                  <th scope="col">{labels.driver}</th>
+                  <th scope="col">{labels.gross}</th>
+                  <th scope="col">{labels.loads}</th>
                 </tr>
-              ) : null}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {drivers.top.map((row) => (
+                  <tr key={row.driverId}>
+                    <th scope="row">{row.driverName}</th>
+                    <td>{formatCents(row.grossCents, locale)}</td>
+                    <td>{String(row.loads)}</td>
+                  </tr>
+                ))}
+                {drivers.restCount > 0 ? (
+                  <tr>
+                    <th scope="row">{labels.other(drivers.restCount)}</th>
+                    <td>{formatCents(drivers.restCents, locale)}</td>
+                    <td />
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </section>
@@ -412,37 +414,39 @@ export function CompliancePanel({
         </div>
       </div>
 
-      <table className="sr-only">
-        <caption>{labels.heading}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{labels.horizon}</th>
-            <th scope="col">{labels.count}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <th scope="row">{labels.d30}</th>
-            <td>{String(expiring.d30)}</td>
-          </tr>
-          <tr>
-            <th scope="row">{labels.d60}</th>
-            <td>{String(expiring.d60)}</td>
-          </tr>
-          <tr>
-            <th scope="row">{labels.d90}</th>
-            <td>{String(expiring.d90)}</td>
-          </tr>
-          <tr>
-            <th scope="row">{labels.complete}</th>
-            <td>{String(dqf.complete)}</td>
-          </tr>
-          <tr>
-            <th scope="row">{labels.incomplete}</th>
-            <td>{String(dqf.incomplete)}</td>
-          </tr>
-        </tbody>
-      </table>
+      <div className="sr-only">
+        <table>
+          <caption>{labels.heading}</caption>
+          <thead>
+            <tr>
+              <th scope="col">{labels.horizon}</th>
+              <th scope="col">{labels.count}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">{labels.d30}</th>
+              <td>{String(expiring.d30)}</td>
+            </tr>
+            <tr>
+              <th scope="row">{labels.d60}</th>
+              <td>{String(expiring.d60)}</td>
+            </tr>
+            <tr>
+              <th scope="row">{labels.d90}</th>
+              <td>{String(expiring.d90)}</td>
+            </tr>
+            <tr>
+              <th scope="row">{labels.complete}</th>
+              <td>{String(dqf.complete)}</td>
+            </tr>
+            <tr>
+              <th scope="row">{labels.incomplete}</th>
+              <td>{String(dqf.incomplete)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
   )
 }

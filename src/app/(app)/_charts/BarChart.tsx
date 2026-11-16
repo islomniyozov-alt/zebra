@@ -319,44 +319,46 @@ export function BarChart({ bars, locale, labels }: Props) {
       {legend}
 
       {/* ── THE FIGURES, READABLE WITHOUT THE BARS (§13) ───────────────── */}
-      <table className="sr-only">
-        <caption>{labels.heading}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{labels.bucket}</th>
-            <th scope="col">{labels.gross}</th>
-            <th scope="col">{labels.driverPay}</th>
-            <th scope="col">{labels.afterDriverPay}</th>
-            <th scope="col">{labels.loads}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {bars.map((bar) => (
-            <tr key={bar.key}>
-              <th scope="row">{bar.detail}</th>
-              <td>{formatCents(bar.grossCents, locale)}</td>
-              <td>
-                {bar.driverPayCents === null
-                  ? labels.unrecorded
-                  : formatCents(bar.driverPayCents, locale)}
-              </td>
-              <td>
-                {bar.marginCents === null
-                  ? labels.unrecorded
-                  : formatCents(bar.marginCents, locale)}
-              </td>
-              {/* AN EM DASH, NOT THE WORD "null" (§8). `String(null)` is
-               * "null", and that is what the by-company report printed in
-               * production for every row: it passes `loads: null` deliberately,
-               * because item 7's readers group money rather than loads, and the
-               * TOOLTIP above honours that by leaving the row out. This table
-               * cannot leave a cell out — the column belongs to the shape — so
-               * it says the thing §8 says for "not recorded". */}
-              <td>{bar.loads === null ? '—' : String(bar.loads)}</td>
+      <div className="sr-only">
+        <table>
+          <caption>{labels.heading}</caption>
+          <thead>
+            <tr>
+              <th scope="col">{labels.bucket}</th>
+              <th scope="col">{labels.gross}</th>
+              <th scope="col">{labels.driverPay}</th>
+              <th scope="col">{labels.afterDriverPay}</th>
+              <th scope="col">{labels.loads}</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {bars.map((bar) => (
+              <tr key={bar.key}>
+                <th scope="row">{bar.detail}</th>
+                <td>{formatCents(bar.grossCents, locale)}</td>
+                <td>
+                  {bar.driverPayCents === null
+                    ? labels.unrecorded
+                    : formatCents(bar.driverPayCents, locale)}
+                </td>
+                <td>
+                  {bar.marginCents === null
+                    ? labels.unrecorded
+                    : formatCents(bar.marginCents, locale)}
+                </td>
+                {/* AN EM DASH, NOT THE WORD "null" (§8). `String(null)` is
+                 * "null", and that is what the by-company report printed in
+                 * production for every row: it passes `loads: null` deliberately,
+                 * because item 7's readers group money rather than loads, and the
+                 * TOOLTIP above honours that by leaving the row out. This table
+                 * cannot leave a cell out — the column belongs to the shape — so
+                 * it says the thing §8 says for "not recorded". */}
+                <td>{bar.loads === null ? '—' : String(bar.loads)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

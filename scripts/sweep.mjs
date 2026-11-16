@@ -45,6 +45,7 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, sep } from 'node:path'
 import { describeReadBack, readBackHyperdrive } from './hyperdrive-config.mjs'
+import { measureShells, reportShells } from './shell-height.mjs'
 import { chromium } from 'playwright'
 import { neonConfig, Pool } from '@neondatabase/serverless'
 import {
@@ -1347,6 +1348,21 @@ async function sweep() {
   )
   for (const line of brokenLinks) console.log(`   BROKEN EXPORT LINK ${line}`)
   sums.problems += brokenLinks.length
+
+  // THE SHELL, RENDERED (owner's report 2026-11-16): every chart page at
+  // 1886×961 and 1366×768, as the owner — the shell one window tall at the
+  // top of a page that does not scroll. A problem per broken render, by page
+  // and window. See shell-height.mjs for the 2,743 px document that set it.
+  const shellBrowser = await chromium.launch(
+    process.env.SHOT_CHROME ? { executablePath: process.env.SHOT_CHROME } : {},
+  )
+  try {
+    sums.problems += reportShells(
+      await measureShells(shellBrowser, BASE, cookie),
+    )
+  } finally {
+    await shellBrowser.close()
+  }
 
   // ONE INVOCATION, ONE SIGN-IN (§6.10, 2026-10-13). Two sign-ins matched to
   // the same invocation means a measurement attributed to the wrong role —

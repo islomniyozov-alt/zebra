@@ -194,25 +194,27 @@ export function Donut({ slices, locale, top = 6, labels }: Props) {
       </div>
 
       {/* ── THE SAME FIGURES, READABLE WITHOUT SEEING THE RING (§13) ────── */}
-      <table className="sr-only">
-        <caption>{labels.heading}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{labels.name}</th>
-            <th scope="col">{labels.value}</th>
-            <th scope="col">{labels.share}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {drawn.map((slice) => (
-            <tr key={slice.key}>
-              <th scope="row">{slice.label}</th>
-              <td>{formatCents(slice.cents, locale)}</td>
-              <td>{pct(slice.cents)}</td>
+      <div className="sr-only">
+        <table>
+          <caption>{labels.heading}</caption>
+          <thead>
+            <tr>
+              <th scope="col">{labels.name}</th>
+              <th scope="col">{labels.value}</th>
+              <th scope="col">{labels.share}</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {drawn.map((slice) => (
+              <tr key={slice.key}>
+                <th scope="row">{slice.label}</th>
+                <td>{formatCents(slice.cents, locale)}</td>
+                <td>{pct(slice.cents)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

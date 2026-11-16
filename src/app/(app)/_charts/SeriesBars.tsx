@@ -264,31 +264,33 @@ export function SeriesBars({
 
       {/* THE SAME FIGURES AS A TABLE (§6.1.1, §13), in full rather than
        * compacted: a screen reader gets no benefit from "$12.4k". */}
-      <table className="sr-only">
-        <caption>{labels.heading}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{labels.bucket}</th>
-            {series.map((entry) => (
-              <th key={entry.key} scope="col">
-                {entry.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {buckets.map((bucket) => (
-            <tr key={bucket.key}>
-              <th scope="row">{bucket.detail}</th>
-              {series.map((entry, index) => (
-                <td key={entry.key}>
-                  {formatCents(bucket.values[index] ?? 0, locale)}
-                </td>
+      <div className="sr-only">
+        <table>
+          <caption>{labels.heading}</caption>
+          <thead>
+            <tr>
+              <th scope="col">{labels.bucket}</th>
+              {series.map((entry) => (
+                <th key={entry.key} scope="col">
+                  {entry.label}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {buckets.map((bucket) => (
+              <tr key={bucket.key}>
+                <th scope="row">{bucket.detail}</th>
+                {series.map((entry, index) => (
+                  <td key={entry.key}>
+                    {formatCents(bucket.values[index] ?? 0, locale)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

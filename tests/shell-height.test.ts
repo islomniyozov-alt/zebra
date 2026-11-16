@@ -1,0 +1,109 @@
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { describe, expect, it } from 'vitest'
+import {
+  SHELL_PAGES,
+  SHELL_VIEWPORTS,
+  shellFindings,
+} from '../scripts/shell-height.mjs'
+
+// ---------------------------------------------------------------------------
+// THE SHELL FILLS THE WINDOW (owner's report 2026-11-16, dev /dashboard at
+// 1886×961). The cause was a chart's screen-reader table carrying `sr-only`
+// itself: a table grows past `height: 1px` and ignores `overflow: hidden`, so
+// 1,760 px of rows hung off the page and the document scrolled under the
+// shell. `scripts/shell-height.mjs` renders the chart pages and the sweep runs
+// it on every deploy; these hold its arithmetic, its page list and the cause.
+// ---------------------------------------------------------------------------
+
+/** Every .tsx under `dir`, recursively. */
+function tsxUnder(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const at = join(dir, entry.name)
+    if (entry.isDirectory()) return tsxUnder(at)
+    return entry.name.endsWith('.tsx') ? [at] : []
+  })
+}
+
+const row = (overrides: Record<string, unknown> = {}) => ({
+  path: '/dashboard',
+  width: 1886,
+  height: 961,
+  status: 200,
+  shellTop: 0,
+  shellHeight: 961,
+  documentHeight: 961,
+  ...overrides,
+})
+
+describe('the shell check', () => {
+  it('measures at the report’s window and a laptop’s', () => {
+    expect(SHELL_VIEWPORTS).toEqual([
+      { width: 1886, height: 961 },
+      { width: 1366, height: 768 },
+    ])
+  })
+
+  it('passes a shell one window tall on a page that does not scroll', () => {
+    expect(shellFindings([row()])).toEqual([])
+  })
+
+  it('fails the report: the page scrolled and the shell rode up', () => {
+    // Read on dev at 0d1ec98: shell 961 px at -1,782, document 2,743 px.
+    expect(
+      shellFindings([row({ shellTop: -1782, documentHeight: 2743 })]),
+    ).toEqual([
+      '/dashboard at 1886×961: shell top at -1782px after scrolling the page',
+      '/dashboard at 1886×961: document 2743px tall, window 961px',
+    ])
+  })
+
+  it('fails a short shell, a missing one and a page it could not measure', () => {
+    expect(shellFindings([row({ shellHeight: 590 })])).toEqual([
+      '/dashboard at 1886×961: shell 590px tall, window 961px',
+    ])
+    expect(shellFindings([row({ shellHeight: null })])).toHaveLength(1)
+    expect(shellFindings([row({ status: 500 })])).toEqual([
+      '/dashboard at 1886×961: answered 500, shell not measured',
+    ])
+  })
+
+  it('renders every page that draws a chart', () => {
+    // Read from the source: the pages whose own file imports a chart, plus
+    // the dashboard, whose panels do.
+    const appDir = join('src', 'app', '(app)')
+    const chartPages = tsxUnder(appDir)
+      .filter((file) => file.endsWith('page.tsx'))
+      .filter((file) =>
+        /from '(\.\.\/)+_charts\/|from '\.\/Panels'/.test(
+          readFileSync(file, 'utf8'),
+        ),
+      )
+      .map(
+        (file) =>
+          '/' +
+          file
+            .slice(appDir.length + 1)
+            .replace(/\\/g, '/')
+            .replace(/\/?page\.tsx$/, ''),
+      )
+    expect(chartPages.length).toBeGreaterThan(1)
+    expect(new Set(SHELL_PAGES)).toEqual(new Set(chartPages))
+  })
+
+  it('runs on every deploy sweep, its problems counted', () => {
+    const sweep = readFileSync('scripts/sweep.mjs', 'utf8')
+    expect(sweep).toMatch(
+      /sums\.problems \+= reportShells\(\s*await measureShells\(shellBrowser, BASE, cookie\)/,
+    )
+  })
+})
+
+describe('the cause', () => {
+  it('no table carries sr-only itself — the div around it does', () => {
+    const offenders = tsxUnder('src').filter((file) =>
+      /<table[^>]*\bsr-only\b/.test(readFileSync(file, 'utf8')),
+    )
+    expect(offenders).toEqual([])
+  })
+})

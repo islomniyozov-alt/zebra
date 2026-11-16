@@ -163,23 +163,25 @@ export function DayBars({ days, period, labels }: Props) {
       </div>
 
       {/* ── THE FIGURES, READABLE WITHOUT THE STRIP (§13) ───────────────── */}
-      <table className="sr-only">
-        <caption>{labels.heading}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{labels.day}</th>
-            <th scope="col">{labels.loads}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {axis.map((day) => (
-            <tr key={iso(day)}>
-              <th scope="row">{iso(day)}</th>
-              <td>{String(counts.get(iso(day)) ?? 0)}</td>
+      <div className="sr-only">
+        <table>
+          <caption>{labels.heading}</caption>
+          <thead>
+            <tr>
+              <th scope="col">{labels.day}</th>
+              <th scope="col">{labels.loads}</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {axis.map((day) => (
+              <tr key={iso(day)}>
+                <th scope="row">{iso(day)}</th>
+                <td>{String(counts.get(iso(day)) ?? 0)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
