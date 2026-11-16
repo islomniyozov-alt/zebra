@@ -9,6 +9,11 @@
 // the window with the grey body under it, cutting "Loads delivered per day"
 // in half. Every HTTP check passed, because nothing about it is a status.
 //
+// AND THE SIDEBAR SCROLLS ON ITS OWN (owner's report 2026-11-16): eleven
+// groups ran past a 961 px window and Maintenance, HR Management and Admin
+// could not be reached. On the first page of each window every sidebar entry
+// is scrolled to inside the sidebar, and must land in the window.
+//
 // So this RENDERS the pages that draw charts, at the window the report came
 // from and a laptop's, scrolls the page as far as it goes, and holds three
 // facts: the shell's top is at 0, its height is the window's, and the
@@ -68,8 +73,56 @@ export function shellFindings(rows) {
       problems.push(
         `${where}: document ${row.documentHeight}px tall, window ${row.height}px`,
       )
+    // THE SIDEBAR, ENTRY BY ENTRY, where it was measured (the first page of
+    // each window — the sidebar is the same on every page).
+    if (row.sidebarEntries === undefined) continue
+    if (row.sidebarEntries === 0)
+      problems.push(`${where}: no sidebar entries to reach`)
+    for (const href of row.sidebarUnreachable ?? [])
+      problems.push(
+        `${where}: sidebar entry ${href} not reachable by scrolling the sidebar`,
+      )
   }
   return problems
+}
+
+/**
+ * In the page: scroll ONLY the sidebar's own scroller to each entry and ask
+ * whether it then lies inside the window and is the element at its centre.
+ * Scrolling the entry into view with `scrollIntoView` would not do — an
+ * `overflow-hidden` shell is still scrollable by script, and a check that
+ * scrolled the shell to reach Admin would pass a sidebar nobody can scroll.
+ */
+function reachSidebar() {
+  const nav = document.querySelector('[data-density] nav')
+  const links = nav ? [...nav.querySelectorAll('a[href]')] : []
+  const scrollerOf = (element) => {
+    for (
+      let at = element.parentElement;
+      at && at !== nav.parentElement;
+      at = at.parentElement
+    )
+      if (/auto|scroll/.test(getComputedStyle(at).overflowY)) return at
+    return null
+  }
+  const unreachable = []
+  for (const link of links) {
+    const scroller = scrollerOf(link)
+    if (scroller) {
+      const offset =
+        link.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+      scroller.scrollTop += offset - scroller.clientHeight / 2
+    }
+    const box = link.getBoundingClientRect()
+    const hit = document.elementFromPoint(
+      box.left + box.width / 2,
+      box.top + box.height / 2,
+    )
+    const inside = box.top >= 0 && box.bottom <= window.innerHeight
+    if (!inside || !hit || !(hit === link || link.contains(hit)))
+      unreachable.push(link.getAttribute('href'))
+  }
+  return { sidebarEntries: links.length, sidebarUnreachable: unreachable }
 }
 
 /** Render every page at every viewport with `cookie`; one row per pair. */
@@ -111,7 +164,11 @@ export async function measureShells(
               }
             })
           : { shellTop: null, shellHeight: null, documentHeight: null }
-      rows.push({ path, ...viewport, status, ...measured })
+      const sidebar =
+        status === 200 && path === pages[0]
+          ? await page.evaluate(reachSidebar)
+          : {}
+      rows.push({ path, ...viewport, status, ...measured, ...sidebar })
     }
     await context.close()
   }

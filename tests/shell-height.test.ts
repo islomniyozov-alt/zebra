@@ -68,6 +68,31 @@ describe('the shell check', () => {
     ])
   })
 
+  it('fails a sidebar entry the sidebar cannot be scrolled to', () => {
+    // Read on dev at 29b0820, 1366×768: eleven entries, Compliance to Audit.
+    expect(
+      shellFindings([
+        row({
+          width: 1366,
+          height: 768,
+          shellHeight: 768,
+          documentHeight: 768,
+          sidebarEntries: 24,
+          sidebarUnreachable: ['/maintenance', '/audit'],
+        }),
+      ]),
+    ).toEqual([
+      '/dashboard at 1366×768: sidebar entry /maintenance not reachable by scrolling the sidebar',
+      '/dashboard at 1366×768: sidebar entry /audit not reachable by scrolling the sidebar',
+    ])
+    expect(
+      shellFindings([row({ sidebarEntries: 0, sidebarUnreachable: [] })]),
+    ).toEqual(['/dashboard at 1886×961: no sidebar entries to reach'])
+    expect(
+      shellFindings([row({ sidebarEntries: 24, sidebarUnreachable: [] })]),
+    ).toEqual([])
+  })
+
   it('renders every page that draws a chart', () => {
     // Read from the source: the pages whose own file imports a chart, plus
     // the dashboard, whose panels do.
@@ -96,6 +121,33 @@ describe('the shell check', () => {
     expect(sweep).toMatch(
       /sums\.problems \+= reportShells\(\s*await measureShells\(shellBrowser, BASE, cookie\)/,
     )
+  })
+})
+
+describe('the sidebar scrolls on its own', () => {
+  it('its list is bounded under the wordmark and scrolls, thin, in nav tokens', () => {
+    const sidebar = readFileSync('src/components/shell/Sidebar.tsx', 'utf8')
+    const list = /<div className="([^"]*)">\s*\{groups\.map/.exec(sidebar)?.[1]
+    expect(list?.split(' ')).toEqual(
+      expect.arrayContaining([
+        'z-nav-scroll',
+        'min-h-0',
+        'flex-1',
+        'overflow-y-auto',
+      ]),
+    )
+    const css = readFileSync('src/app/globals.css', 'utf8')
+    const rule = /\.z-nav-scroll \{([^}]*)\}/.exec(css)?.[1] ?? ''
+    expect(rule).toMatch(/scrollbar-width: thin;/)
+    expect(rule).toMatch(
+      /scrollbar-color: var\(--color-nav-[a-z0-9-]+\) transparent;/,
+    )
+  })
+
+  it('and the check reaches each entry by the sidebar’s own scroller', () => {
+    const check = readFileSync('scripts/shell-height.mjs', 'utf8')
+    expect(check).toContain('await page.evaluate(reachSidebar)')
+    expect(check).not.toMatch(/scrollIntoView\(/)
   })
 })
 

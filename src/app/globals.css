@@ -211,6 +211,13 @@
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
   }
+
+  /* §3.6 — the sidebar's own scrollbar: thin, the rule's navy on nothing, so
+   * it reads as part of the column rather than a light bar laid over it. */
+  .z-nav-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-nav-border) transparent;
+  }
 }
 
 /* WHY A ROW WAS NOT READ, beside its badge.

@@ -65,7 +65,12 @@ export function Sidebar({ groups, appName, navLabel }: SidebarProps) {
         </span>
       </div>
 
-      <div className="flex flex-col gap-z3 py-z3">
+      {/* THE LIST SCROLLS, THE WORDMARK DOES NOT (owner's report
+          2026-11-16): eleven groups outgrow a laptop's window, and a column
+          that only grew pushed Maintenance, HR Management and Admin below
+          its edge. `min-h-0 flex-1` bounds it under the wordmark row;
+          `z-nav-scroll` is the thin scrollbar in the nav tokens. */}
+      <div className="z-nav-scroll flex min-h-0 flex-1 flex-col gap-z3 overflow-y-auto py-z3">
         {groups.map((group) => (
           <div key={group.key} className="flex flex-col gap-[2px]">
             {group.label ? (
