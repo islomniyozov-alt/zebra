@@ -3,15 +3,16 @@ import { readFileSync } from 'node:fs'
 import { createPrismaClient } from '@/lib/db'
 import { asRecords, readXlsx } from '@/lib/datatruck/xlsx'
 import {
+  alreadyInZebra,
   chooseExport,
   coDriverSeat,
   crewFillFor,
   datatruckCents,
   importEventAt,
+  indexZebraLoads,
   planLoads,
   DATATRUCK_EVENT_NOTE,
-  rateChangeFor,
-  rateFreezeFor,
+  rateDecisionFor,
   syncDecisionFor,
   type PlannedLoad,
 } from '@/lib/datatruck/loads'
@@ -28,9 +29,9 @@ import { assertTenancy } from './datatruck-tenancy'
 //   npx tsx -r dotenv/config scripts/seed-datatruck-loads.ts --production --write
 //
 // The rules are in `src/lib/datatruck/loads.ts` and tested without a database.
-// This file does the four things that need one: resolve names to rows, bridge
-// to the loads Zebra already has, reconcile the money, and write in batches
-// that can be resumed.
+// This file does the four things that need one: resolve names to rows, refuse
+// the rows Zebra already holds, reconcile the money, and write in batches that
+// can be resumed.
 //
 // ── RECONCILE TO THE CENT, BEFORE ANYTHING IS WRITTEN ─────────────────────
 //
@@ -56,7 +57,10 @@ import { assertTenancy } from './datatruck-tenancy'
 // and is tested without a database; this file only writes what it returns.
 //
 // A load with no `externalId` was booked in Zebra and is none of the sync's
-// business: those stay add-missing, as they always were.
+// business. An export row whose `Load ID` or `Trip ID` names one — or names
+// any load other than the row's own — is REFUSED by `alreadyInZebra`, printed
+// by name and never created (owner's ruling, 2026-11-16). It replaced the
+// bridge, which enriched an exact match and created everything else.
 //
 // ── WHAT IT NEVER TOUCHES ─────────────────────────────────────────────────
 //
@@ -341,6 +345,67 @@ async function main(): Promise<void> {
       console.log(`  … and ${plan.held.length - 40} more`)
     }
 
+    // ── ALREADY IN ZEBRA: ONE PREDICATE, ASKED BEFORE ANYTHING ELSE ──────
+    //
+    // `alreadyInZebra` is the rule and is tested without a database; this
+    // reads what it needs. EVERY load, deleted ones included, for the
+    // Shipment ID — `@@unique([organizationId, externalId])` holds across a
+    // soft delete, so a deleted import still owns its key. References only
+    // from live loads: a deleted load is not freight Zebra holds.
+    const zebraLoads = await db.load.findMany({
+      where: { organizationId: tenancy.organizationId },
+      select: {
+        id: true,
+        loadNumber: true,
+        externalId: true,
+        referenceNumber: true,
+        deletedAt: true,
+        stops: {
+          where: { referenceNumber: { not: null } },
+          select: { referenceNumber: true },
+        },
+      },
+    })
+    const zebraIndex = indexZebraLoads(
+      zebraLoads.map((load) => ({
+        id: load.id,
+        loadNumber: load.loadNumber,
+        externalId: load.externalId,
+        referenceNumber: load.deletedAt ? null : load.referenceNumber,
+        stopReferences: load.deletedAt
+          ? []
+          : load.stops.flatMap((stop) =>
+              stop.referenceNumber ? [stop.referenceNumber] : [],
+            ),
+      })),
+    )
+    const decided = plan.planned.map((load) => ({
+      load,
+      decision: alreadyInZebra(load, zebraIndex),
+    }))
+    const refused = decided.flatMap(({ load, decision }) =>
+      decision.kind === 'refused' ? [{ load, matches: decision.matches }] : [],
+    )
+    /** Every row the predicate lets through: its own load, or a new one. */
+    const toWrite: PlannedLoad[] = decided.flatMap(({ load, decision }) =>
+      decision.kind === 'refused' ? [] : [load],
+    )
+    const importedCount = decided.filter(
+      ({ decision }) => decision.kind === 'imported',
+    ).length
+
+    heading(
+      `REFUSED — ${refused.length} row(s) whose Load ID or Trip ID is already in Zebra; never created`,
+    )
+    for (const { load, matches } of refused) {
+      console.log(
+        `  ${load.externalId.padEnd(12)} ` +
+          matches
+            .map((m) => `${m.via} ${m.key} = load ${m.loadNumber} (${m.on})`)
+            .join('; '),
+      )
+    }
+
     // ── RESOLUTION: NAMES TO ROWS, ORG-WIDE, AMBIGUITY REFUSED ─────────
     //
     // Trucks by unit and drivers by name, across the whole organization rather
@@ -444,7 +509,7 @@ async function main(): Promise<void> {
     const unresolvedCoDrivers = new Map<string, number>()
     const ambiguousCoDrivers = new Map<string, number>()
     const sameAsDriver = new Map<string, number>()
-    for (const load of plan.planned) {
+    for (const load of toWrite) {
       if (load.truckUnit) {
         const companyId = companyByName.get(load.authority) ?? ''
         const hits = truckByUnit.get(nameKey(load.truckUnit)) ?? []
@@ -533,7 +598,7 @@ async function main(): Promise<void> {
       CUSTOMER_ALIASES[exportName] ?? exportName
 
     const wanted = new Map<string, number>()
-    for (const load of plan.planned) {
+    for (const load of toWrite) {
       wanted.set(load.customerName, (wanted.get(load.customerName) ?? 0) + 1)
     }
 
@@ -604,104 +669,78 @@ async function main(): Promise<void> {
     )
     console.log('  customers afterwards is far harder than not splitting them.')
 
-    // ── THE BRIDGE TO LOADS ZEBRA ALREADY HAS ──────────────────────────
+    // ── RATE HELD, READ BEFORE THE WRITE RATHER THAN AFTER IT ───────────
     //
-    // `Load ID` -> `referenceNumber`, lookup only. It is NOT unique in the
-    // export — six values repeat — so a repeated one that matches a live load
-    // is refused and named rather than enriching the same load from several
-    // rows.
-    // ── LOADS ZEBRA BOOKED ITSELF, WHICH EXCLUDES THIS IMPORT'S OWN ────
-    //
-    // `externalId: null` is the whole clause and it was missing on the first
-    // dev run. Imported loads carry a `referenceNumber` too — it is the
-    // customer's text, copied from `Load ID` — so on a SECOND run every one of
-    // them looked like a live Zebra load waiting to be enriched, and the seed
-    // set about enriching 14,444 rows with themselves.
-    //
-    // Found by re-running rather than by reading: the first run was clean
-    // because there was nothing imported yet to confuse it, which is exactly
-    // the shape of bug that only a second run can show.
-    const live = await db.load.findMany({
-      where: {
-        organizationId: tenancy.organizationId,
-        deletedAt: null,
-        referenceNumber: { not: null },
-        externalId: null,
-      },
-      select: { id: true, referenceNumber: true, loadNumber: true },
-    })
-    const liveByReference = new Map(
-      live.map((load) => [nameKey(load.referenceNumber ?? ''), load]),
+    // Owner's ruling, 2026-11-16: on a matched load that is invoiced, settled
+    // or paid, the import never changes the rate, and the difference is
+    // printed. `rateDecisionFor` is the rule the write below calls too, so
+    // this list is what the write will refuse, not a forecast of it. In
+    // chunks, because the history is 14,451 ids.
+    const alreadyPresent = importedCount
+    const rateHeldPreview: string[] = []
+    let ratesToRestate = 0
+    /** The row each matched load came from, keyed by the load's id. */
+    const importedByLoadId = new Map(
+      decided.flatMap(({ load, decision }) =>
+        decision.kind === 'imported' ? [[decision.loadId, load] as const] : [],
+      ),
     )
-    const bridgeCounts = new Map<string, PlannedLoad[]>()
-    for (const load of plan.planned) {
-      if (!load.referenceNumber) continue
-      const key = nameKey(load.referenceNumber)
-      if (!liveByReference.has(key)) continue
-      bridgeCounts.set(key, [...(bridgeCounts.get(key) ?? []), load])
-    }
-    const toEnrich = [...bridgeCounts].filter(([, rows]) => rows.length === 1)
-    const contested = [...bridgeCounts].filter(([, rows]) => rows.length > 1)
-
-    heading(
-      `THE BRIDGE — ${toEnrich.length} export row(s) match a live Zebra load`,
-    )
-    for (const [key, rows] of toEnrich) {
-      const target = liveByReference.get(key)!
-      console.log(
-        `  ${rows[0]!.externalId.padEnd(12)} -> load ${target.loadNumber} (ref ${target.referenceNumber})`,
-      )
-    }
-    if (contested.length > 0) {
-      heading(
-        `CONTESTED — ${contested.length} reference(s) claimed by several rows`,
-      )
-      for (const [key, rows] of contested) {
-        const target = liveByReference.get(key)!
-        console.log(
-          `  load ${target.loadNumber} (ref ${target.referenceNumber}) claimed by ` +
-            `${rows.map((r) => r.externalId).join(', ')} — REFUSED, none enriches it`,
-        )
-      }
-    }
-
-    const enrichKeys = new Set(toEnrich.map(([key]) => key))
-    const toCreate = plan.planned.filter(
-      (load) =>
-        !load.referenceNumber || !enrichKeys.has(nameKey(load.referenceNumber)),
-    )
-
-    // ── WHAT IS ALREADY HERE, ASKED RATHER THAN ASSUMED ────────────────
-    //
-    // A resumable seed whose preview cannot say "9,000 of these are already
-    // in" is a preview that describes the first run and lies about every one
-    // after it. Counted on the KEY the write uses, in chunks because 14,451
-    // ids do not belong in a single `IN` list.
-    let alreadyPresent = 0
-    for (const ids of chunk(
-      toCreate.map((load) => load.externalId),
-      1_000,
-    )) {
-      alreadyPresent += await db.load.count({
-        where: {
-          organizationId: tenancy.organizationId,
-          externalId: { in: ids },
+    for (const ids of chunk([...importedByLoadId.keys()], 1_000)) {
+      const rows = await db.load.findMany({
+        where: { id: { in: ids } },
+        select: {
+          id: true,
+          externalId: true,
+          billingStatus: true,
+          linehaulCents: true,
+          accessorialsCents: true,
+          _count: {
+            select: {
+              settlementLines: true,
+              settlementLoadLines: true,
+              paymentApplications: true,
+              invoiceLines: true,
+            },
+          },
         },
       })
+      for (const row of rows) {
+        const load = importedByLoadId.get(row.id)!
+        const decision = rateDecisionFor(
+          {
+            billing: row.billingStatus,
+            ...row._count,
+            linehaulCents: row.linehaulCents,
+            accessorialCents: row.accessorialsCents,
+          },
+          load,
+        )
+        if (decision.kind === 'change') ratesToRestate++
+        if (decision.kind === 'held') {
+          rateHeldPreview.push(`${load.externalId} ${decision.line}`)
+        }
+      }
     }
+    heading(
+      `RATE HELD — ${rateHeldPreview.length} matched load(s) invoiced, settled or paid; the export's rate is not written`,
+    )
+    for (const line of rateHeldPreview) console.log(`  ${line}`)
 
     heading('WHAT THIS WOULD DO')
     console.log(
-      `  ${String(toCreate.length - alreadyPresent).padStart(6)}  loads created`,
+      `  ${String(toWrite.length - alreadyPresent).padStart(6)}  loads created`,
     )
     console.log(
-      `  ${String(alreadyPresent).padStart(6)}  already present — a re-run skips these`,
+      `  ${String(alreadyPresent).padStart(6)}  already present — synced forward, never created again`,
     )
     console.log(
-      `  ${String(toEnrich.length).padStart(6)}  live loads enriched — adds missing, replaces nothing`,
+      `  ${String(refused.length).padStart(6)}  rows refused — already in Zebra under another load`,
     )
     console.log(
-      `  ${String(contested.length).padStart(6)}  references refused as contested`,
+      `  ${String(ratesToRestate).padStart(6)}  rates restated on matched loads`,
+    )
+    console.log(
+      `  ${String(rateHeldPreview.length).padStart(6)}  rates held — invoiced, settled or paid`,
     )
     console.log(
       `  ${String(missingCustomers.length).padStart(6)}  customers created`,
@@ -738,7 +777,7 @@ async function main(): Promise<void> {
     }
     console.log(`  ${missingCustomers.length} created`)
 
-    heading(`LOADS — ${toCreate.length} in batches of ${BATCH}`)
+    heading(`LOADS — ${toWrite.length} in batches of ${BATCH}`)
     const writeStarted = Date.now()
     let created = 0
     let skipped = 0
@@ -753,10 +792,10 @@ async function main(): Promise<void> {
     let advanced = 0
     let ratesUpdated = 0
     const heldBackwards: string[] = []
-    const rateFrozen: string[] = []
+    const rateHeld: string[] = []
     let batchIndex = 0
 
-    for (const batch of chunk(toCreate, BATCH)) {
+    for (const batch of chunk(toWrite, BATCH)) {
       batchIndex++
       // RESUMABILITY LIVES HERE. Ask what is already present rather than
       // trusting a checkpoint; the database is the only record of what landed.
@@ -781,10 +820,16 @@ async function main(): Promise<void> {
           accessorialsCents: true,
           organizationId: true,
           // WHAT ZEBRA HAS SPENT AGAINST THIS LOAD. Counted, not inferred from
-          // a status: a settlement line means a driver was paid on this figure
-          // and an application means a customer's money was matched to it.
+          // a status: a settlement line means a driver was paid on this figure,
+          // an application means a customer's money was matched to it, and an
+          // invoice line means a broker holds a bill for it.
           _count: {
-            select: { settlementLines: true, paymentApplications: true },
+            select: {
+              settlementLines: true,
+              settlementLoadLines: true,
+              paymentApplications: true,
+              invoiceLines: true,
+            },
           },
         },
       })
@@ -896,41 +941,28 @@ async function main(): Promise<void> {
         //
         // While dispatchers work over there a live load's rate is theirs and
         // this system follows. The freeze is about COMMITMENT rather than age:
-        // once a settlement line or a payment application exists, the figure
-        // has been paid on, and moving it would make a cheque disagree with
-        // the load it settled.
-        const freeze = rateFreezeFor({
-          billing: row.billingStatus,
-          settlementLines: row._count.settlementLines,
-          paymentApplications: row._count.paymentApplications,
-        })
-        const rate = freeze.frozen
-          ? null
-          : rateChangeFor(
-              {
-                linehaulCents: row.linehaulCents,
-                accessorialCents: row.accessorialsCents,
-              },
-              {
-                linehaulCents: load.linehaulCents,
-                accessorialCents: load.accessorialCents,
-              },
-            )
+        // once the load is invoiced, settled or paid, the figure has been
+        // billed or paid on, and moving it would make an invoice or a cheque
+        // disagree with the load. `rateDecisionFor` is the rule, and the
+        // preview's RATE HELD list came from the same call.
+        const rateDecision = rateDecisionFor(
+          {
+            billing: row.billingStatus,
+            ...row._count,
+            linehaulCents: row.linehaulCents,
+            accessorialCents: row.accessorialsCents,
+          },
+          load,
+        )
+        const rate = rateDecision.kind === 'change' ? rateDecision.change : null
         if (rate) {
           data['linehaulCents'] = rate.linehaulCents
           data['accessorialsCents'] = rate.accessorialCents
           data['totalRevenueCents'] = rate.totalRevenueCents
-        } else if (
-          freeze.frozen &&
-          freeze.why !== 'closed' &&
-          (row.linehaulCents !== load.linehaulCents ||
-            row.accessorialsCents !== load.accessorialCents)
-        ) {
+        } else if (rateDecision.kind === 'held') {
           // Named, not skipped in silence: the export disagrees with a figure
-          // Zebra has already paid against, and somebody should know.
-          rateFrozen.push(
-            `${load.externalId} ${freeze.why}: export ${load.linehaulCents}+${load.accessorialCents}, database ${row.linehaulCents}+${row.accessorialsCents}`,
-          )
+          // Zebra has already billed or paid against, and somebody should know.
+          rateHeld.push(`${load.externalId} ${rateDecision.line}`)
         }
 
         if (Object.keys(data).length === 0) continue
@@ -1207,48 +1239,12 @@ async function main(): Promise<void> {
       }
     }
 
-    // ── ENRICHMENT: ADDS MISSING, REPLACES NOTHING ─────────────────────
-    heading(`ENRICHING — ${toEnrich.length} live load(s)`)
-    let enriched = 0
-    for (const [key, rows] of toEnrich) {
-      const targetLoad = liveByReference.get(key)!
-      const source = rows[0]!
-      const current = await db.load.findUniqueOrThrow({
-        where: { id: targetLoad.id },
-        select: {
-          externalId: true,
-          internalNotes: true,
-          actualMiles: true,
-          emptyMiles: true,
-          dispatchedMiles: true,
-        },
-      })
-      // Every field is written ONLY where the live load has nothing. A live
-      // load is the newer truth about freight that is still running.
-      const data: Record<string, unknown> = {}
-      if (current.externalId === null) data['externalId'] = source.externalId
-      if (current.internalNotes === null && source.tripId) {
-        data['internalNotes'] = `Datatruck trip ${source.tripId}.`
-      }
-      if (current.actualMiles === null && source.actualMiles !== null) {
-        data['actualMiles'] = source.actualMiles
-      }
-      if (current.emptyMiles === null && source.emptyMiles !== null) {
-        data['emptyMiles'] = source.emptyMiles
-      }
-      if (current.dispatchedMiles === null && source.dispatchedMiles !== null) {
-        data['dispatchedMiles'] = source.dispatchedMiles
-      }
-      if (Object.keys(data).length === 0) {
-        console.log(`  ${targetLoad.loadNumber}  nothing missing, left alone`)
-        continue
-      }
-      await db.load.update({ where: { id: targetLoad.id }, data })
-      enriched++
-      console.log(
-        `  ${targetLoad.loadNumber}  added ${Object.keys(data).join(', ')}`,
-      )
-    }
+    // ── NO ENRICHMENT ANY MORE ────────────────────────────────────────────
+    //
+    // The bridge used to add miles, a trip note and the Shipment ID to a live
+    // load whose reference matched. Writing the Shipment ID is what made that
+    // load syncable — and re-priceable — on every later run, so the ruling of
+    // 2026-11-16 refuses the row instead. A refused row writes nothing.
 
     const seconds = (Date.now() - startedAt) / 1000
     heading('WRITTEN')
@@ -1294,14 +1290,13 @@ async function main(): Promise<void> {
     console.log(
       `  ${ratesUpdated} rate(s) restated, each with a BILLING event naming old and new`,
     )
-    if (rateFrozen.length > 0) {
-      console.log(
-        `  ${rateFrozen.length} rate change(s) REFUSED — Zebra has money against them:`,
+    if (rateHeld.length > 0) {
+      // EVERY LINE, NOT THE FIRST TWENTY. Each is an invoice, a statement or
+      // a payment the export disagrees with.
+      heading(
+        `RATE HELD — ${rateHeld.length} matched load(s) invoiced, settled or paid; the export's rate was not written`,
       )
-      for (const line of rateFrozen.slice(0, 20)) console.log(`    ${line}`)
-      if (rateFrozen.length > 20) {
-        console.log(`    … and ${rateFrozen.length - 20} more`)
-      }
+      for (const line of rateHeld) console.log(`  ${line}`)
     }
     if (heldBackwards.length > 0) {
       console.log(
@@ -1312,7 +1307,9 @@ async function main(): Promise<void> {
         console.log(`    … and ${heldBackwards.length - 20} more`)
       }
     }
-    console.log(`  ${enriched} live loads enriched`)
+    console.log(
+      `  ${refused.length} row(s) refused — already in Zebra, nothing written`,
+    )
     console.log(`  ${missingCustomers.length} customers created`)
     console.log(
       `  ${seconds.toFixed(1)}s total, ${(created / Math.max(seconds, 0.001)).toFixed(0)} loads/second`,

@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
+  alreadyInZebra,
+  indexZebraLoads,
+  rateDecisionFor,
+  type ZebraLoadKey,
   chooseExport,
   coDriverSeat,
   terminatedYieldsToTruck,
@@ -519,11 +523,67 @@ describe('what a later export may change', () => {
 // ---------------------------------------------------------------------------
 
 describe('when a fresh export may restate the money', () => {
-  const load = (over: Partial<Parameters<typeof rateFreezeFor>[0]> = {}) => ({
-    billing: 'UNINVOICED' as const,
+  const load = (
+    over: Partial<Parameters<typeof rateFreezeFor>[0]> = {},
+  ): Parameters<typeof rateFreezeFor>[0] => ({
+    billing: 'UNINVOICED',
     settlementLines: 0,
+    settlementLoadLines: 0,
     paymentApplications: 0,
+    invoiceLines: 0,
     ...over,
+  })
+
+  // ── OWNER'S RULING 2026-11-16: INVOICED, SETTLED OR PAID ───────────────
+  it('freezes an invoiced load that has no payment yet', () => {
+    // The gap the ruling closed: INVOICED with nothing applied was restated,
+    // and the broker's invoice then disagreed with the load it bills.
+    expect(rateFreezeFor(load({ billing: 'INVOICED' }))).toEqual({
+      frozen: true,
+      why: 'invoiced',
+    })
+  })
+
+  it('freezes on an invoice line, whatever the billing axis says', () => {
+    expect(rateFreezeFor(load({ invoiceLines: 1 }))).toEqual({
+      frozen: true,
+      why: 'invoiced',
+    })
+  })
+
+  it('freezes a load filed with the factor, disputed or written off', () => {
+    for (const billing of [
+      'FILED_WITH_FACTOR',
+      'DISPUTED',
+      'WRITTEN_OFF',
+    ] as const) {
+      expect(rateFreezeFor(load({ billing }))).toEqual({
+        frozen: true,
+        why: 'invoiced',
+      })
+    }
+  })
+
+  it('freezes a load whose billing axis says paid', () => {
+    for (const billing of ['PAID', 'PARTIALLY_PAID'] as const) {
+      expect(rateFreezeFor(load({ billing }))).toEqual({
+        frozen: true,
+        why: 'paid',
+      })
+    }
+  })
+
+  it('freezes a load printed on a driver statement', () => {
+    expect(rateFreezeFor(load({ settlementLoadLines: 1 }))).toEqual({
+      frozen: true,
+      why: 'settled',
+    })
+  })
+
+  it('still allows it on a load that is only ready to invoice', () => {
+    expect(rateFreezeFor(load({ billing: 'READY_TO_INVOICE' }))).toEqual({
+      frozen: false,
+    })
   })
 
   it('allows it on an open imported load with no money against it', () => {
@@ -1397,5 +1457,264 @@ describe('the planner holds it and still imports the load', () => {
     expect(plan.planned).toHaveLength(0)
     expect(plan.held).toHaveLength(1)
     expect(plan.duplicateOtherPay).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// ALREADY IN ZEBRA. Owner's ruling, 2026-11-16.
+//
+// THE FIXTURES ARE THE 2026-09-24 FILES' OWN VALUES. The export rows are
+// copied from `corpus/datatruck/loads-and-trips_2026_09_24_16_49_51.xlsx`;
+// the Zebra loads are what the Relay trips importer writes for trips in
+// `corpus/datatruck/Trips - 2026-09-24T090710.426.csv` — `referenceNumber`
+// is the Trip ID (`trips-writer.ts`), and each leg's Load ID is on its
+// arrival stop (`trips-import.ts`). `corpus/` is not in the repository, so
+// the values are written out here.
+//
+//   DT-016518 / 115QTNZPF  — the one Load ID both files carry. A single-leg
+//                            trip: Trip ID and Load ID are the same string.
+//   T-111LZF1LH            — a multi-leg trip, legs 116H3G98L and 116KC2CKW.
+//   DT-016641 / T-114VKSVCZ — a Datatruck row whose Load ID IS a trip id.
+//   DT-016642 / 115JZW863  — an Amazon row with nothing in Zebra.
+// ---------------------------------------------------------------------------
+
+describe('already in Zebra', () => {
+  const exportRow = (over: Record<string, string> = {}) => ({
+    'Shipment ID': 'DT-016518',
+    'Created date': 'Sep 22, 2026, 17:54',
+    'Load ID': '115QTNZPF',
+    Customer: 'AMAZON LOGISTICS',
+    'Driver/Carrier': 'KAMOL HOJIEV',
+    Truck: '181',
+    'MC Number': 'Midwest Global Logistics LLC',
+    'Load status': 'delivered',
+    'PU date': 'Sep 19, 2026',
+    'DEL date': 'Sep 19, 2026',
+    'Load pay': '744.87',
+    'Total other pay': '0',
+    'Total pay': '744.87',
+    ...over,
+  })
+  const planned = (over: Record<string, string> = {}) => {
+    const plan = planLoads([exportRow(over)])
+    expect(plan.held).toEqual([])
+    return plan.planned[0]!
+  }
+
+  const zebra = (
+    over: Partial<ZebraLoadKey> & { id: string },
+  ): ZebraLoadKey => ({
+    loadNumber: over.id,
+    externalId: null,
+    referenceNumber: null,
+    stopReferences: [],
+    ...over,
+  })
+  /** What the trips writer leaves for the single-leg trip 115QTNZPF. */
+  const relaySingle = zebra({
+    id: 'relay-1',
+    loadNumber: '1042',
+    referenceNumber: '115QTNZPF',
+    stopReferences: ['115QTNZPF'],
+  })
+  /** And for the multi-leg T-111LZF1LH. */
+  const relayMulti = zebra({
+    id: 'relay-2',
+    loadNumber: '1043',
+    referenceNumber: 'T-111LZF1LH',
+    stopReferences: ['116H3G98L', '116KC2CKW'],
+  })
+  /** What this import left for DT-016641 on an earlier run. */
+  const imported = zebra({
+    id: 'dt-1',
+    loadNumber: 'DT-016641',
+    externalId: 'DT-016641',
+    referenceNumber: 'T-114VKSVCZ',
+  })
+  const index = indexZebraLoads([relaySingle, relayMulti, imported])
+
+  it('refuses the row whose Load ID is a Relay trip already booked', () => {
+    expect(alreadyInZebra(planned(), index)).toEqual({
+      kind: 'refused',
+      matches: [
+        {
+          loadNumber: '1042',
+          via: 'Load ID',
+          key: '115QTNZPF',
+          on: 'reference',
+        },
+        {
+          loadNumber: '1042',
+          via: 'Load ID',
+          key: '115QTNZPF',
+          on: 'stop reference',
+        },
+      ],
+    })
+  })
+
+  it('refuses a leg of a multi-leg trip, found on the stop', () => {
+    // THE CASE THE BRIDGE MISSED. `116KC2CKW` is nowhere on the load's own
+    // reference, which is the Trip ID, so the old exact match created a
+    // second load for this freight.
+    const decision = alreadyInZebra(
+      planned({ 'Shipment ID': 'DT-090001', 'Load ID': '116KC2CKW' }),
+      index,
+    )
+    expect(decision).toEqual({
+      kind: 'refused',
+      matches: [
+        {
+          loadNumber: '1043',
+          via: 'Load ID',
+          key: '116KC2CKW',
+          on: 'stop reference',
+        },
+      ],
+    })
+  })
+
+  it('refuses a row whose Trip ID names the trip, whatever its Load ID', () => {
+    const decision = alreadyInZebra(
+      planned({
+        'Shipment ID': 'DT-090002',
+        'Load ID': '119ZZZZZZ',
+        'Trip ID': 'T-111LZF1LH',
+      }),
+      index,
+    )
+    expect(decision).toMatchObject({
+      kind: 'refused',
+      matches: [{ loadNumber: '1043', via: 'Trip ID', on: 'reference' }],
+    })
+  })
+
+  it('compares by nameKey — case and spaces, never nearest', () => {
+    expect(
+      alreadyInZebra(planned({ 'Load ID': '  115qtnzpf ' }), index).kind,
+    ).toBe('refused')
+    expect(alreadyInZebra(planned({ 'Load ID': '115QTNZP' }), index).kind).toBe(
+      'new',
+    )
+  })
+
+  it("syncs the row's own load, whose reference is its own Load ID", () => {
+    // Every imported load carries its Load ID as its reference, so a
+    // predicate that did not skip the row's own load would refuse every
+    // re-run of every week.
+    const decision = alreadyInZebra(
+      planned({ 'Shipment ID': 'DT-016641', 'Load ID': 'T-114VKSVCZ' }),
+      index,
+    )
+    expect(decision).toEqual({ kind: 'imported', loadId: 'dt-1' })
+  })
+
+  it('refuses a row with its own load when another load claims it too', () => {
+    // A duplicate that already exists: an earlier import created DT-016518
+    // beside the Relay load. It is named, not synced further.
+    const withDuplicate = indexZebraLoads([
+      relaySingle,
+      zebra({
+        id: 'dt-2',
+        externalId: 'DT-016518',
+        referenceNumber: '115QTNZPF',
+      }),
+    ])
+    expect(alreadyInZebra(planned(), withDuplicate).kind).toBe('refused')
+  })
+
+  it('creates the row nothing in Zebra names', () => {
+    expect(
+      alreadyInZebra(
+        planned({ 'Shipment ID': 'DT-016642', 'Load ID': '115JZW863' }),
+        index,
+      ),
+    ).toEqual({ kind: 'new' })
+  })
+
+  it('never matches a blank Load ID to a blank reference', () => {
+    const blank = indexZebraLoads([
+      zebra({ id: 'b', referenceNumber: '', stopReferences: [' '] }),
+    ])
+    expect(
+      alreadyInZebra(
+        { externalId: 'DT-090003', referenceNumber: null, tripId: null },
+        blank,
+      ),
+    ).toEqual({ kind: 'new' })
+  })
+
+  it('is what the seed decides with, and the bridge is gone', () => {
+    const seed = readFileSync('scripts/seed-datatruck-loads.ts', 'utf8')
+    expect((seed.match(/alreadyInZebra\(/g) ?? []).length).toBe(1)
+    expect(seed).toContain('REFUSED — ${refused.length} row(s)')
+    // Refused rows are never in the batches the write walks.
+    expect(seed).toContain('for (const batch of chunk(toWrite, BATCH))')
+    expect(seed).not.toContain('liveByReference')
+    expect(seed).not.toContain("data['externalId']")
+  })
+})
+
+describe('what a matched load does with the export rate', () => {
+  const current = (
+    over: Partial<Parameters<typeof rateDecisionFor>[0]> = {},
+  ): Parameters<typeof rateDecisionFor>[0] => ({
+    billing: 'UNINVOICED',
+    settlementLines: 0,
+    settlementLoadLines: 0,
+    paymentApplications: 0,
+    invoiceLines: 0,
+    // DT-016641's figure, as the 09-24 export carries it.
+    linehaulCents: 199_208,
+    accessorialCents: 0,
+    ...over,
+  })
+  const restated = { linehaulCents: 205_000, accessorialCents: 0 }
+
+  it('restates an open load with nothing against it', () => {
+    expect(rateDecisionFor(current(), restated).kind).toBe('change')
+  })
+
+  it('does nothing when the figure has not moved', () => {
+    expect(
+      rateDecisionFor(current({ billing: 'INVOICED' }), {
+        linehaulCents: 199_208,
+        accessorialCents: 0,
+      }),
+    ).toEqual({ kind: 'same' })
+  })
+
+  it('holds an invoiced load and prints both figures', () => {
+    expect(rateDecisionFor(current({ billing: 'INVOICED' }), restated)).toEqual(
+      {
+        kind: 'held',
+        why: 'invoiced',
+        line: 'invoiced: export $2050.00 + $0.00, Zebra $1992.08 + $0.00',
+      },
+    )
+  })
+
+  it('holds a settled load and a paid one', () => {
+    expect(
+      rateDecisionFor(current({ settlementLoadLines: 1 }), restated),
+    ).toMatchObject({ kind: 'held', why: 'settled' })
+    expect(
+      rateDecisionFor(current({ paymentApplications: 1 }), restated),
+    ).toMatchObject({ kind: 'held', why: 'paid' })
+  })
+
+  it('leaves closed history alone without listing it', () => {
+    expect(
+      rateDecisionFor(current({ billing: 'CLOSED_IN_DATATRUCK' }), restated),
+    ).toEqual({ kind: 'same' })
+  })
+
+  it('is what the seed calls in the preview AND the write', () => {
+    const seed = readFileSync('scripts/seed-datatruck-loads.ts', 'utf8')
+    expect((seed.match(/rateDecisionFor\(/g) ?? []).length).toBe(2)
+    expect(seed).toContain('RATE HELD — ${rateHeldPreview.length}')
+    expect(seed).toContain('RATE HELD — ${rateHeld.length}')
+    // The old inline freeze must be gone, not merely bypassed.
+    expect(seed).not.toContain('rateFreezeFor(')
   })
 })
