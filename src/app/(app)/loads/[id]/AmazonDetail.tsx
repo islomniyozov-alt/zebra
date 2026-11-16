@@ -151,10 +151,17 @@ export interface AmazonStopRow {
   place: string | null
   zip: string | null
   window: string
+  /** The actuals beside the plan — the portal's taps and the office write them. */
+  arrived: string
+  departed: string
   address: ReactNode
 }
 
-/** Stops as a table: position, facility code, city/state, zip, window. */
+/**
+ * Stops as a table: position, facility code, city/state, zip, the appointment
+ * window, and Arrived / Departed beside it — scheduled against actual, read
+ * across one row.
+ */
 export function AmazonStops({
   stops,
   labels,
@@ -167,6 +174,8 @@ export function AmazonStops({
     place: string
     zip: string
     window: string
+    arrived: string
+    departed: string
     address: string
     empty: string
   }
@@ -177,6 +186,8 @@ export function AmazonStops({
     labels.place,
     labels.zip,
     labels.window,
+    labels.arrived,
+    labels.departed,
     labels.address,
   ]
   return (
@@ -185,7 +196,7 @@ export function AmazonStops({
         <p className="text-sm text-ink-2">{labels.empty}</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] border-collapse text-sm">
+          <table className="w-full min-w-[980px] border-collapse text-sm">
             <thead>
               <tr className="border-b border-border">
                 {headings.map((heading) => (
@@ -217,6 +228,12 @@ export function AmazonStops({
                   </td>
                   <td className="whitespace-nowrap px-z2 py-z2 font-mono tabular-nums text-ink">
                     {stop.window}
+                  </td>
+                  <td className="whitespace-nowrap px-z2 py-z2 font-mono tabular-nums text-ink">
+                    {stop.arrived}
+                  </td>
+                  <td className="whitespace-nowrap px-z2 py-z2 font-mono tabular-nums text-ink">
+                    {stop.departed}
                   </td>
                   <td className="px-z2 py-z2">{stop.address}</td>
                 </tr>

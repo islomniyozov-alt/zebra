@@ -1142,6 +1142,11 @@ export default async function LoadDetailPage({
           start && end
             ? `${start} – ${end}`
             : (start ?? at(stop.scheduledAt) ?? '—'),
+        // THE ACTUALS, BESIDE THE PLAN (owner's change on accepting §7.13):
+        // the portal's taps write them, and scheduled against actual is the
+        // comparison a dispatcher reads this row for.
+        arrived: at(stop.arrivedAt) ?? '—',
+        departed: at(stop.departedAt) ?? '—',
         address: addressById.get(stop.id) ?? null,
       }
     })
@@ -1329,6 +1334,8 @@ export default async function LoadDetailPage({
                       place: t('loads.stopsCol.place'),
                       zip: t('loads.stopsCol.zip'),
                       window: t('loads.stopsCol.window'),
+                      arrived: t('loads.stopsCol.arrived'),
+                      departed: t('loads.stopsCol.departed'),
                       address: t('loads.stopsCol.address'),
                       empty: t('loads.stopsEmpty'),
                     }}

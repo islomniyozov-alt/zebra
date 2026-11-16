@@ -323,6 +323,22 @@ describe('the Amazon load detail page', () => {
     expect(page).toContain('if (view.datatruckShape) {')
   })
 
+  // v11.20 — scheduled against actual on one row. The portal's taps write
+  // these clocks; a stops table without them would hide the comparison.
+  it('keeps Arrived and Departed beside the appointment window', () => {
+    const detail = readFileSync(
+      'src/app/(app)/loads/[id]/AmazonDetail.tsx',
+      'utf8',
+    )
+    expect(page).toContain("arrived: at(stop.arrivedAt) ?? '—'")
+    expect(page).toContain("departed: at(stop.departedAt) ?? '—'")
+    expect(detail).toMatch(
+      /labels\.window,\s*labels\.arrived,\s*labels\.departed,/,
+    )
+    expect(detail).toContain('{stop.arrived}')
+    expect(detail).toContain('{stop.departed}')
+  })
+
   it('asks for no document on an Amazon load, and says where they are', () => {
     expect(page).toContain('const required = !view.documentsOnRelay')
     expect(page).toContain("note: t('loads.documentsOnRelay')")
