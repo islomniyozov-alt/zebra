@@ -124,6 +124,23 @@ describe('the nightly', () => {
       ci.indexOf('- name: nightly production sign-in'),
     )
   })
+
+  it('reads production’s limits for yesterday from its persisted logs, with its own verdict (GAPS 44)', () => {
+    // Owner's ruling 2026-11-16: a dated GAPS 44 line only if production
+    // logs an exceeded* outcome — so the nightly asks every night.
+    const check = step('nightly production limits')
+    expect(check).toContain(
+      "if: always() && (github.event_name == 'schedule' || github.event.inputs.sweep == 'true')",
+    )
+    for (const name of ['CLOUDFLARE_OBSERVABILITY_TOKEN', 'R2_ACCOUNT_ID'])
+      expect(check).toContain(`${name}: \${{ secrets.${name} }}`)
+    expect(check).toContain(
+      'node scripts/workers-logs.mjs days zebra --yesterday',
+    )
+    expect(check).toContain(
+      'node scripts/run-status.mjs --check nightly-prod-limits',
+    )
+  })
 })
 
 // ---------------------------------------------------------------------------

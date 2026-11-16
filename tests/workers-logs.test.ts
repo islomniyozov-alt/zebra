@@ -3,6 +3,7 @@ import {
   DAY_MS,
   invocationOf,
   limitNamed,
+  limitsVerdict,
   observabilityConfig,
   rayIdOf,
   rayLine,
@@ -130,5 +131,39 @@ describe('the seven days', () => {
       routes: { 'exceededCpu /portal': 1 },
     })
     expect(days[2]).toEqual({ day: '2026-11-17', byOutcome: {}, routes: {} })
+  })
+})
+
+describe('the nightly verdict (owner’s ruling 2026-11-16)', () => {
+  const day = (
+    d: string,
+    outcomes: Record<string, number>,
+    routes: Record<string, number> = {},
+  ) => ({ day: d, outcomes, byOutcome: {}, routes })
+
+  it('any limit is NOT OK, by day and route', () => {
+    const verdict = limitsVerdict('zebra', [
+      day(
+        '2026-11-15',
+        { ok: 300, exceededMemory: 1 },
+        { 'exceededMemory /trailers/x': 1 },
+      ),
+    ])
+    expect(verdict.ok).toBe(false)
+    expect(verdict.line).toBe(
+      'zebra LOGGED A LIMIT — NOT OK. 2026-11-15 1 × exceededMemory /trailers/x.',
+    )
+  })
+
+  it('a day with invocations and no limit is OK; a day with none read is not', () => {
+    expect(
+      limitsVerdict('zebra', [day('2026-11-15', { ok: 308, canceled: 1 })]),
+    ).toEqual({
+      ok: true,
+      line: 'zebra: NO exceeded* OUTCOME in 2026-11-15 — OK (309 invocations).',
+    })
+    const silent = limitsVerdict('zebra', [day('2026-11-15', {})])
+    expect(silent.ok).toBe(false)
+    expect(silent.line).toMatch(/NO INVOCATIONS READ/)
   })
 })

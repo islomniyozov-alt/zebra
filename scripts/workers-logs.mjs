@@ -277,6 +277,42 @@ export async function readLimitDays(env, name, n, now = Date.now()) {
   }
 }
 
+/**
+ * The nightly's verdict on a days reading (owner's ruling 2026-11-16, GAPS
+ * 44): any `exceeded*` outcome is NOT OK, by day, limit and route — the
+ * signal for a dated GAPS 44 line. A day the logs answered with no
+ * invocations at all is NOT OK too: no traffic and no reading look alike.
+ */
+export function limitsVerdict(name, days) {
+  const hits = days.flatMap((day) =>
+    Object.entries(day.routes).map(
+      ([route, count]) => `${day.day} ${count} × ${route}`,
+    ),
+  )
+  const silent = days.filter(
+    (day) => Object.keys(day.outcomes ?? {}).length === 0,
+  )
+  if (hits.length > 0)
+    return {
+      ok: false,
+      line: `${name} LOGGED A LIMIT — NOT OK. ${hits.join('; ')}.`,
+    }
+  if (silent.length > 0)
+    return {
+      ok: false,
+      line: `${name}: NO INVOCATIONS READ for ${silent.map((d) => d.day).join(', ')} — NOT OK (unreadable is not clean).`,
+    }
+  const total = days.reduce(
+    (sum, day) =>
+      sum + Object.values(day.outcomes).reduce((a, b) => a + Number(b), 0),
+    0,
+  )
+  return {
+    ok: true,
+    line: `${name}: NO exceeded* OUTCOME in ${days.map((d) => d.day).join(', ')} — OK (${total} invocations).`,
+  }
+}
+
 async function main() {
   const [mode, name, ...rest] = process.argv.slice(2)
   if (mode === 'rays') {
@@ -297,7 +333,17 @@ async function main() {
     return 0
   }
   if (mode === 'days') {
-    const read = await readLimitDays(process.env, name, Number(rest[0] ?? 7))
+    // `days <service> <n> [--yesterday]`: --yesterday reads the last full
+    // UTC day only, for the nightly's verdict.
+    const yesterday = rest.includes('--yesterday')
+    const n = Number(rest.find((arg) => /^\d+$/.test(arg)) ?? 7)
+    const read = await readLimitDays(
+      process.env,
+      name,
+      yesterday ? 1 : n,
+      // The last millisecond of yesterday, so the one day read is whole.
+      yesterday ? Math.floor(Date.now() / DAY_MS) * DAY_MS - 1 : Date.now(),
+    )
     if (read.unreadable) {
       console.log(`PERSISTED LOGS UNREADABLE — ${read.unreadable}. NOT OK.`)
       return 1
@@ -309,7 +355,10 @@ async function main() {
       for (const [route, count] of Object.entries(day.routes))
         console.log(`    ${count} × ${route}`)
     }
-    return 0
+    if (!yesterday) return 0
+    const { ok, line } = limitsVerdict(name, read.days)
+    console.log(line)
+    return ok ? 0 : 1
   }
   throw new Error(`workers-logs: unknown mode ${mode} (rays | days)`)
 }
