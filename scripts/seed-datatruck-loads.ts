@@ -695,8 +695,9 @@ async function main(): Promise<void> {
     } satisfies Prisma.LoadCountOutputTypeDefaultArgs
     /**
      * A person's writes to each load since it was created. The audit log holds
-     * a row only for an ATTRIBUTED write, so this import's own updates — run
-     * unattributed — are never among them.
+     * a row only for a write inside an attributed scope; this script runs with
+     * no scope at all (`noContext` in `audit.ts`), so its own updates are
+     * never among them.
      */
     const userEditsFor = async (
       ids: readonly string[],

@@ -1104,9 +1104,10 @@ export function syncDecisionFor(
  * import never changes money on a load Zebra touched after creation.
  *
  * TWO FACTS, EITHER ENOUGH. `userEdits` counts the load's audit rows other
- * than CREATE: an audit row is written only for an ATTRIBUTED write
- * (`audit.ts` returns early on `unattributed`), so the import's own updates
- * never count and a person's always do. `zebraLines` counts accessorial rows
+ * than CREATE: an audit row is written only inside an ATTRIBUTED scope, and
+ * every attributed scope carries a `userId`. The seeds run with no scope at
+ * all (`auditExtension` records them as a `noContext` gap and writes no row),
+ * so the import's own updates never count and a person's always do. `zebraLines` counts accessorial rows
  * that are not the import's own (`DATATRUCK_OTHER_PAY_NOTE`). It is the last
  * reason checked, so a load that is also invoiced or paid says so rather than
  * "touched".
