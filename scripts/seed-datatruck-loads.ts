@@ -12,6 +12,7 @@ import {
   indexZebraLoads,
   planLoads,
   DATATRUCK_EVENT_NOTE,
+  DATATRUCK_OTHER_PAY_NOTE,
   rateDecisionFor,
   syncDecisionFor,
   type PlannedLoad,
@@ -20,6 +21,7 @@ import { formatCents } from '@/lib/money'
 import { nameKey } from '@/lib/name-key'
 import { transitionOperational } from '@/lib/load-status'
 import { assertTenancy } from './datatruck-tenancy'
+import type { Prisma } from '../src/generated/prisma/client'
 
 // ---------------------------------------------------------------------------
 // A YEAR OF FREIGHT: 14,451 LOADS, $17.2M, INTO A SYSTEM THAT DID NOT RUN IT.
@@ -669,13 +671,84 @@ async function main(): Promise<void> {
     )
     console.log('  customers afterwards is far harder than not splitting them.')
 
+    // ── WHAT ZEBRA HAS DONE TO A MATCHED LOAD, READ ONE WAY FOR BOTH PATHS ─
+    //
+    // The counts `rateFreezeFor` needs. A settlement line means a driver was
+    // paid on this figure, an application means a customer's money was matched
+    // to it, an invoice line means a broker holds a bill for it — and an
+    // accessorial row that is not this import's own means somebody in Zebra
+    // added money to it (owner's ruling 2026-11-16, "touched after creation").
+    // `notes` is nullable and `<>` drops NULL, so a row with no note is named
+    // explicitly: it is a Zebra row too.
+    const MONEY_COUNTS = {
+      select: {
+        settlementLines: true,
+        settlementLoadLines: true,
+        paymentApplications: true,
+        invoiceLines: true,
+        accessorials: {
+          where: {
+            OR: [{ notes: null }, { notes: { not: DATATRUCK_OTHER_PAY_NOTE } }],
+          },
+        },
+      },
+    } satisfies Prisma.LoadCountOutputTypeDefaultArgs
+    /**
+     * A person's writes to each load since it was created. The audit log holds
+     * a row only for an ATTRIBUTED write, so this import's own updates — run
+     * unattributed — are never among them.
+     */
+    const userEditsFor = async (
+      ids: readonly string[],
+    ): Promise<Map<string, number>> => {
+      const rows = await db.auditLog.groupBy({
+        by: ['entityId'],
+        where: {
+          organizationId: tenancy.organizationId,
+          entityType: 'Load',
+          entityId: { in: [...ids] },
+          action: { not: 'CREATE' },
+          userId: { not: null },
+        },
+        _count: { _all: true },
+      })
+      return new Map(rows.map((row) => [row.entityId, row._count._all]))
+    }
+    const moneyState = (
+      row: {
+        id: string
+        billingStatus: Parameters<typeof rateDecisionFor>[0]['billing']
+        linehaulCents: number
+        accessorialsCents: number
+        _count: {
+          settlementLines: number
+          settlementLoadLines: number
+          paymentApplications: number
+          invoiceLines: number
+          accessorials: number
+        }
+      },
+      userEdits: ReadonlyMap<string, number>,
+    ): Parameters<typeof rateDecisionFor>[0] => ({
+      billing: row.billingStatus,
+      settlementLines: row._count.settlementLines,
+      settlementLoadLines: row._count.settlementLoadLines,
+      paymentApplications: row._count.paymentApplications,
+      invoiceLines: row._count.invoiceLines,
+      userEdits: userEdits.get(row.id) ?? 0,
+      zebraLines: row._count.accessorials,
+      linehaulCents: row.linehaulCents,
+      accessorialCents: row.accessorialsCents,
+    })
+
     // ── RATE HELD, READ BEFORE THE WRITE RATHER THAN AFTER IT ───────────
     //
-    // Owner's ruling, 2026-11-16: on a matched load that is invoiced, settled
-    // or paid, the import never changes the rate, and the difference is
-    // printed. `rateDecisionFor` is the rule the write below calls too, so
-    // this list is what the write will refuse, not a forecast of it. In
-    // chunks, because the history is 14,451 ids.
+    // Owner's rulings, 2026-11-16: on a matched load that is invoiced,
+    // settled, paid, or touched in Zebra after creation, the import never
+    // changes the rate, and the difference is printed. `rateDecisionFor` is
+    // the rule the write below calls too, so this list is what the write will
+    // refuse, not a forecast of it. In chunks, because the history is 14,451
+    // ids.
     const alreadyPresent = importedCount
     const rateHeldPreview: string[] = []
     let ratesToRestate = 0
@@ -694,27 +767,13 @@ async function main(): Promise<void> {
           billingStatus: true,
           linehaulCents: true,
           accessorialsCents: true,
-          _count: {
-            select: {
-              settlementLines: true,
-              settlementLoadLines: true,
-              paymentApplications: true,
-              invoiceLines: true,
-            },
-          },
+          _count: MONEY_COUNTS,
         },
       })
+      const edits = await userEditsFor(ids)
       for (const row of rows) {
         const load = importedByLoadId.get(row.id)!
-        const decision = rateDecisionFor(
-          {
-            billing: row.billingStatus,
-            ...row._count,
-            linehaulCents: row.linehaulCents,
-            accessorialCents: row.accessorialsCents,
-          },
-          load,
-        )
+        const decision = rateDecisionFor(moneyState(row, edits), load)
         if (decision.kind === 'change') ratesToRestate++
         if (decision.kind === 'held') {
           rateHeldPreview.push(`${load.externalId} ${decision.line}`)
@@ -722,7 +781,7 @@ async function main(): Promise<void> {
       }
     }
     heading(
-      `RATE HELD — ${rateHeldPreview.length} matched load(s) invoiced, settled or paid; the export's rate is not written`,
+      `RATE HELD — ${rateHeldPreview.length} matched load(s) invoiced, settled, paid or touched in Zebra; the export's rate is not written`,
     )
     for (const line of rateHeldPreview) console.log(`  ${line}`)
 
@@ -819,20 +878,12 @@ async function main(): Promise<void> {
           linehaulCents: true,
           accessorialsCents: true,
           organizationId: true,
-          // WHAT ZEBRA HAS SPENT AGAINST THIS LOAD. Counted, not inferred from
-          // a status: a settlement line means a driver was paid on this figure,
-          // an application means a customer's money was matched to it, and an
-          // invoice line means a broker holds a bill for it.
-          _count: {
-            select: {
-              settlementLines: true,
-              settlementLoadLines: true,
-              paymentApplications: true,
-              invoiceLines: true,
-            },
-          },
+          // WHAT ZEBRA HAS DONE TO THIS LOAD. Counted, not inferred from a
+          // status — the same counts the preview read (`MONEY_COUNTS`).
+          _count: MONEY_COUNTS,
         },
       })
+      const editsInBatch = await userEditsFor(present.map((row) => row.id))
       const already = new Map(present.map((row) => [row.externalId ?? '', row]))
       const fresh = batch.filter((load) => !already.has(load.externalId))
       skipped += batch.length - fresh.length
@@ -942,16 +993,11 @@ async function main(): Promise<void> {
         // While dispatchers work over there a live load's rate is theirs and
         // this system follows. The freeze is about COMMITMENT rather than age:
         // once the load is invoiced, settled or paid, the figure has been
-        // billed or paid on, and moving it would make an invoice or a cheque
-        // disagree with the load. `rateDecisionFor` is the rule, and the
-        // preview's RATE HELD list came from the same call.
+        // billed or paid on, and once anybody in Zebra has touched it, Zebra
+        // knows something the export does not. `rateDecisionFor` is the rule,
+        // and the preview's RATE HELD list came from the same call.
         const rateDecision = rateDecisionFor(
-          {
-            billing: row.billingStatus,
-            ...row._count,
-            linehaulCents: row.linehaulCents,
-            accessorialCents: row.accessorialsCents,
-          },
+          moneyState(row, editsInBatch),
           load,
         )
         const rate = rateDecision.kind === 'change' ? rateDecision.change : null
@@ -1000,7 +1046,7 @@ async function main(): Promise<void> {
           // would leave the two disagreeing, which is exactly the quiet
           // inconsistency the money checks exist to catch.
           await db.loadAccessorial.deleteMany({
-            where: { loadId: row.id, notes: 'Datatruck "Total other pay".' },
+            where: { loadId: row.id, notes: DATATRUCK_OTHER_PAY_NOTE },
           })
           if (rate.accessorialCents > 0) {
             await db.loadAccessorial.create({
@@ -1011,7 +1057,7 @@ async function main(): Promise<void> {
                 amountCents: rate.accessorialCents,
                 isBillable: true,
                 status: 'BILLED',
-                notes: 'Datatruck "Total other pay".',
+                notes: DATATRUCK_OTHER_PAY_NOTE,
               },
             })
           }
@@ -1177,7 +1223,7 @@ async function main(): Promise<void> {
             amountCents: load.accessorialCents,
             isBillable: true,
             status: 'BILLED' as const,
-            notes: 'Datatruck "Total other pay".',
+            notes: DATATRUCK_OTHER_PAY_NOTE,
           },
         ]
       })
@@ -1294,7 +1340,7 @@ async function main(): Promise<void> {
       // EVERY LINE, NOT THE FIRST TWENTY. Each is an invoice, a statement or
       // a payment the export disagrees with.
       heading(
-        `RATE HELD — ${rateHeld.length} matched load(s) invoiced, settled or paid; the export's rate was not written`,
+        `RATE HELD — ${rateHeld.length} matched load(s) invoiced, settled, paid or touched in Zebra; the export's rate was not written`,
       )
       for (const line of rateHeld) console.log(`  ${line}`)
     }

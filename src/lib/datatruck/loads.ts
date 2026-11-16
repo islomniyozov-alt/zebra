@@ -1094,10 +1094,36 @@ export function syncDecisionFor(
  * PAID and PARTIALLY_PAID read as paid. A `SettlementLoadLine` is one load
  * printed on one driver statement, so it is settled just as a
  * `SettlementLine` is.
+ *
+ * ── AND ANYTHING ZEBRA TOUCHED AFTER CREATION ────────────────────────────
+ *
+ * Owner's ruling, 2026-11-16, on the case the runbook left open: a dispatcher
+ * added a billable accessorial, the export restated the column to its own
+ * figure, and only the import's own row was replaced — so the column stopped
+ * equalling the sum of the rows. The ruling is wider than that case: the
+ * import never changes money on a load Zebra touched after creation.
+ *
+ * TWO FACTS, EITHER ENOUGH. `userEdits` counts the load's audit rows other
+ * than CREATE: an audit row is written only for an ATTRIBUTED write
+ * (`audit.ts` returns early on `unattributed`), so the import's own updates
+ * never count and a person's always do. `zebraLines` counts accessorial rows
+ * that are not the import's own (`DATATRUCK_OTHER_PAY_NOTE`). It is the last
+ * reason checked, so a load that is also invoiced or paid says so rather than
+ * "touched".
  */
 export type RateFreeze =
   | { frozen: false }
-  | { frozen: true; why: 'closed' | 'settled' | 'paid' | 'invoiced' }
+  | {
+      frozen: true
+      why: 'closed' | 'settled' | 'paid' | 'invoiced' | 'touched'
+    }
+
+/**
+ * The note on the one accessorial row this import writes for `Total other
+ * pay`. Any OTHER row on the load was added by Zebra — a person, the
+ * remittance importer, the trips importer — and freezes the money.
+ */
+export const DATATRUCK_OTHER_PAY_NOTE = 'Datatruck "Total other pay".'
 
 /** Billing states that mean an invoice has gone out. */
 const INVOICED_BILLING: ReadonlySet<LoadBillingStatus> = new Set([
@@ -1449,6 +1475,10 @@ export function rateFreezeFor(load: {
   settlementLoadLines: number
   paymentApplications: number
   invoiceLines: number
+  /** Audit rows on the load other than CREATE — each one a person's write. */
+  userEdits: number
+  /** Accessorial rows on the load not written by this import. */
+  zebraLines: number
 }): RateFreeze {
   if (load.billing === 'CLOSED_IN_DATATRUCK')
     return { frozen: true, why: 'closed' }
@@ -1458,6 +1488,8 @@ export function rateFreezeFor(load: {
     return { frozen: true, why: 'paid' }
   if (load.invoiceLines > 0 || INVOICED_BILLING.has(load.billing))
     return { frozen: true, why: 'invoiced' }
+  if (load.userEdits > 0 || load.zebraLines > 0)
+    return { frozen: true, why: 'touched' }
   return { frozen: false }
 }
 
@@ -1478,7 +1510,7 @@ export type RateDecision =
   | { kind: 'change'; change: RateChange }
   | {
       kind: 'held'
-      why: 'settled' | 'paid' | 'invoiced'
+      why: 'settled' | 'paid' | 'invoiced' | 'touched'
       /** Export and database, both, in money — the line under RATE HELD. */
       line: string
     }
