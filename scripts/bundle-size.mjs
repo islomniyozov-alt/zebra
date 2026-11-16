@@ -75,7 +75,15 @@ export function measure({ production = false } = {}) {
       ],
       { encoding: 'utf8' },
     )
-    return gzipBytesFrom(`${result.stdout}\n${result.stderr}`)
+    const output = `${result.stdout}\n${result.stderr}`
+    const bytes = gzipBytesFrom(output)
+    // NO SIZE IS A FAILED DRY RUN, AND ITS CAUSE GOES IN THE LOG: run
+    // 43826422641 printed "BUNDLE SIZE UNKNOWN" and nothing of why.
+    if (bytes === null)
+      console.error(
+        `wrangler deploy --dry-run (exit ${result.status}), its last lines:\n${output.trim().split('\n').slice(-25).join('\n')}`,
+      )
+    return bytes
   } finally {
     rmSync(outdir, { recursive: true, force: true })
   }

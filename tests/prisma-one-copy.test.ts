@@ -106,7 +106,10 @@ describe('the package', () => {
     expect(PACKAGE_NAME).toBe('@zebra/prisma-workerd')
   })
 
-  it('leaves the compiler’s ?module import relative to index.mjs, for wrangler', async () => {
+  it('writes the compiler’s ?module import as the package’s own .wasm, by absolute path', async () => {
+    // Absolute because which copy of index.mjs OpenNext bundles differs by
+    // platform; CI's dry run failed on a relative one (run 43826422641).
+    const at = 'C:\\repo\\node_modules\\@zebra\\prisma-workerd\\' + WASM
     const result = await build({
       stdin: {
         contents: `export const m = () => import("./internal/${WASM}?module")`,
@@ -115,9 +118,11 @@ describe('the package', () => {
       bundle: true,
       write: false,
       format: 'esm',
-      plugins: [keepWasmModule],
+      plugins: [keepWasmModule(at)],
       logLevel: 'silent',
     })
-    expect(result.outputFiles[0]?.text).toContain(`import("./${WASM}?module")`)
+    expect(result.outputFiles[0]?.text).toContain(
+      `import("C:/repo/node_modules/@zebra/prisma-workerd/${WASM}?module")`,
+    )
   })
 })

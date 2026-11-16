@@ -43,22 +43,30 @@ export const packageJson = () => ({
 })
 
 /**
- * The esbuild plugin that leaves the compiler's `?module` import as it is —
- * relative to `index.mjs`, where the `.wasm` is copied — for OpenNext's
- * `wrangler-externals` plugin and wrangler to resolve.
+ * The esbuild plugin that writes the compiler's `?module` import as the
+ * ABSOLUTE path of the package's own `.wasm`, for OpenNext's
+ * `wrangler-externals` plugin and wrangler to load at deploy.
+ *
+ * NOT RELATIVE, because which copy of `index.mjs` OpenNext's esbuild bundles
+ * depends on the platform: on Windows it resolved the package under the root
+ * `node_modules`, and on CI's Linux it took the copy Next's trace put in the
+ * server function — where the `.wasm` is left out on purpose (next.config.ts)
+ * — and the dry run failed with no size (run 43826422641, `c54b0ae`). One
+ * absolute path is valid whichever copy is bundled.
+ * @param {string} wasmPath  the `.wasm` beside the package's `index.mjs`
  */
-export const keepWasmModule = {
+export const keepWasmModule = (wasmPath) => ({
   name: 'keep-wasm-module',
   setup(build) {
     build.onResolve({ filter: /\.wasm\?module$/ }, ({ path }) => ({
-      path: `./${WASM}?module`,
+      path: `${wasmPath.replace(/\\/g, '/')}?module`,
       external: true,
       ...(path.endsWith(`${WASM}?module`)
         ? {}
         : { errors: [{ text: `unexpected wasm import ${path}` }] }),
     }))
   },
-}
+})
 
 async function main() {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -80,7 +88,7 @@ async function main() {
     platform: 'neutral',
     target: 'esnext',
     packages: 'external',
-    plugins: [keepWasmModule],
+    plugins: [keepWasmModule(join(out, WASM))],
     logLevel: 'warning',
     metafile: true,
   })
