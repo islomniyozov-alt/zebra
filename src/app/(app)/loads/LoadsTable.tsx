@@ -20,15 +20,16 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
 import { useRouter, usePathname } from 'next/navigation'
 import { keepColumns } from '../_grid/grid-page'
+import { anyFilter, FILTER_PARAMS } from './LoadFilters'
 import { billingTone, operationalTone, type StatusTone } from '@/lib/status'
 import type {
   LoadBillingStatus,
   LoadOperationalStatus,
 } from '@/generated/prisma/client'
 
-// The Loads screen's table. TWELVE COLUMNS DECLARED — eleven when the
-// organization holds a single authority (§6.3) — AND NINE SHOWN, behind §7.1.4's
-// chooser. Driver and DEL date arrived with §6.7 on 2026-10-08.
+// The Loads screen's table. FIFTEEN COLUMNS DECLARED — fourteen when the
+// organization holds a single authority (§6.3) — AND TWELVE SHOWN, behind
+// §7.1.4's chooser, in Datatruck's order (§6.7, the second pass, 2026-11-16).
 //
 // This comment said "eight, or seven" and was accurate when it was written. The
 // warnings column arrived on 2026-09-20, took the count to ten for every
@@ -49,10 +50,17 @@ export interface LoadRow {
   drivers: readonly { id: string; name: string }[]
   pickup: string
   delivery: string
+  /** Shown on hover over the place (§6.7, the second pass). */
+  pickupZip: string | null
+  deliveryZip: string | null
   /** The final delivery's local date, already formatted (§6.7 item 5). */
   deliveryDate: string
   truckId: string | null
   truck: string
+  trailerId: string | null
+  trailer: string
+  /** `RC · BOL · POD`, `+n` for other kinds, or an em dash. */
+  documents: string
   operationalStatus: LoadOperationalStatus
   billingStatus: LoadBillingStatus
   /** Pre-formatted in the request's locale. Money never crosses as a number. */
@@ -100,6 +108,8 @@ interface LoadsTableProps {
     delivery: string
     deliveryDate: string
     truck: string
+    trailer: string
+    documents: string
     copy: string
     copied: string
     copyFailed: string
@@ -120,7 +130,12 @@ interface LoadsTableProps {
    * the target gets the name as plain text, because a link that 404s is a
    * broken screen rather than a permission.
    */
-  mayOpen: { customer: boolean; driver: boolean; truck: boolean }
+  mayOpen: {
+    customer: boolean
+    driver: boolean
+    truck: boolean
+    trailer: boolean
+  }
 }
 
 /**
@@ -153,7 +168,9 @@ export function LoadsTable({
   const params = useSearchParams()
   const router = useRouter()
   const pathname = usePathname()
-  const filtered = params.size > 0
+  // THE TAB IS NOT A FILTER: an empty Dispatched tab is a quiet day, not a
+  // narrowing with a way out.
+  const filtered = anyFilter(params)
   // WHICH ROWS ARE OPEN. Component state and nothing else (§6.7 item 8): a
   // reload closes them all, and nothing is stored.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
@@ -173,27 +190,41 @@ export function LoadsTable({
   // twelve-character date 202 px while Driver had 123 px and cut 70 rows of
   // 100. `tests/table-column-widths.test.tsx` renders this and reads the
   // declarations below.
+  /** A place, its zip on hover. */
+  const place = (text: string, zip: string | null) => (
+    <span title={zip ? `${text} ${zip}` : undefined}>{text}</span>
+  )
+
+  // THE ORDER IS `LOAD_COLUMN_KEYS`' ORDER, Datatruck's (§6.7, the second
+  // pass): `keepColumns` keeps this array's order, never the preference's.
   const columns: Column<LoadRow>[] = [
     {
       key: 'loadNumber',
       header: labels.load,
       fit: 'content',
-      // THE REFERENCE RIDES WITH THE LOAD NUMBER RATHER THAN IN A COLUMN OF
-      // ITS OWN. The reason given here was §7.1's cap "with anything past that
-      // behind a column chooser this application does not have" — it has one
-      // now (§7.1.4, and §7.1.7 put it on this list), so what is left is the
-      // reason that was always the better one: both are identity, and a
-      // dispatcher scans ONE place for "which load is this".
+      // THE REFERENCE IS ITS OWN COLUMN since 2026-11-16 (§6.7, the second
+      // pass). What rides with the number now is the WARNINGS DOT: the column
+      // is off by default, and a load with something to fix still says so —
+      // in words for a screen reader and on hover, never colour alone.
       //
       // Never truncated. These are the fields people copy and read down a
       // phone.
       render: (row) => (
-        <span className="inline-flex flex-col align-middle">
+        <span className="inline-flex items-center gap-z1 align-middle">
           <span className="z-identifier">{row.loadNumber}</span>
-          {row.reference === null ? null : (
-            <span className="font-mono text-xs text-ink-3" dir="ltr">
-              {labels.reference} {row.reference}
-            </span>
+          {row.warnings.length === 0 ? null : (
+            <span
+              role="img"
+              data-warning-dot
+              aria-label={labels.warningCount.replace(
+                '{n}',
+                String(row.warnings.length),
+              )}
+              title={row.warnings
+                .map((warning) => labels.warningNames[warning.name])
+                .join(', ')}
+              className="inline-block size-[6px] shrink-0 rounded-full bg-warning"
+            />
           )}
         </span>
       ),
@@ -209,16 +240,34 @@ export function LoadsTable({
         />
       ),
     },
-    ...(showCompanyColumn
-      ? [
-          {
-            key: 'company',
-            header: labels.company,
-            truncate: true,
-            render: (row: LoadRow) => row.companyName,
-          },
-        ]
-      : []),
+    {
+      key: 'reference',
+      header: labels.reference,
+      fit: 'content',
+      render: (row) =>
+        row.reference === null ? (
+          '—'
+        ) : (
+          <span className="font-mono text-xs" dir="ltr">
+            {row.reference}
+          </span>
+        ),
+    },
+    {
+      key: 'status',
+      header: labels.status,
+      fit: 'content',
+      render: (row) => (
+        // Operational: filled. Billing: outlined. Same hue vocabulary,
+        // different construction, so the two are distinguishable at a glance
+        // (§7.2).
+        <StatusBadge
+          tone={operationalTone(row.operationalStatus)}
+          label={statusLabels[row.operationalStatus] ?? row.operationalStatus}
+          variant="filled"
+        />
+      ),
+    },
     {
       key: 'customer',
       header: labels.customer,
@@ -231,26 +280,6 @@ export function LoadsTable({
         ) : (
           row.customerName
         ),
-    },
-    {
-      key: 'pickup',
-      header: labels.pickup,
-      truncate: true,
-      render: (row) => row.pickup,
-    },
-    {
-      key: 'delivery',
-      header: labels.delivery,
-      truncate: true,
-      render: (row) => row.delivery,
-    },
-    {
-      key: 'deliveryDate',
-      header: labels.deliveryDate,
-      fit: 'content',
-      render: (row) => (
-        <span className="font-mono tabular-nums">{row.deliveryDate}</span>
-      ),
     },
     {
       key: 'driver',
@@ -288,18 +317,57 @@ export function LoadsTable({
         ),
     },
     {
-      key: 'status',
-      header: labels.status,
+      key: 'trailer',
+      header: labels.trailer,
+      fit: 'content',
+      render: (row) =>
+        mayOpen.trailer && row.trailerId !== null ? (
+          <span className="z-identifier">
+            <RecordLink href={`/trailers/${row.trailerId}`}>
+              {row.trailer}
+            </RecordLink>
+          </span>
+        ) : (
+          <span className="z-identifier">{row.trailer}</span>
+        ),
+    },
+    ...(showCompanyColumn
+      ? [
+          {
+            key: 'company',
+            header: labels.company,
+            truncate: true,
+            render: (row: LoadRow) => row.companyName,
+          },
+        ]
+      : []),
+    {
+      key: 'pickup',
+      header: labels.pickup,
+      truncate: true,
+      // City, ST; the zip on hover; the facility in the expand (§6.7).
+      render: (row) => place(row.pickup, row.pickupZip),
+    },
+    {
+      key: 'delivery',
+      header: labels.delivery,
+      truncate: true,
+      render: (row) => place(row.delivery, row.deliveryZip),
+    },
+    {
+      key: 'deliveryDate',
+      header: labels.deliveryDate,
       fit: 'content',
       render: (row) => (
-        // Operational: filled. Billing: outlined. Same hue vocabulary,
-        // different construction, so the two are distinguishable at a glance
-        // (§7.2).
-        <StatusBadge
-          tone={operationalTone(row.operationalStatus)}
-          label={statusLabels[row.operationalStatus] ?? row.operationalStatus}
-          variant="filled"
-        />
+        <span className="font-mono tabular-nums">{row.deliveryDate}</span>
+      ),
+    },
+    {
+      key: 'documents',
+      header: labels.documents,
+      fit: 'content',
+      render: (row) => (
+        <span className="font-mono text-xs text-ink-2">{row.documents}</span>
       ),
     },
     {
@@ -390,7 +458,17 @@ export function LoadsTable({
             action={
               <Button
                 variant="secondary"
-                onClick={() => router.replace(pathname, { scroll: false })}
+                onClick={() => {
+                  // Every filter, never the tab (§6.7, the second pass).
+                  const next = new URLSearchParams(params.toString())
+                  for (const key of [...FILTER_PARAMS, 'page']) next.delete(key)
+                  router.replace(
+                    next.size > 0 ? `${pathname}?${next}` : pathname,
+                    {
+                      scroll: false,
+                    },
+                  )
+                }}
               >
                 {labels.clearFilters}
               </Button>

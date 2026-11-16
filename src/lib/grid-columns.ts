@@ -112,8 +112,21 @@ export function gridRevalidate(grid: GridId): {
   return { path: '/accounting', type: 'layout' }
 }
 
+/**
+ * A grid whose memory moved to a new key, so a new default reaches everyone.
+ *
+ * `/loads` MOVED ON 2026-11-16 (§6.7, the second pass). Every stored choice
+ * was made against the old columns, and the memory rule — the set HIDDEN —
+ * would have shown each new column on top of it until the cap dropped
+ * Documents and DEL date off the end. The old rows stay and nothing reads them.
+ */
+const KEY_VERSION: Partial<Record<GridId, string>> = {
+  'loads.loads': 'v2',
+}
+
 /** The preference key a grid's column memory is stored under. */
-export const keyFor = (grid: GridId) => `columns.${grid}`
+export const keyFor = (grid: GridId) =>
+  KEY_VERSION[grid] ? `columns.${grid}.${KEY_VERSION[grid]}` : `columns.${grid}`
 
 /** A stored column preference, as `readGridColumns` reads it. */
 export interface StoredColumnRow {
@@ -204,13 +217,14 @@ export function gridColumnsFromRow(
 
 /**
  * How many columns a grid may show (§7.1.7). Nine, except `/loads`, which the
- * owner's ruling of 2026-10-09 gives ten: its default names ten columns for a
+ * owner's ruling of 2026-10-09 gave ten and the brief of 2026-11-16 (§6.7, the
+ * second pass) twelve: its default names twelve columns for a
  * multi-authority carrier — and `/trucks`, which the owner's ruling of
  * 2026-11-10 gives eleven: the brief's default set (§6.5 part 1), unit, make,
  * model, plate, year, state, authority, driver, odometer, status, warnings.
  */
 export const GRID_COLUMN_CAP: Partial<Record<GridId, number>> = {
-  'loads.loads': 10,
+  'loads.loads': 12,
   'trucks.trucks': 11,
 }
 

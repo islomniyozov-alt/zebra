@@ -117,16 +117,22 @@ export function visibleFromMemory(
 // of what to show; letting it reorder columns too would mean a five-phase-old
 // row deciding that money sits left of a load number.
 
+// DATATRUCK'S ORDER (§6.7, the second pass, owner's brief 2026-11-16): load ·
+// ref · status · customer · driver · truck · trailer · authority · pickup ·
+// delivery · DEL date · documents, then the three behind the chooser.
 export const LOAD_COLUMN_KEYS = [
   'loadNumber',
-  'company',
+  'reference',
+  'status',
   'customer',
+  'driver',
+  'truck',
+  'trailer',
+  'company',
   'pickup',
   'delivery',
   'deliveryDate',
-  'driver',
-  'truck',
-  'status',
+  'documents',
   'billing',
   'rate',
   'warnings',
@@ -142,11 +148,13 @@ export const LOAD_COLUMN_KEYS = [
  * shows ten with more than one authority — so `/loads` is capped at ten
  * (`GRID_COLUMN_CAP`, §7.1.7 amended).
  *
- * WARNINGS IS NOT IN HERE, DELIBERATELY. An absent warnings column reads as
- * "nothing wrong", which is the one thing a hidden column must not be able to
- * say.
+ * WARNINGS JOINED THEM ON 2026-11-16 (§6.7, the second pass, owner's brief).
+ * It was kept out because an absent warnings column reads as "nothing wrong";
+ * the dot after a load's number (`LoadsTable`) now says what the column did,
+ * so the reason holds without the column. Twelve show with more than one
+ * authority, which is `/loads`' cap.
  */
-export const LOAD_COLUMNS_HIDDEN = ['billing', 'rate'] as const
+export const LOAD_COLUMNS_HIDDEN = ['billing', 'rate', 'warnings'] as const
 
 /**
  * The columns `/loads` gained after column memory changed shape (§6.7): an old

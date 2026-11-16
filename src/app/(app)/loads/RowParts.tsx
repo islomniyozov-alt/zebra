@@ -22,6 +22,12 @@ import { loadNotesAction } from './filter-actions'
 export interface RowStop {
   type: 'PICKUP' | 'DELIVERY' | 'INTERMEDIATE'
   place: string
+  /**
+   * The stop's own name — a Relay facility code, a shipper. The list's cells
+   * show City, ST; the facility moved here (§6.7, the second pass).
+   */
+  facility: string | null
+  zip: string | null
   when: string | null
 }
 
@@ -128,7 +134,21 @@ export function RowDetail({
               <span className="w-[72px] shrink-0 text-ink-3">
                 {labels.stopTypes[stop.type]}
               </span>
-              <span className="text-ink">{stop.place}</span>
+              <span className="text-ink">
+                {stop.place}
+                {stop.zip ? (
+                  <span className="ms-z1 font-mono text-ink-3" dir="ltr">
+                    {stop.zip}
+                  </span>
+                ) : null}
+                {/* The name only when the place is not already it — a Relay
+                 * stop with no address prints its facility as its place. */}
+                {stop.facility && stop.facility !== stop.place ? (
+                  <span className="ms-z2 font-mono text-ink-2" dir="ltr">
+                    {stop.facility}
+                  </span>
+                ) : null}
+              </span>
               <span className="ms-auto font-mono tabular-nums text-ink-2">
                 {stop.when ?? '—'}
               </span>

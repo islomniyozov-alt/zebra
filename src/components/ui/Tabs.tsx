@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import type { ReactNode } from 'react'
 import { cx } from '@/lib/cx'
 
 export interface TabSpec {
@@ -17,6 +18,11 @@ interface TabsProps {
   hrefFor: (key: string) => string
   /** Names the set for a screen reader: "Payroll views". */
   label: string
+  /**
+   * The page's own action at the row's end — New load on `/loads` (§6.7, the
+   * second pass), where the tabs are the only row above the toolbar.
+   */
+  trailing?: ReactNode
 }
 
 /**
@@ -41,7 +47,7 @@ interface TabsProps {
  * Same rule as §7.4's chips: "One-time charges (0)" says the week is clean, and a
  * count that disappeared would read as a tab that failed to load.
  */
-export function Tabs({ tabs, active, hrefFor, label }: TabsProps) {
+export function Tabs({ tabs, active, hrefFor, label, trailing }: TabsProps) {
   return (
     <nav
       aria-label={label}
@@ -78,6 +84,9 @@ export function Tabs({ tabs, active, hrefFor, label }: TabsProps) {
           </Link>
         )
       })}
+      {trailing ? (
+        <div className="ms-auto flex items-center py-z1">{trailing}</div>
+      ) : null}
     </nav>
   )
 }

@@ -5,6 +5,7 @@ import type {
 } from '@/generated/prisma/client'
 import { readyToInvoiceWhere } from './invoices'
 import { loadSearchWhere } from './loads'
+import { tabWhere } from './load-tabs'
 import { viewWhere, type LoadViewName, type ViewContext } from './load-views'
 import type { CompanyScopeFilter } from './tenancy'
 
@@ -35,6 +36,8 @@ export interface LoadListParams {
   billing?: string
   company?: string
   ref: string
+  /** One of the six tabs (§6.7, the second pass); absent is All loads. */
+  tab?: string
   view?: string
   from?: string
   to?: string
@@ -54,6 +57,7 @@ export function readLoadListParams(
     billing: one('billing'),
     company: one('company'),
     ref: (one('ref') ?? '').trim(),
+    tab: one('tab'),
     view: one('view'),
     from: one('from'),
     to: one('to'),
@@ -69,6 +73,7 @@ export interface LoadListWhere {
   status: Prisma.LoadWhereInput
   billing: Prisma.LoadWhereInput
   view: Prisma.LoadWhereInput
+  tab: Prisma.LoadWhereInput
 }
 
 export function loadListWhere(
@@ -111,6 +116,7 @@ export function loadListWhere(
       from: params.from,
       to: params.to,
     }),
+    tab: tabWhere(params.tab, ctx),
   }
 }
 
@@ -120,7 +126,7 @@ const and = (...parts: Prisma.LoadWhereInput[]): Prisma.LoadWhereInput => ({
 
 /** The rows on screen, and the footer's total. */
 export function listWhere(where: LoadListWhere): Prisma.LoadWhereInput {
-  return and(where.base, where.status, where.billing, where.view)
+  return and(where.base, where.status, where.billing, where.view, where.tab)
 }
 
 /**
@@ -129,16 +135,41 @@ export function listWhere(where: LoadListWhere): Prisma.LoadWhereInput {
  * filter like any other, and the status and billing counts honour it.
  */
 export function statusCountWhere(where: LoadListWhere): Prisma.LoadWhereInput {
-  return and(where.base, where.billing, where.view)
+  return and(where.base, where.billing, where.view, where.tab)
 }
 
 export function billingCountWhere(where: LoadListWhere): Prisma.LoadWhereInput {
-  return and(where.base, where.status, where.view)
+  return and(where.base, where.status, where.view, where.tab)
 }
 
 /** The Ready to invoice chip, whose predicate is not a column `groupBy` sees. */
 export function readyCountWhere(where: LoadListWhere): Prisma.LoadWhereInput {
-  return and(where.base, where.status, where.view, readyToInvoiceWhere())
+  return and(
+    where.base,
+    where.status,
+    where.view,
+    where.tab,
+    readyToInvoiceWhere(),
+  )
+}
+
+/**
+ * A tab's count (§6.7, the second pass): every other filter — the view
+ * included — and this tab in place of the active one. `undefined` is All
+ * loads.
+ */
+export function tabCountWhere(
+  where: LoadListWhere,
+  tab: string | undefined,
+  ctx: ViewContext,
+): Prisma.LoadWhereInput {
+  return and(
+    where.base,
+    where.status,
+    where.billing,
+    where.view,
+    tabWhere(tab, ctx),
+  )
 }
 
 /**
@@ -150,5 +181,11 @@ export function viewCountWhere(
   name: LoadViewName,
   ctx: ViewContext,
 ): Prisma.LoadWhereInput {
-  return and(where.base, where.status, where.billing, viewWhere(name, ctx))
+  return and(
+    where.base,
+    where.status,
+    where.billing,
+    where.tab,
+    viewWhere(name, ctx),
+  )
 }

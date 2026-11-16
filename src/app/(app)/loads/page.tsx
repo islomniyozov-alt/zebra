@@ -9,11 +9,13 @@ import {
 import { Button } from '@/components/ui/Button'
 import { getLocaleContext } from '@/lib/locale'
 import type { MessageKey } from '@/lib/i18n'
-import { FilterBar } from '@/components/ui/FilterBar'
+import { Tabs } from '@/components/ui/Tabs'
 import { LoadsTable, type LoadRow } from './LoadsTable'
 import { billingLabelKey, operationalLabelKey } from '@/lib/status'
-import { readLoadListParams, READY } from '@/lib/load-list'
+import { readLoadListParams } from '@/lib/load-list'
 import { LOADS_GRID, readLoadListData } from '@/lib/load-list-page'
+import { documentsLabel } from '@/lib/load-list-rows'
+import { isLoadTab, LOAD_TABS } from '@/lib/load-tabs'
 import { renderDateOnly } from '@/lib/stop-time'
 import { DENSITIES } from '@/lib/preferences'
 import {
@@ -26,10 +28,10 @@ import {
   LOAD_COLUMN_KEYS,
   LOAD_COLUMNS_HIDDEN,
 } from '@/lib/list-columns'
-import { SavedViews } from './SavedViews'
 import { ColumnsChooser } from '../_grid/ColumnsChooser'
 import { DensityControl } from './DensityControl'
 import { LoadFilters } from './LoadFilters'
+import { DateRangeFilter, ReferenceSearch } from './ToolbarControls'
 import { AuthorityFilter } from '../_grid/AuthorityFilter'
 import type {
   LoadBillingStatus,
@@ -43,9 +45,11 @@ import type {
 // security and the permission check happened before the query did. ESLint
 // refuses `withOrg` and `prisma` under src/app, so there is no shorter path.
 //
-// §6.7 gave it Datatruck's shape. WHAT IT READS IS `readLoadListData` in
-// `src/lib/load-list-page.ts`: the rows, and every number on the bar from ONE
-// grouped statement (chain two, 2026-10-09). The page renders.
+// §6.7 gave it Datatruck's shape, and the second pass (owner's brief
+// 2026-11-16) the rest of it: six tabs with counts, one toolbar row, nothing
+// else above the table. WHAT IT READS IS `readLoadListData` in
+// `src/lib/load-list-page.ts`: the rows, and every count from ONE grouped
+// statement (chain two, 2026-10-09). The page renders.
 
 /**
  * The chooser's labels, keyed by column (§7.1.7).
@@ -57,6 +61,9 @@ const loadColumnHeaders = (
   t: (key: MessageKey) => string,
 ): Record<(typeof LOAD_COLUMN_KEYS)[number], string> => ({
   loadNumber: t('loads.column.load'),
+  reference: t('loads.column.reference'),
+  trailer: t('loads.column.trailer'),
+  documents: t('loads.column.documents'),
   company: t('loads.column.company'),
   customer: t('loads.column.customer'),
   pickup: t('loads.column.pickup'),
@@ -113,14 +120,21 @@ export default async function LoadsPage({
   /** The same query string, for the export: the file is this view. */
   const exportQuery = pageHref(1)
 
-  const [mayCreate, mayOpenCustomer, mayOpenDriver, mayOpenTruck, mayUpload] =
-    await Promise.all([
-      currentUserCan('create', 'load'),
-      currentUserCan('read', 'customer'),
-      currentUserCan('read', 'driver'),
-      currentUserCan('read', 'truck'),
-      currentUserCan('create', 'document'),
-    ])
+  const [
+    mayCreate,
+    mayOpenCustomer,
+    mayOpenDriver,
+    mayOpenTruck,
+    mayOpenTrailer,
+    mayUpload,
+  ] = await Promise.all([
+    currentUserCan('create', 'load'),
+    currentUserCan('read', 'customer'),
+    currentUserCan('read', 'driver'),
+    currentUserCan('read', 'truck'),
+    currentUserCan('read', 'trailer'),
+    currentUserCan('create', 'document'),
+  ])
 
   // TWO CALLS THROUGH THE TENANT READER, NO TRANSACTION (§6.7 v11.10): the
   // authorities, preferences and labels, then the rows, warnings and chips
@@ -130,7 +144,6 @@ export default async function LoadsPage({
     counts,
     authorities,
     filterLabels,
-    savedViews,
     density,
     visibleLoadColumns,
   } = await readCurrentOrg('read', 'load', async (reader, session) => {
@@ -194,6 +207,8 @@ export default async function LoadsPage({
     drivers: row.drivers,
     pickup: row.pickup,
     delivery: row.delivery,
+    pickupZip: row.pickupZip,
+    deliveryZip: row.deliveryZip,
     deliveryDate:
       row.deliveryDay === null
         ? '—'
@@ -201,6 +216,9 @@ export default async function LoadsPage({
           '—'),
     truckId: row.truckId,
     truck: row.truck ?? '—',
+    trailerId: row.trailerId,
+    trailer: row.trailer ?? '—',
+    documents: documentsLabel(row.documents),
     operationalStatus: row.operationalStatus,
     billingStatus: row.billingStatus,
     // Money is an integer of cents everywhere until the moment it is read.
@@ -241,20 +259,16 @@ export default async function LoadsPage({
     'CLOSED_IN_DATATRUCK',
   ]
 
-  const statuses: LoadOperationalStatus[] = [
-    'BOOKED',
-    'IN_TRANSIT',
-    'DELIVERED',
-    'POD_RECEIVED',
-  ]
-  // READY_TO_INVOICE first: it is the biggest bucket on a working board.
-  const billing: string[] = [
-    READY,
-    'UNINVOICED',
-    'INVOICED',
-    'PARTIALLY_PAID',
-    'PAID',
-  ]
+  // ── THE SIX TABS (§6.7, the second pass) ─────────────────────────────
+  //
+  // A tab keeps every filter and drops the page; All loads is no `?tab=`.
+  const activeTab = isLoadTab(listParams.tab) ? listParams.tab : 'all'
+  const tabHref = (key: string) => {
+    const next = new URLSearchParams(pageHref(1))
+    if (key === 'all') next.delete('tab')
+    else next.set('tab', key)
+    return next.size > 0 ? `/loads?${next}` : '/loads'
+  }
 
   const headers = loadColumnHeaders(t)
   const typeahead = (which: 'broker' | 'driver') => ({
@@ -266,124 +280,95 @@ export default async function LoadsPage({
     clear: t('loads.filter.clearOne'),
   })
 
+  const range = (which: 'pickup' | 'delivery') => ({
+    label: t(
+      which === 'pickup'
+        ? 'loads.filter.pickupDate'
+        : 'loads.filter.deliveryDate',
+    ),
+    from: t('loads.filter.range.from'),
+    to: t('loads.filter.range.to'),
+    clear: t('loads.filter.range.clear'),
+  })
+
   return (
     <>
-      {/* Page title, then the filter bar directly under it — never in a
-       * drawer (§7.4). The page's actions sit top-right and belong to the
-       * page (§7.1.6). */}
-      <div className="flex items-baseline justify-between gap-z4 border-b border-border bg-surface px-gutter py-z3">
-        <h1 className="text-lg font-medium text-ink">{t('loads.title')}</h1>
-        <div className="flex items-center gap-z3">
-          {/* §2 — one meaning per screen, stated in the screen's header. */}
-          <p className="text-xs text-ink-3">{t('loads.stripeMeaning')}</p>
-          {/* §6.7 item 7: this view, every page of it, as CSV. A plain link:
-           * the browser downloads, middle-click works, nothing is posted. */}
-          <a
-            href={`/loads/export${exportQuery ? `?${exportQuery}` : ''}`}
-            className="inline-flex h-control-compact items-center rounded-control border border-border-strong bg-surface px-z2 text-xs font-medium text-ink-2 hover:bg-surface-3"
-          >
-            {t('loads.export')}
-          </a>
-          {mayCreate ? (
+      {/* THE TITLE IS THE BREADCRUMB'S (§6.7, the second pass): nothing above
+       * the table but the tabs and one toolbar row, so the heading is spoken
+       * and not drawn. */}
+      <h1 className="sr-only">{t('loads.title')}</h1>
+
+      {/* SIX TABS, EACH WITH ITS COUNT, from the one grouped statement. Zero
+       * is shown: "Dispatched 0" says the board is clear. New load sits at
+       * the row's end, the page's one action. */}
+      <Tabs
+        label={t('loads.tabs')}
+        active={activeTab}
+        hrefFor={tabHref}
+        tabs={(['all', ...LOAD_TABS] as const).map((key) => ({
+          key,
+          label: t(`loads.tab.${key}`),
+          count: counts.tabs[key],
+        }))}
+        trailing={
+          mayCreate ? (
             <Link href="/loads/new">
               <Button variant="primary" size="compact">
                 {t('loads.add')}
               </Button>
             </Link>
-          ) : null}
-        </div>
-      </div>
-
-      {/* §7.4 — pinned above the table, not behind a menu. One click. Density
-       * moved to the filter bar's second row (§6.7 chain two). */}
-      <SavedViews
-        grid="loads"
-        views={savedViews}
-        labels={{
-          save: t('views.save'),
-          name: t('views.name'),
-          saveHint: t('views.saveHint'),
-          remove: t('views.remove'),
-          all: t('views.all'),
-          cancel: t('ref.cancel'),
-          density: t('density.label'),
-          densities: [],
-        }}
+          ) : null
+        }
       />
 
-      {/* §6.7 chain two: TWO ROWS AT 1920. Row one, every chip; row two, the
-       * search, the Filters popover, the chooser, density, Clear filters. */}
-      <FilterBar
-        layout="twoRows"
-        clearLabel={t('loads.filter.clear')}
-        moreLabel={t('loads.filter.more')}
-        extraParams={['view', 'from', 'to', 'customer', 'driver', 'company']}
-        groups={[
-          {
-            param: 'status',
-            label: t('loads.filter.status'),
-            choices: statuses.map((status) => ({
-              value: status,
-              label: t(operationalLabelKey(status)),
-              // Zero is a real answer and is shown: "Delivered 0" says the day
-              // is clear, where a missing chip would look like a broken filter.
-              count: counts.status[status] ?? 0,
-            })),
-          },
-          // Two VIEWS beside the status chips. They share `?view=` with the
-          // date presets in the popover, so choosing one clears the other.
-          {
-            id: 'queue',
-            param: 'view',
-            label: t('loads.filter.queue'),
-            choices: (['upcoming', 'unpaid'] as const).map((name) => ({
-              value: name,
-              label: t(`loads.view.${name}`),
-              count: counts[name],
-            })),
-          },
-          {
-            param: 'billing',
-            label: t('loads.filter.billing'),
-            choices: billing.map((status) => ({
-              value: status,
-              label: t(billingLabelKey(status as LoadBillingStatus)),
-              count: counts.billing[status] ?? 0,
-            })),
-          },
-          // THE AUTHORITY IS NOT A CHIP GROUP ANY MORE. It is the dropdown
-          // among the children below (§6.3, 2026-11-06): the names appear only
-          // while it is open. `company` is in `extraParams` above, so Clear
-          // filters stays honest about it.
-        ]}
-        search={{
-          param: 'ref',
-          label: t('loads.filter.reference'),
-          placeholder: t('loads.filter.referencePlaceholder'),
-        }}
+      {/* ONE TOOLBAR ROW, in the brief's order: Filter · Pickup date ·
+       * Delivery date · Reference search · Authority · Export · Density ·
+       * Columns. Never in a drawer (§7.4); Clear filters is inside Filter. */}
+      <div
+        data-filter-bar
+        className="flex flex-wrap items-center gap-z2 border-b border-border bg-surface px-gutter py-z2"
       >
-        {/* THE AUTHORITY, AS A DROPDOWN (§6.3, 2026-11-06): closed it reads
-         * "Authority: All"; the names appear only while it is open. No counts
-         * here — a narrowing, not a report — and nothing when there is one
-         * authority, which the component decides. */}
+        <LoadFilters
+          selected={filterLabels}
+          labels={{
+            open: t('loads.filter.filter'),
+            dates: t('loads.filter.dates'),
+            picksUpToday: t('loads.view.picksUpToday'),
+            deliversThisWeek: t('loads.view.deliversThisWeek'),
+            clear: t('loads.filter.clear'),
+            broker: typeahead('broker'),
+            driver: typeahead('driver'),
+          }}
+        />
+        <DateRangeFilter which="pickup" labels={range('pickup')} />
+        <DateRangeFilter which="delivery" labels={range('delivery')} />
+        <ReferenceSearch
+          label={t('loads.filter.reference')}
+          placeholder={t('loads.filter.referencePlaceholder')}
+        />
+        {/* THE AUTHORITY, AS A DROPDOWN (§6.3, 2026-11-06); nothing when there
+         * is one authority, which the component decides. */}
         <AuthorityFilter
           companies={authorities}
           label={t('loads.filter.authority')}
           allLabel={t('accounting.allCompanies')}
         />
-        <LoadFilters
-          selected={filterLabels}
+        {/* §6.7 item 7: this view, every page of it, as CSV. A plain link:
+         * the browser downloads, middle-click works, nothing is posted. */}
+        <a
+          href={`/loads/export${exportQuery ? `?${exportQuery}` : ''}`}
+          className="inline-flex h-control-compact items-center rounded-control border border-border-strong bg-surface px-z2 text-xs font-medium text-ink-2 hover:bg-surface-3"
+        >
+          {t('loads.export')}
+        </a>
+        <DensityControl
+          density={density}
           labels={{
-            open: t('loads.filters'),
-            dates: t('loads.filter.dates'),
-            picksUpToday: t('loads.view.picksUpToday'),
-            deliversThisWeek: t('loads.view.deliversThisWeek'),
-            pickupRange: t('loads.filter.range.pickup'),
-            deliveryRange: t('loads.filter.range.delivery'),
-            from: t('loads.filter.range.from'),
-            to: t('loads.filter.range.to'),
-            broker: typeahead('broker'),
-            driver: typeahead('driver'),
+            density: t('density.label'),
+            densities: DENSITIES.map((value) => ({
+              value,
+              label: t(`density.${value}` as never),
+            })),
           }}
         />
         <ColumnsChooser
@@ -403,30 +388,21 @@ export default async function LoadsPage({
             'grid.columns.errorGrid': t('grid.columns.errorGrid'),
           }}
         />
-        <DensityControl
-          density={density}
-          labels={{
-            density: t('density.label'),
-            densities: DENSITIES.map((value) => ({
-              value,
-              label: t(`density.${value}` as never),
-            })),
-          }}
-        />
-      </FilterBar>
+      </div>
 
       <LoadsTable
         rows={rows}
         // §6.3 as amended: the company column exists only where there is more
         // than one authority to tell apart.
         showCompanyColumn={companyCount > 1}
-        // §7.1.7 as amended 2026-10-09: ten on this list.
+        // §7.1.7 as amended 2026-11-16: twelve on this list.
         columnCap={gridColumnCap('loads.loads')}
         visible={visibleLoadColumns}
         mayOpen={{
           customer: mayOpenCustomer,
           driver: mayOpenDriver,
           truck: mayOpenTruck,
+          trailer: mayOpenTrailer,
         }}
         statusLabels={Object.fromEntries(
           ALL_OPERATIONAL.map((status) => [
@@ -477,6 +453,8 @@ export default async function LoadsPage({
           delivery: t('loads.column.delivery'),
           deliveryDate: t('loads.column.deliveryDate'),
           truck: t('loads.column.truck'),
+          trailer: t('loads.column.trailer'),
+          documents: t('loads.column.documents'),
           status: t('loads.column.status'),
           billing: t('loads.column.billing'),
           rate: t('loads.column.rate'),

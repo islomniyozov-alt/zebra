@@ -196,10 +196,12 @@ describe('the loads list resolves the view it is given', () => {
         join(process.cwd(), 'src', 'lib', 'load-list-counts.ts'),
         'utf8',
       ),
-    ).toMatch(/AND COALESCE\(\$\{viewSql\(params, ctx\)\}, false\)`/)
+    ).toMatch(
+      /AND COALESCE\(\$\{viewSql\(params, ctx\)\}, false\)\s+AND COALESCE\(\$\{tabSql\(params, ctx\)\}, false\)`/,
+    )
     expect(source).toMatch(/^\s*const matching = counts\.matching$/m)
     expect(builder).toMatch(
-      /return and\(where\.base, where\.status, where\.billing, where\.view\)/,
+      /return and\(where\.base, where\.status, where\.billing, where\.view, where\.tab\)/,
     )
   })
 

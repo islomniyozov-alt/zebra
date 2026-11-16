@@ -10,9 +10,8 @@ import type { LoadListRow } from './load-list-rows'
 // "In transit" in whatever language the person reads, because the file is read
 // by a machine downstream. Money is `1234.56`; a date is `YYYY-MM-DD`.
 //
-// THE LOAD CELL HOLDS TWO IDENTIFIERS on screen — the load number, and the
-// broker's reference under it — so the file gives each its own column rather
-// than a cell a spreadsheet cannot split.
+// THE REFERENCE IS ITS OWN COLUMN on screen since 2026-11-16 (§6.7, the second
+// pass), and in the file too, so hiding one hides it in both.
 // ---------------------------------------------------------------------------
 
 type LoadColumn = (typeof LOAD_COLUMN_KEYS)[number]
@@ -22,10 +21,8 @@ const FILE_COLUMNS: Record<
   LoadColumn,
   readonly [string, (row: LoadListRow) => string | null][]
 > = {
-  loadNumber: [
-    ['load_number', (row) => row.loadNumber],
-    ['reference', (row) => row.reference],
-  ],
+  loadNumber: [['load_number', (row) => row.loadNumber]],
+  reference: [['reference', (row) => row.reference]],
   company: [['authority', (row) => row.companyName]],
   customer: [['broker', (row) => row.customerName]],
   pickup: [['pickup', (row) => row.pickup]],
@@ -35,6 +32,8 @@ const FILE_COLUMNS: Record<
     ['driver', (row) => row.drivers.map((driver) => driver.name).join(' / ')],
   ],
   truck: [['truck', (row) => row.truck]],
+  trailer: [['trailer', (row) => row.trailer]],
+  documents: [['documents', (row) => row.documents.join(';')]],
   status: [['status', (row) => row.operationalStatus]],
   billing: [['billing', (row) => row.billingStatus]],
   rate: [['rate', (row) => csvMoney(row.linehaulCents)]],

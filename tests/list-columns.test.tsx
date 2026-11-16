@@ -378,10 +378,15 @@ describe('the chooser asks about a permission the role on that screen holds', ()
 describe('what is never default-hidden', () => {
   // §7.1.7. An absent warnings column reads as "nothing wrong", which is the one
   // thing a hidden column must not be able to say — so it is not a matter of
-  // taste on these two lists.
-  it('the warnings column, on either list', () => {
-    expect([...LOAD_COLUMNS_HIDDEN]).not.toContain('warnings')
+  // taste on the trucks list. ON `/loads` IT IS HIDDEN SINCE 2026-11-16 (§6.7,
+  // the second pass) because the dot after the number says it instead; the
+  // render test below holds the dot.
+  it('the warnings column on trucks; on loads, the dot stands in for it', () => {
     expect([...TRUCK_COLUMNS_HIDDEN]).not.toContain('warnings')
+    expect([...LOAD_COLUMNS_HIDDEN]).toContain('warnings')
+    expect(
+      readFileSync('src/app/(app)/loads/LoadsTable.tsx', 'utf8'),
+    ).toContain('data-warning-dot')
   })
 
   it('nor the first column, which carries the row link', () => {
@@ -415,28 +420,35 @@ describe('what is never default-hidden', () => {
     }
   })
 
-  it('the loads list opens on the ten the owner named (2026-10-09)', () => {
-    // THE RULING, PINNED: only rate and billing start hidden.
-    expect([...LOAD_COLUMNS_HIDDEN].sort()).toEqual(['billing', 'rate'])
+  it('the loads list opens on the twelve the owner named, in order (2026-11-16)', () => {
+    // THE BRIEF, PINNED (§6.7, the second pass): rate, billing and warnings
+    // start hidden, and the twelve shown are Datatruck's order.
+    expect([...LOAD_COLUMNS_HIDDEN].sort()).toEqual([
+      'billing',
+      'rate',
+      'warnings',
+    ])
     expect(
       LOAD_COLUMN_KEYS.filter(
         (key) => !LOAD_COLUMNS_HIDDEN.includes(key as never),
       ),
     ).toEqual([
       'loadNumber',
-      'company',
+      'reference',
+      'status',
       'customer',
+      'driver',
+      'truck',
+      'trailer',
+      'company',
       'pickup',
       'delivery',
       'deliveryDate',
-      'driver',
-      'truck',
-      'status',
-      'warnings',
+      'documents',
     ])
-    // Ten is over §7.1's nine, which is why `/loads` is capped at ten — and
-    // `/trucks` at eleven, the owner's ruling of 2026-11-10 (§6.5 part 1).
-    expect(gridColumnCap('loads.loads')).toBe(10)
+    // Twelve is over §7.1's nine, which is why `/loads` is capped at twelve —
+    // and `/trucks` at eleven, the owner's ruling of 2026-11-10 (§6.5 part 1).
+    expect(gridColumnCap('loads.loads')).toBe(12)
     expect(gridColumnCap('trucks.trucks')).toBe(11)
     expect(gridColumnCap('drivers.drivers')).toBe(TABLE_COLUMN_CAP)
   })
@@ -463,8 +475,13 @@ describe('LoadsTable renders inside the cap with the authority column shown', ()
     pickup: 'Chicago, IL',
     delivery: 'Dallas, TX',
     deliveryDate: 'Oct 9, 2026',
+    pickupZip: '60601',
+    deliveryZip: '75201',
     truckId: 't1',
     truck: '104',
+    trailerId: 'tr1',
+    trailer: '53-07',
+    documents: 'RC · BOL',
     operationalStatus: 'IN_TRANSIT' as const,
     billingStatus: 'UNINVOICED' as const,
     rate: '$2,450.00',
@@ -511,6 +528,8 @@ describe('LoadsTable renders inside the cap with the authority column shown', ()
     delivery: 'Delivery',
     deliveryDate: 'DEL date',
     truck: 'Truck',
+    trailer: 'Trailer',
+    documents: 'Documents',
     status: 'Status',
     billing: 'Billing',
     rate: 'Rate',
@@ -539,14 +558,19 @@ describe('LoadsTable renders inside the cap with the authority column shown', ()
           labels={labels}
           statusLabels={{ IN_TRANSIT: 'In transit' }}
           billingLabels={{ UNINVOICED: 'Not invoiced' }}
-          mayOpen={{ customer: true, driver: true, truck: true }}
+          mayOpen={{
+            customer: true,
+            driver: true,
+            truck: true,
+            trailer: true,
+          }}
         />
       </ToastProvider>,
     )
     return screen.getAllByRole('columnheader')
   }
 
-  it('ten headers by default, the authority and warnings among them', async () => {
+  it('twelve headers by default, the authority among them and warnings not', async () => {
     const available = columnKeysFor(LOAD_COLUMN_KEYS, true)
     const headers = await renderList(
       visibleFromMemory(
@@ -556,22 +580,76 @@ describe('LoadsTable renders inside the cap with the authority column shown', ()
         gridColumnCap('loads.loads'),
       ),
     )
-    expect(headers.length).toBe(10)
+    expect(headers.length).toBe(12)
     // THE AUTHORITY COLUMN tells six carriers' freight apart, so it had better
     // be shown; dropping it would "fix" the cap by hiding the distinction.
     const text = headers.map((cell) => cell.textContent)
-    expect(text).toContain('Authority')
-    expect(text).toContain('Pickup')
-    expect(text).toContain('Warnings')
+    expect(text).toEqual([
+      'Load',
+      'Ref',
+      'Status',
+      'Customer',
+      'Driver',
+      'Truck',
+      'Trailer',
+      'Authority',
+      'Pickup',
+      'Delivery',
+      'DEL date',
+      'Documents',
+    ])
+    expect(text).not.toContain('Warnings')
     expect(text).not.toContain('Rate')
   })
 
+  it('a load with warnings carries the dot after its number, named', async () => {
+    const { LoadsTable } = await import('@/app/(app)/loads/LoadsTable')
+    const { ToastProvider } = await import('@/components/ui/Toast')
+    render(
+      <ToastProvider>
+        <LoadsTable
+          rows={[
+            row,
+            {
+              ...row,
+              id: 'l2',
+              loadNumber: 'L-1002',
+              warnings: [
+                { name: 'document_missing', detail: 'POD' },
+                { name: 'pickup_soon_unassigned', detail: '' },
+              ],
+            },
+          ]}
+          showCompanyColumn
+          columnCap={gridColumnCap('loads.loads')}
+          expandLabels={expandLabels}
+          menuLabels={menuLabels}
+          visible={['loadNumber', 'status']}
+          labels={{ ...labels, warningCount: '{n} to fix' }}
+          statusLabels={{ IN_TRANSIT: 'In transit' }}
+          billingLabels={{ UNINVOICED: 'Not invoiced' }}
+          mayOpen={{
+            customer: true,
+            driver: true,
+            truck: true,
+            trailer: true,
+          }}
+        />
+      </ToastProvider>,
+    )
+    // ONE DOT, ON THE LOAD THAT HAS SOMETHING TO FIX, said in words.
+    const dots = document.querySelectorAll('[data-warning-dot]')
+    expect(dots.length).toBe(1)
+    expect(dots[0]!.getAttribute('aria-label')).toBe('2 to fix')
+    expect(dots[0]!.closest('tr')!.textContent).toContain('L-1002')
+  })
+
   it('and every column at once is what throws, so the cap is load-bearing', async () => {
-    // THE FAILURE ITSELF, OBSERVED. Hand the component all twelve and the
-    // grid's cap throws — proof that the ten above is the cap and not a
+    // THE FAILURE ITSELF, OBSERVED. Hand the component all fifteen and the
+    // grid's cap throws — proof that the twelve above is the cap and not a
     // coincidence of this fixture.
     await expect(
       renderList(columnKeysFor(LOAD_COLUMN_KEYS, true)),
-    ).rejects.toThrow(/10 columns at most; this one has 12/)
+    ).rejects.toThrow(/12 columns at most; this one has 15/)
   })
 })

@@ -26,6 +26,12 @@ import type { TxClient } from './tenancy'
 export interface LoadListStop {
   type: 'PICKUP' | 'DELIVERY' | 'INTERMEDIATE'
   place: string
+  /**
+   * The stop's own name — a Relay facility code, a shipper — shown in the
+   * expand beside the place (§6.7, the second pass), or null.
+   */
+  facility: string | null
+  zip: string | null
   /** The appointment in the stop's own zone (§8, rule 3), or null. */
   when: string | null
 }
@@ -41,10 +47,17 @@ export interface LoadListRow {
   drivers: { id: string; name: string }[]
   pickup: string
   delivery: string
+  /** The first pickup's and final delivery's zip, for the cell's hover. */
+  pickupZip: string | null
+  deliveryZip: string | null
   /** The final delivery's local date, `YYYY-MM-DD`, or null. */
   deliveryDay: string | null
   truckId: string | null
   truck: string | null
+  trailerId: string | null
+  trailer: string | null
+  /** The kinds of document on the load, distinct and in `DOCUMENT_ORDER`. */
+  documents: string[]
   operationalStatus: LoadOperationalStatus
   billingStatus: LoadBillingStatus
   linehaulCents: number
@@ -73,6 +86,41 @@ export function stopPlace(
   if (!stop) return '—'
   const address = [stop.city, stop.state].filter(Boolean).join(', ')
   return address || stop.name || '—'
+}
+
+/** The three a dispatcher asks for, first and by name; the rest are counted. */
+export const DOCUMENT_ORDER = ['RATE_CONFIRMATION', 'BOL', 'POD'] as const
+
+const DOCUMENT_CODE: Record<(typeof DOCUMENT_ORDER)[number], string> = {
+  RATE_CONFIRMATION: 'RC',
+  BOL: 'BOL',
+  POD: 'POD',
+}
+
+/** Distinct, the three named kinds first in their order, the rest by name. */
+function documentKinds(types: readonly string[]): string[] {
+  const rank = (type: string) => {
+    const at = (DOCUMENT_ORDER as readonly string[]).indexOf(type)
+    return at === -1 ? DOCUMENT_ORDER.length : at
+  }
+  return [...new Set(types)].sort(
+    (a, b) => rank(a) - rank(b) || a.localeCompare(b),
+  )
+}
+
+/**
+ * The Documents cell (§6.7, the second pass): `RC · BOL · POD` for those
+ * present, `+n` for any other kind, an em dash for none.
+ */
+export function documentsLabel(kinds: readonly string[]): string {
+  const named = kinds
+    .filter((kind): kind is (typeof DOCUMENT_ORDER)[number] =>
+      (DOCUMENT_ORDER as readonly string[]).includes(kind),
+    )
+    .map((kind) => DOCUMENT_CODE[kind])
+  const others = kinds.length - named.length
+  const parts = [named.join(' · '), others > 0 ? `+${others}` : '']
+  return parts.filter(Boolean).join(' ') || '—'
 }
 
 /**
@@ -110,6 +158,8 @@ export async function readLoadRows(
       driver: { select: { id: true, firstName: true, lastName: true } },
       coDriver: { select: { id: true, firstName: true, lastName: true } },
       truck: { select: { id: true, unitNumber: true } },
+      trailer: { select: { id: true, unitNumber: true } },
+      documents: { where: { deletedAt: null }, select: { type: true } },
       stops: {
         orderBy: { sequence: 'asc' },
         select: {
@@ -117,6 +167,7 @@ export async function readLoadRows(
           name: true,
           city: true,
           state: true,
+          postalCode: true,
           scheduledAt: true,
           windowStart: true,
         },
@@ -146,11 +197,14 @@ export interface LoadRowSource {
   driver: { id: string; firstName: string; lastName: string } | null
   coDriver: { id: string; firstName: string; lastName: string } | null
   truck: { id: string; unitNumber: string } | null
+  trailer: { id: string; unitNumber: string } | null
+  documents: { type: string }[]
   stops: {
     type: LoadListStop['type']
     name: string | null
     city: string | null
     state: string | null
+    postalCode: string | null
     scheduledAt: Date | null
     windowStart: Date | null
   }[]
@@ -167,6 +221,7 @@ export function loadRowsFrom(
     const finalDelivery = [...load.stops]
       .reverse()
       .find((stop) => stop.type === 'DELIVERY')
+    const firstPickup = load.stops.find((stop) => stop.type === 'PICKUP')
     return {
       id: load.id,
       loadNumber: load.loadNumber,
@@ -180,8 +235,10 @@ export function loadRowsFrom(
           id: seat.id,
           name: `${seat.firstName} ${seat.lastName}`.trim(),
         })),
-      pickup: stopPlace(load.stops.find((stop) => stop.type === 'PICKUP')),
+      pickup: stopPlace(firstPickup),
       delivery: stopPlace(finalDelivery),
+      pickupZip: firstPickup?.postalCode ?? null,
+      deliveryZip: finalDelivery?.postalCode ?? null,
       // THE DAY THE DATE VIEWS READ: the stop's own local date, so a row never
       // sits in a view its own DEL date contradicts.
       deliveryDay: finalDelivery
@@ -193,6 +250,9 @@ export function loadRowsFrom(
         : null,
       truckId: load.truck?.id ?? null,
       truck: load.truck?.unitNumber ?? null,
+      trailerId: load.trailer?.id ?? null,
+      trailer: load.trailer?.unitNumber ?? null,
+      documents: documentKinds(load.documents.map((doc) => doc.type)),
       operationalStatus: load.operationalStatus,
       billingStatus: load.billingStatus,
       linehaulCents: load.linehaulCents,
@@ -204,6 +264,8 @@ export function loadRowsFrom(
       stops: load.stops.map((stop) => ({
         type: stop.type,
         place: stopPlace(stop),
+        facility: stop.name,
+        zip: stop.postalCode,
         when:
           renderStopTime(stop.scheduledAt ?? stop.windowStart, stop.state, {
             fallbackZone: zone,
@@ -242,9 +304,16 @@ export function loadRowsSql(
               FROM "Driver" d WHERE d.id = l."coDriverId") AS co_driver,
            (SELECT json_build_object('id', t.id, 'unitNumber', t."unitNumber")
               FROM "Truck" t WHERE t.id = l."truckId") AS truck,
+           (SELECT json_build_object('id', tr.id, 'unitNumber', tr."unitNumber")
+              FROM "Trailer" tr WHERE tr.id = l."trailerId") AS trailer,
+           (SELECT COALESCE(json_agg(json_build_object('type', dc.type::text)),
+                   '[]'::json)
+              FROM "Document" dc
+             WHERE dc."loadId" = l.id AND dc."deletedAt" IS NULL) AS documents,
            (SELECT COALESCE(json_agg(json_build_object(
                      'type', st.type::text, 'name', st.name, 'city', st.city,
-                     'state', st.state, 'scheduledAt', st."scheduledAt",
+                     'state', st.state, 'postalCode', st."postalCode",
+                     'scheduledAt', st."scheduledAt",
                      'windowStart', st."windowStart") ORDER BY st.sequence),
                    '[]'::json)
               FROM "LoadStop" st WHERE st."loadId" = l.id) AS stops
@@ -275,11 +344,14 @@ export interface LoadRowSqlRow {
   driver: Seat | null
   co_driver: Seat | null
   truck: { id: string; unitNumber: string } | null
+  trailer: { id: string; unitNumber: string } | null
+  documents: { type: string }[]
   stops: {
     type: string
     name: string | null
     city: string | null
     state: string | null
+    postalCode: string | null
     scheduledAt: Stamp | null
     windowStart: Stamp | null
   }[]
@@ -303,11 +375,14 @@ export function loadRowSourcesFrom(
     driver: row.driver,
     coDriver: row.co_driver,
     truck: row.truck,
+    trailer: row.trailer,
+    documents: row.documents,
     stops: row.stops.map((stop) => ({
       type: stop.type as LoadListStop['type'],
       name: stop.name,
       city: stop.city,
       state: stop.state,
+      postalCode: stop.postalCode,
       scheduledAt: asDate(stop.scheduledAt),
       windowStart: asDate(stop.windowStart),
     })),

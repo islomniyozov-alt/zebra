@@ -110,8 +110,13 @@ describe('and the render carries them', () => {
     pickup: 'Chicago, IL',
     delivery: 'Dallas, TX',
     deliveryDate: 'Oct 9, 2026',
+    pickupZip: '60601',
+    deliveryZip: '75201',
     truckId: 't1',
     truck: '104',
+    trailerId: 'tr1',
+    trailer: '53-07',
+    documents: 'RC · BOL',
     operationalStatus: 'IN_TRANSIT' as const,
     billingStatus: 'UNINVOICED' as const,
     rate: '$2,450.00',
@@ -156,6 +161,8 @@ describe('and the render carries them', () => {
     delivery: 'Delivery',
     deliveryDate: 'DEL date',
     truck: 'Truck',
+    trailer: 'Trailer',
+    documents: 'Documents',
     status: 'Status',
     billing: 'Billing',
     rate: 'Rate',
@@ -190,7 +197,12 @@ describe('and the render carries them', () => {
           labels={labels}
           statusLabels={{ IN_TRANSIT: 'In transit' }}
           billingLabels={{ UNINVOICED: 'Not invoiced' }}
-          mayOpen={{ customer: true, driver: true, truck: true }}
+          mayOpen={{
+            customer: true,
+            driver: true,
+            truck: true,
+            trailer: true,
+          }}
         />
       </ToastProvider>,
     )
@@ -205,7 +217,15 @@ describe('and the render carries them', () => {
 
   it('a fitted header asks for no width and nothing in its column wraps', async () => {
     const { header } = await renderList(true)
-    for (const name of ['Load', 'DEL date', 'Truck', 'Status', 'Warnings']) {
+    for (const name of [
+      'Load',
+      'Ref',
+      'Status',
+      'Truck',
+      'Trailer',
+      'DEL date',
+      'Documents',
+    ]) {
       expect(header(name).className, name).toContain('w-0')
       expect(header(name).className, name).toContain('whitespace-nowrap')
       expect(header(name).style.width, name).toBe('')

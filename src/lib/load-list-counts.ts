@@ -1,5 +1,6 @@
 import { Prisma } from '@/generated/prisma/client'
 import { READY, type LoadListParams } from './load-list'
+import { isLoadTab, LOAD_TABS, TAB_STATUSES, type LoadTab } from './load-tabs'
 import {
   addDays,
   rangeOf,
@@ -46,11 +47,20 @@ import type { TxClient } from './tenancy'
 export interface CountGroup {
   op: string
   bs: string
+  cancelled: boolean
   inView: boolean
   ready: boolean
   upcoming: boolean
   unpaid: boolean
   n: number
+}
+
+/** Whether a group is in a tab. No tab, or an unknown one, is All loads. */
+export function inTab(g: CountGroup, tab: string | undefined): boolean {
+  if (!isLoadTab(tab)) return true
+  if (tab === 'upcoming') return g.upcoming
+  if (tab === 'unpaid') return g.unpaid
+  return !g.cancelled && (TAB_STATUSES[tab] as readonly string[]).includes(g.op)
 }
 
 export interface ChipCounts {
@@ -60,7 +70,12 @@ export interface ChipCounts {
   billing: Record<string, number>
   upcoming: number
   unpaid: number
-  /** The footer's total: every filter, the view included. */
+  /**
+   * Each tab's count, `all` included (§6.7, the second pass): every other
+   * filter, the view included, and that tab in place of the active one.
+   */
+  tabs: Record<'all' | LoadTab, number>
+  /** The footer's total: every filter, the view and the tab included. */
   matching: number
 }
 
@@ -74,24 +89,29 @@ export interface ChipCounts {
  */
 export function chipCounts(
   groups: readonly CountGroup[],
-  params: Pick<LoadListParams, 'status' | 'billing'>,
+  params: Pick<LoadListParams, 'status' | 'billing' | 'tab'>,
 ): ChipCounts {
   const statusOk = (g: CountGroup) => !params.status || g.op === params.status
   const billingOk = (g: CountGroup) =>
     !params.billing ||
     (params.billing === READY ? g.ready : g.bs === params.billing)
+  const tabOk = (g: CountGroup) => inTab(g, params.tab)
   const counts: ChipCounts = {
     status: {},
     billing: {},
     upcoming: 0,
     unpaid: 0,
+    tabs: {
+      all: 0,
+      ...Object.fromEntries(LOAD_TABS.map((tab) => [tab, 0])),
+    } as ChipCounts['tabs'],
     matching: 0,
   }
   for (const g of groups) {
-    if (billingOk(g) && g.inView) {
+    if (billingOk(g) && g.inView && tabOk(g)) {
       counts.status[g.op] = (counts.status[g.op] ?? 0) + g.n
     }
-    if (statusOk(g) && g.inView) {
+    if (statusOk(g) && g.inView && tabOk(g)) {
       // THE READY CHIP IS THE PREDICATE, NEVER THE COLUMN. `READY` is the same
       // string as the column value `READY_TO_INVOICE`, which direct-settled
       // freight also carries; counting both under one key showed 1,603 on dev
@@ -102,10 +122,15 @@ export function chipCounts(
       }
       if (g.ready) counts.billing[READY] = (counts.billing[READY] ?? 0) + g.n
     }
-    if (statusOk(g) && billingOk(g)) {
+    if (statusOk(g) && billingOk(g) && tabOk(g)) {
       if (g.upcoming) counts.upcoming += g.n
       if (g.unpaid) counts.unpaid += g.n
       if (g.inView) counts.matching += g.n
+    }
+    // A TAB REPLACES THE ACTIVE TAB, as a chip replaces its own group.
+    if (statusOk(g) && billingOk(g) && g.inView) {
+      counts.tabs.all += g.n
+      for (const tab of LOAD_TABS) if (inTab(g, tab)) counts.tabs[tab] += g.n
     }
   }
   return counts
@@ -210,6 +235,21 @@ function isViewName(value: string | undefined): value is LoadViewName {
   return value !== undefined && Object.hasOwn(VIEW_SQL, value)
 }
 
+/**
+ * The active tab in SQL (§6.7, the second pass). Upcoming and Unpaid are the
+ * views' own SQL; the three status tabs read `TAB_STATUSES`, the list the
+ * Prisma predicate reads. An unknown or absent tab narrows nothing.
+ */
+function tabSql(params: LoadListParams, ctx: ViewContext): Prisma.Sql {
+  const tab = params.tab
+  if (!isLoadTab(tab)) return Prisma.sql`true`
+  if (tab === 'upcoming') return VIEW_SQL.upcoming(ctx)
+  if (tab === 'unpaid') return VIEW_SQL.unpaid(ctx)
+  return Prisma.sql`(${NOT_CANCELLED} AND l."operationalStatus"::text = ANY(${[
+    ...TAB_STATUSES[tab],
+  ]}::text[]))`
+}
+
 /** The active view in SQL; an unknown or absent name narrows nothing. */
 function viewSql(params: LoadListParams, ctx: ViewContext): Prisma.Sql {
   if (!isViewName(params.view)) return Prisma.sql`true`
@@ -250,6 +290,7 @@ function baseSql(
 export interface CountGroupRow {
   op: string
   bs: string
+  cancelled: boolean
   in_view: boolean
   ready: boolean
   upcoming: boolean
@@ -278,7 +319,8 @@ export function loadListRowsWhereSql(
   return Prisma.sql`${baseSql(params, companyScopes)}
     AND ${params.status ? Prisma.sql`l."operationalStatus"::text = ${params.status}` : Prisma.sql`true`}
     AND ${billing}
-    AND COALESCE(${viewSql(params, ctx)}, false)`
+    AND COALESCE(${viewSql(params, ctx)}, false)
+    AND COALESCE(${tabSql(params, ctx)}, false)`
 }
 
 /** The groups as SQL — one statement alone, or a CTE of the list's call. */
@@ -291,6 +333,7 @@ export function loadCountGroupsSql(
     SELECT
       l."operationalStatus"::text AS op,
       l."billingStatus"::text AS bs,
+      l."isCancelled" AS cancelled,
       COALESCE(${viewSql(params, ctx)}, false) AS in_view,
       COALESCE(${READY_SQL}, false) AS ready,
       COALESCE(${VIEW_SQL.upcoming(ctx)}, false) AS upcoming,
@@ -299,7 +342,7 @@ export function loadCountGroupsSql(
     FROM "Load" l
     JOIN "Company" c ON c."id" = l."companyId"
     WHERE ${baseSql(params, companyScopes)}
-    GROUP BY 1, 2, 3, 4, 5, 6
+    GROUP BY 1, 2, 3, 4, 5, 6, 7
   `
 }
 
@@ -322,6 +365,7 @@ export function countGroupsFrom(rows: readonly CountGroupRow[]): CountGroup[] {
   return rows.map((row) => ({
     op: row.op,
     bs: row.bs,
+    cancelled: row.cancelled,
     inView: row.in_view,
     ready: row.ready,
     upcoming: row.upcoming,

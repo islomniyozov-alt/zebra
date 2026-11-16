@@ -403,7 +403,19 @@ describe('the grid contract', () => {
 // change the table first — which is the order §15 requires anyway.
 describe('each destination has the tabs §6.2 says it has', () => {
   const EXPECTED: Record<string, readonly string[]> = {
-    invoices: ['invoices', 'ready', 'factored', 'direct'],
+    // NINE SINCE 2026-11-16 (§6.7, the second pass): the invoicing chips
+    // arrived from `/loads` as tabs, between the grid and Factored.
+    invoices: [
+      'invoices',
+      'podReceived',
+      'ready',
+      'uninvoiced',
+      'invoiced',
+      'partiallyPaid',
+      'paid',
+      'factored',
+      'direct',
+    ],
     payments: ['payments', 'unapplied'],
     // FOUR SINCE §6.2.10 PART 4: the transactions cut sits last.
     reports: ['company', 'week', 'driver', 'transactions'],
@@ -434,7 +446,7 @@ describe('each destination has the tabs §6.2 says it has', () => {
     expect(doc).toContain('Batches · Balances')
     expect(doc).toContain('By authority · By week · By driver · Transactions')
     expect(doc).toContain(
-      'Invoices · Ready to invoice · Factored · Direct-settled',
+      'Invoices · POD received · Ready to invoice · Uninvoiced · Invoiced · Partially paid · Paid · Factored · Direct-settled',
     )
   })
 })

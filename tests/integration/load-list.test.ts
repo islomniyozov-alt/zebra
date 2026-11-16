@@ -20,8 +20,15 @@ import {
   readLoadListParams,
   readyCountWhere,
   statusCountWhere,
+  tabCountWhere,
   viewCountWhere,
 } from '@/lib/load-list'
+import { LOAD_TABS } from '@/lib/load-tabs'
+import {
+  BILLING_LOAD_TABS,
+  billingTabCounts,
+  readBillingTab,
+} from '@/lib/billing-tabs'
 import { loadListCounts } from '@/lib/load-list-counts'
 import {
   LOADS_GRID,
@@ -304,6 +311,76 @@ beforeAll(async () => {
       directSettled: true,
     },
   })
+  // THE SECOND PASS'S TABS (§6.7, 2026-11-16). Each status tab needs a load
+  // the seed never makes in that state, dated before every range below so the
+  // only views they join are the ones their states put them in.
+  await book(
+    'dispatched',
+    chicagoId,
+    [
+      { type: 'PICKUP', state: 'IL', at: zoneMidnight('2026-11-01', CHI) },
+      { type: 'DELIVERY', state: 'TX', at: zoneMidnight('2026-11-02', CHI) },
+    ],
+    'DISPATCHED',
+  )
+  // In transit, with a trailer, a zip and two documents — the second pass's
+  // new cells, so the body's two spellings are compared on something.
+  await book(
+    'moving',
+    chicagoId,
+    [
+      { type: 'PICKUP', state: 'IL', at: zoneMidnight('2026-11-01', CHI) },
+      { type: 'DELIVERY', state: 'TX', at: zoneMidnight('2026-11-03', CHI) },
+    ],
+    'IN_TRANSIT',
+  )
+  const trailer = await owner.trailer.create({
+    data: { organizationId, companyId: chicagoId, unitNumber: `T-${nonce}` },
+  })
+  await owner.load.update({
+    where: { id: ids['moving']! },
+    data: { trailerId: trailer.id },
+  })
+  await owner.loadStop.updateMany({
+    where: { loadId: ids['moving']! },
+    data: { postalCode: '60601' },
+  })
+  for (const type of ['POD', 'RATE_CONFIRMATION'] as const) {
+    await owner.document.create({
+      data: {
+        organizationId,
+        companyId: chicagoId,
+        loadId: ids['moving']!,
+        type,
+        r2Key: `load-list-${nonce}-${type}`,
+        filename: `${type}.pdf`,
+        mimeType: 'application/pdf',
+        sizeBytes: 1,
+      },
+    })
+  }
+  // Invoiced and partially paid: delivered and still owed, so both are Unpaid
+  // too, and each is the one load its Billing → Invoice tab lists.
+  await book(
+    'invoiced',
+    chicagoId,
+    [
+      { type: 'PICKUP', state: 'IL', at: zoneMidnight('2026-11-01', CHI) },
+      { type: 'DELIVERY', state: 'TX', at: zoneMidnight('2026-11-02', CHI) },
+    ],
+    'DELIVERED',
+    'INVOICED',
+  )
+  await book(
+    'partial',
+    chicagoId,
+    [
+      { type: 'PICKUP', state: 'IL', at: zoneMidnight('2026-11-01', CHI) },
+      { type: 'DELIVERY', state: 'TX', at: zoneMidnight('2026-11-02', CHI) },
+    ],
+    'DELIVERED',
+    'PARTIALLY_PAID',
+  )
   // The driver sits in the second seat of one load and the first of another.
   await owner.load.update({
     where: { id: ids['illinois']! },
@@ -365,9 +442,126 @@ describe('each counted chip agrees with its list, both above zero', () => {
 
   it('Unpaid: delivered or POD in, and still owed', async () => {
     const { listed, chipCount } = await read({ view: 'unpaid' }, 'unpaid')
-    expect(keysOf(listed)).toEqual(['owed', 'ready', 'relayReady'])
+    expect(keysOf(listed)).toEqual([
+      'invoiced',
+      'owed',
+      'partial',
+      'ready',
+      'relayReady',
+    ])
     expect(chipCount).toBe(listed.length)
     expect(chipCount).toBeGreaterThan(0)
+  }, 300_000)
+})
+
+// ---------------------------------------------------------------------------
+// THE SECOND PASS (§6.7, owner's brief 2026-11-16): SIX TABS ON /loads, AND THE
+// INVOICING CHIPS AS TABS OF BILLING → INVOICE. Each count equals its rows,
+// both above zero, membership by load.
+// ---------------------------------------------------------------------------
+
+describe('each loads tab agrees with its list, both above zero', () => {
+  const DELIVERED = [
+    'archive',
+    'invoiced',
+    'owed',
+    'paid',
+    'partial',
+    'ready',
+    'relayReady',
+    'writtenOff',
+  ]
+  // ALL LOADS IS EVERY FIXTURE, read when the case runs: `ids` fills in
+  // `beforeAll`, after this block is collected.
+  const EXPECTED: Record<string, string[]> = {
+    upcoming: ['eastern', 'illinois', 'relay'],
+    dispatched: ['dispatched'],
+    inTransit: ['moving'],
+    delivered: DELIVERED,
+    unpaid: ['invoiced', 'owed', 'partial', 'ready', 'relayReady'],
+  }
+
+  it.each(['all', ...LOAD_TABS])(
+    '%s',
+    async (tab) => {
+      const { listed } = await read(tab === 'all' ? {} : { tab })
+      const counted = await inOrg(async (tx) => {
+        const ctx = viewContext(await listedAuthorities(tx, []), NOW)
+        // FROM A DIFFERENT TAB, as the page counts it: a tab's number ignores
+        // the active tab.
+        const counts = await loadListCounts(
+          tx,
+          readLoadListParams({
+            tab: tab === 'dispatched' ? 'paid' : 'dispatched',
+          }),
+          [],
+          ctx,
+        )
+        return counts.tabs[tab as keyof typeof counts.tabs]
+      })
+      expect(keysOf(listed)).toEqual(
+        tab === 'all' ? Object.keys(ids).sort() : EXPECTED[tab],
+      )
+      expect(counted).toBe(listed.length)
+      expect(counted).toBeGreaterThan(0)
+    },
+    300_000,
+  )
+})
+
+describe('each Billing → Invoice load tab agrees with its list, both above zero', () => {
+  const EXPECTED: Record<(typeof BILLING_LOAD_TABS)[number], string[]> = {
+    podReceived: ['ready', 'relayReady', 'writtenOff'],
+    uninvoiced: [
+      'dayEight',
+      'dispatched',
+      'eastern',
+      'illinois',
+      'moving',
+      'owed',
+      'ready',
+      'relay',
+    ],
+    invoiced: ['invoiced'],
+    partiallyPaid: ['partial'],
+    paid: ['paid'],
+  }
+
+  it.each([...BILLING_LOAD_TABS])(
+    '%s',
+    async (tab) => {
+      const { counted, rows } = await inOrg(async (tx) => {
+        const ctx = viewContext(await listedAuthorities(tx, []), NOW)
+        return {
+          counted: (await billingTabCounts(tx, [], {}, ctx))[tab],
+          rows: await readBillingTab(tx, [], tab, {}, ctx, {
+            now: NOW,
+            locale: 'en-US',
+          }),
+        }
+      })
+      const listed = rows.map((row) => row.id)
+      expect(keysOf(listed)).toEqual(EXPECTED[tab])
+      expect(counted).toBe(listed.length)
+      expect(counted).toBeGreaterThan(0)
+    },
+    300_000,
+  )
+
+  it('narrows by authority as the chips did', async () => {
+    const { counted, rows } = await inOrg(async (tx) => {
+      const ctx = viewContext(await listedAuthorities(tx, []), NOW)
+      const narrow = { company: newYorkId }
+      return {
+        counted: (await billingTabCounts(tx, [], narrow, ctx)).uninvoiced,
+        rows: await readBillingTab(tx, [], 'uninvoiced', narrow, ctx, {
+          now: NOW,
+          locale: 'en-US',
+        }),
+      }
+    })
+    expect(keysOf(rows.map((row) => row.id))).toEqual(['relay'])
+    expect(counted).toBe(1)
   }, 300_000)
 })
 
@@ -454,6 +648,20 @@ async function bothWays(query: Record<string, string>) {
     const params = readLoadListParams(query)
     const where = loadListWhere(params, {}, ctx)
     const sql = await loadListCounts(tx, params, [], ctx)
+    const tabs = Object.fromEntries(
+      await Promise.all(
+        (['all', ...LOAD_TABS] as const).map(async (tab) => [
+          tab,
+          await tx.load.count({
+            where: tabCountWhere(where, tab === 'all' ? undefined : tab, {
+              ...ctx,
+              from: params.from,
+              to: params.to,
+            }),
+          }),
+        ]),
+      ),
+    )
     const [matching, status, billing, ready, upcoming, unpaid] =
       await Promise.all([
         tx.load.count({ where: listWhere(where) }),
@@ -483,6 +691,7 @@ async function bothWays(query: Record<string, string>) {
         billing: prismaBilling,
         upcoming,
         unpaid,
+        tabs,
         matching,
       },
     }
@@ -496,6 +705,9 @@ const FILTER_SETS: Record<string, string>[] = [
   { status: 'POD_RECEIVED' },
   { billing: 'UNINVOICED' },
   { billing: READY },
+  // The second pass's tabs, a status tab and a view tab (§6.7, 2026-11-16).
+  { tab: 'delivered' },
+  { tab: 'upcoming' },
 ]
 
 describe('the grouped statement agrees with the predicates, one case per view', () => {
@@ -562,7 +774,9 @@ describe('the export is the list, every row of it', () => {
       )
       // The person's visible columns, in order, as codes.
       expect(
-        lines[0]!.startsWith('load_number,reference,authority,broker'),
+        lines[0]!.startsWith(
+          'load_number,reference,status,broker,driver,truck,trailer,authority',
+        ),
       ).toBe(true)
     },
     300_000,

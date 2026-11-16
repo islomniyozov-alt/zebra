@@ -48,7 +48,21 @@ import { GridFooterNav } from '../../_grid/GridFooterNav'
 import { gridView, keepColumns, pagedFooterLabel } from '../../_grid/grid-page'
 import type { InvoiceStatus } from '@/generated/prisma/client'
 import type { MessageKey } from '@/lib/i18n'
-import type { StatusTone } from '@/lib/status'
+import {
+  billingLabelKey,
+  operationalLabelKey,
+  type StatusTone,
+} from '@/lib/status'
+import {
+  BILLING_LOAD_TABS,
+  billingTabCounts,
+  isBillingLoadTab,
+  readBillingTab,
+  type BillingLoadTab,
+} from '@/lib/billing-tabs'
+import type { LoadListRow } from '@/lib/load-list-rows'
+import { viewContext } from '@/lib/load-views'
+import { LoadTabTable } from './LoadTabTable'
 
 // ACCOUNTING → INVOICES (§6.2, §7.1.6): three tabs over one grid.
 //
@@ -62,6 +76,12 @@ import type { StatusTone } from '@/lib/status'
 //
 // RECEIVABLES FOLDED IN as the age chip on the first tab: aging is a view of the
 // invoice list, not a second list of the same rows.
+//
+// AND THE INVOICING CHIPS ARRIVED FROM `/loads` as tabs (§6.7, the second
+// pass, owner's brief 2026-11-16): POD received · Ready to invoice ·
+// Uninvoiced · Invoiced · Partially paid · Paid. Ready was already the queue
+// here; the other five list LOADS through `src/lib/billing-tabs.ts`, each
+// with the predicate its chip had.
 
 const INVOICE_TONE: Record<string, StatusTone> = {
   DRAFT: 'neutral',
@@ -84,8 +104,30 @@ const ERROR_KEYS: MessageKey[] = [
   'invoices.error.mixedCompanies',
 ]
 
-const TABS = ['invoices', 'ready', 'factored', 'direct'] as const
+const TABS = [
+  'invoices',
+  'podReceived',
+  'ready',
+  'uninvoiced',
+  'invoiced',
+  'partiallyPaid',
+  'paid',
+  'factored',
+  'direct',
+] as const
 type Tab = (typeof TABS)[number]
+
+/** Rows per page on the load tabs, as on `/loads`. */
+const LOAD_PAGE_SIZE = 100
+
+/** Each load tab's label: the words its chip had on `/loads`. */
+const LOAD_TAB_LABEL: Record<BillingLoadTab, MessageKey> = {
+  podReceived: operationalLabelKey('POD_RECEIVED'),
+  uninvoiced: billingLabelKey('UNINVOICED'),
+  invoiced: billingLabelKey('INVOICED'),
+  partiallyPaid: billingLabelKey('PARTIALLY_PAID'),
+  paid: billingLabelKey('PAID'),
+}
 
 const COLUMN_KEYS: readonly string[] = [
   'invoiceNumber',
@@ -151,6 +193,16 @@ export default async function AccountingInvoicesPage({
   // offered it and cannot land on it by following a link.
   const tab: Tab = requested === 'ready' && !mayCreate ? 'invoices' : requested
 
+  // THE LOAD TABS' NARROWING: the authority and the search box, as the chips
+  // honoured them on `/loads`.
+  const narrow = {
+    company: companyParam ?? undefined,
+    ref: typeof raw.q === 'string' ? raw.q.trim() : '',
+  }
+  const pageParam = Number(typeof raw.page === 'string' ? raw.page : '1')
+  const loadPage =
+    Number.isFinite(pageParam) && pageParam >= 1 ? Math.floor(pageParam) : 1
+
   const search = new URLSearchParams(
     Object.entries(raw).flatMap(([key, value]) =>
       value === undefined
@@ -166,32 +218,64 @@ export default async function AccountingInvoicesPage({
 
   const data = await withCurrentOrg('read', 'invoice', async (tx, session) => {
     const scope = companyScopeFilter(session.companyScopes)
-    const [invoices, companies, ready, direct, readyCount, columns, strip] =
-      await Promise.all([
-        readInvoices(tx, scope, new Date()),
-        listedAuthorities(tx, session.companyScopes),
-        mayCreate ? readyToInvoice(tx, scope) : Promise.resolve([]),
-        directSettledAwaiting(tx, scope),
-        // COUNTED, NOT INFERRED FROM THE ROWS. `readyToInvoice` takes 500, so
-        // `ready.length` is the CAP once there are more than that — and the tab
-        // would read "500" forever while the real number grew. Same predicate,
-        // counted in SQL, and held to the /loads Ready chip by a test.
-        mayCreate ? readyToInvoiceCount(tx, scope) : Promise.resolve(0),
-        readGridColumns(tx, session.userId, 'invoices.invoices', COLUMN_KEYS),
-        // ── THE STRIP, AND EVERY COUNT ON IT, IN ONE STATEMENT ───────────
-        //
-        // Same lesson as readyCount above, applied to the rest of the screen:
-        // the Factored tab read `invoices.filter(isFactored).length` over a
-        // reader capped at 2000, so it was right only while the number was
-        // small enough not to need. The chip counts come from here too.
-        invoiceStrip(
-          tx,
-          narrowCompanyScope(session.companyScopes, companyParam),
-          window,
-          now,
-        ),
-      ])
-    return { invoices, companies, ready, direct, readyCount, columns, strip }
+    // NO DATE IS READ by a load tab's predicate, so the context's "today" is
+    // the default zone's and nothing here depends on it.
+    const ctx = viewContext([], now)
+    const [
+      invoices,
+      companies,
+      ready,
+      direct,
+      readyCount,
+      columns,
+      strip,
+      loadCounts,
+      loadRows,
+    ] = await Promise.all([
+      readInvoices(tx, scope, new Date()),
+      listedAuthorities(tx, session.companyScopes),
+      mayCreate ? readyToInvoice(tx, scope) : Promise.resolve([]),
+      directSettledAwaiting(tx, scope),
+      // COUNTED, NOT INFERRED FROM THE ROWS. `readyToInvoice` takes 500, so
+      // `ready.length` is the CAP once there are more than that — and the tab
+      // would read "500" forever while the real number grew. Same predicate,
+      // counted in SQL, and held to the /loads Ready chip by a test.
+      mayCreate ? readyToInvoiceCount(tx, scope) : Promise.resolve(0),
+      readGridColumns(tx, session.userId, 'invoices.invoices', COLUMN_KEYS),
+      // ── THE STRIP, AND EVERY COUNT ON IT, IN ONE STATEMENT ───────────
+      //
+      // Same lesson as readyCount above, applied to the rest of the screen:
+      // the Factored tab read `invoices.filter(isFactored).length` over a
+      // reader capped at 2000, so it was right only while the number was
+      // small enough not to need. The chip counts come from here too.
+      invoiceStrip(
+        tx,
+        narrowCompanyScope(session.companyScopes, companyParam),
+        window,
+        now,
+      ),
+      // EVERY LOAD TAB'S COUNT IN ONE STATEMENT: the list's grouped count.
+      billingTabCounts(tx, session.companyScopes, narrow, ctx),
+      isBillingLoadTab(requested)
+        ? readBillingTab(tx, session.companyScopes, requested, narrow, ctx, {
+            skip: (loadPage - 1) * LOAD_PAGE_SIZE,
+            take: LOAD_PAGE_SIZE,
+            now,
+            locale,
+          })
+        : Promise.resolve([] as LoadListRow[]),
+    ])
+    return {
+      invoices,
+      companies,
+      ready,
+      direct,
+      readyCount,
+      columns,
+      strip,
+      loadCounts,
+      loadRows,
+    }
   })
 
   const money = (cents: number) => (
@@ -292,15 +376,24 @@ export default async function AccountingInvoicesPage({
       <Tabs
         tabs={[
           { key: 'invoices', label: t('invoices.tab.invoices') },
-          ...(mayCreate
-            ? [
-                {
-                  key: 'ready',
-                  label: t('invoices.tab.ready'),
-                  count: data.readyCount,
-                },
-              ]
-            : []),
+          ...BILLING_LOAD_TABS.flatMap((key) => {
+            const tabSpec = {
+              key,
+              label: t(LOAD_TAB_LABEL[key]),
+              count: data.loadCounts[key],
+            }
+            // Ready to invoice sits after POD received, in the chips' order.
+            return key === 'podReceived' && mayCreate
+              ? [
+                  tabSpec,
+                  {
+                    key: 'ready',
+                    label: t('invoices.tab.ready'),
+                    count: data.readyCount,
+                  },
+                ]
+              : [tabSpec]
+          }),
           {
             key: 'factored',
             // COUNTED IN SQL. This was `invoices.filter(...).length` over a
@@ -320,6 +413,50 @@ export default async function AccountingInvoicesPage({
       />
     </>
   )
+
+  // ── THE LOAD TABS (§6.7, the second pass) ───────────────────────────────
+  //
+  // LOADS, NOT INVOICES: an uninvoiced load has no invoice to list.
+  // `LoadTabTable` draws them; the authority and the search narrow them as
+  // they narrowed the chips on `/loads`.
+  if (isBillingLoadTab(tab)) {
+    return (
+      <>
+        {header}
+        <div className="flex flex-wrap items-center gap-z3 border-b border-border bg-surface px-gutter py-z2">
+          <AuthorityFilter
+            companies={data.companies}
+            label={t('accounting.company')}
+            allLabel={t('accounting.allCompanies')}
+          />
+        </div>
+        <FilterBar
+          groups={[]}
+          search={{
+            param: 'q',
+            label: t('loads.filter.reference'),
+            placeholder: t('loads.filter.referencePlaceholder'),
+          }}
+          clearLabel={t('filter.clear')}
+          moreLabel={t('filter.more')}
+        />
+        <LoadTabTable
+          rows={data.loadRows}
+          total={data.loadCounts[tab]}
+          page={loadPage}
+          pageSize={LOAD_PAGE_SIZE}
+          labelKey={LOAD_TAB_LABEL[tab]}
+          showAuthority={data.companies.length > 1}
+          pageHref={(to) => {
+            const next = new URLSearchParams(search)
+            if (to > 1) next.set('page', String(to))
+            else next.delete('page')
+            return `${PATH}?${next}`
+          }}
+        />
+      </>
+    )
+  }
 
   // ── READY TO INVOICE ─────────────────────────────────────────────────────
   if (tab === 'ready') {
