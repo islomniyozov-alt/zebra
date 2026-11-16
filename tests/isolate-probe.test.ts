@@ -7,6 +7,7 @@ import {
   probeVerdict,
   routesFor,
   sequenceFor,
+  signInVerdict,
   verdictLine,
   withDistinctCounts,
 } from '../scripts/isolate-probe.mjs'
@@ -156,6 +157,64 @@ describe('the 1102, by the body', () => {
     expect(verdict.passes[2]?.resourceLimit).toBe(0)
     expect(verdict.notOk).toBe(true)
     expect(verdictLine(verdict, ALL_ROLES)).toContain('1 1102, 1 unaccounted')
+  })
+})
+
+describe('the sign-ins (owner’s ruling 2026-11-16)', () => {
+  const ok = (role: string, attempt = 1) => ({
+    role,
+    attempt,
+    outcome: 'ok',
+    ray: `${role}-${attempt}`,
+  })
+  const stalled = (role: string, attempt: number, ray: string | null) => ({
+    role,
+    attempt,
+    outcome: 'stalled',
+    ray,
+  })
+  const fetched = withDistinctCounts([
+    row(1, '/a', 200, fine),
+    row(2, '/a', 200, fine),
+  ])
+
+  it('a stall that comes back on its retry withholds clean, and is not NOT OK', () => {
+    const signIns = [
+      ok('owner'),
+      stalled('admin', 1, 'r-admin'),
+      ok('admin', 2),
+    ]
+    expect(signInVerdict(signIns)).toEqual({
+      attempts: 3,
+      stalled: 1,
+      stalledRays: ['r-admin'],
+      failedRoles: [],
+    })
+    const verdict = probeVerdict(fetched, signIns)
+    expect(verdict.clean).toBe(false)
+    expect(verdict.notOk).toBe(false)
+    expect(verdictLine(verdict, 'all')).toContain(
+      'sign-ins: 3 attempt(s), 1 stalled',
+    )
+  })
+
+  it('a role that stalls on every attempt is NOT OK by name, with its rays kept', () => {
+    const signIns = [
+      ok('owner'),
+      stalled('admin', 1, 'r1'),
+      stalled('admin', 2, null),
+    ]
+    const verdict = probeVerdict([], signIns)
+    expect(verdict.signIns.failedRoles).toEqual(['admin'])
+    expect(verdict.signIns.stalledRays).toEqual(['r1', null])
+    expect(verdict.notOk).toBe(true)
+    expect(verdict.shape).toBe('sign-in stalled as admin')
+    // NOT OK on the stall itself, not on the empty fetch it caused: with
+    // rows that all answered, the failed role still fails the probe.
+    expect(probeVerdict(fetched, signIns).notOk).toBe(true)
+    expect(verdictLine(verdict, 'all')).toMatch(
+      /^ISOLATE PROBE READ SIGN-IN STALLED AS ADMIN — NOT OK/,
+    )
   })
 })
 

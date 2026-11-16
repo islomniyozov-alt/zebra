@@ -18,6 +18,17 @@
 // Cloudflare's 1102 page (`namesResourceLimit`), so a 1102 with no tail
 // event is still recorded by ray rather than lost as "unaccounted".
 //
+// EVERY SIGN-IN IS A RAY, AND A STALL GETS ONE RETRY (owner's ruling
+// 2026-11-16). The first two `--role all` runs died at sign-in — the fifth,
+// then the second — with Playwright's bare timeout, and dev's `LoginAttempt`
+// held no row for either: the POST never finished. So each attempt keeps the
+// ray and status of its `POST /login` if the worker ever answered, a stalled
+// role is tried once more (as the sweep does, `SIGN_IN_ATTEMPTS`), and a role
+// that stalls twice ends the fetching but not the reading: the tail and the
+// PERSISTED Workers Logs (`scripts/workers-logs.mjs`) are asked for every
+// stalled sign-in and every 5xx by ray — outcome, wall, CPU, memory if the
+// event has it — or the reading says UNREADABLE and why.
+//
 // WHAT IT READS. The deploy sweep asks one dev isolate for every page as six
 // roles inside twenty minutes and, on 2026-11-12/13, read `Dynamic import
 // exceeded memory limits` on 21–28 requests a run across four commits —
@@ -56,12 +67,16 @@ import {
   MATRIX_ROLES,
   namesCeiling,
   readRouteMatrix,
+  SIGN_IN_ATTEMPTS,
 } from './sweep.mjs'
 import { startTail, trimEvent, workerNameFor } from './worker-tail.mjs'
+import { rayLine, readRays } from './workers-logs.mjs'
 
 export const DEFAULT_BASE = 'https://zebra-dev.tajikcargollc.workers.dev'
 export const PASSES = 2
 export const TAIL_WAIT_MS = 30_000
+/** How long the persisted logs are given to hold a ray before they are asked. */
+export const PERSIST_WAIT_MS = 90_000
 /** The `--role` value that runs the sweep's six-role sequence. */
 export const ALL_ROLES = 'all'
 /** Cloudflare's own page for a worker over its limits — error 1102. */
@@ -141,7 +156,7 @@ export function withDistinctCounts(rows) {
  * the ray). A 500 is `status >= 500`; a ceiling 500 is one whose worker
  * account names the ceiling (`namesCeiling`).
  */
-export function probeVerdict(rows) {
+export function probeVerdict(rows, signIns = []) {
   /** @type {Record<number, { requests: number, failed: number, firstAtDistinct: number | null, ceiling: number, resourceLimit: number, unaccounted: number, otherFault: number }>} */
   const passes = {}
   for (const pass of [1, 2]) {
@@ -167,26 +182,61 @@ export function probeVerdict(rows) {
   const totalFailed = passes[1].failed + passes[2].failed
   const unaccounted = passes[1].unaccounted + passes[2].unaccounted
   const empty = rows.length === 0
-  const shape = empty
-    ? 'nothing fetched'
-    : totalFailed === 0
-      ? 'clean'
-      : passes[1].firstAtDistinct !== null &&
-          passes[1].firstAtDistinct > 1 &&
-          passes[2].failed >= passes[1].failed
-        ? 'rises with distinct routes, and stays up'
-        : passes[1].firstAtDistinct === 1
-          ? 'from the first request'
-          : 'scattered'
+  const signedIn = signInVerdict(signIns)
+  const shape =
+    signedIn.failedRoles.length > 0
+      ? `sign-in stalled as ${signedIn.failedRoles.join(', ')}`
+      : empty
+        ? 'nothing fetched'
+        : totalFailed === 0
+          ? 'clean'
+          : passes[1].firstAtDistinct !== null &&
+              passes[1].firstAtDistinct > 1 &&
+              passes[2].failed >= passes[1].failed
+            ? 'rises with distinct routes, and stays up'
+            : passes[1].firstAtDistinct === 1
+              ? 'from the first request'
+              : 'scattered'
   return {
     passes,
     undelivered,
     shape,
+    signIns: signedIn,
     // CLEAN needs all three: nothing failed, nothing was fetched into
     // silence, and the tail accounted for every ray — "sees no rows" is
     // true of an empty set, so an empty probe is not clean either.
-    clean: !empty && totalFailed === 0 && undelivered.length === 0,
-    notOk: empty || totalFailed > 0 || unaccounted > 0,
+    // A stall that came back on its retry withholds "clean" without making
+    // the probe NOT OK — the same footing as an undelivered ray.
+    clean:
+      !empty &&
+      totalFailed === 0 &&
+      undelivered.length === 0 &&
+      signedIn.stalled === 0,
+    notOk:
+      empty ||
+      totalFailed > 0 ||
+      unaccounted > 0 ||
+      signedIn.failedRoles.length > 0,
+  }
+}
+
+/**
+ * The sign-ins' reading: every attempt, the stalled ones, and the roles that
+ * stalled on every attempt — which end the probe NOT OK.
+ */
+export function signInVerdict(signIns) {
+  const stalled = signIns.filter((row) => row.outcome === 'stalled')
+  const roles = [...new Set(signIns.map((row) => row.role))]
+  const failedRoles = roles.filter(
+    (role) =>
+      !signIns.some((row) => row.role === role && row.outcome === 'ok') &&
+      signIns.filter((row) => row.role === role).length >= SIGN_IN_ATTEMPTS,
+  )
+  return {
+    attempts: signIns.length,
+    stalled: stalled.length,
+    stalledRays: stalled.map((row) => row.ray),
+    failedRoles,
   }
 }
 
@@ -195,9 +245,11 @@ export function verdictLine(verdict, role) {
   const p1 = verdict.passes[1]
   const p2 = verdict.passes[2]
   const counts = `pass 1: ${p1.failed} of ${p1.requests} answered 5xx (first at distinct route ${p1.firstAtDistinct ?? '—'}, ${p1.ceiling} the ceiling, ${p1.resourceLimit} 1102, ${p1.unaccounted} unaccounted); pass 2: ${p2.failed} of ${p2.requests} (${p2.ceiling} the ceiling, ${p2.resourceLimit} 1102, ${p2.unaccounted} unaccounted)`
+  const si = verdict.signIns ?? { attempts: 0, stalled: 0 }
+  const signIns = `sign-ins: ${si.attempts} attempt(s), ${si.stalled} stalled`
   if (verdict.clean)
-    return `ISOLATE PROBE CLEAN — OK. role ${role}; ${counts}; every ray accounted for.`
-  return `ISOLATE PROBE READ ${verdict.shape.toUpperCase()} — NOT OK. role ${role}; ${counts}; ${verdict.undelivered.length} ray(s) the tail never delivered.`
+    return `ISOLATE PROBE CLEAN — OK. role ${role}; ${signIns}; ${counts}; every ray accounted for.`
+  return `ISOLATE PROBE READ ${verdict.shape.toUpperCase()} — ${verdict.notOk ? 'NOT OK' : 'NOT CLEAN'}. role ${role}; ${signIns}; ${counts}; ${verdict.undelivered.length} ray(s) the tail never delivered.`
 }
 
 async function main() {
@@ -286,42 +338,81 @@ async function main() {
   }
   console.log(`tail ready on ${worker}`)
 
-  // ── one sign-in per role, in MATRIX_ROLES order ────────────────────────
+  // ── one sign-in per role, in MATRIX_ROLES order, each attempt a ray ────
+  const startedAt = Date.now()
   const browser = await chromium.launch(
     process.env.SHOT_CHROME ? { executablePath: process.env.SHOT_CHROME } : {},
   )
   const cookies = new Map()
-  for (const [name, { email, password }] of credentials) {
-    const context = await browser.newContext()
-    const page = await context.newPage()
-    await page.goto(`${base}/login`, { waitUntil: 'domcontentloaded' })
-    await page.fill('input[name="email"]', email)
-    await page.fill('input[name="password"]', password)
-    await Promise.all([
-      page.waitForURL((url) => !url.pathname.startsWith('/login'), {
-        timeout: 90_000,
-      }),
-      page.click('button[type="submit"]'),
-    ])
-    const cookie = (await context.cookies()).find(
-      (c) => c.name === 'zebra_session',
-    )
-    await context.close()
-    if (!cookie?.value) {
-      await browser.close()
-      tail.stop()
-      throw new Error(
-        `isolate-probe: no zebra_session after the ${name} sign-in`,
+  const signIns = []
+  signing: for (const [name, { email, password }] of credentials) {
+    for (let attempt = 1; attempt <= SIGN_IN_ATTEMPTS; attempt++) {
+      const context = await browser.newContext()
+      const page = await context.newPage()
+      const record = {
+        role: name,
+        attempt,
+        startedAt: null,
+        elapsedMs: null,
+        outcome: null,
+        ray: null,
+        status: null,
+        resourceLimit: false,
+      }
+      page.on('response', (response) => {
+        const request = response.request()
+        if (
+          request.method() === 'POST' &&
+          new URL(request.url()).pathname === '/login'
+        ) {
+          record.ray = response.headers()['cf-ray'] ?? null
+          record.status = response.status()
+        }
+      })
+      try {
+        await page.goto(`${base}/login`, { waitUntil: 'domcontentloaded' })
+        await page.fill('input[name="email"]', email)
+        await page.fill('input[name="password"]', password)
+        record.startedAt = new Date().toISOString()
+        await Promise.all([
+          page.waitForURL((url) => !url.pathname.startsWith('/login'), {
+            timeout: 90_000,
+          }),
+          page.click('button[type="submit"]'),
+        ])
+        const cookie = (await context.cookies()).find(
+          (c) => c.name === 'zebra_session',
+        )
+        record.outcome = cookie?.value ? 'ok' : 'stalled'
+        if (cookie?.value) cookies.set(name, cookie.value)
+      } catch (error) {
+        record.outcome = 'stalled'
+        record.reason = String(error?.message ?? error).split('\n')[0]
+        record.resourceLimit = namesResourceLimit(
+          record.status ?? 0,
+          await page.content().catch(() => ''),
+        )
+      }
+      record.elapsedMs = record.startedAt
+        ? Date.now() - Date.parse(record.startedAt)
+        : null
+      await context.close()
+      signIns.push(record)
+      console.log(
+        `sign-in ${name} attempt ${attempt}: ${record.outcome}, status ${record.status ?? '-'}, ray ${record.ray ?? 'none — the POST never answered'}${record.resourceLimit ? ', 1102 page' : ''}`,
       )
+      if (record.outcome === 'ok') continue signing
     }
-    cookies.set(name, cookie.value)
-    console.log(`signed in as ${name}`)
+    // Stalled on every attempt: nothing more is fetched, and the reading
+    // below still asks the tail and the persisted logs for every ray.
+    break
   }
   await browser.close()
+  const failedSignIn = signInVerdict(signIns).failedRoles.length > 0
 
   // ── the two passes ─────────────────────────────────────────────────────
   const fetched = []
-  for (let pass = 1; pass <= PASSES; pass++) {
+  for (let pass = 1; pass <= (failedSignIn ? 0 : PASSES); pass++) {
     for (const { route, role: as, expected, path } of paths) {
       const started = performance.now()
       const response = await fetch(new URL(path, base), {
@@ -346,12 +437,51 @@ async function main() {
   const rows = withDistinctCounts(fetched)
 
   // ── the worker's account of every ray ──────────────────────────────────
-  await tail.waitFor(rows.map((row) => row.ray).filter(Boolean), TAIL_WAIT_MS)
-  for (const row of rows) {
+  await tail.waitFor(
+    [...rows, ...signIns].map((row) => row.ray).filter(Boolean),
+    TAIL_WAIT_MS,
+  )
+  for (const row of [...rows, ...signIns]) {
     const event = row.ray ? tail.lookup(row.ray) : null
     row.worker = event ? trimEvent(event) : null
   }
   tail.stop()
+
+  // ── the persisted logs, by ray, for every stalled sign-in and every 5xx ─
+  const asked = [
+    ...signIns.filter((row) => row.outcome === 'stalled'),
+    ...rows.filter((row) => row.status >= 500),
+  ]
+  const askedRays = asked.map((row) => row.ray).filter(Boolean)
+  const noRay = asked.filter((row) => !row.ray).length
+  let persisted = { rays: [] }
+  if (askedRays.length > 0) {
+    console.log(
+      `\nwaiting ${PERSIST_WAIT_MS / 1000} s, then asking the persisted logs for ${askedRays.length} ray(s)`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, PERSIST_WAIT_MS))
+    persisted = await readRays(
+      process.env,
+      worker,
+      askedRays,
+      startedAt - 60_000,
+      Date.now() + 60_000,
+    )
+  }
+  console.log('\npersisted Workers Logs, by ray:')
+  if (askedRays.length === 0)
+    console.log(
+      noRay > 0
+        ? `  ${noRay} stalled request(s) carried no ray — the worker never answered them, so there is nothing to ask for`
+        : '  nothing to ask for: no stalled sign-in, no 5xx',
+    )
+  else if (persisted.unreadable)
+    console.log(`  UNREADABLE — ${persisted.unreadable}`)
+  else
+    for (const { ray, invocations } of persisted.rays)
+      console.log(`  ${rayLine(ray, invocations).replace(/\n/g, '\n  ')}`)
+  if (askedRays.length > 0 && noRay > 0)
+    console.log(`  and ${noRay} stalled request(s) with no ray at all`)
 
   // ── the table ──────────────────────────────────────────────────────────
   console.log(
@@ -373,7 +503,7 @@ async function main() {
     )
   }
 
-  const verdict = probeVerdict(rows)
+  const verdict = probeVerdict(rows, signIns)
   const detail =
     process.env.RUN_STATUS_DETAIL ??
     join('.run-status', 'isolate-probe.detail.json')
@@ -387,7 +517,9 @@ async function main() {
         role,
         at: new Date().toISOString(),
         skipped,
+        signIns,
         rows,
+        persisted,
         verdict,
       },
       null,
