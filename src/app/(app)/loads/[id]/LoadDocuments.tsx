@@ -37,6 +37,12 @@ interface Props {
   slots: readonly DocumentSlot[]
   mayUpload: boolean
   onUploaded: () => Promise<void>
+  /**
+   * §7.13 — one sentence under the title, on Amazon freight: "Documents are
+   * on Amazon Relay." Its slots are passed as not required, so the card asks
+   * for nothing and keeps the optional upload.
+   */
+  note?: string
   labels: {
     title: string
     missing: string
@@ -56,6 +62,7 @@ export function LoadDocuments({
   slots,
   mayUpload,
   onUploaded,
+  note,
   labels,
 }: Props) {
   const router = useRouter()
@@ -113,6 +120,7 @@ export function LoadDocuments({
   return (
     <section className="rounded-card border border-border bg-surface p-z4">
       <h2 className="text-md font-medium text-ink">{labels.title}</h2>
+      {note ? <p className="mt-z1 text-sm text-ink-2">{note}</p> : null}
 
       {openError ? (
         <p role="alert" className="mt-z2 text-sm text-danger">

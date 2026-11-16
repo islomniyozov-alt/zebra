@@ -19,7 +19,14 @@
 // direct-settling customer would get this screen too, which is correct, because
 // everything the screen removes is removed BECAUSE nobody invoices this freight
 // and the broker holds the paperwork.
+//
+// §7.13 ADDS THE SECOND FACT. The Datatruck history import never sets
+// `directSettled`, so its Amazon loads got the broker screen; the rules the
+// owner ruled on for AMAZON freight read `isAmazonLoad` instead, and the rest
+// keep reading the flag.
 // ---------------------------------------------------------------------------
+
+import { isAmazonLoad } from './amazon-load'
 
 export interface LoadDetailView {
   /**
@@ -36,10 +43,23 @@ export interface LoadDetailView {
   showStopTimezone: boolean
   /** Item 3 — the stop's own address, editable on this load alone. */
   editStopAddress: boolean
-  /** Item 4 — the second money box beside Linehaul. */
+  /**
+   * Item 4 — the second money box beside Linehaul. §7.13: withheld on every
+   * Amazon load, because Amazon's rate is fuel-included.
+   */
   showFuelSurcharge: boolean
-  /** Item 6 — Rate con / POD / BOL prompts. */
-  showDocuments: boolean
+  /**
+   * §7.13 — the documents card says "Documents are on Amazon Relay" and
+   * requires no slot, so nothing reads "Missing — this load needs one". It
+   * replaces item 6's `showDocuments`, which withheld the panel on
+   * direct-settled freight and so took the optional upload away with it.
+   */
+  documentsOnRelay: boolean
+  /**
+   * §7.13 — the page in Datatruck's shape: header, second row, tabs, the
+   * eight-step tracker, stops and trips tables, three cards, the right rail.
+   */
+  datatruckShape: boolean
   /**
    * Item 6 — the stops as a TABLE, which subsumes item 1's numbering.
    *
@@ -66,9 +86,10 @@ export interface LoadDetailView {
   /** Item 8 — notes as timeline entries rather than a panel of their own. */
   notesInTimeline: boolean
   /**
-   * MONEY §7 — the File with factor button.
+   * MONEY §7 — the File with factor button, and with it the "Still missing:"
+   * checklist. §7.13: withheld on every Amazon load.
    *
-   * SAME REASON AS `showDocuments`. Direct-settled freight is never invoiced
+   * SAME REASON AS `documentsOnRelay`. Direct-settled freight is never invoiced
    * and never sold to a factor, so a Factoring panel on it is a button that
    * could only ever refuse. It is hidden rather than disabled: a disabled
    * control says "not yet", and this one would mean "not ever".
@@ -94,28 +115,36 @@ export interface LoadDetailView {
 /**
  * The screen for one load.
  *
- * EVERY FIELD IS DERIVED FROM `directSettled` AND NOTHING ELSE. Permission is
- * not consulted here and must not be: `load:update` and `load.financials` still
- * gate the writes at the call site, and folding them in would make this the
- * second place permission is decided — which the standing rule reserves for
- * `permissions.ts`. This answers "what does this KIND of freight show", never
- * "may this person see it".
+ * TWO FACTS AND NOTHING ELSE. `directSettled` for what §7.12 decided about
+ * direct settlement; `isAmazonLoad` for what §7.13 decided about Amazon
+ * freight — the documents, the fuel surcharge, the factoring panel and the
+ * shape. Every direct-settled load is an Amazon load by the predicate's Relay
+ * side, so a load that is neither renders exactly as it did.
+ *
+ * Permission is not consulted here and must not be: `load:update` and
+ * `load.financials` still gate the writes at the call site, and folding them
+ * in would make this the second place permission is decided — which the
+ * standing rule reserves for `permissions.ts`. This answers "what does this
+ * KIND of freight show", never "may this person see it".
  */
 export function loadDetailView(load: {
   directSettled: boolean
+  customer: { name: string }
 }): LoadDetailView {
   const direct = load.directSettled
+  const amazon = isAmazonLoad(load)
   return Object.freeze({
     showAssignment: direct,
     copyableIdentifiers: direct,
     showStopTimezone: !direct,
     editStopAddress: direct,
-    showFuelSurcharge: !direct,
-    showDocuments: !direct,
+    showFuelSurcharge: !amazon,
+    documentsOnRelay: amazon,
+    datatruckShape: amazon,
     stopsAsTable: direct,
     flagMissingAddress: direct,
     notesInTimeline: direct,
-    showFactoring: !direct,
+    showFactoring: !amazon,
     paymentTypeDerived: direct,
     settledWord: direct ? 'onStatement' : 'invoiced',
   })
@@ -160,3 +189,27 @@ export const ACCESSORIAL_TYPES = [
   'FUEL_ADVANCE_FEE',
   'OTHER',
 ] as const
+
+/** Who the second row of the Amazon shape names as having created the load. */
+export type CreatedBy =
+  | { kind: 'person'; name: string }
+  | { kind: 'import' }
+  | { kind: 'unknown' }
+
+/**
+ * §7.13 — "Created by", from the load's CREATE audit row.
+ *
+ * THE PERSON ON THAT ROW FIRST: an upload in the app runs in the uploader's
+ * attributed scope, so a Relay file's loads name who uploaded it. A load with
+ * no such row and a Datatruck Shipment ID was made by the history import,
+ * which runs with no audit scope and writes no row — so it is named as the
+ * import rather than as nobody. Anything else is honestly unknown.
+ */
+export function createdBy(
+  load: { externalId: string | null },
+  creator: { name: string | null } | null,
+): CreatedBy {
+  if (creator?.name) return { kind: 'person', name: creator.name }
+  if (load.externalId?.startsWith('DT-')) return { kind: 'import' }
+  return { kind: 'unknown' }
+}

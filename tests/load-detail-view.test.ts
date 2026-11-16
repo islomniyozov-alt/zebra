@@ -23,13 +23,24 @@ import {
 // ---------------------------------------------------------------------------
 
 describe('the screen a load gets', () => {
+  // The three kinds of load §7.13 tells apart. A Relay booking settles
+  // directly; the Datatruck history import's Amazon load does not carry the
+  // flag; broker freight is neither.
+  const relay = { directSettled: true, customer: { name: 'Amazon Relay' } }
+  const imported = {
+    directSettled: false,
+    customer: { name: 'Amazon Relay' },
+  }
+  const werner = { directSettled: false, customer: { name: 'Werner' } }
+
   const amazon: LoadDetailView = {
     showAssignment: true,
     copyableIdentifiers: true,
     showStopTimezone: false,
     editStopAddress: true,
     showFuelSurcharge: false,
-    showDocuments: false,
+    documentsOnRelay: true,
+    datatruckShape: true,
     stopsAsTable: true,
     flagMissingAddress: true,
     notesInTimeline: true,
@@ -46,7 +57,8 @@ describe('the screen a load gets', () => {
     showStopTimezone: true,
     editStopAddress: false,
     showFuelSurcharge: true,
-    showDocuments: true,
+    documentsOnRelay: false,
+    datatruckShape: false,
     stopsAsTable: false,
     flagMissingAddress: false,
     notesInTimeline: false,
@@ -56,40 +68,52 @@ describe('the screen a load gets', () => {
   }
 
   it('strips the panels Relay freight does not use', () => {
-    expect(loadDetailView({ directSettled: true })).toEqual(amazon)
+    expect(loadDetailView(relay)).toEqual(amazon)
   })
 
   it('leaves broker freight the full screen', () => {
-    expect(loadDetailView({ directSettled: false })).toEqual(broker)
+    expect(loadDetailView(werner)).toEqual(broker)
   })
 
-  // THE HALF THAT MATTERS MOST TO GET WRONG. Removing the Documents panel is
-  // safe on direct-settled freight only because `transitionOperational` fires
-  // the POD there; on broker freight the POD upload IS how the load becomes
-  // payable and invoiceable, and losing it would be silent.
-  it('never takes the documents panel off freight that needs it', () => {
-    expect(loadDetailView({ directSettled: false }).showDocuments).toBe(true)
+  // §7.13 — THE LOAD THE BRIEF WAS ABOUT. DT-018794 came from the history
+  // import: Amazon's by its customer, not flagged direct. The Amazon rules
+  // apply; §7.12's direct-settlement rules still read the flag.
+  it("gives an imported Amazon load Amazon's screen and keeps the flag's rules", () => {
+    expect(loadDetailView(imported)).toEqual({
+      ...broker,
+      showFuelSurcharge: false,
+      documentsOnRelay: true,
+      datatruckShape: true,
+      showFactoring: false,
+    })
+  })
+
+  // THE HALF THAT MATTERS MOST TO GET WRONG. On broker freight the POD upload
+  // IS how the load becomes payable and invoiceable; a card that told it the
+  // paperwork lives in Relay would be silent about the slot it needs.
+  it('never tells freight that needs documents that they are on Relay', () => {
+    expect(loadDetailView(werner).documentsOnRelay).toBe(false)
   })
 
   // MONEY §7. Broker freight is the only freight that is ever factored, and a
-  // Factoring panel on a Relay load is a button whose only possible outcome is
-  // a refusal — the customer settles directly and no invoice exists to sell.
+  // Factoring panel on an Amazon load is a button whose only possible outcome
+  // is a refusal — and its "Still missing:" list asks for Relay's paperwork.
   it('offers factoring only on freight that can be invoiced', () => {
-    expect(loadDetailView({ directSettled: false }).showFactoring).toBe(true)
-    expect(loadDetailView({ directSettled: true }).showFactoring).toBe(false)
+    expect(loadDetailView(werner).showFactoring).toBe(true)
+    expect(loadDetailView(relay).showFactoring).toBe(false)
+    expect(loadDetailView(imported).showFactoring).toBe(false)
   })
 
-  // Every decision comes from the one flag, so the two answers must differ on
-  // every field. A field that reads the same both ways is either a mistake or
-  // does not belong in this module.
-  it('differs on every field, because every field is that one decision', () => {
+  // Relay and broker freight differ on every field: each field is one of the
+  // two decisions, and a Relay load is both direct-settled and Amazon's.
+  it('differs on every field between Relay and broker freight', () => {
     for (const key of Object.keys(amazon) as (keyof LoadDetailView)[]) {
       expect(amazon[key], key).not.toBe(broker[key])
     }
   })
 
   it('is frozen, so a caller cannot answer differently further down', () => {
-    const view = loadDetailView({ directSettled: true })
+    const view = loadDetailView(relay)
     expect(Object.isFrozen(view)).toBe(true)
   })
 })

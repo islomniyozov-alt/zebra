@@ -44,12 +44,16 @@ describe('the accessorial summary', () => {
 
 describe('the payment type', () => {
   it('is a fact on direct-settled freight and a choice on the rest', () => {
-    expect(loadDetailView({ directSettled: true }).paymentTypeDerived).toBe(
-      true,
-    )
-    expect(loadDetailView({ directSettled: false }).paymentTypeDerived).toBe(
-      false,
-    )
+    expect(
+      loadDetailView({
+        directSettled: true,
+        customer: { name: 'Amazon Relay' },
+      }).paymentTypeDerived,
+    ).toBe(true)
+    expect(
+      loadDetailView({ directSettled: false, customer: { name: 'Werner' } })
+        .paymentTypeDerived,
+    ).toBe(false)
     expect(page).toContain('derived={view.paymentTypeDerived}')
     expect(paymentPanel).toContain('if (derived) {')
   })
@@ -65,12 +69,16 @@ describe('the payment type', () => {
 
 describe('the tracker', () => {
   it("says 'On statement' where there will never be an invoice", () => {
-    expect(loadDetailView({ directSettled: true }).settledWord).toBe(
-      'onStatement',
-    )
-    expect(loadDetailView({ directSettled: false }).settledWord).toBe(
-      'invoiced',
-    )
+    expect(
+      loadDetailView({
+        directSettled: true,
+        customer: { name: 'Amazon Relay' },
+      }).settledWord,
+    ).toBe('onStatement')
+    expect(
+      loadDetailView({ directSettled: false, customer: { name: 'Werner' } })
+        .settledWord,
+    ).toBe('invoiced')
     expect(page).toContain("view.settledWord === 'onStatement'")
     expect(page).toContain("'loads.stageOnStatement'")
   })
