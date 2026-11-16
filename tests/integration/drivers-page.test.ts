@@ -199,15 +199,22 @@ beforeAll(async () => {
   // ACTIVE, NO TRUCK: Unassigned.
   await seed('Idle', alphaId, { status: 'AVAILABLE', tags: ['night'] })
   // VACATION BY STATUS, and VACATION BY A RETURN DATE AHEAD.
+  //
+  // AVAILABLE, NOT OFF_DUTY, on the two off-duty drivers (2026-11-16).
+  // Migration 55 retired OFF_DUTY as a stored status, and
+  // dispatch-fields.test.ts holds every driver in the database to that — so
+  // while this fixture stood, the full suite failed whenever the two files
+  // overlapped. Both values are WORKING_STATUSES, and the vacation tab reads
+  // `offDutyUntil`, so no count here moves.
   await seed('Holiday', alphaId, { status: 'VACATION' })
   await seed('Returning', betaId, {
-    status: 'OFF_DUTY',
+    status: 'AVAILABLE',
     isOffDuty: true,
     offDutyUntil: day(10),
   })
   // AN OFF-DUTY DATE ALREADY PAST is not on the vacation board.
   await seed('Back', betaId, {
-    status: 'OFF_DUTY',
+    status: 'AVAILABLE',
     isOffDuty: true,
     offDutyUntil: day(-10),
   })
