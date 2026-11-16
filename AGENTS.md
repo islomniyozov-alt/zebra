@@ -486,9 +486,12 @@ Rules about instruments, which are the ones that cost whole sessions:
   `git diff --name-only` against `main` names nothing under `src/lib/`,
   nothing under `prisma/migrations/`, and no code that computes or moves
   money or decides auth — sessions, sign-in, permissions, the cookie —
-  wherever it lives. One such path and the chain is not visual-only, even
-  if it is a label: `src/lib/i18n.ts` is under `src/lib/`, so a chain that
-  renames a string there keeps the full ritual. The commit message says
+  wherever it lives. One such path and the chain is not visual-only.
+  **The one exception under `src/lib/` is the label files, `src/lib/i18n*`**
+  (owner's amendment, 2026-11-16): a label is words on a screen, so a
+  change limited to those files and to visual paths still counts as
+  visual-only. A change to anything else under `src/lib/` — a predicate, a
+  reader, a column list — keeps the full ritual. The commit message says
   "visual-only" by name, so the exemption is claimed where review can
   check it against the file list. Everything else keeps the full ritual,
   and a visual-only chain still deploys to dev and waits for the ship, as
