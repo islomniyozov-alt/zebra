@@ -100,6 +100,18 @@ describe('the shell check', () => {
 })
 
 describe('the cause', () => {
+  it('the shell is positioned, so no absolute element is laid out against the page', () => {
+    // The wrappers alone left document 1,860 px on dev at cd56789: the
+    // sr-only div was absolute with no positioned ancestor.
+    const layout = readFileSync('src/app/(app)/layout.tsx', 'utf8')
+    const shell = /data-density=\{density\}\s*className="([^"]*)"/.exec(
+      layout,
+    )?.[1]
+    expect(shell?.split(' ')).toEqual(
+      expect.arrayContaining(['relative', 'h-screen', 'overflow-hidden']),
+    )
+  })
+
   it('no table carries sr-only itself — the div around it does', () => {
     const offenders = tsxUnder('src').filter((file) =>
       /<table[^>]*\bsr-only\b/.test(readFileSync(file, 'utf8')),

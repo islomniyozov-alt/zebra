@@ -154,10 +154,18 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     /* §5.1 lives HERE rather than on <html>: the preference belongs to a
      * signed-in user and the root layout has no session — the login screen has
      * no density to have. `--z-row-height` is a custom property, so it cascades
-     * from this element to everything the shell contains. */
+     * from this element to everything the shell contains.
+     *
+     * `relative` MAKES THE SHELL EVERY STRAY ABSOLUTE ELEMENT'S BOX (owner's
+     * report 2026-11-16). An `sr-only` element is `position: absolute`; with
+     * no positioned ancestor it sat at its place deep in a scrolled page while
+     * being laid out against the DOCUMENT, so the document grew to reach it
+     * (1,860 px on /dashboard at 961) and scrolling it lifted the shell out of
+     * the window. Positioned and `overflow-hidden`, the shell contains and
+     * clips them, and the document stays one window tall. */
     <div
       data-density={density}
-      className="flex h-screen overflow-hidden bg-surface-2"
+      className="relative flex h-screen overflow-hidden bg-surface-2"
     >
       <Sidebar
         groups={groups}

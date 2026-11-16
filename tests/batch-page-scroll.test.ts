@@ -46,7 +46,7 @@ describe('the batch page is its own scroll region', () => {
 
   it('and the shell gives it a bounded column to shrink inside', () => {
     expect(shell).toContain(
-      'className="flex h-screen overflow-hidden bg-surface-2"',
+      'className="relative flex h-screen overflow-hidden bg-surface-2"',
     )
     // The column that holds {children}: bounded (min-h-0 flex-1) AND the
     // scrolling region (overflow-y-auto). Matched by its classes rather than
