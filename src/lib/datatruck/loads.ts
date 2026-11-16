@@ -1,6 +1,7 @@
 import { MoneyFormatError, parseMoneyToCents } from '../money'
 import { resolveState } from './states'
 import { isReferralPayee } from '../driver-kind'
+import { nameKey } from '../name-key'
 import { parseTags } from '../tags'
 import type {
   EquipmentType,
@@ -1081,10 +1082,36 @@ export function syncDecisionFor(
  * CLOSED IS FROZEN TOO, for the same reason `syncDecisionFor` refuses it: the
  * freight finished its life in the other system and this one will not take it
  * back.
+ *
+ * ── INVOICED IS FROZEN, AND SO IS A STATEMENT LINE ───────────────────────
+ *
+ * Owner's ruling, 2026-11-16: on a matched load that is invoiced, settled or
+ * paid, the import never changes the rate. Until then an INVOICED load with
+ * no payment yet was restated freely, which made the invoice the broker holds
+ * disagree with the load it bills. Invoiced is read two ways, because either
+ * is enough: an `InvoiceLine` exists, or the billing axis is past the point
+ * an invoice went out — INVOICED, FILED_WITH_FACTOR, DISPUTED, WRITTEN_OFF.
+ * PAID and PARTIALLY_PAID read as paid. A `SettlementLoadLine` is one load
+ * printed on one driver statement, so it is settled just as a
+ * `SettlementLine` is.
  */
 export type RateFreeze =
   | { frozen: false }
-  | { frozen: true; why: 'closed' | 'settled' | 'paid' }
+  | { frozen: true; why: 'closed' | 'settled' | 'paid' | 'invoiced' }
+
+/** Billing states that mean an invoice has gone out. */
+const INVOICED_BILLING: ReadonlySet<LoadBillingStatus> = new Set([
+  'INVOICED',
+  'FILED_WITH_FACTOR',
+  'DISPUTED',
+  'WRITTEN_OFF',
+])
+
+/** Billing states that mean money has come in. */
+const PAID_BILLING: ReadonlySet<LoadBillingStatus> = new Set([
+  'PAID',
+  'PARTIALLY_PAID',
+])
 
 /**
  * WHICH SEATS A RE-IMPORT MAY FILL ON A LOAD THAT ALREADY EXISTS.
@@ -1419,13 +1446,197 @@ export function chooseExport(
 export function rateFreezeFor(load: {
   billing: LoadBillingStatus
   settlementLines: number
+  settlementLoadLines: number
   paymentApplications: number
+  invoiceLines: number
 }): RateFreeze {
   if (load.billing === 'CLOSED_IN_DATATRUCK')
     return { frozen: true, why: 'closed' }
-  if (load.settlementLines > 0) return { frozen: true, why: 'settled' }
-  if (load.paymentApplications > 0) return { frozen: true, why: 'paid' }
+  if (load.settlementLines > 0 || load.settlementLoadLines > 0)
+    return { frozen: true, why: 'settled' }
+  if (load.paymentApplications > 0 || PAID_BILLING.has(load.billing))
+    return { frozen: true, why: 'paid' }
+  if (load.invoiceLines > 0 || INVOICED_BILLING.has(load.billing))
+    return { frozen: true, why: 'invoiced' }
   return { frozen: false }
+}
+
+/**
+ * What a fresh export does to a matched load's money: nothing, a restatement,
+ * or a refusal to restate that somebody must read.
+ *
+ * ONE DECISION FOR THE PREVIEW AND THE WRITE. The preview prints RATE HELD
+ * from this, and the write restates only on `change` — so the list read before
+ * `--write` is the list of what the write will refuse, not a second opinion.
+ *
+ * A CLOSED LOAD IS HELD SILENTLY (`same`). Thousands of history rows differ
+ * from a re-export by a re-typed cent, and the freight is not this system's;
+ * a list that carried them would bury the invoiced load that matters.
+ */
+export type RateDecision =
+  | { kind: 'same' }
+  | { kind: 'change'; change: RateChange }
+  | {
+      kind: 'held'
+      why: 'settled' | 'paid' | 'invoiced'
+      /** Export and database, both, in money — the line under RATE HELD. */
+      line: string
+    }
+
+export function rateDecisionFor(
+  current: Parameters<typeof rateFreezeFor>[0] & {
+    linehaulCents: number
+    accessorialCents: number
+  },
+  incoming: { linehaulCents: number; accessorialCents: number },
+): RateDecision {
+  const change = rateChangeFor(current, incoming)
+  if (change === null) return { kind: 'same' }
+  const freeze = rateFreezeFor(current)
+  if (!freeze.frozen) return { kind: 'change', change }
+  if (freeze.why === 'closed') return { kind: 'same' }
+  const money = (cents: number) => `$${(cents / 100).toFixed(2)}`
+  return {
+    kind: 'held',
+    why: freeze.why,
+    line:
+      `${freeze.why}: export ${money(incoming.linehaulCents)} + ${money(incoming.accessorialCents)}, ` +
+      `Zebra ${money(current.linehaulCents)} + ${money(current.accessorialCents)}`,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ALREADY IN ZEBRA — THE ONE PREDICATE.
+//
+// Owner's ruling, 2026-11-16. An export row whose `Load ID` or `Trip ID`
+// names a load Zebra already holds is REFUSED: printed by name, never created.
+//
+// ── WHAT IT REPLACES ─────────────────────────────────────────────────────
+//
+// THE BRIDGE matched `Load ID` against `Load.referenceNumber` on loads with
+// no `externalId`, exactly, and enriched a single match. Anything that did not
+// match exactly was CREATED. Since 2026-09-26 the Relay trips importer books
+// completed Amazon trips with `referenceNumber` = the Trip ID and each leg's
+// Load ID on its arrival stop — in `Trips - 2026-09-24T090710.426.csv` 34 of
+// 152 trips are multi-leg — so a Datatruck row carrying one leg's Load ID
+// missed the bridge and became a second load for the same freight, both seated
+// and both settleable. And a reference two rows claimed was "refused" from the
+// enrichment and then created twice.
+//
+// AND THE BRIDGE'S ENRICHMENT WAS WHAT LATER RE-PRICED A RELAY LOAD: it wrote
+// the Shipment ID into `externalId`, after which every re-run synced that load
+// as if this import had created it.
+//
+// ── THREE KEYS, ONE ORDER ────────────────────────────────────────────────
+//
+//   SHIPMENT ID against `externalId` — the row's OWN load, which a re-run
+//   syncs as it always has.
+//   LOAD ID and TRIP ID against `referenceNumber` — a Relay Trip ID, a broker's
+//   reference, or an earlier import's `Load ID`.
+//   LOAD ID and TRIP ID against a stop's `referenceNumber` — where a Relay
+//   leg's Load ID lives.
+//
+// A reference match on the row's OWN load is not a match: every imported load
+// carries its `Load ID` as its reference. A reference match on ANY OTHER load
+// refuses the row, even when the row has an own load too — that is a
+// duplicate that already exists, and it is named rather than synced further.
+//
+// Keys compare by `nameKey`: exact after case and whitespace, never nearest.
+// ---------------------------------------------------------------------------
+
+/** One Zebra load, as much of it as the predicate reads. */
+export interface ZebraLoadKey {
+  id: string
+  loadNumber: string
+  externalId: string | null
+  referenceNumber: string | null
+  /** Every stop's `referenceNumber` — a Relay leg's Load ID lands here. */
+  stopReferences: readonly string[]
+}
+
+type ReferenceHit = { load: ZebraLoadKey; on: 'reference' | 'stop reference' }
+
+export interface ZebraLoadIndex {
+  byExternalId: ReadonlyMap<string, ZebraLoadKey>
+  byReference: ReadonlyMap<string, readonly ReferenceHit[]>
+}
+
+export function indexZebraLoads(
+  loads: readonly ZebraLoadKey[],
+): ZebraLoadIndex {
+  const byExternalId = new Map<string, ZebraLoadKey>()
+  const byReference = new Map<string, ReferenceHit[]>()
+  const add = (raw: string | null, hit: ReferenceHit) => {
+    // A BLANK NEVER MATCHES. Without this, a row with no Load ID would match
+    // every load whose reference is an empty string.
+    const key = nameKey(raw ?? '')
+    if (key === '') return
+    const hits = byReference.get(key) ?? []
+    if (!hits.some((h) => h.load.id === hit.load.id && h.on === hit.on)) {
+      hits.push(hit)
+    }
+    byReference.set(key, hits)
+  }
+  for (const load of loads) {
+    if (load.externalId) byExternalId.set(load.externalId, load)
+    add(load.referenceNumber, { load, on: 'reference' })
+    for (const stop of load.stopReferences) {
+      add(stop, { load, on: 'stop reference' })
+    }
+  }
+  return { byExternalId, byReference }
+}
+
+export interface AlreadyInZebraMatch {
+  loadNumber: string
+  /** Which of the row's columns matched. */
+  via: 'Load ID' | 'Trip ID'
+  key: string
+  on: 'reference' | 'stop reference'
+}
+
+export type AlreadyInZebra =
+  | { kind: 'new' }
+  | { kind: 'imported'; loadId: string }
+  | { kind: 'refused'; matches: AlreadyInZebraMatch[] }
+
+export function alreadyInZebra(
+  row: {
+    externalId: string
+    referenceNumber: string | null
+    tripId: string | null
+  },
+  index: ZebraLoadIndex,
+): AlreadyInZebra {
+  const own = index.byExternalId.get(row.externalId) ?? null
+  const matches: AlreadyInZebraMatch[] = []
+  const look = (via: 'Load ID' | 'Trip ID', raw: string | null) => {
+    // NO BLANK CHECK HERE: the index never holds a blank key, so a blank
+    // `Load ID` finds nothing. A second check would be a clause no break
+    // could ever be seen failing.
+    for (const hit of index.byReference.get(nameKey(raw ?? '')) ?? []) {
+      if (own !== null && hit.load.id === own.id) continue
+      if (
+        matches.some(
+          (m) => m.loadNumber === hit.load.loadNumber && m.on === hit.on,
+        )
+      ) {
+        continue
+      }
+      matches.push({
+        loadNumber: hit.load.loadNumber,
+        via,
+        key: (raw ?? '').trim(),
+        on: hit.on,
+      })
+    }
+  }
+  look('Load ID', row.referenceNumber)
+  look('Trip ID', row.tripId)
+
+  if (matches.length > 0) return { kind: 'refused', matches }
+  if (own !== null) return { kind: 'imported', loadId: own.id }
+  return { kind: 'new' }
 }
 
 export interface RateChange {
