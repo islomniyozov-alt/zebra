@@ -81,6 +81,14 @@ export function invocationOf(event) {
   }
 }
 
+/**
+ * The ray as the persisted logs hold it. A response's `cf-ray` header ends in
+ * the colo (`a5b10b7b58e9a9b4-IAD`) and `$metadata.rayId` does not — asked
+ * with the suffix, the logs answered nothing for a ray they held (first run,
+ * 2026-11-16).
+ */
+export const rayIdOf = (ray) => String(ray).replace(/-[A-Z]{3}$/, '')
+
 /** The limit an invocation hit, by the runtime's own outcome, or null. */
 export const limitNamed = (invocation) =>
   /^exceeded/i.test(String(invocation?.outcome ?? ''))
@@ -182,7 +190,7 @@ export async function readRays(env, name, rays, from, to) {
             {
               key: '$metadata.rayId',
               operation: 'eq',
-              value: ray,
+              value: rayIdOf(ray),
               type: 'string',
             },
           ],
@@ -229,26 +237,34 @@ export async function readLimitDays(env, name, n, now = Date.now()) {
           ]),
         ),
       )
-      const limited = await query(config, {
-        queryId: 'limit-days-events',
-        timeframe,
-        parameters: {
-          datasets: ['cloudflare-workers'],
-          filters: [
-            service(name),
-            invocationsOnly,
-            {
-              key: '$workers.outcome',
-              operation: 'in',
-              value: ['exceededMemory', 'exceededCpu', 'exceededResources'],
-              type: 'string',
-            },
-          ],
-        },
-        view: 'events',
-        limit: 1000,
-      })
-      invocations.push(...eventsOf(limited).map(invocationOf))
+      // The events of each limit outcome the day's counts actually hold, one
+      // `eq` query apiece — the API answered 400 to an `in` filter on the
+      // outcome (first run, 2026-11-16).
+      const limits = Object.keys(counts.at(-1)).filter((outcome) =>
+        /^exceeded/i.test(outcome),
+      )
+      for (const outcome of limits) {
+        const limited = await query(config, {
+          queryId: 'limit-days-events',
+          timeframe,
+          parameters: {
+            datasets: ['cloudflare-workers'],
+            filters: [
+              service(name),
+              invocationsOnly,
+              {
+                key: '$workers.outcome',
+                operation: 'eq',
+                value: outcome,
+                type: 'string',
+              },
+            ],
+          },
+          view: 'events',
+          limit: 1000,
+        })
+        invocations.push(...eventsOf(limited).map(invocationOf))
+      }
     }
     return {
       days: tallyDays(days, invocations).map((day, k) => ({

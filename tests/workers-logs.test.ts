@@ -4,6 +4,7 @@ import {
   invocationOf,
   limitNamed,
   observabilityConfig,
+  rayIdOf,
   rayLine,
   readRays,
   tallyDays,
@@ -59,6 +60,14 @@ describe('the reading of one invocation', () => {
     const one = invocationOf(event({ memoryUsedBytes: 133_000_000 }))
     expect(one.memory).toBe(133_000_000)
     expect(one.extra).toEqual({ memoryUsedBytes: 133_000_000 })
+  })
+})
+
+describe('the ray as the logs hold it', () => {
+  it('drops the colo the cf-ray header ends in, and nothing else', () => {
+    expect(rayIdOf('a5b10b7b58e9a9b4-IAD')).toBe('a5b10b7b58e9a9b4')
+    expect(rayIdOf('a5b419d4bbb9521a-DYU')).toBe('a5b419d4bbb9521a')
+    expect(rayIdOf('a5b10b7b58e9a9b4')).toBe('a5b10b7b58e9a9b4')
   })
 })
 
