@@ -5,6 +5,7 @@ import { check as checkMigrationGap } from './check-migration-gap.mjs'
 import { runIntegrationSuite, resolveEndpoint } from './integration-gate.mjs'
 import { refusalMessage } from './deploy-refusal.mjs'
 import { measure, verdict } from './bundle-size.mjs'
+import { copiesVerdict, measureCopies } from './prisma-copies.mjs'
 import { describeReadBack, readBackHyperdrive } from './hyperdrive-config.mjs'
 import {
   checkReceipt,
@@ -273,6 +274,15 @@ run(['opennextjs-cloudflare', 'build'])
 // the number. Dormant code counts — see scripts/bundle-size.mjs.
 {
   const { ok, line } = verdict(measure({ production }))
+  console.log(line)
+  if (!ok) process.exit(1)
+}
+
+// ONE PRISMA CLIENT, ONE QUERY COMPILER (owner's ruling 2026-11-16, GAPS 36 /
+// 44). Read from the built bundle's metafile; five copies and two `.wasm` were
+// what a warm dev isolate held at `bed6b3a`. See scripts/prisma-copies.mjs.
+{
+  const { ok, line } = copiesVerdict(measureCopies())
   console.log(line)
   if (!ok) process.exit(1)
 }

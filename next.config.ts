@@ -105,12 +105,18 @@ const nextConfig: NextConfig = {
       },
     ]
   },
+  // ONE COPY OF THE CLIENT (owner's ruling 2026-11-16, GAPS 36 / 44). The
+  // workerd client is resolved as the package `@zebra/prisma-workerd`, which
+  // `npm run build` compiles from `src/generated/prisma-workerd`
+  // (`scripts/prisma-workerd-package.mjs`) and asks for in one place
+  // (`src/lib/prisma-workerd-external.mjs`), and named a server external: as
+  // app source Turbopack compiled it into every chunk group that imported it —
+  // five copies at `bed6b3a`, and the 3.68 MB `.wasm` twice — while an
+  // external is left as a `require` that OpenNext's esbuild bundles once.
+  serverExternalPackages: forWorkers ? ['@zebra/prisma-workerd'] : [],
   turbopack: {
     resolveAlias: forWorkers
-      ? {
-          '@/generated/prisma/client':
-            './src/generated/prisma-workerd/client.ts',
-        }
+      ? { '@/generated/prisma/client': './src/lib/prisma-workerd-external.mjs' }
       : {},
   },
   // `pg`'s Workers socket shim, CARRIED BY NAME (§6.10, GAPS 33). `pg` loads
@@ -122,6 +128,13 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     '/**': ['./node_modules/pg-cloudflare/**/*'],
   },
+  // The client package's `.wasm`, LEFT OUT OF THE TRACE (GAPS 36): the one
+  // copy the bundle imports is the package's own, by absolute path through
+  // OpenNext's `wrangler-externals`; a traced copy is listed again in
+  // OpenNext's wasm-chunk loader, and wrangler would upload 3.68 MB twice.
+  outputFileTracingExcludes: forWorkers
+    ? { '/**': ['./node_modules/@zebra/prisma-workerd/*.wasm'] }
+    : {},
 }
 
 export default nextConfig
