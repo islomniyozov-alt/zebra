@@ -77,7 +77,18 @@ const BOUNDARY_WORDS = ['Something went wrong on our side']
 // ── THE ROUTES, FROM THE FILESYSTEM ────────────────────────────────────────
 
 /**
- * Every `page.tsx` under `src/app`, as the URL path it serves.
+ * The directory names of the CSV export route handlers (`exports/route.ts`,
+ * `loads/export/route.ts`, `trucks/export/route.ts`). Owner's report
+ * 2026-11-16: every grid's Export CSV linked to `/accounting/export`, a path
+ * that had stopped existing on 2026-09-28 when the handler moved to
+ * `/exports` — a 404 for seven weeks, because the sweep fetched pages only.
+ */
+export const EXPORT_DIR = /^exports?$/
+
+/**
+ * Every `page.tsx` under `src/app`, as the URL path it serves — and every
+ * export route handler (`EXPORT_DIR`), so a CSV endpoint is held to §6.8 like
+ * the page it belongs to.
  *
  * Route groups — `(app)`, `(auth)` — are organisational and contribute nothing
  * to the path, which is the one rule a hand-written list gets wrong first.
@@ -92,13 +103,48 @@ export function routesUnder(root) {
           join(dir, entry.name),
           grouped ? segments : [...segments, entry.name],
         )
-      } else if (entry.name === 'page.tsx') {
+      } else if (
+        entry.name === 'page.tsx' ||
+        (entry.name === 'route.ts' && EXPORT_DIR.test(segments.at(-1) ?? ''))
+      ) {
         found.push(`/${segments.join('/')}`)
       }
     }
   }
   walk(root, [])
   return [...new Set(found)].sort()
+}
+
+/**
+ * The query a route needs before it answers anything but 400. `/exports`
+ * serves every accounting and payroll grid by `grid`; the payments grid is
+ * the one the owner's report was about, and its §6.8 row is the payments
+ * page's.
+ */
+export const ROUTE_QUERY = new Map([['/exports', 'grid=payments.payments']])
+
+/**
+ * Whether an anonymous answer is a refusal. A page redirects to `/login`; a
+ * route handler answers 401 — both refuse, and anything else let a stranger in.
+ */
+export const anonRefused = (status) =>
+  (status >= 300 && status < 400) || status === 401
+
+/**
+ * Every link to an export a rendered page carries, as paths: `href`s whose
+ * path has an `export`/`exports` segment, `&amp;` undone. The sweep fetches
+ * each one, so a link to a route that does not exist is a problem by name —
+ * the check that would have caught `/accounting/export` on its first night.
+ */
+export function exportLinksIn(html) {
+  const out = new Set()
+  for (const match of String(html).matchAll(/href="(\/[^"]*)"/g)) {
+    const href = match[1].replace(/&amp;/g, '&')
+    const path = href.split('?')[0]
+    if (path.split('/').some((segment) => EXPORT_DIR.test(segment)))
+      out.add(href)
+  }
+  return [...out]
 }
 
 /** `[id]` and `[token]`, which need a real value before anything can be fetched. */
@@ -1093,6 +1139,8 @@ async function sweep() {
   const authed = []
   const anon = []
   const unresolved = [...failed]
+  /** Every export link a rendered owner page carried → the page it was on. */
+  const exportLinks = new Map()
   /** Every protected page's answer per role, for the matrix. */
   const seen = []
 
@@ -1108,8 +1156,12 @@ async function sweep() {
         path = route.replace(/\[[^\]]+\]/, id)
       }
     }
+    if (ROUTE_QUERY.has(route)) path = `${path}?${ROUTE_QUERY.get(route)}`
 
     const withSession = await get(path, { cookie })
+    if (withSession.status < 300)
+      for (const href of exportLinksIn(withSession.body))
+        if (!exportLinks.has(href)) exportLinks.set(href, route)
     const verdict = classify(withSession.status, withSession.body)
     authed.push({
       route,
@@ -1155,7 +1207,7 @@ async function sweep() {
       }
 
       const without = await get(path, {})
-      const refused = without.status >= 300 && without.status < 400
+      const refused = anonRefused(without.status)
       anon.push({ route, status: without.status, refused })
       if (!refused) {
         console.log(
@@ -1233,6 +1285,16 @@ async function sweep() {
   const ceiling = ceilingKeys(serverErrors)
   const sums = tally({ authed, anon, unresolved, findings, matrix, ceiling })
 
+  // EVERY EXPORT LINK, FOLLOWED (owner's report 2026-11-16). As the owner,
+  // once each; anything but a 200 is a problem by name — the link, the page
+  // that carried it, and the status.
+  const brokenLinks = []
+  for (const [href, from] of exportLinks) {
+    const answer = await get(href, { cookie })
+    if (answer.status !== 200)
+      brokenLinks.push(`${href} (on ${from}): ${answer.status}`)
+  }
+
   console.log('\n' + '='.repeat(70))
   console.log(
     `SWEPT ${authed.length} of ${routes.length} page(s) WITH a session`,
@@ -1280,6 +1342,11 @@ async function sweep() {
     console.log(`UNRESOLVED (never fetched at all): ${sums.unresolved.length}`)
     for (const line of sums.unresolved) console.log(`   ${line}`)
   }
+  console.log(
+    `EXPORT LINKS: ${exportLinks.size} followed, ${brokenLinks.length} broken`,
+  )
+  for (const line of brokenLinks) console.log(`   BROKEN EXPORT LINK ${line}`)
+  sums.problems += brokenLinks.length
 
   // ONE INVOCATION, ONE SIGN-IN (§6.10, 2026-10-13). Two sign-ins matched to
   // the same invocation means a measurement attributed to the wrong role —

@@ -7,7 +7,12 @@ import { listedAuthorities } from '@/lib/companies'
 import { formatCents } from '@/lib/money'
 import { readGridColumns } from '@/lib/grid-columns'
 import { applyList, sumCents, type RawParams } from '@/lib/list-view'
-import { paymentShape, readPayments } from '@/lib/accounting-grids'
+import {
+  paymentShape,
+  paymentsInState,
+  readPayments,
+  unappliedTabRows,
+} from '@/lib/accounting-grids'
 import type { PaymentRow } from '@/lib/payments'
 import { Table, type Column } from '@/components/ui/Table'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -122,8 +127,20 @@ export default async function AccountingPaymentsPage({
     return { payments, companies, columns, strip }
   })
 
-  // FROM SQL, over the window. See the reader above.
-  const unappliedCount = data.strip.unappliedCount
+  // THE TAB COUNTS ITS LIST (owner's report 2026-11-16). It was the strip's
+  // all-dates balance count, and under Last 7 days the tab read "Unapplied 5"
+  // over an empty list. Now it is the length of the unapplied tab's own rows
+  // under the parameters the tab link carries — the same predicate and the
+  // same `applyList` (`unappliedTabRows`). The strip's figure stays a balance.
+  const tabParams = Object.fromEntries(
+    Object.entries(raw).filter(
+      ([key]) => !['state', 'page', 'sort', 'dir', 'tab'].includes(key),
+    ),
+  )
+  const unappliedCount = unappliedTabRows(
+    data.payments,
+    windowed(tabParams, window),
+  ).length
 
   const state =
     tab === 'unapplied'
@@ -131,12 +148,7 @@ export default async function AccountingPaymentsPage({
       : typeof raw.state === 'string'
         ? raw.state
         : null
-  const narrowed =
-    state === 'unapplied'
-      ? data.payments.filter((row) => row.unappliedCents > 0)
-      : state === 'applied'
-        ? data.payments.filter((row) => row.unappliedCents === 0)
-        : data.payments
+  const narrowed = paymentsInState(data.payments, state)
 
   // THE PICKER FILTERS THE LIST, by received date. See the note on Invoices.
   const view = gridView(

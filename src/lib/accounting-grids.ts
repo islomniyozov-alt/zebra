@@ -5,7 +5,12 @@ import { listPayments, type PaymentRow } from './payments'
 import { listCharges, type ChargeRow } from './driver-deductions'
 import type { StandingChargeListRow } from './standing-charges'
 import { agingBucketFor, type AgingBucket } from './factoring'
-import type { ListShape } from './list-view'
+import {
+  applyList,
+  readListParams,
+  type ListShape,
+  type RawParams,
+} from './list-view'
 
 type TxClient = Prisma.TransactionClient
 
@@ -19,7 +24,7 @@ type TxClient = Prisma.TransactionClient
 // carry its own query. Two queries that are supposed to agree about money are two
 // queries that will not."
 //
-// The route handler at `/accounting/export` and the five pages both come here.
+// The route handler at `/exports` and the five pages both come here.
 // What the pages keep for themselves is RENDERING — a `Column`'s `render` is JSX
 // and needs a locale and a translator, neither of which belongs in a CSV.
 //
@@ -198,6 +203,43 @@ export async function readPayments(
   scope: Scope,
 ): Promise<PaymentRow[]> {
   return listPayments(tx, scope)
+}
+
+/**
+ * THE ONE PREDICATE FOR "UNAPPLIED" ON THE PAYMENTS SCREEN — the tab's count
+ * and the tab's list are both this (owner's report 2026-11-16: the chip read
+ * "Unapplied 5" over "No payments match these filters" under Last 7 days,
+ * because the count was the strip's all-dates balance and the list applied
+ * the picker's window). The strip's money figure stays a balance by ruling
+ * (§6.2.8, 2026-10-04); the TAB is a list, and a tab counts its list.
+ */
+export const isUnapplied = (row: PaymentRow) => row.unappliedCents > 0
+
+/** The rows a payments state chip keeps — `unapplied`, `applied`, or all. */
+export function paymentsInState(
+  rows: readonly PaymentRow[],
+  state: string | null,
+): readonly PaymentRow[] {
+  if (state === 'unapplied') return rows.filter(isUnapplied)
+  if (state === 'applied') return rows.filter((row) => row.unappliedCents === 0)
+  return rows
+}
+
+/**
+ * The unapplied tab's rows under `raw` — the window, the authority, the
+ * search and the funnels, through the same `applyList` the list itself runs.
+ * Its length is the tab's count, so the count cannot disagree with the list.
+ */
+export function unappliedTabRows(
+  rows: readonly PaymentRow[],
+  raw: RawParams,
+): PaymentRow[] {
+  return applyList(
+    paymentsInState(rows, 'unapplied'),
+    readListParams(raw),
+    paymentShape,
+    raw,
+  )
 }
 
 export const paymentShape: ListShape<PaymentRow> = {

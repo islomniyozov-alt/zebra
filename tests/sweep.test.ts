@@ -21,6 +21,10 @@ import {
   readRouteMatrix,
   roleNamedBy,
   routesUnder,
+  EXPORT_DIR,
+  ROUTE_QUERY,
+  anonRefused,
+  exportLinksIn,
   SIGN_IN_ATTEMPTS,
   tally,
   WARM_UP_WINDOW_MS,
@@ -253,11 +257,24 @@ describe('a stalled sign-in', () => {
 const ROUTES: string[] = routesUnder('src/app')
 
 describe('the routes come from the filesystem', () => {
-  it('finds one route per page.tsx, and no more', () => {
+  it('finds one route per page.tsx and per export route handler, and no more', () => {
     // Counted from the artefact with a different method than the script uses:
     // a recursive glob over the same tree. Two readings of the same directory.
     const pages = globPages('src/app')
-    expect(ROUTES.length).toBe(pages.length)
+    const exports = globExportRoutes('src/app')
+    expect(exports.length).toBe(3)
+    expect(ROUTES.length).toBe(pages.length + exports.length)
+  })
+
+  it('includes the export routes, which the sweep fetched none of until 2026-11-16', () => {
+    // Owner's report: Export CSV linked to /accounting/export for seven weeks
+    // after the handler moved to /exports, and no instrument fetched either.
+    for (const route of ['/exports', '/loads/export', '/trucks/export'])
+      expect(ROUTES).toContain(route)
+    // Only export handlers — not every route.ts (the API routes are not pages).
+    expect(ROUTES.some((route) => route.startsWith('/api/'))).toBe(false)
+    expect(EXPORT_DIR.test('export')).toBe(true)
+    expect(EXPORT_DIR.test('exporter')).toBe(false)
   })
 
   it('strips route groups, which is the rule a hand-written list gets wrong', () => {
@@ -279,6 +296,36 @@ describe('the routes come from the filesystem', () => {
     expect(ROUTES).toContain('/trucks')
     expect(ROUTES).toContain('/loads')
     expect(ROUTES).toContain('/payroll/batches')
+  })
+})
+
+describe('the export routes and links (owner’s report 2026-11-16)', () => {
+  it('asks /exports for the payments grid, the page its row mirrors', () => {
+    expect(ROUTE_QUERY.get('/exports')).toBe('grid=payments.payments')
+  })
+
+  it('a route handler’s 401 refuses a stranger as a page’s redirect does', () => {
+    expect(anonRefused(303)).toBe(true)
+    expect(anonRefused(307)).toBe(true)
+    expect(anonRefused(401)).toBe(true)
+    expect(anonRefused(200)).toBe(false)
+    expect(anonRefused(403)).toBe(false)
+    expect(anonRefused(404)).toBe(false)
+  })
+
+  it('finds every export link a page renders, and nothing else', () => {
+    const html =
+      '<a href="/accounting/export?grid=payments.payments&amp;period=7d">Export CSV</a>' +
+      '<a href="/loads/export?status=open">Export</a>' +
+      '<a href="/exports?grid=payments.payments">x</a>' +
+      '<a href="/exports?grid=payments.payments">again</a>' +
+      '<a href="/accounting/payments?tab=unapplied">Unapplied</a>' +
+      '<a href="/drivers/exporter">not an export segment</a>'
+    expect(exportLinksIn(html)).toEqual([
+      '/accounting/export?grid=payments.payments&period=7d',
+      '/loads/export?status=open',
+      '/exports?grid=payments.payments',
+    ])
   })
 })
 
@@ -587,9 +634,10 @@ describe('the route matrix covers every protected page, and only those', () => {
   it('reads the rows out of the design system', () => {
     expect(MATRIX.size).toBe(protectedRoutes.length)
     // 54 at §6.8's writing; 55 since §6.9's testing summary (2026-10-11); 59
-    // since the driver portal's four pages (Phase 7 step 2, 2026-11-12). A
-    // pinned number so a page cannot appear or vanish without this line moving.
-    expect(protectedRoutes.length).toBe(59)
+    // since the driver portal's four pages (Phase 7 step 2, 2026-11-12); 62
+    // since the three export routes (v11.12, 2026-11-16). A pinned number so
+    // a page cannot appear or vanish without this line moving.
+    expect(protectedRoutes.length).toBe(62)
   })
 
   it.each(ROUTES.filter((route) => !PUBLIC.has(route)))(
@@ -856,6 +904,22 @@ describe('a fetch that throws', () => {
 })
 
 /** A second reading of the same tree, so the count above is not self-confirming. */
+function globExportRoutes(root: string): string[] {
+  const out: string[] = []
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) walk(`${dir}/${entry.name}`)
+      else if (
+        entry.name === 'route.ts' &&
+        ['export', 'exports'].includes(dir.split('/').at(-1) ?? '')
+      )
+        out.push(`${dir}/${entry.name}`)
+    }
+  }
+  walk(root)
+  return out
+}
+
 function globPages(root: string): string[] {
   const out: string[] = []
   const walk = (dir: string) => {

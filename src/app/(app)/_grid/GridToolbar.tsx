@@ -56,7 +56,7 @@ export function GridToolbar({
   return (
     <div className="flex items-center gap-z2">
       {children}
-      <Link href={`/accounting/export?${exportParams}`} prefetch={false}>
+      <Link href={`/exports?${exportParams}`} prefetch={false}>
         <Button variant="secondary" size="compact">
           {labels.export}
         </Button>

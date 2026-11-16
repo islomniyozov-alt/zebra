@@ -37,7 +37,7 @@ import { listStandingCharges } from '@/lib/standing-charges'
 import { isGridId, type GridId } from '@/lib/grid-columns'
 import type { Action, Resource } from '@/lib/permissions'
 
-// GET /accounting/export?grid=<id>&<the same filters the screen has>
+// GET /exports?grid=<id>&<the same filters the screen has>
 //
 // §7.1.5 — EVERY PAGE OF THE FILTERED SET, NOT THE PAGE ON SCREEN.
 //
