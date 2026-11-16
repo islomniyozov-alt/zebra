@@ -233,7 +233,8 @@ Rules that are cheap to state and expensive to rediscover:
 - Logical CSS properties only — `margin-inline-start`, never `margin-left`.
 - No hex colour outside the token block. Grep before deleting a token.
 - Amend `TMS-DESIGN-SYSTEM.md` in its own commit, with the reason, _before_
-  changing code to match it.
+  changing code to match it — except in a visual-only chain, where it rides
+  in the code's commit (see "A VISUAL-ONLY CHAIN" under the deploy order).
 
 Rules about instruments, which are the ones that cost whole sessions:
 
@@ -356,7 +357,8 @@ Rules about instruments, which are the ones that cost whole sessions:
      again on 2026-09-22 a change to `driverWarnings` passed `check` and
      every node test and broke a fixture in
      `tests/integration/warnings.test.ts` — the second time AFTER saying the
-     habit was fixed. Ten minutes; run it when the network is usable.
+     habit was fixed. Ten minutes; run it when the network is usable. A
+     visual-only chain skips this step (see "A VISUAL-ONLY CHAIN" below).
 
      **THE GATE OF RECORD IS CI'S RUN ON THE PUSHED SHA.** Owner's ruling,
      2026-10-12. `ci.yml` and `deploy-production.yml` each run the full
@@ -467,6 +469,30 @@ Rules about instruments, which are the ones that cost whole sessions:
   ship on dev". That is the one report where "dev ahead" is the finished
   state and not the incomplete one — and `check:drift` still prints both,
   so the gap is read from the workers, not remembered.
+
+  **A VISUAL-ONLY CHAIN SKIPS THE LOCAL INTEGRATION PRE-CHECK AND CARRIES
+  ITS DESIGN-SYSTEM AMENDMENT IN THE SAME COMMIT AS THE CODE.** Owner's
+  speed rule, 2026-11-16. Two exemptions, and only two:
+  1. Step 2's local pre-check is not run. CI's run on the pushed sha is
+     the gate, as it already is for every chain — nothing deploys until it
+     is green. `npm run check` still runs locally; `--skip-integration`
+     stays forbidden, because CI does not skip anything.
+  2. The `TMS-DESIGN-SYSTEM.md` amendment goes in the code's commit rather
+     than a commit of its own before it. The reason the rule exists — the
+     doc says it before the code does it — is kept by the commit message,
+     which names the section, the version and the reason first.
+
+  VISUAL-ONLY IS DECIDED BY THE DIFF, NOT BY THE INTENT. The chain's
+  `git diff --name-only` against `main` names nothing under `src/lib/`,
+  nothing under `prisma/migrations/`, and no code that computes or moves
+  money or decides auth — sessions, sign-in, permissions, the cookie —
+  wherever it lives. One such path and the chain is not visual-only, even
+  if it is a label: `src/lib/i18n.ts` is under `src/lib/`, so a chain that
+  renames a string there keeps the full ritual. The commit message says
+  "visual-only" by name, so the exemption is claimed where review can
+  check it against the file list. Everything else keeps the full ritual,
+  and a visual-only chain still deploys to dev and waits for the ship, as
+  above.
 
 - **FROM THE MOMENT THE INTEGRATION GATE STARTS UNTIL THE RITUAL'S LAST STEP
   REPORTS: NO EDIT, NO COMMIT, NO WATCHER, NO DRY RUN. The working directory
