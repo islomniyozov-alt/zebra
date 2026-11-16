@@ -31,6 +31,14 @@ tests with fixtures from the 09-24 files, each guard watched failing.
 Runbook updated to match.
 ```
 
+And on the case the second version left open:
+
+```
+Ruling on 4a: the import never changes money on a load that Zebra touched
+after creation — any user edit in the audit log or any Zebra-added line —
+same RATE HELD path.
+```
+
 Everything below was read from `scripts/seed-datatruck-loads.ts`,
 `scripts/datatruck-tenancy.ts` and `src/lib/datatruck/loads.ts` as of the
 commit that built that ruling, and measured from the corpus files named —
@@ -75,12 +83,16 @@ Keys compare exactly after case and whitespace (`nameKey`), never nearest.
 The bridge's enrichment is gone with it — a refused row writes nothing.
 
 `rateDecisionFor` decides the money on every synced load, in the preview and
-in the write: restated only when the load is not invoiced, settled or paid.
-Otherwise the difference is printed under **RATE HELD**. Invoiced is an
-`InvoiceLine` or billing at `INVOICED`, `FILED_WITH_FACTOR`, `DISPUTED` or
-`WRITTEN_OFF`; paid is a payment application or `PAID` / `PARTIALLY_PAID`;
-settled is a `SettlementLine` or a `SettlementLoadLine`. Closed history is
-held without being listed.
+in the write: restated only when the load is not invoiced, settled, paid or
+touched in Zebra. Otherwise the difference is printed under **RATE HELD**.
+Invoiced is an `InvoiceLine` or billing at `INVOICED`, `FILED_WITH_FACTOR`,
+`DISPUTED` or `WRITTEN_OFF`; paid is a payment application or `PAID` /
+`PARTIALLY_PAID`; settled is a `SettlementLine` or a `SettlementLoadLine`.
+Touched is any audit row on the load other than its CREATE — only a person's
+write leaves one, because this script runs with no audit scope and writes
+none — or any accessorial row other than the import's own
+`Datatruck "Total other pay".` row. Closed history is held without being
+listed.
 
 ## (1) What to export from Datatruck
 
@@ -198,9 +210,10 @@ write. Anything else is a stop and a question, not a judgement call.
 8. `CUSTOMERS — … to create`: every name on the list is genuinely new — not
    a spelling of a customer in the "already on this database" list above it.
    Exact-name matching splits a broker in two otherwise.
-9. `RATE HELD — n matched load(s) invoiced, settled or paid`: every line
-   read. Each is an invoice, a statement or a payment the export disagrees
-   with, export figure and Zebra figure side by side. Nothing on it is
+9. The `RATE HELD — n matched load(s) …` list: every line read. Each starts
+   with why — `invoiced`, `settled`,
+   `paid` or `touched` — and shows the export figure and Zebra figure side by
+   side. Nothing on it is
    written; the list is for somebody to decide whether Zebra or Datatruck is
    right.
 10. `WHAT THIS WOULD DO`: the four counts `loads created`, `already present`,
@@ -218,9 +231,10 @@ looking wrong.
 
 ## (4) A week imported twice
 
-**Nothing is created twice, and no invoiced, settled or paid load is
-re-priced. Money on an open load with nothing against it can still move — by
-design.** Read from the script.
+**Nothing is created twice, and no load that is invoiced, settled, paid or
+touched in Zebra is re-priced. Money moves only on a load nobody in Zebra has
+written to since the import made it — by design, because Datatruck owns that
+rate.** Read from the script.
 
 The key is the Shipment ID. `Load` has `@@unique([organizationId,
 externalId])`, every batch asks which of its Shipment IDs are present before
@@ -241,30 +255,34 @@ writes when either side has moved:
   row delivered on or after 2026-09-13. Each operational move writes an event
   dated by the export.
 - **Rate:** restated to the export's figure when the two differ AND the load
-  is not invoiced, settled, paid or closed. Otherwise printed under RATE
-  HELD, unwritten. A restatement deletes the `Datatruck "Total other pay".`
+  is not invoiced, settled, paid, touched or closed. Otherwise printed under
+  RATE HELD, unwritten. A restatement deletes the `Datatruck "Total other pay".`
   accessorial row, writes a new one, and records a BILLING event naming old
   and new.
 
-Two ways an identical file still writes on a second run — both only on a
-load that is uninvoiced, unsettled and unpaid:
+The two cases the earlier versions of this section named as "an identical
+file still writes" are both held now, under RATE HELD as `touched`:
 
-1. **A remittance landed between the two runs.** The duplicate-cancellation
-   rule reads Amazon's `TONU` rows at run time. A row booked with its other
-   pay on the first run is planned with other pay 0 on the second, and its
-   accessorial is restated to 0.
-2. **Someone added a billable accessorial in Zebra.** `accessorialsCents`
-   then differs from the export, so the rate is restated to the export's
-   figure — and only the Datatruck-noted row is deleted, so the Zebra row
-   survives and the column no longer equals the sum of the rows. Still open;
-   it needs its own ruling.
+1. **A remittance landed between the two runs.** The remittance importer's
+   `TONU` row is an accessorial the import did not write, so the load is
+   touched and its other pay is not restated to 0. The difference prints.
+2. **Someone added a billable accessorial in Zebra.** Touched, for the same
+   reason; the column is left equal to the sum of its rows.
 
-**One case predates the ruling.** A Relay load the old bridge already
+So on a second run of the identical file, the only money that can move is on
+a load whose Datatruck figure changed between the exports and that nobody in
+Zebra has written to.
+
+**One case predates the rulings.** A Relay load the old bridge already
 matched carries a `DT-…` `externalId` from that run. To the predicate it is
-that row's own load, so it is synced — frozen if invoiced, settled or paid,
-restated otherwise. Which production loads carry such an `externalId` is a
-read-only question for production (an `externalId` beginning `DT-` on a load
-whose `loadNumber` does not); it was not asked from here.
+that row's own load, so it is synced. It is frozen if invoiced, settled, paid
+or touched — and a Relay load uploaded in the app is normally touched,
+because the upload seats the driver after landing the load, inside the
+uploader's attributed scope. "Normally" is a reading of `trips-writer.ts`,
+not a count: which production loads carry such an `externalId`, and whether
+any of them has no audit row beyond its CREATE, is a read-only question for
+production (an `externalId` beginning `DT-` on a load whose `loadNumber` does
+not). It was not asked from here.
 
 ## (5) A date-bounded export
 

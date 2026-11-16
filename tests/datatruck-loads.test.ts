@@ -531,7 +531,33 @@ describe('when a fresh export may restate the money', () => {
     settlementLoadLines: 0,
     paymentApplications: 0,
     invoiceLines: 0,
+    userEdits: 0,
+    zebraLines: 0,
     ...over,
+  })
+
+  // ── OWNER'S RULING 2026-11-16: TOUCHED IN ZEBRA AFTER CREATION ─────────
+  it('freezes a load a person has edited since it was created', () => {
+    expect(rateFreezeFor(load({ userEdits: 1 }))).toEqual({
+      frozen: true,
+      why: 'touched',
+    })
+  })
+
+  it('freezes a load carrying a line this import did not write', () => {
+    // The case that produced the ruling: a dispatcher's detention row, and
+    // the export restating the column so it no longer summed its rows.
+    expect(rateFreezeFor(load({ zebraLines: 1 }))).toEqual({
+      frozen: true,
+      why: 'touched',
+    })
+  })
+
+  it('names money before touch when both are true', () => {
+    expect(rateFreezeFor(load({ billing: 'INVOICED', userEdits: 3 }))).toEqual({
+      frozen: true,
+      why: 'invoiced',
+    })
   })
 
   // ── OWNER'S RULING 2026-11-16: INVOICED, SETTLED OR PAID ───────────────
@@ -1664,6 +1690,8 @@ describe('what a matched load does with the export rate', () => {
     settlementLoadLines: 0,
     paymentApplications: 0,
     invoiceLines: 0,
+    userEdits: 0,
+    zebraLines: 0,
     // DT-016641's figure, as the 09-24 export carries it.
     linehaulCents: 199_208,
     accessorialCents: 0,
@@ -1703,6 +1731,14 @@ describe('what a matched load does with the export rate', () => {
     ).toMatchObject({ kind: 'held', why: 'paid' })
   })
 
+  it('holds a touched load on the same RATE HELD path', () => {
+    expect(rateDecisionFor(current({ zebraLines: 1 }), restated)).toEqual({
+      kind: 'held',
+      why: 'touched',
+      line: 'touched: export $2050.00 + $0.00, Zebra $1992.08 + $0.00',
+    })
+  })
+
   it('leaves closed history alone without listing it', () => {
     expect(
       rateDecisionFor(current({ billing: 'CLOSED_IN_DATATRUCK' }), restated),
@@ -1716,5 +1752,25 @@ describe('what a matched load does with the export rate', () => {
     expect(seed).toContain('RATE HELD — ${rateHeld.length}')
     // The old inline freeze must be gone, not merely bypassed.
     expect(seed).not.toContain('rateFreezeFor(')
+  })
+
+  it('reads touch from the audit log and the lines, for both paths', () => {
+    const seed = readFileSync('scripts/seed-datatruck-loads.ts', 'utf8')
+    // A person's write, never this import's own (which writes no audit row),
+    // and never the CREATE that made the load.
+    expect(seed).toContain("action: { not: 'CREATE' }")
+    expect(seed).toContain('userId: { not: null }')
+    // Every line not this import's own — including one with no note at all,
+    // which `<>` alone would drop.
+    expect(seed).toContain('{ notes: null }')
+    expect(seed).toContain('{ notes: { not: DATATRUCK_OTHER_PAY_NOTE } }')
+    // The two facts reach the rule rather than being read and dropped.
+    expect(seed).toContain('userEdits: userEdits.get(row.id) ?? 0')
+    expect(seed).toContain('zebraLines: row._count.accessorials')
+    // One reading, used by the preview and the write — each with the edits
+    // it asked the audit log for.
+    expect(seed).toContain('moneyState(row, edits)')
+    expect(seed).toContain('moneyState(row, editsInBatch)')
+    expect((seed.match(/_count: MONEY_COUNTS/g) ?? []).length).toBe(2)
   })
 })
