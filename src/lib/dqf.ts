@@ -265,71 +265,229 @@ export interface DqfFacts {
  * wrong, with no event to tell it.
  */
 export function dqfChecklist(facts: DqfFacts, now: Date): DqfEntry[] {
-  return DQF_REQUIREMENTS.map((requirement) => {
-    const base = {
-      key: requirement.key,
-      cfr: requirement.cfr,
-      cadence: requirement.cadence,
-    }
+  return DQF_REQUIREMENTS.map((requirement) =>
+    dqfEntryFor(requirement, facts, now),
+  )
+}
 
-    // THE HIRE DATE IS A ROW (queue item 20 (4)): present when recorded,
-    // missing when not. It has no date of its own to be "since".
-    if (requirement.evidence.kind === 'fact') {
-      return facts.hireDate !== null
-        ? { ...base, status: 'present' as const, dueSince: null }
-        : { ...base, status: 'missing' as const, dueSince: null }
-    }
+/**
+ * ONE ROW OF THE FILE, from its own evidence. The checklist is this, nine
+ * times; `dqfRowSatisfied` is this, read as yes or no.
+ */
+export function dqfEntryFor(
+  requirement: DqfRequirement,
+  facts: DqfFacts,
+  now: Date,
+): DqfEntry {
+  const base = {
+    key: requirement.key,
+    cfr: requirement.cfr,
+    cadence: requirement.cadence,
+  }
 
-    if (requirement.evidence.kind === 'document') {
-      const onFile = facts.documents.includes(requirement.evidence.type)
-      return onFile
-        ? { ...base, status: 'present' as const, dueSince: null }
-        : { ...base, status: 'missing' as const, dueSince: facts.hireDate }
-    }
+  // THE HIRE DATE IS A ROW (queue item 20 (4)): present when recorded,
+  // missing when not. It has no date of its own to be "since".
+  if (requirement.evidence.kind === 'fact') {
+    return facts.hireDate !== null
+      ? { ...base, status: 'present' as const, dueSince: null }
+      : { ...base, status: 'missing' as const, dueSince: null }
+  }
 
-    // EITHER: the document on file reads present and undated; failing that,
-    // the compliance record alone reads by its date below.
-    if (
-      requirement.evidence.kind === 'either' &&
-      facts.documents.includes(requirement.evidence.document)
-    ) {
-      return { ...base, status: 'present' as const, dueSince: null }
-    }
+  if (requirement.evidence.kind === 'document') {
+    const onFile = facts.documents.includes(requirement.evidence.type)
+    return onFile
+      ? { ...base, status: 'present' as const, dueSince: null }
+      : { ...base, status: 'missing' as const, dueSince: facts.hireDate }
+  }
 
-    // THE LATEST RECORD WINS, which is `compliance.ts`'s supersession rule
-    // stated again rather than imported: a renewal filed beside last year's
-    // MVR is the one that says whether the file is current.
-    const type =
-      requirement.evidence.kind === 'either'
-        ? requirement.evidence.compliance
-        : requirement.evidence.type
-    const held = facts.compliance.filter((item) => item.type === type)
-    if (held.length === 0) {
-      return { ...base, status: 'missing' as const, dueSince: facts.hireDate }
-    }
-
-    const dated = held
-      .filter(
-        (item): item is { type: string; expiresAt: Date } =>
-          item.expiresAt !== null,
-      )
-      .sort((a, b) => b.expiresAt.getTime() - a.expiresAt.getTime())[0]
-
-    // ON FILE BUT UNDATED. The column is NOT NULL so this is unreachable
-    // through the application; a row that got there another way is filed
-    // rather than lapsed, and inventing an expiry for it would raise an
-    // alarm about a date nobody wrote.
-    if (!dated) return { ...base, status: 'present' as const, dueSince: null }
-
-    const days = daysUntil(dated.expiresAt, now)
-    if (days < 0) {
-      return { ...base, status: 'expired' as const, dueSince: dated.expiresAt }
-    }
-    if (days <= DQF_LEAD_DAYS) {
-      return { ...base, status: 'due' as const, dueSince: dated.expiresAt }
-    }
+  // EITHER: the document on file reads present and undated; failing that,
+  // the compliance record alone reads by its date below.
+  if (
+    requirement.evidence.kind === 'either' &&
+    facts.documents.includes(requirement.evidence.document)
+  ) {
     return { ...base, status: 'present' as const, dueSince: null }
-  })
+  }
+
+  // THE LATEST RECORD WINS, which is `compliance.ts`'s supersession rule
+  // stated again rather than imported: a renewal filed beside last year's
+  // MVR is the one that says whether the file is current.
+  const type =
+    requirement.evidence.kind === 'either'
+      ? requirement.evidence.compliance
+      : requirement.evidence.type
+  const held = facts.compliance.filter((item) => item.type === type)
+  if (held.length === 0) {
+    return { ...base, status: 'missing' as const, dueSince: facts.hireDate }
+  }
+
+  const dated = held
+    .filter(
+      (item): item is { type: string; expiresAt: Date } =>
+        item.expiresAt !== null,
+    )
+    .sort((a, b) => b.expiresAt.getTime() - a.expiresAt.getTime())[0]
+
+  // ON FILE BUT UNDATED. The column is NOT NULL so this is unreachable
+  // through the application; a row that got there another way is filed
+  // rather than lapsed, and inventing an expiry for it would raise an
+  // alarm about a date nobody wrote.
+  if (!dated) return { ...base, status: 'present' as const, dueSince: null }
+
+  const days = daysUntil(dated.expiresAt, now)
+  if (days < 0) {
+    return { ...base, status: 'expired' as const, dueSince: dated.expiresAt }
+  }
+  if (days <= DQF_LEAD_DAYS) {
+    return { ...base, status: 'due' as const, dueSince: dated.expiresAt }
+  }
+  return { ...base, status: 'present' as const, dueSince: null }
+}
+
+/**
+ * THE ONE PREDICATE PER ROW (§6.4 part 2 v11.30): is this row satisfied — on
+ * file, and if dated, not lapsed? `due` satisfies it (the driver is qualified
+ * today); `missing` and `expired` do not. What satisfies each row is its
+ * `evidence`, read by `dqfEntryFor` and nowhere else.
+ */
+export function dqfRowSatisfied(
+  requirement: DqfRequirement,
+  facts: DqfFacts,
+  now: Date,
+): boolean {
+  const { status } = dqfEntryFor(requirement, facts, now)
+  return status === 'present' || status === 'due'
+}
+
+// ── every row its action (§6.4 part 2 v11.30) ────────────────────────────
+
+/**
+ * The act that satisfies a row, DERIVED FROM ITS EVIDENCE so the button and
+ * the predicate cannot disagree: a fact is set on Main, a document is
+ * uploaded, a dated record is recorded. An `either` row is offered its
+ * document — the record half is filed through the CDL reader or the
+ * compliance panel, which already exist for it.
+ */
+export type DqfRowAction =
+  | { kind: 'main'; field: 'hireDate' }
+  | { kind: 'upload'; documentType: DocumentType }
+  | { kind: 'record'; complianceType: ComplianceType }
+
+export function dqfRowAction(requirement: DqfRequirement): DqfRowAction {
+  const evidence = requirement.evidence
+  switch (evidence.kind) {
+    case 'fact':
+      return { kind: 'main', field: evidence.fact }
+    case 'document':
+      return { kind: 'upload', documentType: evidence.type }
+    case 'either':
+      return { kind: 'upload', documentType: evidence.document }
+    case 'compliance':
+      return { kind: 'record', complianceType: evidence.type }
+  }
+}
+
+/** How far ahead the Record form's expiry is prefilled for an annual row. */
+export const DQF_RECORD_DEFAULT_DAYS = 365
+
+/**
+ * The facts once the action has done its work: what it FILES, stated as the
+ * evidence the predicate reads. The agreement test applies this to every
+ * unsatisfied row and asks the predicate again; the integration test does it
+ * for real, through the writers.
+ */
+export function dqfFactsAfter(
+  action: DqfRowAction,
+  facts: DqfFacts,
+  now: Date,
+): DqfFacts {
+  switch (action.kind) {
+    case 'main':
+      return { ...facts, hireDate: now }
+    case 'upload':
+      return { ...facts, documents: [...facts.documents, action.documentType] }
+    case 'record':
+      return {
+        ...facts,
+        compliance: [
+          ...facts.compliance,
+          {
+            type: action.complianceType,
+            expiresAt: new Date(
+              now.getTime() + DQF_RECORD_DEFAULT_DAYS * 86_400_000,
+            ),
+          },
+        ],
+      }
+  }
+}
+
+/** A document on the driver, as the on-file link needs it. */
+export interface DqfFiledDocument {
+  id: string
+  filename: string
+  type: string
+  uploadedAt: Date | null
+}
+
+/** A live compliance record, with the documents attached to it. */
+export interface DqfFiledRecord {
+  id: string
+  type: string
+  expiresAt: Date
+  isSuperseded: boolean
+  documents: readonly { id: string; filename: string }[]
+}
+
+/**
+ * THE DOCUMENT AN ON-FILE ROW LINKS TO: the newest document of the row's kind
+ * on the driver, else one attached to the newest live record of the row's
+ * type. Null when the row is satisfied by a fact, or by a record with nothing
+ * attached — that row offers Attach instead (`dqfOnFileRecord`).
+ */
+export function dqfOnFileDocument(
+  requirement: DqfRequirement,
+  documents: readonly DqfFiledDocument[],
+  records: readonly DqfFiledRecord[],
+): { id: string; filename: string } | null {
+  const evidence = requirement.evidence
+  const documentType =
+    evidence.kind === 'document'
+      ? evidence.type
+      : evidence.kind === 'either'
+        ? evidence.document
+        : null
+  if (documentType !== null) {
+    const newest = documents
+      .filter((document) => document.type === documentType)
+      .sort(
+        (a, b) =>
+          (b.uploadedAt?.getTime() ?? 0) - (a.uploadedAt?.getTime() ?? 0),
+      )[0]
+    if (newest) return { id: newest.id, filename: newest.filename }
+  }
+  const record = dqfOnFileRecord(requirement, records)
+  return record?.documents[0] ?? null
+}
+
+/** The newest live record that satisfies a dated row, or null. */
+export function dqfOnFileRecord(
+  requirement: DqfRequirement,
+  records: readonly DqfFiledRecord[],
+): DqfFiledRecord | null {
+  const evidence = requirement.evidence
+  const type =
+    evidence.kind === 'compliance'
+      ? evidence.type
+      : evidence.kind === 'either'
+        ? evidence.compliance
+        : null
+  if (type === null) return null
+  return (
+    records
+      .filter((record) => record.type === type && !record.isSuperseded)
+      .sort((a, b) => b.expiresAt.getTime() - a.expiresAt.getTime())[0] ?? null
+  )
 }
 
 /**

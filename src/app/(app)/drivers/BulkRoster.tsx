@@ -98,7 +98,9 @@ export function BulkRoster({ children, labels, reasons }: Props) {
           >
             {labels.terminated}
           </Button>
+          {/* type="button": inside the roster form, a bare button submits it. */}
           <Button
+            type="button"
             variant="ghost"
             size="compact"
             onClick={(event) => {

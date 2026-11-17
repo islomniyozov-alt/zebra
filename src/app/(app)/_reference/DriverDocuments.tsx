@@ -19,9 +19,15 @@
 // Owner's ruling, 2026-09-12: "a cancelled rotation leaves the upload on the
 // driver as 'not read — needs rotation', visible on the document list."
 //
-// READ-ONLY, AND DELIBERATELY PLAIN. It is not an uploader and not a viewer;
-// `CompliancePanel` owns attaching, and a second control for the same act is a
-// second place for the accept list to drift.
+// ── AND SINCE v11.30 IT IS WHERE A DRIVER'S PAPER GOES IN ──────────────────
+//
+// It was read-only and said "No documents on this driver" with nothing to
+// press (safety team on dev, 2026-11-17). It now uploads by kind
+// (`DRIVER_DOCUMENT_KINDS`), lists the driver's documents AND those attached
+// to the driver's compliance records, each with the day it arrived and the
+// expiry of what it evidences (`driverDocumentList`), and opens each file.
+// Attaching to one record stays the compliance panel's; the upload here is
+// on the driver, which is where the DQF reads a document kind from.
 // ---------------------------------------------------------------------------
 
 import { useState } from 'react'
@@ -33,6 +39,8 @@ import {
   storeRotatedAndRead,
 } from '@/lib/rotate-and-read'
 import { UprightCard } from '@/components/UprightCard'
+import { Select } from '@/components/ui/Select'
+import { DocumentLink, UploadTo, type UploadLabels } from './DocumentControls'
 
 export interface DriverDocumentRow {
   id: string
@@ -46,6 +54,8 @@ export interface DriverDocumentRow {
   type: string
   /** The one state this panel exists to make visible. */
   needsRotation: boolean
+  /** The expiry of the record it evidences; null when it evidences nothing dated. */
+  expiresAt: Date | null
   /**
    * Whether a better copy of this document now exists.
    *
@@ -54,7 +64,7 @@ export interface DriverDocumentRow {
    * about work somebody has already done.
    */
   superseded: boolean
-  uploadedAt: Date
+  uploadedAt: Date | null
 }
 
 interface Props {
@@ -63,9 +73,20 @@ interface Props {
   driverId: string
   /** Null when the reader may not file compliance — then there is no button. */
   mayRead: boolean
+  /** `document:create`: the upload control is rendered only then. */
+  mayUpload: boolean
+  /** The kinds a driver document may be, in the picker's order, translated. */
+  kinds: readonly { value: string; label: string }[]
+  /** Every document kind's name, for the list (a record's file may be any). */
+  kindLabels: Record<string, string>
   labels: {
     heading: string
     none: string
+    kind: string
+    uploaded: string
+    expires: string
+    open: string
+    upload: UploadLabels
     needsRotation: string
     superseded: string
     rotateAndRead: string
@@ -83,14 +104,19 @@ interface Props {
   }
 }
 
-const day = (value: Date) => value.toISOString().slice(0, 10)
+const day = (value: Date | null) =>
+  value ? value.toISOString().slice(0, 10) : '—'
 
 export function DriverDocuments({
   documents,
   driverId,
   mayRead,
+  mayUpload,
+  kinds,
+  kindLabels,
   labels,
 }: Props) {
+  const [kind, setKind] = useState<string>(kinds[0]?.value ?? 'OTHER')
   /**
    * The parked document a person is currently turning, WITH ITS BYTES.
    *
@@ -196,6 +222,33 @@ export function DriverDocuments({
     <section className="rounded-card border border-border bg-surface p-z4">
       <h2 className="text-md font-medium text-ink">{labels.heading}</h2>
 
+      {/* UPLOAD, BY KIND, ON THE DRIVER. The kind is chosen first and the
+       * file second, so nothing lands as "other" by accident. */}
+      {mayUpload ? (
+        <div className="mt-z3 flex flex-wrap items-end gap-z3">
+          <div className="min-w-[220px]">
+            <Select
+              name="kind"
+              label={labels.kind}
+              options={kinds}
+              value={kind}
+              onChange={(event) => setKind(event.target.value)}
+            />
+          </div>
+          <span className="pb-z2">
+            <UploadTo
+              key={kind}
+              target={{
+                entity: 'driver',
+                entityId: driverId,
+                documentType: kind,
+              }}
+              labels={labels.upload}
+            />
+          </span>
+        </div>
+      ) : null}
+
       {notice ? (
         <p role="status" className="mt-z2 text-sm text-ink-2">
           {notice}
@@ -211,10 +264,24 @@ export function DriverDocuments({
               key={document.id}
               className="flex flex-wrap items-baseline gap-z2"
             >
-              <span className="text-ink">{document.filename}</span>
-              <span className="font-mono text-xs text-ink-3">
-                {day(document.uploadedAt)}
+              <span className="min-w-[16ch] text-ink-2">
+                {kindLabels[document.type] ?? document.type}
               </span>
+              <DocumentLink
+                id={document.id}
+                filename={document.filename}
+                failedLabel={labels.open}
+              />
+              <span className="font-mono text-xs text-ink-3">
+                {labels.uploaded} {day(document.uploadedAt)}
+              </span>
+              {/* AN EXPIRY ONLY WHERE THERE IS ONE. A dash would read as a
+               * missing date on a document that has none to miss. */}
+              {document.expiresAt ? (
+                <span className="font-mono text-xs text-ink-2">
+                  {labels.expires} {day(document.expiresAt)}
+                </span>
+              ) : null}
               {/* SAID IN WORDS, NOT SHOWN AS AN ABSENCE. A row that simply
                * lacked a green tick would read as "fine" at a glance, and the
                * whole point of keeping this file is that somebody has to do

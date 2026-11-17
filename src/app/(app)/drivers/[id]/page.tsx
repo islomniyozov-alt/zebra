@@ -42,10 +42,28 @@ import { DEDUCTION_TYPES } from '@/lib/driver-deductions'
 import {
   dqfChecklist,
   dqfIncompleteCount,
+  dqfOnFileDocument,
+  dqfOnFileRecord,
+  dqfRowAction,
+  DQF_RECORD_DEFAULT_DAYS,
   DQF_REQUIREMENTS,
   isQualifiable,
+  type DqfRequirement,
 } from '@/lib/dqf'
-import { DqfPanel, type DqfPanelRow } from '../../_reference/DqfPanel'
+import {
+  DqfPanel,
+  type DqfPanelAction,
+  type DqfPanelRow,
+} from '../../_reference/DqfPanel'
+import { documentTypeFor } from '@/lib/compliance'
+import {
+  DRIVER_DOCUMENT_KINDS,
+  driverDocumentList,
+} from '@/lib/driver-documents'
+import type { ComplianceType } from '@/generated/prisma/client'
+import { CdlReader } from './CdlReader'
+import { MedicalCertUpload } from '../../safety/MedicalCertUpload'
+import { medLabels } from '../../safety/med-labels'
 import { bpsToInput, formatCents } from '@/lib/money'
 import { DriverMainForm, type DriverMainSection } from './DriverMainForm'
 import { DriverPhoto } from './DriverPhoto'
@@ -116,6 +134,15 @@ export default async function EditDriverPage({
       })
       if (!head) return null
       const { driver, companies, authority: open } = head
+      // The driver's live records with their files — the Documents list and
+      // the DQF rows' on-file links read the same list.
+      const filedRecords = head.compliance.map((record) => ({
+        id: record.id,
+        type: record.type,
+        expiresAt: record.expiresAt,
+        isSuperseded: record.isSuperseded,
+        documents: head.complianceDocuments.get(record.id) ?? [],
+      }))
       const openCompany = open
         ? (companies.find((c) => c.id === open.companyId)?.name ?? null)
         : null
@@ -191,14 +218,21 @@ export default async function EditDriverPage({
         dispatchers: head.dispatchers,
         driverStatus: head.driverStatus,
         photoId: photoOf(head.documents)?.id ?? null,
-        documents: head.documents.map((document) => ({
-          id: document.id,
-          filename: document.filename,
-          type: document.type,
-          uploadedAt: document.uploadedAt,
-          needsRotation: document.ocrStatus === 'NEEDS_ROTATION',
-          superseded: document.supersededByDocumentId !== null,
-        })),
+        // §6.4 part 2 v11.30 — the driver's documents AND its records'
+        // files, each with the expiry of what it evidences.
+        documents: driverDocumentList({
+          documents: head.documents.map((document) => ({
+            id: document.id,
+            filename: document.filename,
+            type: document.type,
+            uploadedAt: document.uploadedAt,
+            needsRotation: document.ocrStatus === 'NEEDS_ROTATION',
+            superseded: document.supersededByDocumentId !== null,
+          })),
+          records: filedRecords,
+          documentTypeFor,
+        }),
+        filedRecords,
       }
     },
   )
@@ -206,6 +240,7 @@ export default async function EditDriverPage({
   if (!data) notFound()
   const {
     documents,
+    filedRecords,
     driver,
     companies,
     openCompany,
@@ -240,9 +275,19 @@ export default async function EditDriverPage({
   // file built from them (§6.8, owner's ruling on GAPS 19).
   const maySeeDqf = await currentUserCan('read', 'dqf')
   const maySeeInspections = await currentUserCan('read', 'inspection')
+  const mayRecordInspection = await currentUserCan('create', 'inspection')
   const mayRenewCompliance = await currentUserCan('create', 'compliance')
 
   const mayEdit = await currentUserCan('update', 'driver')
+  // The CDL reader's route is `driver:create` (it began on Add driver).
+  const mayCreateDriver = await currentUserCan('create', 'driver')
+  const kindLabels = documentTypeLabels(t) as Record<string, string>
+  const uploadLabels = (attach: string) => ({
+    attach,
+    preparing: t('compliancePanel.preparing'),
+    uploading: t('compliancePanel.uploading'),
+    failed: t('compliancePanel.failed'),
+  })
   const mayDelete = await currentUserCan('delete', 'driver')
   // A MANAGER reads what a driver is paid; setting it is `driver.pay:update`,
   // which OWNER, ADMIN and ACCOUNTING hold. A DISPATCHER sees neither.
@@ -284,23 +329,73 @@ export default async function EditDriverPage({
   const dqfQualifiable = isQualifiable(driver)
 
   const dqfDay = new Intl.DateTimeFormat(locale, { dateStyle: 'medium' })
-  const dqfRows: DqfPanelRow[] = dqfEntries.map((entry) => ({
-    key: entry.key,
-    label: t(`dqf.key.${entry.key}` as MessageKey),
-    cfr: entry.cfr,
-    cadenceLabel: t(`dqf.cadence.${entry.cadence}` as MessageKey),
-    status: entry.status,
-    statusLabel: t(`dqf.status.${entry.status}` as MessageKey),
-    // NO DATE IS ITS OWN ANSWER. A missing item on a driver with no
-    // recorded hire date has been required since a day nobody wrote down,
-    // and "—" would read as "not required yet".
-    since:
-      entry.dueSince !== null
-        ? dqfDay.format(entry.dueSince)
-        : entry.status === 'missing'
-          ? t('dqf.since.unknown')
+  // §6.4 part 2 v11.30 — EVERY ROW ITS ACTION, from its own evidence
+  // (`dqfRowAction`), gated by the permission of the writer it reaches.
+  const mayUploadDocument = await currentUserCan('create', 'document')
+  const recordDefault = new Date(
+    dqfNow.getTime() + DQF_RECORD_DEFAULT_DAYS * 86_400_000,
+  )
+    .toISOString()
+    .slice(0, 10)
+  const dqfDocuments = documents.filter(
+    (document) => document.recordId === null,
+  )
+  const actionFor = (requirement: DqfRequirement): DqfPanelAction | null => {
+    const action = dqfRowAction(requirement)
+    switch (action.kind) {
+      case 'main':
+        return mayEdit
+          ? { kind: 'main', href: `/drivers/${id}#field-hireDate` }
+          : null
+      case 'upload':
+        return mayUploadDocument
+          ? { kind: 'upload', driverId: id, documentType: action.documentType }
+          : null
+      case 'record':
+        return mayRenewCompliance
+          ? {
+              kind: 'record',
+              driverId: id,
+              complianceType: action.complianceType,
+              defaultExpires: recordDefault,
+            }
+          : null
+    }
+  }
+  const dqfRows: DqfPanelRow[] = dqfEntries.map((entry, index) => {
+    const requirement = DQF_REQUIREMENTS[index]!
+    const onFile =
+      entry.status === 'missing'
+        ? null
+        : dqfOnFileDocument(requirement, dqfDocuments, filedRecords)
+    const record = onFile ? null : dqfOnFileRecord(requirement, filedRecords)
+    return {
+      action: actionFor(requirement),
+      onFile,
+      attach:
+        record && mayUploadDocument && mayRenewCompliance
+          ? {
+              recordId: record.id,
+              documentType: documentTypeFor(record.type as ComplianceType),
+            }
           : null,
-  }))
+      key: entry.key,
+      label: t(`dqf.key.${entry.key}` as MessageKey),
+      cfr: entry.cfr,
+      cadenceLabel: t(`dqf.cadence.${entry.cadence}` as MessageKey),
+      status: entry.status,
+      statusLabel: t(`dqf.status.${entry.status}` as MessageKey),
+      // "SINCE" PRINTS A DATE OR NOTHING (§6.4 part 2 v11.30). "No hire date
+      // recorded" printed on every at-hire row; it now prints on the hire-date
+      // row alone, where the date is fixed — and that row links to Main.
+      since:
+        entry.dueSince !== null
+          ? dqfDay.format(entry.dueSince)
+          : entry.key === 'hire_date' && entry.status === 'missing'
+            ? t('dqf.since.unknown')
+            : null,
+    }
+  })
 
   const dqfSummary =
     dqfIncomplete === 0
@@ -794,6 +889,7 @@ export default async function EditDriverPage({
             action={updateDriverAction.bind(null, id)}
             cancelHref="/drivers"
             labels={{ save: t('ref.save'), cancel: t('ref.cancel') }}
+            readOnly={!mayEdit}
           >
             {mayEdit ? (
               <AssetActions
@@ -809,13 +905,9 @@ export default async function EditDriverPage({
                   null
                 }
                 transferAction={transferAssetAction.bind(null, 'driver', id)}
-                retireAction={
-                  mayDelete
-                    ? retireAssetAction.bind(null, 'driver', id)
-                    : async () => {
-                        'use server'
-                      }
-                }
+                {...(mayDelete
+                  ? { retireAction: retireAssetAction.bind(null, 'driver', id) }
+                  : {})}
                 restoreAction={restoreAssetAction.bind(null, 'driver', id)}
                 labels={{
                   transfer: t('ref.transfer'),
@@ -870,6 +962,7 @@ export default async function EditDriverPage({
               never: t('drivers.signIn.never'),
               pick: t('drivers.signIn.pick'),
               noCandidates: t('drivers.signIn.noCandidates'),
+              newUser: t('users.add'),
               terminated: t('drivers.signIn.terminated'),
               link: t('drivers.signIn.link'),
               linking: t('drivers.signIn.linking'),
@@ -896,9 +989,20 @@ export default async function EditDriverPage({
               documents={documents}
               driverId={id}
               mayRead={mayRenewCompliance}
+              mayUpload={mayUploadDocument}
+              kinds={DRIVER_DOCUMENT_KINDS.map((kind) => ({
+                value: kind,
+                label: kindLabels[kind] ?? kind,
+              }))}
+              kindLabels={kindLabels}
               labels={{
                 heading: t('documents.heading'),
                 none: t('documents.none'),
+                kind: t('documents.kind'),
+                uploaded: t('documents.uploaded'),
+                expires: t('documents.expires'),
+                open: t('compliancePanel.failed'),
+                upload: uploadLabels(t('documents.upload')),
                 needsRotation: t('documents.needsRotation'),
                 superseded: t('documents.superseded'),
                 rotateAndRead: t('documents.rotateAndRead'),
@@ -915,6 +1019,66 @@ export default async function EditDriverPage({
                 },
               }}
             />
+            {/* THE READERS WHERE ONE EXISTS (§6.4 part 2 v11.30): the medical
+             * card with this driver stated — the Safety screen's own flow — and
+             * the CDL, which proposes the licence record. Both read, then
+             * confirm; nothing is filed by a read. */}
+            {mayRenewCompliance ? (
+              <div className="mt-z4 rounded-card border border-border bg-surface p-z4">
+                <h2 className="text-md font-medium text-ink">
+                  {t('documents.readMedical')}
+                </h2>
+                <div className="mt-z3 max-w-[520px]">
+                  <MedicalCertUpload
+                    driverId={id}
+                    driverLabel={`${driver.firstName} ${driver.lastName}`}
+                    labels={medLabels(t)}
+                  />
+                </div>
+              </div>
+            ) : null}
+            {mayRenewCompliance && mayCreateDriver ? (
+              <div className="mt-z4">
+                <CdlReader
+                  driverId={id}
+                  onMain={{
+                    cdlNumber: driver.cdlNumber ?? '',
+                    cdlState: driver.cdlState ?? '',
+                    cdlClass: driver.cdlClass ?? '',
+                  }}
+                  translate={compliance.translate}
+                  labels={{
+                    title: t('documents.readCdl'),
+                    hint: t('documents.readCdlHint'),
+                    drop: {
+                      title: t('drivers.cdl.dropTitle'),
+                      body: t('drivers.cdl.dropBody'),
+                      hint: t('drivers.cdl.dropHint'),
+                      busy: t('drivers.cdl.reading'),
+                    },
+                    number: t('drivers.cdlNumber'),
+                    state: t('drivers.cdlState'),
+                    class: t('drivers.cdlClass'),
+                    expires: t('compliancePanel.expires'),
+                    onMain: t('documents.onMain'),
+                    file: t('documents.cdlFile'),
+                    discard: t('drivers.med.discard'),
+                    filed: t('documents.cdlFiled'),
+                    keptFailed: t('documents.cdlKeptFailed'),
+                    failed: t('drivers.cdl.failed'),
+                    unreadable: t('drivers.cdl.unreadable'),
+                    upright: {
+                      title: t('upright.title'),
+                      hint: t('upright.hint'),
+                      rotateLeft: t('upright.rotateLeft'),
+                      rotateRight: t('upright.rotateRight'),
+                      read: t('upright.read'),
+                      cancel: t('upright.cancel'),
+                    },
+                  }}
+                />
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -929,11 +1093,24 @@ export default async function EditDriverPage({
               rows={dqfRows}
               summary={dqfSummary}
               qualifiable={dqfQualifiable}
+              translate={compliance.translate}
               labels={{
                 title: t('dqf.title'),
                 hint: t('dqf.hint'),
                 since: t('dqf.since'),
                 notQualifiable: t('dqf.notQualifiable'),
+                setOnMain: t('dqf.action.setOnMain'),
+                renew: t('dqf.action.renew'),
+                openFailed: t('compliancePanel.failed'),
+                upload: uploadLabels(t('documents.upload')),
+                attach: uploadLabels(t('compliancePanel.attach')),
+                record: {
+                  record: t('dqf.action.record'),
+                  expires: t('compliancePanel.expires'),
+                  done: t('dqf.action.done'),
+                  save: t('compliancePanel.save'),
+                  cancel: t('ref.cancel'),
+                },
               }}
             />
           </div>
@@ -1129,6 +1306,14 @@ export default async function EditDriverPage({
           <div className="mt-z4 max-w-[900px]">
             <InspectionPanel
               rows={inspections.rows}
+              {...(mayRecordInspection
+                ? {
+                    record: {
+                      href: '/safety/inspections/new',
+                      label: t('ins.record'),
+                    },
+                  }
+                : {})}
               labels={
                 inspections.labels as Parameters<
                   typeof InspectionPanel

@@ -100,6 +100,52 @@ export function driverTabWhere(
 }
 
 /**
+ * The column a tab brings of its own (§6.4 part 1): Terminated prints when,
+ * Vacation prints the return. Null for the other three.
+ */
+export function tabDateColumn(tab: DriverTab): 'terminated' | 'returns' | null {
+  return tab === 'terminated'
+    ? 'terminated'
+    : tab === 'vacation'
+      ? 'returns'
+      : null
+}
+
+/**
+ * THE TAB'S DATE COLUMN TAKES A SEAT, IT DOES NOT ADD ONE (§6.4 part 1
+ * v11.30). The chooser bounds the chosen set by the grid's cap, so a full set
+ * plus the tab's date was one column past it — `Table` refused the render and
+ * Terminated and Vacation answered 500 for every person with nine columns
+ * shown, the multi-authority default among them.
+ *
+ * Under the cap the date is added. At the cap it takes Last activity's place;
+ * without Last activity, the last chosen column before Warnings. The first
+ * chosen column (the name, which the chooser locks) and Warnings are never
+ * given up. The result is in the chosen order with the date appended; the page's
+ * `keepColumns` puts it back in the table's own order.
+ */
+export function fitTabColumn(
+  visible: readonly string[],
+  tabColumn: string | null,
+  cap: number,
+): string[] {
+  const chosen = visible.filter(
+    (key) => key !== 'terminated' && key !== 'returns',
+  )
+  if (tabColumn === null) return chosen.slice(0, cap)
+  if (chosen.length < cap) return [...chosen, tabColumn]
+  const kept = chosen.slice(0, cap)
+  const giveUp = kept.includes('lastActivity')
+    ? 'lastActivity'
+    : [...kept].reverse().find((key, index, reversed) => {
+        const at = reversed.length - 1 - index
+        return at > 0 && key !== 'warnings'
+      })
+  if (giveUp === undefined) return kept
+  return [...kept.filter((key) => key !== giveUp), tabColumn]
+}
+
+/**
  * What every tab of the list is narrowed by before its own question: the
  * session's authority scope (empty is unrestricted, as `companyScopeFilter`),
  * the authority chip and the tag chip.

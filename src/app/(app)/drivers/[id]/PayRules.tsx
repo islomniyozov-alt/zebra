@@ -111,6 +111,7 @@ export function PayRules({
                   driverId={driverId}
                   ruleId={rule.id}
                   today={today}
+                  translate={translate}
                   labels={{ close: labels.close, hint: labels.closeHint }}
                 />
               ) : null}
@@ -201,14 +202,19 @@ function CloseRule({
   driverId,
   ruleId,
   today,
+  translate,
   labels,
 }: {
   driverId: string
   ruleId: string
   today: string
+  /** The page's error keys in words. */
+  translate: Record<string, string>
   labels: { close: string; hint: string }
 }) {
-  const [, act, pending] = useActionState<PayRuleState, FormData>(
+  // THE STATE IS READ. It was discarded, so a refused close (a date before
+  // the rule's start) did nothing visible (clickable audit, 2026-11-17).
+  const [state, act, pending] = useActionState<PayRuleState, FormData>(
     closePayRuleAction.bind(null, driverId, ruleId),
     PAY_RULE_INITIAL,
   )
@@ -227,6 +233,11 @@ function CloseRule({
       <Button type="submit" variant="ghost" size="compact" disabled={pending}>
         {labels.close}
       </Button>
+      {state.error ? (
+        <span role="alert" className="text-xs text-danger">
+          {translate[state.error] ?? state.error}
+        </span>
+      ) : null}
     </form>
   )
 }

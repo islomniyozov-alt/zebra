@@ -21,12 +21,18 @@ import {
 import { dqfChecklist, dqfIncompleteCount } from '@/lib/dqf'
 import {
   DRIVER_TABS,
+  fitTabColumn,
   isDriverTab,
   readinessFor,
+  tabDateColumn,
   type DriverTab,
   type Readiness,
 } from '@/lib/driver-list'
-import { gridColumnsFromRow, readGridColumns } from '@/lib/grid-columns'
+import {
+  gridColumnCap,
+  gridColumnsFromRow,
+  readGridColumns,
+} from '@/lib/grid-columns'
 import {
   columnKeysFor,
   DRIVER_COLUMN_KEYS,
@@ -110,6 +116,9 @@ const DISPATCH_FILTERS = [
  * cut.
  */
 const PAGE_CAP = 500
+
+/** §7.1.7 — nine; `GRID_COLUMN_CAP` names no other number for this grid. */
+const DRIVER_COLUMN_CAP = gridColumnCap('drivers.drivers')
 
 interface Row {
   id: string
@@ -379,7 +388,9 @@ export default async function DriversPage({
     // §6.2.1 — funnels that write the same parameter the filter bar renders as
     // a chip, so a narrowed grid stays a link somebody can send.
     columnFilters: {
-      type: (row) => row.driverType,
+      // THE WORDS THE CELL SHOWS, not the enum: typing "Company driver" (or
+      // its Russian) matched nothing against COMPANY_DRIVER (audit 2026-11-17).
+      type: (row) => t(`drivers.type.${row.driverType}` as MessageKey),
       company: (row) => row.companyName,
       truck: (row) => row.truck,
     },
@@ -589,13 +600,13 @@ export default async function DriversPage({
       ),
     },
   ]
-  // The tab's date column is always shown with the tab; the chooser governs
-  // the declared set.
-  const shownColumns = keepColumns(columns, [
-    ...visible,
-    'terminated',
-    'returns',
-  ])
+  // THE TAB'S DATE COLUMN TAKES A SEAT INSIDE THE CAP (§6.4 part 1 v11.30).
+  // It was appended to the chosen nine, and `Table` refused ten: Terminated and
+  // Vacation answered 500 on dev (safety team, 2026-11-17).
+  const shownColumns = keepColumns(
+    columns,
+    fitTabColumn(visible, tabDateColumn(tab), DRIVER_COLUMN_CAP),
+  )
 
   const search = new URLSearchParams(
     Object.entries(params).flatMap(([key, value]) =>
@@ -628,9 +639,15 @@ export default async function DriversPage({
     'drivers.error.removed': t('drivers.error.removed'),
   }
 
+  const rosterEmpty =
+    counts.all === 0 && !companyParam && !tagParam && !showRetired
+
   const table = (
     <Table
       caption={t('drivers.title')}
+      // §7.1.7 — the grid's own cap, the same number `readGridColumns` bounds
+      // the chosen set by, so the table and the chooser agree.
+      columnCap={DRIVER_COLUMN_CAP}
       columns={shownColumns}
       rows={view.paged.rows}
       footRows={view.filtered}
@@ -663,17 +680,36 @@ export default async function DriversPage({
         ),
       }}
       empty={
-        <EmptyState
-          title={t('drivers.empty.title')}
-          body={t('drivers.empty.body')}
-          action={
-            mayCreate ? (
-              <Link href="/drivers/new">
-                <Button variant="primary">{t('drivers.add')}</Button>
+        // "NO DRIVERS YET" ONLY WHEN THERE ARE NONE. A tab or a filter that
+        // selects nothing said "Add the first driver" over a roster of
+        // hundreds, and gave a role without create no way back (clickable
+        // audit, 2026-11-17). Narrowed-to-nothing says so and clears.
+        rosterEmpty ? (
+          <EmptyState
+            title={t('drivers.empty.title')}
+            body={t('drivers.empty.body')}
+            action={
+              mayCreate ? (
+                <Link href="/drivers/new">
+                  <Button variant="primary">{t('drivers.add')}</Button>
+                </Link>
+              ) : null
+            }
+          />
+        ) : (
+          <EmptyState
+            title={t('drivers.emptyFiltered.title')}
+            body={t('drivers.emptyFiltered.body')}
+            action={
+              <Link
+                href={`/drivers?tab=${tab}`}
+                className="text-sm font-medium text-accent hover:underline"
+              >
+                {t('drivers.emptyFiltered.clear')}
               </Link>
-            ) : null
-          }
-        />
+            }
+          />
+        )
       }
     />
   )

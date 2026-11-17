@@ -6,6 +6,11 @@ import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { DriverDocuments } from '@/app/(app)/_reference/DriverDocuments'
 
+// The upload control re-reads the page through the app router; jsdom has none.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
+}))
+
 // ---------------------------------------------------------------------------
 // A PARKED CARD IS VISIBLE, IN WORDS (owner's ruling, 2026-09-12).
 //
@@ -23,6 +28,16 @@ import { DriverDocuments } from '@/app/(app)/_reference/DriverDocuments'
 const LABELS = {
   heading: 'Documents',
   none: 'No documents on this driver.',
+  kind: 'Kind',
+  uploaded: 'Uploaded',
+  expires: 'Expires',
+  open: 'Failed',
+  upload: {
+    attach: 'Upload a file',
+    preparing: 'Preparing…',
+    uploading: 'Uploading…',
+    failed: 'Failed',
+  },
   needsRotation: 'not read — needs rotation',
   superseded: 'replaced by a turned copy',
   rotateAndRead: 'Rotate and read',
@@ -39,6 +54,15 @@ const LABELS = {
   },
 }
 
+const KINDS = [
+  { value: 'CDL_COPY', label: 'Copy of CDL' },
+  { value: 'MEDICAL_CARD', label: 'Medical card' },
+  { value: 'EMPLOYMENT_APPLICATION', label: 'Employment application' },
+]
+const KIND_LABELS: Record<string, string> = Object.fromEntries(
+  KINDS.map((kind) => [kind.value, kind.label]),
+)
+
 /** The panel as the driver page renders it, for somebody who may file. */
 const panel = (
   documents: Parameters<typeof DriverDocuments>[0]['documents'],
@@ -47,6 +71,9 @@ const panel = (
     documents={documents}
     driverId="driver-1"
     mayRead
+    mayUpload
+    kinds={KINDS}
+    kindLabels={KIND_LABELS}
     labels={LABELS}
   />
 )
@@ -65,6 +92,7 @@ describe('the driver document list', () => {
           type: 'MEDICAL_CARD',
           needsRotation: true,
           superseded: false,
+          expiresAt: null,
           uploadedAt: at('2026-09-12'),
         },
       ]),
@@ -84,6 +112,7 @@ describe('the driver document list', () => {
           type: 'MEDICAL_CARD',
           needsRotation: false,
           superseded: false,
+          expiresAt: null,
           uploadedAt: at('2026-09-11'),
         },
       ]),
@@ -114,6 +143,7 @@ describe('the driver document list', () => {
           type: 'MEDICAL_CARD',
           needsRotation: true,
           superseded: false,
+          expiresAt: null,
           uploadedAt: at('2026-09-12'),
         },
       ]),
@@ -132,6 +162,7 @@ describe('the driver document list', () => {
           type: 'MEDICAL_CARD',
           needsRotation: false,
           superseded: false,
+          expiresAt: null,
           uploadedAt: at('2026-09-11'),
         },
       ]),
@@ -151,11 +182,15 @@ describe('the driver document list', () => {
             type: 'MEDICAL_CARD',
             needsRotation: true,
             superseded: false,
+            expiresAt: null,
             uploadedAt: at('2026-09-12'),
           },
         ]}
         driverId="driver-1"
         mayRead={false}
+        mayUpload={false}
+        kinds={KINDS}
+        kindLabels={KIND_LABELS}
         labels={LABELS}
       />,
     )
@@ -206,6 +241,7 @@ describe('the driver document list', () => {
             type: 'MEDICAL_CARD',
             needsRotation: true,
             superseded: false,
+            expiresAt: null,
             uploadedAt: at('2026-09-12'),
           },
         ]),
@@ -238,6 +274,7 @@ describe('the driver document list', () => {
           type: 'MEDICAL_CARD',
           needsRotation: true,
           superseded: true,
+          expiresAt: null,
           uploadedAt: at('2026-09-12'),
         },
       ]),
@@ -257,6 +294,7 @@ describe('the driver document list', () => {
           type: 'MEDICAL_CARD',
           needsRotation: true,
           superseded: true,
+          expiresAt: null,
           uploadedAt: at('2026-09-12'),
         },
       ]),
@@ -284,6 +322,7 @@ describe('the driver document list', () => {
           type: 'CDL_COPY',
           needsRotation: true,
           superseded: false,
+          expiresAt: null,
           uploadedAt: at('2026-09-12'),
         },
       ]),
@@ -303,6 +342,7 @@ describe('the driver document list', () => {
           type: 'MEDICAL_CARD',
           needsRotation: true,
           superseded: false,
+          expiresAt: null,
           uploadedAt: at('2026-09-12'),
         },
         {
@@ -311,6 +351,7 @@ describe('the driver document list', () => {
           type: 'MEDICAL_CARD',
           needsRotation: false,
           superseded: false,
+          expiresAt: null,
           uploadedAt: at('2026-09-11'),
         },
       ]),
@@ -318,5 +359,73 @@ describe('the driver document list', () => {
     expect(screen.getByText('parked.jpg')).toBeTruthy()
     expect(screen.getByText('fine.jpg')).toBeTruthy()
     expect(screen.getAllByText(LABELS.needsRotation)).toHaveLength(1)
+  })
+
+  // ── v11.30: UPLOAD BY KIND, THE KIND, THE FILE, THE DATES ──────────────
+  //
+  // The tab said "No documents on this driver" and offered nothing (safety
+  // team on dev, 2026-11-17). The way out is on the panel whether or not
+  // there are rows.
+  it('offers an upload by kind, even when the list is empty', () => {
+    render(panel([]))
+    expect(screen.getByText(LABELS.none)).toBeTruthy()
+    expect(screen.getByLabelText(LABELS.kind)).toBeTruthy()
+    expect(screen.getByText(LABELS.upload.attach)).toBeTruthy()
+    for (const kind of KINDS)
+      expect(screen.getByRole('option', { name: kind.label })).toBeTruthy()
+  })
+
+  it('offers no upload to somebody who may not create documents', () => {
+    render(
+      <DriverDocuments
+        documents={[]}
+        driverId="driver-1"
+        mayRead={false}
+        mayUpload={false}
+        kinds={KINDS}
+        kindLabels={KIND_LABELS}
+        labels={LABELS}
+      />,
+    )
+    expect(screen.queryByText(LABELS.upload.attach)).toBeNull()
+  })
+
+  it('lists each document with its kind, an openable file, the upload day and the expiry it evidences', () => {
+    render(
+      panel([
+        {
+          id: 'c',
+          filename: 'cdl-front.jpg',
+          type: 'CDL_COPY',
+          needsRotation: false,
+          superseded: false,
+          expiresAt: at('2028-03-01'),
+          uploadedAt: at('2026-11-01'),
+        },
+        {
+          id: 'd',
+          filename: 'application.pdf',
+          type: 'EMPLOYMENT_APPLICATION',
+          needsRotation: false,
+          superseded: false,
+          expiresAt: null,
+          uploadedAt: at('2026-10-01'),
+        },
+      ]),
+    )
+    // The kind in the LIST (the picker carries the same words as an option).
+    expect(
+      screen
+        .getAllByText('Copy of CDL')
+        .some((node) => node.tagName === 'SPAN'),
+    ).toBe(true)
+    // THE FILE OPENS: a button that mints the short-lived URL, not plain text.
+    expect(screen.getByRole('button', { name: 'cdl-front.jpg' })).toBeTruthy()
+    expect(screen.getByText(`${LABELS.uploaded} 2026-11-01`)).toBeTruthy()
+    expect(screen.getByText(`${LABELS.expires} 2028-03-01`)).toBeTruthy()
+    // NO EXPIRY WHERE THERE IS NONE — one expiry line on the page, not two.
+    expect(screen.getAllByText(new RegExp(`^${LABELS.expires} `))).toHaveLength(
+      1,
+    )
   })
 })
