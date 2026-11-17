@@ -752,9 +752,15 @@ describe('the open-batch flow', () => {
     // delivery date (`deliveryDateOf`), and the POD no longer selects trips —
     // Amazon loads carry no POD of their own. The range's last day counts
     // whole, as the engine's does.
+    // And since the catch-up ruling the same day, "outside" is AFTER the range
+    // only: a trip delivered before it is available, flagged `earlier`.
     expect(preview).toContain('const deliveryAt = deliveryDateOf({')
     expect(preview).toMatch(
-      /deliveryAt\.getTime\(\) < input\.from\.getTime\(\) \|\|\s+deliveryAt\.getTime\(\) > lastInstant/,
+      /deliveryAt\.getTime\(\) > lastInstant\s+\? 'outsideRange'/,
+    )
+    expect(preview).not.toMatch(/deliveryAt\.getTime\(\) < input\.from/)
+    expect(preview).toContain(
+      'earlier: deliveryAt !== null && deliveryAt < input.from',
     )
     expect(preview).not.toContain('podAt')
   })

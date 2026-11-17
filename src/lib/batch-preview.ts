@@ -129,6 +129,13 @@ export interface PreviewTrip {
   /** Null on an available trip; the bucket otherwise. */
   reason: UnavailableReason | null
   /**
+   * DELIVERED BEFORE THE RANGE AND NOT YET PAID — the catch-up group (owner's
+   * ruling 2026-11-17, MONEY-DESIGN §6). An available trip either way; the
+   * screen lists these as their own group, "Delivered earlier, not yet paid",
+   * ticked by default. False on every unavailable trip.
+   */
+  earlier: boolean
+  /**
    * On the batch screen (§6.2.10 part 2b): this batch has declined the trip, so
    * its box starts UNTICKED. Always false on the picker, which has no batch yet.
    */
@@ -179,6 +186,32 @@ export interface BatchPreview {
 }
 
 /**
+ * The catch-up candidates the picker reads besides its window (owner's ruling
+ * 2026-11-17, MONEY-DESIGN §6): Delivered, with a driver, on no statement —
+ * or, on the batch screen, on that batch's own. No date bound: "regardless of
+ * date" is the ruling. `previewLoadsSql` spells the same clause in SQL.
+ */
+export function catchUpWhere(forBatchId: string | null): Prisma.LoadWhereInput {
+  return {
+    operationalStatus: { in: [...DELIVERED_STATUSES] },
+    driverId: { not: null },
+    settlementLines: { none: {} },
+    OR: [
+      { settlementLoadLines: { none: {} } },
+      ...(forBatchId
+        ? [
+            {
+              settlementLoadLines: {
+                some: { settlement: { batchId: forBatchId } },
+              },
+            },
+          ]
+        : []),
+    ],
+  }
+}
+
+/**
  * Classify a window's freight.
  *
  * `from`/`to` BOUND THE POD, not the delivery stop. A week is decided by when
@@ -213,15 +246,25 @@ export async function previewBatch(
       // copy of what freight is even a candidate.
       ...SETTLEABLE_LOAD,
       ...(input.companyId ? { companyId: input.companyId } : {}),
-      stops: {
-        some: {
-          type: 'DELIVERY',
-          scheduledAt: {
-            gte: new Date(input.from.getTime() - margin),
-            lte: new Date(input.to.getTime() + margin),
+      OR: [
+        // THE WINDOW: delivery planned within a fortnight of the range.
+        {
+          stops: {
+            some: {
+              type: 'DELIVERY',
+              scheduledAt: {
+                gte: new Date(input.from.getTime() - margin),
+                lte: new Date(input.to.getTime() + margin),
+              },
+            },
           },
         },
-      },
+        // AND THE CATCH-UP, HOWEVER OLD (owner's ruling 2026-11-17): every
+        // Delivered trip with a driver that is on no statement — or on THIS
+        // batch's, on the batch screen — so a trip the batch will draft is a
+        // trip the screen lists by name. Classified below like any other.
+        catchUpWhere(input.forBatchId ?? null),
+      ],
     },
     orderBy: { loadNumber: 'asc' },
     take: 2000,
@@ -413,6 +456,7 @@ export function previewFrom(
           : { loadPayCents: null, payProblem: pay.reason }
       })(),
       reason: null,
+      earlier: false,
       excluded: excludedHere.has(load.id),
     }
 
@@ -438,8 +482,9 @@ export function previewFrom(
         ? 'inTransit'
         : deliveryAt === null
           ? 'noDeliveryDate'
-          : deliveryAt.getTime() < input.from.getTime() ||
-              deliveryAt.getTime() > lastInstant
+          : // AFTER THE RANGE ONLY. Before it is the catch-up: eligible for this
+            // batch however long ago (owner's ruling 2026-11-17).
+            deliveryAt.getTime() > lastInstant
             ? 'outsideRange'
             : load.driverId === null
               ? 'noDriver'
@@ -447,8 +492,12 @@ export function previewFrom(
                 ? 'noRule'
                 : null
 
-    if (reason === null) available.push(trip)
-    else unavailable[reason].push({ ...trip, reason })
+    if (reason === null) {
+      available.push({
+        ...trip,
+        earlier: deliveryAt !== null && deliveryAt < input.from,
+      })
+    } else unavailable[reason].push({ ...trip, reason })
   }
 
   return { available, unavailable, considered: loads.length }
@@ -476,7 +525,10 @@ export function previewLoadsSql(window: {
   from: Prisma.Sql
   to: Prisma.Sql
   companyId: Prisma.Sql
+  /** The batch screen's own batch, whose lined trips count as catch-up. */
+  forBatchId?: Prisma.Sql
 }): Prisma.Sql {
+  const forBatchId = window.forBatchId ?? Prisma.sql`NULL`
   return Prisma.sql`
     SELECT l.id, l."loadNumber", l."referenceNumber",
            l."operationalStatus"::text AS "operationalStatus",
@@ -522,11 +574,22 @@ export function previewLoadsSql(window: {
      WHERE l."deletedAt" IS NULL AND l."isCancelled" = false
        AND l."billingStatus"::text <> 'CLOSED_IN_DATATRUCK'
        AND (${window.companyId} IS NULL OR l."companyId" = ${window.companyId})
-       AND EXISTS (
+       AND (EXISTS (
          SELECT 1 FROM "LoadStop" st
           WHERE st."loadId" = l.id AND st.type::text = 'DELIVERY'
             AND st."scheduledAt" >= ${window.from} - interval '14 days'
             AND st."scheduledAt" <= ${window.to} + interval '14 days')
+         -- THE CATCH-UP, HOWEVER OLD (owner's ruling 2026-11-17): \`catchUpWhere\`.
+         OR (l."operationalStatus"::text IN ('DELIVERED', 'POD_RECEIVED')
+             AND l."driverId" IS NOT NULL
+             AND NOT EXISTS (SELECT 1 FROM "SettlementLine" sl
+                              WHERE sl."loadId" = l.id)
+             AND (NOT EXISTS (SELECT 1 FROM "SettlementLoadLine" ll
+                               WHERE ll."loadId" = l.id)
+                  OR EXISTS (SELECT 1 FROM "SettlementLoadLine" ll
+                               JOIN "Settlement" s ON s.id = ll."settlementId"
+                              WHERE ll."loadId" = l.id
+                                AND s."batchId" = ${forBatchId}))))
      ORDER BY l."loadNumber"
      LIMIT 2000`
 }

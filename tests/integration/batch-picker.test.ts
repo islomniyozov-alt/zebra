@@ -518,12 +518,23 @@ describe('an exclusion is monotonic', () => {
     expect(opened.ok).toBe(true)
     if (!opened.ok) return
 
-    expect(await grossOf(opened.batchId)).toBe(25_000)
+    // RELATIVE SINCE THE CATCH-UP RULING (2026-11-17): the previous test's
+    // `declined` trip — delivered the week before, on no statement — is
+    // eligible for this batch too, so the gross is this week's kept trip PLUS
+    // what is caught up. This test is about the declined trip's way back in,
+    // so that is what is measured.
+    const base = await grossOf(opened.batchId)
+    expect(
+      await owner.settlementLoadLine.count({ where: { loadId: kept } }),
+    ).toBe(1)
+    expect(
+      await owner.settlementLoadLine.count({ where: { loadId: declined } }),
+    ).toBe(0)
 
     // "SELECT ALL AVAILABLE" IS THIS CALL WITH NO IDS.
     await inOrg((tx) => includeTrips(tx, { batchId: opened.batchId }))
 
-    expect(await grossOf(opened.batchId)).toBe(25_000 + 65_000)
+    expect(await grossOf(opened.batchId)).toBe(base + 65_000)
     expect(await excludedLoadIds(owner, opened.batchId)).toEqual([])
     void kept
   })

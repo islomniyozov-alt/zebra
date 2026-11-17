@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { settleableForBatch } from '@/lib/settlement-batch'
 import {
-  deliveredBetween,
+  deliveredBy,
   settleableInPeriod,
   settleableWhere,
 } from '@/lib/settlements'
@@ -1243,7 +1243,7 @@ describe('the batch and the driver ask one question', () => {
     end: new Date(Date.UTC(2026, 8, 5)),
   }
 
-  it('both carry the period core, verbatim', () => {
+  it('both carry the same base and gate; the batch’s window adds the catch-up', () => {
     const core = settleableInPeriod(
       period.start,
       new Date(period.end.getTime() + 86_399_999),
@@ -1256,11 +1256,18 @@ describe('the batch and the driver ask one question', () => {
     )
 
     for (const key of Object.keys(core) as (keyof typeof core)[]) {
-      expect(batch[key], `batch is missing ${key}`).toEqual(core[key])
       expect(driver[key], `settleableWhere is missing ${key}`).toEqual(
         core[key],
       )
+      // THE CATCH-UP RULING (2026-11-17): the batch's window is "delivered on
+      // or before the end", not "inside the range" — every earlier Delivered
+      // trip on no statement is eligible. Every OTHER key is the core's.
+      if (key === 'AND') continue
+      expect(batch[key], `batch is missing ${key}`).toEqual(core[key])
     }
+    expect(batch.AND).toEqual([
+      deliveredBy(new Date(period.end.getTime() + 86_399_999)),
+    ])
   })
 
   // ── THE THREE THE BATCH USED TO LEAVE OUT, UNDER THE 2026-11-17 RULINGS ──
@@ -1288,14 +1295,12 @@ describe('the batch and the driver ask one question', () => {
     })
   })
 
-  it('DATES the delivery inside the period, to the last millisecond', () => {
+  it('DATES the delivery on or before the period end, to the last millisecond', () => {
     expect(settleableForBatch(null, period).AND).toEqual([
       // The Saturday, whole. A period ending at midnight loses everything that
-      // landed on its last day — four loads, on the 9/13 week.
-      deliveredBetween(
-        period.start,
-        new Date(period.end.getTime() + 86_399_999),
-      ),
+      // landed on its last day — four loads, on the 9/13 week. No lower bound:
+      // the catch-up ruling of 2026-11-17.
+      deliveredBy(new Date(period.end.getTime() + 86_399_999)),
     ])
   })
 

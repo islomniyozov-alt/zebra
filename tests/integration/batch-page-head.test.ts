@@ -396,14 +396,29 @@ describe('/settlements/batches/[id] in one statement', () => {
       batches.alpha!,
     ))!
     const ids = (rows: { loadId: string }[]) => rows.map((r) => r.loadId).sort()
+    // THE CATCH-UP (owner's ruling 2026-11-17): `early` (delivered three days
+    // before the week) and `beforeMargin` (sixteen, beyond the window) are on
+    // no statement when the batch opens, so the batch drafts them and the
+    // screen lists them as "Delivered earlier, not yet paid".
     expect(ids(alpha.preview.available)).toEqual(
-      [loads.ticked, loads.declined, loads.afterOpen].sort(),
+      [
+        loads.ticked,
+        loads.declined,
+        loads.afterOpen,
+        loads.early,
+        loads.beforeMargin,
+      ].sort(),
+    )
+    expect(ids(alpha.preview.available.filter((t) => t.earlier))).toEqual(
+      [loads.early, loads.beforeMargin].sort(),
     )
     expect(
       alpha.preview.available.filter((t) => t.excluded).map((t) => t.loadId),
     ).toEqual([loads.declined])
+    // AFTER THE RANGE ONLY. `beyondMargin` is now read by the catch-up clause
+    // (Delivered, on no statement) and lands here, after the week.
     expect(ids(alpha.preview.unavailable.outsideRange)).toEqual(
-      [loads.podLate, loads.early, loads.lateInMargin].sort(),
+      [loads.podLate, loads.lateInMargin, loads.beyondMargin].sort(),
     )
     // DELIVERED-STATUS LOADS WITH NO DELIVERY DATE (MONEY-DESIGN §6,
     // 2026-11-17): `transit` is Delivered by a column write with no event and
@@ -415,7 +430,9 @@ describe('/settlements/batches/[id] in one statement', () => {
     )
     expect(ids(alpha.preview.unavailable.noDriver)).toEqual([loads.noDriver])
     expect(ids(alpha.preview.unavailable.noRule)).toEqual([loads.noRule])
-    expect(alpha.preview.considered).toBe(10)
+    // TEN IN THE WINDOW, AND TWO MORE THE CATCH-UP CLAUSE READS:
+    // `beforeMargin` (on this batch) and `beyondMargin` (on none).
+    expect(alpha.preview.considered).toBe(12)
     const ticked = alpha.preview.available.find(
       (t) => t.loadId === loads.ticked,
     )!
@@ -423,12 +440,13 @@ describe('/settlements/batches/[id] in one statement', () => {
     expect(ticked.loadPayCents).toBe(36_000)
     expect(ticked.locations).toBe('Whiteland, IN → Gastonia DC')
     expect(alpha.batch.company?.name).toBe(`ALPHA ${nonce}`)
-    // The paid driver's statement carries the one trip; the ruleless driver's
-    // is there with none, which is how the engine records a blocker.
+    // The paid driver's statement carries the week's trip and the two caught
+    // up; the ruleless driver's is there with none, which is how the engine
+    // records a blocker.
     expect(
       alpha.batch.settlements.map((s) => [s.driver.firstName, s.lines]).sort(),
     ).toEqual([
-      ['PAID', 1],
+      ['PAID', 3],
       ['RULELESS', 0],
     ])
 
@@ -437,10 +455,13 @@ describe('/settlements/batches/[id] in one statement', () => {
       batches.wide!,
     ))!
     expect(wide.batch.company).toBeNull()
+    // `early` is in the window and on ALPHA's statement now (the catch-up);
+    // `beforeMargin` is on alpha's too but outside the window, so the wide
+    // batch never reads it. `beyondMargin`, on none, is read by the catch-up.
     expect(ids(wide.preview.unavailable.alreadyInBatch)).toEqual(
-      [loads.ticked, loads.beta].sort(),
+      [loads.ticked, loads.early, loads.beta].sort(),
     )
-    expect(wide.preview.considered).toBe(11)
+    expect(wide.preview.considered).toBe(12)
   }, 600_000)
 
   it('is ONE statement through the tenant reader; a deleted batch and another organization’s are absent', async () => {

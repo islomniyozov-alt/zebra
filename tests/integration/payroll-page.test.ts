@@ -62,7 +62,9 @@ const OFFERED = [
 const PAID_WEEK = weekOf(new Date(Date.UTC(2026, 7, 5)))
 /**
  * The week of 2026-08-23, which has NO batch: the strip's engine path reads
- * only unbatched freight, so its cases run here, where the paid driver's
+ * only unbatched freight — this week's, and since the catch-up ruling
+ * (2026-11-17) PERIOD's held and blocked loads, which no statement carries —
+ * so its cases run here, where the paid driver's
  * loads still need the pay rule. (On PERIOD they sit in the draft batch and
  * a strip that read no rules at all would pass — watched, 2026-11-14.)
  */
@@ -510,10 +512,18 @@ describe('the blockers strip reads the gross half', () => {
     expect(strip.heldSumCents).toBe(
       full.held.reduce((sum, row) => sum + row.line.rateCents, 0),
     )
-    // NOT EMPTY: one blocked driver, one held line — and the paid driver's
+    // NOT EMPTY: one blocked driver, held lines — and the paid driver's
     // freight was priced, so the rule was read and used.
-    expect(strip.blockers.map((b) => b.driverId)).toEqual([blockedDriver])
-    expect(strip.heldCount).toBe(1)
+    //
+    // THE CATCH-UP (owner's ruling 2026-11-17): PERIOD's batch left W-BLOCK
+    // (no rule) and R-HELD (no remittance) on no statement, so this unbatched
+    // week's engine catches them up beside T-BLOCK and T-HELD. A blocker is
+    // raised per load, so the one blocked driver appears twice.
+    expect([...new Set(strip.blockers.map((b) => b.driverId))]).toEqual([
+      blockedDriver,
+    ])
+    expect(strip.blockers).toHaveLength(2)
+    expect(strip.heldCount).toBe(2)
     expect(strip.fromStored).toBe(false)
     const paid = full.settlements.find((s) => s.driverId === paidDriver)
     expect(paid?.lines.length ?? 0).toBeGreaterThan(0)
@@ -542,7 +552,8 @@ describe('the blockers strip reads the gross half', () => {
       // loads, drivers, pay rules, settlement charges. The full read is
       // twelve.
       expect(count).toBeLessThanOrEqual(4)
-      expect(blockers).toBe(1)
+      // T-BLOCK and the caught-up W-BLOCK, one per load (2026-11-17).
+      expect(blockers).toBe(2)
     } finally {
       await client.$disconnect()
     }

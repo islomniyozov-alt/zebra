@@ -1,6 +1,6 @@
 import type { Prisma } from '@/generated/prisma/client'
 import { syncBatchStatus, type StatementVote } from './batch-status'
-import { settleableInPeriod } from './settlements'
+import { settleableUpTo } from './settlements'
 import {
   allocateSeries,
   batchNumberOf,
@@ -92,14 +92,13 @@ export function settleableForBatch(
   period: Week,
 ): Prisma.LoadWhereInput {
   return {
-    // THE PERIOD, THE STATUS AND THE EVENT — one definition, shared with
-    // `settleableWhere`. The end is pushed to the last millisecond of the
-    // Saturday for the same reason the stop filter used to be: a period ending
-    // at midnight loses everything that landed on the last day.
-    ...settleableInPeriod(
-      period.start,
-      new Date(period.end.getTime() + 86_399_999),
-    ),
+    // THE RANGE AND EVERYTHING DELIVERED BEFORE IT NOT YET ON A STATEMENT —
+    // the catch-up ruling (MONEY-DESIGN §6, 2026-11-17). Delivered status, a
+    // delivery date on or before the end. The end is pushed to the last
+    // millisecond of the last day: a period ending at midnight loses
+    // everything that landed on it. The fences below keep a trip from being
+    // drafted twice; the range's own no-overlap rule is `openBatch`'s.
+    ...settleableUpTo(new Date(period.end.getTime() + 86_399_999)),
     // ONE COMPANY, SEVERAL, OR THE WHOLE ORGANIZATION through the same
     // definition. Settlement is org-wide by ruling, so `null` is now the
     // normal case and the company filter is what a scoped VIEW uses — row-level

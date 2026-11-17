@@ -126,8 +126,16 @@ export default async function OpenBatchPage({
   // THE NINE COLUMNS LIVE IN `BatchTripsGrid` (§6.2.10 part 2b), shared with the
   // batch screen so "what would go in" and "what is in" cannot drift apart.
 
+  // TWO GROUPS OF ONE `available` (owner's catch-up ruling 2026-11-17): the
+  // range's trips in the paged grid, and those delivered before the range and
+  // not yet paid, listed whole under it. Both go into the batch.
+  const inRange = data.preview.available.filter((trip) => !trip.earlier)
+  const earlier = data.preview.available
+    .filter((trip) => trip.earlier)
+    .sort((a, b) => a.loadNumber.localeCompare(b.loadNumber))
+
   const view = gridView(
-    data.preview.available,
+    inRange,
     raw,
     {
       searchText: (row) =>
@@ -261,7 +269,7 @@ export default async function OpenBatchPage({
         // OVER A BATCH THIS ONE WOULD OVERLAP (the overlap ruling). The action
         // refuses all three again on its own account.
         disabled={companyId === null || !validRange || data.existing !== null}
-        shown={view.paged.rows.length}
+        shown={view.paged.rows.length + earlier.length}
         labels={{
           add: t('preview.add'),
           selectAll: t('preview.selectAll'),
@@ -301,6 +309,48 @@ export default async function OpenBatchPage({
           }
           below={
             <>
+              {/* ── DELIVERED EARLIER, NOT YET PAID (owner's catch-up ruling
+               * 2026-11-17, MONEY-DESIGN §6) ────────────────────────────────
+               *
+               * Every Delivered trip of this authority on no statement, from
+               * before the range, however long ago: the batch drafts them, so
+               * the screen lists them BY NAME, ticked by default, in the same
+               * form — an untick is an exclusion like any other. The range's
+               * no-overlap rule does not apply to these; the statement fence
+               * keeps each from being paid twice. Omitted when empty (§4). */}
+              {earlier.length > 0 ? (
+                <section className="border-t border-border">
+                  <h2 className="bg-surface-2 px-gutter py-z2 text-sm font-medium text-ink">
+                    {t('preview.earlier')}{' '}
+                    <span className="font-mono tabular-nums text-ink-3">
+                      {earlier.length}
+                    </span>
+                  </h2>
+                  <p className="bg-surface-2 px-gutter pb-z2 text-xs text-ink-3">
+                    {t('preview.earlierHint')}
+                  </p>
+                  <BatchTripsGrid
+                    rows={earlier}
+                    footRows={earlier}
+                    companyId={companyId}
+                    selection={{
+                      name: 'trip',
+                      label: t('preview.earlier'),
+                      alsoPost: 'shown',
+                      defaultCheckedFor: () => true,
+                    }}
+                    caption={t('preview.earlier')}
+                    sort={{
+                      key: 'loadNumber',
+                      dir: 'asc',
+                      hrefFor: view.sortFor(PATH),
+                      label: t('accounting.sortBy'),
+                    }}
+                    totalsLabel={`${t('preview.earlier')} · ${earlier.length}`}
+                    empty={null}
+                  />
+                </section>
+              ) : null}
               {/* ── AND EVERYTHING THAT WOULD NOT GO IN ───────────────────────────
                *
                * Grouped by reason, each with a sentence saying what to do about it.

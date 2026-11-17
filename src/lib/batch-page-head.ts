@@ -116,6 +116,9 @@ export async function readBatchPageHead(
       from: Prisma.sql`(SELECT "periodStart" FROM b)`,
       to: Prisma.sql`(SELECT "periodEnd" FROM b)`,
       companyId: Prisma.sql`(SELECT "companyId" FROM b)`,
+      // This batch's own lined trips count as catch-up (2026-11-17), as
+      // `previewBatch`'s `catchUpWhere(forBatchId)` reads them.
+      forBatchId: Prisma.sql`(SELECT id FROM b)`,
     })}),
     exclusions AS (
       SELECT e."loadId" FROM "SettlementBatchExclusion" e

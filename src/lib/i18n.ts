@@ -144,6 +144,9 @@ const en = {
     'The batch covers every authority; the filter above narrows this list only.',
   'preview.needAuthority': 'Choose an authority to create a batch.',
   'preview.exists': 'A batch for this authority already overlaps these dates:',
+  'preview.earlier': 'Delivered earlier, not yet paid',
+  'preview.earlierHint':
+    'Delivered before this range and on no statement. They go into this batch unless unticked.',
   'preview.emptyAvailable': 'No trips would go into this batch',
   'preview.emptyAvailableHint':
     'Widen the range, or look below at what is being left out and why.',
@@ -3427,6 +3430,9 @@ const ru: Dictionary = {
     'Партия охватывает все компании; фильтр выше сужает только этот список.',
   'preview.needAuthority': 'Выберите компанию, чтобы создать партию.',
   'preview.exists': 'Партия этой компании уже пересекается с этими датами:',
+  'preview.earlier': 'Доставлено раньше, ещё не оплачено',
+  'preview.earlierHint':
+    'Доставлено до этого диапазона и не входит ни в один расчёт. Войдёт в эту партию, если не снять отметку.',
   'preview.emptyAvailable': 'В эту партию не войдёт ни один рейс',
   'preview.emptyAvailableHint':
     'Расширьте диапазон или посмотрите ниже, что исключено и почему.',
@@ -6677,6 +6683,9 @@ const fa: Dictionary = {
     'دسته همهٔ شرکت‌ها را در بر می‌گیرد؛ فیلتر بالا تنها این فهرست را محدود می‌کند.',
   'preview.needAuthority': 'برای ایجاد دسته، یک شرکت انتخاب کنید.',
   'preview.exists': 'دسته‌ای از این شرکت با این تاریخ‌ها هم‌پوشانی دارد:',
+  'preview.earlier': 'زودتر تحویل‌شده، هنوز پرداخت‌نشده',
+  'preview.earlierHint':
+    'پیش از این بازه تحویل شده و در هیچ صورت‌حسابی نیست. اگر تیک برداشته نشود، در این دسته می‌آید.',
   'preview.emptyAvailable': 'هیچ سفری وارد این دسته نمی‌شود',
   'preview.emptyAvailableHint':
     'بازه را گسترده کنید، یا پایین‌تر ببینید چه چیزی و چرا کنار گذاشته شده است.',

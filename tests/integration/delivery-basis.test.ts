@@ -3,8 +3,9 @@ import { retryingClient } from '../retrying-client'
 import { withOrg, type TxClient } from '@/lib/tenancy'
 import { createBroker } from '@/lib/brokers'
 import { LOAD_WRITE_TIMEOUT_MS, createLoad } from '@/lib/loads'
-import { openBatch, settleableForBatch } from '@/lib/settlement-batch'
-import { SETTLEABLE_LOAD } from '@/lib/settlements'
+import { openBatch } from '@/lib/settlement-batch'
+import { SETTLEABLE_LOAD, settleableInPeriod } from '@/lib/settlements'
+import { previewBatch } from '@/lib/batch-preview'
 import { weekOf, type Week } from '@/lib/settlement-week'
 import type { Prisma, PrismaClient } from '@/generated/prisma/client'
 
@@ -155,12 +156,23 @@ async function names(where: Prisma.LoadWhereInput): Promise<string[]> {
   return rows.map((row) => nameOf.get(row.id)!).sort()
 }
 
-/** The delivery basis without the "not yet on a statement" fence. */
+/**
+ * The delivery basis over the RANGE — `settleableInPeriod`, the range alone,
+ * for the authority. The batch drafts this plus the catch-up (below).
+ */
 function deliveryBasis(period: Week): Prisma.LoadWhereInput {
-  const where = settleableForBatch(companyId, period)
-  const { settlementLoadLines: _a, settlementLines: _b, ...selection } = where
-  return selection
+  return {
+    ...settleableInPeriod(
+      period.start,
+      new Date(period.end.getTime() + 86_399_999),
+    ),
+    companyId,
+    driverId: { not: null },
+  }
 }
+
+/** What Create showed for W1 before any batch: both groups, by name. */
+const w1Groups = { inRange: [] as string[], earlier: [] as string[] }
 
 const before: Record<'W1' | 'W2', { delivery: string[]; pod: string[] }> = {
   W1: { delivery: [], pod: [] },
@@ -268,6 +280,27 @@ beforeAll(async () => {
     deliveredDay: 9,
     podDay: 10,
   })
+  // THE CATCH-UP (owner's ruling 2026-11-17): delivered three weeks before W1,
+  // on no statement — beyond the picker's fourteen-day window, so only the
+  // catch-up clause can bring it in. W1's batch drafts it.
+  await trip({
+    name: 'earlyUnpaid',
+    status: 'POD_RECEIVED',
+    deliveredDay: -21,
+    podDay: -20,
+  })
+
+  // WHAT CREATE SHOWS FOR W1, BEFORE ANY BATCH: the range and the catch-up.
+  const w1 = await inOrg((tx) =>
+    previewBatch(tx, { from: W1.start, to: W1.end, companyId }),
+  )
+  const mine = (trips: { loadId: string }[]) =>
+    trips
+      .map((t) => nameOf.get(t.loadId))
+      .filter((n): n is string => n !== undefined)
+      .sort()
+  w1Groups.inRange = mine(w1.available.filter((t) => !t.earlier))
+  w1Groups.earlier = mine(w1.available.filter((t) => t.earlier))
 
   // THE SELECTIONS, BEFORE ANY BATCH PUTS LINES ON THE LOADS.
   for (const [key, period] of [
@@ -347,7 +380,10 @@ describe('trips by delivery date against trips by POD date, every batch', () => 
     expect(before.W2.delivery).toEqual(['plainW2'])
   })
 
-  it('and each batch the engine drafted holds exactly its delivery-basis trips', async () => {
+  it('and each batch the engine drafted holds its range plus the catch-up', async () => {
+    // W1 drafts its range AND `earlyUnpaid`, delivered three weeks before and
+    // on no statement. W2 drafts its range only: everything earlier is on W1.
+    const catchUp = { W1: ['earlyUnpaid'], W2: [] as string[] }
     for (const key of ['W1', 'W2'] as const) {
       const lines = await owner.settlementLoadLine.findMany({
         where: { settlement: { batchId: batchIds[key] } },
@@ -356,7 +392,18 @@ describe('trips by delivery date against trips by POD date, every batch', () => 
       const drafted = [
         ...new Set(lines.map((l) => nameOf.get(l.loadId)!)),
       ].sort()
-      expect(drafted, key).toEqual(before[key].delivery)
+      expect(drafted, key).toEqual(
+        [...before[key].delivery, ...catchUp[key]].sort(),
+      )
     }
+  })
+})
+
+describe('Create shows two groups, both above zero (the catch-up ruling)', () => {
+  it('the range, and "Delivered earlier, not yet paid" by name', () => {
+    expect(w1Groups.inRange.length).toBeGreaterThan(0)
+    expect(w1Groups.earlier.length).toBeGreaterThan(0)
+    expect(w1Groups.inRange).toEqual(before.W1.delivery)
+    expect(w1Groups.earlier).toEqual(['earlyUnpaid'])
   })
 })
