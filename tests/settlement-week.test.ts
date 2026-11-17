@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { settleableForBatch } from '@/lib/settlement-batch'
-import { settleableInPeriod, settleableWhere } from '@/lib/settlements'
+import {
+  deliveredBetween,
+  settleableInPeriod,
+  settleableWhere,
+} from '@/lib/settlements'
 import {
   CHECK_DATE_LAG_DAYS,
   checkDateFor,
@@ -1259,42 +1263,51 @@ describe('the batch and the driver ask one question', () => {
     }
   })
 
-  // ── THE THREE THE BATCH USED TO LEAVE OUT ────────────────────────────────
-  it('REQUIRES the POD status on the batch side', () => {
-    expect(settleableForBatch(null, period).operationalStatus).toBe(
-      'POD_RECEIVED',
-    )
+  // ── THE THREE THE BATCH USED TO LEAVE OUT, UNDER THE 2026-11-17 RULINGS ──
+  //
+  // MONEY-DESIGN §6, "Which period a trip belongs to": the delivery date, not
+  // the POD, and Delivered is enough. What the 8/30 replay found still holds —
+  // a load must have a DELIVERED status, an APPLIED event, inside the period
+  // to the last millisecond — only the status and the event widened.
+  it('REQUIRES a delivered status on the batch side', () => {
+    expect(settleableForBatch(null, period).operationalStatus).toEqual({
+      in: ['DELIVERED', 'POD_RECEIVED'],
+    })
   })
 
-  it('REQUIRES an APPLIED POD event on the batch side', () => {
-    const events = settleableForBatch(null, period).statusEvents
-    expect(events).toMatchObject({
+  it('REQUIRES an APPLIED Delivered-or-POD event when no drop has departed', () => {
+    const [delivered] = settleableForBatch(null, period).AND as [
+      { OR: [unknown, { AND: [unknown, { statusEvents: unknown }] }] },
+    ]
+    expect(delivered.OR[1].AND[1].statusEvents).toMatchObject({
       some: {
         axis: 'OPERATIONAL',
-        toStatus: 'POD_RECEIVED',
+        toStatus: { in: ['DELIVERED', 'POD_RECEIVED'] },
         outcome: 'APPLIED',
       },
     })
   })
 
-  it('DATES that event inside the period, to the last millisecond', () => {
-    const events = settleableForBatch(null, period).statusEvents as {
-      some: { occurredAt: { gte: Date; lte: Date } }
-    }
-    expect(events.some.occurredAt.gte.getTime()).toBe(period.start.getTime())
-    // The Saturday, whole. A period ending at midnight loses everything that
-    // landed on its last day — four loads, on the 9/13 week.
-    expect(events.some.occurredAt.lte.getTime()).toBe(
-      period.end.getTime() + 86_399_999,
-    )
+  it('DATES the delivery inside the period, to the last millisecond', () => {
+    expect(settleableForBatch(null, period).AND).toEqual([
+      // The Saturday, whole. A period ending at midnight loses everything that
+      // landed on its last day — four loads, on the 9/13 week.
+      deliveredBetween(
+        period.start,
+        new Date(period.end.getTime() + 86_399_999),
+      ),
+    ])
   })
 
-  // ── AND THE STOP FILTER IS GONE, WHICH IS THE SUBSTANTIVE HALF ───────────
+  // ── THE STOP'S PLAN NEVER SELECTS ───────────────────────────────────────
   //
-  // Kept as an explicit assertion rather than left implied: a delivery stop
-  // dated in the week is a PLAN, and a load that never arrived has one.
-  it('no longer selects on the delivery stop', () => {
-    expect(settleableForBatch(null, period).stops).toBeUndefined()
+  // A delivery stop's `scheduledAt` is a PLAN, and a load that never arrived
+  // has one. Since 2026-11-17 the stop's ACTUAL departure is the first source
+  // of the delivery date — inside `AND`, never as a top-level stop filter.
+  it('never selects on the delivery stop’s plan', () => {
+    const where = settleableForBatch(null, period)
+    expect(where.stops).toBeUndefined()
+    expect(JSON.stringify(where)).not.toContain('scheduledAt')
   })
 
   // Each side keeps exactly the scoping that is its own business.

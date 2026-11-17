@@ -57,6 +57,7 @@ const OPEN_UP_TO = 12
 
 const REASON_LABEL: Record<UnavailableReason, MessageKey> = {
   inTransit: 'preview.reason.inTransit',
+  noDeliveryDate: 'preview.reason.noDeliveryDate',
   outsideRange: 'preview.reason.outsideRange',
   alreadyInBatch: 'preview.reason.alreadyInBatch',
   noDriver: 'preview.reason.noDriver',
@@ -65,6 +66,7 @@ const REASON_LABEL: Record<UnavailableReason, MessageKey> = {
 
 const REASON_HINT: Record<UnavailableReason, MessageKey> = {
   inTransit: 'preview.hint.inTransit',
+  noDeliveryDate: 'preview.hint.noDeliveryDate',
   outsideRange: 'preview.hint.outsideRange',
   alreadyInBatch: 'preview.hint.alreadyInBatch',
   noDriver: 'preview.hint.noDriver',
@@ -171,7 +173,8 @@ export default async function OpenBatchPage({
           placeholder: t('settlements.trip.load'),
         }}
         range={{
-          label: t('preview.pod'),
+          // THE RANGE BOUNDS THE DELIVERY DATE (MONEY-DESIGN §6, 2026-11-17).
+          label: t('preview.deliveryDate'),
           fromLabel: t('accounting.from'),
           toLabel: t('accounting.to'),
           // THE PRE-FILL IS SHOWN, not implied by empty boxes (part 7, R1).

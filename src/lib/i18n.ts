@@ -128,7 +128,7 @@ const en = {
   'preview.create': 'Create',
   'preview.available': 'Available trips',
   'preview.unavailable': 'Not going in',
-  'preview.pod': 'POD',
+  'preview.deliveryDate': 'Delivery date',
   // §6.2.10 part 1 — the trip picker's own columns and controls.
   'preview.payee': 'Payee',
   'preview.loadPay': 'Driver pay',
@@ -147,15 +147,18 @@ const en = {
   'preview.emptyAvailable': 'No trips would go into this batch',
   'preview.emptyAvailableHint':
     'Widen the range, or look below at what is being left out and why.',
-  'preview.reason.inTransit': 'In transit',
-  'preview.reason.outsideRange': 'POD outside the range',
+  'preview.reason.inTransit': 'Not delivered',
+  'preview.reason.noDeliveryDate': 'No delivery date',
+  'preview.reason.outsideRange': 'Delivered outside the range',
   'preview.reason.alreadyInBatch': 'Already on a statement',
   'preview.reason.noDriver': 'No driver',
   'preview.reason.noRule': 'No pay rule',
   'preview.hint.inTransit':
-    'No POD has landed. These pay in the week their POD arrives.',
+    'Not marked Delivered yet. These pay in the range their delivery date falls in.',
+  'preview.hint.noDeliveryDate':
+    'Delivered, but no delivery stop departure and no Delivered time is recorded. Record the departure on the load.',
   'preview.hint.outsideRange':
-    'Delivered near this window but the POD fell outside it — a week is decided by the POD.',
+    'Delivered near this window but outside it — a trip is placed by its delivery date.',
   'preview.hint.alreadyInBatch':
     'These are settled. Open the statement to see what was paid.',
   'preview.hint.noDriver':
@@ -3409,7 +3412,7 @@ const ru: Dictionary = {
   'preview.create': 'Создать',
   'preview.available': 'Доступные рейсы',
   'preview.unavailable': 'Не войдут',
-  'preview.pod': 'POD',
+  'preview.deliveryDate': 'Дата доставки',
   'preview.payee': 'Получатель',
   'preview.loadPay': 'Оплата водителю',
   'preview.driverType': 'Тип водителя',
@@ -3427,15 +3430,18 @@ const ru: Dictionary = {
   'preview.emptyAvailable': 'В эту партию не войдёт ни один рейс',
   'preview.emptyAvailableHint':
     'Расширьте диапазон или посмотрите ниже, что исключено и почему.',
-  'preview.reason.inTransit': 'В пути',
-  'preview.reason.outsideRange': 'POD вне диапазона',
+  'preview.reason.inTransit': 'Не доставлено',
+  'preview.reason.noDeliveryDate': 'Нет даты доставки',
+  'preview.reason.outsideRange': 'Доставлено вне диапазона',
   'preview.reason.alreadyInBatch': 'Уже в расчёте',
   'preview.reason.noDriver': 'Без водителя',
   'preview.reason.noRule': 'Нет правила оплаты',
   'preview.hint.inTransit':
-    'POD не получен. Они оплачиваются на неделе поступления POD.',
+    'Ещё не отмечено как доставленное. Оплачивается в диапазоне, куда попадёт дата доставки.',
+  'preview.hint.noDeliveryDate':
+    'Доставлено, но не записаны ни выезд с точки доставки, ни время доставки. Укажите выезд в грузе.',
   'preview.hint.outsideRange':
-    'Доставлено рядом с этим окном, но POD вне его — неделя определяется по POD.',
+    'Доставлено рядом с этим окном, но вне его — рейс относится к дате доставки.',
   'preview.hint.alreadyInBatch':
     'Они уже рассчитаны. Откройте расчёт, чтобы увидеть выплату.',
   'preview.hint.noDriver':
@@ -6656,7 +6662,7 @@ const fa: Dictionary = {
   'preview.create': 'ایجاد',
   'preview.available': 'سفرهای در دسترس',
   'preview.unavailable': 'واردنشدنی‌ها',
-  'preview.pod': 'رسید تحویل',
+  'preview.deliveryDate': 'تاریخ تحویل',
   'preview.payee': 'دریافت‌کننده',
   'preview.loadPay': 'دستمزد راننده',
   'preview.driverType': 'نوع راننده',
@@ -6674,15 +6680,18 @@ const fa: Dictionary = {
   'preview.emptyAvailable': 'هیچ سفری وارد این دسته نمی‌شود',
   'preview.emptyAvailableHint':
     'بازه را گسترده کنید، یا پایین‌تر ببینید چه چیزی و چرا کنار گذاشته شده است.',
-  'preview.reason.inTransit': 'در مسیر',
-  'preview.reason.outsideRange': 'رسید خارج از بازه',
+  'preview.reason.inTransit': 'تحویل‌نشده',
+  'preview.reason.noDeliveryDate': 'بدون تاریخ تحویل',
+  'preview.reason.outsideRange': 'تحویل خارج از بازه',
   'preview.reason.alreadyInBatch': 'از پیش در صورت‌حساب',
   'preview.reason.noDriver': 'بدون راننده',
   'preview.reason.noRule': 'بدون قاعدهٔ پرداخت',
   'preview.hint.inTransit':
-    'رسیدی نرسیده است. این‌ها در هفتهٔ رسیدن رسید پرداخت می‌شوند.',
+    'هنوز «تحویل‌شده» ثبت نشده است. در بازه‌ای پرداخت می‌شود که تاریخ تحویل در آن بیفتد.',
+  'preview.hint.noDeliveryDate':
+    'تحویل شده، اما نه زمان خروج از توقف تحویل ثبت شده و نه زمان تحویل. زمان خروج را در بار ثبت کنید.',
   'preview.hint.outsideRange':
-    'نزدیک این بازه تحویل شده اما رسید بیرون آن افتاده — هفته را رسید تعیین می‌کند.',
+    'نزدیک این بازه اما بیرون آن تحویل شده — هر سفر بر پایهٔ تاریخ تحویلش جای می‌گیرد.',
   'preview.hint.alreadyInBatch':
     'این‌ها تسویه شده‌اند. برای دیدن پرداخت، صورت‌حساب را باز کنید.',
   'preview.hint.noDriver':

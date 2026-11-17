@@ -405,7 +405,12 @@ describe('/settlements/batches/[id] in one statement', () => {
     expect(ids(alpha.preview.unavailable.outsideRange)).toEqual(
       [loads.podLate, loads.early, loads.lateInMargin].sort(),
     )
-    expect(ids(alpha.preview.unavailable.inTransit)).toEqual(
+    // DELIVERED-STATUS LOADS WITH NO DELIVERY DATE (MONEY-DESIGN §6,
+    // 2026-11-17): `transit` is Delivered by a column write with no event and
+    // no stop departure; `stale`'s only event was refused. Neither is in
+    // transit, and the screen now says which they are.
+    expect(ids(alpha.preview.unavailable.inTransit)).toEqual([])
+    expect(ids(alpha.preview.unavailable.noDeliveryDate)).toEqual(
       [loads.transit, loads.stale].sort(),
     )
     expect(ids(alpha.preview.unavailable.noDriver)).toEqual([loads.noDriver])

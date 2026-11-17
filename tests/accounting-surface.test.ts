@@ -711,6 +711,7 @@ describe('the open-batch flow', () => {
     expect(page).toContain('UNAVAILABLE_REASONS.map')
     for (const reason of [
       'inTransit',
+      'noDeliveryDate',
       'outsideRange',
       'alreadyInBatch',
       'noDriver',
@@ -730,8 +731,9 @@ describe('the open-batch flow', () => {
     const hints = [...page.matchAll(/'(preview\.hint\.\w+)'/g)].map(
       (hit) => hit[1],
     )
-    expect(new Set(labels).size).toBe(5)
-    expect(new Set(hints).size).toBe(5)
+    // SIX SINCE 2026-11-17: `noDeliveryDate` (MONEY-DESIGN §6).
+    expect(new Set(labels).size).toBe(6)
+    expect(new Set(hints).size).toBe(6)
   })
 
   // ── A LOAD LANDS IN EXACTLY ONE BUCKET ──────────────────────────────────
@@ -745,11 +747,16 @@ describe('the open-batch flow', () => {
     expect(preview).not.toMatch(/loads\.filter\([^)]*\)\s*\.filter/)
   })
 
-  it('bounds the window on the POD, not the delivery stop', () => {
-    // MONEY-DESIGN §0: a week is decided by when the POD landed. A load
-    // delivered Saturday whose POD arrives Monday belongs to the next week,
-    // which is what `outsideRange` exists to show.
-    expect(preview).toContain('podAt < input.from || podAt > input.to')
+  it('bounds the window on the delivery date, not the POD', () => {
+    // MONEY-DESIGN §6, owner's ruling 2026-11-17: a trip is placed by its
+    // delivery date (`deliveryDateOf`), and the POD no longer selects trips —
+    // Amazon loads carry no POD of their own. The range's last day counts
+    // whole, as the engine's does.
+    expect(preview).toContain('const deliveryAt = deliveryDateOf({')
+    expect(preview).toMatch(
+      /deliveryAt\.getTime\(\) < input\.from\.getTime\(\) \|\|\s+deliveryAt\.getTime\(\) > lastInstant/,
+    )
+    expect(preview).not.toContain('podAt')
   })
 
   it('offers no tick on a trip whose pay cannot be computed', () => {
