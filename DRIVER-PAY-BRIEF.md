@@ -163,7 +163,27 @@ Only the four `batchStatus.*` labels and their RU/FA translations move. The
 verbs move with them: "Finalise" becomes "Post", and "Approve" becomes "Post"
 wherever it is still spelled that way.
 
-## 6. Rulings needed before step 1
+## 6. Rulings — MADE 2026-11-17
+
+Islom's answers, the same day:
+
+- **R1: a free date range**, pre-filled with the last full settlement week.
+  Trips already in any batch are excluded, so an overlap is harmless. _Reverses
+  my recommendation and §6.2.10 part 1's fixed week; built in the Create step,
+  which amends part 1 first._
+- **R2: authority required.** Uktam always picks one.
+- **R7: no "Change status" control.** A batch's status derives from its
+  statements; the batch gets **Post all unposted** and **Mark paid** instead.
+- **R3–R6, R8–R17: the recommendations below, as written**, with two notes:
+  - **R8**'s week number stays PROVISIONAL until a second batch confirms it.
+  - **R12** is reversed: Total pay = Total gross is Datatruck's shape, so both
+    columns are kept.
+- **Step 1 is the Batches list plus the status words** (my steps 1 and 2 merged).
+  It gets the full ritual at merge, because this is money.
+
+What follows is the list as it was put to Islom.
+
+## 6a. Rulings needed before step 1 (as asked)
 
 Each ruling has a recommendation, but the decision is Islom's. The ones marked
 ★ contradict an earlier written ruling, and the brief does not resolve them by
