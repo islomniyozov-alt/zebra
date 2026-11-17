@@ -207,7 +207,11 @@ export async function previewBatch(
         },
       },
     },
-    orderBy: { loadNumber: 'asc' },
+    // ID BREAKS THE TIE: load numbers are per authority, so two authorities'
+    // 1001 tie, and an order Postgres may break either way is not an order —
+    // deploy production run 44095305838 failed batch-page-head on it. The SQL
+    // spelling below orders the same way.
+    orderBy: [{ loadNumber: 'asc' }, { id: 'asc' }],
     take: 2000,
     select: {
       id: true,
@@ -489,7 +493,7 @@ export function previewLoadsSql(window: {
           WHERE st."loadId" = l.id AND st.type::text = 'DELIVERY'
             AND st."scheduledAt" >= ${window.from} - interval '14 days'
             AND st."scheduledAt" <= ${window.to} + interval '14 days')
-     ORDER BY l."loadNumber"
+     ORDER BY l."loadNumber", l.id
      LIMIT 2000`
 }
 
