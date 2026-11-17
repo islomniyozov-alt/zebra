@@ -1217,8 +1217,18 @@ export async function markBatchPaid(
   // FILTERED BY THE PREDICATE, NOT BY A PREFIX IN A WHERE CLAUSE. `DRAFT-` is
   // one placeholder shape and dev turned up a second nobody wrote down; a SQL
   // `startsWith` here would silently be a third definition of "has no name".
+  //
+  // ── A VOIDED STATEMENT IS NEVER PAID (owner's ruling 2026-11-17) ─────────
+  //
+  // Both reads below skip VOID. Until this ruling the `updateMany` matched every
+  // statement on the batch, so marking a batch paid turned a struck statement
+  // PAID — a document the office voided, recorded as money that left. VOID is
+  // not a vote in `deriveBatchStatus` either, which is how a batch holding one
+  // could be FINAL and reach this function. Nor is a void minted a number here:
+  // it is not being issued.
+  const live = { batchId, status: { not: 'VOID' as const } }
   const inBatch = await tx.settlement.findMany({
-    where: { batchId },
+    where: live,
     select: { id: true, organizationId: true, settlementNumber: true },
   })
   for (const settlement of inBatch) {
@@ -1228,7 +1238,7 @@ export async function markBatchPaid(
   }
 
   await tx.settlement.updateMany({
-    where: { batchId },
+    where: live,
     data: { status: 'PAID', paidAt: new Date() },
   })
   return { ok: true }
