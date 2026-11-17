@@ -92,7 +92,7 @@ export function TrackerSteps({
           </span>
         ) : null}
       </div>
-      <ol className="flex items-start">
+      <ol data-tracker className="flex items-start">
         {labels.steps.map((word, index) => {
           const number = index + 1
           const reached = !cancelled && number <= step
@@ -113,9 +113,16 @@ export function TrackerSteps({
                   )}
                 />
               ) : null}
+              {/* ABOVE THE BARS, z-10 (owner's report 2026-11-17: "digits 1–6
+               * render mirrored / upside down"). There was no transform: each
+               * step's bar is absolute and comes LATER in the DOM than the
+               * circle to its start, so it painted a 3 px line in the same
+               * blue straight through that digit. scripts/tracker-render.mjs
+               * holds every digit as the topmost element at its own centre. */}
               <span
+                data-tracker-step
                 className={cx(
-                  'relative flex size-[32px] items-center justify-center rounded-full text-sm font-medium tabular-nums',
+                  'relative z-10 flex size-[32px] items-center justify-center rounded-full text-sm font-medium tabular-nums',
                   reached
                     ? 'bg-progress text-surface'
                     : 'bg-surface-3 text-ink-2',

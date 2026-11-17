@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useState } from 'react'
+import { useActionState, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
@@ -22,6 +22,13 @@ const DETAIL_INITIAL: DetailState = { error: null, notice: null }
 interface Props {
   isCancelled: boolean
   canDeliver: boolean
+  /**
+   * `menu` (the Amazon detail, §7.13; owner's review 2026-11-17): the header
+   * keeps only neutral actions — Mark delivered as a secondary button and a ⋮
+   * menu — and Cancel load lives in the menu, the only place it is red.
+   * `inline`, the default, is every other load detail as it was.
+   */
+  layout?: 'inline' | 'menu'
   markDelivered: (previous: DetailState) => Promise<DetailState>
   cancel: (previous: DetailState, formData: FormData) => Promise<DetailState>
   uncancel: () => Promise<void>
@@ -34,6 +41,8 @@ interface Props {
     confirmCancel: string
     uncancel: string
     close: string
+    /** The ⋮ button's name, for `layout="menu"`. */
+    menu?: string
   }
 }
 
@@ -44,8 +53,27 @@ export function LoadActions({
   cancel,
   uncancel,
   labels,
+  layout = 'inline',
 }: Props) {
   const [open, setOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  // Closes on a click anywhere else and on Escape, like every popover here.
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDown = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false)
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [menuOpen])
   const [deliverState, deliverAction, delivering] = useActionState(
     markDelivered,
     DETAIL_INITIAL,
@@ -71,7 +99,7 @@ export function LoadActions({
         <form action={deliverAction}>
           <Button
             type="submit"
-            variant="primary"
+            variant={layout === 'menu' ? 'secondary' : 'primary'}
             size="compact"
             disabled={delivering}
           >
@@ -81,15 +109,59 @@ export function LoadActions({
       ) : null}
 
       {/* Standing rule 11 of the design system: destructive actions are never
-       * accent-coloured. */}
-      <Button
-        type="button"
-        variant="danger"
-        size="compact"
-        onClick={() => setOpen(true)}
-      >
-        {labels.cancel}
-      </Button>
+       * accent-coloured. In the menu layout Cancel is not in the header at
+       * all — it is the menu's red item, behind the same confirmation. */}
+      {layout === 'menu' ? (
+        <div ref={menuRef} className="relative">
+          <button
+            type="button"
+            data-load-menu
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            aria-label={labels.menu}
+            onClick={() => setMenuOpen((value) => !value)}
+            className="inline-flex h-control-compact items-center justify-center px-z1 rounded-control border border-border-strong bg-surface text-ink-2 hover:bg-surface-3 focus-visible:outline focus-visible:outline-2"
+          >
+            <svg
+              aria-hidden
+              viewBox="0 0 16 16"
+              className="size-[14px]"
+              fill="currentColor"
+            >
+              <circle cx="8" cy="3.5" r="1.25" />
+              <circle cx="8" cy="8" r="1.25" />
+              <circle cx="8" cy="12.5" r="1.25" />
+            </svg>
+          </button>
+          {menuOpen ? (
+            <div
+              role="menu"
+              className="absolute end-0 top-[calc(100%+4px)] z-30 min-w-[180px] rounded-card border border-border-strong bg-surface py-z1 shadow-lg"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false)
+                  setOpen(true)
+                }}
+                className="block w-full px-z3 py-z1 text-start text-xs font-medium text-danger hover:bg-danger-soft focus-visible:bg-danger-soft focus-visible:outline-none"
+              >
+                {labels.confirmCancel}
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <Button
+          type="button"
+          variant="danger"
+          size="compact"
+          onClick={() => setOpen(true)}
+        >
+          {labels.cancel}
+        </Button>
+      )}
 
       {/* A declined transition is a NOTICE, not an error. The person clicking
        * did nothing wrong — the load is simply further along than their screen

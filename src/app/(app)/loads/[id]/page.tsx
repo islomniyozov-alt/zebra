@@ -814,28 +814,32 @@ export default async function LoadDetailPage({
   // Built once and placed by whichever layout this load gets (§7.13): broker
   // freight renders each where it always did, the Amazon shape puts them in
   // its tabs and its rail. Every prop is the one the panel had before.
-  const actionsNode = mayUpdate ? (
-    <LoadActions
-      isCancelled={load.isCancelled}
-      canDeliver={
-        load.operationalStatus !== 'POD_RECEIVED' &&
-        load.operationalStatus !== 'DELIVERED'
-      }
-      markDelivered={markDeliveredAction.bind(null, id)}
-      cancel={cancelLoadAction.bind(null, id)}
-      uncancel={uncancelLoadAction.bind(null, id)}
-      labels={{
-        markDelivered: t('loads.markDelivered'),
-        cancel: t('ref.cancel'),
-        cancelTitle: t('loads.cancelTitle'),
-        cancelBody: t('loads.cancelBody'),
-        reason: t('loads.cancelReason'),
-        confirmCancel: t('loads.cancel'),
-        uncancel: t('loads.uncancel'),
-        close: t('ref.cancel'),
-      }}
-    />
-  ) : null
+  const actionsFor = (layout: 'inline' | 'menu') =>
+    mayUpdate ? (
+      <LoadActions
+        layout={layout}
+        isCancelled={load.isCancelled}
+        canDeliver={
+          load.operationalStatus !== 'POD_RECEIVED' &&
+          load.operationalStatus !== 'DELIVERED'
+        }
+        markDelivered={markDeliveredAction.bind(null, id)}
+        cancel={cancelLoadAction.bind(null, id)}
+        uncancel={uncancelLoadAction.bind(null, id)}
+        labels={{
+          markDelivered: t('loads.markDelivered'),
+          cancel: t('ref.cancel'),
+          cancelTitle: t('loads.cancelTitle'),
+          cancelBody: t('loads.cancelBody'),
+          reason: t('loads.cancelReason'),
+          confirmCancel: t('loads.cancel'),
+          uncancel: t('loads.uncancel'),
+          close: t('ref.cancel'),
+          menu: t('loads.menu'),
+        }}
+      />
+    ) : null
+  const actionsNode = actionsFor('inline')
 
   const assignmentNode =
     view.showAssignment && mayUpdate ? (
@@ -1284,7 +1288,9 @@ export default async function LoadDetailPage({
                 <StatusBadge tone="muted" label={t('loads.cancelled')} />
               ) : null}
             </div>
-            <div className="flex items-center gap-z3">{actionsNode}</div>
+            {/* NEUTRAL ACTIONS ONLY in the Amazon header (§7.13, owner's
+             * review 2026-11-17): Cancel load is in the ⋮ menu. */}
+            <div className="flex items-center gap-z3">{actionsFor('menu')}</div>
           </div>
           <div className="max-w-[640px]">
             <FactGrid

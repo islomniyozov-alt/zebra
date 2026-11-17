@@ -46,6 +46,7 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, sep } from 'node:path'
 import { describeReadBack, readBackHyperdrive } from './hyperdrive-config.mjs'
 import { measureShells, reportShells } from './shell-height.mjs'
+import { measureTracker, reportTracker } from './tracker-render.mjs'
 import { chromium } from 'playwright'
 import { neonConfig, Pool } from '@neondatabase/serverless'
 import {
@@ -1359,6 +1360,11 @@ async function sweep() {
   try {
     sums.problems += reportShells(
       await measureShells(shellBrowser, BASE, cookie),
+    )
+    // AND THE AMAZON TRACKER'S DIGITS, UPRIGHT AND UNCOVERED (owner's report
+    // 2026-11-17). See tracker-render.mjs for the bars that crossed them.
+    sums.problems += reportTracker(
+      await measureTracker(shellBrowser, BASE, cookie),
     )
   } finally {
     await shellBrowser.close()
