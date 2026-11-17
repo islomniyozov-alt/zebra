@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { withCurrentOrg } from '@/lib/auth-context'
 import {
+  deleteBatch,
   finaliseBatch,
   markBatchPaid,
   SETTLEMENT_BATCH_TIMEOUT_MS,
@@ -10,8 +11,15 @@ import {
 import type { BulkRefusal, BulkState } from './bulk-state'
 import type { MessageKey } from '@/lib/i18n'
 
-// PAYROLL → BATCHES: change status on a selection (§6.2.1, owner's ruling
-// 2026-09-28).
+// PAYROLL → BATCHES: act on a selection (§6.2.1, owner's ruling 2026-09-28;
+// §6.2.10 part 7, 2026-11-17).
+//
+// ── THREE ACTS, AND NO "CHANGE STATUS" (part 7, R7) ──────────────────────
+//
+// Post all unposted (`finaliseBatch`), Mark paid (`markBatchPaid`) and Delete
+// (`deleteBatch`, Unposted batches only). A batch's status is derived from its
+// statements and is never set by hand, so there is no control that sets one —
+// each act changes statements and the status follows.
 //
 // ── PER BATCH, THROUGH THE SAME TWO FUNCTIONS, BLOCKERS INTACT ────────────
 //
@@ -45,10 +53,18 @@ const REASON: Record<string, MessageKey> = {
   not_a_week: 'batch.error.notAWeek',
   blocked: 'batch.blockers',
   period_taken: 'batch.error.notAWeek',
+  posted: 'batch.error.posted',
 }
 
-export async function changeStatusAction(
-  intent: 'finalise' | 'markPaid',
+/** The permission each act needs: deleting is `delete`, the other two `update`. */
+const NEEDS = {
+  finalise: 'update',
+  markPaid: 'update',
+  delete: 'delete',
+} as const
+
+export async function batchBulkAction(
+  intent: 'finalise' | 'markPaid' | 'delete',
   _previous: BulkState,
   formData: FormData,
 ): Promise<BulkState> {
@@ -62,7 +78,7 @@ export async function changeStatusAction(
     // A TRANSACTION EACH. See the header — one around all of them would hold
     // locks for minutes and undo runs that had already succeeded.
     const outcome = await withCurrentOrg(
-      'update',
+      NEEDS[intent],
       'settlement',
       async (tx, session) => {
         const batch = await tx.settlementBatch.findFirst({
@@ -74,7 +90,9 @@ export async function changeStatusAction(
         const result =
           intent === 'finalise'
             ? await finaliseBatch(tx, id, session.userId)
-            : await markBatchPaid(tx, id, session.userId)
+            : intent === 'markPaid'
+              ? await markBatchPaid(tx, id, session.userId)
+              : await deleteBatch(tx, id)
 
         if (result.ok) return { name, refusal: null }
 

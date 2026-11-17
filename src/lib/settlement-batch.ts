@@ -1,5 +1,5 @@
 import type { Prisma } from '@/generated/prisma/client'
-import { syncBatchStatus } from './batch-status'
+import { syncBatchStatus, type StatementVote } from './batch-status'
 import { settleableInPeriod } from './settlements'
 import {
   allocateSeries,
@@ -865,6 +865,8 @@ export type BatchRefusal =
   | { kind: 'not_found' }
   | { kind: 'not_draft'; status: string }
   | { kind: 'blocked'; blockers: BatchResult['blockers'] }
+  /** Delete refused: a statement on the batch is posted or paid (part 7, R6). */
+  | { kind: 'posted' }
   /** A batch already covers this period. Carries it, so the screen can link. */
   | {
       kind: 'period_taken'
@@ -1228,6 +1230,68 @@ export async function markBatchPaid(
   await tx.settlement.updateMany({
     where: { batchId },
     data: { status: 'PAID', paidAt: new Date() },
+  })
+  return { ok: true }
+}
+
+/**
+ * The statuses that hold a batch from being deleted: a posted or paid
+ * statement is a document somebody was, or is about to be, paid on (§6.2.10
+ * part 7, R6). Pure, so the guard can be watched failing without a database.
+ */
+export function deletableBatch(statuses: readonly StatementVote[]): boolean {
+  return statuses.every((status) => status === 'DRAFT' || status === 'VOID')
+}
+
+/**
+ * Delete a batch while it is Unposted (§6.2.10 part 7, R6; owner's ruling
+ * 2026-11-17).
+ *
+ * REFUSED, BY NAME, WHEN ANY STATEMENT ON IT IS POSTED OR PAID. Otherwise, in
+ * the caller's transaction:
+ *
+ *   1. its DRAFT statements are deleted — the same `deleteMany` `refreshDraft`
+ *      runs before every rebuild, so their load, line and deduction rows go
+ *      by cascade and their fuel and toll rows are released by SET NULL, as
+ *      they are on every refresh. A draft is rebuilt on every refresh; it is
+ *      not a document, and deleting one destroys nothing that was issued.
+ *   2. its exclusions are deleted: the unticks were decisions about THIS
+ *      batch, and a batch that no longer exists has nothing to exclude from.
+ *   3. the batch is SOFT-deleted (`deletedAt`). Every reader already filters
+ *      on it, `openBatch`'s "period taken" check among them, so the week can be
+ *      opened again and its trips are available to it.
+ *
+ * THE NUMBER IS NOT REISSUED. `SB-000470` deleted leaves a gap, and the gap is
+ * the record that a batch existed; reissuing it would give two batches one
+ * name in anybody's notes. A VOID statement stays as it is: it was struck, it
+ * is history, and it carries its own number.
+ *
+ * Who deleted it is the audit row the soft delete writes (`audit.ts` audits
+ * every write to this model), so there is no `deletedBy` column.
+ */
+export async function deleteBatch(
+  tx: TxClient,
+  batchId: string,
+): Promise<{ ok: true } | { ok: false; reason: BatchRefusal }> {
+  const batch = await tx.settlementBatch.findFirst({
+    where: { id: batchId, deletedAt: null },
+    select: { id: true },
+  })
+  if (!batch) return { ok: false, reason: { kind: 'not_found' } }
+
+  const statements = await tx.settlement.findMany({
+    where: { batchId },
+    select: { status: true },
+  })
+  if (!deletableBatch(statements.map((row) => row.status))) {
+    return { ok: false, reason: { kind: 'posted' } }
+  }
+
+  await tx.settlement.deleteMany({ where: { batchId, status: 'DRAFT' } })
+  await tx.settlementBatchExclusion.deleteMany({ where: { batchId } })
+  await tx.settlementBatch.update({
+    where: { id: batchId },
+    data: { deletedAt: new Date() },
   })
   return { ok: true }
 }

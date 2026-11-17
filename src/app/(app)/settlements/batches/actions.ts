@@ -40,6 +40,7 @@ const REFUSAL: Record<BatchRefusal['kind'], MessageKey> = {
   not_draft: 'batch.error.notDraft',
   blocked: 'batch.error.blocked',
   period_taken: 'money.error.periodTaken',
+  posted: 'batch.error.posted',
 }
 
 /**

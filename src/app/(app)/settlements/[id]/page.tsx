@@ -38,10 +38,9 @@ import {
 import type {
   PaymentMethod,
   SettlementLineType,
-  SettlementStatus,
 } from '@/generated/prisma/client'
 import type { MessageKey } from '@/lib/i18n'
-import type { StatusTone } from '@/lib/status'
+import { STATEMENT_WORDS } from '@/lib/pay-status'
 
 // ---------------------------------------------------------------------------
 // THE SETTLEMENT WORKBENCH (TMS-DESIGN-SYSTEM §6.2.2).
@@ -69,13 +68,6 @@ import type { StatusTone } from '@/lib/status'
 // balances and fuel & tolls — carry a Review link to where their rows live,
 // which is why they are links and not bare numbers.
 // ---------------------------------------------------------------------------
-
-const TONE: Record<SettlementStatus, StatusTone> = {
-  DRAFT: 'neutral',
-  APPROVED: 'progress',
-  PAID: 'success',
-  VOID: 'muted',
-}
 
 /** The held reasons, in the reader's language. Same three the batch names. */
 const HELD_REASON: Record<string, MessageKey> = {
@@ -683,11 +675,10 @@ export default async function SettlementPage({
                 </span>
               </Fact>
               <span className="ms-auto">
+                {/* Unposted · Posted · Paid · Void (§6.2.10 part 7). */}
                 <StatusBadge
-                  tone={TONE[settlement.status]}
-                  label={t(
-                    `settlementStatus.${settlement.status}` as MessageKey,
-                  )}
+                  tone={STATEMENT_WORDS[settlement.status].tone}
+                  label={t(STATEMENT_WORDS[settlement.status].label)}
                 />
               </span>
             </div>

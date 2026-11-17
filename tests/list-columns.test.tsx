@@ -97,7 +97,7 @@ describe('the key lists match the columns the pages actually declare', () => {
     expect(TRUCK_COLUMN_KEYS.length).toBeGreaterThan(TABLE_COLUMN_CAP)
   })
 
-  it('and the batches page says which of its eleven start hidden', () => {
+  it('and the batches page says which of its twelve start hidden', () => {
     // WITHOUT THIS ARGUMENT the cap still holds — `readGridColumns` would keep
     // the first nine — but the two it dropped would be whichever happened to be
     // last, not the two §7.1.7 chose. Line-anchored, so a commented-out call
@@ -309,16 +309,23 @@ describe('the cap lives in readGridColumns, so no grid can get past it', () => {
       BATCH_COLUMN_KEYS,
       BATCH_COLUMNS_HIDDEN,
     )
-    expect(visible.length).toBe(9)
-    expect(visible).not.toContain('created')
-    // AND THE THREE §6.2.9 ADDED ARE STILL THERE, because a 500 answered by
-    // quietly dropping the feature's own columns is not a fix.
-    expect(visible).toContain('gross')
-    expect(visible).toContain('deductions')
-    expect(visible).toContain('amount')
+    // DATATRUCK'S NINE, IN ORDER (§6.2.10 part 7, R4/R5, owner's ruling
+    // 2026-11-17). Gross and deductions — §6.2.9's — are a tick away by that
+    // ruling; Amount (net) stays shown.
+    expect(visible).toEqual([
+      'batchNumber',
+      'status',
+      'createdBy',
+      'created',
+      'checkDate',
+      'period',
+      'statements',
+      'amount',
+      'payCompany',
+    ])
   })
 
-  it('and with a stored row naming eleven columns', async () => {
+  it('and with a stored row naming twelve columns', async () => {
     const visible = await readGridColumns(
       txWith([...BATCH_COLUMN_KEYS]),
       'u1',

@@ -54,8 +54,9 @@ import { Button } from '@/components/ui/Button'
 import { WeekPicker } from './WeekPicker'
 import { WeekStrip } from './WeekStrip'
 import { BatchActions } from '../../settlements/batches/[id]/BatchActions'
-import type { MessageKey } from '@/lib/i18n'
 import type { StatusTone } from '@/lib/status'
+import { batchWord } from '@/lib/pay-status'
+import { payrollStrip, payrollStripHref } from '../payroll-tabs'
 
 // ACCOUNTING → PAYROLL (§6.2, §7.1.6): five tabs over one grid.
 //
@@ -79,31 +80,14 @@ import type { StatusTone } from '@/lib/status'
 // needs no batch to answer. This tab is what comes off the week on screen. A rule
 // dormant until November shows on one and not the other.
 
-// ── STATUS, TONE AND LABEL, AS AN EXPLICIT MAP ────────────────────────────
+// ── STATUS, TONE AND LABEL: THE OFFICE'S WORDS (§6.2.10 part 7) ──────────
 //
-// THE CAST WAS THE BUG. `t(`batchStatus.${row.status}` as MessageKey)` compiles
-// against any string, and `translator` falls back to `en[key] ?? undefined` — so a
-// key that does not exist renders an EMPTY badge instead of throwing. None of
-// `batchStatus.DRAFT|FINAL|PAID` existed; typecheck passed; the status column
-// would have shipped blank.
-//
-// A `Record` KEYED BY THE STATUS AND VALUED BY A REAL `MessageKey` is the fix, and
-// it is a mechanism rather than care: a sixth status has to be added here to
-// compile, and `MessageKey` has to exist in the dictionary to type.
-const STATUS: Record<string, { tone: StatusTone; label: MessageKey }> = {
-  DRAFT: { tone: 'neutral', label: 'batchStatus.DRAFT' },
-  // §6.2.10 part 3 — some statements final, some not. `warning`, as §3.3 reads
-  // it: attention, a batch somebody is in the middle of.
-  PARTIAL: { tone: 'warning', label: 'batchStatus.PARTIAL' },
-  FINAL: { tone: 'progress', label: 'batchStatus.FINAL' },
-  PAID: { tone: 'success', label: 'batchStatus.PAID' },
-  APPROVED: { tone: 'progress', label: 'batchStatus.APPROVED' },
-  VOID: { tone: 'muted', label: 'batchStatus.VOID' },
-}
-
-/** An unrecognised status shows the raw value rather than nothing at all. */
+// Unposted · Partial posted · Posted · Paid, from `batchWord` in
+// `src/lib/pay-status.ts` — typed by the enum there, so a status the map does
+// not know fails to compile instead of rendering an empty badge (the cast this
+// page once had). An unrecognised value shows raw rather than nothing at all.
 const statusOf = (value: string) =>
-  STATUS[value] ?? { tone: 'neutral' as StatusTone, label: null }
+  batchWord(value) ?? { tone: 'neutral' as StatusTone, label: null }
 
 // TWO TABS: both are a run's totals (§6.2). Driver statements and the two
 // charge grids became their own destinations under Payroll.
@@ -159,6 +143,7 @@ export default async function PayrollPage({
   const { t, locale } = await getLocaleContext()
   const mayWrite = await currentUserCan('update', 'settlement')
   const mayOpen = await currentUserCan('create', 'settlement')
+  const mayDelete = await currentUserCan('delete', 'settlement')
   // A DRIVER'S OWN MONEY IS A SEPARATE PERMISSION from a batch total. Three of
   // the five tabs are `driver.pay`, and a role holding only `settlement` sees
   // Batches and nothing under it.
@@ -274,6 +259,7 @@ export default async function PayrollPage({
     selected: t('grid.selected'),
     finalise: t('batches.finaliseSelected'),
     markPaid: t('batches.markPaidSelected'),
+    remove: t('batches.deleteSelected'),
     clear: t('grid.clearSelection'),
     blocked: t('batches.bulkBlocked'),
     done: t('batches.bulkDone'),
@@ -282,6 +268,7 @@ export default async function PayrollPage({
     'batch.error.notFound': t('batch.error.notFound'),
     'batch.error.notDraft': t('batch.error.notDraft'),
     'batch.error.notAWeek': t('batch.error.notAWeek'),
+    'batch.error.posted': t('batch.error.posted'),
     'batch.blockers': t('batch.blockers'),
   }
 
@@ -327,6 +314,14 @@ export default async function PayrollPage({
           />
         )
       },
+    },
+    {
+      // §6.2.10 part 7 (R4): read from the batch's audit CREATE row.
+      key: 'createdBy',
+      filterable: true,
+      header: t('batches.createdBy'),
+      sortable: true,
+      render: (row) => row.createdBy ?? <span className="text-ink-3">—</span>,
     },
     {
       key: 'created',
@@ -523,12 +518,19 @@ export default async function PayrollPage({
     return `${PATH}?${next}`
   }
 
-  const visibleTabs = TABS.filter((key) => key === 'batches' || maySeePay).map(
-    (key) => ({
-      key,
-      label: t(`payroll.tab.${key}` as MessageKey),
-    }),
-  )
+  // PAYROLL'S ONE STRIP (§6.2.10 part 7, R10): this page's two tabs keep the
+  // week and the year in their links; Driver statements and One-time charges
+  // are their own routes. `TABS` above is still what `?tab=` narrows against.
+  const visibleTabs = payrollStrip({
+    batches: true,
+    pay: maySeePay,
+    t,
+  })
+  const stripHref = (key: string) =>
+    payrollStripHref(key, {
+      batches: tabHref('batches'),
+      balances: tabHref('balances'),
+    })
 
   const header = (
     <>
@@ -577,7 +579,7 @@ export default async function PayrollPage({
       <Tabs
         tabs={visibleTabs}
         active={tab}
-        hrefFor={tabHref}
+        hrefFor={stripHref}
         label={t('grid.tabs')}
       />
     </>
@@ -683,7 +685,7 @@ export default async function PayrollPage({
             figures={[
               {
                 key: 'draft',
-                label: t('batchStatus.DRAFT'),
+                label: t('payStatus.unposted'),
                 cents: data.pipeline.draftCents,
                 note: `${String(data.pipeline.draftCount)} ${t('strip.runs')}`,
                 scope: 'balance',
@@ -691,7 +693,7 @@ export default async function PayrollPage({
               },
               {
                 key: 'final',
-                label: t('batchStatus.FINAL'),
+                label: t('payStatus.posted'),
                 cents: data.pipeline.finalCents,
                 note: `${String(data.pipeline.finalCount)} ${t('strip.runs')}`,
                 // APPROVED AND UNPAID — the figure with a deadline, so it is the
@@ -703,7 +705,7 @@ export default async function PayrollPage({
               },
               {
                 key: 'paid',
-                label: t('batchStatus.PAID'),
+                label: t('payStatus.paid'),
                 cents: data.pipeline.paidCents,
                 note: `${String(data.pipeline.paidCount)} ${t('strip.runs')}`,
                 scope: 'balance',
@@ -748,7 +750,11 @@ export default async function PayrollPage({
             errors={errors}
           />
         </div>
-        <BulkStatus labels={bulkLabels} reasons={bulkReasons}>
+        <BulkStatus
+          labels={bulkLabels}
+          reasons={bulkReasons}
+          mayDelete={mayDelete}
+        >
           <Table
             columns={columns}
             rows={view.paged.rows}
