@@ -7,7 +7,12 @@ import { createLoad, LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import { documentsForRecords, recordsForSubject } from '@/lib/compliance'
 import { inspectionsForSubject } from '@/lib/inspections'
 import { payRulesFor } from '@/lib/driver-pay'
-import { onTimeRateForDriver } from '@/lib/dispatch-fields'
+import {
+  dispatchFactsForDrivers,
+  dispatchStatusFrom,
+  onTimeRateForDriver,
+} from '@/lib/dispatch-fields'
+import { DISPATCHER_ROLES } from '@/lib/driver-main'
 import { dqfFactsForDrivers } from '@/lib/dqf'
 import { currentAuthority } from '@/lib/fleet'
 import { teamMateFor } from '@/lib/team'
@@ -138,6 +143,33 @@ async function readByHelpers(
       )?.timezone ?? null,
     teamMate: await teamMateFor(tx, id),
     signIn: withSignIn ? await signInLinkFor(tx, organizationId, id) : null,
+    // §6.4 part 2 v11.22 — the dispatcher picker: members whose role
+    // dispatches, plus whoever already holds the field, by name then id.
+    // Ordered by the database, as the SQL is, so collation cannot differ.
+    dispatchers: await tx.user.findMany({
+      where: {
+        OR: [
+          {
+            memberships: {
+              some: { organizationId, role: { in: [...DISPATCHER_ROLES] } },
+            },
+          },
+          ...(driver.dispatcherUserId ? [{ id: driver.dispatcherUserId }] : []),
+        ],
+      },
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+      select: { id: true, name: true },
+    }),
+    // …and the derived status, the list's own rule over the list's facts.
+    driverStatus: dispatchStatusFrom(
+      (await dispatchFactsForDrivers(tx, [id])).get(id) ?? {
+        rosterStatus: driver.status,
+        isOffDuty: driver.isOffDuty,
+        offDutyUntil: driver.offDutyUntil,
+        activeStatuses: [],
+      },
+      NOW,
+    ),
   }
 }
 

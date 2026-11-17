@@ -19,6 +19,7 @@ import { isTruckOverride } from './truck-list'
 const storedTruckStatus = (status: TruckStatus | undefined): TruckStatus =>
   status !== undefined && isTruckOverride(status) ? status : 'AVAILABLE'
 import { assertDriverKind, DEFAULT_DRIVER_KIND } from './driver-kind'
+import { isDispatcherRole } from './driver-main'
 import { parseTags } from './tags'
 import {
   closeOpenPeriod,
@@ -139,6 +140,17 @@ export interface DriverInput {
   kind?: unknown
   /** Free text, split on commas by `parseTags`. Omitted means "leave as is". */
   tags?: unknown
+  /**
+   * §6.4 part 2 v11.22 (migration 73) — the four facts Main gained. Each is
+   * written by `updateDriver` ONLY WHEN SENT: `undefined` leaves the column as
+   * it is, so the import and the seeds, which call this without them, clear
+   * nothing. An empty string from the form clears the field, as everywhere.
+   */
+  middleName?: unknown
+  birthDate?: unknown
+  telegram?: unknown
+  /** A member whose role is in `DISPATCHER_ROLES`, or empty for none. */
+  dispatcherUserId?: unknown
   /** The truck this driver runs. Must be under the same authority. */
   assignedTruckId?: unknown
   /**
@@ -730,9 +742,24 @@ export async function updateDriver(
   // actually is.
   const current = await tx.driver.findUnique({
     where: { id },
-    select: { id: true, companyId: true },
+    select: {
+      id: true,
+      companyId: true,
+      organizationId: true,
+      dispatcherUserId: true,
+    },
   })
   if (!current) throw new ReferenceError('not_found')
+
+  const dispatcherUserId =
+    input.dispatcherUserId === undefined
+      ? undefined
+      : await assignedDispatcher(
+          tx,
+          current.organizationId,
+          input.dispatcherUserId,
+          current.dispatcherUserId,
+        )
 
   const assignedTruckId = await pairedTruck(
     tx,
@@ -778,10 +805,55 @@ export async function updateDriver(
         ? { kind: assertDriverKind(input.kind) }
         : {}),
       ...(input.tags !== undefined ? { tags: parseTags(input.tags) } : {}),
+      // §6.4 part 2 v11.22 — the same rule: written only when sent.
+      ...(input.middleName !== undefined
+        ? { middleName: optionalText(input.middleName) }
+        : {}),
+      ...(input.birthDate !== undefined
+        ? { birthDate: dateOnly(input.birthDate, 'birthDate') }
+        : {}),
+      ...(input.telegram !== undefined
+        ? { telegram: optionalText(input.telegram) }
+        : {}),
+      ...(dispatcherUserId !== undefined ? { dispatcherUserId } : {}),
       assignedTruckId,
       assignedTrailerId,
     },
   })
+}
+
+/**
+ * The driver's assigned dispatcher, or null for none (§6.4 part 2, v11.22).
+ *
+ * A MEMBER OF THIS ORGANIZATION WHOSE ROLE DISPATCHES — `DISPATCHER_ROLES`,
+ * the list the picker offers — or refused in words under the field. The
+ * picker cannot be the gate: an import, a script and a stale tab reach this
+ * writer, and only one of them has a select.
+ *
+ * WHOEVER IS ALREADY THERE MAY STAY. A dispatcher whose role later changed is
+ * still in the record's list, so saving the form without touching the field
+ * must not refuse the name it already holds — the same rule the load's
+ * assignment pickers keep for an off-duty driver.
+ */
+async function assignedDispatcher(
+  tx: TxClient,
+  organizationId: string,
+  value: unknown,
+  currentId: string | null,
+): Promise<string | null> {
+  const userId = optionalText(value)
+  if (userId === null) return null
+  if (userId === currentId) return userId
+  const membership = await tx.membership.findUnique({
+    where: { userId_organizationId: { userId, organizationId } },
+    select: { role: true },
+  })
+  if (!membership || !isDispatcherRole(membership.role)) {
+    throw new ReferenceError('dispatcher_not_member', {
+      field: 'dispatcherUserId',
+    })
+  }
+  return userId
 }
 
 /**

@@ -54,6 +54,12 @@ import {
   type LastActivitySqlRow,
 } from './dispatch-fields'
 import { asNumber } from './sql-json'
+import {
+  crewOfTrucksFrom,
+  crewOfTrucksSql,
+  type CrewMember,
+  type CrewSqlRow,
+} from './team'
 
 // ---------------------------------------------------------------------------
 // /drivers IN THREE STATEMENTS (§6.4 part 1 v11.02, v11.04; the slow-pages
@@ -180,6 +186,12 @@ export interface DriverListFacts {
   dispatch: Map<string, DispatchFacts>
   lastActivity: Map<string, Date | null>
   trucks: Map<string, TruckFacts>
+  /**
+   * §6.4 part 3 v11.22 — the listed trucks' crews, for the Team column. The
+   * same seats `crewOfTrucks` returns (`crewOfTrucksSql`, held to it by
+   * `tests/integration/truck-list.test.ts`); `teamMatesFor` folds them.
+   */
+  crews: Map<string, CrewMember[]>
 }
 
 interface FactsRow {
@@ -190,6 +202,16 @@ interface FactsRow {
   dispatch: DispatchFactsSqlRow[]
   activity: LastActivitySqlRow[]
   trucks: TruckComplianceSqlRow[]
+  crews: CrewSqlRow[]
+}
+
+/**
+ * The aggregate's order, where one matters. The crews keep `crewOfTrucks`'
+ * seat order — oldest pairing first, then id — as its caller on `/trucks`
+ * does; the rest are maps keyed by id.
+ */
+const FACT_ORDER: Partial<Record<(typeof FACT_CTES)[number], Prisma.Sql>> = {
+  crews: Prisma.sql` ORDER BY x."updatedAt", x.id`,
 }
 
 const FACT_CTES = [
@@ -200,13 +222,14 @@ const FACT_CTES = [
   'dispatch',
   'activity',
   'trucks',
+  'crews',
 ] as const
 
 /**
  * The listed drivers' facts and their trucks' compliance, in ONE statement —
  * what `driverWarningFacts`, `dispatchFactsForDrivers`,
- * `lastActivityForDrivers` and `truckWarningFacts` return. An empty list
- * sends nothing.
+ * `lastActivityForDrivers`, `truckWarningFacts` and `crewOfTrucks` return. An
+ * empty list sends nothing.
  */
 export async function readDriverFacts(
   reader: TenantReader,
@@ -219,6 +242,7 @@ export async function readDriverFacts(
       dispatch: new Map(),
       lastActivity: new Map(),
       trucks: new Map(),
+      crews: new Map(),
     }
   }
   const texts: Record<(typeof FACT_CTES)[number], Prisma.Sql> = {
@@ -229,6 +253,9 @@ export async function readDriverFacts(
     dispatch: dispatchFactsSql(driverIds),
     activity: lastActivitySql(driverIds),
     trucks: truckComplianceSql(truckIds),
+    crews: crewOfTrucksSql(
+      Prisma.sql`d."assignedTruckId" = ANY(${[...truckIds]}::text[])`,
+    ),
   }
   const rows = await reader.read<FactsRow>(Prisma.sql`
     WITH ${Prisma.join(
@@ -240,7 +267,7 @@ export async function readDriverFacts(
     SELECT ${Prisma.join(
       FACT_CTES.map(
         (name) =>
-          Prisma.sql`(SELECT COALESCE(json_agg(x), '[]'::json) FROM ${Prisma.raw(name)} x) AS ${Prisma.raw(name)}`,
+          Prisma.sql`(SELECT COALESCE(json_agg(x${FACT_ORDER[name] ?? Prisma.empty}), '[]'::json) FROM ${Prisma.raw(name)} x) AS ${Prisma.raw(name)}`,
       ),
       ',\n',
     )}
@@ -258,5 +285,6 @@ export async function readDriverFacts(
     dispatch: dispatchFactsFrom(row.dispatch),
     lastActivity: lastActivityFrom(driverIds, row.activity),
     trucks: truckFactsFrom(truckIds, row.trucks),
+    crews: crewOfTrucksFrom(truckIds, row.crews),
   }
 }

@@ -380,10 +380,12 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships    Membership[]
-  sessions       Session[]
-  resetTokens    PasswordResetToken[]
-  driverProfiles Driver[]
+  memberships       Membership[]
+  sessions          Session[]
+  resetTokens       PasswordResetToken[]
+  driverProfiles    Driver[]             @relation("DriverUser")
+  /// Drivers this user is the assigned dispatcher of (§6.4 part 2, v11.22).
+  dispatchedDrivers Driver[]             @relation("DriverDispatcher")
 
   loadsBooked               Load[]
   statusEvents              LoadStatusEvent[]
@@ -837,7 +839,7 @@ model Driver {
 
   // Optional login for the driver portal. Not every driver gets one.
   userId String?
-  user   User?   @relation(fields: [userId], references: [id])
+  user   User?   @relation("DriverUser", fields: [userId], references: [id])
 
   // The id this driver carried in the system they were migrated from.
   //
@@ -913,11 +915,11 @@ model Driver {
 
   hireDate        DateTime?
   terminationDate DateTime?
-  status          DriverStatus  @default(AVAILABLE)
+  status          DriverStatus @default(AVAILABLE)
   /// THE DRIVER'S OWN WORDS (migration 70). This was `employmentType`, an
   /// `OwnershipType` — a truck's title on a person, with "company driver"
   /// spelled OWNED. `OwnershipType` stays on trucks and trailers.
-  driverType      DriverType    @default(COMPANY_DRIVER)
+  driverType      DriverType   @default(COMPANY_DRIVER)
 
   /// WHETHER THIS ROW IS A PERSON OR A REFERRAL PAYEE. `PERSON` | `PAYEE`.
   ///
@@ -997,6 +999,26 @@ model Driver {
   /// across a fleet, this becomes a table and the migration is a backfill.
   tags String[] @default([])
 
+  // ── MAIN, IN DATATRUCK'S SHAPE (§6.4 part 2, v11.22; migration 73) ────────
+  //
+  // Four facts the record form lacked. All nullable with no default, and
+  // `updateDriver` writes each only when the form sends it — omitted means
+  // unchanged, as `kind` and `tags` are — so the import, the seeds and any
+  // script that calls it clear nothing.
+  middleName String?
+  /// A calendar date, stored as midnight UTC like `hireDate` (§8).
+  birthDate  DateTime?
+  /// The driver's Telegram handle or number, as typed. Free text: Datatruck
+  /// carries both shapes and nothing here sends to it.
+  telegram   String?
+
+  /// The office member who dispatches this driver. A member of this
+  /// organization whose role is OWNER, ADMIN, MANAGER or DISPATCHER —
+  /// `fleet.ts` refuses anyone else by name. SET NULL when the user goes, so a
+  /// departed dispatcher leaves the driver unassigned rather than unsaveable.
+  dispatcherUserId String?
+  dispatcher       User?   @relation("DriverDispatcher", fields: [dispatcherUserId], references: [id], onDelete: SetNull)
+
   deletedAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1032,6 +1054,7 @@ model Driver {
   @@index([companyId, status])
   @@index([companyId, lastName])
   @@index([assignedTrailerId])
+  @@index([dispatcherUserId])
   @@index([tags], type: Gin)
 }
 

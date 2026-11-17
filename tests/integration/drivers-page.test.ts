@@ -24,6 +24,7 @@ import {
   lastActivityForDrivers,
 } from '@/lib/dispatch-fields'
 import { readDriverFacts, readDriversHead } from '@/lib/drivers-page'
+import { crewOfTrucks } from '@/lib/team'
 import { createPrismaClient, prisma, statementsOf } from '@/lib/db'
 import type { PrismaClient } from '@/generated/prisma/client'
 
@@ -493,7 +494,7 @@ describe('/drivers in three statements', () => {
   it('reads the facts the four loaders read, and the roster qualifies as isQualifiable does', async () => {
     const ids = Object.values(drivers)
     const trucks = [truckId]
-    const [one, warning, dispatch, activity, truckFacts] = await inOrg(
+    const [one, warning, dispatch, activity, truckFacts, crews] = await inOrg(
       async (tx) =>
         [
           await readDriverFacts(txReader(tx), ids, trucks),
@@ -501,12 +502,17 @@ describe('/drivers in three statements', () => {
           await dispatchFactsForDrivers(tx, ids),
           await lastActivityForDrivers(tx, ids),
           await truckWarningFacts(tx, trucks),
+          await crewOfTrucks(tx, trucks),
         ] as const,
     )
     expect(one.facts).toEqual(warning)
     expect(one.dispatch).toEqual(dispatch)
     expect(one.lastActivity).toEqual(activity)
     expect(one.trucks).toEqual(truckFacts)
+    // §6.4 part 3 v11.22 — the Team column's crews are `crewOfTrucks`' own,
+    // and the truck is crewed, so the comparison is not of two empty maps.
+    expect(one.crews).toEqual(crews)
+    expect(crews.get(truckId)!.length).toBeGreaterThan(0)
 
     const roster = await owner.driver.findMany({
       where: { id: { in: ids } },

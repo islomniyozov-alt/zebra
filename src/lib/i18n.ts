@@ -1038,6 +1038,37 @@ const en = {
     'That truck runs under a different authority. A driver and their truck must be under the same one — transfer the truck first, or pick another.',
   'ref.error.truckFull':
     'That truck already carries two drivers. Take one off it first, or pick another truck.',
+  'ref.error.dispatcherNotMember':
+    'Pick a dispatcher from the list — an owner, admin, manager or dispatcher in this organization.',
+  // §6.4 part 2 v11.22 — Main in Datatruck's shape.
+  'drivers.main.personal': 'Personal information',
+  'drivers.main.compliance': 'Compliance',
+  'drivers.main.assignments': 'Assignments',
+  'drivers.main.team': 'Team',
+  'drivers.middleName': 'Middle name',
+  'drivers.birthDate': 'Birth date',
+  'drivers.telegram': 'Telegram',
+  'drivers.employmentStatus': 'Employment status',
+  'drivers.driverStatus': 'Driver status',
+  'drivers.driverStatusHint':
+    'Worked out from the loads and the off-duty flag — not set here.',
+  'drivers.tenure': 'Tenure',
+  'drivers.tenureValue': '{years} yr {months} mo',
+  'drivers.dispatcher': 'Assigned dispatcher',
+  'drivers.dispatcherNone': 'No dispatcher',
+  'drivers.safetyLink':
+    'The CDL expiry, the medical card and the DQF are kept on Safety.',
+  'drivers.safetyLinkAction': 'Open Safety',
+  'drivers.teamDriver': 'Team driver',
+  'drivers.teamYes': 'Yes',
+  'drivers.teamNo': 'No',
+  'drivers.teamCoDriver': 'Co-driver',
+  'drivers.teamHint':
+    'A team is two drivers holding the same truck. Give both the same truck to pair them.',
+  'drivers.photo': 'Photo',
+  'drivers.photoUpload': 'Upload photo',
+  'drivers.photoFailed': 'The photo did not upload. Try again.',
+  'drivers.column.team': 'Team',
   'ref.error.notDriverKind':
     'Not a kind this record can be: a person or a referral payee.',
   'ref.error.paymentTypeDirect':
@@ -4283,6 +4314,36 @@ const ru: Dictionary = {
     'Этот тягач числится за другим перевозчиком. Водитель и его тягач должны быть под одним — сначала переведите тягач или выберите другой.',
   'ref.error.truckFull':
     'На этом тягаче уже два водителя. Сначала снимите одного или выберите другой тягач.',
+  'ref.error.dispatcherNotMember':
+    'Выберите диспетчера из списка — владельца, администратора, менеджера или диспетчера этой организации.',
+  'drivers.main.personal': 'Личные данные',
+  'drivers.main.compliance': 'Документы и допуск',
+  'drivers.main.assignments': 'Назначения',
+  'drivers.main.team': 'Команда',
+  'drivers.middleName': 'Отчество',
+  'drivers.birthDate': 'Дата рождения',
+  'drivers.telegram': 'Telegram',
+  'drivers.employmentStatus': 'Статус занятости',
+  'drivers.driverStatus': 'Статус водителя',
+  'drivers.driverStatusHint':
+    'Определяется по грузам и отметке «не на смене» — здесь не задаётся.',
+  'drivers.tenure': 'Стаж в компании',
+  'drivers.tenureValue': '{years} г. {months} мес.',
+  'drivers.dispatcher': 'Диспетчер',
+  'drivers.dispatcherNone': 'Без диспетчера',
+  'drivers.safetyLink':
+    'Срок CDL, медкарта и DQF хранятся во вкладке «Безопасность».',
+  'drivers.safetyLinkAction': 'Открыть «Безопасность»',
+  'drivers.teamDriver': 'Командный водитель',
+  'drivers.teamYes': 'Да',
+  'drivers.teamNo': 'Нет',
+  'drivers.teamCoDriver': 'Напарник',
+  'drivers.teamHint':
+    'Команда — это два водителя на одном тягаче. Назначьте обоим один тягач, чтобы объединить их.',
+  'drivers.photo': 'Фото',
+  'drivers.photoUpload': 'Загрузить фото',
+  'drivers.photoFailed': 'Фото не загрузилось. Попробуйте ещё раз.',
+  'drivers.column.team': 'Команда',
   'ref.error.notDriverKind':
     'Такого типа записи нет: человек или получатель реферальных.',
   'ref.error.paymentTypeDirect':
@@ -7485,6 +7546,36 @@ const fa: Dictionary = {
     'این کامیون زیر شرکت دیگری کار می‌کند. راننده و کامیونش باید زیر یک شرکت باشند — نخست کامیون را منتقل کنید یا کامیون دیگری برگزینید.',
   'ref.error.truckFull':
     'این کامیون از پیش دو راننده دارد. نخست یکی را بردارید یا کامیون دیگری برگزینید.',
+  'ref.error.dispatcherNotMember':
+    'یک دیسپچر از فهرست برگزینید — مالک، مدیر، سرپرست یا دیسپچرِ همین سازمان.',
+  'drivers.main.personal': 'اطلاعات شخصی',
+  'drivers.main.compliance': 'مدارک و صلاحیت',
+  'drivers.main.assignments': 'واگذاری‌ها',
+  'drivers.main.team': 'تیم',
+  'drivers.middleName': 'نام میانی',
+  'drivers.birthDate': 'تاریخ تولد',
+  'drivers.telegram': 'تلگرام',
+  'drivers.employmentStatus': 'وضعیت استخدام',
+  'drivers.driverStatus': 'وضعیت راننده',
+  'drivers.driverStatusHint':
+    'از روی بارها و نشانِ خارج از شیفت به دست می‌آید — اینجا تنظیم نمی‌شود.',
+  'drivers.tenure': 'سابقه در شرکت',
+  'drivers.tenureValue': '{years} سال {months} ماه',
+  'drivers.dispatcher': 'دیسپچر',
+  'drivers.dispatcherNone': 'بدون دیسپچر',
+  'drivers.safetyLink':
+    'تاریخ انقضای CDL، کارت پزشکی و DQF در زبانهٔ ایمنی نگهداری می‌شوند.',
+  'drivers.safetyLinkAction': 'باز کردن ایمنی',
+  'drivers.teamDriver': 'رانندهٔ تیمی',
+  'drivers.teamYes': 'بله',
+  'drivers.teamNo': 'خیر',
+  'drivers.teamCoDriver': 'همکار',
+  'drivers.teamHint':
+    'تیم یعنی دو راننده روی یک کامیون. برای جفت‌کردن، به هر دو یک کامیون بدهید.',
+  'drivers.photo': 'عکس',
+  'drivers.photoUpload': 'بارگذاری عکس',
+  'drivers.photoFailed': 'عکس بارگذاری نشد. دوباره تلاش کنید.',
+  'drivers.column.team': 'تیم',
   'ref.error.notDriverKind': 'چنین نوع رکوردی نیست: شخص یا گیرندهٔ معرفی.',
   'ref.error.paymentTypeDirect':
     'این بار مستقیم تسویه می‌شود، پس نوع پرداخت آن Direct است و تغییر نمی‌کند.',

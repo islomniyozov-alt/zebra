@@ -10,11 +10,17 @@ import { shapeRecords, type ComplianceRow } from './compliance'
 import { shapeInspections, type InspectionRow } from './inspections'
 import { ruleInForce, type PayRuleRow } from './driver-pay'
 import {
+  dispatchFactsFrom,
+  dispatchFactsSql,
+  dispatchStatusFrom,
   FINISHED,
   onTimeFrom,
   onTimeRateFrom,
+  type DispatchFactsSqlRow,
+  type DispatchStatus,
   type OnTimeRate,
 } from './dispatch-fields'
+import { DISPATCHER_ROLES } from './driver-main'
 import {
   dqfDocumentsSql,
   dqfDriversSql,
@@ -54,6 +60,7 @@ export const DATE_FIELDS = {
   Driver: [
     'offDutyUntil',
     'hireDate',
+    'birthDate',
     'terminationDate',
     'deletedAt',
     'createdAt',
@@ -106,6 +113,14 @@ export interface DriverRecordHead {
   timezone: string | null
   teamMate: TeamMate | null
   signIn: SignInLinkView | null
+  /**
+   * §6.4 part 2 v11.22 — who may be this driver's assigned dispatcher: the
+   * organization's members in `DISPATCHER_ROLES`, plus whoever already holds
+   * the field, so the select never drops the value it is showing.
+   */
+  dispatchers: { id: string; name: string }[]
+  /** §6.4 part 2 v11.22 — the derived dispatch status, never stored. */
+  driverStatus: DispatchStatus
 }
 
 type Json = Record<string, unknown>
@@ -131,6 +146,8 @@ interface HeadRow {
   crew: Json[]
   linked_user: Json | null
   candidates: Json[] | null
+  dispatchers: Json[]
+  dispatch: DispatchFactsSqlRow[]
 }
 
 const agg = (name: string, order: string) =>
@@ -264,7 +281,18 @@ export async function readDriverRecordHead(
        WHERE d."deletedAt" IS NULL AND d.status::text <> 'INACTIVE'
        ORDER BY d."updatedAt" ASC
        LIMIT ${TRUCK_SEATS + 1}
-    )
+    ),
+    -- §6.4 part 2 v11.22: the dispatcher picker — the members whose role
+    -- dispatches, and whoever already holds the field.
+    dispatchers AS (
+      SELECT u.id, u.name FROM "Membership" m JOIN "User" u ON u.id = m."userId"
+       WHERE m."organizationId" = ${input.organizationId}
+         AND m.role::text = ANY(${[...DISPATCHER_ROLES]}::text[])
+      UNION
+      SELECT u.id, u.name FROM me JOIN "User" u ON u.id = me."dispatcherUserId"
+    ),
+    -- …and the facts the derived driver status reads, the list's own text.
+    dispatch AS (${dispatchFactsSql([id])})
     SELECT
       (SELECT row_to_json(x) FROM me x) AS driver,
       ${agg('companies', 'x.name, x.id')},
@@ -289,6 +317,8 @@ export async function readDriverRecordHead(
       (SELECT c.timezone FROM "Company" c
         WHERE c.id = (SELECT "companyId" FROM me)) AS timezone,
       ${agg('crew', 'x."updatedAt", x.id')},
+      ${agg('dispatchers', 'x.name, x.id')},
+      ${agg('dispatch', 'x.id')},
       ${
         input.withSignIn
           ? Prisma.sql`(SELECT json_build_object('id', u.id, 'name', u.name,
@@ -494,5 +524,15 @@ export async function readDriverRecordHead(
             candidates: (row.candidates ?? []).map((u) => user(u)!),
           }
       : null,
+    dispatchers: row.dispatchers as unknown as { id: string; name: string }[],
+    driverStatus: dispatchStatusFrom(
+      dispatchFactsFrom(row.dispatch).get(id) ?? {
+        rosterStatus: driver.status,
+        isOffDuty: driver.isOffDuty,
+        offDutyUntil: driver.offDutyUntil,
+        activeStatuses: [],
+      },
+      input.now,
+    ),
   }
 }

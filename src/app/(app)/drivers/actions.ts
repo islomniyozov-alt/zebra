@@ -9,6 +9,14 @@ import { rememberAuthority, toFormState } from '../_reference/shared'
 import type { RecordFormState } from '@/components/forms/RecordForm'
 import type { DriverStatus, DriverType } from '@/generated/prisma/client'
 
+/**
+ * A field the form may not render: `undefined` when it is absent, so
+ * `updateDriver` leaves the column as it is (§6.4 part 2 v11.22) — `get`
+ * alone returns null for a missing field, which would clear it.
+ */
+const sent = (formData: FormData, name: string) =>
+  formData.has(name) ? formData.get(name) : undefined
+
 function read(formData: FormData) {
   return {
     companyId: String(formData.get('companyId') ?? ''),
@@ -36,6 +44,11 @@ function read(formData: FormData) {
     // `fleet.ts` refuses a kind outside the list and splits the tags.
     kind: formData.get('kind') || undefined,
     tags: formData.get('tags'),
+    // Main's four new fields (migration 73); the create form has none of them.
+    middleName: sent(formData, 'middleName'),
+    birthDate: sent(formData, 'birthDate'),
+    telegram: sent(formData, 'telegram'),
+    dispatcherUserId: sent(formData, 'dispatcherUserId'),
     assignedTruckId: formData.get('assignedTruckId'),
     assignedTrailerId: formData.get('assignedTrailerId'),
     // Both create-only, and both null on an edit because the form does not
