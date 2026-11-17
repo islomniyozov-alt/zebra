@@ -1,6 +1,7 @@
 import type { Prisma } from '@/generated/prisma/client'
 import { syncBatchStatus, type StatementVote } from './batch-status'
-import { settleableInPeriod } from './settlements'
+import { settleableUpTo } from './settlements'
+import { batchLowerBound, readCarryOverFloor } from './payroll-cutover'
 import {
   allocateSeries,
   batchNumberOf,
@@ -90,14 +91,23 @@ export const SETTLEMENT_BATCH_TIMEOUT_MS = 60_000
 export function settleableForBatch(
   companyId: string | readonly string[] | null,
   period: Week,
+  /**
+   * THE CARRY-OVER FLOOR (`readCarryOverFloor`): how far back "delivered
+   * earlier, not yet paid" reaches. REQUIRED, so no caller drafts the catch-up
+   * unbounded by forgetting it (owner's ruling 2026-11-17).
+   */
+  floor: Date,
 ): Prisma.LoadWhereInput {
   return {
-    // THE PERIOD, THE STATUS AND THE EVENT — one definition, shared with
-    // `settleableWhere`. The end is pushed to the last millisecond of the
-    // Saturday for the same reason the stop filter used to be: a period ending
-    // at midnight loses everything that landed on the last day.
-    ...settleableInPeriod(
-      period.start,
+    // THE RANGE AND EVERYTHING DELIVERED BEFORE IT, BACK TO THE FLOOR, NOT YET
+    // ON A STATEMENT — the catch-up ruling and its floor (MONEY-DESIGN §6,
+    // 2026-11-17). Delivered status, a delivery date from the earlier of the
+    // range start and the floor to the end. The end is pushed to the last
+    // millisecond of the last day: a period ending at midnight loses
+    // everything that landed on it. The fences below keep a trip from being
+    // drafted twice; the range's own no-overlap rule is `openBatch`'s.
+    ...settleableUpTo(
+      batchLowerBound(period.start, floor),
       new Date(period.end.getTime() + 86_399_999),
     ),
     // ONE COMPANY, SEVERAL, OR THE WHOLE ORGANIZATION through the same
@@ -209,9 +219,12 @@ export async function batchInputForOrg(
   } = {},
 ): Promise<DriverSettlementInput[]> {
   const netPay = options.netPay !== false
+  // THE CARRY-OVER FLOOR, ONE STATEMENT (owner's ruling 2026-11-17): how far
+  // back this batch's "delivered earlier, not yet paid" may reach.
+  const floor = await readCarryOverFloor(tx, input.companyId ?? null)
   const loads = await tx.load.findMany({
     where: {
-      ...settleableForBatch(input.companyId ?? null, input.period),
+      ...settleableForBatch(input.companyId ?? null, input.period, floor),
       // THE EXCLUSION SET, SUBTRACTED HERE AND NOWHERE ELSE, so every caller
       // that computes a batch honours it: the draft refresh, the preview, and
       // the agreement test all read one definition of "what is in this batch".

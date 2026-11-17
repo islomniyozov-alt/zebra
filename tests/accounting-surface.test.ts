@@ -713,6 +713,7 @@ describe('the open-batch flow', () => {
       'inTransit',
       'noDeliveryDate',
       'outsideRange',
+      'beforeCutover',
       'alreadyInBatch',
       'noDriver',
       'noRule',
@@ -731,9 +732,10 @@ describe('the open-batch flow', () => {
     const hints = [...page.matchAll(/'(preview\.hint\.\w+)'/g)].map(
       (hit) => hit[1],
     )
-    // SIX SINCE 2026-11-17: `noDeliveryDate` (MONEY-DESIGN §6).
-    expect(new Set(labels).size).toBe(6)
-    expect(new Set(hints).size).toBe(6)
+    // SEVEN SINCE 2026-11-17: `noDeliveryDate` and `beforeCutover`
+    // (MONEY-DESIGN §6, the delivery date and the carry-over floor).
+    expect(new Set(labels).size).toBe(7)
+    expect(new Set(hints).size).toBe(7)
   })
 
   // ── A LOAD LANDS IN EXACTLY ONE BUCKET ──────────────────────────────────
@@ -752,9 +754,15 @@ describe('the open-batch flow', () => {
     // delivery date (`deliveryDateOf`), and the POD no longer selects trips —
     // Amazon loads carry no POD of their own. The range's last day counts
     // whole, as the engine's does.
+    // And since the catch-up ruling the same day, "outside" is AFTER the range
+    // only: a trip delivered before it is available, flagged `earlier`.
     expect(preview).toContain('const deliveryAt = deliveryDateOf({')
     expect(preview).toMatch(
-      /deliveryAt\.getTime\(\) < input\.from\.getTime\(\) \|\|\s+deliveryAt\.getTime\(\) > lastInstant/,
+      /deliveryAt\.getTime\(\) > lastInstant\s+\? 'outsideRange'/,
+    )
+    expect(preview).not.toMatch(/deliveryAt\.getTime\(\) < input\.from/)
+    expect(preview).toContain(
+      'earlier: deliveryAt !== null && deliveryAt < input.from',
     )
     expect(preview).not.toContain('podAt')
   })

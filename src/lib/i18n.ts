@@ -144,12 +144,16 @@ const en = {
     'The batch covers every authority; the filter above narrows this list only.',
   'preview.needAuthority': 'Choose an authority to create a batch.',
   'preview.exists': 'A batch for this authority already overlaps these dates:',
+  'preview.earlier': 'Delivered earlier, not yet paid',
+  'preview.earlierHint':
+    'Delivered before this range and on no statement. They go into this batch unless unticked.',
   'preview.emptyAvailable': 'No trips would go into this batch',
   'preview.emptyAvailableHint':
     'Widen the range, or look below at what is being left out and why.',
   'preview.reason.inTransit': 'Not delivered',
   'preview.reason.noDeliveryDate': 'No delivery date',
-  'preview.reason.outsideRange': 'Delivered outside the range',
+  'preview.reason.outsideRange': 'Delivered after the range',
+  'preview.reason.beforeCutover': 'Delivered before payroll cutover',
   'preview.reason.alreadyInBatch': 'Already on a statement',
   'preview.reason.noDriver': 'No driver',
   'preview.reason.noRule': 'No pay rule',
@@ -158,7 +162,14 @@ const en = {
   'preview.hint.noDeliveryDate':
     'Delivered, but no delivery stop departure and no Delivered time is recorded. Record the departure on the load.',
   'preview.hint.outsideRange':
-    'Delivered near this window but outside it — a trip is placed by its delivery date.',
+    'Delivered after this range — a trip is placed by its delivery date.',
+  'preview.hint.beforeCutover':
+    'Delivered before the payroll cutover on Settings, so it never carries over into a Zebra batch.',
+  'settings.payroll': 'Payroll',
+  'settings.cutover': 'Payroll cutover date',
+  'settings.cutoverHint':
+    '"Delivered earlier, not yet paid" reaches back to this date and no further. Empty: each authority carries over from the start of its first Zebra batch.',
+  'settings.error.badCutover': 'Enter a real date, or leave it empty.',
   'preview.hint.alreadyInBatch':
     'These are settled. Open the statement to see what was paid.',
   'preview.hint.noDriver':
@@ -3427,12 +3438,16 @@ const ru: Dictionary = {
     'Партия охватывает все компании; фильтр выше сужает только этот список.',
   'preview.needAuthority': 'Выберите компанию, чтобы создать партию.',
   'preview.exists': 'Партия этой компании уже пересекается с этими датами:',
+  'preview.earlier': 'Доставлено раньше, ещё не оплачено',
+  'preview.earlierHint':
+    'Доставлено до этого диапазона и не входит ни в один расчёт. Войдёт в эту партию, если не снять отметку.',
   'preview.emptyAvailable': 'В эту партию не войдёт ни один рейс',
   'preview.emptyAvailableHint':
     'Расширьте диапазон или посмотрите ниже, что исключено и почему.',
   'preview.reason.inTransit': 'Не доставлено',
   'preview.reason.noDeliveryDate': 'Нет даты доставки',
-  'preview.reason.outsideRange': 'Доставлено вне диапазона',
+  'preview.reason.outsideRange': 'Доставлено после диапазона',
+  'preview.reason.beforeCutover': 'Доставлено до перехода расчётов',
   'preview.reason.alreadyInBatch': 'Уже в расчёте',
   'preview.reason.noDriver': 'Без водителя',
   'preview.reason.noRule': 'Нет правила оплаты',
@@ -3441,7 +3456,15 @@ const ru: Dictionary = {
   'preview.hint.noDeliveryDate':
     'Доставлено, но не записаны ни выезд с точки доставки, ни время доставки. Укажите выезд в грузе.',
   'preview.hint.outsideRange':
-    'Доставлено рядом с этим окном, но вне его — рейс относится к дате доставки.',
+    'Доставлено после этого диапазона — рейс относится к дате доставки.',
+  'preview.hint.beforeCutover':
+    'Доставлено до даты перехода расчётов в настройках, поэтому никогда не переносится в партию Zebra.',
+  'settings.payroll': 'Расчёты',
+  'settings.cutover': 'Дата перехода расчётов',
+  'settings.cutoverHint':
+    '«Доставлено раньше, ещё не оплачено» доходит до этой даты, не дальше. Пусто: каждая компания переносит с начала своей первой партии Zebra.',
+  'settings.error.badCutover':
+    'Введите настоящую дату или оставьте поле пустым.',
   'preview.hint.alreadyInBatch':
     'Они уже рассчитаны. Откройте расчёт, чтобы увидеть выплату.',
   'preview.hint.noDriver':
@@ -6677,12 +6700,16 @@ const fa: Dictionary = {
     'دسته همهٔ شرکت‌ها را در بر می‌گیرد؛ فیلتر بالا تنها این فهرست را محدود می‌کند.',
   'preview.needAuthority': 'برای ایجاد دسته، یک شرکت انتخاب کنید.',
   'preview.exists': 'دسته‌ای از این شرکت با این تاریخ‌ها هم‌پوشانی دارد:',
+  'preview.earlier': 'زودتر تحویل‌شده، هنوز پرداخت‌نشده',
+  'preview.earlierHint':
+    'پیش از این بازه تحویل شده و در هیچ صورت‌حسابی نیست. اگر تیک برداشته نشود، در این دسته می‌آید.',
   'preview.emptyAvailable': 'هیچ سفری وارد این دسته نمی‌شود',
   'preview.emptyAvailableHint':
     'بازه را گسترده کنید، یا پایین‌تر ببینید چه چیزی و چرا کنار گذاشته شده است.',
   'preview.reason.inTransit': 'تحویل‌نشده',
   'preview.reason.noDeliveryDate': 'بدون تاریخ تحویل',
-  'preview.reason.outsideRange': 'تحویل خارج از بازه',
+  'preview.reason.outsideRange': 'تحویل پس از بازه',
+  'preview.reason.beforeCutover': 'تحویل پیش از انتقال حقوق',
   'preview.reason.alreadyInBatch': 'از پیش در صورت‌حساب',
   'preview.reason.noDriver': 'بدون راننده',
   'preview.reason.noRule': 'بدون قاعدهٔ پرداخت',
@@ -6691,7 +6718,14 @@ const fa: Dictionary = {
   'preview.hint.noDeliveryDate':
     'تحویل شده، اما نه زمان خروج از توقف تحویل ثبت شده و نه زمان تحویل. زمان خروج را در بار ثبت کنید.',
   'preview.hint.outsideRange':
-    'نزدیک این بازه اما بیرون آن تحویل شده — هر سفر بر پایهٔ تاریخ تحویلش جای می‌گیرد.',
+    'پس از این بازه تحویل شده — هر سفر بر پایهٔ تاریخ تحویلش جای می‌گیرد.',
+  'preview.hint.beforeCutover':
+    'پیش از تاریخ انتقال حقوق در تنظیمات تحویل شده، پس هرگز به دستهٔ Zebra منتقل نمی‌شود.',
+  'settings.payroll': 'حقوق',
+  'settings.cutover': 'تاریخ انتقال حقوق',
+  'settings.cutoverHint':
+    '«زودتر تحویل‌شده، هنوز پرداخت‌نشده» تا این تاریخ و نه پیش‌تر می‌رود. خالی: هر شرکت از آغاز نخستین دستهٔ Zebra خود منتقل می‌کند.',
+  'settings.error.badCutover': 'یک تاریخ واقعی وارد کنید یا خالی بگذارید.',
   'preview.hint.alreadyInBatch':
     'این‌ها تسویه شده‌اند. برای دیدن پرداخت، صورت‌حساب را باز کنید.',
   'preview.hint.noDriver':

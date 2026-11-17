@@ -3,8 +3,10 @@ import { retryingClient } from '../retrying-client'
 import { withOrg, type TxClient } from '@/lib/tenancy'
 import { createBroker } from '@/lib/brokers'
 import { LOAD_WRITE_TIMEOUT_MS, createLoad } from '@/lib/loads'
-import { openBatch, settleableForBatch } from '@/lib/settlement-batch'
-import { SETTLEABLE_LOAD } from '@/lib/settlements'
+import { openBatch } from '@/lib/settlement-batch'
+import { SETTLEABLE_LOAD, settleableInPeriod } from '@/lib/settlements'
+import { previewBatch } from '@/lib/batch-preview'
+import { savePayrollCutover } from '@/lib/payroll-cutover'
 import { weekOf, type Week } from '@/lib/settlement-week'
 import type { Prisma, PrismaClient } from '@/generated/prisma/client'
 
@@ -155,11 +157,26 @@ async function names(where: Prisma.LoadWhereInput): Promise<string[]> {
   return rows.map((row) => nameOf.get(row.id)!).sort()
 }
 
-/** The delivery basis without the "not yet on a statement" fence. */
+/**
+ * The delivery basis over the RANGE — `settleableInPeriod`, the range alone,
+ * for the authority. The batch drafts this plus the catch-up (below).
+ */
 function deliveryBasis(period: Week): Prisma.LoadWhereInput {
-  const where = settleableForBatch(companyId, period)
-  const { settlementLoadLines: _a, settlementLines: _b, ...selection } = where
-  return selection
+  return {
+    ...settleableInPeriod(
+      period.start,
+      new Date(period.end.getTime() + 86_399_999),
+    ),
+    companyId,
+    driverId: { not: null },
+  }
+}
+
+/** What Create showed for W1 before any batch: both groups, by name. */
+const w1Groups = {
+  inRange: [] as string[],
+  earlier: [] as string[],
+  beforeCutover: [] as string[],
 }
 
 const before: Record<'W1' | 'W2', { delivery: string[]; pod: string[] }> = {
@@ -268,6 +285,47 @@ beforeAll(async () => {
     deliveredDay: 9,
     podDay: 10,
   })
+  // THE CATCH-UP (owner's ruling 2026-11-17): delivered three weeks before W1,
+  // on no statement — beyond the picker's fourteen-day window, so only the
+  // catch-up clause can bring it in. W1's batch drafts it.
+  await trip({
+    name: 'earlyUnpaid',
+    status: 'POD_RECEIVED',
+    deliveredDay: -21,
+    podDay: -20,
+  })
+  // THE CARRY-OVER FLOOR (owner's ruling 2026-11-17): the organization's
+  // payroll cutover, twenty-five days before W1, through the Settings writer.
+  // `earlyUnpaid` (day -21) is after it and carries over; `beforeFloor`
+  // (day -40) is before it and never does. Without the setting, W1 — the
+  // authority's first batch — would be the floor and neither would.
+  await trip({
+    name: 'beforeFloor',
+    status: 'POD_RECEIVED',
+    deliveredDay: -40,
+    podDay: -39,
+  })
+  const cut = await inOrg((tx) =>
+    savePayrollCutover(
+      tx,
+      organizationId,
+      new Date(W1.start.getTime() - 25 * DAY).toISOString().slice(0, 10),
+    ),
+  )
+  if (!cut.ok) throw new Error('payroll cutover refused')
+
+  // WHAT CREATE SHOWS FOR W1, BEFORE ANY BATCH: the range and the catch-up.
+  const w1 = await inOrg((tx) =>
+    previewBatch(tx, { from: W1.start, to: W1.end, companyId }),
+  )
+  const mine = (trips: { loadId: string }[]) =>
+    trips
+      .map((t) => nameOf.get(t.loadId))
+      .filter((n): n is string => n !== undefined)
+      .sort()
+  w1Groups.inRange = mine(w1.available.filter((t) => !t.earlier))
+  w1Groups.earlier = mine(w1.available.filter((t) => t.earlier))
+  w1Groups.beforeCutover = mine(w1.unavailable.beforeCutover)
 
   // THE SELECTIONS, BEFORE ANY BATCH PUTS LINES ON THE LOADS.
   for (const [key, period] of [
@@ -347,7 +405,10 @@ describe('trips by delivery date against trips by POD date, every batch', () => 
     expect(before.W2.delivery).toEqual(['plainW2'])
   })
 
-  it('and each batch the engine drafted holds exactly its delivery-basis trips', async () => {
+  it('and each batch the engine drafted holds its range plus the catch-up', async () => {
+    // W1 drafts its range AND `earlyUnpaid`, delivered three weeks before and
+    // on no statement. W2 drafts its range only: everything earlier is on W1.
+    const catchUp = { W1: ['earlyUnpaid'], W2: [] as string[] }
     for (const key of ['W1', 'W2'] as const) {
       const lines = await owner.settlementLoadLine.findMany({
         where: { settlement: { batchId: batchIds[key] } },
@@ -356,7 +417,44 @@ describe('trips by delivery date against trips by POD date, every batch', () => 
       const drafted = [
         ...new Set(lines.map((l) => nameOf.get(l.loadId)!)),
       ].sort()
-      expect(drafted, key).toEqual(before[key].delivery)
+      expect(drafted, key).toEqual(
+        [...before[key].delivery, ...catchUp[key]].sort(),
+      )
     }
+  })
+})
+
+describe('Create shows two groups, both above zero (the catch-up ruling)', () => {
+  it('the range, and "Delivered earlier, not yet paid" by name', () => {
+    expect(w1Groups.inRange.length).toBeGreaterThan(0)
+    expect(w1Groups.earlier.length).toBeGreaterThan(0)
+    expect(w1Groups.inRange).toEqual(before.W1.delivery)
+    expect(w1Groups.earlier).toEqual(['earlyUnpaid'])
+  })
+
+  it('reaches back to the payroll cutover and no further', async () => {
+    // AFTER THE FLOOR, PRESENT; BEFORE IT, ABSENT — from the group, and from
+    // the batch the engine drafted, with the setting's change audited.
+    expect(w1Groups.earlier).toContain('earlyUnpaid')
+    expect(w1Groups.earlier).not.toContain('beforeFloor')
+    expect(w1Groups.beforeCutover).toEqual(['beforeFloor'])
+    expect(
+      await owner.settlementLoadLine.count({
+        where: { loadId: ids.beforeFloor },
+      }),
+    ).toBe(0)
+    const audit = await owner.auditLog.findFirst({
+      where: {
+        organizationId,
+        entityType: 'Organization',
+        entityId: organizationId,
+        action: 'UPDATE',
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { changes: true },
+    })
+    expect(audit?.changes).toMatchObject({
+      payrollCutoverDate: { from: null },
+    })
   })
 })

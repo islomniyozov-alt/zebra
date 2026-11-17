@@ -141,6 +141,15 @@ model Organization {
   // Nullable because most tenants never turn this on.
   inboundAddress String? @unique
 
+  // THE PAYROLL CUTOVER — the carry-over floor (MONEY-DESIGN §6, owner's
+  // ruling 2026-11-17, migration 74). "Delivered earlier, not yet paid" reaches
+  // back to this date and no further; a trip delivered before it never carries
+  // over into a batch. NULL means the default: per authority, the start of its
+  // earliest live Zebra batch, else today — `readCarryOverFloor` decides.
+  // Set on Settings by OWNER/ADMIN (`organization:update`); the audit extension
+  // records every change with its from and to.
+  payrollCutoverDate DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

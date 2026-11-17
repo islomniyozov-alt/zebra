@@ -5,6 +5,7 @@ import { companyIdScopeFilter } from '@/lib/tenancy'
 import { settingsForScope } from '@/lib/settings'
 import { bpsToInput, centsToInput } from '@/lib/money'
 import { SettingsForm } from '../_reference/SettingsForm'
+import { PayrollCutoverForm } from './PayrollCutoverForm'
 import type { MessageKey } from '@/lib/i18n'
 
 // PHASE 4 §5 STEP 6 — the settings screen.
@@ -57,9 +58,24 @@ export default async function SettingsPage() {
 
   const { t } = await getLocaleContext()
 
-  const rows = await withCurrentOrg('read', 'organization', (tx, session) =>
-    // Scoped, so a user restricted to one authority edits one authority.
-    settingsForScope(tx, companyIdScopeFilter(session.companyScopes)),
+  const { rows, cutover } = await withCurrentOrg(
+    'read',
+    'organization',
+    async (tx, session) => ({
+      // Scoped, so a user restricted to one authority edits one authority.
+      rows: await settingsForScope(
+        tx,
+        companyIdScopeFilter(session.companyScopes),
+      ),
+      // THE PAYROLL CUTOVER, the organization's own (MONEY-DESIGN §6,
+      // owner's ruling 2026-11-17).
+      cutover:
+        (
+          await tx.organization.findFirst({
+            select: { payrollCutoverDate: true },
+          })
+        )?.payrollCutoverDate ?? null,
+    }),
   )
 
   const fieldLabels = Object.fromEntries(
@@ -80,6 +96,22 @@ export default async function SettingsPage() {
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-surface-2 px-gutter py-z5">
         <div className="flex max-w-[900px] flex-col gap-z5">
+          {/* THE ORGANIZATION'S PAYROLL CUTOVER, above the per-authority forms:
+           * one date for the organization (MONEY-DESIGN §6, 2026-11-17). */}
+          <section className="rounded-card border border-border bg-surface p-z4">
+            <PayrollCutoverForm
+              value={cutover ? cutover.toISOString().slice(0, 10) : ''}
+              mayEdit={mayEdit}
+              labels={{
+                section: t('settings.payroll'),
+                cutover: t('settings.cutover'),
+                hint: t('settings.cutoverHint'),
+                save: t('settings.save'),
+                saved: t('settings.saved'),
+                readOnly: t('settings.readOnly'),
+              }}
+            />
+          </section>
           {rows.map((row) => (
             <section
               key={row.companyId}

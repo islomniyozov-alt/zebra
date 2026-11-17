@@ -2,6 +2,11 @@ import { Prisma } from '@/generated/prisma/client'
 import type { TenantReader } from './tenancy'
 import { asDate } from './sql-json'
 import {
+  carryOverFloorFrom,
+  carryOverFloorSql,
+  type CarryOverFloorRow,
+} from './payroll-cutover'
+import {
   previewFrom,
   previewLoadsFrom,
   previewLoadsSql,
@@ -84,6 +89,8 @@ interface HeadRow {
   })[]
   loads: PreviewLoadSqlRow[]
   exclusions: string[]
+  /** `carryOverFloorSql`'s row (owner's ruling 2026-11-17). */
+  floor: CarryOverFloorRow | null
 }
 
 const stamp = (value: Stamp): Date => asDate(value) ?? new Date(NaN)
@@ -116,18 +123,25 @@ export async function readBatchPageHead(
       from: Prisma.sql`(SELECT "periodStart" FROM b)`,
       to: Prisma.sql`(SELECT "periodEnd" FROM b)`,
       companyId: Prisma.sql`(SELECT "companyId" FROM b)`,
+      // This batch's own lined trips count as catch-up (2026-11-17), as
+      // `previewBatch`'s `catchUpWhere(forBatchId)` reads them.
+      forBatchId: Prisma.sql`(SELECT id FROM b)`,
     })}),
     exclusions AS (
       SELECT e."loadId" FROM "SettlementBatchExclusion" e
        WHERE e."batchId" = (SELECT id FROM b)
-    )
+    ),
+    -- THE CARRY-OVER FLOOR, the text \`readCarryOverFloor\` sends, for the
+    -- batch's own scope (owner's ruling 2026-11-17).
+    floor AS (${carryOverFloorSql(Prisma.sql`(SELECT "companyId" FROM b)`)})
     SELECT (SELECT row_to_json(b) FROM b) AS batch,
            (SELECT COALESCE(json_agg(x ORDER BY x."createdAt", x.id), '[]'::json)
               FROM settlements x) AS settlements,
            (SELECT COALESCE(json_agg(x ORDER BY x."loadNumber"), '[]'::json)
               FROM loads x) AS loads,
            (SELECT COALESCE(json_agg(x."loadId" ORDER BY x."loadId"), '[]'::json)
-              FROM exclusions x) AS exclusions`)
+              FROM exclusions x) AS exclusions,
+           (SELECT row_to_json(x) FROM floor x) AS floor`)
 
   const row = rows[0]
   if (!row?.batch) return null
@@ -159,7 +173,12 @@ export async function readBatchPageHead(
   const preview = previewFrom(
     previewLoadsFrom(row.loads),
     new Set(row.exclusions),
-    { from: batch.periodStart, to: batch.periodEnd, forBatchId: batch.id },
+    {
+      from: batch.periodStart,
+      to: batch.periodEnd,
+      forBatchId: batch.id,
+      floor: carryOverFloorFrom(row.floor, new Date()),
+    },
   )
   return { batch, preview }
 }
