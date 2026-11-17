@@ -88,6 +88,14 @@ export interface FilterRange {
   label: string
   fromLabel: string
   toLabel: string
+  /**
+   * What each input shows when the URL names no date — the range the page is
+   * ACTUALLY reading by default, so an empty box never stands for a date the
+   * server chose (Create batch's last full week, §6.2.10 part 7). Omitted, an
+   * absent date is an empty box, as before.
+   */
+  defaultFrom?: string
+  defaultTo?: string
 }
 
 interface FilterBarProps {
@@ -313,7 +321,7 @@ export function FilterBar({
               type="date"
               aria-label={range.fromLabel}
               key={`from-${params.get('from') ?? ''}`}
-              defaultValue={params.get('from') ?? ''}
+              defaultValue={params.get('from') ?? range.defaultFrom ?? ''}
               onChange={(event) => setDay('from', event.target.value)}
               className="h-control-compact rounded-control border border-border-strong bg-surface px-z2 font-mono text-xs text-ink focus:border-accent focus:outline-none"
             />
@@ -324,7 +332,7 @@ export function FilterBar({
               type="date"
               aria-label={range.toLabel}
               key={`to-${params.get('to') ?? ''}`}
-              defaultValue={params.get('to') ?? ''}
+              defaultValue={params.get('to') ?? range.defaultTo ?? ''}
               onChange={(event) => setDay('to', event.target.value)}
               className="h-control-compact rounded-control border border-border-strong bg-surface px-z2 font-mono text-xs text-ink focus:border-accent focus:outline-none"
             />

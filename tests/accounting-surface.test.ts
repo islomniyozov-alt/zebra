@@ -785,9 +785,14 @@ describe('the open-batch flow', () => {
     //
     // BOTH BRANCHES, because a screen that only ever said one of them would pass
     // a check for either string on its own.
-    expect(page).toContain("t('preview.forOrg')")
+    //
+    // §6.2.10 part 7 (R2, 2026-11-17): a new batch names an authority, so the
+    // other branch is no longer "every authority" but "choose one" — and the
+    // org-wide sentence must NOT come back on this screen.
+    expect(page).toContain("t('preview.needAuthority')")
     expect(page).toContain("t('preview.forCompany')")
     expect(page).toContain("t('preview.willOpen')")
+    expect(page).not.toContain("t('preview.forOrg')")
   })
 })
 

@@ -19,7 +19,7 @@ import {
   checkDateFor,
   computeBatch,
   remittanceOutcome,
-  isSettlementWeek,
+  isBatchPeriod,
   type BatchResult,
   type DriverSettlementInput,
   type SettleableLoad,
@@ -703,7 +703,33 @@ export async function batchInputForOrg(
 }
 
 /**
- * Create a batch for one company and one week, and draft it immediately.
+ * The live batches a new one would collide with (§6.2.10 part 7, the overlap
+ * ruling 2026-11-17): same organization, not deleted, a period that shares at
+ * least one day with this one (inclusive), and an overlapping scope — the same
+ * authority, or either side the whole organization. Two authorities may share
+ * dates freely.
+ *
+ * A WHERE, NOT A QUERY, so the one predicate is what `openBatch` sends and
+ * what `tests/create-batch.test.ts` evaluates against rows.
+ */
+export function batchOverlapWhere(input: {
+  organizationId: string
+  period: Week
+  companyId?: string | null
+}): Prisma.SettlementBatchWhereInput {
+  return {
+    organizationId: input.organizationId,
+    deletedAt: null,
+    periodStart: { lte: input.period.end },
+    periodEnd: { gte: input.period.start },
+    ...(input.companyId == null
+      ? {}
+      : { OR: [{ companyId: input.companyId }, { companyId: null }] }),
+  }
+}
+
+/**
+ * Create a batch for one authority and one period, and draft it immediately.
  *
  * ── ONE CREATE, TWO CALLERS ──────────────────────────────────────────────
  *
@@ -751,10 +777,23 @@ export async function openBatch(
 ): Promise<
   { ok: true; batchId: string } | { ok: false; reason: BatchRefusal }
 > {
-  if (!isSettlementWeek(input.period)) {
-    return { ok: false, reason: { kind: 'not_a_week' } }
+  // ANY WHOLE-DAY PERIOD, START ON OR BEFORE END (§6.2.10 part 7, R1). It was
+  // a settlement week by construction until the owner's ruling of 2026-11-17.
+  if (!isBatchPeriod(input.period)) {
+    return { ok: false, reason: { kind: 'bad_range' } }
   }
 
+  // ── NO OVERLAP PER AUTHORITY (part 7, the overlap ruling 2026-11-17) ──────
+  //
+  // Read this block's history below as "one batch per period". With a free
+  // range, an identical start is no longer the collision: two RAM batches over
+  // 11/08–11/14 and 11/10–11/16 share four days, and the deductions engine
+  // takes every weekly charge ONCE PER STATEMENT whatever the period's length,
+  // so both would take RAM's weekly insurance. Trips cannot double —
+  // `alreadyInBatch` fences them — but charges could. So the test is OVERLAP:
+  // a live batch whose period touches this one (start ≤ our end and end ≥ our
+  // start, inclusive days) and whose scope overlaps ours.
+  //
   // ── ONE BATCH PER PERIOD, ENFORCED HERE AND NOT BY THE DATABASE ───────
   //
   // The ruling is one batch per period for the organization, and this is where
@@ -783,14 +822,7 @@ export async function openBatch(
   // has to rely on that: finding out by noticing a half-empty batch is not the
   // same as being told.
   const existing = await tx.settlementBatch.findFirst({
-    where: {
-      organizationId: input.organizationId,
-      deletedAt: null,
-      periodStart: input.period.start,
-      ...(input.companyId == null
-        ? {}
-        : { OR: [{ companyId: input.companyId }, { companyId: null }] }),
-    },
+    where: batchOverlapWhere(input),
     select: { id: true, status: true, batchNumber: true },
   })
   if (existing) {
@@ -862,6 +894,8 @@ export async function openBatch(
 
 export type BatchRefusal =
   | { kind: 'not_a_week' }
+  /** Not a whole-day period with start on or before end (part 7, R1). */
+  | { kind: 'bad_range' }
   | { kind: 'not_found' }
   | { kind: 'not_draft'; status: string }
   | { kind: 'blocked'; blockers: BatchResult['blockers'] }
@@ -1073,9 +1107,12 @@ export async function finaliseBatch(
   const batch = await tx.settlementBatch.findFirstOrThrow({
     where: { id: batchId },
   })
+  // THE SAME TEST `openBatch` APPLIES (part 7, R1): a batch opened over any
+  // whole-day range finalises; one whose stored period is not a period at all
+  // (end before start) still refuses by name.
   const period: Week = { start: batch.periodStart, end: batch.periodEnd }
-  if (!isSettlementWeek(period)) {
-    return { ok: false, reason: { kind: 'not_a_week' } }
+  if (!isBatchPeriod(period)) {
+    return { ok: false, reason: { kind: 'bad_range' } }
   }
 
   // THE NUMBER THE BATCH ALREADY HAS. `openBatch` allocates it, so finalising

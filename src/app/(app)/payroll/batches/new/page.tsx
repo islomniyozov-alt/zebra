@@ -2,14 +2,21 @@ import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { listedAuthorities } from '@/lib/companies'
-import { isSettlementWeek, payWeekFor, weekOf } from '@/lib/settlement-week'
+import {
+  dayFromParam,
+  isBatchPeriod,
+  lastFullSettlementWeek,
+} from '@/lib/settlement-week'
 import {
   previewBatch,
   UNAVAILABLE_REASONS,
   type UnavailableReason,
 } from '@/lib/batch-preview'
 import { applyList, type RawParams } from '@/lib/list-view'
-import { SETTLEMENT_BATCH_TIMEOUT_MS } from '@/lib/settlement-batch'
+import {
+  batchOverlapWhere,
+  SETTLEMENT_BATCH_TIMEOUT_MS,
+} from '@/lib/settlement-batch'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { BatchTripsGrid } from '../BatchTripsGrid'
 import { FilterBar } from '@/components/ui/FilterBar'
@@ -19,26 +26,26 @@ import { gridView, pagedFooterLabel } from '../../../_grid/grid-page'
 import { CreateBatch } from './CreateBatch'
 import type { MessageKey } from '@/lib/i18n'
 
-// PAYROLL → BATCHES → OPEN A BATCH (owner's ruling, 2026-09-29).
+// PAYROLL → BATCHES → CREATE BATCH (owner's ruling, 2026-09-29; §6.2.10 part 7
+// step 2, owner's rulings 2026-11-17).
 //
 // Authority and a date range, the freight that would go in, and everything
 // that would not — grouped by why.
 //
-// ── THE AUTHORITY NARROWS THE GRID AND NOT THE BATCH ──────────────────────
+// ── THE AUTHORITY IS REQUIRED, AND IT SCOPES THE BATCH (part 7, R2) ───────
 //
-// Datatruck opens one batch per paying company; Zebra settles the organization
-// in one run (Islom, 2026-09-11), so the authority chip here is a reading aid
-// and the batch it creates covers every authority. THE SCREEN SAYS SO, because
-// picking "RAM Haulage" and pressing Create and getting a batch with Dolphins
-// freight in it would otherwise be a surprise about money.
+// Datatruck opens one batch per paying company and so does Zebra now: the
+// authority chosen here is the batch's `companyId`. With none chosen the grid
+// still shows every authority's freight, the line above it says an authority
+// is needed, and Create is off.
 //
-// ── THE RANGE PREVIEWS; THE WEEK IS WHAT OPENS ────────────────────────────
+// ── THE RANGE IS WHAT OPENS (part 7, R1) ─────────────────────────────────
 //
-// A batch is a settlement week by construction — `openBatch` refuses anything
-// else as `not_a_week`. So the range is the window this screen LOOKS at, and
-// Create opens the week the range starts in, named on the button. A range
-// spanning two weeks is allowed to be previewed and refused at Create, rather
-// than silently opening the first of them.
+// From and To are free, pre-filled with the last FULL settlement week. What
+// the screen shows is what Create opens — no snapping to a week. A range that
+// overlaps a live batch for the same authority is named above the grid and
+// Create is off, because weekly charges are taken once per statement and two
+// overlapping batches would take them twice (the overlap ruling).
 
 const PATH = '/payroll/batches/new'
 
@@ -76,25 +83,16 @@ export default async function OpenBatchPage({
   const raw = await searchParams
   const { t } = await getLocaleContext()
 
-  // THE WEEK THAT IS DUE IS THE DEFAULT RANGE — the period that ended two
-  // Saturdays ago (MONEY-DESIGN §0), not the one that just closed.
-  const due = payWeekFor(new Date())
-  const asDay = (value: unknown, fallback: Date) =>
-    typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
-      ? new Date(`${value}T00:00:00.000Z`)
-      : fallback
-  const from = asDay(raw.from, due.period.start)
-  const to = asDay(raw.to, due.period.end)
+  // THE LAST FULL SETTLEMENT WEEK IS THE DEFAULT RANGE (part 7, R1) — the
+  // Sunday-to-Saturday week before this one, 11/08–11/14 on 11/17 — and the
+  // parser is the action's own, so the range seen is the range opened.
+  const lastFull = lastFullSettlementWeek(new Date())
+  const from = dayFromParam(raw.from) ?? lastFull.start
+  const to = dayFromParam(raw.to) ?? lastFull.end
+  const validRange = isBatchPeriod({ start: from, end: to })
 
-  const week = weekOf(from)
-  // THE RANGE HAS TO BE ONE WEEK for Create to be offered. Snapped to its
-  // Sunday, so "the week of the 16th" works; refused where the two ends fall in
-  // different weeks, because that is two batches and the button makes one.
-  const sameWeek =
-    isSettlementWeek(week) &&
-    weekOf(to).start.getTime() === week.start.getTime()
-
-  const companyId = typeof raw.company === 'string' ? raw.company : null
+  const companyId =
+    typeof raw.company === 'string' && raw.company !== '' ? raw.company : null
 
   const data = await withCurrentOrg(
     'create',
@@ -103,17 +101,20 @@ export default async function OpenBatchPage({
       const [preview, companies, existing] = await Promise.all([
         previewBatch(tx, { from, to, companyId }),
         listedAuthorities(tx, session.companyScopes),
-        // A BATCH ALREADY COVERING THIS WEEK. `openBatch` refuses with
-        // `period_taken` and hands it back, but saying so before the click is
-        // the difference between a form and a trap.
-        tx.settlementBatch.findFirst({
-          where: {
-            organizationId: session.organizationId,
-            deletedAt: null,
-            periodStart: week.start,
-          },
-          select: { id: true, batchNumber: true, status: true },
-        }),
+        // A BATCH THIS ONE WOULD OVERLAP — the predicate `openBatch` refuses
+        // on, so the screen and the create cannot disagree. Saying so before
+        // the click is the difference between a form and a trap. Asked only
+        // with an authority and a valid range: without them there is no create.
+        companyId !== null && validRange
+          ? tx.settlementBatch.findFirst({
+              where: batchOverlapWhere({
+                organizationId: session.organizationId,
+                period: { start: from, end: to },
+                companyId,
+              }),
+              select: { id: true, batchNumber: true, status: true },
+            })
+          : Promise.resolve(null),
       ])
       return { preview, companies, existing }
     },
@@ -173,6 +174,9 @@ export default async function OpenBatchPage({
           label: t('preview.pod'),
           fromLabel: t('accounting.from'),
           toLabel: t('accounting.to'),
+          // THE PRE-FILL IS SHOWN, not implied by empty boxes (part 7, R1).
+          defaultFrom: day(lastFull.start),
+          defaultTo: day(lastFull.end),
         }}
         clearLabel={t('filter.clear')}
         moreLabel={t('filter.more')}
@@ -189,26 +193,25 @@ export default async function OpenBatchPage({
       </div>
 
       {/* ── WHAT CREATE WOULD ACTUALLY DO ─────────────────────────────────
-       * Said before the button is pressed, because the two facts that
-       * surprise people are that the batch is org-wide and that it covers a
-       * WEEK rather than the range typed above. */}
+       * Said before the button is pressed: the range it opens — exactly the
+       * one above, no longer snapped to a week (part 7, R1) — and the
+       * authority it settles, or that one is needed (R2). */}
       <div className="flex flex-wrap items-baseline gap-z3 border-b border-border bg-surface-2 px-gutter py-z2 text-xs text-ink-2">
         <span>
           {t('preview.willOpen')}{' '}
           <span className="font-mono text-ink" dir="ltr">
-            {day(week.start)} — {day(week.end)}
+            {day(from)} — {day(to)}
           </span>
         </span>
-        {/* §6.2.10 — THE CHIP NOW SCOPES THE BATCH, not just the grid, so the
-         * sentence names what Create will settle. It used to say "org-wide"
-         * unconditionally, which was true then and would be a lie now. */}
         <span>
-          {companyId === null
-            ? t('preview.forOrg')
-            : `${t('preview.forCompany')} ${
-                data.companies.find((company) => company.id === companyId)
-                  ?.name ?? companyId
-              }`}
+          {companyId === null ? (
+            <span className="text-warning">{t('preview.needAuthority')}</span>
+          ) : (
+            `${t('preview.forCompany')} ${
+              data.companies.find((company) => company.id === companyId)
+                ?.name ?? companyId
+            }`
+          )}
         </span>
         <span className="font-mono tabular-nums">
           {t('preview.considered')} {data.preview.considered}
@@ -234,8 +237,8 @@ export default async function OpenBatchPage({
             </span>
           ))}
         </span>
-        {!sameWeek ? (
-          <span className="text-danger">{t('preview.twoWeeks')}</span>
+        {!validRange ? (
+          <span className="text-danger">{t('batch.error.badRange')}</span>
         ) : null}
         {data.existing ? (
           <span className="text-warning">
@@ -248,14 +251,18 @@ export default async function OpenBatchPage({
       </div>
 
       <CreateBatch
-        week={day(week.start)}
+        from={day(from)}
+        to={day(to)}
         companyId={companyId ?? ''}
-        disabled={!sameWeek || data.existing !== null}
+        // OFF WITHOUT AN AUTHORITY (R2), ON A RANGE THAT IS NOT ONE (R1), AND
+        // OVER A BATCH THIS ONE WOULD OVERLAP (the overlap ruling). The action
+        // refuses all three again on its own account.
+        disabled={companyId === null || !validRange || data.existing !== null}
         shown={view.paged.rows.length}
         labels={{
           add: t('preview.add'),
           selectAll: t('preview.selectAll'),
-          week: `${day(week.start)} — ${day(week.end)}`,
+          period: `${day(from)} — ${day(to)}`,
         }}
       >
         <BatchTripsGrid
