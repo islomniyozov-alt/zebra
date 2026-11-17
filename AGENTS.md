@@ -14,8 +14,9 @@ records how each acceptance box was met and §8 what this phase inherits.
 `PHASE-6-BRIEF.md` is Create Load v2; `PHASE-7-BRIEF.md` is the driver portal
 (numbered by the owner 2026-11-12): its §4 was ruled in full and steps 0–6
 built on dev the same day; §9 records how each §6 box closed and §10 what
-the next phase inherits. It closes on the owner's ship and the three boxes
-only a phone can tick.
+the next phase inherits. It closes on the owner's ship and the two boxes
+only a phone can tick (the third, the Farsi look, was withdrawn with
+Farsi on 2026-11-17: two locales, EN and RU; Afghan drivers use Russian).
 
 Phases 1, 2, 3 and 4 are closed and all still binding: Phase 1 for the
 mechanisms in its §6–§10, Phase 2 for its engine patterns, Phase 3 for money,

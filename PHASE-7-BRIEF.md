@@ -64,8 +64,9 @@ tree at `d41b57c`.
 - **The design rules exist.** §9: 15 px base type, 44 px targets, 52 px
   primary, one primary action per screen, camera-first upload, offline queue
   with a pending indicator, 7:1 body contrast, and the sentence that is the
-  whole brief — _do not build the component and hide it_. §12: Farsi is RTL,
-  identifiers are `dir="ltr"`.
+  whole brief — _do not build the component and hide it_. §12: two locales,
+  EN and RU — Farsi removed 2026-11-17 by owner; Afghan drivers use Russian.
+  Identifiers stay `dir="ltr"`.
 
 ## 1. What a driver sees
 
@@ -110,8 +111,8 @@ read exactly this until a fixture gives it a roster row — §3.3).
    (§4.2, ruled 2026-11-12). On dev today that is 35 statements visible and
    107 not.
 5. **Account.** The existing `/account` (name, email, password change, sign
-   out), restyled to the portal's type scale. Locale switch here, because a
-   Farsi-speaking driver is the portal's first user (§12).
+   out), restyled to the portal's type scale. Locale switch here, EN and RU (§12;
+   Farsi removed 2026-11-17 by owner — Afghan drivers use Russian).
 
 What a driver may **write**, in full: a status change on their own open load,
 and a document upload onto their own load. The status change is one of the
@@ -127,18 +128,18 @@ never sets its status (§4.5, ruled).
 
 ## 2. What §6.8 already grants, and what it does not
 
-| Need                                  | Granted today                                            | Missing                                                                                |
-| ------------------------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| A driver signs in and reaches nothing | Yes — 53 refusals, one reach, proven nightly             | They land on a 404; the portal needs a landing and the login a role-aware redirect     |
-| Read own loads                        | `portal.load:read`                                       | A route, the own-row predicate, a lib function, an integration test with two drivers   |
-| Set a status                          | `portal.load:update`; `StatusSource.DRIVER_PORTAL`       | The action and its narrowing to forward steps on an own load                           |
-| See own documents                     | `portal.document:read`                                   | A route and the predicate (`loadId IN own loads OR driverId = own`)                    |
-| Upload a document                     | `portal.document:create`; `PendingUpload`; presigned put | Camera-first client, type limited to seven, attach to own load only, offline queue     |
-| See own settlements                   | `portal.settlement:read`; statement PDF                  | A route, the predicate (`Settlement.driverId = own AND status IN (APPROVED, PAID)`)    |
-| A driver IS a roster row              | `Driver.userId`                                          | **Nothing writes it.** The writer is a picker on the driver's record, OWNER/ADMIN only |
-| The portal is not the operator app    | `portal.*` is its own vocabulary; §9 is its own shell    | The shell: a `(portal)` route group, no sidebar, its own layout, its own type scale    |
-| Farsi                                 | `fa` locale, RTL direction, logical properties app-wide  | Every portal string in three languages from the first component                        |
-| The sweep covers it                   | Routes come from the filesystem; six roles already       | A seed driver WITH a roster row and loads, or every portal page sweeps as empty state  |
+| Need                                  | Granted today                                            | Missing                                                                                         |
+| ------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| A driver signs in and reaches nothing | Yes — 53 refusals, one reach, proven nightly             | They land on a 404; the portal needs a landing and the login a role-aware redirect              |
+| Read own loads                        | `portal.load:read`                                       | A route, the own-row predicate, a lib function, an integration test with two drivers            |
+| Set a status                          | `portal.load:update`; `StatusSource.DRIVER_PORTAL`       | The action and its narrowing to forward steps on an own load                                    |
+| See own documents                     | `portal.document:read`                                   | A route and the predicate (`loadId IN own loads OR driverId = own`)                             |
+| Upload a document                     | `portal.document:create`; `PendingUpload`; presigned put | Camera-first client, type limited to seven, attach to own load only, offline queue              |
+| See own settlements                   | `portal.settlement:read`; statement PDF                  | A route, the predicate (`Settlement.driverId = own AND status IN (APPROVED, PAID)`)             |
+| A driver IS a roster row              | `Driver.userId`                                          | **Nothing writes it.** The writer is a picker on the driver's record, OWNER/ADMIN only          |
+| The portal is not the operator app    | `portal.*` is its own vocabulary; §9 is its own shell    | The shell: a `(portal)` route group, no sidebar, its own layout, its own type scale             |
+| Two locales (was Farsi)               | EN and RU; logical properties app-wide                   | Every portal string in EN and RU. Farsi removed 2026-11-17 by owner; Afghan drivers use Russian |
+| The sweep covers it                   | Routes come from the filesystem; six roles already       | A seed driver WITH a roster row and loads, or every portal page sweeps as empty state           |
 
 ## 3. What is missing, as work — no code in this brief
 
@@ -183,8 +184,8 @@ never sets its status (§4.5, ruled).
    before and after compression, and the upload's wall time from a phone on
    a cellular connection.
 6. **The sweep and the ritual.** Portal routes join the filesystem walk
-   automatically; the matrix gains their rows; the RTL pass runs on every
-   portal screen before it ships (§12); the deploy sweep (§6.8, `d41b57c`)
+   automatically; the matrix gains their rows; every portal screen is read
+   in Russian before it ships (§12; the RTL pass went with Farsi, 2026-11-17); the deploy sweep (§6.8, `d41b57c`)
    renders them after every dev deploy. Any new table carrying
    `organizationId` gets its fixture row in the same commit (AGENTS.md).
 
@@ -270,8 +271,9 @@ the owner the same day. The rules are transcribed into
       but the page
 - [x] A settlement visible in the portal matches the statement PDF the
       office sent, to the cent
-- [ ] Every portal screen passes the RTL pass in Farsi; every identifier reads
-      left-to-right
+- [x] ~~Every portal screen passes the RTL pass in Farsi~~ — WITHDRAWN
+      2026-11-17: two locales, Farsi removed by owner; Afghan drivers use
+      Russian. Identifiers still carry `dir="ltr"`
 - [ ] An upload started offline is sent on reconnect and shown pending
       until then; killing the app mid-queue loses nothing (measured)
 - [x] The driver record's "Sign-in" picker is reachable by OWNER and ADMIN
@@ -413,7 +415,7 @@ boxes only a phone can tick are OPEN, by name, with the procedure.
 | A portal status on the timeline as `driver portal`; refusals in words | `tests/integration/portal.test.ts` "the driver's status step" — source `DRIVER_PORTAL`, the user named, a stale tap and a backwards tap refused with one event on the load, the co-driver refused by name                                                                                                                                                                                                                         |
 | A POD from a phone attaches as `POD`; the office sees it              | The predicates in `tests/integration/portal.test.ts` "the driver's upload target"; the confirm is the office's own `confirmUpload` (`src/lib/documents.ts`), which calls `podConfirmed` — proven in `tests/integration/loads.test.ts` — and `tests/portal-documents.test.ts` pins the portal's confirm route to that function. **OPEN for the phone:** photograph a POD on dev as the sweep driver and open SWEEP-1 in the office |
 | A settlement matches the statement PDF to the cent                    | One function renders both: `statementPdfFor` in `src/lib/statement-document.ts`, called by the office's route and the portal's; `tests/statement-workbench.test.ts` reads it; the portal's numbers are the settlement row's own (`ownSettlements`)                                                                                                                                                                                |
-| RTL pass in Farsi; identifiers LTR                                    | Every portal class is a logical property and every identifier carries `dir="ltr"` (load number, reference, filename, dates). **OPEN for the phone:** the owner's look on dev in Farsi on every portal screen                                                                                                                                                                                                                      |
+| RTL pass in Farsi; identifiers LTR                                    | Every portal class is a logical property and every identifier carries `dir="ltr"` (load number, reference, filename, dates). **WITHDRAWN 2026-11-17:** two locales, Farsi removed by owner; Afghan drivers use Russian — the phone look in Farsi is no longer owed, so two phone boxes remain                                                                                                                                     |
 | An upload started offline is sent on reconnect; a kill loses nothing  | `tests/offline-queue.test.ts` — kept offline, sent in order on reconnect, a refusal kept with its words, a network failure stops the pass; the store is IndexedDB. **OPEN for the phone (flag 11):** airplane mode on, tap a rung and take a photo, kill the app, reopen, airplane mode off; both land and the strip empties                                                                                                      |
 | The Sign-in picker: OWNER/ADMIN, the predicate, nothing under portal  | `tests/integration/driver-link.test.ts` (12 cases) and `tests/driver-record.test.ts`; `tests/portal-status.test.ts` "nothing under the portal writes the roster" reads every file under `(portal)`, `api/portal` and `src/lib/portal*` and finds no driver write and no link call                                                                                                                                                 |
 | No DRAFT in the portal; no pay before finalisation                    | `tests/integration/portal.test.ts` — the draft absent from Settlements, `payCents` null on the open load, 65,000 through the APPROVED line                                                                                                                                                                                                                                                                                        |
