@@ -35,6 +35,8 @@
 // resolving.
 // ---------------------------------------------------------------------------
 
+import { matchByKeys, plateKey, type MatchKey } from './ordered-match'
+
 /**
  * WHETHER A TRIP AT THIS STAGE GETS ITS CREW FROM THE FILE.
  *
@@ -64,9 +66,26 @@ export function stageSeatsCrew(stage: string): boolean {
   return stage === 'finished'
 }
 
+/**
+ * THE TRUCK SEAT'S KEYS, IN ORDER (MONEY-DESIGN §2, amended 2026-11-17).
+ *
+ * `Tractor Vehicle ID` is tried as a unit number first — the 2026-09-27
+ * ruling's key — and, only when no unit matches, as a licence plate: current
+ * plate or plate history, normalised by `plateKey`. The first key that finds
+ * anything decides (`matchByKeys`); two trucks on it is a refusal naming both.
+ */
+export const TRUCK_KEYS = ['unit', 'plate'] as const
+export type TruckKey = (typeof TRUCK_KEYS)[number]
+
 /** What the file's columns resolve to for one trip. */
 export type CrewSeat =
-  | { kind: 'seated'; driverId: string | null; truckId: string | null }
+  | {
+      kind: 'seated'
+      driverId: string | null
+      truckId: string | null
+      /** Which key seated the truck; null when no truck was seated. */
+      truckKey: TruckKey | null
+    }
   | { kind: 'refused'; reasons: CrewRefusal[] }
 
 export interface CrewRefusal {
@@ -75,6 +94,13 @@ export interface CrewRefusal {
   /** Exactly what the file said, for a report that names it. */
   value: string
   why: 'matches_nobody' | 'matches_two' | 'file_disagrees'
+  /** The truck key that found two trucks — `plate` reads "by plate". */
+  key?: TruckKey
+  /**
+   * AMBIGUOUS BY NAME: the units a plate landed on, so the refusal says which
+   * two trucks share it rather than only that two do.
+   */
+  candidates?: string[]
 }
 
 export interface CrewResolvers {
@@ -82,6 +108,13 @@ export interface CrewResolvers {
   driverIdsFor: (name: string) => readonly string[]
   /** Every truck id this unit number resolves to. */
   truckIdsFor: (unit: string) => readonly string[]
+  /**
+   * Every truck id this plate resolves to — current plate or plate history,
+   * compared by `plateKey`. Absent: the plate key finds nothing.
+   */
+  truckIdsByPlate?: (plate: string) => readonly string[]
+  /** A truck's unit number, to name the candidates of an ambiguous plate. */
+  truckUnitOf?: (truckId: string) => string
 }
 
 /**
@@ -108,10 +141,60 @@ export function crewSeatFor(
     resolve.driverIdsFor,
     reasons,
   )
-  const truckId = pick(trip.tractorIds, 'truck', resolve.truckIdsFor, reasons)
+  const truck = pickTruck(trip.tractorIds, resolve, reasons)
 
   if (reasons.length > 0) return { kind: 'refused', reasons }
-  return { kind: 'seated', driverId, truckId }
+  return {
+    kind: 'seated',
+    driverId,
+    truckId: truck?.id ?? null,
+    truckKey: truck?.key ?? null,
+  }
+}
+
+/**
+ * The truck seat through the ordered keys. The same three refusals as a name
+ * — the file disagreeing with itself, nobody, two — and a plate's two are
+ * named by unit.
+ */
+function pickTruck(
+  values: readonly string[],
+  resolve: CrewResolvers,
+  reasons: CrewRefusal[],
+): { id: string; key: TruckKey } | null {
+  const named = values.map((value) => value.trim()).filter((v) => v !== '')
+  if (named.length === 0) return null
+  if (named.length > 1) {
+    reasons.push({
+      column: 'truck',
+      value: named.join(' / '),
+      why: 'file_disagrees',
+    })
+    return null
+  }
+  const only = named[0]!
+  const keys: MatchKey<TruckKey>[] = [
+    { key: 'unit', idsFor: resolve.truckIdsFor },
+    { key: 'plate', idsFor: resolve.truckIdsByPlate ?? (() => []) },
+  ]
+  const match = matchByKeys(only, keys)
+  if (match.kind === 'one') return { id: match.id, key: match.key }
+  if (match.kind === 'none') {
+    reasons.push({ column: 'truck', value: only, why: 'matches_nobody' })
+    return null
+  }
+  reasons.push({
+    column: 'truck',
+    value: only,
+    why: 'matches_two',
+    key: match.key,
+    ...(match.key === 'plate'
+      ? {
+          candidates: match.ids.map((id) => resolve.truckUnitOf?.(id) ?? id),
+        }
+      : {}),
+  })
+  return null
 }
 
 function pick(
@@ -142,6 +225,34 @@ function pick(
     return null
   }
   return hits[0]!
+}
+
+/**
+ * EVERY PLATE A TRUCK HAS CARRIED, keyed by `plateKey` (MONEY-DESIGN §2,
+ * 2026-11-17): its current `plate`, and every value the audit log records on
+ * its `plate` changes, from and to. A plate two trucks have carried — one
+ * now, one before — lists both, and the matcher refuses it by name rather
+ * than deciding which of them the file meant.
+ */
+export function plateIndex(
+  trucks: readonly { id: string; plate: string | null }[],
+  history: readonly { id: string; from: string | null; to: string | null }[],
+): Map<string, string[]> {
+  const index = new Map<string, string[]>()
+  const add = (plate: string | null, id: string) => {
+    if (plate === null) return
+    const key = plateKey(plate)
+    if (key === '') return
+    const ids = index.get(key) ?? []
+    if (!ids.includes(id)) ids.push(id)
+    index.set(key, ids)
+  }
+  for (const truck of trucks) add(truck.plate, truck.id)
+  for (const change of history) {
+    add(change.from, change.id)
+    add(change.to, change.id)
+  }
+  return index
 }
 
 /**

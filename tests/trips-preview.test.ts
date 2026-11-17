@@ -31,11 +31,13 @@ const LABELS = {
   marksDelivered: 'marks delivered',
   closedHistory: 'closed history — untouched',
   seatsCrew: 'seats the crew',
+  truckByPlate: 'truck by plate',
   driver: 'driver',
   truck: 'truck',
   matchesNobody: 'matches nobody',
   matchesTwo: 'matches two',
   fileDisagrees: 'the file names two',
+  byPlate: 'by plate',
   rateFromRow: "the row's own cost",
   rateFromLegs: 'the legs added up',
 }
@@ -536,6 +538,7 @@ describe('the crew on the row', () => {
     kind: 'seated' as const,
     driverId,
     truckId,
+    truckKey: truckId === null ? null : ('unit' as const),
   })
 
   it('says it seats the crew, and names the labels it used', () => {

@@ -1697,6 +1697,7 @@ describe('the crew a completed file names', () => {
         kind: 'seated',
         driverId: seatDriverId,
         truckId: seatTruckId,
+        truckKey: seatTruckId === null ? null : 'unit',
       })
       if (seat.kind !== 'seated') throw new Error('expected seated')
       const outcome = await createTripLoad(
@@ -1853,7 +1854,12 @@ describe('the crew a completed file names', () => {
     expect(seat.kind).toBe('refused')
     if (seat.kind === 'refused') {
       expect(seat.reasons).toEqual([
-        { column: 'truck', value: unit.toLowerCase(), why: 'matches_two' },
+        {
+          column: 'truck',
+          value: unit.toLowerCase(),
+          why: 'matches_two',
+          key: 'unit',
+        },
       ])
     }
 

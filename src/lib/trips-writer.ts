@@ -8,7 +8,8 @@ import { importEventAt } from './datatruck/loads'
 import { transitionOperational } from './load-status'
 import { nameKey } from './name-key'
 import { PERSON_DRIVER } from './driver-kind'
-import { stageSeatsCrew, type CrewResolvers } from './trips-crew'
+import { plateIndex, stageSeatsCrew, type CrewResolvers } from './trips-crew'
+import { plateKey } from './ordered-match'
 import { zoneForRelayStop } from './relay-import'
 import { zoneWallClock } from './stop-time'
 import type { TxClient } from './tenancy'
@@ -158,7 +159,7 @@ export async function resolveTripCrew(
       ? []
       : await tx.truck.findMany({
           where: { deletedAt: null },
-          select: { id: true, unitNumber: true },
+          select: { id: true, unitNumber: true, plate: true },
         })
 
   const driverIds = new Map<string, string[]>()
@@ -182,9 +183,41 @@ export async function resolveTripCrew(
     truckIds.set(key, hits)
   }
 
+  // ── THE PLATE, SECOND (MONEY-DESIGN §2, 2026-11-17) ───────────────────
+  //
+  // Only the values no unit number matched are looked up by plate, and the
+  // plate history is read only when there are any — so a file whose tractors
+  // all resolve by unit pays nothing for this. Current plates ride on the
+  // roster read above; the history is the audit log's `plate` diffs on Truck.
+  const unmatched = units.filter((unit) => !truckIds.has(unit))
+  const history =
+    unmatched.length === 0
+      ? []
+      : await tx.$queryRaw<
+          { id: string; from: string | null; to: string | null }[]
+        >`
+          SELECT a."entityId" AS id,
+                 a."changes"->'plate'->>'from' AS "from",
+                 a."changes"->'plate'->>'to' AS "to"
+            FROM "AuditLog" a
+           WHERE a."entityType" = 'Truck'
+             AND jsonb_exists(a."changes", 'plate')`
+  const plates =
+    unmatched.length === 0
+      ? new Map<string, string[]>()
+      : plateIndex(
+          trucks,
+          // A REMOVED TRUCK IS NOT A CANDIDATE: its old plate in the log must
+          // not seat it, any more than its unit number would.
+          history.filter((change) => trucks.some((t) => t.id === change.id)),
+        )
+  const unitOf = new Map(trucks.map((truck) => [truck.id, truck.unitNumber]))
+
   return {
     driverIdsFor: (name) => driverIds.get(nameKey(name)) ?? [],
     truckIdsFor: (unit) => truckIds.get(nameKey(unit)) ?? [],
+    truckIdsByPlate: (plate) => plates.get(plateKey(plate)) ?? [],
+    truckUnitOf: (id) => unitOf.get(id) ?? id,
   }
 }
 
