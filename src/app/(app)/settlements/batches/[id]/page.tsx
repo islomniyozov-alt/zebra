@@ -23,6 +23,8 @@ import { gridView, pagedFooterLabel } from '../../../_grid/grid-page'
 import { BatchTripsGrid } from '../../../payroll/batches/BatchTripsGrid'
 import { BatchActions } from './BatchActions'
 import { BatchTicks } from './BatchTicks'
+import { StatusBadge } from '@/components/ui/StatusBadge'
+import { batchWord, statementWord, type PayWord } from '@/lib/pay-status'
 import type { MessageKey } from '@/lib/i18n'
 
 // THE BATCH SCREEN (§6.2.10 part 2b, production walk 2026-10-07).
@@ -259,6 +261,10 @@ export default async function BatchPage({
     />
   )
 
+  /** The office's word for a status, or the raw value where none is known. */
+  const wordFor = (word: PayWord | null, raw: string) =>
+    word ? t(word.label) : raw
+
   // THE PAGE IS THE SCROLL REGION, as every other page under the shell is
   // (§6.1: content is the only scrolling region; layout.tsx is h-screen +
   // overflow-hidden). Without min-h-0 / flex-1 / overflow-y-auto this column
@@ -283,9 +289,14 @@ export default async function BatchPage({
         <p className="text-xs text-ink-3">
           {batch.company?.name ?? t('preview.forOrg')}
         </p>
-        <p className="ms-auto text-xs uppercase tracking-[0.04em] text-ink-2">
-          {batch.status}
-        </p>
+        {/* THE OFFICE'S WORD (§6.2.10 part 7): Unposted · Partial posted ·
+         * Posted · Paid. It printed the enum. */}
+        <span className="ms-auto">
+          <StatusBadge
+            tone={batchWord(batch.status)?.tone ?? 'neutral'}
+            label={wordFor(batchWord(batch.status), batch.status)}
+          />
+        </span>
       </header>
 
       {mayWrite ? (
@@ -378,7 +389,12 @@ export default async function BatchPage({
                   >
                     {settlement.settlementNumber}
                   </Link>
-                  <span className="ms-z2 text-ink-3">{settlement.status}</span>
+                  <span className="ms-z2 text-ink-3">
+                    {wordFor(
+                      statementWord(settlement.status),
+                      settlement.status,
+                    )}
+                  </span>
                 </td>
                 <td className="p-z3 text-end font-mono">{settlement.lines}</td>
                 <td className="p-z3 text-end font-mono">

@@ -260,6 +260,7 @@ export const DRIVER_COLUMNS_HIDDEN = ['email', 'team', 'cdl'] as const
 export const BATCH_COLUMN_KEYS = [
   'batchNumber',
   'status',
+  'createdBy',
   'created',
   'checkDate',
   'period',
@@ -272,14 +273,17 @@ export const BATCH_COLUMN_KEYS = [
 ] as const
 
 /**
- * §7.1.7: `created` is bookkeeping — the row's own age, next to a check date and
- * a period that are the dates anybody asks about — and `notes` is free text that
- * truncates to nothing useful in a column. Both a tick away.
+ * DATATRUCK'S NINE SHOW (§6.2.10 part 7, R4 and R5; owner's ruling
+ * 2026-11-17): Batch ID · Status · Created by · Created date · Check date ·
+ * Period · Settlements · Amount · Authority. Datatruck's list has neither gross
+ * nor deductions, so both are a tick away, with `notes`, which truncates to
+ * nothing useful in a column.
  *
- * NOT `gross`, `deductions` OR `amount`: those three are why §6.2.9 touched this
- * grid, and hiding them by default would answer a 500 by undoing the feature.
+ * THIS REVERSES, BY RULING, the line that stood here: "not gross, deductions
+ * or amount — those three are why §6.2.9 touched this grid". Amount (net)
+ * stays shown; the other two remain one tick from the screen.
  */
-export const BATCH_COLUMNS_HIDDEN = ['created', 'notes'] as const
+export const BATCH_COLUMNS_HIDDEN = ['gross', 'deductions', 'notes'] as const
 
 /**
  * The keys a list actually has this request.

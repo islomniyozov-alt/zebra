@@ -294,20 +294,20 @@ export interface BatchGridRow {
   grossCents: number
   deductionsCents: number
   /**
-   * WHICH AUTHORITY CUTS THE CHEQUES — AND FOR ZEBRA THE ANSWER IS ALL OF THEM.
+   * WHICH AUTHORITY CUTS THE CHEQUES: the batch's own company, or null for a
+   * batch opened for the whole organization.
    *
-   * Datatruck carries a real company here because a batch there belongs to one
-   * payer: `SB-000448` is Dolphin's and `SB-000447` is RAM's, both covering
-   * Sep 13-19. Zebra settles the organization in one run (Islom, 2026-09-11),
-   * so the honest value is "all authorities" and the per-company split is the
-   * breakdown directly beneath the row.
-   *
-   * THIS FIELD IS THE BREAKDOWN'S HEADLINE, NOT A MISSING COLUMN. It read
-   * `not recorded` for a few hours, which described `schema.prisma` rather than
-   * the money, and invited a migration that the shape does not need. Owner's
-   * ruling, 2026-09-28: no `payCompanyId`.
+   * This was always null, on the 2026-09-11 ruling that Zebra settles the
+   * organization in one run. §6.2.10 part 1 then gave the batch a nullable
+   * `companyId`, Datatruck's shape (`SB-000448` Dolphin's and `SB-000447`
+   * RAM's, both covering Sep 13-19), and this field kept saying "all
+   * authorities" for batches that had one. Part 7 (2026-11-17, R2) makes the
+   * authority required at Create, so the null is the older batches only. The
+   * per-company breakdown beneath each row stays.
    */
-  payCompanyName: null
+  payCompanyName: string | null
+  /** Who opened it, from the audit CREATE row; null where none names a user. */
+  createdBy: string | null
   notes: string | null
   /**
    * Settle together, report apart (Islom, 2026-09-11). The batch is the
@@ -374,6 +374,8 @@ export interface BatchSqlRow {
   period_start: Date | string
   period_end: Date | string
   notes: string | null
+  created_by: string | null
+  company_name: string | null
   statements: bigint | number
   amount: bigint | number
   gross: bigint | number
@@ -405,6 +407,26 @@ export function batchRowsSql(): Prisma.Sql {
       b."periodStart"                          AS period_start,
       b."periodEnd"                            AS period_end,
       b."notes"                                AS notes,
+      -- WHO OPENED IT: the batch's audit CREATE row (§6.2.10 part 7, R4).
+      -- Read, not stored — \`audit.ts\` audits every write to this model, so
+      -- the row exists for every batch opened by a person, and a batch opened
+      -- with no user in context answers NULL ("—"), not a guess. Scalar
+      -- subqueries over \`b."id"\`, which the GROUP BY makes legal, so the
+      -- grouped read stays one statement. The (organizationId, entityType,
+      -- entityId) index serves it.
+      (SELECT u."name"
+         FROM "AuditLog" a
+         JOIN "User" u ON u."id" = a."userId"
+        WHERE a."organizationId" = b."organizationId"
+          AND a."entityType" = 'SettlementBatch'
+          AND a."entityId" = b."id"
+          AND a."action" = 'CREATE'
+        ORDER BY a."createdAt", a."id"
+        LIMIT 1)                               AS created_by,
+      -- THE BATCH'S OWN AUTHORITY (part 1's \`companyId\`); NULL is a batch
+      -- opened for the whole organization, which the grid says in words.
+      (SELECT c."name" FROM "Company" c WHERE c."id" = b."companyId")
+                                               AS company_name,
       COUNT(st."id")::bigint                   AS statements,
       COALESCE(SUM(st."netCents"), 0)::bigint  AS amount,
       -- NO EXTRA QUERY: the same grouped read, two more sums. §6.2.9.
@@ -494,9 +516,8 @@ export function batchesFrom(
     amountCents: asNumber(row.amount),
     grossCents: asNumber(row.gross),
     deductionsCents: asNumber(row.deductions),
-    // Always null: the row's answer is "all authorities" and the names are on
-    // `breakdown`. See the field's own note.
-    payCompanyName: null,
+    payCompanyName: row.company_name,
+    createdBy: row.created_by,
     notes: row.notes,
     breakdown: breakdownOf.get(row.id) ?? [],
   }))
@@ -512,6 +533,7 @@ export const batchShape: ListShape<BatchGridRow> = {
   sorts: {
     batchNumber: (row) => row.batchNumber,
     status: (row) => row.status,
+    createdBy: (row) => row.createdBy,
     created: (row) => row.createdAt.getTime(),
     checkDate: (row) => row.checkDate.getTime(),
     period: (row) => row.periodStart.getTime(),
@@ -527,6 +549,7 @@ export const batchShape: ListShape<BatchGridRow> = {
   columnFilters: {
     batchNumber: (row) => row.batchNumber,
     status: (row) => row.status,
+    createdBy: (row) => row.createdBy,
     payCompany: (row) => row.payCompanyName,
     notes: (row) => row.notes,
   },
@@ -551,15 +574,15 @@ export interface StatementGridRow {
   /** `SB-000001`, or null for a settlement that belongs to no run. */
   batchNumber: string | null
   /**
-   * THE BATCH'S STATUS WHERE THERE IS A BATCH, AND THE SETTLEMENT'S WHERE THERE
-   * IS NOT.
+   * THE STATEMENT'S OWN STATUS — Unposted, Posted, Paid or Void (§6.2.10 part
+   * 7, v11.24).
    *
-   * `Settlement.batchId` IS NULLABLE, which the compiler pointed out and I had
-   * assumed away: settlements generated one driver at a time — the path
-   * `/settlements` offered before this redesign — belong to no run. A statement's
-   * state is its run's state when it has one, and its own when it does not, and
-   * reading `batch.status` unconditionally would have thrown on exactly the rows
-   * that predate batching.
+   * It was the batch's status where there was a batch, from before posting
+   * became per statement: while a batch moved all at once, the two were the
+   * same answer. Part 3 made PARTIAL real and this grid's own bulk bar posts
+   * one statement at a time, so a posted statement in a half-posted week read
+   * "Partial", and one just posted from this grid still read as its run's
+   * draft. Datatruck's Driver Statements column is the statement's.
    */
   status: string
   /** Null for a settlement that belongs to no run. */
@@ -678,7 +701,7 @@ export async function readStatements(
     deductionsCents: reducing.get(row.id) ?? 0,
     otherPayCents: row.otherPayCents,
     netCents: row.netCents,
-    status: row.batch?.status ?? row.status,
+    status: row.status,
     batchId: row.batch?.id ?? null,
     batchNumber: row.batch?.batchNumber ?? null,
   }))

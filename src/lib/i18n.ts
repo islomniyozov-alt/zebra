@@ -200,20 +200,20 @@ const en = {
   'grid.filterColumn': 'Filter this column',
   'grid.filterApply': 'Filter',
   'grid.filterClear': 'Clear',
-  'batches.finaliseSelected': 'Finalise',
+  'batches.finaliseSelected': 'Post all unposted',
   'batches.markPaidSelected': 'Mark paid',
-  'batches.bulkBlocked': 'Some selected batches could not change status.',
-  'batches.bulkDone': 'Status changed.',
+  'batches.deleteSelected': 'Delete',
+  'batches.bulkBlocked': 'Some selected batches could not be changed.',
+  'batches.bulkDone': 'Batches changed:',
   'batches.unnumbered': 'unnumbered',
   'charges.tab.thisWeek': 'This week',
   'charges.thisWeekHint':
     'What comes off the selected week, from the standing rules.',
-  'batchStatus.DRAFT': 'Draft',
-  'batchStatus.FINAL': 'Final',
-  'batchStatus.PARTIAL': 'Partial',
-  'batchStatus.PAID': 'Paid',
-  'batchStatus.APPROVED': 'Approved',
-  'batchStatus.VOID': 'Void',
+  'payStatus.unposted': 'Unposted',
+  'payStatus.partial': 'Partial posted',
+  'payStatus.posted': 'Posted',
+  'payStatus.paid': 'Paid',
+  'payStatus.void': 'Void',
 
   // ── THE GRID CONTRACT (§7.1.3-7.1.6) ─────────────────────────────────
   'grid.filter': 'Filter',
@@ -237,11 +237,12 @@ const en = {
   'payroll.tab.oneTime': 'One-time charges',
   'payroll.tab.scheduled': 'Scheduled payments',
   'batches.batch': 'Batch',
-  'batches.created': 'Created',
+  'batches.createdBy': 'Created by',
+  'batches.created': 'Created date',
   'batches.period': 'Period',
   'batches.statements': 'Statements',
   'batches.amount': 'Amount',
-  'batches.payCompany': 'Pay company',
+  'batches.payCompany': 'Authority',
   'batches.notes': 'Notes',
   'batches.empty': 'No batches match these filters',
   'batches.breakdown': 'by authority',
@@ -255,7 +256,7 @@ const en = {
   'balances.escrow': 'Escrow held',
   'balances.empty': 'Nothing settled this year',
   'balances.emptyHint':
-    'Balances come from final and paid batches. Finalise a week to see them.',
+    'Balances come from posted and paid batches. Post a week to see them.',
   'oneTime.appliesOn': 'Applies on',
   'oneTime.load': 'Load',
   'oneTime.settled': 'Settled',
@@ -462,7 +463,7 @@ const en = {
   'reports.deduction.category': 'Deduction',
   'reports.emptyDriver': 'No settled weeks in this window',
   'reports.emptyDriverHint':
-    'Only final and paid batches appear here. Widen the range, or finalise a week.',
+    'Only posted and paid statements appear here. Widen the range, or post a week.',
   'nav.group.records': 'Records',
   'nav.group.admin': 'Admin',
   'nav.dashboard': 'Dashboard',
@@ -2961,10 +2962,6 @@ const en = {
   'settlements.void': 'Void',
   'settlements.voidHint':
     'Releases the loads back so a corrected one can be generated.',
-  'settlementStatus.DRAFT': 'Draft',
-  'settlementStatus.APPROVED': 'Approved',
-  'settlementStatus.PAID': 'Paid',
-  'settlementStatus.VOID': 'Void',
   'settlementLine.LOAD_PAY': 'Load pay',
   'settlementLine.ACCESSORIAL_PAY': 'Accessorial pay',
   'settlementLine.BONUS': 'Bonus',
@@ -2992,7 +2989,7 @@ const en = {
   'settlements.error.notFound': 'That settlement no longer exists.',
   'settlements.error.notDraft':
     'This settlement is approved. Void it and generate a corrected one.',
-  'settlements.error.notApproved': 'Approve it before recording it as paid.',
+  'settlements.error.notApproved': 'Post it before recording it as paid.',
   'settlements.error.alreadyPaid': 'That settlement is already paid.',
   'settlements.error.negativeNet':
     'The deductions come to more than the pay. That is a conversation, not a cheque.',
@@ -3099,7 +3096,7 @@ const en = {
   'batch.checkDateDerived': 'Period end + 13 days',
   'batch.create': 'Create batch',
   'batch.refresh': 'Refresh draft',
-  'batch.finalise': 'Finalise batch',
+  'batch.finalise': 'Post all unposted',
   'batch.markPaid': 'Mark paid',
   'batch.statement': 'Statement',
   'batch.trips': 'Trips in this batch',
@@ -3129,6 +3126,8 @@ const en = {
   'batch.error.notAWeek':
     'A settlement period runs Sunday to Saturday. That pair is not one.',
   'batch.error.notFound': 'That batch no longer exists.',
+  'batch.error.posted':
+    'It has a posted or paid statement, so it cannot be deleted.',
   'batch.error.notDraft':
     'That batch is no longer a draft. A finalised batch is a document — correct it with a charge in a later week.',
   'batch.error.blocked':
@@ -3478,20 +3477,20 @@ const ru: Dictionary = {
   'grid.filterColumn': 'Фильтр по столбцу',
   'grid.filterApply': 'Применить',
   'grid.filterClear': 'Сбросить',
-  'batches.finaliseSelected': 'Утвердить',
+  'batches.finaliseSelected': 'Провести все непроведённые',
   'batches.markPaidSelected': 'Отметить оплаченной',
-  'batches.bulkBlocked': 'Некоторые выбранные партии не удалось перевести.',
-  'batches.bulkDone': 'Статус изменён.',
+  'batches.deleteSelected': 'Удалить',
+  'batches.bulkBlocked': 'Некоторые выбранные партии не удалось изменить.',
+  'batches.bulkDone': 'Изменено партий:',
   'batches.unnumbered': 'без номера',
   'charges.tab.thisWeek': 'Эта неделя',
   'charges.thisWeekHint':
     'Что удерживается за выбранную неделю по регулярным правилам.',
-  'batchStatus.DRAFT': 'Черновик',
-  'batchStatus.FINAL': 'Утверждена',
-  'batchStatus.PARTIAL': 'Частично',
-  'batchStatus.PAID': 'Выплачена',
-  'batchStatus.APPROVED': 'Утверждён',
-  'batchStatus.VOID': 'Аннулирован',
+  'payStatus.unposted': 'Не проведено',
+  'payStatus.partial': 'Частично проведено',
+  'payStatus.posted': 'Проведено',
+  'payStatus.paid': 'Выплачено',
+  'payStatus.void': 'Аннулировано',
 
   // ── THE GRID CONTRACT (§7.1.3-7.1.6) ─────────────────────────────────
   'grid.filter': 'Фильтр',
@@ -3515,11 +3514,12 @@ const ru: Dictionary = {
   'payroll.tab.oneTime': 'Разовые удержания',
   'payroll.tab.scheduled': 'Регулярные платежи',
   'batches.batch': 'Партия',
-  'batches.created': 'Создана',
+  'batches.createdBy': 'Создал',
+  'batches.created': 'Дата создания',
   'batches.period': 'Период',
   'batches.statements': 'Расчётов',
   'batches.amount': 'Сумма',
-  'batches.payCompany': 'Платёжная компания',
+  'batches.payCompany': 'Компания',
   'batches.notes': 'Примечания',
   'batches.empty': 'Нет партий по этим фильтрам',
   'batches.breakdown': 'по компаниям',
@@ -3533,7 +3533,7 @@ const ru: Dictionary = {
   'balances.escrow': 'Депозит',
   'balances.empty': 'В этом году расчётов не было',
   'balances.emptyHint':
-    'Балансы берутся из утверждённых и выплаченных партий. Утвердите неделю.',
+    'Балансы берутся из проведённых и выплаченных партий. Проведите неделю.',
   'oneTime.appliesOn': 'Дата',
   'oneTime.load': 'Груз',
   'oneTime.settled': 'Учтено',
@@ -3740,7 +3740,7 @@ const ru: Dictionary = {
   'reports.deduction.category': 'Удержание',
   'reports.emptyDriver': 'Нет утверждённых недель за этот период',
   'reports.emptyDriverHint':
-    'Здесь показаны только утверждённые и выплаченные партии. Расширьте диапазон или утвердите неделю.',
+    'Здесь показаны только проведённые и выплаченные расчёты. Расширьте диапазон или проведите неделю.',
 
   // ── ACCOUNTING (§6.2, amended 2026-09-28) ─────────────────────────────
   'nav.group.records': 'Справочники',
@@ -6215,10 +6215,6 @@ const ru: Dictionary = {
   'settlements.void': 'Аннулировать',
   'settlements.voidHint':
     'Освобождает грузы, чтобы создать исправленный расчёт.',
-  'settlementStatus.DRAFT': 'Черновик',
-  'settlementStatus.APPROVED': 'Утверждён',
-  'settlementStatus.PAID': 'Выплачен',
-  'settlementStatus.VOID': 'Аннулирован',
   'settlementLine.LOAD_PAY': 'Оплата за груз',
   'settlementLine.ACCESSORIAL_PAY': 'Оплата доп. услуг',
   'settlementLine.BONUS': 'Премия',
@@ -6247,7 +6243,7 @@ const ru: Dictionary = {
   'settlements.error.notDraft':
     'Расчёт утверждён. Аннулируйте его и создайте исправленный.',
   'settlements.error.notApproved':
-    'Сначала утвердите расчёт, потом отмечайте выплату.',
+    'Сначала проведите расчёт, потом отмечайте выплату.',
   'settlements.error.alreadyPaid': 'Этот расчёт уже выплачен.',
   'settlements.error.negativeNet':
     'Удержания превышают начисления. Это разговор, а не выплата.',
@@ -6346,7 +6342,7 @@ const ru: Dictionary = {
   'batch.checkDateDerived': 'Конец периода + 13 дней',
   'batch.create': 'Создать партию',
   'batch.refresh': 'Пересчитать черновик',
-  'batch.finalise': 'Утвердить партию',
+  'batch.finalise': 'Провести все непроведённые',
   'batch.markPaid': 'Отметить оплаченной',
   'batch.statement': 'Ведомость',
   'batch.trips': 'Рейсы в этой партии',
@@ -6376,6 +6372,8 @@ const ru: Dictionary = {
   'batch.error.notAWeek':
     'Период расчёта — с воскресенья по субботу. Эта пара дат не подходит.',
   'batch.error.notFound': 'Эта партия больше не существует.',
+  'batch.error.posted':
+    'В партии есть проведённый или выплаченный расчёт — удалить её нельзя.',
   'batch.error.notDraft':
     'Это уже не черновик. Утверждённая партия — документ; исправляйте начислением в следующей неделе.',
   'batch.error.blocked':
@@ -6724,20 +6722,20 @@ const fa: Dictionary = {
   'grid.filterColumn': 'فیلتر این ستون',
   'grid.filterApply': 'اعمال',
   'grid.filterClear': 'پاک کردن',
-  'batches.finaliseSelected': 'نهایی کردن',
+  'batches.finaliseSelected': 'ثبت همهٔ ثبت‌نشده‌ها',
   'batches.markPaidSelected': 'علامت پرداخت‌شده',
-  'batches.bulkBlocked': 'وضعیت برخی از دسته‌های انتخاب‌شده تغییر نکرد.',
-  'batches.bulkDone': 'وضعیت تغییر کرد.',
+  'batches.deleteSelected': 'حذف',
+  'batches.bulkBlocked': 'برخی از دسته‌های انتخاب‌شده تغییر نکردند.',
+  'batches.bulkDone': 'دسته‌های تغییرکرده:',
   'batches.unnumbered': 'بدون شماره',
   'charges.tab.thisWeek': 'این هفته',
   'charges.thisWeekHint':
     'آنچه بر پایهٔ قواعد جاری از هفتهٔ انتخاب‌شده کسر می‌شود.',
-  'batchStatus.DRAFT': 'پیش‌نویس',
-  'batchStatus.FINAL': 'نهایی',
-  'batchStatus.PARTIAL': 'ناتمام',
-  'batchStatus.PAID': 'پرداخت‌شده',
-  'batchStatus.APPROVED': 'تأیید‌شده',
-  'batchStatus.VOID': 'باطل',
+  'payStatus.unposted': 'ثبت‌نشده',
+  'payStatus.partial': 'بخشی ثبت‌شده',
+  'payStatus.posted': 'ثبت‌شده',
+  'payStatus.paid': 'پرداخت‌شده',
+  'payStatus.void': 'باطل',
 
   // ── THE GRID CONTRACT (§7.1.3-7.1.6) ─────────────────────────────────
   'grid.filter': 'فیلتر',
@@ -6761,11 +6759,12 @@ const fa: Dictionary = {
   'payroll.tab.oneTime': 'کسورات یک‌باره',
   'payroll.tab.scheduled': 'پرداخت‌های زمان‌بندی‌شده',
   'batches.batch': 'دسته',
-  'batches.created': 'ایجاد',
+  'batches.createdBy': 'ایجادکننده',
+  'batches.created': 'تاریخ ایجاد',
   'batches.period': 'دوره',
   'batches.statements': 'صورت‌حساب‌ها',
   'batches.amount': 'مبلغ',
-  'batches.payCompany': 'شرکت پرداخت‌کننده',
+  'batches.payCompany': 'شرکت',
   'batches.notes': 'یادداشت‌ها',
   'batches.empty': 'هیچ دسته‌ای با این فیلترها همخوانی ندارد',
   'batches.breakdown': 'بر پایهٔ شرکت',
@@ -6779,7 +6778,7 @@ const fa: Dictionary = {
   'balances.escrow': 'وجه‌الضمان',
   'balances.empty': 'امسال چیزی تسویه نشده',
   'balances.emptyHint':
-    'مانده‌ها از دسته‌های نهایی و پرداخت‌شده می‌آیند. یک هفته را نهایی کنید.',
+    'مانده‌ها از دسته‌های ثبت‌شده و پرداخت‌شده می‌آیند. یک هفته را ثبت کنید.',
   'oneTime.appliesOn': 'تاریخ اعمال',
   'oneTime.load': 'بار',
   'oneTime.settled': 'تسویه‌شده',
@@ -6985,7 +6984,7 @@ const fa: Dictionary = {
   'reports.deduction.category': 'کسر',
   'reports.emptyDriver': 'در این بازه هفتهٔ تسویه‌شده‌ای نیست',
   'reports.emptyDriverHint':
-    'تنها دسته‌های نهایی و پرداخت‌شده اینجا دیده می‌شوند. بازه را گسترده کنید یا هفته‌ای را نهایی کنید.',
+    'تنها صورت‌حساب‌های ثبت‌شده و پرداخت‌شده اینجا دیده می‌شوند. بازه را گسترده کنید یا هفته‌ای را ثبت کنید.',
 
   // ── ACCOUNTING (§6.2, amended 2026-09-28) ─────────────────────────────
   'nav.group.records': 'سوابق',
@@ -9431,10 +9430,6 @@ const fa: Dictionary = {
     'شناسهٔ حواله یا شمارهٔ چک. «پرداخت شد؟» و «با کدام حواله؟» دو پرسش جدا هستند.',
   'settlements.void': 'ابطال',
   'settlements.voidHint': 'بارها را آزاد می‌کند تا تسویهٔ اصلاح‌شده ساخته شود.',
-  'settlementStatus.DRAFT': 'پیش‌نویس',
-  'settlementStatus.APPROVED': 'تأییدشده',
-  'settlementStatus.PAID': 'پرداخت‌شده',
-  'settlementStatus.VOID': 'باطل',
   'settlementLine.LOAD_PAY': 'دستمزد بار',
   'settlementLine.ACCESSORIAL_PAY': 'دستمزد خدمات جانبی',
   'settlementLine.BONUS': 'پاداش',
@@ -9462,7 +9457,7 @@ const fa: Dictionary = {
   'settlements.error.notFound': 'این تسویه دیگر وجود ندارد.',
   'settlements.error.notDraft':
     'این تسویه تأیید شده است. باطلش کنید و اصلاح‌شده بسازید.',
-  'settlements.error.notApproved': 'اول تأیید کنید، بعد پرداخت را ثبت کنید.',
+  'settlements.error.notApproved': 'اول ثبت کنید، بعد پرداخت را ثبت کنید.',
   'settlements.error.alreadyPaid': 'این تسویه قبلاً پرداخت شده است.',
   'settlements.error.negativeNet':
     'کسورات از دستمزد بیشتر است. این یک گفت‌وگوست، نه یک پرداخت.',
@@ -9559,7 +9554,7 @@ const fa: Dictionary = {
   'batch.checkDateDerived': 'پایان دوره + ۱۳ روز',
   'batch.create': 'ساختن دسته',
   'batch.refresh': 'محاسبهٔ دوبارهٔ پیش‌نویس',
-  'batch.finalise': 'نهایی کردن دسته',
+  'batch.finalise': 'ثبت همهٔ ثبت‌نشده‌ها',
   'batch.markPaid': 'ثبت پرداخت',
   'batch.statement': 'صورت‌حساب',
   'batch.trips': 'سفرهای این دسته',
@@ -9589,6 +9584,8 @@ const fa: Dictionary = {
   'batch.error.notAWeek':
     'دورهٔ تسویه از یکشنبه تا شنبه است. این دو تاریخ چنین دوره‌ای نمی‌سازند.',
   'batch.error.notFound': 'این دسته دیگر وجود ندارد.',
+  'batch.error.posted':
+    'این دسته صورت‌حساب ثبت‌شده یا پرداخت‌شده دارد و حذف نمی‌شود.',
   'batch.error.notDraft':
     'این دیگر پیش‌نویس نیست. دستهٔ نهایی‌شده یک سند است؛ با یک ردیف در هفتهٔ بعد اصلاحش کنید.',
   'batch.error.blocked':

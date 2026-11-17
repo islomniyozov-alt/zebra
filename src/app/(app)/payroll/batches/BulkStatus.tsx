@@ -2,7 +2,7 @@
 
 import { useActionState, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
-import { changeStatusAction } from './bulk-actions'
+import { batchBulkAction } from './bulk-actions'
 import { BULK_INITIAL } from './bulk-state'
 
 interface Props {
@@ -12,12 +12,19 @@ interface Props {
     selected: string
     finalise: string
     markPaid: string
+    remove: string
     clear: string
     blocked: string
     done: string
   }
   /** Refusal sentences, already translated — a client cannot call `t`. */
   reasons: Record<string, string>
+  /**
+   * `settlement:delete`. Delete is offered only to a role that may delete; the
+   * server still refuses any batch with a posted statement, by name (§6.2.10
+   * part 7, R6).
+   */
+  mayDelete: boolean
 }
 
 /**
@@ -46,20 +53,28 @@ interface Props {
  * `finaliseBatch` and `markBatchPaid` refuse per batch and the refusals come
  * back by name — which is more useful than a disabled button that says nothing.
  */
-export function BulkStatus({ children, labels, reasons }: Props) {
+export function BulkStatus({ children, labels, reasons, mayDelete }: Props) {
   const [count, setCount] = useState(0)
   const [finalState, finalise, finalising] = useActionState(
-    changeStatusAction.bind(null, 'finalise'),
+    batchBulkAction.bind(null, 'finalise'),
     BULK_INITIAL,
   )
   const [paidState, markPaid, marking] = useActionState(
-    changeStatusAction.bind(null, 'markPaid'),
+    batchBulkAction.bind(null, 'markPaid'),
+    BULK_INITIAL,
+  )
+  const [deleteState, remove, removing] = useActionState(
+    batchBulkAction.bind(null, 'delete'),
     BULK_INITIAL,
   )
 
-  const state =
-    finalState.changed + finalState.refusals.length > 0 ? finalState : paidState
-  const busy = finalising || marking
+  const acted = (s: typeof finalState) => s.changed + s.refusals.length > 0
+  const state = acted(finalState)
+    ? finalState
+    : acted(paidState)
+      ? paidState
+      : deleteState
+  const busy = finalising || marking || removing
 
   const recount = (form: HTMLFormElement | null) => {
     if (!form) return
@@ -99,6 +114,17 @@ export function BulkStatus({ children, labels, reasons }: Props) {
           >
             {labels.markPaid}
           </Button>
+          {mayDelete ? (
+            <Button
+              type="submit"
+              formAction={remove}
+              variant="danger"
+              size="compact"
+              disabled={busy}
+            >
+              {labels.remove}
+            </Button>
+          ) : null}
           <Button
             variant="ghost"
             size="compact"

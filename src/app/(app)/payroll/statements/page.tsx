@@ -39,6 +39,8 @@ import { GridFooterNav } from '../../_grid/GridFooterNav'
 import { gridView, keepColumns, pagedFooterLabel } from '../../_grid/grid-page'
 import type { MessageKey } from '@/lib/i18n'
 import type { StatusTone } from '@/lib/status'
+import { statementWord } from '@/lib/pay-status'
+import { payrollStrip, payrollStripHref } from '../payroll-tabs'
 
 // PAYROLL → STATEMENTS (§6.2, split 2026-09-28): what one driver was paid for
 // one week.
@@ -50,25 +52,17 @@ import type { StatusTone } from '@/lib/status'
 // week in mind rather than a batch. A batch is a run; a statement is a piece of
 // paper somebody is holding on the phone.
 //
-// ONE TAB, DELIBERATELY. §7.1.6 says a page is tabs over one grid; this page has
-// one question and therefore one tab, and the strip renders so the section looks
-// the same everywhere rather than having one destination that is shaped
-// differently for no reason the reader can see.
+// ONE QUESTION, AND PAYROLL'S STRIP ABOVE IT. §7.1.6 says a page is tabs over
+// one grid; this page has one question, and the strip it draws is Payroll's
+// own (§6.2.10 part 7, R10) — Batches · Driver statements · Balances ·
+// One-time charges — so the section reads as Datatruck's Driver Pay row.
 //
-// THE STRIPE MEANS THE RUN'S STATE, or the settlement's own where it belongs to
-// no run — `Settlement.batchId` is nullable, and the rows that predate batching
-// are exactly the ones a status column would otherwise render blank.
-
-const STATUS: Record<string, { tone: StatusTone; label: MessageKey }> = {
-  DRAFT: { tone: 'neutral', label: 'batchStatus.DRAFT' },
-  FINAL: { tone: 'progress', label: 'batchStatus.FINAL' },
-  PAID: { tone: 'success', label: 'batchStatus.PAID' },
-  APPROVED: { tone: 'progress', label: 'batchStatus.APPROVED' },
-  VOID: { tone: 'muted', label: 'batchStatus.VOID' },
-}
+// THE STATUS IS THE STATEMENT'S OWN (part 7): Unposted · Posted · Paid · Void,
+// from `statementWord`. It was the run's state until 2026-11-17, from before
+// posting became per statement.
 
 const statusOf = (value: string) =>
-  STATUS[value] ?? { tone: 'neutral' as StatusTone, label: null }
+  statementWord(value) ?? { tone: 'neutral' as StatusTone, label: null }
 
 // ONE TAB, DECLARED THE SAME WAY THE OTHERS DECLARE THEIRS. The strip renders
 // so the section looks the same everywhere, and the literal is here so
@@ -128,6 +122,7 @@ export default async function StatementsPage({
   // POSTING IS ITS OWN PERMISSION. Signing off on what a person is paid is a
   // different act from preparing it — permissions.ts decides, this only asks.
   const mayApprove = await currentUserCan('approve', 'settlement')
+  const maySeeBatches = await currentUserCan('read', 'settlement')
 
   const raw = await searchParams
   const { t, locale } = await getLocaleContext()
@@ -365,15 +360,15 @@ export default async function StatementsPage({
         breadcrumb={[t('nav.group.payroll'), t('payroll.tab.statements')]}
       />
       <Tabs
-        tabs={[
-          {
-            key: TABS[0],
-            label: t('payroll.tab.statements'),
-            count: data.statements.length,
-          },
-        ]}
+        tabs={payrollStrip({
+          batches: maySeeBatches,
+          // This page is `driver.pay` already (the notFound above).
+          pay: true,
+          t,
+          counts: { [TABS[0]]: data.statements.length },
+        })}
         active={TABS[0]}
-        hrefFor={() => PATH}
+        hrefFor={(key) => payrollStripHref(key, { [TABS[0]]: PATH })}
         label={t('grid.tabs')}
       />
       <div className="flex flex-wrap items-center justify-end gap-z3 border-b border-border bg-surface px-gutter py-z2">
