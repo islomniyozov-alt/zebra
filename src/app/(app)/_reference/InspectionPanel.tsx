@@ -33,16 +33,35 @@ interface Props {
     hint: string
     none: string
   }
+  /**
+   * Where a new inspection is recorded, for a viewer who may — absent
+   * otherwise. "No inspections on file." was a dead end for the roles that can
+   * record one (clickable audit, 2026-11-17).
+   */
+  record?: { href: string; label: string }
 }
 
-export function InspectionPanel({ rows, labels }: Props) {
+export function InspectionPanel({ rows, labels, record }: Props) {
   return (
     <section className="rounded-card border border-border bg-surface p-z4">
       <h2 className="text-md font-medium text-ink">{labels.title}</h2>
       <p className="mt-z1 max-w-[68ch] text-sm text-ink-3">{labels.hint}</p>
 
       {rows.length === 0 ? (
-        <p className="mt-z3 text-sm text-ink-2">{labels.none}</p>
+        <p className="mt-z3 text-sm text-ink-2">
+          {labels.none}
+          {record ? (
+            <>
+              {' '}
+              <Link
+                href={record.href}
+                className="text-accent underline-offset-2 hover:underline"
+              >
+                {record.label}
+              </Link>
+            </>
+          ) : null}
+        </p>
       ) : (
         <ul className="mt-z3 flex flex-col">
           {rows.map((row) => (

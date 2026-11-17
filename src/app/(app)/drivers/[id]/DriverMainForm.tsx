@@ -60,6 +60,7 @@ export function DriverMainForm({
   action,
   cancelHref,
   labels,
+  readOnly = false,
   children,
 }: {
   left: readonly DriverMainSection[]
@@ -71,6 +72,14 @@ export function DriverMainForm({
   ) => Promise<RecordFormState>
   cancelHref: string
   labels: { save: string; cancel: string }
+  /**
+   * A role without `driver:update` reads the record and cannot post it. The
+   * form was rendered with Save for every role and the action refused with a
+   * ForbiddenError `toFormState` rethrows, so a dispatcher's Save landed on
+   * the error page (clickable audit, 2026-11-17). Read-only disables every
+   * field and shows no Save.
+   */
+  readOnly?: boolean
   /** Rendered under the form — the authority actions. */
   children?: ReactNode
 }) {
@@ -119,6 +128,9 @@ export function DriverMainForm({
     return (
       <Input
         key={field.name}
+        // A STABLE ID PER FIELD, so a link can land on it — the DQF's hire-
+        // date row links to `#field-hireDate` (§6.4 part 2 v11.30).
+        id={`field-${field.name}`}
         name={field.name}
         label={field.label}
         type={field.kind}
@@ -165,14 +177,16 @@ export function DriverMainForm({
   return (
     <>
       <form action={formAction} className="flex max-w-[1100px] flex-col gap-z4">
-        <div className="grid gap-z4 lg:grid-cols-2">
-          <div className="flex min-w-0 flex-col gap-z4">
-            {left.map(renderSection)}
+        <fieldset disabled={readOnly} className="contents">
+          <div className="grid gap-z4 lg:grid-cols-2">
+            <div className="flex min-w-0 flex-col gap-z4">
+              {left.map(renderSection)}
+            </div>
+            <div className="flex min-w-0 flex-col gap-z4">
+              {right.map(renderSection)}
+            </div>
           </div>
-          <div className="flex min-w-0 flex-col gap-z4">
-            {right.map(renderSection)}
-          </div>
-        </div>
+        </fieldset>
 
         {/* A message with no field of its own still has to land somewhere. */}
         {state.error && !state.field ? (
@@ -182,9 +196,11 @@ export function DriverMainForm({
         ) : null}
 
         <div className="flex items-center gap-z2">
-          <Button type="submit" variant="primary" disabled={pending}>
-            {labels.save}
-          </Button>
+          {readOnly ? null : (
+            <Button type="submit" variant="primary" disabled={pending}>
+              {labels.save}
+            </Button>
+          )}
           <Link
             href={cancelHref}
             className="inline-flex h-control items-center rounded-control px-z3 text-base font-medium text-ink-2 hover:bg-surface-3"

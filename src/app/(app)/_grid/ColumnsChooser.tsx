@@ -107,7 +107,13 @@ export function ColumnsChooser({
           >
             {labels.apply}
           </Button>
-          <Button variant="ghost" size="compact" onClick={() => setOpen(false)}>
+          {/* type="button": inside the form, a bare button submits it. */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="compact"
+            onClick={() => setOpen(false)}
+          >
             {labels.cancel}
           </Button>
         </div>

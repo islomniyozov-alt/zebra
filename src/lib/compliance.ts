@@ -1035,21 +1035,38 @@ export async function recordRenewal(
 export async function documentsForRecords(
   tx: TxClient,
   recordIds: readonly string[],
-): Promise<Map<string, { id: string; filename: string }[]>> {
+): Promise<
+  Map<string, { id: string; filename: string; uploadedAt: Date | null }[]>
+> {
   if (recordIds.length === 0) return new Map()
 
   const documents = await tx.document.findMany({
     where: { complianceItemId: { in: [...recordIds] }, deletedAt: null },
     orderBy: { uploadedAt: 'desc' },
-    select: { id: true, filename: true, complianceItemId: true },
+    select: {
+      id: true,
+      filename: true,
+      complianceItemId: true,
+      uploadedAt: true,
+    },
   })
 
-  const byRecord = new Map<string, { id: string; filename: string }[]>()
+  // THE UPLOAD DAY RIDES ALONG (§6.4 part 2 v11.30): the driver's Documents
+  // tab lists it, and `readDriverRecordHead` carries the same field, so the
+  // two transports stay equal.
+  const byRecord = new Map<
+    string,
+    { id: string; filename: string; uploadedAt: Date | null }[]
+  >()
   for (const document of documents) {
     const key = document.complianceItemId
     if (!key) continue
     const list = byRecord.get(key) ?? []
-    list.push({ id: document.id, filename: document.filename })
+    list.push({
+      id: document.id,
+      filename: document.filename,
+      uploadedAt: document.uploadedAt,
+    })
     byRecord.set(key, list)
   }
   return byRecord

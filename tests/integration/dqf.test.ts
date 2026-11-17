@@ -6,9 +6,14 @@ import {
   dqfChecklist,
   dqfFactsForDrivers,
   dqfIncompleteCount,
+  dqfRowAction,
+  dqfRowSatisfied,
   DQF_COMPLIANCE_TYPES,
   DQF_DOCUMENT_TYPES,
+  DQF_RECORD_DEFAULT_DAYS,
+  DQF_REQUIREMENTS,
 } from '@/lib/dqf'
+import { recordRenewal } from '@/lib/compliance'
 import { driverWarningFacts, driverWarnings } from '@/lib/warnings'
 import type {
   ComplianceType,
@@ -266,5 +271,82 @@ describe('what a roster costs', () => {
     const one = await countFor([completeId])
     const twenty = await countFor(Array.from({ length: 20 }, () => completeId))
     expect(twenty).toBe(one)
+  })
+})
+
+// ── EVERY ROW ITS ACTION, AGAINST REAL ROWS (§6.4 part 2 v11.30) ─────────
+//
+// `tests/dqf-actions.test.ts` holds the agreement over hand-built facts. Here
+// each unsatisfied row's action is TAKEN, through the writer it reaches — the
+// compliance writer `recordRenewal` for a Record, a Document row of the
+// action's kind on the driver for an Upload (what the upload pipeline's
+// confirm writes), the hire date for Main — and the loader is asked again.
+// Both sides above zero: the complete file is all satisfied, the new one all
+// unsatisfied, and every one of them turns.
+describe('every DQF row its action', () => {
+  it('each unsatisfied row is satisfied once its action is taken — both sides above zero', async () => {
+    const actedId = (
+      await owner.driver.create({
+        data: {
+          organizationId,
+          companyId,
+          firstName: 'ACTS',
+          lastName: 'ON-EVERY-ROW',
+        },
+      })
+    ).id
+    const before = await inOrg((tx) =>
+      dqfFactsForDrivers(tx, [completeId, actedId]),
+    )
+    const satisfiedBefore = DQF_REQUIREMENTS.filter((r) =>
+      dqfRowSatisfied(r, before.get(completeId)!, NOW),
+    )
+    const unsatisfiedBefore = DQF_REQUIREMENTS.filter(
+      (r) => !dqfRowSatisfied(r, before.get(actedId)!, NOW),
+    )
+    expect(satisfiedBefore.length).toBeGreaterThan(0)
+    expect(unsatisfiedBefore).toHaveLength(DQF_REQUIREMENTS.length)
+
+    let n = 0
+    for (const requirement of unsatisfiedBefore) {
+      const action = dqfRowAction(requirement)
+      if (action.kind === 'main') {
+        await owner.driver.update({
+          where: { id: actedId },
+          data: { hireDate: days(-30) },
+        })
+      } else if (action.kind === 'upload') {
+        n += 1
+        await owner.document.create({
+          data: {
+            organizationId,
+            companyId,
+            driverId: actedId,
+            type: action.documentType,
+            r2Key: `${organizationId}/driver/${actedId}/act-${nonce}-${n}`,
+            filename: `${action.documentType}.pdf`,
+            mimeType: 'application/pdf',
+            sizeBytes: 1024,
+          },
+        })
+      } else {
+        const outcome = await inOrg((tx) =>
+          recordRenewal(tx, {
+            subject: 'driver',
+            subjectId: actedId,
+            type: action.complianceType,
+            issuedAt: null,
+            expiresAt: days(DQF_RECORD_DEFAULT_DAYS),
+          }),
+        )
+        expect(outcome.ok).toBe(true)
+      }
+    }
+
+    const after = await inOrg((tx) => dqfFactsForDrivers(tx, [actedId]))
+    const still = DQF_REQUIREMENTS.filter(
+      (r) => !dqfRowSatisfied(r, after.get(actedId)!, NOW),
+    ).map((r) => r.key)
+    expect(still).toEqual([])
   })
 })

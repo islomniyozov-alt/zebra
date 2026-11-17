@@ -1,6 +1,7 @@
 'use client'
 
 import { useActionState } from 'react'
+import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
 import { linkSignInAction, unlinkSignInAction } from '../link-actions'
@@ -45,6 +46,7 @@ interface Props {
     never: string
     pick: string
     noCandidates: string
+    newUser: string
     terminated: string
     link: string
     linking: string
@@ -112,7 +114,17 @@ export function SignInLink({
       ) : terminated ? (
         <p className="mt-z3 text-sm text-ink-2">{labels.terminated}</p>
       ) : options.length === 0 ? (
-        <p className="mt-z3 text-sm text-ink-2">{labels.noCandidates}</p>
+        <p className="mt-z3 text-sm text-ink-2">
+          {labels.noCandidates}{' '}
+          {/* THE WAY OUT, linked (clickable audit, 2026-11-17). The tab is
+           * user:update; /users/new is user:create — OWNER and ADMIN both. */}
+          <Link
+            href="/users/new"
+            className="text-accent underline-offset-2 hover:underline"
+          >
+            {labels.newUser}
+          </Link>
+        </p>
       ) : (
         <form action={linkAction} className="mt-z3 flex flex-col gap-z3">
           <p className="text-sm text-ink-2">{labels.none}</p>

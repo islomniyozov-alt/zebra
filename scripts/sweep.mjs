@@ -126,6 +126,25 @@ export function routesUnder(root) {
 export const ROUTE_QUERY = new Map([['/exports', 'grid=payments.payments']])
 
 /**
+ * MORE THAN ONE ANSWER FROM ONE ROUTE: query strings fetched as the owner
+ * beside the route's plain fetch, each its own row. The /drivers tabs bring
+ * their own date column, and Terminated and Vacation answered 500 on dev while
+ * the plain list rendered (safety team, 2026-11-17: "A table may show 9
+ * columns at most; this one has 10") — a route the sweep fetched once could
+ * not see it. The first is the report's own URL.
+ */
+export const ROUTE_VARIANTS = new Map([
+  [
+    '/drivers',
+    [
+      'per=500&dispatch=available&tab=terminated',
+      'tab=terminated&per=500',
+      'tab=vacation&per=500',
+    ],
+  ],
+])
+
+/**
  * Whether an anonymous answer is a refusal. A page redirects to `/login`; a
  * route handler answers 401 — both refuse, and anything else let a stranger in.
  */
@@ -1187,6 +1206,33 @@ async function sweep() {
     console.log(
       `${markFor(verdict, matrix.get(route)?.owner === 'refuse')} ${String(withSession.status).padEnd(3)} ${route.padEnd(34)} ${verdict === 'ok' ? '' : verdict}${withSession.to ? ` → ${withSession.to}` : ''}`,
     )
+
+    // THE ROUTE'S OTHER ANSWERS, as the owner — each a row, each a 500 named.
+    for (const query of ROUTE_VARIANTS.get(route) ?? []) {
+      const variantPath = `${path}?${query}`
+      const answer = await get(variantPath, { cookie })
+      const variantVerdict = classify(answer.status, answer.body)
+      authed.push({
+        route,
+        path: variantPath,
+        status: answer.status,
+        verdict: variantVerdict,
+        ...(answer.unreachable ? { unreachable: answer.unreachable } : {}),
+      })
+      if (isServerError(variantVerdict))
+        serverErrors.push(
+          serverErrorRecord({
+            role: 'owner',
+            route,
+            path: variantPath,
+            verdict: variantVerdict,
+            ...answer,
+          }),
+        )
+      console.log(
+        `${markFor(variantVerdict, false)} ${String(answer.status).padEnd(3)} ${variantPath.padEnd(34)} ${variantVerdict === 'ok' ? '' : variantVerdict}`,
+      )
+    }
 
     // THE ANONYMOUS HALF. Auth pages are supposed to render to a stranger; every
     // other page must refuse. A 200 here is the worst finding this script can

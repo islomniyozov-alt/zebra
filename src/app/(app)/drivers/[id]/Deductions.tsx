@@ -129,6 +129,7 @@ export function Deductions({
                   driverId={driverId}
                   deductionId={row.id}
                   today={today}
+                  translate={translate}
                   labels={{ close: labels.close, hint: labels.closeHint }}
                 />
               ) : null}
@@ -236,11 +237,14 @@ function StopDeduction({
   driverId,
   deductionId,
   today,
+  translate,
   labels,
 }: {
   driverId: string
   deductionId: string
   today: string
+  /** The page's error keys in words; a refusal printed its key (audit 2026-11-17). */
+  translate: Record<string, string>
   labels: { close: string; hint: string }
 }) {
   const [state, act, pending] = useActionState<DeductionState, FormData>(
@@ -261,7 +265,7 @@ function StopDeduction({
       </Button>
       {state.error ? (
         <span role="alert" className="text-xs text-danger">
-          {state.error}
+          {translate[state.error] ?? state.error}
         </span>
       ) : null}
     </form>

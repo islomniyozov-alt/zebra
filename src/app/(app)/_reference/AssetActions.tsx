@@ -34,7 +34,12 @@ interface Props {
     previous: RecordFormState,
     formData: FormData,
   ) => Promise<RecordFormState>
-  retireAction: () => Promise<void>
+  /**
+   * Absent when the viewer may not remove the asset — then there is no Remove
+   * button. It was a no-op server action behind a live button and a
+   * confirmation modal (clickable audit, 2026-11-17).
+   */
+  retireAction?: () => Promise<void>
   restoreAction: () => Promise<void>
   labels: {
     transfer: string
@@ -87,23 +92,29 @@ export function AssetActions({
           </form>
         ) : (
           <>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setTransferOpen(true)}
-              disabled={authorities.length === 0}
-            >
-              {labels.transfer}
-            </Button>
+            {/* NO OTHER AUTHORITY, NO BUTTON. It was rendered disabled for
+             * ever in a one-authority organization, with nothing saying why
+             * (clickable audit, 2026-11-17). */}
+            {authorities.length > 0 ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setTransferOpen(true)}
+              >
+                {labels.transfer}
+              </Button>
+            ) : null}
             {/* Standing rule 11 of the design system: destructive actions are
              * never accent-coloured. Danger or ghost only. */}
-            <Button
-              type="button"
-              variant="danger"
-              onClick={() => setRetireOpen(true)}
-            >
-              {labels.retire}
-            </Button>
+            {retireAction ? (
+              <Button
+                type="button"
+                variant="danger"
+                onClick={() => setRetireOpen(true)}
+              >
+                {labels.retire}
+              </Button>
+            ) : null}
           </>
         )}
       </div>

@@ -1,12 +1,11 @@
 'use client'
 
-import { useActionState, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useActionState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Select, type SelectOption } from '@/components/ui/Select'
 import { StatusBadge } from '@/components/ui/StatusBadge'
-import { uploadDocument, type UploadPhase } from '@/lib/upload-client'
+import { AttachDocument, DocumentLink } from './DocumentControls'
 import { cx } from '@/lib/cx'
 import { recordRenewalAction } from './compliance-actions'
 import { COMPLIANCE_INITIAL, type ComplianceState } from './compliance-state'
@@ -209,105 +208,5 @@ export function CompliancePanel({
         </form>
       ) : null}
     </section>
-  )
-}
-
-/**
- * A document link that fetches its own signed URL on click.
- *
- * The URL is short-lived and minted per request, so it cannot be rendered into
- * the page ahead of time — the same pattern the load screen's documents use.
- */
-function DocumentLink({
-  id,
-  filename,
-  failedLabel,
-}: {
-  id: string
-  filename: string
-  failedLabel: string
-}) {
-  const [failed, setFailed] = useState(false)
-
-  return (
-    <button
-      type="button"
-      className="font-mono text-xs text-accent hover:underline"
-      onClick={async () => {
-        try {
-          const response = await fetch(`/api/documents/${id}/download-url`)
-          if (!response.ok) throw new Error(String(response.status))
-          const { url } = (await response.json()) as { url: string }
-          window.open(url, '_blank', 'noopener')
-        } catch {
-          setFailed(true)
-        }
-      }}
-    >
-      {failed ? failedLabel : filename}
-    </button>
-  )
-}
-
-function AttachDocument({
-  recordId,
-  documentType,
-  labels,
-}: {
-  recordId: string
-  documentType: string
-  labels: {
-    attach: string
-    preparing: string
-    uploading: string
-    failed: string
-  }
-}) {
-  const router = useRouter()
-  const [phase, setPhase] = useState<UploadPhase>('idle')
-
-  const caption =
-    phase === 'preparing'
-      ? labels.preparing
-      : phase === 'uploading'
-        ? labels.uploading
-        : phase === 'failed'
-          ? labels.failed
-          : labels.attach
-
-  return (
-    <label
-      className={cx(
-        'cursor-pointer text-xs',
-        phase === 'failed' ? 'text-danger' : 'text-ink-3 hover:text-accent',
-      )}
-    >
-      {caption}
-      <input
-        type="file"
-        className="sr-only"
-        onChange={async (event) => {
-          const file = event.target.files?.[0]
-          if (!file) return
-          try {
-            await uploadDocument(
-              file,
-              {
-                entity: 'complianceItem',
-                entityId: recordId,
-                documentType,
-              },
-              (progress) => setPhase(progress.phase),
-            )
-            setPhase('done')
-            // The row's document list is server-rendered, so the page has to
-            // re-read before the new certificate appears next to it.
-            router.refresh()
-          } catch {
-            setPhase('failed')
-          }
-        }}
-      />
-    </label>
   )
 }

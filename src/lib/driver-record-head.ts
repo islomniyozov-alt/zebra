@@ -100,7 +100,11 @@ export interface DriverRecordHead {
   dqf: DqfFacts
   authority: { companyId: string; since: Date } | null
   compliance: ComplianceRow[]
-  complianceDocuments: Map<string, { id: string; filename: string }[]>
+  /** Each record's files, with the day each arrived (the Documents tab lists it). */
+  complianceDocuments: Map<
+    string,
+    { id: string; filename: string; uploadedAt: Date | null }[]
+  >
   inspections: InspectionRow[]
   documents: {
     id: string
@@ -389,12 +393,16 @@ export async function readDriverRecordHead(
   )
   const complianceDocuments = new Map<
     string,
-    { id: string; filename: string }[]
+    { id: string; filename: string; uploadedAt: Date | null }[]
   >()
   for (const doc of row.compliance_documents) {
     const key = doc.complianceItemId as string
     const list = complianceDocuments.get(key) ?? []
-    list.push({ id: doc.id as string, filename: doc.filename as string })
+    list.push({
+      id: doc.id as string,
+      filename: doc.filename as string,
+      uploadedAt: asDate(doc.uploadedAt),
+    })
     complianceDocuments.set(key, list)
   }
 
