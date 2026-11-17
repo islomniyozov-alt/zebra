@@ -298,61 +298,27 @@ export function deliveredBetween(from: Date, to: Date): Prisma.LoadWhereInput {
 }
 
 /**
- * `deliveryDateOf(load)` on or before `to` — a delivery date exists and is not
- * after the end. The batch's window since the CATCH-UP RULING (MONEY-DESIGN §6,
- * owner's ruling 2026-11-17): any Delivered trip not yet on a statement is
- * eligible for the next batch of its authority, regardless of how long ago it
- * was delivered. A trip with no delivery date is not "earlier" — it has no
- * date — and stays in the picker's No delivery date group until one is
- * recorded.
+ * What a BATCH may draft (owner's catch-up ruling 2026-11-17, with its floor
+ * the same day): delivered in its range, AND every earlier Delivered trip not
+ * yet on a statement back to the CARRY-OVER FLOOR — `from` is the earlier of
+ * the range's start and the floor (`batchLowerBound` in payroll-cutover.ts),
+ * so a trip delivered before the floor never carries over. A trip with no
+ * delivery date is never drafted; it waits in the picker's No delivery date
+ * group.
  *
- * Branch one: some delivery stop departed and none departed after `to`, so
- * the latest departure is on or before it. Branch two: no delivery stop has
- * departed and some finished event is on or before `to`, so the earliest is.
+ * `settleableInPeriod` stays the range alone — the workbench's per-driver set —
+ * and the no-overlap rule (§6.2.10 part 7) applies to the RANGE, not to the
+ * carry-over: the statement fence (`settlementLoadLines: { none: {} }` in
+ * `settleableForBatch`) is what stops a caught-up trip being paid twice.
  */
-export function deliveredBy(to: Date): Prisma.LoadWhereInput {
-  return {
-    OR: [
-      {
-        AND: [
-          {
-            stops: {
-              some: { type: 'DELIVERY', departedAt: { not: null } },
-            },
-          },
-          { stops: { none: { type: 'DELIVERY', departedAt: { gt: to } } } },
-        ],
-      },
-      {
-        AND: [
-          {
-            stops: { none: { type: 'DELIVERY', departedAt: { not: null } } },
-          },
-          {
-            statusEvents: {
-              some: { ...FINISHED_EVENT, occurredAt: { lte: to } },
-            },
-          },
-        ],
-      },
-    ],
-  }
-}
-
-/**
- * What a BATCH ending `periodEnd` may draft (owner's catch-up ruling
- * 2026-11-17): delivered in its range, AND every earlier Delivered trip not
- * yet on a statement. `settleableInPeriod` stays the range alone — the
- * workbench's per-driver set and the picker's "in this range" group — and the
- * no-overlap rule (§6.2.10 part 7) applies to the RANGE, not to these: the
- * statement fence (`settlementLoadLines: { none: {} }` in `settleableForBatch`)
- * is what stops a catch-up trip being paid twice.
- */
-export function settleableUpTo(periodEnd: Date): Prisma.LoadWhereInput {
+export function settleableUpTo(
+  from: Date,
+  periodEnd: Date,
+): Prisma.LoadWhereInput {
   return {
     ...SETTLEABLE_LOAD,
     operationalStatus: { in: [...DELIVERED_STATUSES] },
-    AND: [deliveredBy(periodEnd)],
+    AND: [deliveredBetween(from, periodEnd)],
   }
 }
 

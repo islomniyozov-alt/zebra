@@ -3,12 +3,17 @@ import { readFileSync } from 'node:fs'
 import {
   DELIVERED_STATUSES,
   deliveredBetween,
-  deliveredBy,
   deliveryDateOf,
   settleableInPeriod,
   settleableWhere,
 } from '@/lib/settlements'
 import { settleableForBatch } from '@/lib/settlement-batch'
+import {
+  batchLowerBound,
+  carryOverFloor,
+  carryOverFloorSql,
+  parseCutover,
+} from '@/lib/payroll-cutover'
 import {
   catchUpWhere,
   previewFrom,
@@ -332,7 +337,12 @@ describe('the preview classifies by delivery date', () => {
         }),
       ],
       new Set(),
-      { from: d('2026-11-08T00:00:00Z'), to: d('2026-11-14T00:00:00Z') },
+      {
+        from: d('2026-11-08T00:00:00Z'),
+        to: d('2026-11-14T00:00:00Z'),
+        // An authority's first batch: the floor is its own start.
+        floor: d('2026-11-08T00:00:00Z'),
+      },
     )
     expect(preview.available.map((t) => t.loadId).sort()).toEqual([
       'deliveredNoPod',
@@ -373,11 +383,19 @@ describe('the preview classifies by delivery date', () => {
 // its authority, regardless of date; Create lists them as a second group,
 // "Delivered earlier, not yet paid", ticked by default.
 
-describe('the batch window is "delivered on or before the end"', () => {
+describe('the batch window reaches back to the carry-over floor', () => {
+  // THE FLOOR (owner's ruling 2026-11-17): the payroll cutover. A trip
+  // delivered after it carries over; one delivered before it never does.
+  const FLOOR = d('2026-08-01T00:00:00Z')
   const EARLY: Row = {
     operationalStatus: 'POD_RECEIVED',
     stops: [{ type: 'DELIVERY', departedAt: d('2026-09-02T15:00:00Z') }],
     statusEvents: [ev('POD_RECEIVED', '2026-09-03T10:00:00Z')],
+  }
+  const BEFORE_FLOOR: Row = {
+    operationalStatus: 'POD_RECEIVED',
+    stops: [{ type: 'DELIVERY', departedAt: d('2026-07-20T15:00:00Z') }],
+    statusEvents: [ev('POD_RECEIVED', '2026-07-21T10:00:00Z')],
   }
   const byEnd = (row: Row) => {
     const at = deliveryDateOf({
@@ -393,15 +411,25 @@ describe('the batch window is "delivered on or before the end"', () => {
           .map((e) => e.occurredAt)
           .sort((a, b) => a.getTime() - b.getTime())[0] ?? null,
     })
-    return at !== null && at <= TO
+    return at !== null && at >= FLOOR && at <= TO
   }
+  const batch = (floor: Date) =>
+    settleableForBatch(
+      'co',
+      { start: d('2026-11-08T00:00:00Z'), end: d('2026-11-14T00:00:00Z') },
+      floor,
+    )
 
-  it('agrees with the pure definition on every shape, the early one included', () => {
+  it('agrees with the pure definition: after the floor present, before it absent', () => {
     const selected: string[] = []
-    for (const [name, row] of Object.entries({ ...CASES, early: EARLY })) {
+    for (const [name, row] of Object.entries({
+      ...CASES,
+      early: EARLY,
+      beforeFloor: BEFORE_FLOOR,
+    })) {
       const prisma = matches(
         row as unknown as Record<string, unknown>,
-        deliveredBy(TO),
+        { AND: batch(FLOOR).AND } as Where,
       )
       expect(prisma, name).toBe(byEnd(row))
       if (prisma) selected.push(name)
@@ -416,14 +444,12 @@ describe('the batch window is "delivered on or before the end"', () => {
         'podJumpIn',
       ].sort(),
     )
+    expect(selected).not.toContain('beforeFloor')
   })
 
   it('is what a batch drafts, with the statement fences still on', () => {
-    const where = settleableForBatch('co', {
-      start: d('2026-11-08T00:00:00Z'),
-      end: d('2026-11-14T00:00:00Z'),
-    })
-    expect(where.AND).toEqual([deliveredBy(TO)])
+    const where = batch(FLOOR)
+    expect(where.AND).toEqual([deliveredBetween(FLOOR, TO)])
     expect(where.settlementLoadLines).toEqual({ none: {} })
     expect(where.settlementLines).toEqual({ none: {} })
     expect(where.companyId).toBe('co')
@@ -519,10 +545,22 @@ describe('the picker reads the catch-up and lists it as its own group', () => {
         load('earlier', '2026-09-02T12:00:00Z'),
         load('earlierToo', '2026-11-07T23:00:00Z'),
         load('after', '2026-11-15T09:00:00Z'),
+        // BEFORE THE PAYROLL CUTOVER: never carries over (owner's ruling
+        // 2026-11-17, the floor).
+        load('beforeFloor', '2026-07-20T12:00:00Z'),
       ],
       new Set(),
-      { from: d('2026-11-08T00:00:00Z'), to: d('2026-11-14T00:00:00Z') },
+      {
+        from: d('2026-11-08T00:00:00Z'),
+        to: d('2026-11-14T00:00:00Z'),
+        floor: d('2026-08-01T00:00:00Z'),
+      },
     )
+    // THE FLOOR: before it absent from the earlier group, after it present.
+    expect(preview.available.map((t) => t.loadId)).not.toContain('beforeFloor')
+    expect(preview.unavailable.beforeCutover.map((t) => t.loadId)).toEqual([
+      'beforeFloor',
+    ])
     const inRange = preview.available.filter((t) => !t.earlier)
     const earlier = preview.available.filter((t) => t.earlier)
     expect(inRange.length).toBeGreaterThan(0)
@@ -567,5 +605,84 @@ describe('the picker reads the catch-up and lists it as its own group', () => {
     expect(translator('en')('preview.earlier')).toBe(
       'Delivered earlier, not yet paid',
     )
+  })
+})
+
+// ── THE CARRY-OVER FLOOR'S OWN RULES (owner's ruling 2026-11-17) ──────────
+
+describe('the payroll cutover, the carry-over floor', () => {
+  it('is the setting, else the earliest batch, else today', () => {
+    const today = d('2026-11-17T15:30:00Z')
+    expect(
+      carryOverFloor({
+        stored: d('2026-10-01T00:00:00Z'),
+        earliestBatchStart: d('2026-09-20T00:00:00Z'),
+        today,
+      }).toISOString(),
+    ).toBe('2026-10-01T00:00:00.000Z')
+    expect(
+      carryOverFloor({
+        stored: null,
+        earliestBatchStart: d('2026-09-20T00:00:00Z'),
+        today,
+      }).toISOString(),
+    ).toBe('2026-09-20T00:00:00.000Z')
+    expect(
+      carryOverFloor({
+        stored: null,
+        earliestBatchStart: null,
+        today,
+      }).toISOString(),
+    ).toBe('2026-11-17T00:00:00.000Z')
+  })
+
+  it('bounds the carry-over, never the range', () => {
+    const start = d('2026-11-08T00:00:00Z')
+    expect(batchLowerBound(start, d('2026-09-01T00:00:00Z'))).toEqual(
+      d('2026-09-01T00:00:00Z'),
+    )
+    expect(batchLowerBound(start, d('2026-11-10T00:00:00Z'))).toEqual(start)
+  })
+
+  it('reads the setting and the earliest batch of the scope in one SQL text', () => {
+    const sql = carryOverFloorSql(Prisma.sql`'co'`).strings.join('?')
+    expect(sql).toContain('o."payrollCutoverDate" FROM "Organization" o')
+    expect(sql).toContain('MIN(x."periodStart") FROM "SettlementBatch" x')
+    expect(sql).toContain('x."deletedAt" IS NULL')
+    expect(sql).toContain('OR x."companyId" IS NULL')
+    const head = readFileSync('src/lib/batch-page-head.ts', 'utf8')
+    expect(head).toContain('floor AS (${carryOverFloorSql(')
+  })
+
+  it('parses the Settings field: a real day, or empty for the default', () => {
+    expect(parseCutover('2026-10-01')?.toISOString()).toBe(
+      '2026-10-01T00:00:00.000Z',
+    )
+    expect(parseCutover('')).toBeNull()
+    expect(parseCutover(null)).toBeNull()
+    expect(parseCutover('2026-02-30')).toBeUndefined()
+  })
+
+  it('is set by one audited update, under organization:update', () => {
+    const lib = readFileSync('src/lib/payroll-cutover.ts', 'utf8')
+    expect(lib).toContain('data: { payrollCutoverDate: parsed }')
+    const action = readFileSync('src/app/(app)/settings/actions.ts', 'utf8')
+    expect(action).toContain("withCurrentOrg('update', 'organization'")
+    // AUDITED BY THE EXTENSION: Organization is not among the models it skips.
+    const audit = readFileSync('src/lib/audit.ts', 'utf8')
+    const skipped = audit.slice(
+      audit.indexOf('const UNAUDITED_MODELS'),
+      audit.indexOf('])', audit.indexOf('const UNAUDITED_MODELS')),
+    )
+    expect(skipped).not.toContain("'Organization'")
+  })
+
+  it('every engine path reads it: the batch input and the stored strip', () => {
+    const engine = readFileSync('src/lib/settlement-batch.ts', 'utf8')
+    expect(engine).toContain(
+      'const floor = await readCarryOverFloor(tx, input.companyId ?? null)',
+    )
+    const payroll = readFileSync('src/lib/payroll.ts', 'utf8')
+    expect(payroll).toContain('settleableForBatch(null, input.period, floor)')
   })
 })

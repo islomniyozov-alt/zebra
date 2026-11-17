@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { settleableForBatch } from '@/lib/settlement-batch'
 import {
-  deliveredBy,
+  deliveredBetween,
   settleableInPeriod,
   settleableWhere,
 } from '@/lib/settlements'
@@ -1242,13 +1242,16 @@ describe('the batch and the driver ask one question', () => {
     start: new Date(Date.UTC(2026, 7, 30)),
     end: new Date(Date.UTC(2026, 8, 5)),
   }
+  // THE CARRY-OVER FLOOR (owner's ruling 2026-11-17): four weeks back, so the
+  // catch-up window is visible in every assertion below.
+  const FLOOR = new Date(Date.UTC(2026, 7, 2))
 
   it('both carry the same base and gate; the batch’s window adds the catch-up', () => {
     const core = settleableInPeriod(
       period.start,
       new Date(period.end.getTime() + 86_399_999),
     )
-    const batch = settleableForBatch(null, period)
+    const batch = settleableForBatch(null, period, FLOOR)
     const driver = settleableWhere(
       'drv_1',
       period.start,
@@ -1266,7 +1269,7 @@ describe('the batch and the driver ask one question', () => {
       expect(batch[key], `batch is missing ${key}`).toEqual(core[key])
     }
     expect(batch.AND).toEqual([
-      deliveredBy(new Date(period.end.getTime() + 86_399_999)),
+      deliveredBetween(FLOOR, new Date(period.end.getTime() + 86_399_999)),
     ])
   })
 
@@ -1277,13 +1280,13 @@ describe('the batch and the driver ask one question', () => {
   // a load must have a DELIVERED status, an APPLIED event, inside the period
   // to the last millisecond — only the status and the event widened.
   it('REQUIRES a delivered status on the batch side', () => {
-    expect(settleableForBatch(null, period).operationalStatus).toEqual({
+    expect(settleableForBatch(null, period, FLOOR).operationalStatus).toEqual({
       in: ['DELIVERED', 'POD_RECEIVED'],
     })
   })
 
   it('REQUIRES an APPLIED Delivered-or-POD event when no drop has departed', () => {
-    const [delivered] = settleableForBatch(null, period).AND as [
+    const [delivered] = settleableForBatch(null, period, FLOOR).AND as [
       { OR: [unknown, { AND: [unknown, { statusEvents: unknown }] }] },
     ]
     expect(delivered.OR[1].AND[1].statusEvents).toMatchObject({
@@ -1295,12 +1298,21 @@ describe('the batch and the driver ask one question', () => {
     })
   })
 
-  it('DATES the delivery on or before the period end, to the last millisecond', () => {
-    expect(settleableForBatch(null, period).AND).toEqual([
+  it('DATES the delivery from the floor to the period end, to the last millisecond', () => {
+    expect(settleableForBatch(null, period, FLOOR).AND).toEqual([
       // The Saturday, whole. A period ending at midnight loses everything that
-      // landed on its last day — four loads, on the 9/13 week. No lower bound:
-      // the catch-up ruling of 2026-11-17.
-      deliveredBy(new Date(period.end.getTime() + 86_399_999)),
+      // landed on its last day — four loads, on the 9/13 week. The lower bound
+      // is the carry-over floor (2026-11-17).
+      deliveredBetween(FLOOR, new Date(period.end.getTime() + 86_399_999)),
+    ])
+    // A FLOOR AFTER THE RANGE'S START NEVER CUTS THE RANGE: the bound is the
+    // earlier of the two.
+    const late = new Date(Date.UTC(2026, 8, 3))
+    expect(settleableForBatch(null, period, late).AND).toEqual([
+      deliveredBetween(
+        period.start,
+        new Date(period.end.getTime() + 86_399_999),
+      ),
     ])
   })
 
@@ -1310,14 +1322,16 @@ describe('the batch and the driver ask one question', () => {
   // has one. Since 2026-11-17 the stop's ACTUAL departure is the first source
   // of the delivery date — inside `AND`, never as a top-level stop filter.
   it('never selects on the delivery stop’s plan', () => {
-    const where = settleableForBatch(null, period)
+    const where = settleableForBatch(null, period, FLOOR)
     expect(where.stops).toBeUndefined()
     expect(JSON.stringify(where)).not.toContain('scheduledAt')
   })
 
   // Each side keeps exactly the scoping that is its own business.
   it('keeps the batch org-wide and the driver query per driver', () => {
-    expect(settleableForBatch(null, period).driverId).toEqual({ not: null })
+    expect(settleableForBatch(null, period, FLOOR).driverId).toEqual({
+      not: null,
+    })
     expect(settleableWhere('drv_1', period.start, period.end).OR).toEqual([
       { driverId: 'drv_1' },
       { coDriverId: 'drv_1' },

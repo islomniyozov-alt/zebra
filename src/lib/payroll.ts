@@ -1,6 +1,7 @@
 import type { Prisma } from '@/generated/prisma/client'
 import { computeBatch, isSettlementWeek, weekOf } from './settlement-week'
 import { batchInputForOrg, settleableForBatch } from './settlement-batch'
+import { readCarryOverFloor } from './payroll-cutover'
 import type { Week } from './settlement-week'
 
 type TxClient = Prisma.TransactionClient
@@ -211,11 +212,14 @@ export async function weekTrouble(
   }
 
   if (input.batchId !== null) {
+    // THE ORG-WIDE CARRY-OVER FLOOR (owner's ruling 2026-11-17), because this
+    // strip's read is org-wide (`null` scope), as it was before the floor.
+    const floor = await readCarryOverFloor(tx, null)
     const [seated, settled] = await Promise.all([
       // Everyone with settleable freight in the week, by name. `distinct` keeps
       // this one row per driver rather than one per load.
       tx.load.findMany({
-        where: settleableForBatch(null, input.period),
+        where: settleableForBatch(null, input.period, floor),
         select: {
           driverId: true,
           driver: { select: { firstName: true, lastName: true } },

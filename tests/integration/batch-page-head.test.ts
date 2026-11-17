@@ -396,20 +396,16 @@ describe('/settlements/batches/[id] in one statement', () => {
       batches.alpha!,
     ))!
     const ids = (rows: { loadId: string }[]) => rows.map((r) => r.loadId).sort()
-    // THE CATCH-UP (owner's ruling 2026-11-17): `early` (delivered three days
-    // before the week) and `beforeMargin` (sixteen, beyond the window) are on
-    // no statement when the batch opens, so the batch drafts them and the
-    // screen lists them as "Delivered earlier, not yet paid".
+    // THE CATCH-UP AND ITS FLOOR (owner's rulings 2026-11-17). No payroll
+    // cutover is set here, so the floor is this authority's earliest live
+    // batch — alpha itself, the week's start. `early` (delivered three days
+    // before the week) and `beforeMargin` (sixteen) are on no statement but
+    // BEFORE the floor: they never carry over, and the screen says so.
     expect(ids(alpha.preview.available)).toEqual(
-      [
-        loads.ticked,
-        loads.declined,
-        loads.afterOpen,
-        loads.early,
-        loads.beforeMargin,
-      ].sort(),
+      [loads.ticked, loads.declined, loads.afterOpen].sort(),
     )
-    expect(ids(alpha.preview.available.filter((t) => t.earlier))).toEqual(
+    expect(alpha.preview.available.filter((t) => t.earlier)).toEqual([])
+    expect(ids(alpha.preview.unavailable.beforeCutover)).toEqual(
       [loads.early, loads.beforeMargin].sort(),
     )
     expect(
@@ -430,8 +426,8 @@ describe('/settlements/batches/[id] in one statement', () => {
     )
     expect(ids(alpha.preview.unavailable.noDriver)).toEqual([loads.noDriver])
     expect(ids(alpha.preview.unavailable.noRule)).toEqual([loads.noRule])
-    // TEN IN THE WINDOW, AND TWO MORE THE CATCH-UP CLAUSE READS:
-    // `beforeMargin` (on this batch) and `beyondMargin` (on none).
+    // TEN IN THE WINDOW, AND TWO MORE THE CATCH-UP CLAUSE READS (Delivered,
+    // on no statement): `beforeMargin` and `beyondMargin`.
     expect(alpha.preview.considered).toBe(12)
     const ticked = alpha.preview.available.find(
       (t) => t.loadId === loads.ticked,
@@ -440,13 +436,13 @@ describe('/settlements/batches/[id] in one statement', () => {
     expect(ticked.loadPayCents).toBe(36_000)
     expect(ticked.locations).toBe('Whiteland, IN → Gastonia DC')
     expect(alpha.batch.company?.name).toBe(`ALPHA ${nonce}`)
-    // The paid driver's statement carries the week's trip and the two caught
-    // up; the ruleless driver's is there with none, which is how the engine
-    // records a blocker.
+    // The paid driver's statement carries the one trip — nothing before the
+    // floor carried over; the ruleless driver's is there with none, which is
+    // how the engine records a blocker.
     expect(
       alpha.batch.settlements.map((s) => [s.driver.firstName, s.lines]).sort(),
     ).toEqual([
-      ['PAID', 3],
+      ['PAID', 1],
       ['RULELESS', 0],
     ])
 
@@ -455,13 +451,17 @@ describe('/settlements/batches/[id] in one statement', () => {
       batches.wide!,
     ))!
     expect(wide.batch.company).toBeNull()
-    // `early` is in the window and on ALPHA's statement now (the catch-up);
-    // `beforeMargin` is on alpha's too but outside the window, so the wide
-    // batch never reads it. `beyondMargin`, on none, is read by the catch-up.
     expect(ids(wide.preview.unavailable.alreadyInBatch)).toEqual(
-      [loads.ticked, loads.early, loads.beta].sort(),
+      [loads.ticked, loads.beta].sort(),
     )
-    expect(wide.preview.considered).toBe(12)
+    // The org-wide floor is the earliest live batch of any scope — the week's
+    // start — so `early` and `beforeMargin` are before it here too.
+    expect(ids(wide.preview.unavailable.beforeCutover)).toEqual(
+      [loads.early, loads.beforeMargin].sort(),
+    )
+    // ELEVEN IN THE WINDOW, PLUS `beforeMargin` AND `beyondMargin` (Delivered,
+    // on no statement), read by the catch-up clause.
+    expect(wide.preview.considered).toBe(13)
   }, 600_000)
 
   it('is ONE statement through the tenant reader; a deleted batch and another organization’s are absent', async () => {

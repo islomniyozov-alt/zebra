@@ -713,6 +713,7 @@ describe('the open-batch flow', () => {
       'inTransit',
       'noDeliveryDate',
       'outsideRange',
+      'beforeCutover',
       'alreadyInBatch',
       'noDriver',
       'noRule',
@@ -731,9 +732,10 @@ describe('the open-batch flow', () => {
     const hints = [...page.matchAll(/'(preview\.hint\.\w+)'/g)].map(
       (hit) => hit[1],
     )
-    // SIX SINCE 2026-11-17: `noDeliveryDate` (MONEY-DESIGN §6).
-    expect(new Set(labels).size).toBe(6)
-    expect(new Set(hints).size).toBe(6)
+    // SEVEN SINCE 2026-11-17: `noDeliveryDate` and `beforeCutover`
+    // (MONEY-DESIGN §6, the delivery date and the carry-over floor).
+    expect(new Set(labels).size).toBe(7)
+    expect(new Set(hints).size).toBe(7)
   })
 
   // ── A LOAD LANDS IN EXACTLY ONE BUCKET ──────────────────────────────────

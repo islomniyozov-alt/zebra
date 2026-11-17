@@ -6,6 +6,7 @@ import { LOAD_WRITE_TIMEOUT_MS, createLoad } from '@/lib/loads'
 import { openBatch } from '@/lib/settlement-batch'
 import { SETTLEABLE_LOAD, settleableInPeriod } from '@/lib/settlements'
 import { previewBatch } from '@/lib/batch-preview'
+import { savePayrollCutover } from '@/lib/payroll-cutover'
 import { weekOf, type Week } from '@/lib/settlement-week'
 import type { Prisma, PrismaClient } from '@/generated/prisma/client'
 
@@ -172,7 +173,11 @@ function deliveryBasis(period: Week): Prisma.LoadWhereInput {
 }
 
 /** What Create showed for W1 before any batch: both groups, by name. */
-const w1Groups = { inRange: [] as string[], earlier: [] as string[] }
+const w1Groups = {
+  inRange: [] as string[],
+  earlier: [] as string[],
+  beforeCutover: [] as string[],
+}
 
 const before: Record<'W1' | 'W2', { delivery: string[]; pod: string[] }> = {
   W1: { delivery: [], pod: [] },
@@ -289,6 +294,25 @@ beforeAll(async () => {
     deliveredDay: -21,
     podDay: -20,
   })
+  // THE CARRY-OVER FLOOR (owner's ruling 2026-11-17): the organization's
+  // payroll cutover, twenty-five days before W1, through the Settings writer.
+  // `earlyUnpaid` (day -21) is after it and carries over; `beforeFloor`
+  // (day -40) is before it and never does. Without the setting, W1 — the
+  // authority's first batch — would be the floor and neither would.
+  await trip({
+    name: 'beforeFloor',
+    status: 'POD_RECEIVED',
+    deliveredDay: -40,
+    podDay: -39,
+  })
+  const cut = await inOrg((tx) =>
+    savePayrollCutover(
+      tx,
+      organizationId,
+      new Date(W1.start.getTime() - 25 * DAY).toISOString().slice(0, 10),
+    ),
+  )
+  if (!cut.ok) throw new Error('payroll cutover refused')
 
   // WHAT CREATE SHOWS FOR W1, BEFORE ANY BATCH: the range and the catch-up.
   const w1 = await inOrg((tx) =>
@@ -301,6 +325,7 @@ beforeAll(async () => {
       .sort()
   w1Groups.inRange = mine(w1.available.filter((t) => !t.earlier))
   w1Groups.earlier = mine(w1.available.filter((t) => t.earlier))
+  w1Groups.beforeCutover = mine(w1.unavailable.beforeCutover)
 
   // THE SELECTIONS, BEFORE ANY BATCH PUTS LINES ON THE LOADS.
   for (const [key, period] of [
@@ -405,5 +430,31 @@ describe('Create shows two groups, both above zero (the catch-up ruling)', () =>
     expect(w1Groups.earlier.length).toBeGreaterThan(0)
     expect(w1Groups.inRange).toEqual(before.W1.delivery)
     expect(w1Groups.earlier).toEqual(['earlyUnpaid'])
+  })
+
+  it('reaches back to the payroll cutover and no further', async () => {
+    // AFTER THE FLOOR, PRESENT; BEFORE IT, ABSENT — from the group, and from
+    // the batch the engine drafted, with the setting's change audited.
+    expect(w1Groups.earlier).toContain('earlyUnpaid')
+    expect(w1Groups.earlier).not.toContain('beforeFloor')
+    expect(w1Groups.beforeCutover).toEqual(['beforeFloor'])
+    expect(
+      await owner.settlementLoadLine.count({
+        where: { loadId: ids.beforeFloor },
+      }),
+    ).toBe(0)
+    const audit = await owner.auditLog.findFirst({
+      where: {
+        organizationId,
+        entityType: 'Organization',
+        entityId: organizationId,
+        action: 'UPDATE',
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { changes: true },
+    })
+    expect(audit?.changes).toMatchObject({
+      payrollCutoverDate: { from: null },
+    })
   })
 })

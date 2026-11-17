@@ -549,9 +549,10 @@ describe('the blockers strip reads the gross half', () => {
         },
         { maxWait: 20_000, timeout: SETTLEMENT_BATCH_TIMEOUT_MS },
       )
+      // the carry-over floor (one statement, owner's ruling 2026-11-17),
       // loads, drivers, pay rules, settlement charges. The full read is
-      // twelve.
-      expect(count).toBeLessThanOrEqual(4)
+      // thirteen.
+      expect(count).toBeLessThanOrEqual(5)
       // T-BLOCK and the caught-up W-BLOCK, one per load (2026-11-17).
       expect(blockers).toBe(2)
     } finally {

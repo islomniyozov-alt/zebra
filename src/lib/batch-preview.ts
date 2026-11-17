@@ -4,6 +4,7 @@ import {
   SETTLEABLE_LOAD,
   deliveryDateOf,
 } from './settlements'
+import { batchLowerBound, readCarryOverFloor } from './payroll-cutover'
 import {
   payFor,
   ruleInForce,
@@ -50,6 +51,9 @@ export const UNAVAILABLE_REASONS = [
   // Delivered. Said by name rather than read as "in transit", which it is not.
   'noDeliveryDate',
   'outsideRange',
+  // DELIVERED BEFORE THE RANGE AND BEFORE THE PAYROLL CUTOVER: never carries
+  // over (owner's ruling 2026-11-17, the carry-over floor).
+  'beforeCutover',
   'alreadyInBatch',
   'noDriver',
   'noRule',
@@ -351,7 +355,9 @@ export async function previewBatch(
       : [],
   )
 
-  return previewFrom(loads, excludedHere, input)
+  // THE CARRY-OVER FLOOR, read the way the engine reads it (one statement).
+  const floor = await readCarryOverFloor(tx, input.companyId)
+  return previewFrom(loads, excludedHere, { ...input, floor })
 }
 
 /**
@@ -362,12 +368,19 @@ export async function previewBatch(
 export function previewFrom(
   loads: readonly PreviewLoad[],
   excludedHere: ReadonlySet<string>,
-  input: { from: Date; to: Date; forBatchId?: string | null },
+  input: {
+    from: Date
+    to: Date
+    forBatchId?: string | null
+    /** The carry-over floor (`readCarryOverFloor`), owner's ruling 2026-11-17. */
+    floor: Date
+  },
 ): BatchPreview {
   const unavailable: Record<UnavailableReason, PreviewTrip[]> = {
     inTransit: [],
     noDeliveryDate: [],
     outsideRange: [],
+    beforeCutover: [],
     alreadyInBatch: [],
     noDriver: [],
     noRule: [],
@@ -483,14 +496,19 @@ export function previewFrom(
         : deliveryAt === null
           ? 'noDeliveryDate'
           : // AFTER THE RANGE ONLY. Before it is the catch-up: eligible for this
-            // batch however long ago (owner's ruling 2026-11-17).
+            // batch back to the carry-over floor (owner's rulings 2026-11-17).
             deliveryAt.getTime() > lastInstant
             ? 'outsideRange'
-            : load.driverId === null
-              ? 'noDriver'
-              : ruleInForce(load.driver?.payRules ?? [], input.to) === null
-                ? 'noRule'
-                : null
+            : // BEFORE THE RANGE AND BEFORE THE FLOOR: never carries over —
+              // the same lower bound the engine drafts to (`batchLowerBound`).
+              deliveryAt.getTime() <
+                batchLowerBound(input.from, input.floor).getTime()
+              ? 'beforeCutover'
+              : load.driverId === null
+                ? 'noDriver'
+                : ruleInForce(load.driver?.payRules ?? [], input.to) === null
+                  ? 'noRule'
+                  : null
 
     if (reason === null) {
       available.push({
