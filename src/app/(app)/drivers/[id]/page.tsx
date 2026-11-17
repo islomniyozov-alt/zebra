@@ -47,7 +47,10 @@ import {
 } from '@/lib/dqf'
 import { DqfPanel, type DqfPanelRow } from '../../_reference/DqfPanel'
 import { bpsToInput, formatCents } from '@/lib/money'
-import { RecordForm } from '@/components/forms/RecordForm'
+import { DriverMainForm, type DriverMainSection } from './DriverMainForm'
+import { DriverPhoto } from './DriverPhoto'
+import { photoOf, tenureOf } from '@/lib/driver-main'
+import { DRIVER_KINDS } from '@/lib/driver-kind'
 import { AssetActions } from '../../_reference/AssetActions'
 import { updateDriverAction } from '../actions'
 import { PayRules, type PayRuleRowView } from './PayRules'
@@ -70,7 +73,7 @@ const OPENING_CATEGORIES = [
   'NET_PAY',
 ] as const
 import { isMessageKey, type MessageKey } from '@/lib/i18n'
-import { driverFields } from '../fields'
+import { DRIVER_TYPES, ROSTER_STATUSES, driverStatusKey } from '../fields'
 import { dateInputValue } from '../../_reference/shared'
 import {
   restoreAssetAction,
@@ -184,6 +187,10 @@ export default async function EditDriverPage({
         teamMate: head.teamMate,
         ...tabReads,
         signIn: head.signIn,
+        // §6.4 part 2 v11.22 — Main in Datatruck's shape.
+        dispatchers: head.dispatchers,
+        driverStatus: head.driverStatus,
+        photoId: photoOf(head.documents)?.id ?? null,
         documents: head.documents.map((document) => ({
           id: document.id,
           filename: document.filename,
@@ -219,6 +226,9 @@ export default async function EditDriverPage({
     netByWeek,
     activity,
     signIn,
+    dispatchers,
+    driverStatus,
+    photoId,
   } = data
   const maySeeCompliance = await currentUserCan('read', 'compliance')
   // §6.9: the selections panel exists only for a role that reads the pool.
@@ -397,6 +407,299 @@ export default async function EditDriverPage({
     label: trailer.unitNumber,
   }))
 
+  // ── MAIN IN DATATRUCK'S SHAPE (§6.4 part 2, v11.22) ────────────────────
+  //
+  // Two columns of sections, one form. Every field `updateDriver` writes
+  // unconditionally is here — a field left out would be posted as absent and
+  // cleared — and the four new ones are written only when sent. The derived
+  // facts are text: driver status from `dispatchStatusFrom`, tenure from
+  // `tenureOf`, the team from `team.ts`, the authority from the record.
+  const tenure = tenureOf(driver.hireDate, driver.terminationDate, new Date())
+  const authorityName =
+    openCompany ??
+    companies.find((c) => c.id === driver.companyId)?.name ??
+    null
+  const mainLeft: DriverMainSection[] = [
+    {
+      title: t('drivers.main.personal'),
+      lead: (
+        <DriverPhoto
+          driverId={id}
+          documentId={photoId}
+          initials={`${driver.firstName.slice(0, 1)}${driver.lastName.slice(0, 1)}`}
+          mayUpload={mayEdit && (await currentUserCan('create', 'document'))}
+          labels={{
+            photo: t('drivers.photo'),
+            upload: t('drivers.photoUpload'),
+            failed: t('drivers.photoFailed'),
+          }}
+        />
+      ),
+      items: [
+        {
+          field: {
+            name: 'firstName',
+            label: t('drivers.firstName'),
+            kind: 'text',
+            required: true,
+          },
+        },
+        {
+          field: {
+            name: 'middleName',
+            label: t('drivers.middleName'),
+            kind: 'text',
+          },
+        },
+        {
+          field: {
+            name: 'lastName',
+            label: t('drivers.lastName'),
+            kind: 'text',
+            required: true,
+          },
+        },
+        {
+          field: {
+            name: 'birthDate',
+            label: t('drivers.birthDate'),
+            kind: 'date',
+          },
+        },
+        { field: { name: 'phone', label: t('drivers.phone'), kind: 'tel' } },
+        {
+          field: {
+            name: 'telegram',
+            label: t('drivers.telegram'),
+            kind: 'text',
+          },
+        },
+        { field: { name: 'email', label: t('drivers.email'), kind: 'email' } },
+        // THE ADDRESS STAYS (§6.4 part 2 v11.22, kept beyond the brief): it is
+        // stored only here, and pay-to and the 1099 read it.
+        {
+          field: {
+            name: 'addressLine1',
+            label: t('drivers.addressLine1'),
+            kind: 'text',
+            hint: t('drivers.addressHint'),
+          },
+        },
+        {
+          field: {
+            name: 'addressCity',
+            label: t('drivers.addressCity'),
+            kind: 'text',
+          },
+        },
+        {
+          field: {
+            name: 'addressState',
+            label: t('drivers.addressState'),
+            kind: 'text',
+          },
+        },
+        {
+          field: {
+            name: 'addressPostalCode',
+            label: t('drivers.addressPostalCode'),
+            kind: 'text',
+          },
+        },
+        {
+          field: {
+            name: 'status',
+            label: t('drivers.employmentStatus'),
+            kind: 'select',
+            options: ROSTER_STATUSES.map((status) => ({
+              value: status,
+              label: t(driverStatusKey(status)),
+            })),
+          },
+        },
+        {
+          fact: {
+            label: t('drivers.driverStatus'),
+            value: t(`dispatch.status.${driverStatus}` as MessageKey),
+            hint: t('drivers.driverStatusHint'),
+          },
+        },
+        {
+          field: {
+            name: 'hireDate',
+            label: t('drivers.hireDate'),
+            kind: 'date',
+          },
+        },
+        {
+          fact: {
+            label: t('drivers.tenure'),
+            value: tenure
+              ? t('drivers.tenureValue')
+                  .replace('{years}', String(tenure.years))
+                  .replace('{months}', String(tenure.months))
+              : '—',
+          },
+        },
+      ],
+    },
+    {
+      title: t('drivers.main.compliance'),
+      items: [
+        {
+          field: {
+            name: 'cdlNumber',
+            label: t('drivers.cdlNumber'),
+            kind: 'text',
+            mono: true,
+          },
+        },
+        {
+          field: {
+            name: 'cdlState',
+            label: t('drivers.cdlState'),
+            kind: 'text',
+          },
+        },
+        {
+          field: {
+            name: 'cdlClass',
+            label: t('drivers.cdlClass'),
+            kind: 'text',
+          },
+        },
+        {
+          field: {
+            name: 'driverType',
+            label: t('drivers.employment'),
+            kind: 'select',
+            options: DRIVER_TYPES.map((type) => ({
+              value: type,
+              label: t(`drivers.type.${type}` as MessageKey),
+            })),
+          },
+        },
+        {
+          field: {
+            name: 'kind',
+            label: t('drivers.kind'),
+            kind: 'select',
+            options: DRIVER_KINDS.map((kind) => ({
+              value: kind,
+              label: t(`drivers.kind.${kind}` as MessageKey),
+            })),
+          },
+        },
+        // STORED ON SAFETY, LINKED HERE — not a second copy of a date that
+        // raises an alarm (§6.4 part 2 v11.22).
+        {
+          note: (
+            <>
+              {t('drivers.safetyLink')}{' '}
+              {tabs.includes('safety') ? (
+                <Link
+                  href={`/drivers/${id}?tab=safety`}
+                  className="text-accent underline-offset-2 hover:underline"
+                >
+                  {t('drivers.safetyLinkAction')}
+                </Link>
+              ) : null}
+            </>
+          ),
+        },
+      ],
+    },
+  ]
+  const mainRight: DriverMainSection[] = [
+    {
+      title: t('drivers.main.assignments'),
+      items: [
+        {
+          field: {
+            name: 'assignedTruckId',
+            label: t('drivers.assignedTruck'),
+            kind: 'select',
+            options: [
+              { value: '', label: t('drivers.assignedTruckNone') },
+              ...truckOptions,
+            ],
+          },
+        },
+        {
+          field: {
+            name: 'assignedTrailerId',
+            label: t('drivers.assignedTrailer'),
+            kind: 'select',
+            options: [
+              { value: '', label: t('drivers.assignedTrailerNone') },
+              ...trailerOptions,
+            ],
+          },
+        },
+        { fact: { label: t('ref.authority'), value: authorityName ?? '—' } },
+        {
+          field: {
+            name: 'dispatcherUserId',
+            label: t('drivers.dispatcher'),
+            kind: 'select',
+            options: [
+              { value: '', label: t('drivers.dispatcherNone') },
+              ...dispatchers.map((user) => ({
+                value: user.id,
+                label: user.name,
+              })),
+            ],
+          },
+        },
+        { field: { name: 'notes', label: t('ref.notes'), kind: 'textarea' } },
+        {
+          field: {
+            name: 'tags',
+            label: t('drivers.tags'),
+            kind: 'text',
+            hint: t('drivers.tagsHint'),
+          },
+        },
+      ],
+    },
+    {
+      // DERIVED (owner's ruling 2026-11-17, "keep derived"): two drivers on
+      // one truck are a team, read from `team.ts`; there is nothing to set.
+      title: t('drivers.main.team'),
+      items: [
+        {
+          fact: {
+            label: t('drivers.teamDriver'),
+            value: teamMate ? t('drivers.teamYes') : t('drivers.teamNo'),
+          },
+        },
+        ...(teamMate
+          ? [
+              {
+                fact: {
+                  label: t('drivers.teamCoDriver'),
+                  value: (
+                    <>
+                      <Link
+                        href={`/drivers/${teamMate.id}`}
+                        className="text-ink underline-offset-2 hover:underline"
+                      >
+                        {teamMate.firstName} {teamMate.lastName}
+                      </Link>{' '}
+                      <span className="font-mono text-sm text-ink-3">
+                        · {teamMate.truckUnit}
+                      </span>
+                    </>
+                  ),
+                },
+              },
+            ]
+          : []),
+        { note: t('drivers.teamHint') },
+      ],
+    },
+  ]
+
   return (
     <>
       <div className="flex items-baseline justify-between gap-z4 border-b border-border bg-surface px-gutter py-z3">
@@ -460,18 +763,16 @@ export default async function EditDriverPage({
         ) : null}
 
         {tab === 'main' ? (
-          <RecordForm
-            fields={driverFields(
-              t,
-              authorities,
-              'edit',
-              truckOptions,
-              trailerOptions,
-            )}
+          <DriverMainForm
+            left={mainLeft}
+            right={mainRight}
             values={{
               firstName: driver.firstName,
+              middleName: driver.middleName ?? '',
               lastName: driver.lastName,
+              birthDate: dateInputValue(driver.birthDate),
               phone: driver.phone ?? '',
+              telegram: driver.telegram ?? '',
               email: driver.email ?? '',
               addressLine1: driver.addressLine1 ?? '',
               addressCity: driver.addressCity ?? '',
@@ -488,6 +789,7 @@ export default async function EditDriverPage({
               tags: tagsToInput(driver.tags),
               assignedTruckId: driver.assignedTruckId ?? '',
               assignedTrailerId: driver.assignedTrailerId ?? '',
+              dispatcherUserId: driver.dispatcherUserId ?? '',
             }}
             action={updateDriverAction.bind(null, id)}
             cancelHref="/drivers"
@@ -532,7 +834,7 @@ export default async function EditDriverPage({
                 }}
               />
             ) : null}
-          </RecordForm>
+          </DriverMainForm>
         ) : null}
 
         {/* THE SIGN-IN TAB (Phase 7 step 1; §6.4 part 2, §9 "The link").

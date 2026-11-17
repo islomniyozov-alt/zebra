@@ -221,10 +221,11 @@ export const TRUCK_COLUMNS_ADDED_SINCE_LEGACY = [
 
 // ── /drivers (§6.4 part 1) ────────────────────────────────────────────────
 //
-// ELEVEN DECLARED, NINE SHOWN. The brief names ten; CDL already existed. Email
+// TWELVE DECLARED, NINE SHOWN. The brief names ten; CDL already existed. Email
 // and CDL go behind the chooser: a dispatcher reads this list for who can go
-// where, and both are desk facts. The Terminated and Vacation board tabs add
-// their own date column in the page, outside this set.
+// where, and both are desk facts. Team (§6.4 part 3, v11.22) is the brief's
+// "in the picker": behind the chooser from the start. The Terminated and
+// Vacation board tabs add their own date column in the page, outside this set.
 export const DRIVER_COLUMN_KEYS = [
   'name',
   'ready',
@@ -235,12 +236,13 @@ export const DRIVER_COLUMN_KEYS = [
   'phone',
   'email',
   'truck',
+  'team',
   'cdl',
   'warnings',
 ] as const
 
 /** §7.1.7: never warnings. */
-export const DRIVER_COLUMNS_HIDDEN = ['email', 'cdl'] as const
+export const DRIVER_COLUMNS_HIDDEN = ['email', 'team', 'cdl'] as const
 
 // ── /payroll/batches, the batches tab ─────────────────────────────────────
 //

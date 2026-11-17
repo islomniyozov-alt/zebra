@@ -26,9 +26,9 @@ describe('the drivers list (§6.4 part 1)', () => {
     )
   })
 
-  it('names the ten columns of the brief and hides only email and CDL', () => {
+  it('names the ten columns of the brief, Team behind the chooser, and hides email, Team and CDL', () => {
     // §7.1.7: warnings is never default-hidden — an absent warnings column
-    // reads as "nothing wrong".
+    // reads as "nothing wrong". Team is §6.4 part 3 v11.22: "in the picker".
     expect([...DRIVER_COLUMN_KEYS]).toEqual([
       'name',
       'ready',
@@ -39,10 +39,11 @@ describe('the drivers list (§6.4 part 1)', () => {
       'phone',
       'email',
       'truck',
+      'team',
       'cdl',
       'warnings',
     ])
-    expect([...DRIVER_COLUMNS_HIDDEN]).toEqual(['email', 'cdl'])
+    expect([...DRIVER_COLUMNS_HIDDEN]).toEqual(['email', 'team', 'cdl'])
     expect(DRIVER_COLUMNS_HIDDEN as readonly string[]).not.toContain('warnings')
     expect(page).toContain("'drivers.drivers'")
   })

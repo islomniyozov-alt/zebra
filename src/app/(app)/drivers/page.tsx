@@ -40,6 +40,7 @@ import {
 } from '@/lib/list-view'
 import { DENSITIES } from '@/lib/preferences'
 import { readDriverFacts, readDriversHead } from '@/lib/drivers-page'
+import { teamMatesFor } from '@/lib/driver-main'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
@@ -119,6 +120,8 @@ interface Row {
   cdlNumber: string | null
   cdlState: string | null
   truck: string | null
+  /** §6.4 part 3 v11.22 — the team-mate on the same truck, derived. */
+  teamMate: { id: string; name: string } | null
   driverType: DriverType
   status: DriverStatus
   /** The roster exception worth showing, or null when they simply work here. */
@@ -234,7 +237,17 @@ export default async function DriversPage({
         dispatch: dispatchFacts,
         lastActivity,
         trucks: truckFacts,
+        crews,
       } = await readDriverFacts(reader, ids, truckIds)
+      // THE TEAM COLUMN (§6.4 part 3 v11.22): `team.ts`' seats, folded by
+      // the same `teamMateOf` the record's header uses.
+      const mates = teamMatesFor(
+        drivers.map((driver) => ({
+          id: driver.id,
+          truckId: driver.assignedTruck?.id ?? null,
+        })),
+        crews,
+      )
       // §7.1.7, from the head's stored row. A transaction opens only when that
       // row is the legacy shape and is rewritten once (§6.7).
       const available = columnKeysFor(DRIVER_COLUMN_KEYS, companyCount > 1)
@@ -270,6 +283,7 @@ export default async function DriversPage({
 
       const rows: Row[] = drivers.map((driver) => {
         const driverFacts = facts.get(driver.id) ?? NO_DRIVER_FACTS
+        const mate = mates.get(driver.id) ?? null
         return {
           id: driver.id,
           name: `${driver.lastName}, ${driver.firstName}`,
@@ -279,6 +293,9 @@ export default async function DriversPage({
           cdlNumber: driver.cdlNumber,
           cdlState: driver.cdlState,
           truck: driver.assignedTruck?.unitNumber ?? null,
+          teamMate: mate
+            ? { id: mate.id, name: `${mate.lastName}, ${mate.firstName}` }
+            : null,
           driverType: driver.driverType,
           status: driver.status,
           roster: rosterBadge(driver.status),
@@ -355,6 +372,7 @@ export default async function DriversPage({
       company: (row) => row.companyName,
       phone: (row) => row.phone ?? '',
       truck: (row) => row.truck ?? '',
+      team: (row) => row.teamMate?.name ?? '',
       terminated: (row) => row.terminationDate?.getTime() ?? 0,
       returns: (row) => row.offDutyUntil?.getTime() ?? 0,
     },
@@ -502,6 +520,24 @@ export default async function DriversPage({
       sortable: true,
       filterable: true,
       render: (row) => <span className="font-mono">{orDash(row.truck)}</span>,
+    },
+    // §6.4 part 3 v11.22 — the team-mate, derived from the truck both hold.
+    // Behind the chooser by default (`DRIVER_COLUMNS_HIDDEN`).
+    {
+      key: 'team',
+      header: t('drivers.column.team'),
+      sortable: true,
+      render: (row) =>
+        row.teamMate ? (
+          <Link
+            href={`/drivers/${row.teamMate.id}`}
+            className="relative z-10 hover:text-accent"
+          >
+            {row.teamMate.name}
+          </Link>
+        ) : (
+          '—'
+        ),
     },
     {
       key: 'cdl',
