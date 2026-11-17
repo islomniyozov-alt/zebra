@@ -52,6 +52,7 @@ const OPEN_UP_TO = 12
 
 const REASON_LABEL: Record<UnavailableReason, MessageKey> = {
   inTransit: 'preview.reason.inTransit',
+  noDeliveryDate: 'preview.reason.noDeliveryDate',
   outsideRange: 'preview.reason.outsideRange',
   alreadyInBatch: 'preview.reason.alreadyInBatch',
   noDriver: 'preview.reason.noDriver',
@@ -60,6 +61,7 @@ const REASON_LABEL: Record<UnavailableReason, MessageKey> = {
 
 const REASON_HINT: Record<UnavailableReason, MessageKey> = {
   inTransit: 'preview.hint.inTransit',
+  noDeliveryDate: 'preview.hint.noDeliveryDate',
   outsideRange: 'preview.hint.outsideRange',
   alreadyInBatch: 'preview.hint.alreadyInBatch',
   noDriver: 'preview.hint.noDriver',

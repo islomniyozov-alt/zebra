@@ -245,6 +245,23 @@ One action, **"Settle this week"**, for the organization. It:
 - warns if the period's Amazon remittance is not imported (§3);
 - builds every statement and leaves the batch DRAFT for a person to read.
 
+### Which period a trip belongs to: its DELIVERY DATE (Islom's rulings, 2026-11-17)
+
+**Superseding "a week is decided by when the POD landed"** — the rule `settleableInPeriod` carried since the 2026-09-27 merge, which this document leaned on in TMS-DESIGN-SYSTEM §6.2.10 without ever stating it here.
+
+**The basis is the delivery date:**
+1. the **delivery stop's actual departure** — the latest `departedAt` among the load's delivery stops, which is the last drop's; else
+2. the time the load's **status reached Delivered** — the earliest applied operational event to Delivered *or* POD received, because a status that jumped straight to POD received reached Delivered at that instant; else
+3. none — the trip sits in no period, and the batch picker lists it by name under **No delivery date**.
+
+**The reason is Amazon: its loads carry no POD.** The signed paperwork lives in Relay and Amazon pays against its own record. The POD event Zebra holds for a direct-settled load is written by the status engine at the Delivered instant (`podConfirmed`, ruling 2026-09-03), a copy of a delivery rather than a document anyone received — so for the largest customer, "when the POD landed" was never a fact, only a delivery date under another name. The delivery date is the fact, for every customer, and it is the basis Datatruck's own picker uses ("Time: Delivery time").
+
+**Delivered is enough** (second ruling, same day). A trip settles once its status is Delivered or POD received; it no longer waits for the paperwork. Kept as a gate, it would have opened a hole: a broker POD landing after the batch that covers its delivery date was cut leaves the trip's date inside a finished batch, and the no-overlap rule (§6.2.10 part 7) forbids a second batch over those dates — a trip nobody could ever pay. What the 8/30 replay found stays found: a DISPATCHED or IN_TRANSIT load has no delivered status and cannot settle, whatever its dates say.
+
+**(2) counts a jump to POD received on purpose.** The Datatruck import writes one event per finished load, BOOKED → POD_RECEIVED dated at the export's delivery date, and no stop departures. Reading (2) as "a Delivered event only" would put every such trip in no period at all. Where a load was marked Delivered first, that event is the earlier one and the POD's date never decides.
+
+**What does not change.** The pay rule is still looked up on the load's delivery date (`ruleInForce` on `delDate`) and the workbench's own pricing is untouched; Amazon's remittance matching (`directSettledAwaiting`) still keys on the POD event, because it matches money received, not trips owed. The integration suite `delivery-basis` compares, for every batch on its fixture, the trips the delivery date selects against the trips the POD date would have, and asserts the differences by name.
+
 `FINAL` freezes gross, pay rule, PU/DEL dates, **unit number**, deduction amounts and escrow balances. `PAID` records the payout date and the method. Statement date and payout date are separate columns because they are separate events — the **statement date is an input**, and since 2026-09-28 the **check date is derived** from the period by `checkDateFor` (§0).
 
 **The unit number is a per-settlement field, not a lookup** *(confirmed off the page)*. Muzaffarov settles on unit `0484` for Aug 16–22 and unit `8842` for Aug 23–29. Reading it from the driver's current truck link at render time would silently rewrite last month's statement the next time somebody reassigned a truck — a statement already handed to a person, changing under them. It belongs in the frozen set for the same reason gross and the pay rule do.

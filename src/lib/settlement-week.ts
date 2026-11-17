@@ -100,6 +100,60 @@ export function isSettlementWeek(week: Week): boolean {
 }
 
 /**
+ * Is this pair a period a BATCH may cover (§6.2.10 part 7, R1; owner's ruling
+ * 2026-11-17)?
+ *
+ * Any from/to now, not only a settlement week: whole UTC days, the start on or
+ * before the end. A batch's period bounds which trips go in (by POD), the
+ * check date (`checkDateFor`, end + 13) and which charges are in force
+ * (`inForce`, any point in the period). It is NOT how many times a weekly
+ * charge is taken — that stays once per statement — which is why `openBatch`
+ * refuses two overlapping periods for one authority.
+ */
+export function isBatchPeriod(period: Week): boolean {
+  const whole = (at: Date) =>
+    !Number.isNaN(at.getTime()) && at.getTime() % DAY === 0
+  return (
+    whole(period.start) &&
+    whole(period.end) &&
+    period.start.getTime() <= period.end.getTime()
+  )
+}
+
+/**
+ * A `YYYY-MM-DD` from a URL or a form, as a UTC midnight — or null for
+ * anything that is not exactly a real calendar day (`2026-02-30` is null, not
+ * March 2nd). One parser for Create's screen and its action, so the range the
+ * office saw is the range that opens.
+ */
+export function dayFromParam(value: unknown): Date | null {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return null
+  }
+  const day = new Date(`${value}T00:00:00.000Z`)
+  if (Number.isNaN(day.getTime())) return null
+  return day.toISOString().slice(0, 10) === value ? day : null
+}
+
+/**
+ * The last FULL settlement week before today: the Sunday-to-Saturday week
+ * before the one today falls in (§6.2.10 part 7, R1 — Create batch's
+ * pre-fill). On a Saturday that is the week before this one, because this one
+ * is not over; on a Sunday it is the week that ended yesterday. On 2026-11-17
+ * it is 11/08–11/14, which is what Datatruck's Create screen showed that day.
+ *
+ * NOT `payWeekFor`. That is the week DUE this Friday, two Saturdays back; the
+ * owner's ruling is the last full week.
+ */
+export function lastFullSettlementWeek(today: Date): Week {
+  const current = weekOf(today)
+  return {
+    start: new Date(current.start.getTime() - 7 * DAY),
+    end: new Date(current.start.getTime() - DAY),
+  }
+}
+
+/**
  * The period that is paid on the coming Friday — "this week" on the money screen.
  *
  * ── IT IS NOT THE WEEK THAT JUST CLOSED ──────────────────────────────────

@@ -41,6 +41,7 @@ const REFUSAL: Record<BatchRefusal['kind'], MessageKey> = {
   blocked: 'batch.error.blocked',
   period_taken: 'money.error.periodTaken',
   posted: 'batch.error.posted',
+  bad_range: 'batch.error.badRange',
 }
 
 /**

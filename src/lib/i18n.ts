@@ -128,10 +128,10 @@ const en = {
   'preview.create': 'Create',
   'preview.available': 'Available trips',
   'preview.unavailable': 'Not going in',
-  'preview.pod': 'POD',
+  'preview.deliveryDate': 'Delivery date',
   // §6.2.10 part 1 — the trip picker's own columns and controls.
   'preview.payee': 'Payee',
-  'preview.loadPay': 'Load pay',
+  'preview.loadPay': 'Driver pay',
   'preview.driverType': 'Driver type',
   'preview.locations': 'Locations',
   'preview.selectAll': 'Select all available',
@@ -139,24 +139,26 @@ const en = {
   'preview.forCompany': 'This batch settles',
   'preview.forOrg': 'This batch settles every authority',
   'preview.considered': 'considered',
-  'preview.willOpen': 'Create opens the week',
+  'preview.willOpen': 'Create opens',
   'preview.orgWide':
     'The batch covers every authority; the filter above narrows this list only.',
-  'preview.twoWeeks':
-    'That range spans two settlement weeks. Narrow it to one.',
-  'preview.exists': 'A batch already covers this week:',
+  'preview.needAuthority': 'Choose an authority to create a batch.',
+  'preview.exists': 'A batch for this authority already overlaps these dates:',
   'preview.emptyAvailable': 'No trips would go into this batch',
   'preview.emptyAvailableHint':
     'Widen the range, or look below at what is being left out and why.',
-  'preview.reason.inTransit': 'In transit',
-  'preview.reason.outsideRange': 'POD outside the range',
+  'preview.reason.inTransit': 'Not delivered',
+  'preview.reason.noDeliveryDate': 'No delivery date',
+  'preview.reason.outsideRange': 'Delivered outside the range',
   'preview.reason.alreadyInBatch': 'Already on a statement',
   'preview.reason.noDriver': 'No driver',
   'preview.reason.noRule': 'No pay rule',
   'preview.hint.inTransit':
-    'No POD has landed. These pay in the week their POD arrives.',
+    'Not marked Delivered yet. These pay in the range their delivery date falls in.',
+  'preview.hint.noDeliveryDate':
+    'Delivered, but no delivery stop departure and no Delivered time is recorded. Record the departure on the load.',
   'preview.hint.outsideRange':
-    'Delivered near this window but the POD fell outside it — a week is decided by the POD.',
+    'Delivered near this window but outside it — a trip is placed by its delivery date.',
   'preview.hint.alreadyInBatch':
     'These are settled. Open the statement to see what was paid.',
   'preview.hint.noDriver':
@@ -3044,7 +3046,7 @@ const en = {
   'money.reason': 'Reason',
   'money.remittedBooked': 'Remitted / booked',
   'money.error.periodTaken':
-    'A batch already covers this period. One batch per week, for the whole operation — open that one instead.',
+    'A batch for this authority already overlaps these dates — open that one instead.',
   'money.nothing.closedHistory':
     'nothing — all freight in this period settled in Datatruck.',
   'money.nothing.blocked':
@@ -3128,6 +3130,9 @@ const en = {
   'batch.error.notFound': 'That batch no longer exists.',
   'batch.error.posted':
     'It has a posted or paid statement, so it cannot be deleted.',
+  'batch.error.badRange':
+    'Choose a date range: whole days, with From on or before To.',
+  'batch.error.noAuthority': 'Choose an authority for the batch.',
   'batch.error.notDraft':
     'That batch is no longer a draft. A finalised batch is a document — correct it with a charge in a later week.',
   'batch.error.blocked':
@@ -3407,9 +3412,9 @@ const ru: Dictionary = {
   'preview.create': 'Создать',
   'preview.available': 'Доступные рейсы',
   'preview.unavailable': 'Не войдут',
-  'preview.pod': 'POD',
+  'preview.deliveryDate': 'Дата доставки',
   'preview.payee': 'Получатель',
-  'preview.loadPay': 'Оплата рейса',
+  'preview.loadPay': 'Оплата водителю',
   'preview.driverType': 'Тип водителя',
   'preview.locations': 'Маршрут',
   'preview.selectAll': 'Выбрать все доступные',
@@ -3417,24 +3422,26 @@ const ru: Dictionary = {
   'preview.forCompany': 'Эта ведомость рассчитывает',
   'preview.forOrg': 'Эта ведомость рассчитывает все компании',
   'preview.considered': 'рассмотрено',
-  'preview.willOpen': 'Создание открывает неделю',
+  'preview.willOpen': 'Создание откроет',
   'preview.orgWide':
     'Партия охватывает все компании; фильтр выше сужает только этот список.',
-  'preview.twoWeeks':
-    'Этот диапазон охватывает две расчётные недели. Сузьте до одной.',
-  'preview.exists': 'Эта неделя уже покрыта партией:',
+  'preview.needAuthority': 'Выберите компанию, чтобы создать партию.',
+  'preview.exists': 'Партия этой компании уже пересекается с этими датами:',
   'preview.emptyAvailable': 'В эту партию не войдёт ни один рейс',
   'preview.emptyAvailableHint':
     'Расширьте диапазон или посмотрите ниже, что исключено и почему.',
-  'preview.reason.inTransit': 'В пути',
-  'preview.reason.outsideRange': 'POD вне диапазона',
+  'preview.reason.inTransit': 'Не доставлено',
+  'preview.reason.noDeliveryDate': 'Нет даты доставки',
+  'preview.reason.outsideRange': 'Доставлено вне диапазона',
   'preview.reason.alreadyInBatch': 'Уже в расчёте',
   'preview.reason.noDriver': 'Без водителя',
   'preview.reason.noRule': 'Нет правила оплаты',
   'preview.hint.inTransit':
-    'POD не получен. Они оплачиваются на неделе поступления POD.',
+    'Ещё не отмечено как доставленное. Оплачивается в диапазоне, куда попадёт дата доставки.',
+  'preview.hint.noDeliveryDate':
+    'Доставлено, но не записаны ни выезд с точки доставки, ни время доставки. Укажите выезд в грузе.',
   'preview.hint.outsideRange':
-    'Доставлено рядом с этим окном, но POD вне его — неделя определяется по POD.',
+    'Доставлено рядом с этим окном, но вне его — рейс относится к дате доставки.',
   'preview.hint.alreadyInBatch':
     'Они уже рассчитаны. Откройте расчёт, чтобы увидеть выплату.',
   'preview.hint.noDriver':
@@ -6292,7 +6299,7 @@ const ru: Dictionary = {
   'money.reason': 'Причина',
   'money.remittedBooked': 'Выплачено / по ставке',
   'money.error.periodTaken':
-    'На этот период уже есть партия. Одна партия в неделю на всю компанию — откройте её.',
+    'Партия этой компании уже пересекается с этими датами — откройте её.',
   'money.nothing.closedHistory':
     'ничего — все грузы за этот период рассчитаны в Datatruck.',
   'money.nothing.blocked': 'пока ничего — водителям ниже нужно правило оплаты.',
@@ -6374,6 +6381,9 @@ const ru: Dictionary = {
   'batch.error.notFound': 'Эта партия больше не существует.',
   'batch.error.posted':
     'В партии есть проведённый или выплаченный расчёт — удалить её нельзя.',
+  'batch.error.badRange':
+    'Выберите диапазон дат: целые дни, «с» не позже «по».',
+  'batch.error.noAuthority': 'Выберите компанию для партии.',
   'batch.error.notDraft':
     'Это уже не черновик. Утверждённая партия — документ; исправляйте начислением в следующей неделе.',
   'batch.error.blocked':
@@ -6652,9 +6662,9 @@ const fa: Dictionary = {
   'preview.create': 'ایجاد',
   'preview.available': 'سفرهای در دسترس',
   'preview.unavailable': 'واردنشدنی‌ها',
-  'preview.pod': 'رسید تحویل',
+  'preview.deliveryDate': 'تاریخ تحویل',
   'preview.payee': 'دریافت‌کننده',
-  'preview.loadPay': 'پرداخت سفر',
+  'preview.loadPay': 'دستمزد راننده',
   'preview.driverType': 'نوع راننده',
   'preview.locations': 'مسیر',
   'preview.selectAll': 'انتخاب همه موارد موجود',
@@ -6662,24 +6672,26 @@ const fa: Dictionary = {
   'preview.forCompany': 'این دسته تسویه می‌کند',
   'preview.forOrg': 'این دسته همه شرکت‌ها را تسویه می‌کند',
   'preview.considered': 'بررسی‌شده',
-  'preview.willOpen': 'ایجاد، این هفته را باز می‌کند',
+  'preview.willOpen': 'ایجاد، این بازه را باز می‌کند:',
   'preview.orgWide':
     'دسته همهٔ شرکت‌ها را در بر می‌گیرد؛ فیلتر بالا تنها این فهرست را محدود می‌کند.',
-  'preview.twoWeeks':
-    'این بازه دو هفتهٔ تسویه را در بر می‌گیرد. آن را به یکی محدود کنید.',
-  'preview.exists': 'یک دسته از پیش این هفته را پوشش می‌دهد:',
+  'preview.needAuthority': 'برای ایجاد دسته، یک شرکت انتخاب کنید.',
+  'preview.exists': 'دسته‌ای از این شرکت با این تاریخ‌ها هم‌پوشانی دارد:',
   'preview.emptyAvailable': 'هیچ سفری وارد این دسته نمی‌شود',
   'preview.emptyAvailableHint':
     'بازه را گسترده کنید، یا پایین‌تر ببینید چه چیزی و چرا کنار گذاشته شده است.',
-  'preview.reason.inTransit': 'در مسیر',
-  'preview.reason.outsideRange': 'رسید خارج از بازه',
+  'preview.reason.inTransit': 'تحویل‌نشده',
+  'preview.reason.noDeliveryDate': 'بدون تاریخ تحویل',
+  'preview.reason.outsideRange': 'تحویل خارج از بازه',
   'preview.reason.alreadyInBatch': 'از پیش در صورت‌حساب',
   'preview.reason.noDriver': 'بدون راننده',
   'preview.reason.noRule': 'بدون قاعدهٔ پرداخت',
   'preview.hint.inTransit':
-    'رسیدی نرسیده است. این‌ها در هفتهٔ رسیدن رسید پرداخت می‌شوند.',
+    'هنوز «تحویل‌شده» ثبت نشده است. در بازه‌ای پرداخت می‌شود که تاریخ تحویل در آن بیفتد.',
+  'preview.hint.noDeliveryDate':
+    'تحویل شده، اما نه زمان خروج از توقف تحویل ثبت شده و نه زمان تحویل. زمان خروج را در بار ثبت کنید.',
   'preview.hint.outsideRange':
-    'نزدیک این بازه تحویل شده اما رسید بیرون آن افتاده — هفته را رسید تعیین می‌کند.',
+    'نزدیک این بازه اما بیرون آن تحویل شده — هر سفر بر پایهٔ تاریخ تحویلش جای می‌گیرد.',
   'preview.hint.alreadyInBatch':
     'این‌ها تسویه شده‌اند. برای دیدن پرداخت، صورت‌حساب را باز کنید.',
   'preview.hint.noDriver':
@@ -9505,7 +9517,7 @@ const fa: Dictionary = {
   'money.reason': 'دلیل',
   'money.remittedBooked': 'پرداخت‌شده / طبق نرخ',
   'money.error.periodTaken':
-    'برای این دوره از قبل یک دسته وجود دارد. هفته‌ای یک دسته برای کل مجموعه — همان را باز کنید.',
+    'دسته‌ای از این شرکت با این تاریخ‌ها هم‌پوشانی دارد — همان را باز کنید.',
   'money.nothing.closedHistory':
     'هیچ — همهٔ بارهای این دوره در Datatruck تسویه شده‌اند.',
   'money.nothing.blocked':
@@ -9586,6 +9598,9 @@ const fa: Dictionary = {
   'batch.error.notFound': 'این دسته دیگر وجود ندارد.',
   'batch.error.posted':
     'این دسته صورت‌حساب ثبت‌شده یا پرداخت‌شده دارد و حذف نمی‌شود.',
+  'batch.error.badRange':
+    'یک بازهٔ تاریخ انتخاب کنید: روزهای کامل، «از» پیش از «تا» یا همان روز.',
+  'batch.error.noAuthority': 'برای دسته یک شرکت انتخاب کنید.',
   'batch.error.notDraft':
     'این دیگر پیش‌نویس نیست. دستهٔ نهایی‌شده یک سند است؛ با یک ردیف در هفتهٔ بعد اصلاحش کنید.',
   'batch.error.blocked':

@@ -1,5 +1,9 @@
 import { Prisma } from '@/generated/prisma/client'
-import { SETTLEABLE_LOAD } from './settlements'
+import {
+  DELIVERED_STATUSES,
+  SETTLEABLE_LOAD,
+  deliveryDateOf,
+} from './settlements'
 import {
   payFor,
   ruleInForce,
@@ -41,6 +45,10 @@ type TxClient = Prisma.TransactionClient
 
 export const UNAVAILABLE_REASONS = [
   'inTransit',
+  // DELIVERED, AND NO DELIVERY DATE TO PLACE IT BY (MONEY-DESIGN §6, owner's
+  // ruling 2026-11-17): no delivery stop departure and no applied event to
+  // Delivered. Said by name rather than read as "in transit", which it is not.
+  'noDeliveryDate',
   'outsideRange',
   'alreadyInBatch',
   'noDriver',
@@ -75,8 +83,13 @@ export interface PreviewTrip {
   referenceNumber: string | null
   /** DELIVERED or POD_RECEIVED — the operational axis, as the office reads it. */
   status: string
-  /** When the POD landed, which is the date a week is decided by. */
-  podAt: Date | null
+  /**
+   * THE DELIVERY DATE — `deliveryDateOf`, the date a period is decided by
+   * since 2026-11-17 (MONEY-DESIGN §6): the last drop's actual departure, else
+   * when the status reached Delivered. Null when neither is recorded.
+   */
+  deliveryAt: Date | null
+  /** The Delivery cell: the delivery date, else the last drop's plan. */
   deliveredAt: Date | null
   pickupAt: Date | null
   /** `Chicago, IL → Dallas, TX`. One cell, because it is read as one fact. */
@@ -147,10 +160,13 @@ export interface PreviewLoad {
   stops: {
     type: string
     scheduledAt: Date | null
+    /** The actual departure — the first source of the delivery date. */
+    departedAt: Date | null
     city: string | null
     state: string | null
     name: string | null
   }[]
+  /** At most one: the earliest applied event to Delivered or POD received. */
   statusEvents: { occurredAt: Date }[]
   settlementLoadLines: { settlement: { batchId: string | null } }[]
 }
@@ -257,15 +273,18 @@ export async function previewBatch(
         select: {
           type: true,
           scheduledAt: true,
+          departedAt: true,
           city: true,
           state: true,
           name: true,
         },
       },
+      // THE STATUS REACHING DELIVERED — the delivery date's second source
+      // (MONEY-DESIGN §6, 2026-11-17). It was the POD event.
       statusEvents: {
         where: {
           axis: 'OPERATIONAL',
-          toStatus: 'POD_RECEIVED',
+          toStatus: { in: [...DELIVERED_STATUSES] },
           outcome: 'APPLIED',
         },
         orderBy: { occurredAt: 'asc' },
@@ -308,6 +327,7 @@ export function previewFrom(
 ): BatchPreview {
   const unavailable: Record<UnavailableReason, PreviewTrip[]> = {
     inTransit: [],
+    noDeliveryDate: [],
     outsideRange: [],
     alreadyInBatch: [],
     noDriver: [],
@@ -326,8 +346,18 @@ export function previewFrom(
     return city === '' ? (stop.name ?? null) : city
   }
 
+  // THE LAST DAY COUNTS WHOLE: `to` is a midnight, and a delivery at 2 pm on
+  // it is inside the range — the same end the engine reads
+  // (`settleableForBatch` pushes it to the last millisecond).
+  const lastInstant = input.to.getTime() + 86_399_999
   for (const load of loads) {
-    const podAt = load.statusEvents[0]?.occurredAt ?? null
+    const deliveryAt = deliveryDateOf({
+      stops: load.stops,
+      finishedAt: load.statusEvents[0]?.occurredAt ?? null,
+    })
+    const delivered = (DELIVERED_STATUSES as readonly string[]).includes(
+      load.operationalStatus,
+    )
     const pickup = load.stops.find((stop) => stop.type === 'PICKUP') ?? null
     const deliveries = load.stops.filter((stop) => stop.type === 'DELIVERY')
     const delivery = deliveries[deliveries.length - 1] ?? null
@@ -354,8 +384,8 @@ export function previewFrom(
       driverType: load.driver?.driverType ?? null,
       referenceNumber: load.referenceNumber,
       status: load.operationalStatus,
-      podAt,
-      deliveredAt: delivery?.scheduledAt ?? null,
+      deliveryAt,
+      deliveredAt: deliveryAt ?? delivery?.scheduledAt ?? null,
       pickupAt: pickup?.scheduledAt ?? null,
       locations: ends.length === 0 ? null : ends.join(' → '),
       grossCents: load.totalRevenueCents,
@@ -408,15 +438,18 @@ export function previewFrom(
     // is in transit first, because that is the earlier problem.
     const reason: UnavailableReason | null = onAnotherStatement
       ? 'alreadyInBatch'
-      : podAt === null
+      : !delivered
         ? 'inTransit'
-        : podAt < input.from || podAt > input.to
-          ? 'outsideRange'
-          : load.driverId === null
-            ? 'noDriver'
-            : ruleInForce(load.driver?.payRules ?? [], input.to) === null
-              ? 'noRule'
-              : null
+        : deliveryAt === null
+          ? 'noDeliveryDate'
+          : deliveryAt.getTime() < input.from.getTime() ||
+              deliveryAt.getTime() > lastInstant
+            ? 'outsideRange'
+            : load.driverId === null
+              ? 'noDriver'
+              : ruleInForce(load.driver?.payRules ?? [], input.to) === null
+                ? 'noRule'
+                : null
 
     if (reason === null) available.push(trip)
     else unavailable[reason].push({ ...trip, reason })
@@ -470,13 +503,18 @@ export function previewLoadsSql(window: {
            ) END AS driver,
            (SELECT COALESCE(json_agg(json_build_object(
                      'type', st.type::text, 'scheduledAt', st."scheduledAt",
+                     'departedAt', st."departedAt",
                      'city', st.city, 'state', st.state, 'name', st.name)
                    ORDER BY st.sequence), '[]'::json)
               FROM "LoadStop" st WHERE st."loadId" = l.id) AS stops,
+           -- THE STATUS REACHING DELIVERED (MONEY-DESIGN §6, 2026-11-17): the
+           -- earliest applied event to Delivered or POD received. It was the
+           -- POD event alone. \`deliveryDateOf\` decides from this and the stops.
            (SELECT e."occurredAt" FROM "LoadStatusEvent" e
              WHERE e."loadId" = l.id AND e.axis::text = 'OPERATIONAL'
-               AND e."toStatus" = 'POD_RECEIVED' AND e.outcome::text = 'APPLIED'
-             ORDER BY e."occurredAt" LIMIT 1) AS pod_at,
+               AND e."toStatus" IN ('DELIVERED', 'POD_RECEIVED')
+               AND e.outcome::text = 'APPLIED'
+             ORDER BY e."occurredAt" LIMIT 1) AS finished_at,
            (SELECT s."batchId" FROM "SettlementLoadLine" ll
               JOIN "Settlement" s ON s.id = ll."settlementId"
              WHERE ll."loadId" = l.id ORDER BY ll.id LIMIT 1) AS line_batch_id,
@@ -526,11 +564,12 @@ export interface PreviewLoadSqlRow {
   stops: {
     type: string
     scheduledAt: Stamp | null
+    departedAt: Stamp | null
     city: string | null
     state: string | null
     name: string | null
   }[]
-  pod_at: Stamp | null
+  finished_at: Stamp | null
   line_batch_id: string | null
   on_statement: boolean
 }
@@ -567,11 +606,12 @@ export function previewLoadsFrom(
     stops: row.stops.map((stop) => ({
       ...stop,
       scheduledAt: asDate(stop.scheduledAt),
+      departedAt: asDate(stop.departedAt),
     })),
     statusEvents:
-      row.pod_at === null
+      row.finished_at === null
         ? []
-        : [{ occurredAt: asDate(row.pod_at) ?? new Date(NaN) }],
+        : [{ occurredAt: asDate(row.finished_at) ?? new Date(NaN) }],
     settlementLoadLines: row.on_statement
       ? [{ settlement: { batchId: row.line_batch_id } }]
       : [],

@@ -1,4 +1,5 @@
 import type {
+  LoadOperationalStatus,
   Prisma,
   SettlementLineType,
   SettlementStatus,
@@ -173,6 +174,22 @@ export const SETTLEABLE_LOAD: Prisma.LoadWhereInput = {
  * decision, deliberately untouched: which week a load belongs to and which
  * rule priced it are different questions, and collapsing them here would be a
  * second ruling nobody made.
+ *
+ * ══ SUPERSEDED 2026-11-17: THE DELIVERY DATE PUTS A TRIP IN A PERIOD ══════
+ *
+ * Owner's rulings (MONEY-DESIGN §6, "Which period a trip belongs to"): the
+ * range basis is the DELIVERY DATE — `deliveryDateOf` below — and the POD date
+ * no longer selects trips. The reason is Amazon: its loads carry no POD of
+ * their own (the paperwork lives in Relay; the POD event Zebra writes is a copy
+ * of the Delivered instant), so a period keyed on the POD was keyed on a date
+ * that, for the largest customer, is not a fact. And DELIVERED IS ENOUGH: a
+ * trip settles once it is Delivered or POD received, the gate Datatruck's
+ * "every delivered trip" uses. A broker POD that lands after its delivery
+ * date's batch is cut would otherwise leave the trip unpayable, because the
+ * no-overlap rule (§6.2.10 part 7) forbids a second batch over those dates.
+ *
+ * What the 8/30 replay found stays found: a DISPATCHED or IN_TRANSIT load has
+ * no delivered status and cannot settle, whatever its dates say.
  */
 export function settleableInPeriod(
   periodStart: Date,
@@ -180,15 +197,103 @@ export function settleableInPeriod(
 ): Prisma.LoadWhereInput {
   return {
     ...SETTLEABLE_LOAD,
-    operationalStatus: 'POD_RECEIVED',
-    statusEvents: {
-      some: {
-        axis: 'OPERATIONAL',
-        toStatus: 'POD_RECEIVED',
-        outcome: 'APPLIED',
-        occurredAt: { gte: periodStart, lte: periodEnd },
+    operationalStatus: { in: [...DELIVERED_STATUSES] },
+    // INSIDE `AND`, NOT A TOP-LEVEL `OR`: `settleableWhere` spreads this and
+    // adds its own `OR` for the two seats, and two `OR`s merged by spread
+    // overwrite each other (AGENTS.md, the loads list's filters).
+    AND: [deliveredBetween(periodStart, periodEnd)],
+  }
+}
+
+/** The statuses a trip may settle from (owner's ruling 2026-11-17). */
+export const DELIVERED_STATUSES = [
+  'DELIVERED',
+  'POD_RECEIVED',
+] as const satisfies readonly LoadOperationalStatus[]
+
+/** An applied operational event that took the load to Delivered or beyond. */
+const FINISHED_EVENT = {
+  axis: 'OPERATIONAL',
+  toStatus: { in: [...DELIVERED_STATUSES] },
+  outcome: 'APPLIED',
+} as const satisfies Prisma.LoadStatusEventWhereInput
+
+/**
+ * WHEN A TRIP WAS DELIVERED — the one definition, pure (MONEY-DESIGN §6,
+ * owner's ruling 2026-11-17).
+ *
+ *   1. the DELIVERY STOP'S ACTUAL DEPARTURE — the latest `departedAt` among
+ *      the load's delivery stops, which is the last drop's; else
+ *   2. the time its STATUS REACHED DELIVERED — the earliest applied
+ *      operational event to Delivered or POD received; else
+ *   3. none, and the trip is in no period until one is recorded.
+ *
+ * (2) COUNTS A JUMP STRAIGHT TO POD RECEIVED, because a status that reached
+ * POD received reached Delivered at that instant. The Datatruck import writes
+ * exactly one such event, BOOKED → POD_RECEIVED dated at the export's delivery
+ * date, and no stop departure; reading (2) as "a Delivered event only" would
+ * leave every one of those trips in no period at all. Where a load was marked
+ * Delivered first, the Delivered event is the earlier one and the POD's date
+ * never decides — which is the ruling.
+ *
+ * `settleableInPeriod` is the same definition spelled for Prisma
+ * (`deliveredBetween`), and the preview's SQL twin spells it a third time;
+ * `tests/delivery-date.test.ts` holds the pure and Prisma spellings together on
+ * rows, and the integration agreement test holds all of them to the data.
+ */
+export function deliveryDateOf(load: {
+  stops: readonly { type: string; departedAt: Date | null }[]
+  /** The earliest applied operational event to Delivered or POD received. */
+  finishedAt: Date | null
+}): Date | null {
+  let latest: number | null = null
+  for (const stop of load.stops) {
+    if (stop.type !== 'DELIVERY' || stop.departedAt === null) continue
+    const at = stop.departedAt.getTime()
+    if (latest === null || at > latest) latest = at
+  }
+  return latest === null ? load.finishedAt : new Date(latest)
+}
+
+/**
+ * `deliveryDateOf(load)` within [from, to], inclusive, as a Prisma filter.
+ *
+ * Branch one: some delivery stop departed in the window and none departed
+ * after it — so the LATEST departure is in the window. Branch two: no delivery
+ * stop has departed, some finished event is in the window and none is before
+ * it — so the EARLIEST finished event is in the window.
+ */
+export function deliveredBetween(from: Date, to: Date): Prisma.LoadWhereInput {
+  return {
+    OR: [
+      {
+        AND: [
+          {
+            stops: {
+              some: { type: 'DELIVERY', departedAt: { gte: from, lte: to } },
+            },
+          },
+          { stops: { none: { type: 'DELIVERY', departedAt: { gt: to } } } },
+        ],
       },
-    },
+      {
+        AND: [
+          {
+            stops: { none: { type: 'DELIVERY', departedAt: { not: null } } },
+          },
+          {
+            statusEvents: {
+              some: { ...FINISHED_EVENT, occurredAt: { gte: from, lte: to } },
+            },
+          },
+          {
+            statusEvents: {
+              none: { ...FINISHED_EVENT, occurredAt: { lt: from } },
+            },
+          },
+        ],
+      },
+    ],
   }
 }
 

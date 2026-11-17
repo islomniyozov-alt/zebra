@@ -54,6 +54,8 @@ const REASON: Record<string, MessageKey> = {
   blocked: 'batch.blockers',
   period_taken: 'batch.error.notAWeek',
   posted: 'batch.error.posted',
+  // `finaliseBatch` holds a stored period to `isBatchPeriod` (part 7, R1).
+  bad_range: 'batch.error.badRange',
 }
 
 /** The permission each act needs: deleting is `delete`, the other two `update`. */

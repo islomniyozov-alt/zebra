@@ -2,13 +2,17 @@
 
 import { useActionState, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
-import { openWeekAction } from '../actions'
+import { openBatchAction } from '../actions'
 import { PAYROLL_INITIAL } from '../state'
 
 interface Props {
-  /** The Sunday of the week Create would open. Re-validated server-side. */
-  week: string
-  /** The authority to settle, or '' for the whole organization (§6.2.10). */
+  /**
+   * The range Create opens, `YYYY-MM-DD` both ends, exactly as the screen
+   * read it (§6.2.10 part 7, R1). Re-validated server-side.
+   */
+  from: string
+  to: string
+  /** The authority to settle; required for a new batch (part 7, R2). */
   companyId: string
   disabled: boolean
   /** How many trips the grid rendered, so the count starts right. */
@@ -17,7 +21,8 @@ interface Props {
     /** `Add {count} trips` — `{count}` substituted here, live. */
     add: string
     selectAll: string
-    week: string
+    /** The range, said beside the button. */
+    period: string
   }
   /** The trip grid. Its checkboxes are this form's inputs. */
   children: ReactNode
@@ -45,14 +50,18 @@ interface Props {
  * nothing to verify.
  */
 export function CreateBatch({
-  week,
+  from,
+  to,
   companyId,
   disabled,
   shown,
   labels,
   children,
 }: Props) {
-  const [state, open, pending] = useActionState(openWeekAction, PAYROLL_INITIAL)
+  const [state, open, pending] = useActionState(
+    openBatchAction,
+    PAYROLL_INITIAL,
+  )
   const form = useRef<HTMLFormElement>(null)
   const [picked, setPicked] = useState(shown)
 
@@ -76,7 +85,8 @@ export function CreateBatch({
 
   return (
     <form action={open} ref={form} onChange={recount}>
-      <input type="hidden" name="week" value={week} />
+      <input type="hidden" name="from" value={from} />
+      <input type="hidden" name="to" value={to} />
       <input type="hidden" name="companyId" value={companyId} />
 
       <div className="flex items-center gap-z3 border-b border-border bg-surface-2 px-gutter py-z2">
@@ -88,7 +98,7 @@ export function CreateBatch({
         >
           {labels.selectAll}
         </Button>
-        <span className="text-xs text-ink-3">{labels.week}</span>
+        <span className="text-xs text-ink-3">{labels.period}</span>
         <span className="ms-auto flex items-center gap-z2">
           <Button
             type="submit"
