@@ -158,7 +158,6 @@ describe('the message', () => {
     'https://zebra.example/reset-password/tok',
     t,
     'en',
-    'ltr',
   )
 
   it('carries the link in the plain text part as well as the HTML', () => {
@@ -172,17 +171,18 @@ describe('the message', () => {
     expect(built.text).toContain('expires in an hour')
   })
 
-  it('carries the reader’s direction', () => {
-    const fa = resetEmail('a@b.c', 'https://x/y', t, 'fa', 'rtl')
-    expect(fa.html).toContain('dir="rtl"')
-    expect(built.html).toContain('dir="ltr"')
+  it('carries the reader’s language, and no direction', () => {
+    const ru = resetEmail('a@b.c', 'https://x/y', t, 'ru')
+    expect(ru.html).toContain('lang="ru"')
+    expect(built.html).toContain('lang="en"')
+    expect(built.html).not.toContain('dir=')
   })
 
   it('escapes, even though every string here is ours', () => {
     const nasty = (key: MessageKey) =>
       key === 'email.reset.intro' ? '<script>alert(1)</script>' : 'x'
-    expect(
-      resetEmail('a@b.c', 'https://x', nasty, 'en', 'ltr').html,
-    ).not.toContain('<script>')
+    expect(resetEmail('a@b.c', 'https://x', nasty, 'en').html).not.toContain(
+      '<script>',
+    )
   })
 })

@@ -23,8 +23,8 @@ import { PendingQueue } from './PendingQueue'
 // leave out of a payload. An anonymous request goes to the login, as the
 // operator shell sends it.
 //
-// `dir` is on <html>, from the locale, set by the root layout (§12): every
-// class below is a logical property, so Farsi needs nothing more here.
+// Two left-to-right locales (§12; Farsi removed 2026-11-17). Every class below
+// is still a logical property (rule 6).
 
 export default async function PortalLayout({
   children,

@@ -10,7 +10,7 @@ import { translator } from '@/lib/i18n'
 const PASSWORD = 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6'
 const SIGN_IN = 'https://zebra.tajikcargollc.workers.dev'
 
-const labelsFor = (locale: 'en' | 'ru' | 'fa') => {
+const labelsFor = (locale: 'en' | 'ru') => {
   const t = translator(locale)
   return {
     intro: t('users.share.intro'),
@@ -95,7 +95,7 @@ describe('the Telegram link', () => {
 })
 
 describe('locale', () => {
-  it.each(['en', 'ru', 'fa'] as const)(
+  it.each(['en', 'ru'] as const)(
     'translates the words and never the credential (%s)',
     (locale) => {
       const message = composeCredentialMessage(

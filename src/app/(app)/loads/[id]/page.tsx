@@ -1270,7 +1270,7 @@ export default async function LoadDetailPage({
               <Link
                 href="/loads"
                 aria-label={t('loads.back')}
-                className="text-lg text-ink-2 hover:text-accent rtl:rotate-180"
+                className="text-lg text-ink-2 hover:text-accent"
               >
                 ←
               </Link>

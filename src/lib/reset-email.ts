@@ -5,10 +5,10 @@ import type { Locale, Translate } from './i18n'
 // The one email this application sends.
 //
 // Written as a function of (link, translate) so that it can be asserted on
-// without a network, and so the Russian and Farsi versions are the same code
-// path rather than a second template somebody forgets to change. `dir` comes
-// from the locale, exactly as it does in the application shell — an RTL email
-// read left-to-right is the same bug in a different window.
+// without a network, and so the English and Russian versions are the same
+// code path rather than a second template somebody forgets to change. Both are
+// left-to-right (Farsi removed 2026-11-17, §12), so the message carries `lang`
+// and no `dir`.
 //
 // Plain text is not an afterthought. Corporate mail filters strip HTML, and a
 // reset link that only exists inside an <a> is a reset link that sometimes
@@ -41,7 +41,6 @@ export function resetEmail(
   link: string,
   t: Translate,
   locale: Locale,
-  dir: 'ltr' | 'rtl',
 ): EmailMessage {
   const text = [
     t('email.reset.intro'),
@@ -52,7 +51,7 @@ export function resetEmail(
     t('email.reset.ignore'),
   ].join('\n')
 
-  const html = `<div lang="${locale}" dir="${dir}" style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:15px;line-height:1.5;color:${INK};max-width:520px">
+  const html = `<div lang="${locale}" style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:15px;line-height:1.5;color:${INK};max-width:520px">
 <p>${escapeHtml(t('email.reset.intro'))}</p>
 <p><a href="${escapeHtml(link)}" style="display:inline-block;padding:10px 16px;background:${ACCENT};color:${SURFACE};text-decoration:none;border-radius:4px">${escapeHtml(t('email.reset.action'))}</a></p>
 <p style="font-size:13px;color:${INK_2}">${escapeHtml(t('email.reset.expiry'))}<br>${escapeHtml(t('email.reset.ignore'))}</p>

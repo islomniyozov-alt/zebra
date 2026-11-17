@@ -292,8 +292,8 @@ describe('every key the action can return is renderable', () => {
     'auth.unavailable',
   ]
 
-  it.each(KEYS)('%s exists in all three locales', (key) => {
-    for (const locale of ['en', 'ru', 'fa'] as const) {
+  it.each(KEYS)('%s exists in both locales', (key) => {
+    for (const locale of ['en', 'ru'] as const) {
       const value = translator(locale)(key)
       expect(typeof value).toBe('string')
       expect(value.length).toBeGreaterThan(0)

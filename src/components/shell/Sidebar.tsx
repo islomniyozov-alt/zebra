@@ -20,8 +20,7 @@ import { activeNavHref } from '@/lib/nav-active'
 // so each reads as a heading for the items under it.
 //
 // Active item: nav-active fill, nav-ink text, 2px ACCENT bar on the LEADING
-// edge — inline-start, so it lands on the right in Farsi without a second
-// rule. The bar is the one accent on the navy: accent means "you can do
+// edge — inline-start (rule 6). The bar is the one accent on the navy: accent means "you can do
 // something here", and the current page is where the navigation still says so.
 // No accent fill and no accent text (§3.6).
 

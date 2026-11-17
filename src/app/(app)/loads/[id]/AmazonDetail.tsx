@@ -107,7 +107,7 @@ export function TrackerSteps({
                 <span
                   aria-hidden="true"
                   className={cx(
-                    'absolute top-[15px] h-[3px] w-full -translate-x-1/2 rtl:translate-x-1/2',
+                    'absolute top-[15px] h-[3px] w-full -translate-x-1/2',
                     'start-0',
                     reached ? 'bg-progress' : 'bg-surface-3',
                   )}

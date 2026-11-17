@@ -45,7 +45,7 @@ export async function requestResetAction(
   // difference is exactly what an enumeration attack is looking for. No
   // branch below may reach the return value, including the failures.
   if (outcome.token) {
-    const { t, locale, dir } = await getLocaleContext()
+    const { t, locale } = await getLocaleContext()
     const link = resetLink(outcome.token, {
       origin: process.env.APP_ORIGIN,
       host: await requestHost(),
@@ -54,7 +54,7 @@ export async function requestResetAction(
     // subrequest finishes has the subrequest cancelled, and `waitUntil` is not
     // reachable from a server action. The send is ~200ms and the honest cost
     // of the feature.
-    const sent = await sendEmail(resetEmail(email, link, t, locale, dir))
+    const sent = await sendEmail(resetEmail(email, link, t, locale))
     if (!sent.ok) {
       console.error('[zebra.reset] the link was issued but not delivered', {
         reason: sent.reason,

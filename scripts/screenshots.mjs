@@ -2,7 +2,7 @@ import { chromium } from 'playwright'
 import { mkdirSync } from 'node:fs'
 
 // The §15 evidence: Loads and login at 1080p, Standard density, in English,
-// Russian and right-to-left Farsi.
+// Russian (two locales since Farsi was removed, 2026-11-17, §12).
 //
 // 1920x1080 exactly, because the density rules are written against a 1080p
 // screen and "20 rows visible without scrolling" is a claim about that
@@ -16,53 +16,37 @@ const VIEWPORT = { width: 1920, height: 1080 }
 const SHOTS = [
   { name: 'login-en', path: '/login', locale: 'en', authed: false },
   { name: 'login-ru', path: '/login', locale: 'ru', authed: false },
-  { name: 'login-fa-rtl', path: '/login', locale: 'fa', authed: false },
   { name: 'loads-en', path: '/loads', locale: 'en', authed: true },
   { name: 'loads-ru', path: '/loads', locale: 'ru', authed: true },
-  { name: 'loads-fa-rtl', path: '/loads', locale: 'fa', authed: true },
   { name: 'account-en', path: '/account', locale: 'en', authed: true },
   { name: 'account-ru', path: '/account', locale: 'ru', authed: true },
-  { name: 'account-fa-rtl', path: '/account', locale: 'fa', authed: true },
   // Step 2's reference screens. Trucks stands in for the three fleet lists,
   // which share a layout; brokers differs (no authority column, ever) and the
   // truck form is the only new form shape.
   { name: 'trucks-en', path: '/trucks', locale: 'en', authed: true },
   { name: 'trucks-ru', path: '/trucks', locale: 'ru', authed: true },
-  { name: 'trucks-fa-rtl', path: '/trucks', locale: 'fa', authed: true },
   { name: 'brokers-en', path: '/brokers', locale: 'en', authed: true },
   { name: 'brokers-ru', path: '/brokers', locale: 'ru', authed: true },
-  { name: 'brokers-fa-rtl', path: '/brokers', locale: 'fa', authed: true },
   { name: 'load-new-en', path: '/loads/new', locale: 'en', authed: true },
   { name: 'load-new-ru', path: '/loads/new', locale: 'ru', authed: true },
-  { name: 'load-new-fa-rtl', path: '/loads/new', locale: 'fa', authed: true },
   // Step 6. The board is the new layout, so all three locales; the Loads
   // shots above already carry the saved-views bar, which is why they are not
   // duplicated here.
   { name: 'dispatch-en', path: '/dispatch', locale: 'en', authed: true },
   { name: 'dispatch-ru', path: '/dispatch', locale: 'ru', authed: true },
-  { name: 'dispatch-fa-rtl', path: '/dispatch', locale: 'fa', authed: true },
   // Step 7. The driver form gained the truck pairing, and the Loads view bar
   // gained the density control — both are new layout and both are shot in all
   // three locales.
   { name: 'driver-new-en', path: '/drivers/new', locale: 'en', authed: true },
   { name: 'driver-new-ru', path: '/drivers/new', locale: 'ru', authed: true },
-  {
-    name: 'driver-new-fa-rtl',
-    path: '/drivers/new',
-    locale: 'fa',
-    authed: true,
-  },
   // Admin → Users. New layout, so all three locales; the create form is where
   // the credential panel lives and is worth seeing mirrored.
   { name: 'users-en', path: '/users', locale: 'en', authed: true },
   { name: 'users-ru', path: '/users', locale: 'ru', authed: true },
-  { name: 'users-fa-rtl', path: '/users', locale: 'fa', authed: true },
   { name: 'user-new-en', path: '/users/new', locale: 'en', authed: true },
   { name: 'user-new-ru', path: '/users/new', locale: 'ru', authed: true },
-  { name: 'user-new-fa-rtl', path: '/users/new', locale: 'fa', authed: true },
   { name: 'truck-new-en', path: '/trucks/new', locale: 'en', authed: true },
   { name: 'truck-new-ru', path: '/trucks/new', locale: 'ru', authed: true },
-  { name: 'truck-new-fa-rtl', path: '/trucks/new', locale: 'fa', authed: true },
   // PHASE 4 step 1. The compliance queue — dense, and every row a date next to
   // a status word, which is where §12's longer Russian bites.
   ...money('safety', '/safety'),
@@ -72,15 +56,14 @@ const SHOTS = [
   ...money('dashboard', '/dashboard'),
   // PHASE 3. The money screens, all three locales. These are where §12's
   // "Russian runs ~30% longer" bites hardest: every one of them is a dense
-  // table of right-aligned figures beside a translated label, and Farsi
-  // mirrors the lot.
+  // table of right-aligned figures beside a translated label.
   ...money('invoices', '/invoices'),
   ...money('receivables', '/receivables'),
   ...money('payments', '/payments'),
   ...money('settlements', '/settlements'),
   // PHASE 4 steps 3-6. Four screens that did not exist when the last shot list
   // was written, each a dense table beside a translated label — which is where
-  // §12's "Russian runs ~30% longer" bites and where Farsi mirrors the lot.
+  // §12's "Russian runs ~30% longer" bites.
   ...money('maintenance', '/maintenance'),
   ...money('inspections', '/safety/inspections'),
   ...money('claims', '/safety/claims'),
@@ -92,12 +75,11 @@ const SHOTS = [
   ...money('settings', '/settings', { scroll: 'bottom' }),
 ]
 
-/** One screen in all three locales. The RTL shot is named so it sorts last. */
+/** One screen in both locales. */
 function money(name, path, extra = {}) {
   return [
     { name: `${name}-en`, path, locale: 'en', authed: true, ...extra },
     { name: `${name}-ru`, path, locale: 'ru', authed: true, ...extra },
-    { name: `${name}-fa-rtl`, path, locale: 'fa', authed: true, ...extra },
   ]
 }
 

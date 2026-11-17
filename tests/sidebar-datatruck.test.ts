@@ -82,8 +82,8 @@ describe('the owner’s sidebar', () => {
     expect(hrefs).toHaveLength(new Set(hrefs).size)
   })
 
-  it('has a Russian and a Farsi label for every entry and heading', () => {
-    for (const locale of ['ru', 'fa'] as const) {
+  it('has a Russian label for every entry and heading', () => {
+    for (const locale of ['ru'] as const) {
       const t = translator(locale)
       for (const [heading, labels] of sidebarIn('OWNER', t)) {
         for (const text of [heading, ...(labels as string[])])

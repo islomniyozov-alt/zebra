@@ -12,7 +12,7 @@
 // An error boundary must be a Client Component, so it cannot call
 // `getLocaleContext()` — and importing `i18n.ts` would ship every string in the
 // product to the browser in order to render three of them. So the three
-// sentences live here, in the three languages, and the locale comes from the
+// sentences live here, in the two languages, and the locale comes from the
 // cookie the application already sets. §12's one-dictionary rule is suspended
 // for exactly this file and §7.11 records why.
 //
@@ -36,11 +36,6 @@ const WORDS = {
     body: 'Zebra столкнулась с непредвиденной ошибкой. Всё, что вы ввели, сохранено — кроме незаполненных до конца форм.',
     retry: 'Попробовать снова',
   },
-  fa: {
-    title: 'مشکلی از سمت ما پیش آمد',
-    body: 'Zebra با خطایی غیرمنتظره روبه‌رو شد. چیزی که وارد کرده‌اید از دست نرفته، مگر فرمی که هنوز ذخیره نشده بود.',
-    retry: 'دوباره تلاش کنید',
-  },
 } as const
 
 type Lang = keyof typeof WORDS
@@ -50,7 +45,7 @@ function language(): Lang {
   try {
     const match = /(?:^|;\s*)zebra_locale=([^;]+)/.exec(document.cookie)
     const value = match?.[1]
-    if (value === 'ru' || value === 'fa' || value === 'en') return value
+    if (value === 'ru' || value === 'en') return value
   } catch {
     // No document, no cookie access, no matter.
   }

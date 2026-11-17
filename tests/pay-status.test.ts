@@ -29,7 +29,6 @@ import {
 
 const en = translator('en')
 const ru = translator('ru')
-const fa = translator('fa')
 const read = (path: string) => readFileSync(path, 'utf8')
 
 describe('the office words, from one function', () => {
@@ -85,7 +84,7 @@ describe('the office words, from one function', () => {
     }
   })
 
-  it('says each word in all three locales, not English three times', () => {
+  it('says each word in both locales, not English twice', () => {
     const labels = new Set([
       ...Object.values(STATEMENT_WORDS).map((word) => word.label),
       ...Object.values(BATCH_WORDS).map((word) => word.label),
@@ -93,7 +92,6 @@ describe('the office words, from one function', () => {
     for (const label of labels) {
       expect(en(label), label).not.toBe(label)
       expect(ru(label), label).not.toBe(en(label))
-      expect(fa(label), label).not.toBe(en(label))
     }
   })
 

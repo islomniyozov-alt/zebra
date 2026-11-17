@@ -129,7 +129,6 @@ const SHOTS = [
   // ── THE WORKBENCH ───────────────────────────────────────────────────────
   { name: 'wb-1-statement', path: statementPath },
   { name: 'wb-2-statement-ru', path: statementPath, locale: 'ru' },
-  { name: 'wb-3-statement-fa-rtl', path: statementPath, locale: 'fa' },
   // The same page with nothing left to do on it, so the difference between
   // editable and finished is a picture rather than a sentence.
   ...(finishedPath && finishedPath !== statementPath
@@ -150,7 +149,6 @@ const SHOTS = [
     name: 'wb-6-openbatch-twoweeks',
     path: '/payroll/batches/new?from=2026-09-13&to=2026-09-26',
   },
-  { name: 'wb-7-openbatch-fa-rtl', path: '/payroll/batches/new', locale: 'fa' },
 ]
 
 let failures = 0

@@ -382,7 +382,7 @@ model User {
   passwordHash String?
   name         String
   phone        String?
-  locale       String    @default("en") // en | ru | fa — driver portal needs these on day one
+  locale       String    @default("en") // en | ru — Farsi removed 2026-11-17 (TMS §12); a stored fa reads as en
   isActive     Boolean   @default(true)
   lastLoginAt  DateTime?
 

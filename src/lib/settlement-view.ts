@@ -13,13 +13,14 @@ import type { SettlementPdfLine } from './settlement-pdf'
 // disagreeing in front of a driver.
 //
 // TEMPLATES, NOT CONCATENATION. The first version glued English words between
-// the figures, and the Farsi settlement screen rendered "of $۲٬۴۵۰٫۰۰ gross
-// 30%" — the numbers mirrored, the English words did not, and the result was
-// unreadable in the one place a driver checks their pay. A template per rule
-// type lets each language put the words where they belong.
+// the figures, and a right-to-left settlement screen (Farsi, removed
+// 2026-11-17) mirrored the numbers and not the English words, and the result
+// was unreadable in the one place a driver checks their pay. A template per
+// rule type lets each language put the words where they belong — Russian
+// orders them its own way too.
 //
 // The PDF keeps the English templates on purpose: base-14 fonts are WinAnsi
-// and cannot draw Cyrillic or Farsi at all. The screen carries the locales.
+// and cannot draw Cyrillic at all. The screen carries the locales.
 // ---------------------------------------------------------------------------
 
 export interface BasisTemplates {

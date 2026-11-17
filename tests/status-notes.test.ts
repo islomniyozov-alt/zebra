@@ -6,8 +6,8 @@ import { isMessageKey, translator, type MessageKey } from '@/lib/i18n'
 //
 //   OURS      — "status.note.assigned", written by the status engine. Chrome.
 //               It belongs in the reader's language, and until Step 7 it was
-//               stored as English prose and stayed English in the Russian and
-//               Farsi timelines (§16 flag 14).
+//               stored as English prose and stayed English in the Russian
+//               timeline (§16 flag 14).
 //   A HUMAN'S — "Broker cancelled, no truck available." Evidence. It is shown
 //               exactly as typed, in whatever language it was typed in, and
 //               translating it would be putting words in someone's mouth on a
@@ -25,7 +25,7 @@ const SYSTEM_NOTES: MessageKey[] = [
 describe('the notes the engine writes', () => {
   it.each(SYSTEM_NOTES)('%s is a real key in every locale', (key) => {
     expect(isMessageKey(key)).toBe(true)
-    for (const locale of ['en', 'ru', 'fa'] as const) {
+    for (const locale of ['en', 'ru'] as const) {
       const rendered = translator(locale)(key)
       expect(rendered.length).toBeGreaterThan(0)
     }

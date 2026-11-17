@@ -79,8 +79,8 @@ export function ExpandToggle({
         aria-hidden
         viewBox="0 0 16 16"
         className={cx(
-          'size-[12px] transition-transform duration-120 ease-out rtl:-scale-x-100',
-          open && 'rotate-90 rtl:-rotate-90',
+          'size-[12px] transition-transform duration-120 ease-out',
+          open && 'rotate-90',
         )}
         fill="none"
         stroke="currentColor"

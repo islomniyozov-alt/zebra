@@ -58,13 +58,13 @@ describe('every DocumentType has a label', () => {
     ).toBe(true)
   })
 
-  // ALL THREE LOCALES ARE THE COMPILER'S JOB AND IT ALREADY DOES IT:
-  // `Dictionary = Record<MessageKey, string>`, so `ru` and `fa` cannot omit a
+  // BOTH LOCALES ARE THE COMPILER'S JOB AND IT ALREADY DOES IT:
+  // `Dictionary = Record<MessageKey, string>`, so `ru` cannot omit a
   // key of `en`. A test looping the catalogues would re-assert what the type
   // guarantees, and would need them exported to do it. What is asserted here
   // instead is that each locale returns a NON-EMPTY name, which the type does
   // not say — `''` satisfies `string`.
-  it.each(['en', 'ru', 'fa'] as Locale[])('reads as a name in %s', (locale) => {
+  it.each(['en', 'ru'] as Locale[])('reads as a name in %s', (locale) => {
     const labels = documentTypeLabels(translator(locale))
     const blank = MEMBERS.filter((member) => labels[member].trim() === '')
     expect(blank).toEqual([])

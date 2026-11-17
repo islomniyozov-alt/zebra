@@ -2,7 +2,6 @@ import 'server-only'
 import { cookies } from 'next/headers'
 import {
   DEFAULT_LOCALE,
-  directionOf,
   isLocale,
   translator,
   type Locale,
@@ -20,7 +19,7 @@ export const LOCALE_COOKIE = 'zebra_locale'
  * writes the cookie from `User.locale` on success, so the two agree from then
  * on.
  *
- * Not from Accept-Language either. A Farsi-speaking dispatcher on a
+ * Not from Accept-Language either. An English-speaking dispatcher on a
  * company laptop in a Russian-language office should get what they chose, not
  * what the machine was set up with.
  */
@@ -32,11 +31,10 @@ export async function getLocale(): Promise<Locale> {
 
 export interface LocaleContext {
   locale: Locale
-  dir: 'ltr' | 'rtl'
   t: Translate
 }
 
 export async function getLocaleContext(): Promise<LocaleContext> {
   const locale = await getLocale()
-  return { locale, dir: directionOf(locale), t: translator(locale) }
+  return { locale, t: translator(locale) }
 }

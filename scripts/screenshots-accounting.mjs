@@ -75,17 +75,11 @@ const SHOTS = [
   // The week this session corrected, so the derived check date is in a picture.
   { name: 'grid-5-batches-week', path: '/payroll/batches?week=2026-09-13' },
 
-  // ── RUSSIAN AND FARSI ───────────────────────────────────────────────────
+  // ── RUSSIAN ─────────────────────────────────────────────────────────────
   //
-  // §12: Russian runs ~30% longer and Farsi is right-to-left. The batches grid
-  // is the widest, and the breadcrumb is new — its separator has to mirror.
+  // §12: Russian runs ~30% longer. The batches grid is the widest. (The Farsi
+  // shots went with Farsi, 2026-11-17.)
   { name: 'i18n-1-batches-ru', path: '/payroll/batches', locale: 'ru' },
-  { name: 'i18n-2-batches-fa-rtl', path: '/payroll/batches', locale: 'fa' },
-  {
-    name: 'i18n-3-invoices-fa-rtl',
-    path: '/accounting/invoices',
-    locale: 'fa',
-  },
 
   // ── AND THE OLD PATHS STILL LAND SOMEWHERE ──────────────────────────────
   { name: 'redir-1-thisweek', path: '/money/this-week' },

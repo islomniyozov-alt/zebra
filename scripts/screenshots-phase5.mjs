@@ -91,7 +91,7 @@ await auth.close()
 
 const taken = []
 
-for (const locale of ['en', 'ru', 'fa']) {
+for (const locale of ['en', 'ru']) {
   const context = await browser.newContext({
     viewport: VIEWPORT,
     deviceScaleFactor: 1,
@@ -152,7 +152,7 @@ for (const locale of ['en', 'ru', 'fa']) {
     previous = now
   }
 
-  const suffix = locale === 'fa' ? 'fa-rtl' : locale
+  const suffix = locale
   await shoot(page, `load-new-extracted-${suffix}`)
 
   // AND THE WARNINGS. The dates are cleared first — §3 step 5 made them warn

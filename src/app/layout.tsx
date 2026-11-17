@@ -13,11 +13,10 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode
 }>) {
-  const { locale, dir } = await getLocaleContext()
+  const { locale } = await getLocaleContext()
 
-  // `dir` comes from the locale and nothing else (§12). Every stylesheet uses
-  // logical properties, so this one attribute is the entire right-to-left
-  // implementation — there is no mirrored stylesheet to keep in step.
+  // NO `dir`: both locales are left-to-right since Farsi was removed
+  // (2026-11-17, §12), and left-to-right is the default.
   //
   // NO data-density here. It is a per-user preference and this layout has no
   // user — the login screen has no density to have. The app shell sets it from
@@ -25,7 +24,7 @@ export default async function RootLayout({
   // outside the shell. Setting it here as well made the attribute ambiguous:
   // a check reading `[data-density]` found <html> and never saw the shell.
   return (
-    <html lang={locale} dir={dir}>
+    <html lang={locale}>
       <body className="bg-surface-2 text-ink">
         <ToastProvider>{children}</ToastProvider>
       </body>
