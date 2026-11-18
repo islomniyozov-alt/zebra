@@ -51,6 +51,8 @@ export async function recordRenewalAction(
       identifier: text(formData, 'identifier'),
       issuer: text(formData, 'issuer'),
       notes: text(formData, 'notes'),
+      // Only the licence reader sends it; it fills Main's empty class.
+      cdlClass: text(formData, 'cdlClass'),
     }),
   )
 

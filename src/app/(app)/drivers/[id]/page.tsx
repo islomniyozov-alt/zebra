@@ -98,6 +98,7 @@ import {
   retireAssetAction,
   transferAssetAction,
 } from '../../_reference/asset-actions'
+import { mainCdlView } from '@/lib/driver-cdl'
 
 export default async function EditDriverPage({
   params,
@@ -195,6 +196,18 @@ export default async function EditDriverPage({
 
       return {
         driver,
+        // MAIN'S LICENCE FIELDS, each empty one read from the newest CDL
+        // record (driver-cdl.ts) — from the rows already read, no query. Only
+        // for a role that reads compliance: the record's number must not
+        // reach Main for a role that could not see it on the record.
+        cdlMain: mainCdlView(
+          {
+            cdlNumber: driver.cdlNumber,
+            cdlState: driver.cdlState,
+            cdlClass: driver.cdlClass,
+          },
+          can(session, 'read', 'compliance') ? head.compliance : [],
+        ),
         companies,
         openCompany,
         trucks: head.trucks,
@@ -264,6 +277,7 @@ export default async function EditDriverPage({
     dispatchers,
     driverStatus,
     photoId,
+    cdlMain,
   } = data
   const maySeeCompliance = await currentUserCan('read', 'compliance')
   // §6.9: the selections panel exists only for a role that reads the pool.
@@ -647,6 +661,9 @@ export default async function EditDriverPage({
             label: t('drivers.cdlNumber'),
             kind: 'text',
             mono: true,
+            hint: cdlMain.fromRecord.includes('cdlNumber')
+              ? t('drivers.cdlFromRecord')
+              : undefined,
           },
         },
         {
@@ -654,6 +671,9 @@ export default async function EditDriverPage({
             name: 'cdlState',
             label: t('drivers.cdlState'),
             kind: 'text',
+            hint: cdlMain.fromRecord.includes('cdlState')
+              ? t('drivers.cdlFromRecord')
+              : undefined,
           },
         },
         {
@@ -873,9 +893,9 @@ export default async function EditDriverPage({
               addressCity: driver.addressCity ?? '',
               addressState: driver.addressState ?? '',
               addressPostalCode: driver.addressPostalCode ?? '',
-              cdlNumber: driver.cdlNumber ?? '',
-              cdlState: driver.cdlState ?? '',
-              cdlClass: driver.cdlClass ?? '',
+              cdlNumber: cdlMain.values.cdlNumber ?? '',
+              cdlState: cdlMain.values.cdlState ?? '',
+              cdlClass: cdlMain.values.cdlClass ?? '',
               hireDate: dateInputValue(driver.hireDate),
               status: driver.status,
               driverType: driver.driverType,
