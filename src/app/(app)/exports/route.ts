@@ -80,11 +80,18 @@ import type { Action, Resource } from '@/lib/permissions'
  */
 type ExportableGrid = Exclude<
   GridId,
-  'settlements.trips' | 'loads.loads' | 'trucks.trucks' | 'drivers.drivers'
+  | 'settlements.trips'
+  | 'settlements.batch'
+  | 'loads.loads'
+  | 'trucks.trucks'
+  | 'drivers.drivers'
 >
 
 const NOT_EXPORTABLE = new Set<GridId>([
   'settlements.trips',
+  // §6.2.10 part 7 step 3: one batch's statements, scoped to a document the
+  // address does not carry — the same answer as the statement's trips.
+  'settlements.batch',
   // §7.1.7's two operational lists. They joined `GRID_IDS` for the columns
   // chooser — the cure for a 500 — and §7.1.5's export is the ACCOUNTING grid
   // contract: one shared reader, codes not labels, every page of the filter.
@@ -116,6 +123,7 @@ const GUARD: Record<GridId, { action: Action; resource: Resource }> = {
   // map is exhaustive on purpose, and that exhaustiveness is what made adding
   // the grid id surface this decision instead of burying it.
   'settlements.trips': { action: 'read', resource: 'driver.pay' },
+  'settlements.batch': { action: 'read', resource: 'settlement' },
   'payroll.statements': { action: 'read', resource: 'driver.pay' },
   'payroll.balances': { action: 'read', resource: 'driver.pay' },
   'payroll.oneTime': { action: 'read', resource: 'driver.pay' },

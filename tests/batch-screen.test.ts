@@ -28,7 +28,9 @@ describe('the batch screen', () => {
     // THE PAGE READS ITS WINDOW IN ITS ONE CALL (§6.2.10 2c v11.08) and
     // classifies it through the picker's own `previewFrom`, for its own batch;
     // tests/integration/batch-page-head.test.ts holds it equal to `previewBatch`.
-    expect(batchPage).toContain('readBatchPageHead(reader, id)')
+    // Step 3 (v11.32) passes the reader's id for the column choice, a CTE of
+    // the same one statement.
+    expect(batchPage).toContain('readBatchPageHead(reader, id, session.userId)')
     expect(
       readFileSync(join('src', 'lib', 'batch-page-head.ts'), 'utf8'),
     ).toMatch(/previewFrom\([\s\S]*?forBatchId: batch\.id/)

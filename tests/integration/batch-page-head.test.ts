@@ -6,6 +6,7 @@ import { LOAD_WRITE_TIMEOUT_MS, createLoad } from '@/lib/loads'
 import { openBatch } from '@/lib/settlement-batch'
 import { previewBatch } from '@/lib/batch-preview'
 import { readBatchPageHead, type BatchPageHead } from '@/lib/batch-page-head'
+import { keyFor } from '@/lib/grid-columns'
 import { weekOf } from '@/lib/settlement-week'
 import { createPrismaClient, prisma, statementsOf } from '@/lib/db'
 import type { PrismaClient } from '@/generated/prisma/client'
@@ -317,6 +318,7 @@ afterAll(async () => {
 async function readByPrisma(
   tx: TxClient,
   id: string,
+  readerId: string,
 ): Promise<BatchPageHead | null> {
   const batch = await tx.settlementBatch.findFirst({
     where: { id, deletedAt: null },
@@ -338,9 +340,17 @@ async function readByPrisma(
           settlementNumber: true,
           status: true,
           unitNumber: true,
+          // §6.2.10 part 7 step 3 (v11.32): the batch screen's ten columns
+          // and the rail's sums, every one a stored column.
+          driverType: true,
+          payToName: true,
+          payTariffLabel: true,
+          grossCents: true,
           earningsCents: true,
           deductionsCents: true,
           otherPayCents: true,
+          reimbursementsCents: true,
+          advancesCents: true,
           netCents: true,
           driver: { select: { firstName: true, lastName: true } },
           loadLines: { select: { id: true } },
@@ -349,6 +359,27 @@ async function readByPrisma(
     },
   })
   if (!batch) return null
+  // WHO OPENED IT (R4): the batch's audit CREATE row, oldest first.
+  const created = await tx.auditLog.findFirst({
+    where: {
+      organizationId: batch.organizationId,
+      entityType: 'SettlementBatch',
+      entityId: batch.id,
+      action: 'CREATE',
+    },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    select: { userId: true },
+  })
+  const creator = created?.userId
+    ? await tx.user.findFirst({
+        where: { id: created.userId },
+        select: { name: true },
+      })
+    : null
+  const columnsRow = await tx.userPreference.findFirst({
+    where: { userId: readerId, key: keyFor('settlements.batch') },
+    select: { value: true, organizationId: true },
+  })
   const preview = await previewBatch(tx, {
     from: batch.periodStart,
     to: batch.periodEnd,
@@ -358,12 +389,14 @@ async function readByPrisma(
   return {
     batch: {
       ...batch,
+      createdBy: creator?.name ?? null,
       settlements: batch.settlements.map(({ loadLines, ...s }) => ({
         ...s,
         lines: loadLines.length,
       })),
     },
     preview,
+    columnsRow,
   }
 }
 
@@ -375,14 +408,15 @@ describe('/settlements/batches/[id] in one statement', () => {
       const [inTx, expected] = await inOrg(
         async (tx) =>
           [
-            await readBatchPageHead(txReader(tx), id),
-            await readByPrisma(tx, id),
+            await readBatchPageHead(txReader(tx), id, userId),
+            await readByPrisma(tx, id, userId),
           ] as const,
       )
       expect(inTx, `${name} in a transaction`).toEqual(expected)
       const viaReader = await readBatchPageHead(
         tenantReader(prisma, organizationId),
         id,
+        userId,
       )
       expect(viaReader, `${name} through the tenant reader`).toEqual(expected)
       compared += 2
@@ -394,6 +428,7 @@ describe('/settlements/batches/[id] in one statement', () => {
     const alpha = (await readBatchPageHead(
       tenantReader(prisma, organizationId),
       batches.alpha!,
+      userId,
     ))!
     const ids = (rows: { loadId: string }[]) => rows.map((r) => r.loadId).sort()
     // THE CATCH-UP AND ITS FLOOR (owner's rulings 2026-11-17). No payroll
@@ -436,6 +471,9 @@ describe('/settlements/batches/[id] in one statement', () => {
     expect(ticked.loadPayCents).toBe(36_000)
     expect(ticked.locations).toBe('Whiteland, IN → Gastonia DC')
     expect(alpha.batch.company?.name).toBe(`ALPHA ${nonce}`)
+    // NOT VACUOUS (step 3): the batch was opened with a user in context, so
+    // the audit CREATE row names somebody and the rail prints it.
+    expect(alpha.batch.createdBy).not.toBeNull()
     // The paid driver's statement carries the one trip — nothing before the
     // floor carried over; the ruleless driver's is there with none, which is
     // how the engine records a blocker.
@@ -449,6 +487,7 @@ describe('/settlements/batches/[id] in one statement', () => {
     const wide = (await readBatchPageHead(
       tenantReader(prisma, organizationId),
       batches.wide!,
+      userId,
     ))!
     expect(wide.batch.company).toBeNull()
     expect(ids(wide.preview.unavailable.alreadyInBatch)).toEqual(
@@ -471,6 +510,7 @@ describe('/settlements/batches/[id] in one statement', () => {
       const head = await readBatchPageHead(
         tenantReader(client, organizationId),
         batches.alpha!,
+        userId,
       )
       expect(statementsOf(client)! - at).toBe(1)
       expect(head?.batch.id).toBe(batches.alpha)
@@ -481,15 +521,17 @@ describe('/settlements/batches/[id] in one statement', () => {
       await readBatchPageHead(
         tenantReader(prisma, organizationId),
         batches.deleted!,
+        userId,
       ),
     ).toBeNull()
     const asUs = tenantReader(prisma, organizationId)
-    const theirs = await readBatchPageHead(asUs, otherBatchId)
+    const theirs = await readBatchPageHead(asUs, otherBatchId, userId)
     expect(theirs).toBeNull()
     // NOT VACUOUS: as its own organization the batch is there.
     const own = await readBatchPageHead(
       tenantReader(prisma, otherOrgId),
       otherBatchId,
+      userId,
     )
     expect(own?.batch.id).toBe(otherBatchId)
   }, 300_000)

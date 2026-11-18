@@ -156,6 +156,30 @@ export async function includeTrips(
 }
 
 /**
+ * ADD DRIVER (§6.2.10 part 7 step 3, R14 (b)): every trip of one driver that
+ * this batch has excluded, put back. The batch's own exclusions are read for
+ * that driver's loads — nothing the client sends decides which trips — and
+ * handed to `includeTrips`, the one writer that un-excludes, which refreshes.
+ * A driver with no excluded trip here is `no_trips`, by name.
+ */
+export async function includeDriver(
+  tx: TxClient,
+  input: { batchId: string; driverId: string },
+): Promise<ExclusionOutcome> {
+  const found = await draftOrRefusal(tx, input.batchId)
+  if (!found.ok) return found
+  const rows = await tx.settlementBatchExclusion.findMany({
+    where: { batchId: input.batchId, load: { driverId: input.driverId } },
+    select: { loadId: true },
+  })
+  if (rows.length === 0) return { ok: false, reason: { kind: 'no_trips' } }
+  return includeTrips(tx, {
+    batchId: input.batchId,
+    loadIds: rows.map((row) => row.loadId),
+  })
+}
+
+/**
  * The batch screen's Save (§6.2.10 part 2b): the office's ticks, as a whole.
  *
  * `wanted` is shown minus ticked — the exclusion set the screen wants. Against
