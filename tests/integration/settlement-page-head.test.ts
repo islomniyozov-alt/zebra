@@ -375,6 +375,7 @@ async function readByPrisma(
       driverType: true,
       payoutDate: true,
       batchId: true,
+      notes: true,
       company: { select: { name: true } },
       driver: {
         select: {
@@ -427,7 +428,68 @@ async function readByPrisma(
     },
   })
   if (!settlement) return null
+  // THE TABS' ROWS (TMS §6.2.10 part 7 step 4): the batch's deduction lines,
+  // and the fuel and toll rows `fuelAndTollsFor` sums, under its filters.
+  const window = {
+    driverId: settlement.driver.id,
+    deletedAt: null,
+  }
+  const [deductionLines, fuelRows, tollRows] = await Promise.all([
+    tx.settlementDeductionLine.findMany({
+      where: { settlementId: settlement.id },
+      orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        type: true,
+        description: true,
+        quantity: true,
+        rateCents: true,
+        totalCents: true,
+        recurringDeductionId: true,
+      },
+    }),
+    tx.fuelTransaction.findMany({
+      where: {
+        ...window,
+        purchasedAt: { gte: settlement.periodStart, lte: settlement.periodEnd },
+      },
+      orderBy: [{ purchasedAt: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        purchasedAt: true,
+        vendorName: true,
+        city: true,
+        state: true,
+        gallons: true,
+        totalCents: true,
+        settlementId: true,
+      },
+    }),
+    tx.expense.findMany({
+      where: {
+        ...window,
+        category: 'TOLLS',
+        incurredAt: { gte: settlement.periodStart, lte: settlement.periodEnd },
+      },
+      orderBy: [{ incurredAt: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        incurredAt: true,
+        vendorName: true,
+        amountCents: true,
+        isDriverDeduction: true,
+      },
+    }),
+  ])
   return {
+    tabs: {
+      deductionLines,
+      fuelRows: fuelRows.map((row) => ({
+        ...row,
+        gallons: row.gallons.toFixed(3),
+      })),
+      tollRows,
+    },
     settlement,
     fuel: await fuelAndTollsFor(tx, {
       driverId: settlement.driver.id,
@@ -499,6 +561,16 @@ describe('/settlements/[id] in one statement', () => {
       tollCount: 2,
       alreadyDeductedCents: 1_250,
     })
+    // NOT VACUOUS (step 4): the Fuel and Toll tabs list the rows the figure
+    // above sums — two of each, and their totals agree with it.
+    expect(head.tabs.fuelRows).toHaveLength(2)
+    expect(head.tabs.tollRows).toHaveLength(2)
+    expect(
+      head.tabs.fuelRows.reduce((sum, row) => sum + row.totalCents, 0),
+    ).toBe(head.fuel.fuelCents)
+    expect(
+      head.tabs.tollRows.reduce((sum, row) => sum + row.amountCents, 0),
+    ).toBe(head.fuel.tollCents)
     expect(head.columnsRow?.value).toEqual({ hidden: ['miles', 'load'] })
     expect(head.neighbours.prevPeriod?.id).toBe(settlements['first:Ben'])
     expect(head.neighbours.nextPeriod?.id).toBe(settlements['last:Ben'])

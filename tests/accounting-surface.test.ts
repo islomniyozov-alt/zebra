@@ -1049,8 +1049,10 @@ describe('the statement never calls freight "pay"', () => {
     expect(page).toMatch(
       /workbench\.totalGross'\)\}>\s*\{money\(settlement\.grossCents\)\}/,
     )
+    // Step 4 (v11.33): net pay is the Earnings card's closing line, its label
+    // and the stored net printed together.
     expect(page).toMatch(
-      /workbench\.netPay'\)\}>\s*\{money\(settlement\.netCents\)\}/,
+      /t\('workbench\.netPay'\)\}[\s\S]{0,400}?formatCents\(settlement\.netCents, locale\)/,
     )
   })
 })

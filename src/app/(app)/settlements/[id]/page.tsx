@@ -11,7 +11,18 @@ import { basisSentence, type BasisTemplates } from '@/lib/settlement-view'
 import { readSnapshot } from '@/lib/driver-pay'
 import { readCharge } from '@/lib/settlement-charge'
 import { statementTitle } from '@/lib/settlement-number'
-import { formatCents } from '@/lib/money'
+import { formatCents, ratePerMileCents } from '@/lib/money'
+import {
+  deductionLineTab,
+  STATEMENT_TABS,
+  statementTabCounts,
+  statementTabOf,
+  type LineTab,
+} from '@/lib/statement-tabs'
+import { BATCH_CHARGE_TYPES } from '@/lib/batch-charges'
+import type { RawParams } from '@/lib/list-view'
+import { Tabs } from '@/components/ui/Tabs'
+import { AddStatementDeduction } from './AddStatementDeduction'
 import { Button } from '@/components/ui/Button'
 import { Table, type Column } from '@/components/ui/Table'
 import { addableTrips } from '@/lib/statement-workbench'
@@ -163,16 +174,21 @@ const ERROR_KEYS: MessageKey[] = [
   'settlements.error.mailRejected',
   'settlements.error.mailUnreachable',
   'settlements.error.mailMisconfigured',
+  // ADD DEDUCTION on a batch statement (§6.2.10 part 7 step 4).
+  'deduction.error.unknownType',
 ]
 
 export default async function SettlementPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>
+  searchParams: Promise<RawParams>
 }) {
   if (!(await currentUserCan('read', 'settlement'))) notFound()
 
   const { id } = await params
+  const raw = await searchParams
   const { t, locale } = await getLocaleContext()
   const mayEdit = await currentUserCan('update', 'settlement')
   const mayApprove = await currentUserCan('approve', 'settlement')
@@ -188,7 +204,7 @@ export default async function SettlementPage({
     }),
   )
   if (!head) notFound()
-  const { settlement, fuel, neighbours } = head
+  const { settlement, fuel, neighbours, tabs } = head
 
   // `addable` is DRAFT-only: on an approved statement the panel would offer
   // buttons that `addTripsToSettlement` refuses, and the read costs a
@@ -455,50 +471,210 @@ export default async function SettlementPage({
     draftTemplate: t('workbench.draftTitle'),
   })
 
+  // ── THE SEVEN TABS (§6.2.10 part 7 step 4, R16) ────────────────────────
+  //
+  // Each line goes to ONE tab by `statement-tabs.ts`, and the counts on the
+  // strip are taken from the same split, so a count and the rows under it
+  // cannot disagree. A zero tab is shown with its zero (R16, reaffirmed
+  // 2026-11-18).
+  const tab = statementTabOf(raw.tab)
+  const handLines = settlement.lines.filter((line) => line.type !== 'LOAD_PAY')
+  const linesOn = (which: LineTab) =>
+    tabs.deductionLines.filter((line) => deductionLineTab(line) === which)
+  const counts = statementTabCounts({
+    trips: settlement.loadLines.length,
+    fuelRows: tabs.fuelRows.length,
+    tollRows: tabs.tollRows.length,
+    deductionLines: tabs.deductionLines,
+    handLineTypes: handLines.map((line) => line.type),
+    documents: settlement._count.documents,
+    hasNotes: Boolean(settlement.notes?.trim()),
+  })
+  const path = `/settlements/${settlement.id}`
+  const hrefFor = (key: string) =>
+    key === 'trips' ? path : `${path}?tab=${key}`
+
+  // ADD DEDUCTION: on a batch draft the batch's one-time charge (a line added
+  // by hand would be deleted by the next refresh); on a statement with no
+  // batch, the add-rows below, which nothing rebuilds.
+  const inBatch = settlement.batchId !== null
+  const mayAddCharge = mayAdd && inBatch
+  const mayAddLine = mayAdd && !inBatch
+
+  // THE BALANCES FIGURE: escrow, the batch's lines and any added by hand.
+  const balancesCents =
+    linesOn('balances').reduce((sum, line) => sum + line.totalCents, 0) +
+    balanceLines.reduce((sum, line) => sum + line.amountCents, 0)
+  const rpm = ratePerMileCents(
+    settlement.grossCents,
+    settlement.milesHundredths,
+  )
+
+  type DeductionRow = (typeof tabs.deductionLines)[number]
+  const deductionColumns: Column<DeductionRow>[] = [
+    {
+      key: 'description',
+      header: t('settlements.description'),
+      render: (row) => row.description || '—',
+    },
+    {
+      key: 'type',
+      header: t('settlements.lineType'),
+      render: (row) => row.type,
+    },
+    {
+      key: 'quantity',
+      header: t('workbench.quantity'),
+      align: 'end',
+      render: (row) => <span className="font-mono">{row.quantity}</span>,
+    },
+    {
+      key: 'rate',
+      header: t('settlements.amount'),
+      align: 'end',
+      render: (row) => money(row.rateCents),
+    },
+    {
+      key: 'total',
+      header: t('workbench.total'),
+      align: 'end',
+      render: (row) => money(row.totalCents),
+      foot: (rows) => money(sumCents(rows, (row) => row.totalCents)),
+    },
+  ]
+  const deductionTable = (rows: DeductionRow[], caption: string) =>
+    rows.length === 0 ? null : (
+      <Table
+        columns={deductionColumns}
+        rows={rows}
+        rowKey={(row) => row.id}
+        caption={caption}
+        footRows={rows}
+        totals={{
+          label: totalsLabel(
+            t('accounting.total'),
+            rows.length,
+            t('accounting.rows'),
+          ),
+        }}
+        empty={null}
+      />
+    )
+
+  type FuelRow = (typeof tabs.fuelRows)[number]
+  const fuelColumns: Column<FuelRow>[] = [
+    {
+      key: 'date',
+      header: t('statement.col.date'),
+      render: (row) => (
+        <span className="font-mono text-xs" dir="ltr">
+          {day(row.purchasedAt)}
+        </span>
+      ),
+    },
+    {
+      key: 'vendor',
+      header: t('statement.col.vendor'),
+      truncate: true,
+      render: (row) => row.vendorName ?? '—',
+    },
+    {
+      key: 'place',
+      header: t('statement.col.place'),
+      render: (row) => [row.city, row.state].filter(Boolean).join(', ') || '—',
+    },
+    {
+      key: 'gallons',
+      header: t('statement.col.gallons'),
+      align: 'end',
+      render: (row) => (
+        <span className="font-mono" dir="ltr">
+          {row.gallons}
+        </span>
+      ),
+    },
+    {
+      key: 'total',
+      header: t('workbench.total'),
+      align: 'end',
+      render: (row) => money(row.totalCents),
+      foot: (rows) => money(sumCents(rows, (row) => row.totalCents)),
+    },
+    {
+      key: 'onStatement',
+      header: t('statement.col.onStatement'),
+      render: (row) =>
+        row.settlementId === null ? t('statement.no') : t('statement.yes'),
+    },
+  ]
+
+  type TollRow = (typeof tabs.tollRows)[number]
+  const tollColumns: Column<TollRow>[] = [
+    {
+      key: 'date',
+      header: t('statement.col.date'),
+      render: (row) => (
+        <span className="font-mono text-xs" dir="ltr">
+          {day(row.incurredAt)}
+        </span>
+      ),
+    },
+    {
+      key: 'vendor',
+      header: t('statement.col.vendor'),
+      truncate: true,
+      render: (row) => row.vendorName ?? '—',
+    },
+    {
+      key: 'amount',
+      header: t('settlements.amount'),
+      align: 'end',
+      render: (row) => money(row.amountCents),
+      foot: (rows) => money(sumCents(rows, (row) => row.amountCents)),
+    },
+    {
+      key: 'deducted',
+      header: t('statement.col.deducted'),
+      render: (row) =>
+        row.isDriverDeduction ? t('statement.yes') : t('statement.no'),
+    },
+  ]
+
+  const emptyLine = (key: MessageKey) => (
+    <p className="px-z4 py-z4 text-sm text-ink-3">{t(key)}</p>
+  )
+
   return (
     <>
       <PageHeader
         title={title}
         breadcrumb={[t('nav.group.payroll'), t('nav.statements')]}
         action={
-          // ── THE ACTION ROW (§6.2.2) ────────────────────────────────
-          //
-          // It belongs to the PAGE and does not move as the statement changes
-          // state — except that a control which cannot act is absent rather
-          // than disabled, which is this codebase's existing rule and the
-          // reason Post disappears once a statement is approved.
+          // ── THE ACTION ROW (§6.2.10 part 7 step 4): Post · Add deduction ·
+          // Send to driver · Download, with Recalculate on a draft. A control
+          // that cannot act is absent rather than disabled — the codebase's
+          // rule, and the reason Post disappears once a statement is posted.
           <div className="flex flex-wrap items-center gap-z2">
-            {/* ── ADD TRIPS AND ADD CHARGES ARE JUMPS, NOT SECOND CONTROLS ──
-             *
-             * Both things they would open already exist further down the page,
-             * and a toolbar copy would be a second control writing the same
-             * rows — two places to fix when the rule changes. An anchor is
-             * honest about that: it takes you to the one control.
-             *
-             * BOTH ARE PRESENT WHENEVER THE STATEMENT CAN BE EDITED. Add
-             * trips used to be gated on there BEING trips, which made an
-             * empty week look like one where trips cannot be added at all.
-             * The panel answers that question with an empty state instead;
-             * the button's job is to take you to it. */}
-            {mayAdd ? (
-              <a href="#trips-to-add">
-                <Button variant="secondary" size="compact">
-                  {t('settlements.addTrips')}
-                </Button>
-              </a>
-            ) : null}
-            {mayAdd ? (
-              <a href="#charges-to-add">
-                <Button variant="secondary" size="compact">
-                  {t('workbench.addCharges')}
-                </Button>
-              </a>
-            ) : null}
-            {mayAdd ? (
-              <Recalculate
+            {isDraft && mayApprove ? (
+              <Approve
                 settlementId={settlement.id}
-                label={t('settlements.recalculate')}
+                translate={translate}
+                inToolbar
+                labels={{
+                  approve: t('workbench.post'),
+                  hint: t('settlements.approveHint'),
+                }}
               />
+            ) : null}
+            {/* ADD DEDUCTION IS A JUMP to the one control, on the One-time
+             * tab — a toolbar copy would be a second control writing the same
+             * rows. */}
+            {mayAdd ? (
+              <a href={`${path}?tab=oneTime#charges-to-add`}>
+                <Button variant="secondary" size="compact">
+                  {t('workbench.addDeduction')}
+                </Button>
+              </a>
             ) : null}
             {settlement.status !== 'DRAFT' && settlement.status !== 'VOID' ? (
               <SendToDriver
@@ -512,50 +688,44 @@ export default async function SettlementPage({
                 translate={translate}
               />
             ) : null}
-            {isDraft && mayApprove ? (
-              <Approve
-                settlementId={settlement.id}
-                translate={translate}
-                inToolbar
-                labels={{
-                  approve: t('workbench.post'),
-                  hint: t('settlements.approveHint'),
-                }}
-              />
-            ) : null}
-            {/* ── EXPORT PDF, ON EVERY STATEMENT ─────────────────────
+            {/* ── DOWNLOAD, ON EVERY STATEMENT (§6.2.2) ───────────────
              *
-             * Owner's ruling, 2026-09-30, and it reversed twice in a day —
-             * worth recording because the second reversal is the one that
-             * matters. The route refused a draft with a 409; the button was
-             * then hidden to match; the owner ruled that drafts export with
-             * a watermark, so the refusal went and the button came back.
-             *
-             * NO CONDITION AT ALL NOW, which is the point: the two previous
-             * versions were both attempts to restate the route's refusal in
-             * the page, and the second got it wrong — it tested the
-             * settlement's status where the route tested the batch's. A
-             * control whose availability has to be kept in sync with a
-             * server rule is a control that will drift out of sync with it.
-             * The route renders everything, so the button is always there. */}
+             * Owner's ruling, 2026-09-30: drafts export with a watermark, so
+             * the route renders everything and the button is always there —
+             * a control whose availability had to track a server rule drifted
+             * from it twice. */}
             <a
               href={`/api/settlements/statement/${settlement.id}`}
               target="_blank"
               rel="noopener"
             >
               <Button variant="secondary" size="compact">
-                {t('workbench.exportPdf')}
+                {t('workbench.download')}
               </Button>
             </a>
+            {mayAdd ? (
+              <Recalculate
+                settlementId={settlement.id}
+                label={t('settlements.recalculate')}
+              />
+            ) : null}
           </div>
         }
       />
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-surface-2 px-gutter py-z4">
         <div className="flex flex-col gap-z4">
-          {/* ── THE HEADER BOX (§6.2.2) ──────────────────────────────── */}
-          <section className="rounded-card border border-border bg-surface px-z4 py-z3">
-            <div className="flex flex-wrap items-baseline gap-x-z5 gap-y-z2">
+          {/* ── THE FOUR CARDS (§6.2.10 part 7 step 4) ─────────────────── */}
+          <div className="grid gap-z4 md:grid-cols-2 xl:grid-cols-4">
+            <Card title={t('statement.card.settlement')}>
+              <Fact label={t('settlements.driver')}>
+                <Link
+                  href={`/drivers/${settlement.driver.id}`}
+                  className="text-ink hover:text-accent"
+                >
+                  {driverName}
+                </Link>
+              </Fact>
               <Fact label={t('workbench.settlement')}>
                 <span className="flex items-baseline gap-z1">
                   <Step
@@ -567,9 +737,8 @@ export default async function SettlementPage({
                     label={t('workbench.previous')}
                     glyph="‹"
                   />
-                  {/* THE ID MAY APPEAR HERE (§8): a field in mono is where
-                   * a value somebody might have to quote belongs. It is the
-                   * HEADING that must be a name. */}
+                  {/* THE ID MAY APPEAR HERE (§8): a field in mono is where a
+                   * value somebody might quote belongs. */}
                   <span className="font-mono text-ink" dir="ltr">
                     {settlement.settlementNumber}
                   </span>
@@ -583,14 +752,6 @@ export default async function SettlementPage({
                     glyph="›"
                   />
                 </span>
-              </Fact>
-              <Fact label={t('settlements.driver')}>
-                <Link
-                  href={`/drivers/${settlement.driver.id}`}
-                  className="text-ink hover:text-accent"
-                >
-                  {driverName}
-                </Link>
               </Fact>
               <Fact label={t('settlements.period')}>
                 <span className="flex items-baseline gap-z1">
@@ -624,24 +785,7 @@ export default async function SettlementPage({
                   `drivers.type.${settlement.driverType ?? settlement.driver.driverType}` as MessageKey,
                 )}
               </Fact>
-              <Fact label={t('settlements.tariff')}>
-                {/* §12: `dir="ltr"` ON A FROZEN LATIN STRING. `payTariffLabel`
-                 * is stored as the statement printed it — "3% from gross" —
-                 * and the bidi algorithm reorders that to "from gross 3%" on
-                 * the Farsi screen, which is the same class of bug the
-                 * `basisSentence` templates exist to avoid. It cannot be
-                 * templated, because it is frozen; it can be given a
-                 * direction. */}
-                {settlement.payTariffLabel === null ? (
-                  <span className="text-ink-3">—</span>
-                ) : (
-                  <span dir="ltr">{settlement.payTariffLabel}</span>
-                )}
-              </Fact>
               <Fact label={t('ref.authority')}>{settlement.company.name}</Fact>
-              {/* BACK IN THE HEADER (v10.2). One truck per settlement, frozen
-               * — as a grid column it was the same number on every row, and
-               * ST-005562 prints it here. */}
               <Fact label={t('payroll.unit')}>
                 {settlement.unitNumber === null ? (
                   <span className="text-ink-3">—</span>
@@ -674,21 +818,18 @@ export default async function SettlementPage({
                   )}
                 </span>
               </Fact>
-              <span className="ms-auto">
+              <Fact label={t('payroll.status')}>
                 {/* Unposted · Posted · Paid · Void (§6.2.10 part 7). */}
                 <StatusBadge
                   tone={STATEMENT_WORDS[settlement.status].tone}
                   label={t(STATEMENT_WORDS[settlement.status].label)}
                 />
-              </span>
-            </div>
+              </Fact>
+            </Card>
 
-            {/* THE FIGURES, ON THEIR OWN ROW AND SEPARATED BY A RULE. They are
-             * what the page is for; the block above is who and when. */}
-            <div className="mt-z3 flex flex-wrap items-baseline gap-x-z5 gap-y-z2 border-t border-border pt-z3">
+            <Card title={t('statement.card.earnings')}>
               {/* FREIGHT IS NEVER CALLED PAY (§6.2.2, 2026-10-06). Earnings is
-               * the driver's cut before deductions; the freight sum renders
-               * as Total gross in row 3 and Net pay beside it. */}
+               * the driver's cut before deductions. */}
               <Fact label={t('workbench.earnings')}>
                 {money(settlement.earningsCents)}
               </Fact>
@@ -702,211 +843,355 @@ export default async function SettlementPage({
                 </span>{' '}
                 / {money(settlement.advancesCents)}
               </Fact>
+              {/* THE NET, ABOVE THE FOLD — §6.2.2's reason for one box holds
+               * with four cards. */}
+              <div className="mt-z1 flex items-baseline justify-between gap-z3 border-t border-border pt-z2">
+                <span className="text-xs uppercase tracking-[0.04em] text-ink-2">
+                  {t('workbench.netPay')}
+                </span>
+                <span
+                  className={`font-mono text-lg font-medium tabular-nums ${settlement.netCents < 0 ? 'text-danger' : 'text-ink'}`}
+                >
+                  {formatCents(settlement.netCents, locale)}
+                </span>
+              </div>
+            </Card>
+
+            <Card title={t('statement.card.fuel')}>
+              <Fact label={t('workbench.balances')}>
+                <a href={`${path}?tab=balances`} className="hover:text-accent">
+                  {money(balancesCents)}
+                </a>
+              </Fact>
+              {/* §6.2.3: A READ IS NOT A CHARGE. The figure is what was
+               * burned; the note says what is already coming off. */}
+              <Fact label={t('statement.fuel')}>
+                <a href={`${path}?tab=fuel`} className="hover:text-accent">
+                  {money(fuel.fuelCents)}
+                </a>
+                <span className="ms-z1 text-xs text-ink-3">
+                  {t('workbench.burned')}
+                </span>
+              </Fact>
+              <Fact label={t('statement.tolls')}>
+                <a href={`${path}?tab=toll`} className="hover:text-accent">
+                  {money(fuel.tollCents)}
+                </a>
+                {fuel.alreadyDeductedCents > 0 ? (
+                  <span className="ms-z1 text-xs text-ink-3">
+                    {t('workbench.deducted')}{' '}
+                    {formatCents(fuel.alreadyDeductedCents, locale)}
+                  </span>
+                ) : null}
+              </Fact>
+              <Fact label={t('settlements.tariff')}>
+                {/* §12: `dir="ltr"` ON A FROZEN LATIN STRING — "3% from gross"
+                 * cannot be templated, because it is frozen; it can be given
+                 * a direction. */}
+                {settlement.payTariffLabel === null ? (
+                  <span className="text-ink-3">—</span>
+                ) : (
+                  <span dir="ltr">{settlement.payTariffLabel}</span>
+                )}
+              </Fact>
+            </Card>
+
+            <Card title={t('statement.card.trips')}>
+              {/* R12 AS REVERSED: Total pay and Total gross are the same
+               * stored figure, printed twice as Datatruck prints them. */}
+              <Fact label={t('statement.totalPay')}>
+                {money(settlement.grossCents)}
+              </Fact>
+              <Fact label={t('workbench.totalGross')}>
+                {money(settlement.grossCents)}
+              </Fact>
               <Fact label={t('workbench.tripsCount')}>
                 <span className="font-mono tabular-nums">
                   {settlement.loadLines.length}
                 </span>
               </Fact>
-              {/* ROW 3 OPENS WITH THE FREIGHT SUM AND WHAT LANDS IN THE
-               * ACCOUNT — the two words the artefact prints there. */}
-              <Fact label={t('workbench.totalGross')}>
-                {money(settlement.grossCents)}
+              <Fact label={t('workbench.totalMiles')}>
+                <span className="font-mono tabular-nums">
+                  {Math.round(settlement.milesHundredths / 100).toLocaleString(
+                    locale,
+                  )}
+                </span>
               </Fact>
-              <Fact label={t('workbench.netPay')}>
-                {money(settlement.netCents)}
-              </Fact>
-              <Fact label={t('workbench.balances')}>
-                {money(
-                  balanceLines.reduce((sum, line) => sum + line.amountCents, 0),
+              {/* R15: gross ÷ miles, shown and never stored — `money.ts`. */}
+              <Fact label={t('statement.rpm')}>
+                {rpm === null ? (
+                  <span className="text-ink-3">—</span>
+                ) : (
+                  money(rpm)
                 )}
               </Fact>
-              {/* §6.2.3: A READ IS NOT A CHARGE. The label says what was
-               * burned, and the second figure says what is already coming off
-               * the cheque — without it a reader cannot tell a company-fuel
-               * driver from one about to be charged the whole of it. */}
-              <Fact label={t('workbench.fuelTolls')}>
-                {money(fuel.totalCents)}
-                <span className="ms-z1 text-xs text-ink-3">
-                  {t('workbench.burned')}
-                  {fuel.alreadyDeductedCents > 0
-                    ? ` · ${t('workbench.deducted')} ${formatCents(
-                        fuel.alreadyDeductedCents,
-                        locale,
-                      )}`
-                    : ''}
-                </span>
-              </Fact>
-              <Fact label={t('workbench.attachments')}>
-                <Link
-                  href={`/documents?settlementId=${settlement.id}`}
-                  className="font-mono tabular-nums text-ink hover:text-accent"
-                >
-                  {settlement._count.documents}
-                </Link>
-              </Fact>
-              <span className="ms-auto flex items-baseline gap-z2">
-                <span className="text-xs uppercase tracking-[0.04em] text-ink-2">
-                  {t('settlements.net')}
-                </span>
-                <span className="font-mono text-lg font-medium tabular-nums text-ink">
-                  {formatCents(settlement.netCents, locale)}
-                </span>
-              </span>
-            </div>
-          </section>
+            </Card>
+          </div>
 
-          {/* ── THE TRIPS GRID ─────────────────────────────────────────── */}
-          {settlement.loadLines.length > 0 ? (
-            <section className="overflow-hidden rounded-card border border-border bg-surface">
-              <div className="flex items-baseline justify-between gap-z3 border-b border-border px-z4 py-z3">
-                <h2 className="text-md font-medium text-ink">
-                  {t('settlements.trips')}
-                </h2>
-                {/* THE CHOOSER IS WHY THIS GRID IS LEGAL. Eleven columns, nine
-                 * shown — §6.2.2 as corrected in v10.2, and the other two are
-                 * a tick away rather than gone. */}
-                <ColumnsChooser
-                  grid="settlements.trips"
-                  columns={tripColumns.map((column) => ({
-                    key: column.key,
-                    header: String(column.header),
-                  }))}
-                  visible={visibleTripColumns(storedColumns)}
-                  labels={{
-                    open: t('grid.columns'),
-                    apply: t('grid.columns.apply'),
-                    cancel: t('grid.columns.cancel'),
-                    firstLocked: t('grid.columns.firstLocked'),
+          {/* ── THE SEVEN TABS, EACH WITH ITS COUNT, A ZERO SHOWN (R16) ───── */}
+          <section className="overflow-hidden rounded-card border border-border bg-surface">
+            <Tabs
+              tabs={STATEMENT_TABS.map((key) => ({
+                key,
+                label: t(`statement.tab.${key}` as MessageKey),
+                count: counts[key],
+              }))}
+              active={tab}
+              hrefFor={hrefFor}
+              label={t('grid.tabs')}
+              trailing={
+                tab === 'trips' && settlement.loadLines.length > 0 ? (
+                  /* THE CHOOSER IS WHY THE TRIPS GRID IS LEGAL. Eleven
+                   * columns, nine shown — §6.2.2 as corrected in v10.2. */
+                  <ColumnsChooser
+                    grid="settlements.trips"
+                    columns={tripColumns.map((column) => ({
+                      key: column.key,
+                      header: String(column.header),
+                    }))}
+                    visible={visibleTripColumns(storedColumns)}
+                    labels={{
+                      open: t('grid.columns'),
+                      apply: t('grid.columns.apply'),
+                      cancel: t('grid.columns.cancel'),
+                      firstLocked: t('grid.columns.firstLocked'),
+                    }}
+                    errors={translate}
+                  />
+                ) : null
+              }
+            />
+
+            {tab === 'trips' ? (
+              <>
+                {settlement.loadLines.length > 0 ? (
+                  <Table
+                    columns={keepColumns(
+                      tripColumns,
+                      visibleTripColumns(storedColumns),
+                    )}
+                    rows={settlement.loadLines}
+                    rowKey={(row) => row.id}
+                    rowHref={(row) => `/loads/${row.loadId}`}
+                    caption={t('settlements.trips')}
+                    footRows={settlement.loadLines}
+                    totals={{
+                      label: totalsLabel(
+                        t('accounting.total'),
+                        settlement.loadLines.length,
+                        t('accounting.rows'),
+                      ),
+                    }}
+                    empty={null}
+                  />
+                ) : null}
+                {/* ADD TRIPS, UNDER THE GRID, WHENEVER THE STATEMENT IS
+                 * EDITABLE — empty or not (§6.2.2, v10.6): confirming nothing
+                 * is missing is an answer somebody needs to reach. */}
+                {mayAdd ? (
+                  <div
+                    id="trips-to-add"
+                    className="scroll-mt-z4 border-t border-border p-z4"
+                  >
+                    {addable.length === 0 ? (
+                      <EmptyState
+                        title={t('workbench.noAddableTrips')}
+                        body={t('workbench.noAddableTripsHint')}
+                      />
+                    ) : null}
+                    <AddTrips
+                      settlementId={settlement.id}
+                      trips={addable.map((trip) => ({
+                        loadId: trip.loadId,
+                        loadNumber: trip.loadNumber,
+                        route: `${trip.puPlace} → ${trip.delPlace}`,
+                        gross: formatCents(trip.grossCents, locale),
+                        held:
+                          trip.held === null
+                            ? null
+                            : t(
+                                HELD_REASON[trip.held.kind] ??
+                                  'batch.held.short',
+                              ),
+                      }))}
+                      translate={translate}
+                      labels={{
+                        heading: t('settlements.addTrips'),
+                        hint: t('settlements.addTripsHint'),
+                        add: t('settlements.add'),
+                        heldNote: t('settlements.heldNote'),
+                      }}
+                    />
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+
+            {tab === 'fuel' ? (
+              <>
+                <Table
+                  columns={fuelColumns}
+                  rows={tabs.fuelRows}
+                  rowKey={(row) => row.id}
+                  caption={t('statement.tab.fuel')}
+                  footRows={tabs.fuelRows}
+                  totals={{
+                    label: totalsLabel(
+                      t('accounting.total'),
+                      tabs.fuelRows.length,
+                      t('accounting.rows'),
+                    ),
                   }}
-                  errors={translate}
+                  empty={emptyLine('statement.empty.fuel')}
                 />
-              </div>
-              <Table
-                columns={keepColumns(
-                  tripColumns,
-                  visibleTripColumns(storedColumns),
+                {deductionTable(linesOn('fuel'), t('statement.line'))}
+              </>
+            ) : null}
+
+            {tab === 'toll' ? (
+              <>
+                <Table
+                  columns={tollColumns}
+                  rows={tabs.tollRows}
+                  rowKey={(row) => row.id}
+                  caption={t('statement.tab.toll')}
+                  footRows={tabs.tollRows}
+                  totals={{
+                    label: totalsLabel(
+                      t('accounting.total'),
+                      tabs.tollRows.length,
+                      t('accounting.rows'),
+                    ),
+                  }}
+                  empty={emptyLine('statement.empty.toll')}
+                />
+                {deductionTable(linesOn('toll'), t('statement.line'))}
+              </>
+            ) : null}
+
+            {tab === 'balances' ? (
+              <>
+                {deductionTable(
+                  linesOn('balances'),
+                  t('statement.tab.balances'),
                 )}
-                rows={settlement.loadLines}
-                rowKey={(row) => row.id}
-                rowHref={(row) => `/loads/${row.loadId}`}
-                caption={t('settlements.trips')}
-                footRows={settlement.loadLines}
-                totals={{
-                  label: totalsLabel(
-                    t('accounting.total'),
-                    settlement.loadLines.length,
-                    t('accounting.rows'),
-                  ),
-                }}
-                empty={null}
-              />
-            </section>
-          ) : null}
+                {balanceLines.length > 0 || mayAddLine ? (
+                  <ChargeGrid
+                    settlementId={settlement.id}
+                    rows={balanceLines.map(toChargeRow)}
+                    types={typeOptions(BALANCE_TYPES)}
+                    canAdd={mayAddLine}
+                    locale={locale}
+                    translate={translate}
+                    labels={{
+                      ...gridLabels,
+                      heading: t('settlements.group.balances'),
+                    }}
+                  />
+                ) : null}
+                {counts.balances === 0 && !mayAddLine
+                  ? emptyLine('statement.empty.balances')
+                  : null}
+              </>
+            ) : null}
 
-          {/* ── ADD TRIPS ──────────────────────────────────────────────
-           *
-           * Still a panel and not an add-row, because it is not one: the
-           * add-row writes a figure somebody typed, and this offers a LIST of
-           * this driver's unsettled freight with the held ones marked. There
-           * is nothing to type. */}
-          {/* RENDERED WHENEVER THE STATEMENT IS EDITABLE, empty or not
-           * (§6.2.2, v10.6). It used to appear only when there was freight
-           * to add, so a week with nothing outstanding looked like a week
-           * where trips could not be added — a control restating a condition
-           * instead of answering it. Confirming nothing is missing is an
-           * answer somebody needs to reach. */}
-          {mayAdd ? (
-            <section
-              id="trips-to-add"
-              className="scroll-mt-z4 rounded-card border border-border bg-surface p-z4"
-            >
-              {addable.length === 0 ? (
-                <EmptyState
-                  title={t('workbench.noAddableTrips')}
-                  body={t('workbench.noAddableTripsHint')}
-                />
-              ) : null}
-              <AddTrips
-                settlementId={settlement.id}
-                trips={addable.map((trip) => ({
-                  loadId: trip.loadId,
-                  loadNumber: trip.loadNumber,
-                  route: `${trip.puPlace} → ${trip.delPlace}`,
-                  gross: formatCents(trip.grossCents, locale),
-                  held:
-                    trip.held === null
-                      ? null
-                      : t(HELD_REASON[trip.held.kind] ?? 'batch.held.short'),
-                }))}
-                translate={translate}
-                labels={{
-                  heading: t('settlements.addTrips'),
-                  hint: t('settlements.addTripsHint'),
-                  add: t('settlements.add'),
-                  heldNote: t('settlements.heldNote'),
-                }}
-              />
-            </section>
-          ) : null}
+            {tab === 'recurring' ? (
+              <>
+                {deductionTable(
+                  linesOn('recurring'),
+                  t('statement.tab.recurring'),
+                )}
+                {counts.recurring === 0
+                  ? emptyLine('statement.empty.recurring')
+                  : null}
+              </>
+            ) : null}
 
-          {/* ── THE THREE LINE GRIDS, EACH WITH ITS ADD-ROW ─────────────
-           *
-           * Rendered even when empty, unlike the old page — because an empty
-           * grid here is not a claim that somebody looked and found nothing,
-           * it is the row you add the first deduction in. That is the whole
-           * difference the add-row makes: the section IS the control. */}
-          {otherPayLines.length > 0 || mayAdd ? (
-            <ChargeGrid
-              settlementId={settlement.id}
-              rows={otherPayLines.map(toChargeRow)}
-              types={typeOptions(OTHER_PAY_TYPES)}
-              canAdd={mayAdd}
-              locale={locale}
-              translate={translate}
-              labels={{
-                ...gridLabels,
-                heading: t('settlements.group.otherPay'),
-              }}
-            />
-          ) : null}
+            {tab === 'oneTime' ? (
+              <>
+                {mayAddCharge && settlement.batchId ? (
+                  <AddStatementDeduction
+                    settlementId={settlement.id}
+                    batchId={settlement.batchId}
+                    types={BATCH_CHARGE_TYPES}
+                    translate={translate}
+                    labels={{
+                      heading: t('statement.deduction.heading'),
+                      hint: t('statement.deduction.hint'),
+                      type: t('batch.deduction.type'),
+                      description: t('batch.deduction.description'),
+                      amount: t('batch.deduction.amount'),
+                      add: t('settlements.add'),
+                    }}
+                  />
+                ) : null}
+                {deductionTable(linesOn('oneTime'), t('statement.tab.oneTime'))}
+                {/* THE ADD-ROWS, on a statement with no batch only: nothing
+                 * rebuilds it, so a line added by hand stays. */}
+                {otherPayLines.length > 0 || mayAddLine ? (
+                  <ChargeGrid
+                    settlementId={settlement.id}
+                    rows={otherPayLines.map(toChargeRow)}
+                    types={typeOptions(OTHER_PAY_TYPES)}
+                    canAdd={mayAddLine}
+                    locale={locale}
+                    translate={translate}
+                    labels={{
+                      ...gridLabels,
+                      heading: t('settlements.group.otherPay'),
+                    }}
+                  />
+                ) : null}
+                {deductionLines.length > 0 || mayAddLine ? (
+                  <div
+                    id={mayAddLine ? 'charges-to-add' : undefined}
+                    className="scroll-mt-z4"
+                  >
+                    <ChargeGrid
+                      settlementId={settlement.id}
+                      rows={deductionLines.map(toChargeRow)}
+                      types={typeOptions(DEDUCTION_TYPES)}
+                      canAdd={mayAddLine}
+                      locale={locale}
+                      translate={translate}
+                      labels={{
+                        ...gridLabels,
+                        heading: t('settlements.group.deductions'),
+                      }}
+                    />
+                  </div>
+                ) : null}
+                {counts.oneTime === 0 && !mayAdd
+                  ? emptyLine('statement.empty.oneTime')
+                  : null}
+              </>
+            ) : null}
 
-          {deductionLines.length > 0 || mayAdd ? (
-            <div id="charges-to-add" className="scroll-mt-z4">
-              <ChargeGrid
-                settlementId={settlement.id}
-                rows={deductionLines.map(toChargeRow)}
-                types={typeOptions(DEDUCTION_TYPES)}
-                canAdd={mayAdd}
-                locale={locale}
-                translate={translate}
-                labels={{
-                  ...gridLabels,
-                  heading: t('settlements.group.deductions'),
-                }}
-              />
-            </div>
-          ) : null}
-
-          {balanceLines.length > 0 || mayAdd ? (
-            <ChargeGrid
-              settlementId={settlement.id}
-              rows={balanceLines.map(toChargeRow)}
-              types={typeOptions(BALANCE_TYPES)}
-              canAdd={mayAdd}
-              locale={locale}
-              translate={translate}
-              labels={{
-                ...gridLabels,
-                heading: t('settlements.group.balances'),
-              }}
-            />
-          ) : null}
-
-          {/* THE SECOND LIST OF THE SAME FREIGHT WENT WITH MIGRATION 69. Every
-           * statement's trips are `SettlementLoadLine` rows now, and the trips
-           * grid above shows them for the workbench's statements as it always
-           * did for the batch's — Load gross, Driver gross, the dates and the
-           * places, off the same frozen row. */}
+            {tab === 'attachments' ? (
+              <div className="flex flex-col gap-z3 p-z4">
+                <Fact label={t('statement.documents')}>
+                  <Link
+                    href={`/documents?settlementId=${settlement.id}`}
+                    className="font-mono tabular-nums text-ink hover:text-accent"
+                  >
+                    {settlement._count.documents}
+                  </Link>
+                </Fact>
+                <div>
+                  <h3 className="text-xs uppercase tracking-[0.04em] text-ink-2">
+                    {t('statement.notes')}
+                  </h3>
+                  <p className="mt-z1 whitespace-pre-wrap text-sm text-ink">
+                    {settlement.notes?.trim() || (
+                      <span className="text-ink-3">
+                        {t('statement.noNotes')}
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
+            ) : null}
+          </section>
 
           {settlement.status === 'APPROVED' && mayEdit ? (
             <section className="rounded-card border border-border bg-surface p-z4">
@@ -945,6 +1230,22 @@ export default async function SettlementPage({
         </div>
       </div>
     </>
+  )
+}
+
+/** One of the four summary cards (§6.2.10 part 7 step 4). */
+function Card({
+  title,
+  children,
+}: {
+  title: string
+  children: React.ReactNode
+}) {
+  return (
+    <section className="flex flex-col gap-z2 rounded-card border border-border bg-surface px-z4 py-z3">
+      <h2 className="text-sm font-medium text-ink">{title}</h2>
+      {children}
+    </section>
   )
 }
 
