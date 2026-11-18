@@ -9,6 +9,7 @@ import {
   type TxClient,
 } from './tenancy'
 import { asDate, asNumber } from './sql-json'
+import { fillMainFromCdl } from './driver-cdl'
 
 // ---------------------------------------------------------------------------
 // COMPLIANCE (Phase 4 §5 step 1).
@@ -914,7 +915,16 @@ export interface RenewalInput {
   identifier?: string | null
   issuer?: string | null
   notes?: string | null
+  /**
+   * A driver CDL's class, from a licence reading. The record has no column
+   * for it; it only fills Main's empty `cdlClass` (`driver-cdl.ts`).
+   */
+  cdlClass?: string | null
 }
+
+/** Same text, ignoring case and surrounding space. */
+const sameText = (a: string | null | undefined, b: string | null | undefined) =>
+  (a ?? '').trim().toUpperCase() === (b ?? '').trim().toUpperCase()
 
 /**
  * Record a renewal. ALWAYS A CREATE, NEVER AN UPDATE (§2.1).
@@ -1007,9 +1017,52 @@ export async function recordRenewal(
       ...(input.subject === 'trailer' ? { trailerId: subject.id } : {}),
       ...(input.subject === 'driver' ? { driverId: subject.id } : {}),
     },
-    select: { id: true },
+    select: { id: true, identifier: true, issuer: true },
   })
-  if (clash) return { ok: false, reason: 'duplicate' }
+
+  // A DRIVER'S CDL: MAIN READS FROM WHAT WAS RECORDED (driver-cdl.ts).
+  const isDriverCdl = input.subject === 'driver' && input.type === 'CDL'
+  const fillMain = () =>
+    isDriverCdl
+      ? fillMainFromCdl(tx, subject.id, {
+          number: input.identifier,
+          state: input.issuer,
+          class: input.cdlClass,
+        })
+      : Promise.resolve([])
+
+  if (clash) {
+    // ── THE SAME CARD, READ AGAIN, COMPLETES ITS RECORD (2026-11-18) ──────
+    //
+    // The Datatruck seed filed a CDL record from an export row that carried
+    // only the expiry. Reading that licence on the Documents tab proposes the
+    // SAME expiry with the number and state, and the refusal above sent it
+    // back as a duplicate — so the record could never gain its number and
+    // Main stayed blank. A reading of the same card is not a renewal: it
+    // fills the record's EMPTY number and state and nothing else. A field
+    // both carry that disagrees is still a duplicate, refused — deciding
+    // which is right is a person's call, and a record is never edited over.
+    const fillsRecord =
+      isDriverCdl &&
+      (!clash.identifier || sameText(clash.identifier, input.identifier)) &&
+      (!clash.issuer || sameText(clash.issuer, input.issuer)) &&
+      ((!clash.identifier && !!input.identifier?.trim()) ||
+        (!clash.issuer && !!input.issuer?.trim()))
+    if (!fillsRecord) return { ok: false, reason: 'duplicate' }
+    await tx.complianceItem.update({
+      where: { id: clash.id },
+      data: {
+        ...(!clash.identifier && input.identifier?.trim()
+          ? { identifier: input.identifier.trim() }
+          : {}),
+        ...(!clash.issuer && input.issuer?.trim()
+          ? { issuer: input.issuer.trim() }
+          : {}),
+      },
+    })
+    await fillMain()
+    return { ok: true, recordId: clash.id }
+  }
 
   const created = await tx.complianceItem.create({
     data: {
@@ -1027,6 +1080,7 @@ export async function recordRenewal(
     },
     select: { id: true },
   })
+  await fillMain()
 
   return { ok: true, recordId: created.id }
 }

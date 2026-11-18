@@ -27,7 +27,8 @@ import {
 // READ, THEN CONFIRM. Nothing is written by the read. And Main's licence
 // fields are Main's: a reading that disagrees with them is SHOWN beside them
 // ("Main: …"), never written over them — deciding which is right is the
-// office's call, not this screen's.
+// office's call, not this screen's. An EMPTY Main field is filled from what
+// is filed (`driver-cdl.ts`, 2026-11-18).
 // ---------------------------------------------------------------------------
 
 interface Reading {
@@ -182,6 +183,8 @@ export function CdlReader({ driverId, onMain, translate, labels }: Props) {
       ) : proposal ? (
         <form action={formAction} className="mt-z3 flex flex-col gap-z3">
           <input type="hidden" name="type" value="CDL" />
+          {/* The record has no class column; filing fills Main's empty one. */}
+          <input type="hidden" name="cdlClass" value={proposal.cdlClass} />
           <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-z3">
             <Input
               name="identifier"
