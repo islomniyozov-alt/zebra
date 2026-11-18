@@ -139,6 +139,13 @@ Same shape as the trips importer — upload → parse → preview with counts �
 
 The one-directional rule from the email join holds: a payment file may enrich freight, never create it.
 
+**One matcher, an ordered list of keys, and every match says which key hit** — _amended 2026-11-17 (owner's request, before the code)._ Both Amazon importers match through `matchByKeys` (`src/lib/ordered-match.ts`): the keys are tried in order, the FIRST key that finds anything decides, one hit is a match recorded with the key that made it, and two or more hits on that key are **ambiguous — refused by name**, with every candidate listed, never a guess and never passed to the next key.
+
+- **The remittance** keys a unit `trip_id` (a tour or a leg under a trip) or `load_id` (a single load), as the table above says, and each preview line now records `matchedBy`. **No match changes:** a leg under a trip whose trip is unknown is NOT re-tried by its Load ID, because the line's loads are what the write applies money to, and pulling a leg out of its trip by another key would split a trip's money across groups — that is a ruling to take, not a fallback to add. And **no plate key**: none of the six-week workbooks carries a driver, a unit or a plate (their twenty columns are named in `remittance-shape.ts`), so there is nothing on a remittance line for one to read.
+- **The trips importer's truck seat** (`trips-crew.ts`, the 2026-09-27 ruling: "by unique name and unique unit") gains a second key. The Relay file's `Tractor Vehicle ID` is tried as a **unit number** first and, when no unit matches, as a **licence plate**: normalised (upper case, no spaces, no dashes) and compared against every truck's current `plate` and against its **plate history** — the earlier plates the audit log records on the truck's `plate` changes. A plate on two trucks is refused as ambiguous with both units named. The seat records which key seated it. The driver seat keeps one key, the name.
+
+The measurement is before → after on the real files, with the new matches listed by name: the six-week remittances (unchanged by construction, and asserted so) and the Relay trips exports against dev's trucks — `scripts/match-keys-agreement.ts`, read-only, run where dev is reachable.
+
 **Write, on confirm**
 - one `Payment` for the ACH, amount = header total, dated the payment date;
 - `PaymentApplication` per load;

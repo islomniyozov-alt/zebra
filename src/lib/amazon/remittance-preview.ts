@@ -1,4 +1,5 @@
 import { apportionCents } from '../money'
+import { matchByKeys } from '../ordered-match'
 import type { RemittanceReading, RemittanceRow } from './remittance'
 
 // ---------------------------------------------------------------------------
@@ -101,9 +102,36 @@ export function referenceOfKey(key: RowKey): string | null {
       : null
 }
 
+/**
+ * THE KEYS A REMITTANCE UNIT IS MATCHED ON, IN ORDER (MONEY-DESIGN §2,
+ * amended 2026-11-17): the trip, then the load. A unit tries only the keys its
+ * branch carries — a tour or a leg its trip, a single load its load — so no
+ * match changes: a leg is never pulled out of its trip by its Load ID, because
+ * the line's loads are where the write applies money.
+ */
+export const REMITTANCE_KEYS = ['trip_id', 'load_id'] as const
+export type RemittanceKey = (typeof REMITTANCE_KEYS)[number]
+
+/** The ordered keys a unit's branch carries, each with the value it reads. */
+export function keysOfUnit(
+  key: RowKey,
+): { key: RemittanceKey; value: string }[] {
+  switch (key.branch) {
+    case 'tour':
+    case 'load_under_trip':
+      return [{ key: 'trip_id', value: key.tripId }]
+    case 'single_load':
+      return [{ key: 'load_id', value: key.loadId }]
+    case 'unkeyable':
+      return []
+  }
+}
+
 export interface PreviewLine {
   outcome: MatchOutcome
   key: RowKey
+  /** Which key found the freight; null for `unmatched` and `unkeyable`. */
+  matchedBy: RemittanceKey | null
   remittedCents: number
   /**
    * EVERY load sharing this reference, not one of them.
@@ -209,6 +237,7 @@ export function previewRemittance(
       lines.push({
         outcome: 'unkeyable',
         key: unit.key,
+        matchedBy: null,
         remittedCents: unit.cents,
         loads: [],
         ratedCents: 0,
@@ -218,11 +247,23 @@ export function previewRemittance(
       continue
     }
 
-    const group = freightByReference.get(reference) ?? []
+    // ONE MATCHER (`matchByKeys`): the unit's keys in order; a key "finds"
+    // its reference when freight carries it. A reference with three legs is
+    // ONE match — the trip — not three ambiguous ones.
+    const match = matchByKeys(
+      reference,
+      keysOfUnit(unit.key).map(({ key, value }) => ({
+        key,
+        idsFor: () => (freightByReference.has(value) ? [value] : []),
+      })),
+    )
+    const group =
+      match.kind === 'one' ? (freightByReference.get(match.id) ?? []) : []
     if (group.length === 0) {
       lines.push({
         outcome: 'unmatched',
         key: unit.key,
+        matchedBy: null,
         remittedCents: unit.cents,
         loads: [],
         ratedCents: 0,
@@ -268,6 +309,7 @@ export function previewRemittance(
     lines.push({
       outcome,
       key: unit.key,
+      matchedBy: match.kind === 'one' ? match.key : null,
       remittedCents: unit.cents,
       loads: group,
       ratedCents,

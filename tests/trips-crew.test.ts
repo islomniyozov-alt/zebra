@@ -31,6 +31,7 @@ describe('a trip the file is clear about', () => {
       kind: 'seated',
       driverId: 'drv_1',
       truckId: 'trk_1',
+      truckKey: 'unit',
     })
   })
 
@@ -45,7 +46,12 @@ describe('a trip the file is clear about', () => {
       { driverNames: ['  HAIDAR   Niyozov '], tractorIds: [] },
       resolver({ 'haidar niyozov': ['drv_1'] }, {}),
     )
-    expect(seat).toEqual({ kind: 'seated', driverId: 'drv_1', truckId: null })
+    expect(seat).toEqual({
+      kind: 'seated',
+      driverId: 'drv_1',
+      truckId: null,
+      truckKey: null,
+    })
   })
 })
 
@@ -55,10 +61,20 @@ describe('an empty column is not a refusal', () => {
     // Counting silence as a refusal would bury the ones that are wrong.
     expect(
       crewSeatFor({ driverNames: [], tractorIds: [] }, resolver({}, {})),
-    ).toEqual({ kind: 'seated', driverId: null, truckId: null })
+    ).toEqual({
+      kind: 'seated',
+      driverId: null,
+      truckId: null,
+      truckKey: null,
+    })
     expect(
       crewSeatFor({ driverNames: ['  '], tractorIds: [''] }, resolver({}, {})),
-    ).toEqual({ kind: 'seated', driverId: null, truckId: null })
+    ).toEqual({
+      kind: 'seated',
+      driverId: null,
+      truckId: null,
+      truckKey: null,
+    })
   })
 })
 
@@ -95,7 +111,7 @@ describe('the three refusals', () => {
     expect(seat.kind).toBe('refused')
     if (seat.kind !== 'refused') return
     expect(seat.reasons).toEqual([
-      { column: 'truck', value: '1024', why: 'matches_two' },
+      { column: 'truck', value: '1024', why: 'matches_two', key: 'unit' },
     ])
   })
 

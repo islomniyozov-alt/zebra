@@ -39,6 +39,11 @@ export interface TripRowLabels {
   addsActuals: string
   marksDelivered: string
   seatsCrew: string
+  /**
+   * Said when the truck was seated by its PLATE, not its unit (MONEY-DESIGN
+   * §2, 2026-11-17): the match records which key hit, and the row says so.
+   */
+  truckByPlate: string
 }
 
 /** The words a crew refusal is reported in. */
@@ -48,6 +53,8 @@ export interface CrewRefusalLabels {
   matchesNobody: string
   matchesTwo: string
   fileDisagrees: string
+  /** "by plate" — the key an ambiguous truck was found on, with its units. */
+  byPlate: string
 }
 
 /**
@@ -75,7 +82,16 @@ export function crewRefusalLine(
       : refusal.why === 'matches_two'
         ? labels.matchesTwo
         : labels.fileDisagrees
-  return `${column} “${refusal.value}”: ${why}`
+  // AMBIGUOUS BY NAME: a plate on two trucks names both units.
+  const byPlate =
+    refusal.key === 'plate'
+      ? ` (${labels.byPlate}${
+          refusal.candidates && refusal.candidates.length > 0
+            ? `: ${refusal.candidates.join(', ')}`
+            : ''
+        })`
+      : ''
+  return `${column} “${refusal.value}”: ${why}${byPlate}`
 }
 
 export type TripWriteView =
@@ -228,6 +244,11 @@ export function tripRowView(
         (crew.truckId !== null && truckSeatFree)),
   )
 
+  const seatsCrewWords =
+    crew?.kind === 'seated' && crew.truckKey === 'plate'
+      ? `${labels.seatsCrew} (${labels.truckByPlate})`
+      : labels.seatsCrew
+
   // REFUSALS ARE REPORTED WHATEVER THE STAGE. A live trip's names are not
   // written either way, but a name that matches nobody is a roster gap today
   // and a refused seat next week — telling a dispatcher now is free.
@@ -269,7 +290,7 @@ export function tripRowView(
         ? [
             labels.create,
             trip.stage === 'finished' ? labels.marksDelivered : null,
-            seatsCrew ? labels.seatsCrew : null,
+            seatsCrew ? seatsCrewWords : null,
           ]
             .filter(Boolean)
             .join(', ')
@@ -284,7 +305,7 @@ export function tripRowView(
                   enriching!.hasMiles ? null : labels.addsMiles,
                   willAddActuals ? labels.addsActuals : null,
                   willDeliver ? labels.marksDelivered : null,
-                  seatsCrew ? labels.seatsCrew : null,
+                  seatsCrew ? seatsCrewWords : null,
                 ]
                   .filter(Boolean)
                   .join(', '),
