@@ -307,6 +307,8 @@ model Company {
   randomDraws         RandomDraw[]
   tollTransactions    TollTransaction[]
   settlementBatches   SettlementBatch[]
+  /// One-off charges added from one of its batches (migration 75).
+  settlementCharges   SettlementCharge[]
 
   @@unique([organizationId, dotNumber])
   @@index([organizationId, isActive])
@@ -3023,6 +3025,8 @@ model SettlementBatch {
 
   settlements               Settlement[]
   settlementBatchExclusions SettlementBatchExclusion[]
+  /// One-off charges added from this batch's screen (migration 75).
+  settlementCharges         SettlementCharge[]
 
   /// ONE SERIES ACROSS BOTH CARRIERS, so the unique is on the organization and
   /// not the company. Confirmed off the artefact: 436 RAM, 437 Dolphins, 438
@@ -4357,6 +4361,16 @@ model SettlementCharge {
   /// Set when a settlement has taken it, so it is never taken twice.
   settledAt DateTime?
 
+  /// THE AUTHORITY AND BATCH IT WAS ADDED FROM (migration 75; owner's ruling
+  /// 2026-11-18, MONEY-DESIGN §4). Set by the batch screen's Add deduction;
+  /// null on every charge before it. `chargeScopeWhere` lets only a batch of
+  /// this authority (or an org-wide one) take it, so the same driver in
+  /// another authority's batch over overlapping dates is not charged twice.
+  companyId String?
+  company   Company?         @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  batchId   String?
+  batch     SettlementBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+
   createdAt    DateTime     @default(now())
   /// `onDelete: Cascade`, migration 65 — reversing migration 63's RESTRICT.
   /// Forty-nine organization relations in this schema cascade; these five did
@@ -4368,6 +4382,7 @@ model SettlementCharge {
   @@index([driverId, appliesOn])
   @@index([loadId])
   @@index([organizationId])
+  @@index([batchId])
 }
 
 /// The escrow ledger — the one deduction that is a balance rather than a line.

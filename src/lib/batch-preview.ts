@@ -66,6 +66,11 @@ export interface PreviewTrip {
   loadNumber: string
   companyId: string
   companyName: string
+  /**
+   * The load's driver, so Add driver (§6.2.10 part 7 step 3, R14 (b)) can name
+   * a person by id rather than by a name two drivers may share.
+   */
+  driverId: string | null
   driverName: string | null
   /**
    * WHO IS PAID, which is not always the driver's own name (§6.2.10).
@@ -426,6 +431,7 @@ export function previewFrom(
       loadNumber: load.loadNumber,
       companyId: load.companyId,
       companyName: load.company.name,
+      driverId: load.driverId,
       driverName: load.driver
         ? `${load.driver.firstName} ${load.driver.lastName}`
         : null,

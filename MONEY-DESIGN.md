@@ -205,6 +205,8 @@ A type that carried no behaviour and could not be extended without a migration w
 
 **`SettlementCharge`** (one-off): description, amount, sign, optional `loadId`. "Charge for late Del Load#…" and a truck-wash reimbursement are the same object with opposite signs.
 
+**A one-off charge created from a batch carries that batch's authority and batch id, and only a batch of that authority takes it** _(owner's ruling 2026-11-18, TMS §6.2.10 part 7 step 3; migration 75)_. One driver can sit in two authorities' batches over overlapping dates — the no-overlap rule binds a scope, and two authorities may share dates freely — and the statement's letterhead is the truck's company in both, so the letterhead cannot tell them apart. Without a scope, a charge added in RAM's batch would be read by Dolphins' draft for the same driver and taken twice. So `SettlementCharge` gains `companyId` and `batchId` (both nullable, set by Add deduction), and ONE predicate (`chargeScopeWhere`, `src/lib/charge-scope.ts`) decides which charges a batch may take, in both places that ask: the engine's reader (`batchInputForOrg`) and `finaliseBatch`'s mark-as-taken. A charge with no authority (every charge before this ruling) is taken by any batch, as before. A charge with an authority is taken by a batch of that authority, or by an org-wide batch — the overlap rule already forbids an org-wide batch and an authority's batch over the same dates. The engine's arithmetic does not move; only which charges it is handed.
+
 Escrow is the only one needing a ledger rather than a line: a held balance per driver, incremented on each FINAL settlement, refundable on termination.
 
 No trailer rent — the operation is power only.

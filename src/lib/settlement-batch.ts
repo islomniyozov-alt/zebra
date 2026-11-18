@@ -2,6 +2,7 @@ import type { Prisma } from '@/generated/prisma/client'
 import { syncBatchStatus, type StatementVote } from './batch-status'
 import { settleableUpTo } from './settlements'
 import { batchLowerBound, readCarryOverFloor } from './payroll-cutover'
+import { chargeScopeWhere } from './charge-scope'
 import {
   allocateSeries,
   batchNumberOf,
@@ -406,8 +407,14 @@ export async function batchInputForOrg(
         },
       }),
       tx.driverPayRule.findMany({ where: { driverId: { in: driverIds } } }),
+      // ONLY THE CHARGES THIS BATCH'S AUTHORITY MAY TAKE (MONEY-DESIGN §4,
+      // 2026-11-18): the same predicate `finaliseBatch` marks taken with.
       tx.settlementCharge.findMany({
-        where: { driverId: { in: driverIds }, settledAt: null },
+        where: {
+          driverId: { in: driverIds },
+          settledAt: null,
+          ...chargeScopeWhere(input.companyId ?? null),
+        },
       }),
       netPay
         ? tx.driverEscrowEntry.groupBy({
@@ -1177,12 +1184,16 @@ export async function finaliseBatch(
     }
   }
 
-  // The one-offs this batch took are marked so no later batch takes them again.
+  // The one-offs this batch took are marked so no later batch takes them again
+  // — and ONLY those: another authority's charge for the same driver is not
+  // this batch's to settle (MONEY-DESIGN §4, 2026-11-18; the reader's own
+  // predicate).
   await tx.settlementCharge.updateMany({
     where: {
       driverId: { in: settlements.map((row) => row.driverId) },
       settledAt: null,
       appliesOn: { gte: batch.periodStart, lte: batch.periodEnd },
+      ...chargeScopeWhere(batch.companyId),
     },
     data: { settledAt: new Date() },
   })
@@ -1349,6 +1360,10 @@ export async function deleteBatch(
 
   await tx.settlement.deleteMany({ where: { batchId, status: 'DRAFT' } })
   await tx.settlementBatchExclusion.deleteMany({ where: { batchId } })
+  // THE ONE-OFFS ADDED FROM THIS BATCH'S SCREEN AND NEVER TAKEN go with it,
+  // like its exclusions: they were decisions about this batch (migration 75).
+  // A taken one (`settledAt` set) is history and stays.
+  await tx.settlementCharge.deleteMany({ where: { batchId, settledAt: null } })
   await tx.settlementBatch.update({
     where: { id: batchId },
     data: { deletedAt: new Date() },

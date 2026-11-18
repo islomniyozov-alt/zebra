@@ -58,6 +58,10 @@ export const GRID_IDS = [
   // corrected in v10.2, because §7.1 caps a table at nine and throws above
   // it. This is the grid that found the cap.
   'settlements.trips',
+  // THE BATCH SCREEN'S STATEMENTS (§6.2.10 part 7 step 3, v11.32). Ten
+  // columns, Truck behind the chooser (R11). Document-scoped like the trips
+  // grid above, so not exportable.
+  'settlements.batch',
   // THE TWO OPERATIONAL LISTS, §7.1.7, added 2026-10-04. Not Accounting, and
   // the first entries here that are not: ten and eleven columns respectively,
   // both over the cap, both returning 500 until they got a chooser. See
@@ -109,6 +113,8 @@ export function gridRevalidate(grid: GridId): {
   if (grid === 'loads.loads') return { path: '/loads', type: 'page' }
   if (grid === 'trucks.trucks') return { path: '/trucks', type: 'page' }
   if (grid === 'drivers.drivers') return { path: '/drivers', type: 'page' }
+  if (grid === 'settlements.batch')
+    return { path: '/settlements/batches/[id]', type: 'page' }
   return { path: '/accounting', type: 'layout' }
 }
 
