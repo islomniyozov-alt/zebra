@@ -587,6 +587,15 @@ const SEED_WRITERS = [
   // carried. Where a unit exists already it adds missing values and replaces
   // nothing.
   'seed-datatruck-all-trucks.ts',
+  // ADDED 2026-11-18, owner's instruction. Fills EMPTY driver fields — hire
+  // date, CDL number, state, class — from a fuller Datatruck export, and adds
+  // a CDL or medical-card record only where a qualifiable driver has none.
+  // It never overwrites: the rule is `src/lib/datatruck/driver-fill.ts`,
+  // tested, and the write repeats the empty condition. Dev's write on
+  // 2026-11-18 filled 12 hire dates and 12 CDL states. Same guards as the
+  // seeds above: preview by default, `--write` a second decision,
+  // `assertTenancy` with the owner's stated organization id.
+  'fill-drivers-from-export.ts',
 ]
 
 /**

@@ -7,18 +7,24 @@ import { isQualifiable } from '@/lib/dqf'
 import { assertTenancy } from './datatruck-tenancy'
 
 // ---------------------------------------------------------------------------
-// FILL ONLY EMPTY DRIVER FIELDS FROM A FULLER DATATRUCK EXPORT — DEV.
+// FILL ONLY EMPTY DRIVER FIELDS FROM A FULLER DATATRUCK EXPORT.
 //
-//   npx tsx scripts/fill-drivers-from-export.ts <export.xlsx>           (preview)
-//   npx tsx scripts/fill-drivers-from-export.ts <export.xlsx> --write
+//   node --env-file=.env node_modules/tsx/dist/cli.mjs scripts/fill-drivers-from-export.ts                        (dev, preview)
+//   node --env-file=.env node_modules/tsx/dist/cli.mjs scripts/fill-drivers-from-export.ts --write                (dev)
+//   node --env-file=.env node_modules/tsx/dist/cli.mjs scripts/fill-drivers-from-export.ts --production           (preview)
+//   node --env-file=.env node_modules/tsx/dist/cli.mjs scripts/fill-drivers-from-export.ts --production --write
 //
 // The rules are `src/lib/datatruck/driver-fill.ts`'s, where a test reaches
 // them: keyed on Driver ID with the name checked, empty fields only, never an
 // overwrite, a disagreement listed as KEPT, records only for a qualifiable
 // driver with none of that type. The preview prints every change by name.
 //
-// DEV ONLY. There is no `--production`: a production writer joins the fence
-// in tests/prod-url-guard.test.ts by a ruling, as the drivers seed did.
+// PRODUCTION (owner's instruction 2026-11-18), on the seed writers' terms in
+// tests/prod-url-guard.test.ts: `--production` reads PROD_DIRECT_DATABASE_URL,
+// passed to `createPrismaClient` as an argument and assigned nowhere; preview
+// is the default and `--write` a second decision; `assertTenancy` names the
+// organization and refuses any id but the one the owner stated. The write
+// repeats the empty condition, so a value typed since the preview survives.
 // ---------------------------------------------------------------------------
 
 neonConfig.webSocketConstructor ??= WebSocket
@@ -26,11 +32,36 @@ neonConfig.poolQueryViaFetch = false
 
 const DEFAULT_EXPORT = 'corpus/datatruck/all-drivers_2026_09_09_07_56_22.xlsx'
 const args = process.argv.slice(2)
-const unknown = args.filter((a) => a !== '--write' && !a.endsWith('.xlsx'))
+const unknown = args.filter(
+  (a) => a !== '--write' && a !== '--production' && !a.endsWith('.xlsx'),
+)
 if (unknown.length > 0)
   throw new Error(`Unknown argument(s): ${unknown.join(' ')}`)
 const WRITE = args.includes('--write')
+const PRODUCTION = args.includes('--production')
 const FILE = args.find((a) => a.endsWith('.xlsx')) ?? DEFAULT_EXPORT
+
+/** Stated by the owner, as in the drivers seed; not discovered here. */
+const PRODUCTION_ORGANIZATION_ID = 'cmsbsc82y0000nsvsa6yffuyh'
+
+function target() {
+  const url = PRODUCTION
+    ? process.env.PROD_DIRECT_DATABASE_URL
+    : process.env.DIRECT_DATABASE_URL
+  if (!url) {
+    throw new Error(
+      PRODUCTION
+        ? 'PROD_DIRECT_DATABASE_URL is not set.'
+        : 'DIRECT_DATABASE_URL is not set.',
+    )
+  }
+  return {
+    url,
+    label: PRODUCTION ? 'PRODUCTION' : 'DEV',
+    host: new URL(url).hostname,
+    expectOrganizationId: PRODUCTION ? PRODUCTION_ORGANIZATION_ID : null,
+  }
+}
 
 function heading(text: string): void {
   console.log(`\n${text}`)
@@ -38,22 +69,21 @@ function heading(text: string): void {
 }
 
 async function main(): Promise<void> {
-  const url = process.env.DIRECT_DATABASE_URL
-  if (!url) throw new Error('DIRECT_DATABASE_URL is not set.')
+  const where = target()
   const bytes = new Uint8Array(readFileSync(FILE))
   const records = asRecords(await readXlsx(bytes))
   console.log(`export  ${FILE} (${records.length} rows)`)
   console.log(`mode    ${WRITE ? 'WRITE' : 'preview only'}`)
 
-  const db = createPrismaClient(url)
+  const db = createPrismaClient(where.url)
   try {
-    // This connection bypasses row-level security: the tenant is named and
-    // every read and write below carries its id.
+    // This connection bypasses row-level security: the tenant is named, its
+    // id checked on production, and every read and write below carries it.
     const { organizationId } = await assertTenancy(db, {
-      label: 'DEV',
-      host: new URL(url).hostname,
+      label: where.label,
+      host: where.host,
       slug: 'zebra',
-      expectOrganizationId: null,
+      expectOrganizationId: where.expectOrganizationId,
     })
 
     const rows = await db.driver.findMany({
