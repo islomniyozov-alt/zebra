@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   storage:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # pinned 2026-11-18, GAPS 47: Playwright 1.56.1 cannot install a browser on 26.04
     timeout-minutes: 15
 
     steps:
