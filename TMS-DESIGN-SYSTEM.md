@@ -1838,7 +1838,13 @@ stored `Settlement` column or a sum of them.** Nothing is priced on the page.
     driver, the `SettlementCharge` the engine already reads — signed negative,
     `appliesOn` the batch's last day so it falls inside the period — then the
     draft is refreshed in the same transaction, so the statement shows it.
-    `finaliseBatch` marks it settled as it marks every one-off. It is not a
+    `finaliseBatch` marks it settled as it marks every one-off. **The charge
+    carries the batch's authority and batch id, and only a batch of that
+    authority takes it** (owner's ruling 2026-11-18; MONEY-DESIGN §4;
+    migration 75): the same driver in another authority's batch over
+    overlapping dates is not charged twice. Deleting the batch deletes the
+    charges added from it that no batch has taken, as it deletes its
+    exclusions. It is not a
     `SettlementLine` added to the draft: a refresh rebuilds drafts, and a line
     added by hand would vanish at the next Save. Refused by name: no
     description, an amount that is not a positive figure, a statement that is
