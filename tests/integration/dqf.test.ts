@@ -158,19 +158,21 @@ describe('the loader finds both kinds of evidence', () => {
     expect(dqfIncompleteCount(entries)).toBe(0)
   })
 
-  it('reads an empty file as eight missing of nine, dated from the hire date', async () => {
-    // NINE ROWS since queue item 20 (4): the hire date is the first, and this
-    // driver has one — so it reads PRESENT and the other eight are missing,
-    // each dated from it. A production-shaped row: a new hire with a date
-    // typed and nothing filed yet.
+  it('reads an empty file as five missing of five, none "since" the hire date', async () => {
+    // FIVE ROWS since 2026-11-19 (TMS v11.34). This driver HAS a hire date,
+    // and no row is dated from it any more: a missing row has no "since".
     const facts = await inOrg((tx) => dqfFactsForDrivers(tx, [emptyId]))
     const entries = dqfChecklist(facts.get(emptyId)!, NOW)
-    expect(entries[0]!.key).toBe('hire_date')
-    expect(entries[0]!.status).toBe('present')
-    expect(dqfIncompleteCount(entries)).toBe(8)
-    expect(entries[1]!.status).toBe('missing')
-    expect(entries[1]!.dueSince?.toISOString().slice(0, 10)).toBe(
-      days(-10).toISOString().slice(0, 10),
+    expect(entries.map((e) => e.key)).toEqual([
+      'application',
+      'road_test',
+      'cdl_copy',
+      'mvr',
+      'medical_certificate',
+    ])
+    expect(dqfIncompleteCount(entries)).toBe(5)
+    expect(entries.map((e) => [e.status, e.dueSince])).toEqual(
+      entries.map(() => ['missing', null]),
     )
   })
 
@@ -310,12 +312,7 @@ describe('every DQF row its action', () => {
     let n = 0
     for (const requirement of unsatisfiedBefore) {
       const action = dqfRowAction(requirement)
-      if (action.kind === 'main') {
-        await owner.driver.update({
-          where: { id: actedId },
-          data: { hireDate: days(-30) },
-        })
-      } else if (action.kind === 'upload') {
+      if (action.kind === 'upload') {
         n += 1
         await owner.document.create({
           data: {

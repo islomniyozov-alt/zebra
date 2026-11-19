@@ -9,13 +9,13 @@ import { COMPLIANCE_INITIAL, type ComplianceState } from './compliance-state'
 // ---------------------------------------------------------------------------
 // RECORD, ON A DATED DQF ROW (§6.4 part 2 v11.30).
 //
-// The MVR, the annual review, the medical certificate and the clearinghouse
-// query are compliance records. The row records one of ITS type through the
+// The MVR and the medical card are compliance records (five rows since
+// v11.34). The row records one of ITS type through the
 // compliance panel's own action and writer (`recordRenewalAction` →
 // `recordRenewal`), so a record made here is indistinguishable from one made
 // in the panel below — the type travels as a hidden field the row states.
 //
-// Closed until asked: nine open forms is a page nobody reads.
+// Closed until asked: a page of open forms is a page nobody reads.
 // ---------------------------------------------------------------------------
 
 export function DqfRecordForm({

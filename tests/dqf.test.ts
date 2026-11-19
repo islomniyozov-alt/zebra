@@ -42,7 +42,6 @@ const COMPLETE: DqfFacts = {
 const without = (key: DqfKey): DqfFacts => {
   const requirement = DQF_REQUIREMENTS.find((r) => r.key === key)!
   const evidence = requirement.evidence
-  if (evidence.kind === 'fact') return { ...COMPLETE, hireDate: null }
   if (evidence.kind === 'document' || evidence.kind === 'either') {
     const type = (
       evidence.kind === 'document' ? evidence.type : evidence.document
@@ -63,26 +62,22 @@ const statusOf = (facts: DqfFacts, key: DqfKey) =>
   dqfChecklist(facts, NOW).find((entry) => entry.key === key)!
 
 describe('the definition', () => {
-  it('is the eight items 391.51 lists plus the date they are dated from, each with its section', () => {
-    // NINE SINCE QUEUE ITEM 20 (4): the hire date is a row of its own, first,
-    // because every at-hire row is dated from it and a file with none read
-    // "8 of 8 missing — no hire date recorded" against a date nobody typed.
-    expect(DQF_REQUIREMENTS).toHaveLength(9)
-    expect(DQF_REQUIREMENTS[0]?.key).toBe('hire_date')
+  it('is the five rows of the owner ruling, in its order, each with its section', () => {
+    // FIVE SINCE 2026-11-19 (TMS v11.34, owner's ruling): Contract, Road
+    // test, Copy of the CDL, MVR, Medical card, in that order. Hire date,
+    // prior-employer inquiries, the annual review and the clearinghouse
+    // query are removed.
+    expect(DQF_REQUIREMENTS.map((r) => r.key)).toEqual([
+      'application',
+      'road_test',
+      'cdl_copy',
+      'mvr',
+      'medical_certificate',
+    ])
+    expect(DQF_COMPLIANCE_TYPES).toEqual(['MVR', 'MEDICAL_CARD'])
     for (const requirement of DQF_REQUIREMENTS) {
       expect(requirement.cfr).toMatch(/^\d{3}\./)
     }
-    expect(DQF_REQUIREMENTS.map((r) => r.key).sort()).toEqual([
-      'annual_review',
-      'application',
-      'cdl_copy',
-      'clearinghouse',
-      'hire_date',
-      'medical_certificate',
-      'mvr',
-      'prior_employers',
-      'road_test',
-    ])
   })
 
   it('lets the licence record stand in for the copy of the CDL', () => {
@@ -99,17 +94,6 @@ describe('the definition', () => {
     expect(DQF_DOCUMENT_TYPES).toContain('CDL_COPY')
   })
 
-  it('keeps the MVR and the review of it as two items', () => {
-    // §391.25(a) is obtaining the record; §391.25(b) is a person at the
-    // carrier reviewing it and saying so. A carrier that pulls the MVR and
-    // never reviews it has one of the two, and an audit finds exactly that.
-    const mvr = DQF_REQUIREMENTS.find((r) => r.key === 'mvr')!
-    const review = DQF_REQUIREMENTS.find((r) => r.key === 'annual_review')!
-    expect(mvr.evidence).not.toEqual(review.evidence)
-    expect(mvr.cadence).toBe('annual')
-    expect(review.cadence).toBe('annual')
-  })
-
   it('splits the evidence by whether the thing expires', () => {
     // An employment application does not expire and `ComplianceItem.expiresAt`
     // is NOT NULL — so filing one there would mean inventing a date.
@@ -118,7 +102,7 @@ describe('the definition', () => {
         expect(requirement.evidence.kind).toBe('compliance')
       }
     }
-    expect(DQF_COMPLIANCE_TYPES.length + DQF_DOCUMENT_TYPES.length).toBe(8)
+    expect(DQF_COMPLIANCE_TYPES.length + DQF_DOCUMENT_TYPES.length).toBe(5)
   })
 })
 
@@ -199,30 +183,25 @@ describe('the checklist', () => {
     expect(statusOf(renewed, 'mvr').status).toBe('present')
   })
 
-  it('dates a missing item from the hire date', () => {
-    const entry = statusOf(without('application'), 'application')
-    expect(entry.status).toBe('missing')
-    expect(entry.dueSince).toEqual(days(-500))
-  })
-
-  it('leaves the date null when nobody recorded a hire date', () => {
-    // An absence, not a licence to ignore it: the entry is still missing.
-    const entry = statusOf(
-      { ...without('application'), hireDate: null },
-      'application',
-    )
-    expect(entry.status).toBe('missing')
-    expect(entry.dueSince).toBeNull()
+  it('a missing item has no "since", with or without a hire date (v11.34)', () => {
+    for (const hireDate of [days(-500), null]) {
+      const entry = statusOf(
+        { ...without('application'), hireDate },
+        'application',
+      )
+      expect(entry.status).toBe('missing')
+      expect(entry.dueSince).toBeNull()
+    }
   })
 
   it('finds every item missing for a driver with nothing on file', () => {
     const empty: DqfFacts = { hireDate: null, compliance: [], documents: [] }
     const entries = dqfChecklist(empty, NOW)
     expect(entries.every((entry) => entry.status === 'missing')).toBe(true)
-    expect(dqfIncompleteCount(entries)).toBe(9)
+    expect(dqfIncompleteCount(entries)).toBe(5)
   })
 
-  // ── QUEUE ITEM 20 (4): the licence record, and the hire date as a row ──
+  // ── QUEUE ITEM 20 (4): the licence record ─────────────────────────────
   it('reads the copy of the CDL as present from the document alone', () => {
     const entry = statusOf(COMPLETE, 'cdl_copy')
     expect(entry.status).toBe('present')
@@ -262,22 +241,28 @@ describe('the checklist', () => {
     expect(entry.dueSince).toEqual(days(-1))
     expect(dqfIncompleteCount(dqfChecklist(lapsed, NOW))).toBe(1)
 
-    // And neither: missing, dated from the hire date like any at-hire item.
+    // And neither: missing, with no "since" — not the hire date (v11.34).
     const neither = statusOf(without('cdl_copy'), 'cdl_copy')
     expect(neither.status).toBe('missing')
-    expect(neither.dueSince).toEqual(days(-500))
+    expect(neither.dueSince).toBeNull()
   })
 
-  it('counts a missing hire date as its own row, not against every other one', () => {
+  it('"since" never depends on the hire date, and a missing hire date is not a row', () => {
+    // v11.34: a file with no hire date read "Since No hire date recorded"
+    // on eight rows. The hire date is no longer read by the checklist.
     const noDate: DqfFacts = { ...COMPLETE, hireDate: null }
-    const entries = dqfChecklist(noDate, NOW)
-    const row = entries.find((entry) => entry.key === 'hire_date')!
-    expect(row.status).toBe('missing')
-    // Nothing to be "since": the date IS the thing that is missing.
-    expect(row.dueSince).toBeNull()
-    // Every other row is on file and present; the file is one short, not nine.
-    expect(dqfIncompleteCount(entries)).toBe(1)
-    expect(statusOf(COMPLETE, 'hire_date').status).toBe('present')
+    expect(dqfChecklist(noDate, NOW)).toEqual(dqfChecklist(COMPLETE, NOW))
+    expect(dqfIncompleteCount(dqfChecklist(noDate, NOW))).toBe(0)
+    const empty: DqfFacts = {
+      hireDate: days(-500),
+      compliance: [],
+      documents: [],
+    }
+    const entries = dqfChecklist(empty, NOW)
+    expect(entries.map((e) => [e.status, e.dueSince])).toEqual(
+      entries.map(() => ['missing', null]),
+    )
+    expect(dqfIncompleteCount(entries)).toBe(5)
   })
 })
 
@@ -363,10 +348,10 @@ describe('the warning', () => {
     // to look up.
     // THE COPY OF THE CDL IS NOT AMONG THEM since queue item 20 (4): the
     // fixture's live CDL compliance record stands in for the document, which
-    // is the whole change — and the hire date is recorded, so its row is
-    // present too.
+    // is the whole change. Five rows since v11.34: the contract and the road
+    // test are the document rows left.
     expect(out.find((w) => w.name === 'dqf_incomplete')?.detail).toBe(
-      'application,prior_employers,road_test',
+      'application,road_test',
     )
   })
 

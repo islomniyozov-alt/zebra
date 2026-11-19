@@ -55,35 +55,34 @@ import { isReferralPayee } from './driver-kind'
 /** Filed once at hire, or renewed every twelve months. */
 export type DqfCadence = 'at_hire' | 'annual'
 
+/**
+ * The five rows (owner's ruling 2026-11-19, TMS v11.34). The keys are the
+ * label keys; `application` is labelled "Contract", `mvr` "MVR" and
+ * `medical_certificate` "Medical card".
+ */
 export type DqfKey =
-  | 'hire_date'
   | 'application'
-  | 'mvr'
   | 'road_test'
-  | 'medical_certificate'
   | 'cdl_copy'
-  | 'annual_review'
-  | 'prior_employers'
-  | 'clearinghouse'
+  | 'mvr'
+  | 'medical_certificate'
 
 /**
- * Evidence is a dated compliance record, an undated document on file, EITHER
- * of the two, or a fact on the driver row.
+ * Evidence is a dated compliance record, an undated document on file, or
+ * EITHER of the two.
  *
  * `either` (queue item 20 (4)): the copy of the CDL is satisfied by the
  * `CDL_COPY` document OR by the live CDL compliance record the alerts already
  * watch — the licence itself, with its expiry. When only the record is there
  * the row reads by its date, the way the medical certificate does.
  *
- * `fact`: the hire date. Not a document and not a record — a column on the
- * driver, and the date every at-hire row is dated from. Missing is a row of
- * its own, not a reason the rest of the file reads "since a day nobody wrote".
+ * The hire date was a `fact` row (2026-11-17) and is no longer in the file
+ * (v11.34): it stays a field on Main.
  */
 export type DqfEvidence =
   | { kind: 'compliance'; type: ComplianceType }
   | { kind: 'document'; type: DocumentType }
   | { kind: 'either'; document: DocumentType; compliance: ComplianceType }
-  | { kind: 'fact'; fact: 'hireDate' }
 
 export interface DqfRequirement {
   key: DqfKey
@@ -94,37 +93,21 @@ export interface DqfRequirement {
 }
 
 /**
- * The eight, in the order an auditor walks them.
+ * THE FIVE, in the owner's order (ruling 2026-11-19, TMS v11.34): Contract,
+ * Road test, Copy of the CDL, MVR, Medical card.
  *
- * MVR AND THE ANNUAL REVIEW ARE TWO ITEMS, not one said twice. §391.25(a)
- * requires the carrier to OBTAIN a motor vehicle record each year; §391.25(b)
- * requires somebody at the carrier to REVIEW it and record that they did. A
- * carrier that pulls the MVR and never reviews it has one of the two, and an
- * audit finds exactly that.
+ * REMOVED BY THE SAME RULING: hire date recorded, prior-employer inquiries,
+ * the annual review of the driving record and the clearinghouse query. Every
+ * reader — the checklist, its summary, the roster's totals, the readiness
+ * badge and the compliance warnings (`DQF_COMPLIANCE_TYPES`) — reads this
+ * list, so a row removed here is removed everywhere at once.
  */
 export const DQF_REQUIREMENTS: readonly DqfRequirement[] = [
-  // THE DATE THE FILE IS DATED FROM, FIRST (queue item 20 (4)). A file with no
-  // hire date showed every at-hire row "missing — no hire date recorded" and
-  // a summary counting the file against a date nobody typed. The date is a
-  // row of its own: the office fixes it where it is missing, and the other
-  // rows date themselves from it.
-  {
-    key: 'hire_date',
-    cfr: '391.51',
-    cadence: 'at_hire',
-    evidence: { kind: 'fact', fact: 'hireDate' },
-  },
   {
     key: 'application',
     cfr: '391.21',
     cadence: 'at_hire',
     evidence: { kind: 'document', type: 'EMPLOYMENT_APPLICATION' },
-  },
-  {
-    key: 'prior_employers',
-    cfr: '391.23(a)(2)',
-    cadence: 'at_hire',
-    evidence: { kind: 'document', type: 'EMPLOYMENT_VERIFICATION' },
   },
   {
     key: 'road_test',
@@ -148,22 +131,10 @@ export const DQF_REQUIREMENTS: readonly DqfRequirement[] = [
     evidence: { kind: 'compliance', type: 'MVR' },
   },
   {
-    key: 'annual_review',
-    cfr: '391.25(b)',
-    cadence: 'annual',
-    evidence: { kind: 'compliance', type: 'ANNUAL_REVIEW' },
-  },
-  {
     key: 'medical_certificate',
     cfr: '391.43',
     cadence: 'annual',
     evidence: { kind: 'compliance', type: 'MEDICAL_CARD' },
-  },
-  {
-    key: 'clearinghouse',
-    cfr: '382.701',
-    cadence: 'annual',
-    evidence: { kind: 'compliance', type: 'CLEARINGHOUSE_QUERY' },
   },
 ]
 
@@ -222,14 +193,12 @@ export interface DqfEntry {
   cadence: DqfCadence
   status: DqfStatus
   /**
-   * WHEN IT TURNED DUE — the date this entry started needing attention.
+   * WHEN IT TURNED DUE — for a dated item that is `due` or `expired`, the
+   * expiry itself: the day it lapses or lapsed.
    *
-   * For a dated item that is `due` or `expired`, the expiry itself: the day it
-   * lapses or lapsed. For a `missing` item, the driver's hire date, because
-   * that is when it was first required — null when nobody recorded one, which
-   * is an absence rather than a licence to ignore it.
-   *
-   * Null for `present`. There is nothing to date about a thing that is fine.
+   * NULL FOR `missing` (v11.34): it was the hire date, so a file with no hire
+   * date read "since no hire date recorded" on every row. "Since" no longer
+   * depends on the hire date. Null for `present`.
    */
   dueSince: Date | null
 }
@@ -238,6 +207,10 @@ export interface DqfEntry {
 export const DQF_LEAD_DAYS = 30
 
 export interface DqfFacts {
+  /**
+   * NOT READ BY THE CHECKLIST since v11.34 — no row is dated from it. Kept
+   * because the roster and warning loaders share this shape and carry it.
+   */
   hireDate: Date | null
   /**
    * Live compliance records for this driver. THE SAME LIST item 9's
@@ -271,7 +244,7 @@ export function dqfChecklist(facts: DqfFacts, now: Date): DqfEntry[] {
 }
 
 /**
- * ONE ROW OF THE FILE, from its own evidence. The checklist is this, nine
+ * ONE ROW OF THE FILE, from its own evidence. The checklist is this, five
  * times; `dqfRowSatisfied` is this, read as yes or no.
  */
 export function dqfEntryFor(
@@ -285,19 +258,11 @@ export function dqfEntryFor(
     cadence: requirement.cadence,
   }
 
-  // THE HIRE DATE IS A ROW (queue item 20 (4)): present when recorded,
-  // missing when not. It has no date of its own to be "since".
-  if (requirement.evidence.kind === 'fact') {
-    return facts.hireDate !== null
-      ? { ...base, status: 'present' as const, dueSince: null }
-      : { ...base, status: 'missing' as const, dueSince: null }
-  }
-
   if (requirement.evidence.kind === 'document') {
     const onFile = facts.documents.includes(requirement.evidence.type)
     return onFile
       ? { ...base, status: 'present' as const, dueSince: null }
-      : { ...base, status: 'missing' as const, dueSince: facts.hireDate }
+      : { ...base, status: 'missing' as const, dueSince: null }
   }
 
   // EITHER: the document on file reads present and undated; failing that,
@@ -318,7 +283,7 @@ export function dqfEntryFor(
       : requirement.evidence.type
   const held = facts.compliance.filter((item) => item.type === type)
   if (held.length === 0) {
-    return { ...base, status: 'missing' as const, dueSince: facts.hireDate }
+    return { ...base, status: 'missing' as const, dueSince: null }
   }
 
   const dated = held
@@ -363,21 +328,18 @@ export function dqfRowSatisfied(
 
 /**
  * The act that satisfies a row, DERIVED FROM ITS EVIDENCE so the button and
- * the predicate cannot disagree: a fact is set on Main, a document is
- * uploaded, a dated record is recorded. An `either` row is offered its
+ * the predicate cannot disagree: a document is uploaded, a dated record is
+ * recorded. An `either` row is offered its
  * document — the record half is filed through the CDL reader or the
  * compliance panel, which already exist for it.
  */
 export type DqfRowAction =
-  | { kind: 'main'; field: 'hireDate' }
   | { kind: 'upload'; documentType: DocumentType }
   | { kind: 'record'; complianceType: ComplianceType }
 
 export function dqfRowAction(requirement: DqfRequirement): DqfRowAction {
   const evidence = requirement.evidence
   switch (evidence.kind) {
-    case 'fact':
-      return { kind: 'main', field: evidence.fact }
     case 'document':
       return { kind: 'upload', documentType: evidence.type }
     case 'either':
@@ -402,8 +364,6 @@ export function dqfFactsAfter(
   now: Date,
 ): DqfFacts {
   switch (action.kind) {
-    case 'main':
-      return { ...facts, hireDate: now }
     case 'upload':
       return { ...facts, documents: [...facts.documents, action.documentType] }
     case 'record':
@@ -442,7 +402,7 @@ export interface DqfFiledRecord {
 /**
  * THE DOCUMENT AN ON-FILE ROW LINKS TO: the newest document of the row's kind
  * on the driver, else one attached to the newest live record of the row's
- * type. Null when the row is satisfied by a fact, or by a record with nothing
+ * type. Null when the row is satisfied by a record with nothing
  * attached — that row offers Attach instead (`dqfOnFileRecord`).
  */
 export function dqfOnFileDocument(

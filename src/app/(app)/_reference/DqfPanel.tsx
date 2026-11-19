@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import type { StatusTone } from '@/lib/status'
 import type { DqfStatus } from '@/lib/dqf'
@@ -47,7 +46,6 @@ const TONE: Record<DqfStatus, StatusTone> = {
 
 /** The act a row offers, already gated by the viewer's permissions. */
 export type DqfPanelAction =
-  | { kind: 'main'; href: string }
   | { kind: 'upload'; driverId: string; documentType: string }
   | {
       kind: 'record'
@@ -84,7 +82,6 @@ interface Props {
     hint: string
     since: string
     notQualifiable: string
-    setOnMain: string
     renew: string
     openFailed: string
     upload: UploadLabels
@@ -181,15 +178,6 @@ function RowAction({
   labels: Props['labels']
 }) {
   switch (action.kind) {
-    case 'main':
-      return (
-        <Link
-          href={action.href}
-          className="text-xs text-accent underline-offset-2 hover:underline"
-        >
-          {labels.setOnMain}
-        </Link>
-      )
     case 'upload':
       return (
         <UploadTo

@@ -89,19 +89,16 @@ const FIXTURES: FixtureFile[] = [
     days(-400),
     [
       { id: 'd1', type: 'EMPLOYMENT_APPLICATION', uploadedAt: days(-400) },
-      { id: 'd2', type: 'EMPLOYMENT_VERIFICATION', uploadedAt: days(-399) },
       { id: 'd3', type: 'ROAD_TEST_CERTIFICATE', uploadedAt: days(-398) },
       { id: 'd4', type: 'CDL_COPY', uploadedAt: days(-397) },
     ],
     [
       { id: 'r1', type: 'MVR', expiresAt: days(200), attached: 'a1' },
-      { id: 'r2', type: 'ANNUAL_REVIEW', expiresAt: days(150) },
       { id: 'r3', type: 'MEDICAL_CARD', expiresAt: days(300), attached: 'a3' },
-      { id: 'r4', type: 'CLEARINGHOUSE_QUERY', expiresAt: days(90) },
     ],
   ),
-  // Mixed: the CDL row by the record alone, an expired MVR, a due medical,
-  // a superseded clearinghouse behind a current one.
+  // Mixed: the CDL row by the record alone, an expired MVR, a due medical
+  // card with a superseded one behind it.
   file(
     'mixed',
     days(-100),
@@ -112,7 +109,7 @@ const FIXTURES: FixtureFile[] = [
       { id: 'r7', type: 'MEDICAL_CARD', expiresAt: days(10) },
       {
         id: 'r8',
-        type: 'CLEARINGHOUSE_QUERY',
+        type: 'MEDICAL_CARD',
         // A LATER EXPIRY THAN THE CURRENT ONE, so only the supersession filter
         // keeps it out — newest-first alone would pick it (a guard that did not
         // fire on 2026-11-17 until this was so).
@@ -120,7 +117,6 @@ const FIXTURES: FixtureFile[] = [
         isSuperseded: true,
         attached: 'a8',
       },
-      { id: 'r9', type: 'CLEARINGHOUSE_QUERY', expiresAt: days(165) },
     ],
   ),
 ]
@@ -151,26 +147,16 @@ describe('every row its action (§6.4 part 2 v11.30)', () => {
     const byKey = Object.fromEntries(
       DQF_REQUIREMENTS.map((r) => [r.key, dqfRowAction(r)]),
     )
-    expect(byKey.hire_date).toEqual({ kind: 'main', field: 'hireDate' })
     expect(byKey.application).toEqual({
       kind: 'upload',
       documentType: 'EMPLOYMENT_APPLICATION',
-    })
-    expect(byKey.prior_employers).toEqual({
-      kind: 'upload',
-      documentType: 'EMPLOYMENT_VERIFICATION',
     })
     expect(byKey.road_test).toEqual({
       kind: 'upload',
       documentType: 'ROAD_TEST_CERTIFICATE',
     })
     expect(byKey.cdl_copy).toEqual({ kind: 'upload', documentType: 'CDL_COPY' })
-    for (const key of [
-      'mvr',
-      'annual_review',
-      'medical_certificate',
-      'clearinghouse',
-    ])
+    for (const key of ['mvr', 'medical_certificate'])
       expect(byKey[key]?.kind).toBe('record')
   })
 
@@ -240,14 +226,14 @@ describe('every row its action (§6.4 part 2 v11.30)', () => {
 
   it('links the newest document of the kind, and a superseded record’s file never', () => {
     const mixed = FIXTURES[2]!
-    const clearinghouse = DQF_REQUIREMENTS.find(
-      (r) => r.key === 'clearinghouse',
+    const medical = DQF_REQUIREMENTS.find(
+      (r) => r.key === 'medical_certificate',
     )!
-    // r9 is current with nothing attached; r8's file is history.
+    // r7 is current with nothing attached; r8's file is history.
     expect(
-      dqfOnFileDocument(clearinghouse, mixed.documents, mixed.records),
+      dqfOnFileDocument(medical, mixed.documents, mixed.records),
     ).toBeNull()
-    expect(dqfOnFileRecord(clearinghouse, mixed.records)?.id).toBe('r9')
+    expect(dqfOnFileRecord(medical, mixed.records)?.id).toBe('r7')
     const cdl = DQF_REQUIREMENTS.find((r) => r.key === 'cdl_copy')!
     // No CDL_COPY on the driver: the licence record's own file.
     expect(dqfOnFileDocument(cdl, mixed.documents, mixed.records)?.id).toBe(
@@ -255,17 +241,17 @@ describe('every row its action (§6.4 part 2 v11.30)', () => {
     )
   })
 
-  it('the hire-date row alone prints "no hire date recorded"', () => {
+  it('"since" prints a record’s date or nothing — never the hire date (v11.34)', () => {
     const page = readFileSync('src/app/(app)/drivers/[id]/page.tsx', 'utf8')
     expect(page).toMatch(
-      /entry\.key === 'hire_date' && entry\.status === 'missing'\s*\?\s*t\('dqf\.since\.unknown'\)/,
+      /since: entry\.dueSince !== null \? dqfDay\.format\(entry\.dueSince\) : null,/,
     )
+    expect(page).not.toMatch(/dqf\.since\.unknown/)
   })
 
   it('the page derives each row’s action with dqfRowAction, gated by the writer’s permission', () => {
     const page = readFileSync('src/app/(app)/drivers/[id]/page.tsx', 'utf8')
     expect(page).toMatch(/const action = dqfRowAction\(requirement\)/)
-    expect(page).toMatch(/return mayEdit\s*\?\s*\{ kind: 'main'/)
     expect(page).toMatch(/return mayUploadDocument\s*\?/)
     expect(page).toMatch(/return mayRenewCompliance\s*\?/)
   })

@@ -357,10 +357,6 @@ export default async function EditDriverPage({
   const actionFor = (requirement: DqfRequirement): DqfPanelAction | null => {
     const action = dqfRowAction(requirement)
     switch (action.kind) {
-      case 'main':
-        return mayEdit
-          ? { kind: 'main', href: `/drivers/${id}#field-hireDate` }
-          : null
       case 'upload':
         return mayUploadDocument
           ? { kind: 'upload', driverId: id, documentType: action.documentType }
@@ -399,15 +395,9 @@ export default async function EditDriverPage({
       cadenceLabel: t(`dqf.cadence.${entry.cadence}` as MessageKey),
       status: entry.status,
       statusLabel: t(`dqf.status.${entry.status}` as MessageKey),
-      // "SINCE" PRINTS A DATE OR NOTHING (§6.4 part 2 v11.30). "No hire date
-      // recorded" printed on every at-hire row; it now prints on the hire-date
-      // row alone, where the date is fixed — and that row links to Main.
-      since:
-        entry.dueSince !== null
-          ? dqfDay.format(entry.dueSince)
-          : entry.key === 'hire_date' && entry.status === 'missing'
-            ? t('dqf.since.unknown')
-            : null,
+      // "SINCE" PRINTS A DATE OR NOTHING, and never the hire date (§6.4 part 2
+      // v11.34): a due or expired record's expiry, else nothing.
+      since: entry.dueSince !== null ? dqfDay.format(entry.dueSince) : null,
     }
   })
 
@@ -1119,7 +1109,6 @@ export default async function EditDriverPage({
                 hint: t('dqf.hint'),
                 since: t('dqf.since'),
                 notQualifiable: t('dqf.notQualifiable'),
-                setOnMain: t('dqf.action.setOnMain'),
                 renew: t('dqf.action.renew'),
                 openFailed: t('compliancePanel.failed'),
                 upload: uploadLabels(t('documents.upload')),
