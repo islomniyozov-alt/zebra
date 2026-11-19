@@ -1,6 +1,9 @@
 'use client'
 
 import { useActionState, useState } from 'react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { ADD_AUTHORITY_VALUE } from '@/lib/return-path'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { Select, type SelectOption } from '@/components/ui/Select'
@@ -30,6 +33,14 @@ interface Props {
   /** Authorities this user may move the asset to. Excludes its current one. */
   authorities: readonly SelectOption[]
   currentAuthorityName: string | null
+  /**
+   * "+ Add authority" at the end of the Move-to list (v11.35) — present only
+   * for a role holding `company:create`. `href` is Admin → Authorities → new
+   * carrying this record as the way back.
+   */
+  addAuthority?: { href: string; label: string }
+  /** Open the Transfer dialog on arrival — the way back from Add authority. */
+  openTransfer?: boolean
   transferAction: (
     previous: RecordFormState,
     formData: FormData,
@@ -62,12 +73,19 @@ export function AssetActions({
   isRetired,
   authorities,
   currentAuthorityName,
+  addAuthority,
+  openTransfer,
   transferAction,
   retireAction,
   restoreAction,
   labels,
 }: Props) {
-  const [transferOpen, setTransferOpen] = useState(false)
+  const router = useRouter()
+  // Another authority to move to, or the means to add one.
+  const mayTransfer = authorities.length > 0 || addAuthority !== undefined
+  const [transferOpen, setTransferOpen] = useState(
+    Boolean(openTransfer) && mayTransfer && !isRetired,
+  )
   const [retireOpen, setRetireOpen] = useState(false)
   const [state, formAction, pending] = useActionState(
     transferAction,
@@ -95,7 +113,7 @@ export function AssetActions({
             {/* NO OTHER AUTHORITY, NO BUTTON. It was rendered disabled for
              * ever in a one-authority organization, with nothing saying why
              * (clickable audit, 2026-11-17). */}
-            {authorities.length > 0 ? (
+            {mayTransfer ? (
               <Button
                 type="button"
                 variant="secondary"
@@ -130,12 +148,40 @@ export function AssetActions({
           className="flex flex-col gap-z4"
         >
           <p className="text-sm text-ink-2">{labels.transferBody}</p>
-          <Select
-            name="toCompanyId"
-            label={labels.transferTo}
-            options={authorities}
-            required
-          />
+          {authorities.length > 0 ? (
+            <Select
+              name="toCompanyId"
+              label={labels.transferTo}
+              options={
+                addAuthority
+                  ? [
+                      ...authorities,
+                      { value: ADD_AUTHORITY_VALUE, label: addAuthority.label },
+                    ]
+                  : authorities
+              }
+              required
+              onChange={(event) => {
+                // "+ Add authority" is a way out, not a choice: put the
+                // selection back and go to the new-authority form.
+                if (
+                  addAuthority &&
+                  event.target.value === ADD_AUTHORITY_VALUE
+                ) {
+                  event.target.value = authorities[0]?.value ?? ''
+                  router.push(addAuthority.href)
+                }
+              }}
+            />
+          ) : addAuthority ? (
+            // No other authority yet: the only way forward is to add one.
+            <Link
+              href={addAuthority.href}
+              className="text-sm text-accent underline-offset-2 hover:underline"
+            >
+              {addAuthority.label}
+            </Link>
+          ) : null}
           <Input name="reason" label={labels.transferReason} type="text" />
           <div className="flex justify-end gap-z2">
             <Button
@@ -145,7 +191,11 @@ export function AssetActions({
             >
               {labels.cancel}
             </Button>
-            <Button type="submit" variant="primary" disabled={pending}>
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={pending || authorities.length === 0}
+            >
               {labels.transferConfirm}
             </Button>
           </div>

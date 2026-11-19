@@ -22,13 +22,19 @@ import {
   retireAssetAction,
   transferAssetAction,
 } from '../../_reference/asset-actions'
+import { addAuthorityHref, opensTransfer } from '@/lib/return-path'
 
 export default async function EditTruckPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const { id } = await params
+  // The way back from "+ Add authority" opens the Transfer dialog (v11.35).
+  const openTransfer = opensTransfer(await searchParams)
+  const mayAddAuthority = await currentUserCan('create', 'company')
   const { t, locale } = await getLocaleContext()
 
   // Decided before the transaction opens and threaded into the service, so the
@@ -180,6 +186,15 @@ export default async function EditTruckPage({
                 companies.find((c) => c.id === truck.companyId)?.name ??
                 null
               }
+              openTransfer={openTransfer}
+              {...(mayAddAuthority
+                ? {
+                    addAuthority: {
+                      href: addAuthorityHref(`/trucks/${id}`),
+                      label: t('ref.addAuthority'),
+                    },
+                  }
+                : {})}
               transferAction={transferAssetAction.bind(null, 'truck', id)}
               retireAction={
                 mayDelete

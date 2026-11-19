@@ -99,6 +99,7 @@ import {
   transferAssetAction,
 } from '../../_reference/asset-actions'
 import { mainCdlView } from '@/lib/driver-cdl'
+import { addAuthorityHref, opensTransfer } from '@/lib/return-path'
 
 export default async function EditDriverPage({
   params,
@@ -113,6 +114,9 @@ export default async function EditDriverPage({
   // part 2). Read before the transaction so the readers a tab needs can run
   // inside it, and nothing is fetched that the open tab does not show.
   const requestedTab = recordTabFor((await searchParams)['tab'])
+  // The way back from "+ Add authority" opens the Transfer dialog (v11.35).
+  const openTransfer = opensTransfer(await searchParams)
+  const mayAddAuthority = await currentUserCan('create', 'company')
 
   // §6.8: a role without the read is REFUSED as a 404, never a 500 (sweep).
   if (!(await currentUserCan('read', 'driver'))) notFound()
@@ -914,6 +918,15 @@ export default async function EditDriverPage({
                   companies.find((c) => c.id === driver.companyId)?.name ??
                   null
                 }
+                openTransfer={openTransfer}
+                {...(mayAddAuthority
+                  ? {
+                      addAuthority: {
+                        href: addAuthorityHref(`/drivers/${id}`),
+                        label: t('ref.addAuthority'),
+                      },
+                    }
+                  : {})}
                 transferAction={transferAssetAction.bind(null, 'driver', id)}
                 {...(mayDelete
                   ? { retireAction: retireAssetAction.bind(null, 'driver', id) }

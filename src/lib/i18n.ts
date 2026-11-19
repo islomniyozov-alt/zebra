@@ -1063,6 +1063,7 @@ const en = {
   'drivers.kind.PAYEE': 'Referral payee',
   'ref.transfer': 'Transfer authority',
   'ref.transferTitle': 'Transfer to another authority',
+  'ref.addAuthority': '+ Add authority',
   'ref.transferBody':
     'This closes the current period and opens a new one. Nothing is overwritten.',
   'ref.transferTo': 'Move to',
@@ -4464,6 +4465,7 @@ const ru: Dictionary = {
   'drivers.kind.PAYEE': 'Получатель реферальных',
   'ref.transfer': 'Передать перевозчику',
   'ref.transferTitle': 'Передача другому перевозчику',
+  'ref.addAuthority': '+ Добавить перевозчика',
   'ref.transferBody':
     'Текущий период закрывается и открывается новый. Ничего не перезаписывается.',
   'ref.transferTo': 'Передать',

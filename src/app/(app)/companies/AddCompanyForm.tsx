@@ -1,7 +1,9 @@
 'use client'
 
-import { useActionState, useState } from 'react'
+import { useActionState, useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { transferReturnHref } from '@/lib/return-path'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { FmcsaLookup } from '@/components/forms/FmcsaLookup'
@@ -74,6 +76,7 @@ export function AddCompanyForm({
   action: submitAction,
   initial,
   children,
+  returnTo = null,
 }: {
   labels: AddCompanyLabels
   fmcsa: FmcsaLabels
@@ -85,11 +88,24 @@ export function AddCompanyForm({
   initial?: Readonly<Record<string, string>>
   /** Deactivate and Remove, rendered under the buttons on the edit screen. */
   children?: React.ReactNode
+  /**
+   * A checked record path (`safeReturnPath`) when opened from a Transfer
+   * dialog's "+ Add authority": saving or Cancel returns there with the
+   * dialog open (v11.35). Null otherwise — the authorities list, as before.
+   */
+  returnTo?: string | null
 }) {
   const [state, action, pending] = useActionState(
     submitAction,
     ADD_COMPANY_INITIAL,
   )
+  const router = useRouter()
+  // SAVED, AND OPENED FROM A TRANSFER DIALOG: back to that record with the
+  // dialog open, where the new authority is now in the list.
+  useEffect(() => {
+    if (state.companyId && returnTo)
+      router.replace(transferReturnHref(returnTo))
+  }, [state.companyId, returnTo, router])
   const [values, setValues] = useState({ ...BLANK, ...initial })
   const [lookup, setLookup] = useState<LookupState>(LOOKUP_INITIAL)
   // Which fields the register filled and the person has not touched since.
@@ -206,7 +222,7 @@ export function AddCompanyForm({
           {labels.save}
         </Button>
         <Link
-          href="/companies"
+          href={returnTo ? transferReturnHref(returnTo) : '/companies'}
           className="inline-flex h-control items-center rounded-control px-z3 text-base font-medium text-ink-2 hover:bg-surface-3"
         >
           {labels.cancel}
