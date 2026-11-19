@@ -470,18 +470,57 @@ function itemTwelveFields(input: Omit<TruckInput, 'companyId'>) {
   }
 }
 
-export async function updateTruck(
-  tx: TxClient,
-  id: string,
-  input: Omit<TruckInput, 'companyId'>,
-) {
+/**
+ * A truck edit. EVERY FIELD OPTIONAL, AND OMITTED MEANS UNCHANGED (TMS v11.36
+ * §6.5 part 2), as `updateDriver` already reads its newer fields: the record
+ * has two tabs, each posting its own fields, and a Save on one must not clear
+ * the other's. A field that IS sent and empty is cleared, as before.
+ */
+export type TruckEdit = Partial<Omit<TruckInput, 'companyId'>>
+
+export async function updateTruck(tx: TxClient, id: string, input: TruckEdit) {
   const current = await tx.truck.findUnique({
     where: { id },
     select: { companyId: true },
   })
   if (!current) throw new ReferenceError('not_found')
-  const unitNumber = requiredText(input.unitNumber, 'unitNumber')
-  await assertUnitAvailable(tx, 'truck', current.companyId, unitNumber, id)
+  const unitNumber =
+    input.unitNumber === undefined
+      ? undefined
+      : requiredText(input.unitNumber, 'unitNumber')
+  if (unitNumber !== undefined) {
+    await assertUnitAvailable(tx, 'truck', current.companyId, unitNumber, id)
+  }
+  /** Only what the form sent, each read by its own parser. */
+  const when = <T>(value: unknown, read: () => T) =>
+    value === undefined ? undefined : read()
+
+  const data = {
+    unitNumber,
+    vin: when(input.vin, () => optionalText(input.vin)),
+    make: when(input.make, () => optionalText(input.make)),
+    model: when(input.model, () => optionalText(input.model)),
+    year: when(input.year, () => modelYear(input.year)),
+    plate: when(input.plate, () => optionalText(input.plate)),
+    plateState: when(input.plateState, () => stateCode(input.plateState)),
+    currentOdometer: when(input.currentOdometer, () =>
+      odometer(input.currentOdometer),
+    ),
+    status: input.status ? storedTruckStatus(input.status) : undefined,
+    ownershipType: input.ownershipType || undefined,
+    notes: when(input.notes, () => optionalText(input.notes)),
+    fleetStatus: when(input.fleetStatus, () =>
+      readFleetStatus(input.fleetStatus),
+    ),
+    fuelType: when(input.fuelType, () => readFuelType(input.fuelType)),
+    ownerName: when(input.ownerName, () => optionalText(input.ownerName)),
+    axles: when(input.axles, () => wholeNumber(input.axles, 'axles', 20)),
+    // 200,000 lb is past any legal gross in the United States by a wide
+    // margin — a bound on a typo, not a rule about trucks.
+    grossWeightLbs: when(input.grossWeightLbs, () =>
+      wholeNumber(input.grossWeightLbs, 'grossWeightLbs', 200_000),
+    ),
+  }
 
   try {
     // The authority is NOT settable here. Moving an asset between authorities
@@ -489,20 +528,11 @@ export async function updateTruck(
     // would move it with no record that it moved.
     return await tx.truck.update({
       where: { id },
-      data: {
-        unitNumber,
-        vin: optionalText(input.vin),
-        make: optionalText(input.make),
-        model: optionalText(input.model),
-        year: modelYear(input.year),
-        plate: optionalText(input.plate),
-        plateState: stateCode(input.plateState),
-        currentOdometer: odometer(input.currentOdometer),
-        ...(input.status ? { status: storedTruckStatus(input.status) } : {}),
-        ...(input.ownershipType ? { ownershipType: input.ownershipType } : {}),
-        notes: optionalText(input.notes),
-        ...itemTwelveFields(input),
-      },
+      // An undefined key is Prisma's "leave as is"; dropping them keeps the
+      // statement to the columns that were sent.
+      data: Object.fromEntries(
+        Object.entries(data).filter(([, value]) => value !== undefined),
+      ),
     })
   } catch (error) {
     duplicateFromRace(error)

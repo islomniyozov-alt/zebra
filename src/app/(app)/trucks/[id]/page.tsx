@@ -1,6 +1,18 @@
 import { notFound } from 'next/navigation'
 import { SELECTABLE_AUTHORITY } from '@/lib/companies'
-import { truckOverrideOf } from '@/lib/truck-list'
+import {
+  TRUCK_DETAIL_FIELDS,
+  TRUCK_IDENTITY_FIELDS,
+  TRUCK_STATUS_FIELDS,
+  truckFormValues,
+  type TruckFormField,
+} from '@/lib/truck-form'
+import { Tabs } from '@/components/ui/Tabs'
+import {
+  DriverMainForm,
+  type DriverMainField,
+  type DriverMainSection,
+} from '../../drivers/[id]/DriverMainForm'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import Link from 'next/link'
 import { crewOfTruck } from '@/lib/team'
@@ -13,7 +25,6 @@ import { InspectionPanel } from '../../_reference/InspectionPanel'
 import { inspectionPanelData } from '../../_reference/inspection-view'
 import { MaintenancePanel } from '../../_reference/MaintenancePanel'
 import { maintenancePanelData } from '../../_reference/maintenance-view'
-import { RecordForm } from '@/components/forms/RecordForm'
 import { AssetActions } from '../../_reference/AssetActions'
 import { updateTruckAction } from '../actions'
 import { truckFields } from '../fields'
@@ -32,8 +43,12 @@ export default async function EditTruckPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const { id } = await params
+  const query = await searchParams
   // The way back from "+ Add authority" opens the Transfer dialog (v11.35).
-  const openTransfer = opensTransfer(await searchParams)
+  const openTransfer = opensTransfer(query)
+  // Main, or Details (TMS v11.36 §6.5 part 2). A stale value opens Main.
+  const tab: 'main' | 'details' =
+    query['tab'] === 'details' ? 'details' : 'main'
   const mayAddAuthority = await currentUserCan('create', 'company')
   const { t, locale } = await getLocaleContext()
 
@@ -110,6 +125,74 @@ export default async function EditTruckPage({
   const mayDelete = await currentUserCan('delete', 'truck')
 
   const authorities = companies.map((c) => ({ value: c.id, label: c.name }))
+  const authorityName =
+    openCompany ?? companies.find((c) => c.id === truck.companyId)?.name ?? null
+
+  // ── THE FORM'S FIELDS, FROM THE ONE DEFINITION (`truckFields`) ─────────
+  // Labels, options and hints stay where the create form reads them; this
+  // only places them in the two columns and the Details tab.
+  const specs = new Map(
+    truckFields(t, authorities, 'edit').map((spec) => [spec.name, spec]),
+  )
+  const field = (name: TruckFormField): { field: DriverMainField } => {
+    const spec = specs.get(name)
+    if (!spec || spec.kind === 'hidden' || spec.kind === 'confirm') {
+      throw new Error(`truckFields has no editable ${name}`)
+    }
+    return {
+      field: {
+        name,
+        label: spec.label,
+        kind: spec.kind,
+        ...('options' in spec ? { options: spec.options } : {}),
+        ...('required' in spec && spec.required ? { required: true } : {}),
+        ...('hint' in spec && spec.hint ? { hint: spec.hint } : {}),
+        ...('mono' in spec && spec.mono ? { mono: true } : {}),
+      },
+    }
+  }
+  const crewLinks =
+    crew.length === 0
+      ? t('trucks.crewNone')
+      : crew.map((member, index) => (
+          <span key={member.id}>
+            {index > 0 ? ' · ' : null}
+            <Link
+              href={`/drivers/${member.id}`}
+              className="underline-offset-2 hover:underline"
+            >
+              {member.firstName} {member.lastName}
+            </Link>
+          </span>
+        ))
+  const mainLeft: DriverMainSection[] = [
+    {
+      title: t('trucks.section.identity'),
+      items: [
+        ...TRUCK_IDENTITY_FIELDS.map(field),
+        {
+          fact: {
+            label: t('ref.authority'),
+            value: authorityName ?? t('ref.noOpenPeriod'),
+          },
+        },
+        { fact: { label: t('trucks.crew'), value: crewLinks } },
+      ],
+    },
+  ]
+  const mainRight: DriverMainSection[] = [
+    {
+      title: t('trucks.section.status'),
+      items: TRUCK_STATUS_FIELDS.map(field),
+    },
+  ]
+  const details: DriverMainSection[] = [
+    {
+      title: t('trucks.section.details'),
+      items: TRUCK_DETAIL_FIELDS.map(field),
+    },
+  ]
+  const values = truckFormValues(truck)
 
   return (
     <>
@@ -144,148 +227,159 @@ export default async function EditTruckPage({
         </p>
       </div>
 
+      <Tabs
+        tabs={[
+          { key: 'main', label: t('trucks.tab.main') },
+          { key: 'details', label: t('trucks.tab.details') },
+        ]}
+        active={tab}
+        hrefFor={(key) =>
+          key === 'main' ? `/trucks/${id}` : `/trucks/${id}?tab=${key}`
+        }
+        label={t('trucks.edit')}
+      />
+
       <div className="min-h-0 flex-1 overflow-y-auto bg-surface-2 px-gutter py-z5">
-        <RecordForm
-          fields={truckFields(t, authorities, 'edit')}
-          values={{
-            unitNumber: truck.unitNumber,
-            make: truck.make ?? '',
-            model: truck.model ?? '',
-            year: truck.year === null ? '' : String(truck.year),
-            vin: truck.vin ?? '',
-            plate: truck.plate ?? '',
-            plateState: truck.plateState ?? '',
-            currentOdometer:
-              truck.currentOdometer === null
-                ? ''
-                : String(truck.currentOdometer),
-            // Round two: the form offers Automatic and the three overrides,
-            // so a stored DISPATCHED or IN_TRANSIT from before reads as
-            // Automatic here and is rewritten as AVAILABLE on save.
-            status: truckOverrideOf(truck.status) ?? 'AVAILABLE',
-            ownershipType: truck.ownershipType,
-            notes: truck.notes ?? '',
-          }}
-          action={updateTruckAction.bind(null, id)}
-          cancelHref="/trucks"
-          labels={{ save: t('ref.save'), cancel: t('ref.cancel') }}
-        >
-          {mayEdit ? (
-            <AssetActions
-              kind="truck"
-              id={id}
-              isRetired={truck.deletedAt !== null}
-              // Its current authority is not a place to transfer it to. The
-              // service refuses a same-authority move anyway; leaving it out
-              // of the list means nobody has to be refused to find out.
-              authorities={authorities.filter(
-                (a) => a.value !== truck.companyId,
-              )}
-              currentAuthorityName={
-                openCompany ??
-                companies.find((c) => c.id === truck.companyId)?.name ??
-                null
-              }
-              openTransfer={openTransfer}
-              {...(mayAddAuthority
-                ? {
-                    addAuthority: {
-                      href: addAuthorityHref(`/trucks/${id}`),
-                      label: t('ref.addAuthority'),
-                    },
+        {tab === 'details' ? (
+          // DETAILS POSTS ITS OWN FIVE FIELDS AND NOTHING ELSE; `updateTruck`
+          // leaves Main's as they are (omitted means unchanged).
+          <DriverMainForm
+            left={details}
+            right={[]}
+            values={values}
+            action={updateTruckAction.bind(null, id)}
+            cancelHref="/trucks"
+            labels={{ save: t('ref.save'), cancel: t('ref.cancel') }}
+            readOnly={!mayEdit}
+          />
+        ) : null}
+        {tab === 'main' ? (
+          <>
+            <DriverMainForm
+              left={mainLeft}
+              right={mainRight}
+              values={values}
+              action={updateTruckAction.bind(null, id)}
+              cancelHref="/trucks"
+              labels={{ save: t('ref.save'), cancel: t('ref.cancel') }}
+              readOnly={!mayEdit}
+            >
+              {mayEdit ? (
+                <AssetActions
+                  kind="truck"
+                  id={id}
+                  isRetired={truck.deletedAt !== null}
+                  // Its current authority is not a place to transfer it to. The
+                  // service refuses a same-authority move anyway; leaving it out
+                  // of the list means nobody has to be refused to find out.
+                  authorities={authorities.filter(
+                    (a) => a.value !== truck.companyId,
+                  )}
+                  currentAuthorityName={authorityName}
+                  openTransfer={openTransfer}
+                  {...(mayAddAuthority
+                    ? {
+                        addAuthority: {
+                          href: addAuthorityHref(`/trucks/${id}`),
+                          label: t('ref.addAuthority'),
+                        },
+                      }
+                    : {})}
+                  transferAction={transferAssetAction.bind(null, 'truck', id)}
+                  retireAction={
+                    mayDelete
+                      ? retireAssetAction.bind(null, 'truck', id)
+                      : async () => {
+                          'use server'
+                        }
                   }
-                : {})}
-              transferAction={transferAssetAction.bind(null, 'truck', id)}
-              retireAction={
-                mayDelete
-                  ? retireAssetAction.bind(null, 'truck', id)
-                  : async () => {
-                      'use server'
-                    }
-              }
-              restoreAction={restoreAssetAction.bind(null, 'truck', id)}
-              labels={{
-                transfer: t('ref.transfer'),
-                transferTitle: t('ref.transferTitle'),
-                transferBody: t('ref.transferBody'),
-                transferTo: t('ref.transferTo'),
-                transferReason: t('ref.transferReason'),
-                transferConfirm: t('ref.transferConfirm'),
-                retire: t('ref.retire'),
-                retireConfirm: t('ref.retireConfirm'),
-                retireBody: t('ref.retireBody'),
-                restore: t('ref.restore'),
-                cancel: t('ref.cancel'),
-                currentAuthority: t('ref.currentAuthority'),
-                noOpenPeriod: t('ref.noOpenPeriod'),
-              }}
-            />
-          ) : null}
-        </RecordForm>
+                  restoreAction={restoreAssetAction.bind(null, 'truck', id)}
+                  labels={{
+                    transfer: t('ref.transfer'),
+                    transferTitle: t('ref.transferTitle'),
+                    transferBody: t('ref.transferBody'),
+                    transferTo: t('ref.transferTo'),
+                    transferReason: t('ref.transferReason'),
+                    transferConfirm: t('ref.transferConfirm'),
+                    retire: t('ref.retire'),
+                    retireConfirm: t('ref.retireConfirm'),
+                    retireBody: t('ref.retireBody'),
+                    restore: t('ref.restore'),
+                    cancel: t('ref.cancel'),
+                    currentAuthority: t('ref.currentAuthority'),
+                    noOpenPeriod: t('ref.noOpenPeriod'),
+                  }}
+                />
+              ) : null}
+            </DriverMainForm>
 
-        {/* PHASE 4 §5 STEP 2. Compliance dates are OPERATIONAL — a dispatcher
-         * reads them because they gate a dispatch decision (§2.5), and
-         * ACCOUNTING reads them for insurance certificates at billing time.
-         * Renewing is `compliance:create`, which stays with FLEET_WRITE. */}
-        {maySeeCompliance ? (
-          <div className="mt-z4 max-w-[900px]">
-            <CompliancePanel
-              subject="truck"
-              subjectId={id}
-              rows={compliance.rows}
-              types={compliance.types}
-              documentTypeFor={compliance.documentTypeFor}
-              mayRenew={mayRenew}
-              today={compliance.today}
-              translate={compliance.translate}
-              labels={
-                compliance.labels as Parameters<
-                  typeof CompliancePanel
-                >[0]['labels']
-              }
-            />
-          </div>
-        ) : null}
+            {/* PHASE 4 §5 STEP 2. Compliance dates are OPERATIONAL — a dispatcher
+             * reads them because they gate a dispatch decision (§2.5), and
+             * ACCOUNTING reads them for insurance certificates at billing time.
+             * Renewing is `compliance:create`, which stays with FLEET_WRITE. */}
+            {maySeeCompliance ? (
+              <div className="mt-z4 max-w-[900px]">
+                <CompliancePanel
+                  subject="truck"
+                  subjectId={id}
+                  rows={compliance.rows}
+                  types={compliance.types}
+                  documentTypeFor={compliance.documentTypeFor}
+                  mayRenew={mayRenew}
+                  today={compliance.today}
+                  translate={compliance.translate}
+                  labels={
+                    compliance.labels as Parameters<
+                      typeof CompliancePanel
+                    >[0]['labels']
+                  }
+                />
+              </div>
+            ) : null}
 
-        {/* PHASE 4 §5 STEP 3. A dispatcher reads the service history — a truck
-         * in the shop is a dispatch fact — and never the cost, which is
-         * `truck.financials` and simply is not in the payload for them. */}
-        {maySeeMaintenance ? (
-          <div className="mt-z4 max-w-[900px]">
-            <MaintenancePanel
-              subject="truck"
-              subjectId={id}
-              rows={maintenance.rows}
-              categories={maintenance.categories}
-              {...(maintenance.totals ? { totals: maintenance.totals } : {})}
-              mayRecord={mayRecordMaintenance}
-              mayAttach={mayAttach}
-              today={maintenance.today}
-              translate={maintenance.translate}
-              labels={
-                maintenance.labels as Parameters<
-                  typeof MaintenancePanel
-                >[0]['labels']
-              }
-            />
-          </div>
-        ) : null}
+            {/* PHASE 4 §5 STEP 3. A dispatcher reads the service history — a truck
+             * in the shop is a dispatch fact — and never the cost, which is
+             * `truck.financials` and simply is not in the payload for them. */}
+            {maySeeMaintenance ? (
+              <div className="mt-z4 max-w-[900px]">
+                <MaintenancePanel
+                  subject="truck"
+                  subjectId={id}
+                  rows={maintenance.rows}
+                  categories={maintenance.categories}
+                  {...(maintenance.totals
+                    ? { totals: maintenance.totals }
+                    : {})}
+                  mayRecord={mayRecordMaintenance}
+                  mayAttach={mayAttach}
+                  today={maintenance.today}
+                  translate={maintenance.translate}
+                  labels={
+                    maintenance.labels as Parameters<
+                      typeof MaintenancePanel
+                    >[0]['labels']
+                  }
+                />
+              </div>
+            ) : null}
 
-        {/* PHASE 4 §5 STEP 4. Read-only: an inspection is recorded from
-         * /safety/inspections/new, where the truck, the trailer and the driver
-         * can all be named at once. A panel that could file one from here
-         * would have to guess the other two. */}
-        {maySeeInspections ? (
-          <div className="mt-z4 max-w-[900px]">
-            <InspectionPanel
-              rows={inspections.rows}
-              labels={
-                inspections.labels as Parameters<
-                  typeof InspectionPanel
-                >[0]['labels']
-              }
-            />
-          </div>
+            {/* PHASE 4 §5 STEP 4. Read-only: an inspection is recorded from
+             * /safety/inspections/new, where the truck, the trailer and the driver
+             * can all be named at once. A panel that could file one from here
+             * would have to guess the other two. */}
+            {maySeeInspections ? (
+              <div className="mt-z4 max-w-[900px]">
+                <InspectionPanel
+                  rows={inspections.rows}
+                  labels={
+                    inspections.labels as Parameters<
+                      typeof InspectionPanel
+                    >[0]['labels']
+                  }
+                />
+              </div>
+            ) : null}
+          </>
         ) : null}
       </div>
     </>

@@ -327,8 +327,10 @@ describe('the status derives from the open loads (round two)', () => {
     // create line be broken while the update line still satisfied it (the
     // guard that did not fire, 2026-11-10).
     expect(fleet).toMatch(/^\s+status: storedTruckStatus\(input\.status\),$/m)
+    // The edit's line since v11.36 (omitted means unchanged): the same rule,
+    // an override or AVAILABLE, written only when the form sent a status.
     expect(fleet).toMatch(
-      /^\s+\.\.\.\(input\.status \? \{ status: storedTruckStatus\(input\.status\) \} : \{\}\),$/m,
+      /^\s+status: input\.status \? storedTruckStatus\(input\.status\) : undefined,$/m,
     )
     // (The trailers' create and update keep `input.status`: a trailer has no
     // loads of its own to derive from, so no negative match over the file.)

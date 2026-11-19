@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { createTruck, updateTruck } from '@/lib/fleet'
+import { createTruck, updateTruck, type TruckEdit } from '@/lib/fleet'
 import { rememberAuthority, toFormState } from '../_reference/shared'
 import type { RecordFormState } from '@/components/forms/RecordForm'
 import type { OwnershipType, TruckStatus } from '@/generated/prisma/client'
@@ -39,6 +39,41 @@ function read(formData: FormData) {
   }
 }
 
+/** A field the form did not render is `undefined` — left as it is. */
+const sent = (formData: FormData, name: string) =>
+  formData.has(name) ? formData.get(name) : undefined
+
+/**
+ * THE EDIT READS ONLY WHAT THE FORM SENT (TMS v11.36 §6.5 part 2). The record
+ * has two tabs, each its own form; `updateTruck` leaves an unsent field as it
+ * is, so Details' Save cannot clear Main's fields or the other way round.
+ */
+function readEdit(formData: FormData): TruckEdit {
+  const status = sent(formData, 'status')
+  const ownershipType = sent(formData, 'ownershipType')
+  const unitNumber = sent(formData, 'unitNumber')
+  return Object.fromEntries(
+    Object.entries({
+      unitNumber: unitNumber === undefined ? undefined : String(unitNumber),
+      vin: sent(formData, 'vin'),
+      make: sent(formData, 'make'),
+      model: sent(formData, 'model'),
+      year: sent(formData, 'year'),
+      plate: sent(formData, 'plate'),
+      plateState: sent(formData, 'plateState'),
+      currentOdometer: sent(formData, 'currentOdometer'),
+      status: (status || undefined) as TruckStatus | undefined,
+      ownershipType: (ownershipType || undefined) as OwnershipType | undefined,
+      notes: sent(formData, 'notes'),
+      fleetStatus: sent(formData, 'fleetStatus'),
+      fuelType: sent(formData, 'fuelType'),
+      ownerName: sent(formData, 'ownerName'),
+      axles: sent(formData, 'axles'),
+      grossWeightLbs: sent(formData, 'grossWeightLbs'),
+    }).filter(([, value]) => value !== undefined),
+  ) as TruckEdit
+}
+
 export async function createTruckAction(
   _previous: RecordFormState,
   formData: FormData,
@@ -70,7 +105,7 @@ export async function updateTruckAction(
 
   try {
     await withCurrentOrg('update', 'truck', (tx) =>
-      updateTruck(tx, id, read(formData)),
+      updateTruck(tx, id, readEdit(formData)),
     )
   } catch (error) {
     return toFormState(error, t)

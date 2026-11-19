@@ -27,7 +27,8 @@ import {
 export interface DriverMainField {
   name: string
   label: string
-  kind: 'text' | 'tel' | 'email' | 'date' | 'select' | 'textarea'
+  // `number` since the truck record took this frame (TMS v11.36 §6.5 part 2).
+  kind: 'text' | 'tel' | 'email' | 'date' | 'number' | 'select' | 'textarea'
   options?: readonly SelectOption[]
   required?: boolean
   hint?: string
