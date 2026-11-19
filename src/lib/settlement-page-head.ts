@@ -58,6 +58,8 @@ export interface SettlementPageSettlement {
   driverType: DriverType | null
   payoutDate: Date | null
   batchId: string | null
+  /** The statement's notes, for the Attachments & notes tab (step 4). */
+  notes: string | null
   company: { name: string }
   driver: {
     id: string
@@ -99,11 +101,50 @@ export interface SettlementPageSettlement {
   }[]
 }
 
+/**
+ * What the seven tabs show that the header did not already read (TMS
+ * §6.2.10 part 7 step 4): the batch's own deduction lines, and the fuel and
+ * toll rows the Fuel & tolls figure sums.
+ */
+export interface SettlementTabRows {
+  /** A batch statement's deductions and other pay (`SettlementDeductionLine`). */
+  deductionLines: {
+    id: string
+    type: string
+    description: string
+    quantity: number
+    rateCents: number
+    totalCents: number
+    recurringDeductionId: string | null
+  }[]
+  /** The driver's fuel in the period — the rows `fuel_count` counts. */
+  fuelRows: {
+    id: string
+    purchasedAt: Date
+    vendorName: string | null
+    city: string | null
+    state: string | null
+    /** `Decimal(10,3)` as its text, three places. */
+    gallons: string
+    totalCents: number
+    settlementId: string | null
+  }[]
+  /** The driver's toll expenses in the period — the rows `toll_count` counts. */
+  tollRows: {
+    id: string
+    incurredAt: Date
+    vendorName: string | null
+    amountCents: number
+    isDriverDeduction: boolean
+  }[]
+}
+
 export interface SettlementPageHead {
   settlement: SettlementPageSettlement
   fuel: FuelAndTolls
   columnsRow: StoredColumnRow | null
   neighbours: StatementNeighbours
+  tabs: SettlementTabRows
 }
 
 type Stamp = string | Date
@@ -113,6 +154,9 @@ interface HeadRow {
   settlement: Json | null
   load_lines: Json[]
   lines: Json[]
+  deduction_lines: Json[]
+  fuel_rows: Json[]
+  toll_rows: Json[]
   fuel: Json | null
   columns: StoredColumnRow | null
   prev_in_batch: { id: string; settlementNumber: string } | null
@@ -162,6 +206,31 @@ export async function readSettlementPageHead(
         FROM "SettlementLine" sl
         LEFT JOIN "Load" l ON l.id = sl."loadId"
        WHERE sl."settlementId" = (SELECT id FROM s)
+    ),
+    -- THE TABS' ROWS (step 4): the batch's own deduction lines, and the fuel
+    -- and toll rows under the same filters the fuel CTE below counts.
+    deduction_lines AS (
+      SELECT dl.id, dl.type, dl.description, dl.quantity, dl."rateCents",
+             dl."totalCents", dl."recurringDeductionId", dl."sortOrder"
+        FROM "SettlementDeductionLine" dl
+       WHERE dl."settlementId" = (SELECT id FROM s)
+    ),
+    fuel_rows AS (
+      SELECT f.id, f."purchasedAt", f."vendorName", f.city, f.state,
+             f.gallons::text AS gallons, f."totalCents", f."settlementId"
+        FROM "FuelTransaction" f, s
+       WHERE f."driverId" = s."driverId" AND f."deletedAt" IS NULL
+         AND f."purchasedAt" >= s."periodStart"
+         AND f."purchasedAt" <= s."periodEnd"
+    ),
+    toll_rows AS (
+      SELECT e.id, e."incurredAt", e."vendorName", e."amountCents",
+             e."isDriverDeduction"
+        FROM "Expense" e, s
+       WHERE e."driverId" = s."driverId" AND e."deletedAt" IS NULL
+         AND e.category::text = 'TOLLS'
+         AND e."incurredAt" >= s."periodStart"
+         AND e."incurredAt" <= s."periodEnd"
     ),
     fuel AS (
       SELECT
@@ -225,6 +294,12 @@ export async function readSettlementPageHead(
               FROM load_lines x) AS load_lines,
            (SELECT COALESCE(json_agg(x ORDER BY x."sortOrder", x.id), '[]'::json)
               FROM lines x) AS lines,
+           (SELECT COALESCE(json_agg(x ORDER BY x."sortOrder", x.id), '[]'::json)
+              FROM deduction_lines x) AS deduction_lines,
+           (SELECT COALESCE(json_agg(x ORDER BY x."purchasedAt", x.id), '[]'::json)
+              FROM fuel_rows x) AS fuel_rows,
+           (SELECT COALESCE(json_agg(x ORDER BY x."incurredAt", x.id), '[]'::json)
+              FROM toll_rows x) AS toll_rows,
            (SELECT row_to_json(x) FROM fuel x) AS fuel,
            (SELECT row_to_json(x) FROM columns x) AS columns,
            (SELECT row_to_json(x) FROM prev_in_batch x) AS prev_in_batch,
@@ -259,6 +334,7 @@ export async function readSettlementPageHead(
     driverType: (s.driverType as DriverType | null) ?? null,
     payoutDate: asDate(s.payoutDate),
     batchId: (s.batchId as string | null) ?? null,
+    notes: (s.notes as string | null) ?? null,
     company: { name: s.company_name as string },
     driver: s.driver_row as SettlementPageSettlement['driver'],
     _count: { documents: asNumber(s.documents) },
@@ -326,6 +402,34 @@ export async function readSettlementPageHead(
       nextInBatch: row.next_in_batch,
       prevPeriod: period(row.prev_period),
       nextPeriod: period(row.next_period),
+    },
+    tabs: {
+      deductionLines: row.deduction_lines.map((l) => ({
+        id: l.id as string,
+        type: l.type as string,
+        description: l.description as string,
+        quantity: l.quantity as number,
+        rateCents: l.rateCents as number,
+        totalCents: l.totalCents as number,
+        recurringDeductionId: (l.recurringDeductionId as string | null) ?? null,
+      })),
+      fuelRows: row.fuel_rows.map((f) => ({
+        id: f.id as string,
+        purchasedAt: date(f.purchasedAt),
+        vendorName: (f.vendorName as string | null) ?? null,
+        city: (f.city as string | null) ?? null,
+        state: (f.state as string | null) ?? null,
+        gallons: f.gallons as string,
+        totalCents: f.totalCents as number,
+        settlementId: (f.settlementId as string | null) ?? null,
+      })),
+      tollRows: row.toll_rows.map((e) => ({
+        id: e.id as string,
+        incurredAt: date(e.incurredAt),
+        vendorName: (e.vendorName as string | null) ?? null,
+        amountCents: e.amountCents as number,
+        isDriverDeduction: e.isDriverDeduction as boolean,
+      })),
     },
   }
 }

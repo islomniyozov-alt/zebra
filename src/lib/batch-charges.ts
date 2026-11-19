@@ -169,6 +169,62 @@ export async function addBatchCharge(
   return { ok: true, added: drivers.size, refused }
 }
 
+export type StatementChargeFailure =
+  | BatchChargeFailure
+  /** A statement with no batch keeps the add-row; nothing rebuilds it. */
+  | 'no_batch'
+  | 'not_unposted'
+
+/**
+ * ADD DEDUCTION ON THE STATEMENT PAGE (TMS §6.2.10 part 7 step 4): step 3's
+ * verb for ONE statement. The statement's own batch is read here — the form
+ * names only the statement — and the charge carries that batch's authority,
+ * so the guard of 2026-11-18 holds on this page too.
+ */
+export async function addStatementCharge(
+  tx: TxClient,
+  input: Omit<BatchChargeInput, 'batchId' | 'settlementIds'> & {
+    settlementId: string
+  },
+): Promise<
+  | {
+      ok: true
+      /**
+       * The statement as rebuilt. `refreshDraft` deletes and recreates every
+       * draft on the batch, so the id the office opened no longer exists;
+       * this is the same driver's draft on the same batch, to land on.
+       */
+      settlementId: string | null
+    }
+  | { ok: false; reason: StatementChargeFailure }
+> {
+  const statement = await tx.settlement.findFirst({
+    where: { id: input.settlementId, deletedAt: null },
+    select: { batchId: true, driverId: true },
+  })
+  if (!statement) return { ok: false, reason: 'not_found' }
+  if (statement.batchId === null) return { ok: false, reason: 'no_batch' }
+  const outcome = await addBatchCharge(tx, {
+    batchId: statement.batchId,
+    settlementIds: [input.settlementId],
+    type: input.type,
+    description: input.description,
+    amountCents: input.amountCents,
+  })
+  if (!outcome.ok) return outcome
+  if (outcome.added === 0) return { ok: false, reason: 'not_unposted' }
+  const rebuilt = await tx.settlement.findFirst({
+    where: {
+      batchId: statement.batchId,
+      driverId: statement.driverId,
+      status: 'DRAFT',
+      deletedAt: null,
+    },
+    select: { id: true },
+  })
+  return { ok: true, settlementId: rebuilt?.id ?? null }
+}
+
 function nameOf(row: {
   settlementNumber: string
   driver: { firstName: string; lastName: string }

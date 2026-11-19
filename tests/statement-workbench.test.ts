@@ -229,10 +229,15 @@ describe('the header box carries every field §6.2.2 lists', () => {
     ['other pay / reimbursements', /workbench\.otherPayReimbursements/],
     ['deductions / advances', /workbench\.deductionsAdvances/],
     ['trips count', /workbench\.tripsCount/],
-    ['net pay', /settlements\.net/],
+    // §6.2.10 part 7 step 4 (v11.33): the box became four cards and the
+    // stacked grids seven tabs. Net pay is the Earnings card's last line
+    // (`workbench.netPay` above, once — the second "net" label went); fuel
+    // and tolls are two lines of the Fuel & balances card; attachments are
+    // a tab with their count.
     ['balances', /workbench\.balances/],
-    ['fuel & toll expenses', /workbench\.fuelTolls/],
-    ['attachments', /workbench\.attachments/],
+    ['fuel', /statement\.fuel'/],
+    ['tolls', /statement\.tolls'/],
+    ['attachments', /statement\.tab\.\$\{key\}|statement\.documents/],
   ]
 
   for (const [name, pattern] of FIELDS) {
@@ -248,7 +253,8 @@ describe('the header box carries every field §6.2.2 lists', () => {
       /\bRecalculate\b/,
       /\bSendToDriver\b/,
       /workbench\.post/,
-      /workbench\.exportPdf/,
+      // Datatruck's word since step 4 (v11.33); the same statement PDF route.
+      /workbench\.download/,
     ]) {
       expect(page).toMatch(action)
     }

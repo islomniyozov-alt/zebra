@@ -18,6 +18,8 @@ import { normalizeTypedDate, utcMidnight } from '@/lib/typed-date'
 import { addTripsToSettlement } from '@/lib/statement-workbench'
 import { sendStatementToDriver } from '@/lib/statement-send'
 import { refreshTotals } from '@/lib/settlements'
+import { addStatementCharge } from '@/lib/batch-charges'
+import { SETTLEMENT_BATCH_TIMEOUT_MS } from '@/lib/settlement-batch'
 import { SETTLEMENT_INITIAL, type SettlementState } from './settlement-state'
 import type {
   PaymentMethod,
@@ -59,6 +61,11 @@ const ERRORS: Record<string, MessageKey> = {
   rejected: 'settlements.error.mailRejected',
   unreachable: 'settlements.error.mailUnreachable',
   misconfigured: 'settlements.error.mailMisconfigured',
+  // ADD DEDUCTION on a batch statement (TMS §6.2.10 part 7 step 4).
+  bad_type: 'deduction.error.unknownType',
+  no_batch: 'settlements.error.notFound',
+  not_unposted: 'settlements.error.notDraft',
+  no_statements: 'settlements.error.notFound',
 }
 
 const fail = (reason: string, loadNumbers: string[] = []): SettlementState => ({
@@ -295,4 +302,46 @@ export async function sendToDriverAction(
 
   revalidatePath(`/settlements/${settlementId}`)
   return SETTLEMENT_INITIAL
+}
+
+/**
+ * Add deduction on a batch statement (TMS §6.2.10 part 7 step 4): step 3's
+ * one-time charge for this one statement, carrying its batch's authority,
+ * then the draft refreshed — `addStatementCharge` decides. A refresh REBUILDS
+ * the draft, so the statement's id changes; the office lands on the rebuilt
+ * statement, or on the batch if none was rebuilt.
+ */
+export async function addStatementDeductionAction(
+  settlementId: string,
+  batchId: string,
+  _previous: SettlementState,
+  formData: FormData,
+): Promise<SettlementState> {
+  let amountCents: number
+  try {
+    amountCents = parseMoneyToCents(text(formData, 'amount'))
+  } catch (error) {
+    if (!(error instanceof MoneyFormatError)) throw error
+    return fail('bad_amount')
+  }
+  const outcome = await withCurrentOrg(
+    'update',
+    'settlement',
+    (tx) =>
+      addStatementCharge(tx, {
+        settlementId,
+        type: text(formData, 'type'),
+        description: text(formData, 'description'),
+        amountCents,
+      }),
+    { timeoutMs: SETTLEMENT_BATCH_TIMEOUT_MS },
+  )
+  if (!outcome.ok) return fail(outcome.reason)
+  revalidatePath(`/settlements/batches/${batchId}`)
+  revalidatePath('/payroll/statements')
+  redirect(
+    outcome.settlementId
+      ? `/settlements/${outcome.settlementId}?tab=oneTime`
+      : `/settlements/batches/${batchId}`,
+  )
 }

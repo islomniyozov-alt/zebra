@@ -180,6 +180,33 @@ export function bpsToInput(bps: number): string {
 }
 
 /**
+ * RATE PER MILE, in whole cents: gross ÷ miles (TMS §6.2.10 part 7 step 4,
+ * ruling R15). SHOWN, NEVER STORED — a ratio of two stored columns, so it is
+ * computed here, where every rounding in the codebase lives, and nowhere else.
+ *
+ * Miles arrive in hundredths (`milesHundredths`), so cents per mile is
+ * gross × 100 ÷ hundredths, rounded HALF UP ON THE ABSOLUTE VALUE like
+ * `percentOfCents`. No miles, or no gross to divide, is `null` — a dash on the
+ * screen, never a zero claiming somebody earned nothing per mile.
+ *
+ * Datatruck's sample: $6,940.68 over 2,055.77 mi → 338 (prints $3.38).
+ */
+export function ratePerMileCents(
+  grossCents: number,
+  milesHundredths: number,
+): number | null {
+  if (!Number.isInteger(grossCents) || !Number.isInteger(milesHundredths)) {
+    return null
+  }
+  if (milesHundredths <= 0) return null
+  const numerator = Math.abs(grossCents) * 100
+  const rounded = Math.trunc(
+    (numerator * 2 + milesHundredths) / (2 * milesHundredths),
+  )
+  return grossCents < 0 ? -rounded : rounded
+}
+
+/**
  * What a load is worth: the three stored integers, added.
  *
  * A separate function so the screen and the invoice generator cannot drift —
