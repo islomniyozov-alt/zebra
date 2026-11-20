@@ -137,9 +137,12 @@ export const ROUTE_VARIANTS = new Map([
   [
     '/drivers',
     [
+      // The report's own URL — an OLD link since v11.38, which must still
+      // open (as Inactive) — then the three tabs' replacements and a search.
       'per=500&dispatch=available&tab=terminated',
-      'tab=terminated&per=500',
-      'tab=vacation&per=500',
+      'tab=inactive&per=500',
+      'only=vacation&per=500',
+      'tab=all&only=unassigned&q=a&per=500',
     ],
   ],
 ])

@@ -16,27 +16,57 @@ import { asDate, asNumber } from './sql-json'
 // ---------------------------------------------------------------------------
 
 /**
- * Five tabs over one grid (§7.1.6), each a different QUESTION:
+ * THREE TABS OVER ONE GRID (§6.4 part 1 v11.38, owner's ruling 2026-11-19),
+ * each a different QUESTION, and Active + Inactive = All:
  *
- *   active      the roster at work — not removed, not INACTIVE, not VACATION
- *   unassigned  active, with no truck — the dispatcher's own question
- *   all         every roster row; a REMOVED row is a mistake, not a person,
- *               and stays behind the existing toggle rather than in a tab
- *   terminated  INACTIVE, with the termination date as a column
- *   vacation    VACATION, or an off-duty return date still ahead
+ *   active    every person still employed — not removed, not INACTIVE (a
+ *             driver on VACATION is Active)
+ *   inactive  INACTIVE, with the termination date as a column — what the
+ *             Terminated tab was, renamed
+ *   all       every roster row; a REMOVED row is a mistake, not a person,
+ *             and stays behind the existing toggle rather than in a tab
+ *
+ * Unassigned and the Vacation board were tabs until the same ruling; they are
+ * now CHIPS (`DRIVER_CHIPS`) narrowing whichever tab is open.
  */
-export const DRIVER_TABS = [
-  'active',
-  'unassigned',
-  'all',
-  'terminated',
-  'vacation',
-] as const
+export const DRIVER_TABS = ['active', 'inactive', 'all'] as const
 
 export type DriverTab = (typeof DRIVER_TABS)[number]
 
 export function isDriverTab(value: string): value is DriverTab {
   return (DRIVER_TABS as readonly string[]).includes(value)
+}
+
+/**
+ * The two filter chips (v11.38), each ANDed with the open tab:
+ *
+ *   unassigned  a working driver with no truck — the dispatcher's question
+ *   vacation    VACATION, or an off-duty return date still ahead
+ */
+export const DRIVER_CHIPS = ['unassigned', 'vacation'] as const
+
+export type DriverChip = (typeof DRIVER_CHIPS)[number]
+
+export function isDriverChip(value: string): value is DriverChip {
+  return (DRIVER_CHIPS as readonly string[]).includes(value)
+}
+
+/**
+ * The tab and chip a URL asks for. OLD LINKS STILL OPEN (v11.38):
+ * `tab=terminated` is Inactive; `tab=unassigned` and `tab=vacation` are Active
+ * with that chip. Anything unrecognised opens Active with no chip (§7.1.6).
+ */
+export function driverViewFromUrl(
+  rawTab: unknown,
+  rawChip: unknown,
+): { tab: DriverTab; chip: DriverChip | null } {
+  const tabText = typeof rawTab === 'string' ? rawTab : ''
+  const chipText = typeof rawChip === 'string' ? rawChip : ''
+  const chip = isDriverChip(chipText) ? chipText : null
+  if (isDriverTab(tabText)) return { tab: tabText, chip }
+  if (tabText === 'terminated') return { tab: 'inactive', chip }
+  if (isDriverChip(tabText)) return { tab: 'active', chip: chip ?? tabText }
+  return { tab: 'active', chip }
 }
 
 /** The roster "at work": everything that is not on holiday and not gone. */
@@ -68,11 +98,10 @@ export function activeDriversWhere(): Prisma.DriverWhereInput {
 /**
  * The rows a tab selects. `includeRemoved` is the page's existing toggle and
  * widens the tab to the rows somebody soft-deleted — it is a question about
- * mistakes, orthogonal to every tab, which is why it is a flag and not a sixth.
+ * mistakes, orthogonal to every tab, which is why it is a flag and not a tab.
  */
 export function driverTabWhere(
   tab: DriverTab,
-  now: Date,
   includeRemoved = false,
 ): Prisma.DriverWhereInput {
   const kept: Prisma.DriverWhereInput = includeRemoved
@@ -80,35 +109,81 @@ export function driverTabWhere(
     : { deletedAt: null }
   switch (tab) {
     case 'active':
-      return { ...kept, status: { in: [...WORKING_STATUSES] } }
-    case 'unassigned':
-      return {
-        ...kept,
-        status: { in: [...WORKING_STATUSES] },
-        assignedTruckId: null,
-      }
+      return { ...kept, status: { not: 'INACTIVE' } }
+    case 'inactive':
+      return { ...kept, status: 'INACTIVE' }
     case 'all':
       return kept
-    case 'terminated':
-      return { ...kept, status: 'INACTIVE' }
+  }
+}
+
+/** The rows a chip keeps, ANDed with the tab's. */
+export function driverChipWhere(
+  chip: DriverChip,
+  now: Date,
+): Prisma.DriverWhereInput {
+  switch (chip) {
+    case 'unassigned':
+      return { status: { in: [...WORKING_STATUSES] }, assignedTruckId: null }
     case 'vacation':
-      return {
-        ...kept,
-        OR: [{ status: 'VACATION' }, { offDutyUntil: { gt: now } }],
-      }
+      return { OR: [{ status: 'VACATION' }, { offDutyUntil: { gt: now } }] }
+  }
+}
+
+// ── SEARCH (v11.38): name, phone, assigned truck unit ─────────────────────
+//
+// Every word typed must match ONE of first name, last name, phone or the
+// assigned truck's unit, case-insensitive, as a substring. LIKE's wildcards
+// and its escape character are dropped from a term rather than escaped: a
+// driver's name, phone or unit has none of them, and dropping them makes the
+// SQL spelling below and Prisma's `contains` one rule with nothing to agree
+// about. At most five words of forty characters each.
+
+/** The words a search box's text searches for; empty means no search. */
+export function searchTerms(raw: unknown): string[] {
+  if (typeof raw !== 'string') return []
+  return raw
+    .replace(/[%_\\]/g, '')
+    .split(/\s+/)
+    .map((term) => term.slice(0, 40))
+    .filter((term) => term !== '')
+    .slice(0, 5)
+}
+
+/** The search as the list's `driver.findMany` spreads it. */
+export function driverSearchWhere(
+  terms: readonly string[],
+): Prisma.DriverWhereInput {
+  if (terms.length === 0) return {}
+  return {
+    AND: terms.map((term) => ({
+      OR: [
+        { firstName: { contains: term, mode: 'insensitive' as const } },
+        { lastName: { contains: term, mode: 'insensitive' as const } },
+        { phone: { contains: term, mode: 'insensitive' as const } },
+        {
+          assignedTruck: {
+            is: {
+              unitNumber: { contains: term, mode: 'insensitive' as const },
+            },
+          },
+        },
+      ],
+    })),
   }
 }
 
 /**
- * The column a tab brings of its own (§6.4 part 1): Terminated prints when,
- * Vacation prints the return. Null for the other three.
+ * The column a view brings of its own (§6.4 part 1): Inactive prints when the
+ * driver left, the Vacation chip prints the return. Null otherwise.
  */
-export function tabDateColumn(tab: DriverTab): 'terminated' | 'returns' | null {
-  return tab === 'terminated'
-    ? 'terminated'
-    : tab === 'vacation'
-      ? 'returns'
-      : null
+export function tabDateColumn(
+  tab: DriverTab,
+  chip: DriverChip | null = null,
+): 'terminated' | 'returns' | null {
+  if (tab === 'inactive') return 'terminated'
+  if (chip === 'vacation') return 'returns'
+  return null
 }
 
 /**
@@ -148,12 +223,15 @@ export function fitTabColumn(
 /**
  * What every tab of the list is narrowed by before its own question: the
  * session's authority scope (empty is unrestricted, as `companyScopeFilter`),
- * the authority chip and the tag chip.
+ * the authority chip, the tag chip and the search (v11.38 — so the tab and
+ * chip counts describe the rows the search leaves, never rows it has hidden).
  */
 export interface DriverListBase {
   companyScopes: readonly string[]
   companyId?: string | null
   tag?: string | null
+  /** `searchTerms` of the search box; empty or absent means no search. */
+  search?: readonly string[]
 }
 
 /** The base as the list's `driver.findMany` spreads it. */
@@ -166,59 +244,95 @@ export function driverListBaseWhere(
       : {}),
     ...(base.companyId ? { companyId: base.companyId } : {}),
     ...(base.tag ? { tags: { has: base.tag } } : {}),
+    ...driverSearchWhere(base.search ?? []),
   }
 }
 
 /**
  * THE SAME BASE AND THE SAME TAB QUESTIONS, AS SQL OVER `"Driver" d` (§6.4
- * part 1 v11.02). The five counts are one `COUNT(*) FILTER` each, so the head
+ * part 1 v11.02). The counts are one `COUNT(*) FILTER` each, so the head
  * of `/drivers` is one statement and not five; `driverTabWhere` above stays
  * the list's own predicate. TWO SPELLINGS OF ONE RULE, so the enforcer is
  * named: `tests/integration/drivers-page.test.ts` holds every tab's count
  * here equal to `driver.count` through `driverTabWhere`, with and without
  * removed rows, scoped, chipped and tagged.
  */
+/** `driverSearchWhere`, spelled over `"Driver" d`. */
+function driverSearchSql(terms: readonly string[]): Prisma.Sql {
+  if (terms.length === 0) return Prisma.sql`TRUE`
+  return Prisma.join(
+    terms.map((term) => {
+      const pattern = `%${term}%`
+      return Prisma.sql`(d."firstName" ILIKE ${pattern}
+          OR d."lastName" ILIKE ${pattern}
+          OR d.phone ILIKE ${pattern}
+          OR EXISTS (SELECT 1 FROM "Truck" st
+                      WHERE st.id = d."assignedTruckId"
+                        AND st."unitNumber" ILIKE ${pattern}))`
+    }),
+    ' AND ',
+  )
+}
+
 function driverBaseSql(base: DriverListBase): Prisma.Sql {
   const scopes = [...base.companyScopes]
   return Prisma.sql`(${scopes.length === 0} OR d."companyId" = ANY(${scopes}::text[]))
        AND (${base.companyId ?? null}::text IS NULL OR d."companyId" = ${base.companyId ?? null})
-       AND (${base.tag ?? null}::text IS NULL OR ${base.tag ?? null} = ANY(d."tags"))`
+       AND (${base.tag ?? null}::text IS NULL OR ${base.tag ?? null} = ANY(d."tags"))
+       AND ${driverSearchSql(base.search ?? [])}`
 }
 
 export function driverTabSql(
   tab: DriverTab,
-  now: Date,
   includeRemoved = false,
 ): Prisma.Sql {
   const kept = includeRemoved
     ? Prisma.sql`TRUE`
     : Prisma.sql`d."deletedAt" IS NULL`
-  const working = Prisma.sql`d."status"::text = ANY(${[...WORKING_STATUSES]}::text[])`
   switch (tab) {
     case 'active':
-      return Prisma.sql`${kept} AND ${working}`
-    case 'unassigned':
-      return Prisma.sql`${kept} AND ${working} AND d."assignedTruckId" IS NULL`
+      return Prisma.sql`${kept} AND d."status"::text <> 'INACTIVE'`
+    case 'inactive':
+      return Prisma.sql`${kept} AND d."status"::text = 'INACTIVE'`
     case 'all':
       return kept
-    case 'terminated':
-      return Prisma.sql`${kept} AND d."status"::text = 'INACTIVE'`
-    case 'vacation':
-      return Prisma.sql`${kept} AND (d."status"::text = 'VACATION' OR d."offDutyUntil" > ${now})`
   }
 }
 
-/** The five counts as one SELECT returning one row, a column per tab. */
+/** `driverChipWhere`, spelled over `"Driver" d`. */
+export function driverChipSql(chip: DriverChip, now: Date): Prisma.Sql {
+  switch (chip) {
+    case 'unassigned':
+      return Prisma.sql`d."status"::text = ANY(${[...WORKING_STATUSES]}::text[]) AND d."assignedTruckId" IS NULL`
+    case 'vacation':
+      return Prisma.sql`(d."status"::text = 'VACATION' OR d."offDutyUntil" > ${now})`
+  }
+}
+
+/** A count per tab, and per chip INSIDE the open tab. */
+export type DriverCounts = Record<DriverTab | DriverChip, number>
+
+/**
+ * The three tab counts and the two chip counts as one SELECT returning one
+ * row. A chip counts inside `tab` — the tab the person is looking at.
+ */
 export function driverTabCountsSql(
   base: DriverListBase,
   now: Date,
-  includeRemoved = false,
+  includeRemoved: boolean,
+  tab: DriverTab,
 ): Prisma.Sql {
   return Prisma.sql`SELECT ${Prisma.join(
-    DRIVER_TABS.map(
-      (tab) =>
-        Prisma.sql`COUNT(*) FILTER (WHERE ${driverTabSql(tab, now, includeRemoved)})::int AS ${Prisma.raw(`"${tab}"`)}`,
-    ),
+    [
+      ...DRIVER_TABS.map(
+        (key) =>
+          Prisma.sql`COUNT(*) FILTER (WHERE ${driverTabSql(key, includeRemoved)})::int AS ${Prisma.raw(`"${key}"`)}`,
+      ),
+      ...DRIVER_CHIPS.map(
+        (chip) =>
+          Prisma.sql`COUNT(*) FILTER (WHERE ${driverTabSql(tab, includeRemoved)} AND ${driverChipSql(chip, now)})::int AS ${Prisma.raw(`"${chip}"`)}`,
+      ),
+    ],
     ', ',
   )}
       FROM "Driver" d
@@ -227,11 +341,11 @@ export function driverTabCountsSql(
 
 /** `driverTabCountsSql`'s row, from either transport, as the page's record. */
 export function driverTabCountsFrom(
-  row: Partial<Record<DriverTab, unknown>> | null | undefined,
-): Record<DriverTab, number> {
+  row: Partial<Record<DriverTab | DriverChip, unknown>> | null | undefined,
+): DriverCounts {
   return Object.fromEntries(
-    DRIVER_TABS.map((tab) => [tab, asNumber(row?.[tab])]),
-  ) as Record<DriverTab, number>
+    [...DRIVER_TABS, ...DRIVER_CHIPS].map((key) => [key, asNumber(row?.[key])]),
+  ) as DriverCounts
 }
 
 // ── THE LIST AS SQL (§6.4 part 1 v11.04) ─────────────────────────────────
@@ -267,11 +381,13 @@ export interface DriverListRow {
  * then id — the id so two runs of the same question list the same order.
  * The order is also a column, `ord`, so a caller that wraps this text (the
  * head's `json_agg`) can keep it without restating it.
- * `filter` is a further predicate over `d` (the health filter), or null.
+ * `filter` is a further predicate over `d` (the health filter), or null;
+ * `chip` narrows the tab (v11.38), or null.
  */
 export function driverListSql(input: {
   base: DriverListBase
   tab: DriverTab
+  chip: DriverChip | null
   now: Date
   includeRemoved: boolean
   filter: Prisma.Sql | null
@@ -289,7 +405,8 @@ export function driverListSql(input: {
       JOIN "Company" c ON c.id = d."companyId"
       LEFT JOIN "Truck" t ON t.id = d."assignedTruckId"
      WHERE ${driverBaseSql(input.base)}
-       AND ${driverTabSql(input.tab, input.now, input.includeRemoved)}
+       AND ${driverTabSql(input.tab, input.includeRemoved)}
+       AND ${input.chip ? driverChipSql(input.chip, input.now) : Prisma.sql`TRUE`}
        AND ${input.filter ?? Prisma.sql`TRUE`}
      ORDER BY ord
      LIMIT ${input.cap}`
@@ -349,10 +466,11 @@ export async function countDriverTabs(
   base: DriverListBase,
   now: Date,
   includeRemoved = false,
-): Promise<Record<DriverTab, number>> {
-  const rows = await tx.$queryRaw<Partial<Record<DriverTab, unknown>>[]>(
-    driverTabCountsSql(base, now, includeRemoved),
-  )
+  tab: DriverTab = 'active',
+): Promise<DriverCounts> {
+  const rows = await tx.$queryRaw<
+    Partial<Record<DriverTab | DriverChip, unknown>>[]
+  >(driverTabCountsSql(base, now, includeRemoved, tab))
   return driverTabCountsFrom(rows[0])
 }
 

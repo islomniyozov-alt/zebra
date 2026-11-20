@@ -5,8 +5,11 @@ import { createBroker } from '@/lib/brokers'
 import { createLoad, LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import {
   DRIVER_TABS,
+  DRIVER_CHIPS,
+  driverChipWhere,
   driverListBaseWhere,
   driverTabWhere,
+  type DriverChip,
   type DriverListBase,
   type DriverTab,
 } from '@/lib/driver-list'
@@ -104,6 +107,7 @@ const listedByPrisma = (
   input: {
     base: DriverListBase
     tab: DriverTab
+    chip?: DriverChip | null
     includeRemoved: boolean
     missing: DriverHealthCheck | null
     cap: number
@@ -113,7 +117,8 @@ const listedByPrisma = (
     where: {
       AND: [
         driverListBaseWhere(input.base),
-        driverTabWhere(input.tab, NOW, input.includeRemoved),
+        driverTabWhere(input.tab, input.includeRemoved),
+        ...(input.chip ? [driverChipWhere(input.chip, NOW)] : []),
         ...(input.missing
           ? [driverHealthBase(), driverHealthWhere(input.missing, NOW)]
           : []),
@@ -373,7 +378,7 @@ afterAll(async () => {
 })
 
 describe('/drivers in three statements', () => {
-  it('counts every tab as driverTabWhere does — removed or not, scoped, chipped, tagged', async () => {
+  it('counts every tab and chip as driverTabWhere and driverChipWhere do — removed or not, scoped, chipped, tagged, searched', async () => {
     const bases: { name: string; base: DriverListBase }[] = [
       { name: 'unscoped', base: { companyScopes: [] } },
       { name: 'scoped to Alpha', base: { companyScopes: [alphaId] } },
@@ -382,6 +387,16 @@ describe('/drivers in three statements', () => {
         base: { companyScopes: [], companyId: betaId },
       },
       { name: 'tagged night', base: { companyScopes: [], tag: 'night' } },
+      // v11.38: the search narrows the counts too, by name, phone and unit.
+      { name: 'searched name', base: { companyScopes: [], search: ['ret'] } },
+      {
+        name: 'searched phone',
+        base: { companyScopes: [], search: ['555-01'] },
+      },
+      {
+        name: 'searched unit',
+        base: { companyScopes: [], search: [`t-${nonce}`] },
+      },
     ]
     let compared = 0
     for (const { name, base } of bases) {
@@ -401,7 +416,19 @@ describe('/drivers in three statements', () => {
               where: {
                 AND: [
                   driverListBaseWhere(base),
-                  driverTabWhere(tab, NOW, includeRemoved),
+                  driverTabWhere(tab, includeRemoved),
+                ],
+              },
+            })
+          }
+          // A CHIP COUNTS INSIDE THE OPEN TAB — Active, for ACTIVE_LIST.
+          for (const chip of DRIVER_CHIPS) {
+            expected[chip] = await tx.driver.count({
+              where: {
+                AND: [
+                  driverListBaseWhere(base),
+                  driverTabWhere(ACTIVE_LIST.tab, includeRemoved),
+                  driverChipWhere(chip, NOW),
                 ],
               },
             })
@@ -414,15 +441,23 @@ describe('/drivers in three statements', () => {
         compared += 1
       }
     }
-    expect(compared).toBe(8)
-    // NOT VACUOUS: unscoped, every tab has someone, and the toggle adds one.
+    expect(compared).toBe(14)
+    // NOT VACUOUS: unscoped, every tab and chip has someone, Active and
+    // Inactive make All, and the toggle adds one.
     expect((await head({})).counts).toEqual({
-      active: 5, // Working, Idle, Returning, Back, Payee
-      unassigned: 4,
+      active: 6, // Working, Idle, Holiday, Returning, Back, Payee
+      inactive: 1, // Gone
       all: 7,
-      terminated: 1,
+      unassigned: 4, // Idle, Returning, Back, Payee — working, no truck
       vacation: 2, // Holiday by status, Returning by date
     })
+    // And each search finds someone, and not everyone.
+    for (const search of [['ret'], ['555-01'], [`t-${nonce}`]]) {
+      const all = (await head({ base: { companyScopes: [], search } })).counts
+        .all
+      expect(all, search.join(' ')).toBeGreaterThan(0)
+      expect(all, search.join(' ')).toBeLessThan(7)
+    }
     expect((await head({ includeRemoved: true })).counts.all).toBe(8)
     expect(
       (await head({ base: { companyScopes: [], tag: 'night' } })).counts.active,
@@ -574,11 +609,13 @@ describe('/drivers in three statements', () => {
         base: { companyScopes: [], companyId: betaId },
       },
       { name: 'tagged night', base: { companyScopes: [], tag: 'night' } },
+      { name: 'searched', base: { companyScopes: [], search: ['555-01'] } },
     ]
     const cases: {
       name: string
       base: DriverListBase
       tab: DriverTab
+      chip: DriverChip | null
       includeRemoved: boolean
       missing: DriverHealthCheck | null
       cap: number
@@ -586,14 +623,17 @@ describe('/drivers in three statements', () => {
     for (const { name, base } of bases) {
       for (const includeRemoved of [false, true]) {
         for (const tab of DRIVER_TABS) {
-          cases.push({
-            name,
-            base,
-            tab,
-            includeRemoved,
-            missing: null,
-            cap: 500,
-          })
+          for (const chip of [null, ...DRIVER_CHIPS]) {
+            cases.push({
+              name,
+              base,
+              tab,
+              chip,
+              includeRemoved,
+              missing: null,
+              cap: 500,
+            })
+          }
         }
       }
     }
@@ -603,6 +643,7 @@ describe('/drivers in three statements', () => {
           name: `health ${missing}`,
           base: { companyScopes: [] },
           tab,
+          chip: null,
           includeRemoved: false,
           missing,
           cap: 500,
@@ -614,6 +655,7 @@ describe('/drivers in three statements', () => {
       name: 'capped at 2',
       base: { companyScopes: [] },
       tab: 'all',
+      chip: null,
       includeRemoved: true,
       missing: null,
       cap: 2,
@@ -630,16 +672,23 @@ describe('/drivers in three statements', () => {
               healthCompanyIds: [],
               now: NOW,
               includeRemoved: c.includeRemoved,
-              list: { tab: c.tab, missing: c.missing, cap: c.cap },
+              list: {
+                tab: c.tab,
+                chip: c.chip,
+                missing: c.missing,
+                cap: c.cap,
+              },
             }),
             await listedByPrisma(tx, c),
           ] as const,
       )
-      const label = `${c.name}, ${c.tab}, removed ${c.includeRemoved}`
+      const label = `${c.name}, ${c.tab}, ${c.chip ?? 'no chip'}, removed ${c.includeRemoved}`
       expect(read.drivers, label).toEqual(expected)
       rows += expected.length
     }
-    expect(cases).toHaveLength(51)
+    // 5 bases × removed or not × 3 tabs × (no chip + 2 chips) = 90, then 10
+    // health cases and the cap: 101 (v11.38; it was 51 with five tabs).
+    expect(cases).toHaveLength(101)
 
     // NOT VACUOUS: the lists carry rows, a truck, a tag, a removed row, dates.
     expect(rows).toBeGreaterThan(80)
@@ -724,7 +773,8 @@ describe('/drivers in three statements', () => {
         empty: statementsOf(client)! - atEmpty,
       }).toEqual({ head: 1, facts: 1, empty: 0 })
       // NOT VACUOUS: the one statement carried the list.
-      expect(headRead.drivers).toHaveLength(5)
+      // Six since v11.38: Active includes Holiday, who is on VACATION.
+      expect(headRead.drivers).toHaveLength(6)
     } finally {
       await client.$disconnect()
     }

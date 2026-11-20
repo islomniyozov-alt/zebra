@@ -79,10 +79,11 @@ describe('the dead controls, made live', () => {
 })
 
 describe('the sweep fetches the tab that answered 500', () => {
-  it('the report’s own URL, the terminated tab at 500 a page, and the vacation tab', () => {
+  it('the report’s own URL, the Inactive tab at 500 a page, the Vacation chip, and a search', () => {
     const variants = ROUTE_VARIANTS.get('/drivers') ?? []
     expect(variants).toContain('per=500&dispatch=available&tab=terminated')
-    expect(variants).toContain('tab=terminated&per=500')
-    expect(variants).toContain('tab=vacation&per=500')
+    expect(variants).toContain('tab=inactive&per=500')
+    expect(variants).toContain('only=vacation&per=500')
+    expect(variants).toContain('tab=all&only=unassigned&q=a&per=500')
   })
 })

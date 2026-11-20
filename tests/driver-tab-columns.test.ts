@@ -87,7 +87,8 @@ describe('the tab date column fits inside the cap', () => {
   it('the page uses the rule and hands the table the grid’s cap', () => {
     const page = readFileSync('src/app/(app)/drivers/page.tsx', 'utf8')
     expect(page).toMatch(
-      /fitTabColumn\(visible, tabDateColumn\(tab\), DRIVER_COLUMN_CAP\)/,
+      // v11.38: the view is the tab and the chip (Inactive or Vacation).
+      /fitTabColumn\(visible, tabDateColumn\(tab, chip\), DRIVER_COLUMN_CAP\)/,
     )
     expect(page).toMatch(/columnCap=\{DRIVER_COLUMN_CAP\}/)
     expect(page).toMatch(

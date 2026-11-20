@@ -8,6 +8,8 @@ import {
   type DriverListBase,
   type DriverListRow,
   type DriverListSqlRow,
+  type DriverChip,
+  type DriverCounts,
   type DriverTab,
 } from './driver-list'
 import {
@@ -99,13 +101,18 @@ export interface DriversHeadInput {
   healthCompanyIds: readonly string[]
   now: Date
   includeRemoved: boolean
-  /** The list: the open tab, the health filter if any, and the row cap. */
-  list: { tab: DriverTab; missing: DriverHealthCheck | null; cap: number }
+  /** The list: the open tab, its chip (v11.38), the health filter if any, and the row cap. */
+  list: {
+    tab: DriverTab
+    chip?: DriverChip | null
+    missing: DriverHealthCheck | null
+    cap: number
+  }
 }
 
 export interface DriversHead {
   companyCount: number
-  counts: Record<DriverTab, number>
+  counts: DriverCounts
   health: DriverHealthCounts
   columnsRow: StoredColumnRow | null
   savedViews: SavedView[]
@@ -121,7 +128,7 @@ interface PreferenceRow {
 
 interface HeadRow {
   companies: unknown
-  tabs: Partial<Record<DriverTab, unknown>> | null
+  tabs: Partial<Record<DriverTab | DriverChip, unknown>> | null
   health: Partial<Record<keyof DriverHealthCounts, unknown>> | null
   prefs: PreferenceRow[]
   list: DriverListSqlRow[]
@@ -138,7 +145,7 @@ export async function readDriversHead(
   ]
   const rows = await reader.read<HeadRow>(Prisma.sql`
     WITH companies AS (SELECT COUNT(*)::int AS n FROM "Company"),
-         tabs AS (${driverTabCountsSql(input.base, input.now, input.includeRemoved)}),
+         tabs AS (${driverTabCountsSql(input.base, input.now, input.includeRemoved, input.list.tab)}),
          health AS (${driverHealthSql({ companyIds: input.healthCompanyIds }, input.now)}),
          prefs AS (
            SELECT p."key", p."value", p."organizationId"
@@ -148,6 +155,7 @@ export async function readDriversHead(
          list AS (${driverListSql({
            base: input.base,
            tab: input.list.tab,
+           chip: input.list.chip ?? null,
            now: input.now,
            includeRemoved: input.includeRemoved,
            filter: input.list.missing

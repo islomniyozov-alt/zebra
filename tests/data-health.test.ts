@@ -234,7 +234,8 @@ describe('the five driver checks (part 0b)', () => {
     const head = readFileSync(join('src', 'lib', 'drivers-page.ts'), 'utf8')
     expect(head).toMatch(/driverHealthSql\(/)
     expect(head).toMatch(/driverHealthFilterSql\(input\.list\.missing/)
-    expect(page).toMatch(/list: \{ tab, missing, cap: PAGE_CAP \}/)
+    // v11.38: the chip rides with the tab.
+    expect(page).toMatch(/list: \{ tab, chip, missing, cap: PAGE_CAP \}/)
     expect(page).toContain('<DataHealthRow')
     expect(page).toContain("from '../_grid/DataHealthRow'")
   })

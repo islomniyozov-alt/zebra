@@ -20,12 +20,13 @@ import {
 } from '@/lib/warnings'
 import { dqfChecklist, dqfIncompleteCount } from '@/lib/dqf'
 import {
+  DRIVER_CHIPS,
   DRIVER_TABS,
+  driverViewFromUrl,
   fitTabColumn,
-  isDriverTab,
   readinessFor,
+  searchTerms,
   tabDateColumn,
-  type DriverTab,
   type Readiness,
 } from '@/lib/driver-list'
 import {
@@ -154,10 +155,14 @@ export default async function DriversPage({
   const params = await searchParams
   const { t, locale } = await getLocaleContext()
 
-  const rawTab = typeof params['tab'] === 'string' ? params['tab'] : ''
-  // THE TAB IS IN THE URL, first tab default, and an unrecognised value opens
-  // the first rather than erroring (§7.1.6) — a stale link should open.
-  const tab: DriverTab = isDriverTab(rawTab) ? rawTab : 'active'
+  // THE TAB AND THE CHIP ARE IN THE URL (§6.4 part 1 v11.38): Active ·
+  // Inactive · All, and Unassigned or Vacation as `?only=`. An unrecognised
+  // value opens Active (§7.1.6), and the old tab links still open — Terminated
+  // as Inactive, Unassigned and Vacation as Active with the chip.
+  const { tab, chip } = driverViewFromUrl(params['tab'], params['only'])
+  // THE SEARCH BOX: name, phone or assigned truck unit, every word typed.
+  const query = typeof params['q'] === 'string' ? params['q'] : ''
+  const terms = searchTerms(query)
 
   // REMOVED IS A FLAG, NOT A TAB (§6.4): a soft-deleted row is a mistake, not a
   // person, and the toggle widens whichever tab is open.
@@ -207,6 +212,7 @@ export default async function DriversPage({
         companyScopes: session.companyScopes,
         companyId: companyParam ?? null,
         tag: tagParam ?? null,
+        search: terms,
       }
 
       // THE HEAD AND THE LIST, ONE CALL (§6.4 part 1 v11.02, v11.04): the
@@ -224,7 +230,7 @@ export default async function DriversPage({
         healthCompanyIds: companyParam ? [companyParam] : session.companyScopes,
         now,
         includeRemoved: showRetired,
-        list: { tab, missing, cap: PAGE_CAP },
+        list: { tab, chip, missing, cap: PAGE_CAP },
       })
       const { companyCount, counts, health, drivers } = head
 
@@ -563,9 +569,10 @@ export default async function DriversPage({
         </span>
       ),
     },
-    // THE TAB'S OWN DATE COLUMN (§6.4): Terminated prints when, Vacation board
-    // prints the return. Outside the chooser's set, because the tab decides.
-    ...(tab === 'terminated'
+    // THE VIEW'S OWN DATE COLUMN (§6.4, v11.38): Inactive prints when, the
+    // Vacation chip prints the return. Outside the chooser's set, because the
+    // view decides.
+    ...(tab === 'inactive'
       ? [
           {
             key: 'terminated',
@@ -575,7 +582,7 @@ export default async function DriversPage({
           } satisfies Column<Row>,
         ]
       : []),
-    ...(tab === 'vacation'
+    ...(chip === 'vacation' && tab !== 'inactive'
       ? [
           {
             key: 'returns',
@@ -605,7 +612,7 @@ export default async function DriversPage({
   // Vacation answered 500 on dev (safety team, 2026-11-17).
   const shownColumns = keepColumns(
     columns,
-    fitTabColumn(visible, tabDateColumn(tab), DRIVER_COLUMN_CAP),
+    fitTabColumn(visible, tabDateColumn(tab, chip), DRIVER_COLUMN_CAP),
   )
 
   const search = new URLSearchParams(
@@ -730,9 +737,9 @@ export default async function DriversPage({
         </div>
       </div>
 
-      {/* FIVE TABS, EACH A DIFFERENT QUESTION (§7.1.6, §6.4), counted by
-       * COUNT(*). Switching tabs drops the page and the sort — each tab owns
-       * its ordering. */}
+      {/* THREE TABS, EACH A DIFFERENT QUESTION (§7.1.6, §6.4 v11.38), counted
+       * by COUNT(*). Switching tabs drops the page and the sort — each tab
+       * owns its ordering — and keeps the chip and the search. */}
       <Tabs
         tabs={DRIVER_TABS.map((key) => ({
           key,
@@ -769,6 +776,24 @@ export default async function DriversPage({
        * available drivers should not silently widen the company or change the
        * tab. */}
       <div className="flex flex-wrap items-center gap-z4 border-b border-border bg-surface-2 px-gutter py-z2">
+        {/* SEARCH (v11.38): a plain GET form, so the result is a URL like any
+         * other view and every other filter rides along as a hidden field. */}
+        <form action="/drivers" method="get" role="search">
+          {[...search.entries()]
+            .filter(([key]) => key !== 'q' && key !== 'page')
+            .map(([key, value]) => (
+              <input key={key} type="hidden" name={key} value={value} />
+            ))}
+          <input
+            type="search"
+            name="q"
+            defaultValue={query}
+            placeholder={t('drivers.search')}
+            aria-label={t('drivers.search')}
+            className="h-control w-[240px] rounded-control border border-border-strong bg-surface px-z2 text-sm text-ink"
+          />
+        </form>
+
         <Link
           href={keep({ attention: needsAttention ? null : '1' })}
           className={
@@ -802,6 +827,26 @@ export default async function DriversPage({
               }
             >
               {t(`dispatch.status.${name}` as MessageKey)}
+            </Link>
+          ))}
+        </span>
+
+        {/* UNASSIGNED AND VACATION, AS CHIPS (v11.38): each narrows the open
+         * tab and is counted inside it; a second click lets it go. */}
+        <span className="flex items-center gap-z2">
+          {DRIVER_CHIPS.map((name) => (
+            <Link
+              key={name}
+              href={keep({ only: chip === name ? null : name })}
+              aria-pressed={chip === name}
+              className={
+                chip === name
+                  ? 'text-sm font-medium text-accent'
+                  : 'text-sm text-ink-2 hover:text-accent'
+              }
+            >
+              {t(`drivers.chip.${name}` as MessageKey)}{' '}
+              <span className="tabular-nums text-ink-3">{counts[name]}</span>
             </Link>
           ))}
         </span>
