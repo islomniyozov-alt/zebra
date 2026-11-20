@@ -24,6 +24,7 @@ import { parseTags } from './tags'
 import {
   closeOpenPeriod,
   openFirstPeriod,
+  openPeriodOnReactivation,
   type FleetKind,
 } from './asset-transfer'
 import { deactivateLinkedSignIn } from './driver-link'
@@ -777,6 +778,7 @@ export async function updateDriver(
       companyId: true,
       organizationId: true,
       dispatcherUserId: true,
+      status: true,
     },
   })
   if (!current) throw new ReferenceError('not_found')
@@ -806,7 +808,8 @@ export async function updateDriver(
     id,
   )
 
-  return tx.driver.update({
+  const status = input.status ? assertRosterStatus(input.status) : undefined
+  const updated = await tx.driver.update({
     where: { id },
     data: {
       firstName: requiredText(input.firstName, 'firstName'),
@@ -826,7 +829,7 @@ export async function updateDriver(
       cdlState: stateCode(input.cdlState),
       cdlClass: optionalText(input.cdlClass),
       hireDate: dateOnly(input.hireDate, 'hireDate'),
-      ...(input.status ? { status: assertRosterStatus(input.status) } : {}),
+      ...(status ? { status } : {}),
       ...(input.driverType ? { driverType: input.driverType } : {}),
       notes: optionalText(input.notes),
       // OMITTED MEANS UNCHANGED, like status and type above: a caller that
@@ -850,6 +853,10 @@ export async function updateDriver(
       assignedTrailerId,
     },
   })
+  // LEAVING TERMINATED OPENS THE PERIOD, IN THIS WRITE (TMS §6.4 part 1
+  // v11.39, GAPS 48).
+  await openPeriodOnReactivation(tx, current, current.status, status)
+  return updated
 }
 
 /**
@@ -1057,6 +1064,10 @@ export async function setRosterStatus(
   const current = await tx.driver.findUnique({
     where: { id },
     select: {
+      id: true,
+      organizationId: true,
+      companyId: true,
+      status: true,
       firstName: true,
       lastName: true,
       deletedAt: true,
@@ -1068,13 +1079,17 @@ export async function setRosterStatus(
   if (current.deletedAt !== null) return { ok: false, reason: 'removed', name }
 
   const terminating = status === 'INACTIVE' && current.terminationDate === null
+  const next = assertRosterStatus(status) ?? ACTIVE_ROSTER
   await tx.driver.update({
     where: { id },
     data: {
-      status: assertRosterStatus(status) ?? ACTIVE_ROSTER,
+      status: next,
       ...(terminating ? { terminationDate: new Date() } : {}),
     },
   })
+  // LEAVING TERMINATED OPENS THE PERIOD, IN THIS WRITE (TMS §6.4 part 1
+  // v11.39, GAPS 48) — the bulk bar is the second door back from Terminated.
+  await openPeriodOnReactivation(tx, current, current.status, next)
   // THE SIGN-IN DIES WITH THE TERMINATION DATE, IN THE SAME WRITE (Phase 7
   // §4.7, owner's ruling 2026-11-12): deactivated, sessions revoked, link
   // dropped. Coming back is a new link by OWNER or ADMIN on the record.

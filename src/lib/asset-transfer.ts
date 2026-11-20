@@ -78,6 +78,55 @@ export async function openFirstPeriod(
   })
 }
 
+/**
+ * Does this status change bring a driver back from Terminated? `to` is
+ * undefined when the writer leaves the status as it is.
+ */
+export function reactivates(from: string, to: string | undefined): boolean {
+  return from === 'INACTIVE' && to !== undefined && to !== 'INACTIVE'
+}
+
+/**
+ * LEAVING TERMINATED OPENS THE PERIOD, IN THE SAME WRITE (TMS §6.4 part 1
+ * v11.39; owner's ruling 2026-11-20, GAPS 48).
+ *
+ * `findAuthorityDrift` skips `INACTIVE` drivers and nobody else, so a driver
+ * set back to work with a `companyId` and no open period IS drift the moment
+ * the status lands — and on 2026-11-19 three such reactivations on dev failed
+ * every CI run and a production dispatch. Both status writers call this in
+ * their own transaction: `updateDriver` (the record form) and
+ * `setRosterStatus` (the bulk bar).
+ *
+ * UNDER THE DRIVER'S OWN AUTHORITY, DATED NOW: the row's `companyId` is the
+ * authority the screen shows, and the period starts when somebody brought
+ * them back, which is true. An open period already there is left alone — the
+ * history is not given a second open row.
+ *
+ * Returns whether a period was opened.
+ */
+export async function openPeriodOnReactivation(
+  tx: TxClient,
+  driver: { id: string; organizationId: string; companyId: string },
+  from: string,
+  to: string | undefined,
+  byUserId?: string | null,
+): Promise<boolean> {
+  if (!reactivates(from, to)) return false
+  const open = await tx.assetAssignment.findFirst({
+    where: { driverId: driver.id, effectiveTo: null },
+    select: { id: true },
+  })
+  if (open) return false
+  await openFirstPeriod(
+    tx,
+    driver.organizationId,
+    driver.companyId,
+    linkFor('driver', driver.id),
+    byUserId,
+  )
+  return true
+}
+
 /** Close whatever period is open, if one is. Idempotent. */
 export async function closeOpenPeriod(
   tx: TxClient,
