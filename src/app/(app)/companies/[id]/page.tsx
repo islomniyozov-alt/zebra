@@ -3,6 +3,7 @@ import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { fmcsaLabels } from '@/components/forms/fmcsa-labels'
 import { companyUsage, retiredRemovalRefusal } from '@/lib/companies'
+import { COMPANY_FORM_SELECT, companyFormValues } from '@/lib/company-form'
 import { AddCompanyForm } from '../AddCompanyForm'
 import { CompanyLifecycle } from './CompanyLifecycle'
 import {
@@ -38,17 +39,7 @@ export default async function EditCompanyPage({
       where: { id },
       select: {
         id: true,
-        name: true,
-        legalName: true,
-        mcNumber: true,
-        dotNumber: true,
-        addressLine1: true,
-        addressLine2: true,
-        city: true,
-        state: true,
-        postalCode: true,
-        phone: true,
-        email: true,
+        ...COMPANY_FORM_SELECT,
         isActive: true,
         retired: true,
       },
@@ -73,8 +64,6 @@ export default async function EditCompanyPage({
       await currentUserCan('delete', 'company.retired'),
     ) === null
 
-  const text = (value: string | null) => value ?? ''
-
   return (
     <div className="flex flex-col gap-z4">
       <div className="flex items-baseline gap-z3">
@@ -86,19 +75,7 @@ export default async function EditCompanyPage({
 
       <AddCompanyForm
         action={updateCompanyAction.bind(null, company.id)}
-        initial={{
-          name: company.name,
-          legalName: text(company.legalName),
-          mcNumber: text(company.mcNumber),
-          dotNumber: text(company.dotNumber),
-          addressLine1: text(company.addressLine1),
-          addressLine2: text(company.addressLine2),
-          city: text(company.city),
-          state: text(company.state),
-          postalCode: text(company.postalCode),
-          phone: text(company.phone),
-          email: text(company.email),
-        }}
+        initial={companyFormValues(company)}
         labels={{
           name: t('companies.name'),
           legalName: t('companies.legalName'),

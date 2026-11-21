@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { FmcsaLookup } from '@/components/forms/FmcsaLookup'
 import type { FmcsaLabels } from '@/components/forms/fmcsa-labels'
+import { COMPANY_FORM_FIELDS } from '@/lib/company-form'
 import { lookupCarrierAction } from './actions'
 import {
   ADD_COMPANY_INITIAL,
@@ -56,19 +57,10 @@ export interface AddCompanyLabels {
   hint: string
 }
 
-const BLANK: Record<string, string> = {
-  name: '',
-  legalName: '',
-  mcNumber: '',
-  dotNumber: '',
-  addressLine1: '',
-  addressLine2: '',
-  city: '',
-  state: '',
-  postalCode: '',
-  phone: '',
-  email: '',
-}
+// Every field starts blank; the one list says which (TMS §6.3 v11.41).
+const BLANK: Record<string, string> = Object.fromEntries(
+  COMPANY_FORM_FIELDS.map((name) => [name, '']),
+)
 
 export function AddCompanyForm({
   labels,

@@ -10,6 +10,7 @@ import {
   setCompanyActive,
   updateCompany,
 } from '@/lib/companies'
+import { readCompanyForm, savedHref } from '@/lib/company-form'
 import { requireSession } from '@/lib/auth-context'
 import {
   renderConcerns,
@@ -33,22 +34,9 @@ export async function addCompanyAction(
   formData: FormData,
 ): Promise<AddCompanyState> {
   const { t } = await getLocaleContext()
-  const text = (name: string) => String(formData.get(name) ?? '')
 
   const outcome = await withCurrentOrg('create', 'company', (tx, session) =>
-    addCompany(tx, session.organizationId, {
-      name: text('name'),
-      legalName: text('legalName'),
-      mcNumber: text('mcNumber'),
-      dotNumber: text('dotNumber'),
-      addressLine1: text('addressLine1'),
-      addressLine2: text('addressLine2'),
-      city: text('city'),
-      state: text('state'),
-      postalCode: text('postalCode'),
-      phone: text('phone'),
-      email: text('email'),
-    }),
+    addCompany(tx, session.organizationId, readCompanyForm(formData)),
   )
 
   if (!outcome.ok) {
@@ -125,22 +113,9 @@ export async function updateCompanyAction(
   formData: FormData,
 ): Promise<AddCompanyState> {
   const { t } = await getLocaleContext()
-  const text = (name: string) => String(formData.get(name) ?? '')
 
   const outcome = await withCurrentOrg('update', 'company', (tx) =>
-    updateCompany(tx, id, {
-      name: text('name'),
-      legalName: text('legalName'),
-      mcNumber: text('mcNumber'),
-      dotNumber: text('dotNumber'),
-      addressLine1: text('addressLine1'),
-      addressLine2: text('addressLine2'),
-      city: text('city'),
-      state: text('state'),
-      postalCode: text('postalCode'),
-      phone: text('phone'),
-      email: text('email'),
-    }),
+    updateCompany(tx, id, readCompanyForm(formData)),
   )
 
   if (!outcome.ok) {
@@ -173,7 +148,11 @@ export async function updateCompanyAction(
   }
 
   revalidateAuthorities(id)
-  return { error: null, field: null, companyId: id }
+  // SAVED, SO SAY SO WHERE THE RESULT IS VISIBLE (TMS §6.3 v11.41; owner's
+  // report 2026-11-21). Returning state left the form open after a flash and
+  // nobody could tell the save had happened; the list names it and shows the
+  // new MC and DOT.
+  redirect(savedHref(id))
 }
 
 /**

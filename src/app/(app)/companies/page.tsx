@@ -5,7 +5,8 @@ import { getLocaleContext } from '@/lib/locale'
 import { Table, type Column } from '@/components/ui/Table'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
-import { spendsCap } from '@/lib/companies'
+import { readAuthorityList, spendsCap } from '@/lib/companies'
+import { SavedNotice } from './SavedNotice'
 
 // Admin → Authorities (Phase 6 §7 flag 11).
 //
@@ -29,7 +30,12 @@ interface Row {
   retired: boolean
 }
 
-export default async function CompaniesPage() {
+export default async function CompaniesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ saved?: string | string[] }>
+}) {
+  const { saved } = await searchParams
   const { t } = await getLocaleContext()
 
   if (!(await currentUserCan('read', 'company'))) notFound()
@@ -38,19 +44,7 @@ export default async function CompaniesPage() {
 
   const data = await withCurrentOrg('read', 'company', async (tx) => {
     const [companies, organization] = await Promise.all([
-      tx.company.findMany({
-        orderBy: { name: 'asc' },
-        select: {
-          id: true,
-          name: true,
-          mcNumber: true,
-          dotNumber: true,
-          city: true,
-          state: true,
-          isActive: true,
-          retired: true,
-        },
-      }),
+      readAuthorityList(tx),
       tx.organization.findFirst({ select: { maxCompanies: true } }),
     ])
     return { companies, limit: organization?.maxCompanies ?? 1 }
@@ -65,6 +59,9 @@ export default async function CompaniesPage() {
     isActive: company.isActive,
     retired: company.retired,
   }))
+
+  const savedRow =
+    typeof saved === 'string' ? rows.find((row) => row.id === saved) : undefined
 
   const columns: Column<Row>[] = [
     {
@@ -141,6 +138,14 @@ export default async function CompaniesPage() {
           </Link>
         ) : null}
       </div>
+
+      {/* A SAVE LANDS HERE AND SAYS SO (TMS §6.3 v11.41). Only for a row this
+       * list holds, so a stale or foreign id says nothing. */}
+      {savedRow ? (
+        <SavedNotice
+          message={t('companies.saved').replace('{name}', savedRow.name)}
+        />
+      ) : null}
 
       <Table
         rows={rows}

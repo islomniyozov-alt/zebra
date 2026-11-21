@@ -651,6 +651,7 @@ const en = {
   'companies.email': 'Email',
   'companies.save': 'Add authority',
   'companies.cancel': 'Cancel',
+  'companies.saved': 'Saved — {name}.',
   'companies.hint':
     'This is an operating authority — it prints on invoices and every load is booked under one.',
   'companies.usage': '{used} of {limit} used',
@@ -4061,6 +4062,7 @@ const ru: Dictionary = {
   'companies.email': 'Эл. почта',
   'companies.save': 'Добавить',
   'companies.cancel': 'Отмена',
+  'companies.saved': 'Сохранено — {name}.',
   'companies.hint':
     'Это перевозчик — он печатается в счетах, и каждый рейс оформляется под ним.',
   'companies.usage': 'Использовано {used} из {limit}',

@@ -130,6 +130,31 @@ export function spendsCap(company: { retired: boolean }): boolean {
   return company.retired === SPENDS_CAP.retired
 }
 
+/**
+ * /companies' rows, the reader the page calls — so a test of what the list
+ * shows after a save reads what the screen reads (TMS §6.3 v11.41).
+ *
+ * EVERY AUTHORITY, NOT `SELECTABLE_AUTHORITY`: the admin screen lists
+ * deactivated and retired ones too, so they can be reactivated or removed.
+ * (It was a named matcher in tests/authority-lists.test.ts while the read sat
+ * in the page; here it is in the rule's own home.)
+ */
+export function readAuthorityList(tx: TxClient) {
+  return tx.company.findMany({
+    orderBy: { name: 'asc' },
+    select: {
+      id: true,
+      name: true,
+      mcNumber: true,
+      dotNumber: true,
+      city: true,
+      state: true,
+      isActive: true,
+      retired: true,
+    },
+  })
+}
+
 export type AddCompanyFailure =
   | 'no_name'
   | 'duplicate_name'

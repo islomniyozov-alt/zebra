@@ -24,8 +24,6 @@ import { describe, expect, it } from 'vitest'
  * Showing a list to choose from is not one of their jobs.
  */
 const MATCHERS: Record<string, string> = {
-  'src/app/(app)/companies/page.tsx':
-    'the admin screen lists every authority, including deactivated ones, so they can be reactivated',
   'src/app/api/_lib/coi-context.ts':
     'a certificate of insurance for a deactivated authority is still ours to file',
   'src/lib/inbound-email.ts':

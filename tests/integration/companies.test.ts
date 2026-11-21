@@ -5,10 +5,17 @@ import {
   addCompany,
   companyUsage,
   deleteCompany,
+  readAuthorityList,
   SELECTABLE_AUTHORITY,
   setCompanyActive,
   updateCompany,
 } from '@/lib/companies'
+import {
+  COMPANY_FORM_FIELDS,
+  COMPANY_FORM_SELECT,
+  companyFormValues,
+  readCompanyForm,
+} from '@/lib/company-form'
 import { createLoad, LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import type { PrismaClient } from '@/generated/prisma/client'
 
@@ -579,5 +586,86 @@ describe('the cap counts working authorities; a retired placeholder is the owner
     )
     expect(refused).toEqual({ ok: false, reason: 'has_numbers' })
     expect(await owner.company.findFirst({ where: { id } })).not.toBeNull()
+  }, 300_000)
+})
+
+describe('saving an authority keeps every field the form shows', () => {
+  // TMS §6.3 v11.41, owner's report 2026-11-21: after Look up and Save the
+  // form stayed open and nobody could tell whether it had saved. Every field
+  // is posted as the form posts it, saved by the action's own call, and read
+  // back by the edit page's own reader and the list's.
+  const sent = (overrides: Partial<Record<string, string>> = {}) => {
+    const posted = new FormData()
+    const values: Record<string, string> = {
+      name: `Round Trip ${nonce}`,
+      legalName: `ROUND TRIP LOGISTICS ${nonce} LLC`,
+      mcNumber: `MC-7${nonce.length}1${Date.now().toString().slice(-4)}`,
+      dotNumber: `8${Date.now().toString().slice(-6)}`,
+      addressLine1: '4200 Commerce Dr',
+      addressLine2: 'Suite 9',
+      city: 'Willowbrook',
+      state: 'IL',
+      postalCode: '60527',
+      phone: '(630) 555-0142',
+      email: `safety-${nonce}@example.test`,
+      ...overrides,
+    }
+    for (const name of COMPANY_FORM_FIELDS) posted.set(name, values[name] ?? '')
+    return { posted, values }
+  }
+
+  it('every field comes back as it was saved, on the edit form and the list', async () => {
+    const { id } = await owner.company.create({
+      data: { organizationId, name: `Before Lookup ${nonce}` },
+    })
+    const { posted, values } = sent()
+    const outcome = await inOrg((tx) =>
+      updateCompany(tx, id, readCompanyForm(posted)),
+    )
+    expect(outcome).toEqual({ ok: true, id })
+
+    const reloaded = await inOrg((tx) =>
+      tx.company.findFirstOrThrow({
+        where: { id },
+        select: COMPANY_FORM_SELECT,
+      }),
+    )
+    expect(companyFormValues(reloaded)).toEqual(values)
+
+    const row = (await inOrg((tx) => readAuthorityList(tx))).find(
+      (company) => company.id === id,
+    )
+    expect(row).toMatchObject({
+      mcNumber: values['mcNumber'],
+      dotNumber: values['dotNumber'],
+    })
+  }, 300_000)
+
+  it('a field sent blank is cleared', async () => {
+    const { id } = await owner.company.create({
+      data: {
+        organizationId,
+        name: `Clearing ${nonce}`,
+        phone: '(630) 555-0000',
+        addressLine2: 'Unit 4',
+      },
+    })
+    const { posted } = sent({
+      name: `Clearing ${nonce}`,
+      mcNumber: '',
+      dotNumber: '',
+      phone: '',
+      addressLine2: '',
+    })
+    await inOrg((tx) => updateCompany(tx, id, readCompanyForm(posted)))
+    const reloaded = await owner.company.findUniqueOrThrow({
+      where: { id },
+      select: { phone: true, addressLine2: true, mcNumber: true },
+    })
+    expect(reloaded).toEqual({
+      phone: null,
+      addressLine2: null,
+      mcNumber: null,
+    })
   }, 300_000)
 })
