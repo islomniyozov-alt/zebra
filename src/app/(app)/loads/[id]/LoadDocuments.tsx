@@ -43,6 +43,8 @@ interface Props {
    * for nothing and keeps the optional upload.
    */
   note?: string
+  /** §7.14 item 2 — the slots as a row of tiles, on broker freight. */
+  tiles?: boolean
   labels: {
     title: string
     missing: string
@@ -63,6 +65,7 @@ export function LoadDocuments({
   mayUpload,
   onUploaded,
   note,
+  tiles = false,
   labels,
 }: Props) {
   const router = useRouter()
@@ -128,7 +131,16 @@ export function LoadDocuments({
         </p>
       ) : null}
 
-      <div className="mt-z3 flex flex-col gap-z3">
+      {/* §7.14 item 2 — broker freight shows its slots as TILES, Datatruck's
+       * five: each an upload target, a filled one marked and naming its
+       * files. Same slots, same upload, same open — only the arrangement. */}
+      <div
+        className={
+          tiles
+            ? 'mt-z3 grid gap-z3 sm:grid-cols-2 lg:grid-cols-5'
+            : 'mt-z3 flex flex-col gap-z3'
+        }
+      >
         {slots.map((slot) => {
           const empty = slot.documents.length === 0
           const active = busy === slot.type
@@ -139,7 +151,16 @@ export function LoadDocuments({
             <div
               key={slot.type}
               id={slot.type === 'POD' ? 'pod' : undefined}
-              className="scroll-mt-z6"
+              data-slot={slot.type}
+              data-filled={empty ? undefined : 'true'}
+              className={cx(
+                'scroll-mt-z6',
+                tiles &&
+                  cx(
+                    'rounded-card border p-z3',
+                    empty ? 'border-border' : 'border-accent bg-accent-soft',
+                  ),
+              )}
             >
               <div className="flex items-center justify-between gap-z2">
                 <h3 className="text-sm font-medium text-ink-2">{slot.label}</h3>

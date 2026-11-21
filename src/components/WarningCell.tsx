@@ -80,6 +80,8 @@ export const WARNING_LABEL_KEYS: Record<WarningName, MessageKey> = {
   cancelled_but_assigned: 'warning.cancelled_but_assigned',
   dqf_incomplete: 'warning.dqf_incomplete',
   truck_inactive: 'warning.truck_inactive',
+  rate_con_missing: 'warning.rate_con_missing',
+  pod_missing: 'warning.pod_missing',
 }
 
 /** The same, translated for this request. */

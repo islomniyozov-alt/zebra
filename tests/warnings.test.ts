@@ -96,6 +96,11 @@ const load = (over: Partial<LoadFacts> = {}): LoadFacts => ({
   remittedCents: 0,
   hasRemittance: false,
   confirmedCents: null,
+  // Broker freight with its paper on file: the §7.14 rules are silent
+  // unless a test takes a document away.
+  customerName: 'Werner',
+  rateConOnFile: true,
+  podOnFile: true,
   ...over,
 })
 
@@ -414,5 +419,42 @@ describe('the shape of the feature', () => {
         `${name} is declared but nothing produces it`,
       ).toBe(true)
     }
+  })
+})
+
+describe('broker freight’s paper (TMS §7.14 item 2)', () => {
+  const names = (over: Partial<LoadFacts>) =>
+    loadWarnings(load(over), NOW).map((warning) => warning.name)
+
+  it('warns rate_con_missing from booking on, until one is on file', () => {
+    expect(names({ rateConOnFile: false })).toContain('rate_con_missing')
+    expect(names({ rateConOnFile: true })).not.toContain('rate_con_missing')
+  })
+
+  it('warns pod_missing only once the load is delivered', () => {
+    expect(names({ podOnFile: false, isFinished: false })).not.toContain(
+      'pod_missing',
+    )
+    expect(names({ podOnFile: false, isFinished: true })).toContain(
+      'pod_missing',
+    )
+  })
+
+  it('says nothing on a cancelled load or closed history', () => {
+    const paper = ['rate_con_missing', 'pod_missing']
+    const cancelled = names({
+      rateConOnFile: false,
+      podOnFile: false,
+      isCancelled: true,
+    })
+    expect(cancelled.filter((name) => paper.includes(name))).toEqual([])
+    expect(
+      names({
+        rateConOnFile: false,
+        podOnFile: false,
+        isFinished: true,
+        closedHistory: true,
+      }),
+    ).toEqual([])
   })
 })

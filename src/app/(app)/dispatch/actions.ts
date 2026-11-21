@@ -6,8 +6,10 @@ import { getLocaleContext } from '@/lib/locale'
 import { LOAD_WRITE_TIMEOUT_MS, applyAssignmentStatus } from '@/lib/loads'
 import {
   assertAssignable,
+  assignmentReason,
   loadWindow,
   DispatchConflictError,
+  rateConMissingForDispatch,
 } from '@/lib/dispatch'
 import { describeWarnings, dispatchWarnings } from '@/lib/compliance'
 import type { MessageKey } from '@/lib/i18n'
@@ -35,7 +37,12 @@ export async function assignAction(
   const truckId = String(formData.get('truckId') ?? '')
   const driverId = String(formData.get('driverId') ?? '') || null
   if (truckId === '') {
-    return { error: t('ref.error.required'), moved: null, warnings: null }
+    return {
+      error: t('ref.error.required'),
+      moved: null,
+      warnings: null,
+      rateConMissing: false,
+    }
   }
 
   // §2.4 — WARN, DO NOT BLOCK. Refusing outright turns a paperwork lag into a
@@ -45,8 +52,22 @@ export async function assignAction(
   const warnings = await withCurrentOrg('read', 'compliance', (tx) =>
     dispatchWarnings(tx, { truckId, driverId }),
   )
+  // §7.14 item 3 — broker freight with no rate con: warned with the rest, and
+  // the confirm carries a reason in words (owner's ruling R2).
+  const rateConMissing = await withCurrentOrg('read', 'load', (tx) =>
+    rateConMissingForDispatch(tx, loadId),
+  )
+  const overrideReason = String(formData.get('overrideReason') ?? '').trim()
+  if (rateConMissing && acknowledged && overrideReason === '') {
+    return {
+      error: t('dispatch.rateConReasonRequired'),
+      moved: null,
+      warnings: [],
+      rateConMissing: true,
+    }
+  }
 
-  if (warnings.length > 0 && !acknowledged) {
+  if ((warnings.length > 0 || rateConMissing) && !acknowledged) {
     const when = (days: number) =>
       days === 0
         ? t('safety.dueToday')
@@ -63,8 +84,14 @@ export async function assignAction(
         when: when(warning.daysLeft),
         expired: warning.status === 'expired',
       })),
+      rateConMissing,
     }
   }
+
+  const reason = assignmentReason({
+    compliance: warnings.length > 0 ? describeWarnings(warnings) : null,
+    rateConOverride: rateConMissing ? overrideReason : null,
+  })
 
   try {
     const outcome = await withCurrentOrg(
@@ -108,9 +135,7 @@ export async function assignAction(
             truckId,
             driverId: driver,
             assignedByUserId: session.userId,
-            ...(warnings.length > 0
-              ? { reason: `dispatched over: ${describeWarnings(warnings)}` }
-              : {}),
+            ...(reason !== null ? { reason } : {}),
           },
         })
 
@@ -131,6 +156,7 @@ export async function assignAction(
       // Empty, not null: the board can tell "we never asked" from "we asked
       // and they went ahead".
       warnings: [],
+      rateConMissing: false,
     }
   } catch (error) {
     if (error instanceof DispatchConflictError) {
@@ -147,6 +173,7 @@ export async function assignAction(
           .join(' '),
         moved: null,
         warnings: null,
+        rateConMissing: false,
       }
     }
     throw error

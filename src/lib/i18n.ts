@@ -594,6 +594,8 @@ const en = {
   'warning.settlement_net_negative': 'Settlement below zero',
   'warning.dqf_incomplete': 'DQF incomplete',
   'warning.truck_inactive': 'Truck inactive',
+  'warning.rate_con_missing': 'Rate con missing',
+  'warning.pod_missing': 'POD missing',
   'dqf.title': 'Driver qualification file',
   'dqf.hint':
     '49 CFR 391.51. Computed from the records on file — nothing here is stored.',
@@ -1554,6 +1556,7 @@ const en = {
   'loads.invoiceBlock.no_rate': 'Needs a rate.',
   'loads.invoiceBlock.not_ready': 'Not ready to invoice.',
   'loads.stopZones': 'Stop time zones',
+  'loads.tile.document': 'Document',
 
   'loads.new': 'New load',
   'loads.newHint': 'Ctrl+Enter saves from anywhere',
@@ -1928,6 +1931,9 @@ const en = {
   'dispatch.warnBody':
     'This does not stop the dispatch. Assign anyway if the business says so — the assignment records that you were shown this.',
   'dispatch.warnConfirm': 'Assign anyway',
+  'dispatch.rateConMissing': 'No rate confirmation on this load.',
+  'dispatch.rateConReason': 'Why dispatch without it?',
+  'dispatch.rateConReasonRequired': 'Say why it goes without a rate con.',
   'dispatch.driverKeep': 'Driving: {driver}',
   'dispatch.empty': 'Nothing scheduled.',
   'dispatch.noTrucks': 'No trucks under this authority yet.',
@@ -4014,6 +4020,8 @@ const ru: Dictionary = {
   'warning.settlement_net_negative': 'Расчёт ниже нуля',
   'warning.dqf_incomplete': 'Досье водителя неполное',
   'warning.truck_inactive': 'Машина неактивна',
+  'warning.rate_con_missing': 'Нет rate con',
+  'warning.pod_missing': 'Нет POD',
   'dqf.title': 'Досье водителя (DQF)',
   'dqf.hint':
     '49 CFR 391.51. Вычисляется по имеющимся записям — ничего не хранится.',
@@ -4970,6 +4978,7 @@ const ru: Dictionary = {
   'loads.invoiceBlock.no_rate': 'Нужна ставка.',
   'loads.invoiceBlock.not_ready': 'Пока нельзя выставить счёт.',
   'loads.stopZones': 'Часовые пояса остановок',
+  'loads.tile.document': 'Документ',
 
   'loads.new': 'Новый груз',
   'loads.newHint': 'Ctrl+Enter сохраняет из любого поля',
@@ -5347,6 +5356,9 @@ const ru: Dictionary = {
   'dispatch.warnBody':
     'Это не блокирует назначение. Назначайте, если так решил бизнес — в записи назначения останется, что вам это показали.',
   'dispatch.warnConfirm': 'Всё равно назначить',
+  'dispatch.rateConMissing': 'У груза нет rate con.',
+  'dispatch.rateConReason': 'Почему отправляем без него?',
+  'dispatch.rateConReasonRequired': 'Укажите, почему без rate con.',
   'dispatch.driverKeep': 'За рулём: {driver}',
   'dispatch.empty': 'Ничего не запланировано.',
   'dispatch.noTrucks': 'У этого перевозчика пока нет тягачей.',

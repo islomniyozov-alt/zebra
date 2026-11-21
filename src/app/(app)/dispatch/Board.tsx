@@ -71,6 +71,8 @@ interface Props {
     warnTitle: string
     warnBody: string
     warnConfirm: string
+    rateConMissing: string
+    rateConReason: string
     driverNone: string
     driverKeep: string
     cancel: string
@@ -271,6 +273,11 @@ function AssignModal({
     assignAction.bind(null, load.id),
     ASSIGN_INITIAL,
   )
+  // Something was shown and must be acknowledged: an expiry, or broker
+  // freight with no rate con (§7.14 item 3).
+  const warned =
+    (state.warnings !== null && state.warnings.length > 0) ||
+    state.rateConMissing
 
   // A truck with a driver brings its own; a truck with nobody in it needs one
   // named here. §7 dispatches on truck AND driver, so a board that could only
@@ -370,14 +377,21 @@ function AssignModal({
          * into a stranded load, and the dispatcher proceeds if the business
          * says so. What changes is that they cannot do it without reading
          * this, and the assignment row records that they saw it. */}
-        {state.warnings && state.warnings.length > 0 ? (
+        {warned ? (
           <div
             role="alert"
             className="flex flex-col gap-z1 rounded-card border border-danger bg-danger-soft p-z3"
           >
             <p className="text-sm font-medium text-ink">{labels.warnTitle}</p>
+            {/* §7.14 item 3 — broker freight with no rate con, warned with
+             * the rest; the confirm needs the reason below. */}
+            {state.rateConMissing ? (
+              <p className="text-sm font-medium text-danger">
+                {labels.rateConMissing}
+              </p>
+            ) : null}
             <ul className="flex flex-col gap-z1">
-              {state.warnings.map((warning) => (
+              {(state.warnings ?? []).map((warning) => (
                 <li
                   key={`${warning.subjectLabel}-${warning.typeLabel}`}
                   className="flex flex-wrap items-baseline gap-z2 text-sm"
@@ -395,6 +409,17 @@ function AssignModal({
               ))}
             </ul>
             <p className="text-sm text-ink-2">{labels.warnBody}</p>
+            {state.rateConMissing ? (
+              <label className="flex flex-col gap-z1 text-sm text-ink">
+                {labels.rateConReason}
+                <textarea
+                  name="overrideReason"
+                  required
+                  rows={2}
+                  className="rounded-control border border-border bg-surface px-z2 py-z1 text-base text-ink"
+                />
+              </label>
+            ) : null}
           </div>
         ) : null}
 
@@ -405,19 +430,15 @@ function AssignModal({
           {/* The acknowledgement travels in the FORM, like the truck choice —
            * see the note in ./actions.ts about the closure that silently did
            * nothing. Present only after the warning has been shown. */}
-          {state.warnings && state.warnings.length > 0 ? (
+          {warned ? (
             <input type="hidden" name="acknowledged" value="1" />
           ) : null}
           <Button
             type="submit"
-            variant={
-              state.warnings && state.warnings.length > 0 ? 'danger' : 'primary'
-            }
+            variant={warned ? 'danger' : 'primary'}
             disabled={pending || choice === null}
           >
-            {state.warnings && state.warnings.length > 0
-              ? labels.warnConfirm
-              : labels.assign}
+            {warned ? labels.warnConfirm : labels.assign}
           </Button>
         </div>
       </form>

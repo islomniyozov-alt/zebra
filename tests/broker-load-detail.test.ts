@@ -80,3 +80,59 @@ describe('the stop time-zone editor', () => {
     expect(page).toContain('action={setStopZoneAction.bind(')
   })
 })
+
+describe('the rate-con hold on the dispatch board (step 2)', () => {
+  const action = readFileSync('src/app/(app)/dispatch/actions.ts', 'utf8')
+
+  it('is asked on every assignment, and an acknowledgement needs words', () => {
+    expect(action).toContain('rateConMissingForDispatch(tx, loadId)')
+    expect(action).toMatch(
+      /if \(rateConMissing && acknowledged && overrideReason === ''\) \{/,
+    )
+    expect(action).toMatch(
+      /if \(\(warnings\.length > 0 \|\| rateConMissing\) && !acknowledged\) \{/,
+    )
+  })
+
+  it('writes what was dispatched over onto the assignment row', () => {
+    expect(action).toContain(
+      'rateConOverride: rateConMissing ? overrideReason : null',
+    )
+    expect(action).toContain('...(reason !== null ? { reason } : {}),')
+  })
+})
+
+describe('assignmentReason', () => {
+  it('names each override, the dispatcher’s words kept', async () => {
+    const { assignmentReason } = await import('@/lib/dispatch')
+    expect(
+      assignmentReason({ compliance: null, rateConOverride: null }),
+    ).toBeNull()
+    expect(
+      assignmentReason({
+        compliance: 'truck 212 REGISTRATION expired 2026-11-01',
+        rateConOverride: 'broker emailing it tonight',
+      }),
+    ).toBe(
+      'dispatched over: truck 212 REGISTRATION expired 2026-11-01; rate con missing — broker emailing it tonight',
+    )
+  })
+})
+
+describe('the five document tiles (step 2)', () => {
+  it('are Datatruck’s five, in its order, on broker freight', () => {
+    const slots = page.slice(page.indexOf('const slots: DocumentSlot[]'))
+    const broker = slots.slice(0, slots.indexOf(': ['))
+    expect(broker).toContain('view.brokerShape')
+    const order = [
+      "slotFor('RATE_CONFIRMATION'",
+      "slotFor('BOL'",
+      "slotFor('POD'",
+      "slotFor('OTHER'",
+      "slotFor('COMMERCIAL_INVOICE'",
+    ].map((needle) => slots.indexOf(needle))
+    expect(order.every((at) => at >= 0)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
+    expect(page).toContain('tiles={view.brokerShape}')
+  })
+})

@@ -284,6 +284,8 @@ export default async function DispatchPage({
           warnTitle: t('dispatch.warnTitle'),
           warnBody: t('dispatch.warnBody'),
           warnConfirm: t('dispatch.warnConfirm'),
+          rateConMissing: t('dispatch.rateConMissing'),
+          rateConReason: t('dispatch.rateConReason'),
           driverNone: t('dispatch.driverNone'),
           driverKeep: t('dispatch.driverKeep'),
           cancel: t('ref.cancel'),

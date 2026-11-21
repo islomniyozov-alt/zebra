@@ -261,38 +261,49 @@ describe('created by', () => {
   })
 })
 
-describe('no document warning on a load', () => {
-  // §7.13 ruling 1's third clause is ALREADY TRUE: no load warning reads a
-  // document. Pinned here so a document warning added to loads has to meet
-  // this test, and the Amazon exemption, on the way in.
-  it('takes no document fact and raises no document warning', () => {
-    const warnings = loadWarnings(
-      {
-        pickupAt: null,
-        hasDriver: true,
-        hasTruck: true,
-        isCancelled: false,
-        closedHistory: false,
-        isFinished: true,
-        truckRemoved: false,
-        truckUnit: '08',
-        directSettled: false,
-        rateCents: 17_500,
-        remittedCents: 0,
-        hasRemittance: false,
-        confirmedCents: null,
-      },
-      new Date('2026-11-16T12:00:00Z'),
+describe('no document warning on an Amazon load', () => {
+  // §7.13 ruling 1's third clause, met by §7.14's arrival: broker freight now
+  // warns rate_con_missing and pod_missing, and an Amazon load — whose paper
+  // lives in Relay — raises neither, by either side of isAmazonLoad.
+  const base = {
+    pickupAt: null,
+    hasDriver: true,
+    hasTruck: true,
+    isCancelled: false,
+    closedHistory: false,
+    isFinished: true,
+    truckRemoved: false,
+    truckUnit: '08',
+    directSettled: false,
+    rateCents: 17_500,
+    remittedCents: 0,
+    hasRemittance: false,
+    confirmedCents: null,
+    customerName: 'Amazon Relay',
+    rateConOnFile: false,
+    podOnFile: false,
+  }
+  const names = (facts: typeof base) =>
+    loadWarnings(facts, new Date('2026-11-16T12:00:00Z')).map(
+      (warning) => warning.name,
     )
-    expect(warnings.map((warning) => warning.name)).not.toContain(
-      'document_missing',
+
+  it('raises no document warning on Amazon freight, by name or by Relay', () => {
+    for (const facts of [
+      base,
+      { ...base, customerName: 'AMAZON LOGISTICS' },
+      { ...base, customerName: 'Somebody', directSettled: true },
+    ]) {
+      expect(names(facts)).not.toContain('rate_con_missing')
+      expect(names(facts)).not.toContain('pod_missing')
+      expect(names(facts)).not.toContain('document_missing')
+    }
+  })
+
+  it('and the same facts on broker freight raise both', () => {
+    expect(names({ ...base, customerName: 'Werner' })).toEqual(
+      expect.arrayContaining(['rate_con_missing', 'pod_missing']),
     )
-    const source = readFileSync('src/lib/warnings.ts', 'utf8')
-    const facts = source.slice(
-      source.indexOf('export interface LoadFacts'),
-      source.indexOf('const DAY_MS'),
-    )
-    expect(facts.toLowerCase()).not.toContain('document')
   })
 })
 

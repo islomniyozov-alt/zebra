@@ -708,11 +708,24 @@ export default async function LoadDetailPage({
   // live in Relay, so no slot reads "Missing — this load needs one"; the card
   // says where they are and keeps the upload.
   const required = !view.documentsOnRelay
-  const slots: DocumentSlot[] = [
-    slotFor('RATE_CONFIRMATION', docTypeLabels.RATE_CONFIRMATION, required),
-    slotFor('POD', docTypeLabels.POD, required && podRequired),
-    slotFor('BOL', docTypeLabels.BOL, false),
-  ]
+  //
+  // §7.14 item 2 — BROKER FREIGHT GETS DATATRUCK'S FIVE TILES, in its order:
+  // Rate confirmation, Bill of lading, Proof of delivery, Document,
+  // Commercial invoice. The requirement is the same as before (rate con
+  // always, POD from Delivered); the two new tiles are optional uploads.
+  const slots: DocumentSlot[] = view.brokerShape
+    ? [
+        slotFor('RATE_CONFIRMATION', docTypeLabels.RATE_CONFIRMATION, required),
+        slotFor('BOL', docTypeLabels.BOL, false),
+        slotFor('POD', docTypeLabels.POD, required && podRequired),
+        slotFor('OTHER', t('loads.tile.document'), false),
+        slotFor('COMMERCIAL_INVOICE', docTypeLabels.COMMERCIAL_INVOICE, false),
+      ]
+    : [
+        slotFor('RATE_CONFIRMATION', docTypeLabels.RATE_CONFIRMATION, required),
+        slotFor('POD', docTypeLabels.POD, required && podRequired),
+        slotFor('BOL', docTypeLabels.BOL, false),
+      ]
 
   // ── THE PANELS BOTH LAYOUTS SHARE ────────────────────────────────────────
   //
@@ -925,6 +938,7 @@ export default async function LoadDetailPage({
       mayUpload={mayUpload && !load.isCancelled}
       onUploaded={refreshLoadAction.bind(null, id)}
       {...(view.documentsOnRelay ? { note: t('loads.documentsOnRelay') } : {})}
+      tiles={view.brokerShape}
       labels={{
         title: t('loads.documents'),
         missing: t('loads.documentMissing'),

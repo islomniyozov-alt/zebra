@@ -26,10 +26,16 @@ export interface AssignState {
    * not asked yet" from "we asked and they said go".
    */
   warnings: AssignWarning[] | null
+  /**
+   * §7.14 item 3 — broker freight with no rate con. Shown with the warnings,
+   * and the confirm then needs a reason in words.
+   */
+  rateConMissing: boolean
 }
 
 export const ASSIGN_INITIAL: AssignState = {
   error: null,
   moved: null,
   warnings: null,
+  rateConMissing: false,
 }

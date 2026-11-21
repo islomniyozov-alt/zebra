@@ -8,6 +8,7 @@ import {
   type DqfFacts,
 } from './dqf'
 import { asDate } from './sql-json'
+import { isAmazonLoad } from './amazon-load'
 
 // ---------------------------------------------------------------------------
 // WARNINGS ARE COMPUTED. THERE IS NO WARNING COLUMN AND THERE WILL NOT BE ONE.
@@ -54,6 +55,8 @@ export type WarningName =
   | 'cancelled_but_assigned'
   | 'dqf_incomplete'
   | 'truck_inactive'
+  | 'rate_con_missing'
+  | 'pod_missing'
 
 export interface Warning {
   name: WarningName
@@ -171,6 +174,13 @@ export interface LoadFacts {
   remittedCents: number
   hasRemittance: boolean
   confirmedCents: number | null
+  /** The paying customer's name — with `directSettled`, what `isAmazonLoad`
+   *  reads, so the broker rules below hang on the one predicate (§7.14). */
+  customerName: string
+  /** A live (not deleted) rate confirmation on the load. */
+  rateConOnFile: boolean
+  /** A live POD on the load. */
+  podOnFile: boolean
 }
 
 const DAY_MS = 86_400_000
@@ -359,6 +369,22 @@ export function loadWarnings(facts: LoadFacts, now: Date): Warning[] {
               : 'truck',
       })
     }
+  }
+
+  // §7.14 — BROKER FREIGHT'S PAPER. A load that is neither Amazon nor
+  // direct-settled is invoiced from its rate con and paid on its POD, so a
+  // missing rate con is a warning from booking on, and a missing POD from
+  // Delivered on. Amazon's paper lives in Relay (§7.13) and says nothing here.
+  if (
+    !isAmazonLoad({
+      directSettled: facts.directSettled,
+      customer: { name: facts.customerName },
+    })
+  ) {
+    if (!facts.rateConOnFile)
+      found.push({ name: 'rate_con_missing', detail: '' })
+    if (facts.isFinished && !facts.podOnFile)
+      found.push({ name: 'pod_missing', detail: '' })
   }
 
   // HELD IS THE ENGINE'S OWN REFUSAL, not a second opinion about it.
@@ -569,6 +595,9 @@ export interface LoadWarningFactRow {
   remitted_cents: number
   remittance_count: number
   confirmed_cents: number | null
+  customer_name: string
+  rate_con_on_file: boolean
+  pod_on_file: boolean
 }
 
 /**
@@ -599,7 +628,14 @@ export function loadWarningFactsSql(idsWhere: Prisma.Sql): Prisma.Sql {
                  WHERE pla."loadId" = l."id"), 0) AS remitted_cents,
       COALESCE((SELECT COUNT(*)::int FROM "PaymentLoadApplication" pla
                  WHERE pla."loadId" = l."id"), 0) AS remittance_count,
-      l."settledGrossCents" AS confirmed_cents
+      l."settledGrossCents" AS confirmed_cents,
+      -- §7.14: the customer's name for isAmazonLoad, and the two documents
+      -- broker freight is invoiced and paid on. Same statement, three columns.
+      (SELECT c."name" FROM "Customer" c WHERE c."id" = l."customerId") AS customer_name,
+      EXISTS (SELECT 1 FROM "Document" d WHERE d."loadId" = l."id"
+               AND d."type" = 'RATE_CONFIRMATION' AND d."deletedAt" IS NULL) AS rate_con_on_file,
+      EXISTS (SELECT 1 FROM "Document" d WHERE d."loadId" = l."id"
+               AND d."type" = 'POD' AND d."deletedAt" IS NULL) AS pod_on_file
     FROM "Load" l
     WHERE ${idsWhere} AND l."deletedAt" IS NULL
   `
@@ -625,6 +661,9 @@ export function loadWarningFactsFrom(
       remittedCents: row.remitted_cents,
       hasRemittance: row.remittance_count > 0,
       confirmedCents: row.confirmed_cents,
+      customerName: row.customer_name ?? '',
+      rateConOnFile: row.rate_con_on_file,
+      podOnFile: row.pod_on_file,
     })
   }
 

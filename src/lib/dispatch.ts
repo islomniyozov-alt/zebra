@@ -1,6 +1,7 @@
 import type { TxClient } from './tenancy'
 import type { MessageKey } from './i18n'
 import { isOffDutyNow } from './dispatch-fields'
+import { isAmazonLoad } from './amazon-load'
 
 // ---------------------------------------------------------------------------
 // DISPATCH CONFLICT RULES (§8)
@@ -321,4 +322,53 @@ export async function assertAssignable(
 ): Promise<void> {
   const conflicts = await findAssignmentConflicts(tx, intent, window)
   if (conflicts.length > 0) throw new DispatchConflictError(conflicts)
+}
+
+/**
+ * THE RATE-CON HOLD ON DISPATCH (TMS §7.14 item 3, owner's ruling R2,
+ * 2026-11-21). Broker freight — not Amazon, not direct-settled — with no live
+ * rate confirmation. Warned, never blocked: the board's first submit comes
+ * back with it, and the second goes through only with a reason in words,
+ * written onto the assignment row the audited extension records.
+ *
+ * Read inside the caller's transaction; false for a load that is not there,
+ * so the assignment's own not-found path speaks for it.
+ */
+export async function rateConMissingForDispatch(
+  tx: TxClient,
+  loadId: string,
+): Promise<boolean> {
+  const load = await tx.load.findFirst({
+    where: { id: loadId },
+    select: {
+      directSettled: true,
+      customer: { select: { name: true } },
+      documents: {
+        where: { type: 'RATE_CONFIRMATION', deletedAt: null },
+        select: { id: true },
+        take: 1,
+      },
+    },
+  })
+  if (!load) return false
+  if (isAmazonLoad(load)) return false
+  return load.documents.length === 0
+}
+
+/**
+ * The assignment row's reason: what was dispatched over, in one line. The
+ * compliance part is `describeWarnings`' text; the rate-con part carries the
+ * dispatcher's own words. Null when nothing was overridden.
+ */
+export function assignmentReason(input: {
+  compliance: string | null
+  rateConOverride: string | null
+}): string | null {
+  const parts = [
+    input.compliance ? input.compliance : null,
+    input.rateConOverride !== null
+      ? `rate con missing — ${input.rateConOverride}`
+      : null,
+  ].filter((part): part is string => part !== null)
+  return parts.length === 0 ? null : `dispatched over: ${parts.join('; ')}`
 }
