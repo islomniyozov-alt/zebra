@@ -14,6 +14,7 @@ import {
 import { ReferenceError, optionalText } from '@/lib/reference'
 import { redirect } from 'next/navigation'
 import { generateInvoice } from '@/lib/invoices'
+import { setPhotoStage } from '@/lib/load-photos'
 import { DispatchConflictError } from '@/lib/dispatch'
 import { ZONE_CHOICES } from '@/lib/stop-time'
 import type { MessageKey } from '@/lib/i18n'
@@ -348,4 +349,21 @@ export async function createLoadInvoiceAction(loadId: string): Promise<void> {
   revalidatePath('/loads')
   revalidatePath('/invoices')
   if (outcome.ok) redirect(`/invoices/${outcome.invoiceId}`)
+}
+
+/**
+ * File a just-uploaded photo into the Pickup or Delivery folder (TMS §7.14
+ * item 4). The upload itself is the ordinary document path; this is the one
+ * field that says which folder, through `setPhotoStage`.
+ */
+export async function setPhotoStageAction(
+  loadId: string,
+  documentId: string,
+  stage: string,
+): Promise<{ ok: boolean }> {
+  const outcome = await withCurrentOrg('create', 'document', (tx) =>
+    setPhotoStage(tx, loadId, documentId, stage),
+  )
+  revalidatePath(`/loads/${loadId}`)
+  return { ok: outcome.ok }
 }

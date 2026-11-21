@@ -61,6 +61,9 @@ import { LoadActions } from './LoadActions'
 import { LoadAssignment } from './LoadAssignment'
 import { NoteComposer } from './NoteComposer'
 import { Copyable } from './Copyable'
+import { OtherPayTable } from './OtherPayTable'
+import { PhotoFolders } from './PhotoFolders'
+import { photoFolders } from '@/lib/load-photos'
 import { MilesField } from './MilesField'
 import { StopAddress } from './StopAddress'
 import type { StopRow } from './StopsTable'
@@ -198,6 +201,8 @@ export default async function LoadDetailPage({
             // THE STATUS, so the panel applies `recomputeTotals`' own rule —
             // a denied line is in no figure (§7.12).
             status: true,
+            // §7.14 item 4 — the Other pay table's Note column.
+            notes: true,
           },
         },
         // ── IDS ONLY, SO THE AUDIT FILTER HAS THEM IN TIME ──────────────
@@ -882,6 +887,104 @@ export default async function LoadDetailPage({
     />
   ) : null
 
+  // ── §7.14 item 4 — OTHER PAY, COMMODITIES, PHOTOS (broker freight) ──────
+  //
+  // Other pay: the accessorials as Datatruck's table, money-gated like the
+  // Rate panel and built from the same rows (`accessorialRows` is already
+  // empty for a role without `load.financials`).
+  const otherPayNode =
+    view.brokerShape && maySeeRate ? (
+      <OtherPayTable
+        loadId={id}
+        rows={load.accessorials.map((row) => ({
+          id: row.id,
+          typeLabel: t(`accessorial.${row.type}` as MessageKey),
+          amountCents: row.amountCents,
+          isBillable: row.isBillable,
+          statusLabel: t(`otherPay.status.${row.status}` as MessageKey),
+          notes: row.notes,
+        }))}
+        types={accessorialChoicesFor(ACCESSORIAL_TYPES, load).map((type) => ({
+          value: type,
+          label: t(`accessorial.${type}` as MessageKey),
+        }))}
+        mayEdit={maySetRate && !load.isCancelled}
+        locale={locale}
+        translate={rateMessages}
+        labels={{
+          title: t('otherPay.title'),
+          type: t('otherPay.type'),
+          amount: t('rate.amount'),
+          note: t('otherPay.note'),
+          billable: t('rate.billable'),
+          status: t('otherPay.status'),
+          total: t('otherPay.total'),
+          none: t('rate.none'),
+          add: t('rate.addAccessorial'),
+          remove: t('rate.remove'),
+          yes: t('otherPay.yes'),
+          no: t('otherPay.no'),
+        }}
+      />
+    ) : null
+
+  // Commodities (R7): one read-only row from the four fields Zebra stores,
+  // absent when all four are empty — no item table without a model.
+  const commodityFacts = [
+    { label: t('commodity.description'), value: load.commodity },
+    {
+      label: t('commodity.weight'),
+      value:
+        load.weightLbs === null
+          ? null
+          : `${load.weightLbs.toLocaleString(locale)} lb`,
+    },
+    {
+      label: t('commodity.temperature'),
+      value: load.tempF === null ? null : `${load.tempF} °F`,
+    },
+    {
+      label: t('commodity.hazmat'),
+      value: load.isHazmat ? t('otherPay.yes') : null,
+    },
+  ]
+  const commoditiesNode =
+    view.brokerShape && commodityFacts.some((fact) => fact.value) ? (
+      <DetailCard title={t('commodity.title')}>
+        <FactGrid columns={2} facts={commodityFacts} />
+      </DetailCard>
+    ) : null
+
+  // Photos: the two folders over this load's PHOTO documents.
+  const folders = photoFolders(documents)
+  const photoRow = (document: (typeof documents)[number]) => ({
+    id: document.id,
+    filename: document.filename,
+    uploadedAt:
+      renderStopTime(document.uploadedAt, null, { fallbackZone: zone, locale })
+        ?.text ?? '',
+  })
+  const photosNode = view.brokerShape ? (
+    <PhotoFolders
+      loadId={id}
+      folders={{
+        PICKUP: folders.PICKUP.map(photoRow),
+        DELIVERY: folders.DELIVERY.map(photoRow),
+      }}
+      mayUpload={mayUpload && !load.isCancelled}
+      labels={{
+        title: t('photos.title'),
+        pickup: t('photos.pickup'),
+        delivery: t('photos.delivery'),
+        upload: t('photos.upload'),
+        empty: t('photos.empty'),
+        uploading: t('upload.uploading'),
+        failed: t('upload.failed'),
+        downloadFailed: t('documents.downloadFailed'),
+      }}
+    />
+  ) : null
+
   const paymentTypeNode = (
     <PaymentTypePanel
       value={load.paymentType}
@@ -1370,10 +1473,17 @@ export default async function LoadDetailPage({
                     </Link>
                   </DetailCard>
                 </div>
+                {otherPayNode}
+                {commoditiesNode}
               </>
             ) : null}
             {active === 'trips' ? tripsNode : null}
-            {active === 'documents' ? documentsNode : null}
+            {active === 'documents' ? (
+              <>
+                {documentsNode}
+                {photosNode}
+              </>
+            ) : null}
             {active === 'financials' ? (
               <>
                 {rateNode}

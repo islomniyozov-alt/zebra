@@ -4,6 +4,7 @@ import { withOrg } from '@/lib/tenancy'
 import { LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import { loadWarningFacts, loadWarnings } from '@/lib/warnings'
 import { rateConMissingForDispatch } from '@/lib/dispatch'
+import { photoFolders, setPhotoStage } from '@/lib/load-photos'
 import { dropOrganization, seedOrganization, type OrgFixture } from './fixtures'
 import type { PrismaClient } from '@/generated/prisma/client'
 
@@ -125,5 +126,43 @@ describe('filing the paper', () => {
       data: { deletedAt: new Date() },
     })
     expect(await names(broker)).toContain('pod_missing')
+  }, 180_000)
+})
+
+describe('photo folders (step 3)', () => {
+  it('files a photo into Pickup under RLS, and refuses a POD or another load’s photo', async () => {
+    const photo = await owner.document.create({
+      data: {
+        organizationId: org.organizationId,
+        companyId: org.companyId,
+        loadId: broker,
+        type: 'PHOTO',
+        r2Key: `${org.organizationId}/paper/photo-${Math.random()}`,
+        filename: 'trailer.jpg',
+        mimeType: 'image/jpeg',
+        sizeBytes: 10,
+      },
+      select: { id: true },
+    })
+    expect(
+      await inOrg((tx) => setPhotoStage(tx, broker, photo.id, 'PICKUP')),
+    ).toEqual({ ok: true })
+    // Filed against the other load: not this load's photo.
+    expect(
+      await inOrg((tx) => setPhotoStage(tx, amazon, photo.id, 'DELIVERY')),
+    ).toEqual({ ok: false, reason: 'not_found' })
+
+    const pod = await file(broker, 'POD')
+    expect(
+      await inOrg((tx) => setPhotoStage(tx, broker, pod.id, 'DELIVERY')),
+    ).toEqual({ ok: false, reason: 'not_a_photo' })
+
+    const documents = await owner.document.findMany({
+      where: { loadId: broker },
+      select: { id: true, type: true, photoStage: true, deletedAt: true },
+    })
+    const folders = photoFolders(documents)
+    expect(folders.PICKUP.map((row) => row.id)).toEqual([photo.id])
+    expect(folders.DELIVERY).toEqual([])
   }, 180_000)
 })

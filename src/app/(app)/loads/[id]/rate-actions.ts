@@ -57,7 +57,8 @@ export async function addAccessorialAction(
         // Unchecked means a cost you ate, which is the answer that costs money
         // if guessed wrong — so it is the one you have to choose.
         isBillable: formData.get('isBillable') === 'on',
-        notes: null,
+        // §7.14 item 4 — the Other pay table's Note column.
+        notes: String(formData.get('notes') ?? '').trim() || null,
       }),
   )
 
