@@ -319,8 +319,12 @@ describe('the Amazon load detail page', () => {
     'utf8',
   )
 
-  it('takes the shape from the view, which takes it from isAmazonLoad', () => {
-    expect(page).toContain('if (view.datatruckShape) {')
+  // §7.14: every load takes the shape now; what is Amazon's alone still
+  // rides on the view, which takes it from isAmazonLoad.
+  it('renders one shape for every load, the older stacked layout gone', () => {
+    expect(page).not.toContain('view.datatruckShape')
+    expect(page).not.toContain('<PipelineStrip')
+    expect(page).not.toContain('<LoadFacts')
   })
 
   // v11.20 — scheduled against actual on one row. The portal's taps write
@@ -346,7 +350,7 @@ describe('the Amazon load detail page', () => {
   })
 
   it('reads driver pay only for a role that may see money, signed-off only', () => {
-    expect(page).toContain('maySeeRate && view.datatruckShape')
+    expect(page).toMatch(/const driverPayCents = maySeeRates*?/)
     expect(page).toContain(
       "settlement: { status: { in: ['APPROVED', 'PAID'] } }",
     )
@@ -358,10 +362,12 @@ describe('the Amazon load detail page', () => {
     expect(page).toMatch(/\.\.\.\(maySeeRate\s*\?\s*\[\{ key: 'financials'/)
   })
 
-  // §7.13's flag: Zebra has no route for either, and §7.12 rules that nothing
-  // on direct-settled freight asks for an invoice.
-  it('offers no Create invoice and no Edit load', () => {
-    expect(page).not.toMatch(/createInvoice|create-invoice|Create invoice/)
+  // §7.13's flag: Zebra has no edit route, and §7.12 rules that nothing on
+  // direct-settled freight asks for an invoice. Since §7.14 Create invoice
+  // exists — on broker freight only, so an Amazon load never reaches it.
+  it('offers Amazon freight no Create invoice, and no load Edit load', () => {
+    expect(page).toMatch(/const mayInvoice =\s*view\.brokerShape &&/)
+    expect(page.match(/createLoadInvoiceAction\.bind/g)).toHaveLength(1)
     expect(page).not.toMatch(/editLoad|\/edit`|Edit load/)
   })
 })

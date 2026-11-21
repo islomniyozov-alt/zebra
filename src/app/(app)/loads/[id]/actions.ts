@@ -12,6 +12,8 @@ import {
   setStopAddress,
 } from '@/lib/loads'
 import { ReferenceError, optionalText } from '@/lib/reference'
+import { redirect } from 'next/navigation'
+import { generateInvoice } from '@/lib/invoices'
 import { DispatchConflictError } from '@/lib/dispatch'
 import { ZONE_CHOICES } from '@/lib/stop-time'
 import type { MessageKey } from '@/lib/i18n'
@@ -321,4 +323,29 @@ export async function setStopAddressAction(
 
   revalidatePath(`/loads/${loadId}`)
   revalidatePath('/loads')
+}
+
+/**
+ * Create invoice from the broker load's header (TMS §7.14 item 1). The same
+ * `generateInvoice` the /invoices queue calls, for this one load, with the
+ * line words frozen in the creator's locale as that action freezes them. A
+ * load the readiness query does not admit is refused there, so a stale page
+ * cannot invoice what the button would now refuse.
+ */
+export async function createLoadInvoiceAction(loadId: string): Promise<void> {
+  const { t } = await getLocaleContext()
+  const outcome = await withCurrentOrg('create', 'invoice', (tx, session) =>
+    generateInvoice(tx, session.organizationId, {
+      loadIds: [loadId],
+      labels: {
+        linehaul: t('rate.linehaul'),
+        fuelSurcharge: t('rate.fuelSurcharge'),
+        accessorial: (type: string) => t(`accessorial.${type}` as MessageKey),
+      },
+    }),
+  )
+  revalidatePath(`/loads/${loadId}`)
+  revalidatePath('/loads')
+  revalidatePath('/invoices')
+  if (outcome.ok) redirect(`/invoices/${outcome.invoiceId}`)
 }

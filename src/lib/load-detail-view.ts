@@ -56,10 +56,13 @@ export interface LoadDetailView {
    */
   documentsOnRelay: boolean
   /**
-   * §7.13 — the page in Datatruck's shape: header, second row, tabs, the
-   * eight-step tracker, stops and trips tables, three cards, the right rail.
+   * §7.14 — broker freight: neither Amazon nor direct-settled. EVERY load now
+   * takes §7.13's shape (header, second row, tabs, tracker, stops and trips
+   * tables, three cards, the right rail); this says which rules ride on it —
+   * Create invoice in the header, the stop time-zone editor, the five
+   * document tiles and the broker warnings.
    */
-  datatruckShape: boolean
+  brokerShape: boolean
   /**
    * Item 6 — the stops as a TABLE, which subsumes item 1's numbering.
    *
@@ -140,7 +143,9 @@ export function loadDetailView(load: {
     editStopAddress: direct,
     showFuelSurcharge: !amazon,
     documentsOnRelay: amazon,
-    datatruckShape: amazon,
+    // Every direct-settled load is an Amazon load by the predicate's Relay
+    // side, so `!amazon` is "neither".
+    brokerShape: !amazon,
     stopsAsTable: direct,
     flagMissingAddress: direct,
     notesInTimeline: direct,

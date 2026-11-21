@@ -50,6 +50,72 @@ export function readyToInvoiceWhere(): Prisma.LoadWhereInput {
   }
 }
 
+/**
+ * Why one load cannot be invoiced yet, in the order the office would fix it
+ * (TMS §7.14 item 1 — the broker load's Create invoice is disabled with the
+ * reason). Null when `readyToInvoiceWhere` admits it.
+ */
+export type InvoiceBlock =
+  | 'cancelled'
+  | 'invoiced'
+  | 'direct'
+  | 'no_pod'
+  | 'no_rate'
+  | 'not_ready'
+
+/**
+ * Pure, from the load's own fields: the reason a load the readiness query did
+ * NOT admit is held back. Never asked to decide readiness itself — the query
+ * is the rule; this only names the gap so the button can say it.
+ */
+export function invoiceBlock(load: {
+  isCancelled: boolean
+  directSettled: boolean
+  operationalStatus: string
+  totalRevenueCents: number
+  invoiceLineCount: number
+}): InvoiceBlock {
+  if (load.isCancelled) return 'cancelled'
+  if (load.invoiceLineCount > 0) return 'invoiced'
+  if (load.directSettled) return 'direct'
+  if (load.operationalStatus !== 'POD_RECEIVED') return 'no_pod'
+  if (load.totalRevenueCents <= 0) return 'no_rate'
+  return 'not_ready'
+}
+
+/**
+ * One load's readiness for Create invoice: the readiness query itself, and
+ * when it says no, the named reason. Two statements at most, inside the
+ * caller's transaction.
+ */
+export async function invoiceReadiness(
+  tx: TxClient,
+  loadId: string,
+): Promise<{ ready: true } | { ready: false; reason: InvoiceBlock }> {
+  const admitted = await tx.load.count({
+    where: { id: loadId, ...readyToInvoiceWhere() },
+  })
+  if (admitted > 0) return { ready: true }
+  const load = await tx.load.findFirst({
+    where: { id: loadId },
+    select: {
+      isCancelled: true,
+      directSettled: true,
+      operationalStatus: true,
+      totalRevenueCents: true,
+      _count: { select: { invoiceLines: true } },
+    },
+  })
+  if (!load) return { ready: false, reason: 'not_ready' }
+  return {
+    ready: false,
+    reason: invoiceBlock({
+      ...load,
+      invoiceLineCount: load._count.invoiceLines,
+    }),
+  }
+}
+
 export interface ReadyLoad {
   id: string
   loadNumber: string

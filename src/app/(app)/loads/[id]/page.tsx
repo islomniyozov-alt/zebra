@@ -6,22 +6,14 @@ import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import {
   billingLabelKey,
-  billingTone,
   operationalLabelKey,
   operationalTone,
-  TONE_STRIPE,
 } from '@/lib/status'
-import type { StatusTone } from '@/lib/status'
 import { formatAddress } from '@/lib/locations'
 import { attributionLabel, stopAttribution } from '@/lib/stop-attribution'
 import { milesSummary } from '@/lib/load-miles'
-import {
-  deliveryFactsFromStops,
-  onTimeFrom,
-  type OnTime,
-} from '@/lib/dispatch-fields'
-import { pipelineStage } from '@/lib/load-pipeline'
 import { isAssigned } from '@/lib/load-readiness'
+import { invoiceReadiness } from '@/lib/invoices'
 import {
   activityEntries,
   humaniseField,
@@ -52,12 +44,7 @@ import {
   type TripRow,
 } from './AmazonDetail'
 import { renderStopTime, ZONE_CHOICES } from '@/lib/stop-time'
-import {
-  dwellLabel,
-  dwellMinutes,
-  latenessLabel,
-  shownStopTime,
-} from '@/lib/stop-actuals'
+import { dwellLabel, dwellMinutes } from '@/lib/stop-actuals'
 import { isMessageKey, type MessageKey } from '@/lib/i18n'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
@@ -76,10 +63,8 @@ import { NoteComposer } from './NoteComposer'
 import { Copyable } from './Copyable'
 import { MilesField } from './MilesField'
 import { StopAddress } from './StopAddress'
-import { StopsTable, type StopRow } from './StopsTable'
+import type { StopRow } from './StopsTable'
 import { MilesSummary } from './MilesSummary'
-import { PipelineStrip } from './PipelineStrip'
-import { LoadFacts, type Fact } from './LoadFacts'
 import { ActivityTimeline } from './ActivityTimeline'
 import {
   addNoteAction,
@@ -91,6 +76,7 @@ import {
   setStopAddressAction,
   setStopZoneAction,
   uncancelLoadAction,
+  createLoadInvoiceAction,
 } from './actions'
 import type {
   LoadBillingStatus,
@@ -161,19 +147,6 @@ const bytes = (size: number) =>
     : size < 1024 * 1024
       ? `${Math.round(size / 1024)} KB`
       : `${(size / 1024 / 1024).toFixed(1)} MB`
-
-/**
- * SUCCESS, DANGER, MUTED — and muted is the interesting one.
- *
- * `unknown` is not a mild failure. It is the absence of a measurement, and
- * a warning tone would read as "nearly late" to somebody scanning the
- * header. Muted says nobody recorded it, which is what happened.
- */
-const ON_TIME_TONE: Record<OnTime, StatusTone> = {
-  on_time: 'success',
-  late: 'danger',
-  unknown: 'muted',
-}
 
 export default async function LoadDetailPage({
   params,
@@ -449,44 +422,6 @@ export default async function LoadDetailPage({
   // One pair of words for every copy affordance on the screen.
   const copyLabels = { copy: t('loads.copy'), copied: t('loads.copied') }
 
-  // THE HEADER'S FOUR FACTS. Every one is ungated — see LoadFacts for why
-  // that is a rule about the strip rather than a property of these four.
-  const headerFacts: Fact[] = [
-    { label: t('ref.authority'), value: load.company.name },
-    {
-      label: t('loads.column.customer'),
-      value: (
-        <Link
-          href={`/brokers/${load.customer.id}`}
-          className="hover:text-accent"
-        >
-          {load.customer.name}
-        </Link>
-      ),
-    },
-    {
-      // ITEM 1 — the unit number goes onto a gate ticket and into Relay; the
-      // driver name beside it does not.
-      label: t('loads.column.truck'),
-      value:
-        load.truck?.unitNumber == null ? null : view.copyableIdentifiers ? (
-          <Copyable
-            value={load.truck.unitNumber}
-            className="font-mono"
-            labels={copyLabels}
-          />
-        ) : (
-          <span className="font-mono">{load.truck.unitNumber}</span>
-        ),
-    },
-    {
-      label: t('loads.column.driver'),
-      value: load.driver
-        ? `${load.driver.lastName}, ${load.driver.firstName}`
-        : null,
-    },
-  ]
-
   const mayUpdate = await currentUserCan('update', 'load')
   const mayUpload = await currentUserCan('create', 'document')
 
@@ -512,26 +447,34 @@ export default async function LoadDetailPage({
         )
       : null
 
+  // §7.14 — CREATE INVOICE, on broker freight, for a role that may create an
+  // invoice. Its own read behind `invoice:create`; the readiness query is the
+  // one the /invoices queue uses, and a refusal comes back with its reason.
+  const mayInvoice =
+    view.brokerShape && (await currentUserCan('create', 'invoice'))
+  const invoiceState = mayInvoice
+    ? await withCurrentOrg('read', 'invoice', (tx) => invoiceReadiness(tx, id))
+    : null
+
   // §7.13 — DRIVER PAY FOR THE PROFIT BOX AND THE TRIPS TABLE, in its own read
   // behind `load.financials`, for the reason the filing read above is: a role
   // without it is never sent the figure. The pay the settlement engine wrote on
   // this load's statement lines, counted only from APPROVED or PAID statements
   // — a draft is a figure nobody has signed off — and null when there is none,
   // because unknown pay is not zero pay.
-  const driverPayCents =
-    maySeeRate && view.datatruckShape
-      ? await withCurrentOrg('read', 'load.financials', async (tx) => {
-          const lines = await tx.settlementLoadLine.aggregate({
-            where: {
-              loadId: id,
-              settlement: { status: { in: ['APPROVED', 'PAID'] } },
-            },
-            _sum: { amountCents: true },
-            _count: true,
-          })
-          return lines._count === 0 ? null : (lines._sum.amountCents ?? 0)
+  const driverPayCents = maySeeRate
+    ? await withCurrentOrg('read', 'load.financials', async (tx) => {
+        const lines = await tx.settlementLoadLine.aggregate({
+          where: {
+            loadId: id,
+            settlement: { status: { in: ['APPROVED', 'PAID'] } },
+          },
+          _sum: { amountCents: true },
+          _count: true,
         })
-      : null
+        return lines._count === 0 ? null : (lines._sum.amountCents ?? 0)
+      })
+    : null
 
   // ITEM 8 — the audit log, filtered by what this reader may see.
   //
@@ -619,24 +562,6 @@ export default async function LoadDetailPage({
         />
       ),
     }
-  })
-
-  const stripeTone = load.isCancelled
-    ? 'muted'
-    : operationalTone(load.operationalStatus)
-
-  // ITEM 9 — THE LOAD TRACKER. Derived here, on the server, from the two axes.
-  //
-  // ONLY THE STAGE NAME CROSSES TO THE CLIENT. `totalRevenueCents` is read to
-  // compute it and is not sent; the strip receives one of five words. See the
-  // note in PHASE-5-BRIEF on what that one word still implies for a role
-  // without `load.financials`, which is a ruling rather than a preference.
-  const stage = pipelineStage({
-    operationalStatus: load.operationalStatus,
-    billingStatus: load.billingStatus,
-    directSettled: load.directSettled,
-    totalRevenueCents: load.totalRevenueCents,
-    assigned: isAssigned(load),
   })
 
   // Blank first, and it means "derive it from the state" — the same fallback
@@ -747,26 +672,6 @@ export default async function LoadDetailPage({
     load.operationalStatus === 'DELIVERED' ||
     load.operationalStatus === 'POD_RECEIVED'
 
-  // FINISHED, for the purpose of whose clock is operative. The same two
-  // statuses `podRequired` uses: a load with a POD expected is a load whose
-  // stops have been driven.
-  const delivered = podRequired
-
-  // ── DID IT ARRIVE ON TIME ────────────────────────────────────────────
-  //
-  // NO QUERY. Every stop is already on this page, and `onTimeFrom` is the
-  // same function the list loader feeds — one rule, two sources.
-  //
-  // ONLY ONCE IT IS FINISHED. A load in transit has not failed to arrive,
-  // and a badge reading "No check-in recorded" on freight that is still
-  // moving would be a complaint about the future.
-  const onTime: OnTime | null = delivered
-    ? (() => {
-        const facts = deliveryFactsFromStops(load.stops)
-        return facts === null ? null : onTimeFrom(facts)
-      })()
-    : null
-
   const slotFor = (
     type: string,
     label: string,
@@ -839,7 +744,6 @@ export default async function LoadDetailPage({
         }}
       />
     ) : null
-  const actionsNode = actionsFor('inline')
 
   const assignmentNode =
     view.showAssignment && mayUpdate ? (
@@ -1090,444 +994,245 @@ export default async function LoadDetailPage({
     />
   )
 
-  // ── §7.13 — THE AMAZON LOAD, IN DATATRUCK'S SHAPE ────────────────────────
+  // ── §7.13 AND §7.14 — EVERY LOAD IN DATATRUCK'S SHAPE ──────────────────
   //
-  // `view.datatruckShape` is `isAmazonLoad`, and nothing else decides it. A
-  // load it does not match falls through to the layout below, unchanged.
-  if (view.datatruckShape) {
-    const copy = (value: string) => (
-      <Copyable value={value} className="font-mono" labels={copyLabels} />
-    )
-    const statusBadge = (
-      <StatusBadge
-        tone={operationalTone(load.operationalStatus)}
-        label={t(operationalLabelKey(load.operationalStatus))}
-      />
-    )
+  // Amazon freight (§7.13) and broker freight (§7.14, `view.brokerShape`)
+  // share this layout. What differs rides on the view's flags: Create invoice
+  // and the stop time-zone editor on broker freight, the Relay sentence and
+  // "On statement" on Amazon's. The older stacked layout is gone.
+  const copy = (value: string) => (
+    <Copyable value={value} className="font-mono" labels={copyLabels} />
+  )
+  const statusBadge = (
+    <StatusBadge
+      tone={operationalTone(load.operationalStatus)}
+      label={t(operationalLabelKey(load.operationalStatus))}
+    />
+  )
 
-    // THE TRACKER. One mapping, in `load-tracker.ts`. The seventh word stays
-    // "On statement" on direct-settled freight, as §7.12 ruled and §7.13 flags.
-    const step = trackerStep({
-      operationalStatus: load.operationalStatus,
-      billingStatus: load.billingStatus,
-      assigned: isAssigned(load),
-    })
-    const trackerWords = TRACKER_STEPS.map((key) =>
-      key === 'invoiced' && view.settledWord === 'onStatement'
-        ? t('loads.stageOnStatement')
-        : t(`tracker.${key}` as MessageKey),
-    )
+  // THE TRACKER. One mapping, in `load-tracker.ts`. The seventh word stays
+  // "On statement" on direct-settled freight, as §7.12 ruled and §7.13 flags.
+  const step = trackerStep({
+    operationalStatus: load.operationalStatus,
+    billingStatus: load.billingStatus,
+    assigned: isAssigned(load),
+  })
+  const trackerWords = TRACKER_STEPS.map((key) =>
+    key === 'invoiced' && view.settledWord === 'onStatement'
+      ? t('loads.stageOnStatement')
+      : t(`tracker.${key}` as MessageKey),
+  )
 
-    // THE STOPS. The window in the stop's own zone, as every stop time on
-    // this page is; the address cell is the same editor the table above uses.
-    const addressById = new Map(stopRows.map((row) => [row.id, row.address]))
-    const placeOf = (stop: (typeof load.stops)[number]) =>
-      [stop.city ?? stop.location?.city, stop.state ?? stop.location?.state]
-        .filter(Boolean)
-        .join(', ') || null
-    const amazonStops: AmazonStopRow[] = load.stops.map((stop) => {
-      const at = (when: Date | null) =>
-        when === null
-          ? null
-          : (renderStopTime(when, stop.state, {
-              fallbackZone: zone,
-              locale,
-              zone: stop.location?.timezone ?? null,
-            })?.text ?? null)
-      const start = at(stop.windowStart)
-      const end = at(stop.windowEnd)
-      return {
-        id: stop.id,
-        position: `${stop.sequence} · ${t(`stop.${stop.type}` as never)}`,
-        facility: stop.name ?? '—',
-        place: placeOf(stop),
-        zip: stop.postalCode ?? stop.location?.postalCode ?? null,
-        window:
-          start && end
-            ? `${start} – ${end}`
-            : (start ?? at(stop.scheduledAt) ?? '—'),
-        // THE ACTUALS, BESIDE THE PLAN (owner's change on accepting §7.13):
-        // the portal's taps write them, and scheduled against actual is the
-        // comparison a dispatcher reads this row for.
-        arrived: at(stop.arrivedAt) ?? '—',
-        departed: at(stop.departedAt) ?? '—',
-        address: addressById.get(stop.id) ?? null,
-      }
-    })
-
-    // THE TRIPS. Legs from `tripsFromStops`; the crew is the load's. Driver
-    // gross is the load's statement pay, shown once because no per-leg pay
-    // exists — and absent from the row entirely without `load.financials`.
-    const legs = tripsFromStops(load.stops, load.referenceNumber)
-    const tripRows: TripRow[] = legs.map((leg) => ({
-      key: `${leg.pickup.id}-${leg.delivery.id}`,
-      tripId: leg.tripId ? copy(leg.tripId) : '—',
-      status: statusBadge,
-      pickup: placeOf(leg.pickup) ?? leg.pickup.name ?? '—',
-      delivery: placeOf(leg.delivery) ?? leg.delivery.name ?? '—',
-      driver: load.driver
-        ? `${load.driver.firstName} ${load.driver.lastName}`
-        : null,
-      truck: load.truck?.unitNumber ?? null,
-      trailer: load.trailer?.unitNumber ?? null,
-      ...(maySeeRate
-        ? {
-            driverGross:
-              legs.length === 1 && driverPayCents !== null
-                ? formatCents(driverPayCents, locale)
-                : '—',
-          }
-        : {}),
-    }))
-    const tripLabels = {
-      title: t('loads.tab.trips'),
-      tripId: t('loads.trips.tripId'),
-      status: t('loads.column.status'),
-      pickup: t('loads.trips.pickup'),
-      delivery: t('loads.trips.delivery'),
-      driver: t('loads.column.driver'),
-      truck: t('loads.column.truck'),
-      trailer: t('loads.column.trailer'),
-      driverGross: t('loads.trips.driverGross'),
+  // THE STOPS. The window in the stop's own zone, as every stop time on
+  // this page is; the address cell is the same editor the table above uses.
+  const addressById = new Map(stopRows.map((row) => [row.id, row.address]))
+  const placeOf = (stop: (typeof load.stops)[number]) =>
+    [stop.city ?? stop.location?.city, stop.state ?? stop.location?.state]
+      .filter(Boolean)
+      .join(', ') || null
+  const amazonStops: AmazonStopRow[] = load.stops.map((stop) => {
+    const at = (when: Date | null) =>
+      when === null
+        ? null
+        : (renderStopTime(when, stop.state, {
+            fallbackZone: zone,
+            locale,
+            zone: stop.location?.timezone ?? null,
+          })?.text ?? null)
+    const start = at(stop.windowStart)
+    const end = at(stop.windowEnd)
+    return {
+      id: stop.id,
+      position: `${stop.sequence} · ${t(`stop.${stop.type}` as never)}`,
+      facility: stop.name ?? '—',
+      place: placeOf(stop),
+      zip: stop.postalCode ?? stop.location?.postalCode ?? null,
+      window:
+        start && end
+          ? `${start} – ${end}`
+          : (start ?? at(stop.scheduledAt) ?? '—'),
+      // THE ACTUALS, BESIDE THE PLAN (owner's change on accepting §7.13):
+      // the portal's taps write them, and scheduled against actual is the
+      // comparison a dispatcher reads this row for.
+      arrived: at(stop.arrivedAt) ?? '—',
+      departed: at(stop.departedAt) ?? '—',
+      address: addressById.get(stop.id) ?? null,
     }
-    const tripsNode =
-      tripRows.length > 0 ? (
-        <TripsTable
-          trips={tripRows}
-          showDriverGross={maySeeRate}
-          labels={tripLabels}
-        />
-      ) : null
+  })
 
-    // THE TABS THAT HAVE SOMETHING IN THEM, and the one asked for — or Load
-    // info, when the URL names a tab this load does not show.
-    const tabs: TabSpec[] = [
-      { key: 'info', label: t('loads.tab.info') },
-      ...(legs.length > 0
-        ? [{ key: 'trips', label: t('loads.tab.trips'), count: legs.length }]
-        : []),
-      {
-        key: 'documents',
-        label: t('loads.tab.documents'),
-        count: visibleDocuments.length,
-      },
-      ...(maySeeRate
-        ? [{ key: 'financials', label: t('loads.tab.financials') }]
-        : []),
-      ...(events.length > 0
-        ? [
-            {
-              key: 'status',
-              label: t('loads.tab.status'),
-              count: events.length,
-            },
-          ]
-        : []),
-    ]
-    const asked = typeof query['tab'] === 'string' ? query['tab'] : 'info'
-    const active = tabs.some((tab) => tab.key === asked) ? asked : 'info'
-
-    const author = createdBy(load, creator?.user ?? null)
-    const secondRow = [
-      {
-        label: t('loads.card.loadId'),
-        value: load.referenceNumber ? copy(load.referenceNumber) : null,
-      },
-      ...(maySeeRate
-        ? [
-            {
-              label: t('loads.totalPay'),
-              value: formatCents(load.totalRevenueCents, locale),
-            },
-          ]
-        : []),
-      {
-        label: t('loads.createdBy'),
-        value:
-          author.kind === 'person'
-            ? author.name
-            : author.kind === 'import'
-              ? t('loads.createdByImport')
-              : null,
-      },
-    ]
-
-    const box = maySeeRate
-      ? profitBox({
-          totalRevenueCents: load.totalRevenueCents,
-          accessorialsCents: load.accessorialsCents,
-          driverPayCents,
-        })
-      : null
-    const cents = (value: number | null) =>
-      value === null ? '—' : formatCents(value, locale)
-
-    return (
-      <>
-        <div className="flex flex-col gap-z3 border-b border-border bg-surface px-gutter py-z3">
-          <div className="flex items-center justify-between gap-z4">
-            <div className="flex items-center gap-z3">
-              <Link
-                href="/loads"
-                aria-label={t('loads.back')}
-                className="text-lg text-ink-2 hover:text-accent"
-              >
-                ←
-              </Link>
-              <h1 className="flex items-baseline gap-z2 text-lg font-medium text-ink">
-                <Link href="/loads" className="text-ink-2 hover:text-accent">
-                  {t('loads.breadcrumb')}
-                </Link>
-                <span aria-hidden className="text-ink-3">
-                  /
-                </span>
-                {copy(load.loadNumber)}
-              </h1>
-              {statusBadge}
-              {load.isCancelled ? (
-                <StatusBadge tone="muted" label={t('loads.cancelled')} />
-              ) : null}
-            </div>
-            {/* NEUTRAL ACTIONS ONLY in the Amazon header (§7.13, owner's
-             * review 2026-11-17): Cancel load is in the ⋮ menu. */}
-            <div className="flex items-center gap-z3">{actionsFor('menu')}</div>
-          </div>
-          <div className="max-w-[640px]">
-            <FactGrid
-              facts={secondRow}
-              columns={secondRow.length === 3 ? 3 : 2}
-            />
-          </div>
-          {load.isCancelled && load.cancelReason ? (
-            <p className="rounded-control border border-danger bg-danger-soft px-z2 py-z1 text-sm text-danger">
-              {load.cancelReason}
-            </p>
-          ) : null}
-        </div>
-
-        <Tabs
-          tabs={tabs}
-          active={active}
-          hrefFor={(key) =>
-            key === 'info' ? `/loads/${id}` : `/loads/${id}?tab=${key}`
-          }
-          label={t('loads.tabsLabel')}
-        />
-
-        <div
-          className={`min-h-0 flex-1 overflow-y-auto bg-surface-2 px-gutter py-z5 ${load.isCancelled ? 'opacity-60' : ''}`}
-        >
-          <div className="grid gap-z4 xl:grid-cols-[minmax(0,1fr)_340px]">
-            <div className="flex min-w-0 flex-col gap-z4">
-              {active === 'info' ? (
-                <>
-                  <TrackerSteps
-                    step={step}
-                    cancelled={load.isCancelled}
-                    labels={{
-                      title: t('loads.pipelineTitle'),
-                      cancelled: t('loads.cancelled'),
-                      steps: trackerWords,
-                    }}
-                  />
-                  {assignmentNode}
-                  <AmazonStops
-                    stops={amazonStops}
-                    labels={{
-                      title: t('loads.stopsTitle'),
-                      position: t('loads.colPosition'),
-                      facility: t('loads.stopsCol.facility'),
-                      place: t('loads.stopsCol.place'),
-                      zip: t('loads.stopsCol.zip'),
-                      window: t('loads.stopsCol.window'),
-                      arrived: t('loads.stopsCol.arrived'),
-                      departed: t('loads.stopsCol.departed'),
-                      address: t('loads.stopsCol.address'),
-                      empty: t('loads.stopsEmpty'),
-                    }}
-                  />
-                  {tripsNode}
-                  <div className="grid gap-z4 lg:grid-cols-3">
-                    <DetailCard title={t('loads.card.loadInfo')}>
-                      <FactGrid
-                        columns={1}
-                        facts={[
-                          {
-                            label: t('ref.authority'),
-                            value: load.company.name,
-                          },
-                          {
-                            label: t('loads.card.loadId'),
-                            value: load.referenceNumber,
-                          },
-                          {
-                            label: t('loads.card.reference'),
-                            value: load.poNumber ?? load.bolNumber,
-                          },
-                        ]}
-                      />
-                    </DetailCard>
-                    {milesNode}
-                    <DetailCard title={t('loads.column.customer')}>
-                      <Link
-                        href={`/brokers/${load.customer.id}`}
-                        className="text-sm font-medium text-ink hover:text-accent"
-                      >
-                        {load.customer.name}
-                      </Link>
-                    </DetailCard>
-                  </div>
-                </>
-              ) : null}
-              {active === 'trips' ? tripsNode : null}
-              {active === 'documents' ? documentsNode : null}
-              {active === 'financials' ? (
-                <>
-                  {rateNode}
-                  {paymentTypeNode}
-                  {factoringNode}
-                </>
-              ) : null}
-              {active === 'status' ? (
-                <ActivityTimeline
-                  entries={activityStream.filter(
-                    (entry) => entry.kind === 'status',
-                  )}
-                  truncated={false}
-                  statusLabels={statusLabels}
-                  documentTypeLabels={docTypeLabels}
-                  locale={locale}
-                  timeZone={zone}
-                  labels={{ ...activityLabels, title: t('loads.tab.status') }}
-                />
-              ) : null}
-            </div>
-
-            <aside className="flex min-w-0 flex-col gap-z4">
-              {activityNode}
-              {box ? (
-                <ProfitBoxCard
-                  title={t('profit.title')}
-                  rows={[
-                    {
-                      label: t('profit.revenue'),
-                      value: cents(box.revenueCents),
-                    },
-                    {
-                      label: t('rate.accessorials'),
-                      value: cents(box.accessorialsCents),
-                    },
-                    {
-                      label: t('profit.driverPay'),
-                      value: cents(box.driverPayCents),
-                    },
-                    {
-                      label: t('profit.grossProfit'),
-                      value: cents(box.grossProfitCents),
-                      strong: true,
-                    },
-                    {
-                      label: t('profit.margin'),
-                      value:
-                        box.marginBp === null
-                          ? '—'
-                          : formatBp(box.marginBp, locale),
-                    },
-                  ]}
-                />
-              ) : null}
-            </aside>
-          </div>
-        </div>
-      </>
-    )
+  // THE TRIPS. Legs from `tripsFromStops`; the crew is the load's. Driver
+  // gross is the load's statement pay, shown once because no per-leg pay
+  // exists — and absent from the row entirely without `load.financials`.
+  const legs = tripsFromStops(load.stops, load.referenceNumber)
+  const tripRows: TripRow[] = legs.map((leg) => ({
+    key: `${leg.pickup.id}-${leg.delivery.id}`,
+    tripId: leg.tripId ? copy(leg.tripId) : '—',
+    status: statusBadge,
+    pickup: placeOf(leg.pickup) ?? leg.pickup.name ?? '—',
+    delivery: placeOf(leg.delivery) ?? leg.delivery.name ?? '—',
+    driver: load.driver
+      ? `${load.driver.firstName} ${load.driver.lastName}`
+      : null,
+    truck: load.truck?.unitNumber ?? null,
+    trailer: load.trailer?.unitNumber ?? null,
+    ...(maySeeRate
+      ? {
+          driverGross:
+            legs.length === 1 && driverPayCents !== null
+              ? formatCents(driverPayCents, locale)
+              : '—',
+        }
+      : {}),
+  }))
+  const tripLabels = {
+    title: t('loads.tab.trips'),
+    tripId: t('loads.trips.tripId'),
+    status: t('loads.column.status'),
+    pickup: t('loads.trips.pickup'),
+    delivery: t('loads.trips.delivery'),
+    driver: t('loads.column.driver'),
+    truck: t('loads.column.truck'),
+    trailer: t('loads.column.trailer'),
+    driverGross: t('loads.trips.driverGross'),
   }
+  const tripsNode =
+    tripRows.length > 0 ? (
+      <TripsTable
+        trips={tripRows}
+        showDriverGross={maySeeRate}
+        labels={tripLabels}
+      />
+    ) : null
+
+  // THE TABS THAT HAVE SOMETHING IN THEM, and the one asked for — or Load
+  // info, when the URL names a tab this load does not show.
+  const tabs: TabSpec[] = [
+    { key: 'info', label: t('loads.tab.info') },
+    ...(legs.length > 0
+      ? [{ key: 'trips', label: t('loads.tab.trips'), count: legs.length }]
+      : []),
+    {
+      key: 'documents',
+      label: t('loads.tab.documents'),
+      count: visibleDocuments.length,
+    },
+    ...(maySeeRate
+      ? [{ key: 'financials', label: t('loads.tab.financials') }]
+      : []),
+    ...(events.length > 0
+      ? [
+          {
+            key: 'status',
+            label: t('loads.tab.status'),
+            count: events.length,
+          },
+        ]
+      : []),
+  ]
+  const asked = typeof query['tab'] === 'string' ? query['tab'] : 'info'
+  const active = tabs.some((tab) => tab.key === asked) ? asked : 'info'
+
+  const author = createdBy(load, creator?.user ?? null)
+  const secondRow = [
+    {
+      label: t('loads.card.loadId'),
+      value: load.referenceNumber ? copy(load.referenceNumber) : null,
+    },
+    ...(maySeeRate
+      ? [
+          {
+            label: t('loads.totalPay'),
+            value: formatCents(load.totalRevenueCents, locale),
+          },
+        ]
+      : []),
+    {
+      label: t('loads.createdBy'),
+      value:
+        author.kind === 'person'
+          ? author.name
+          : author.kind === 'import'
+            ? t('loads.createdByImport')
+            : null,
+    },
+  ]
+
+  const box = maySeeRate
+    ? profitBox({
+        totalRevenueCents: load.totalRevenueCents,
+        accessorialsCents: load.accessorialsCents,
+        driverPayCents,
+      })
+    : null
+  const cents = (value: number | null) =>
+    value === null ? '—' : formatCents(value, locale)
 
   return (
     <>
       <div className="flex flex-col gap-z3 border-b border-border bg-surface px-gutter py-z3">
-        <div className="flex items-baseline justify-between gap-z4">
+        <div className="flex items-center justify-between gap-z4">
           <div className="flex items-center gap-z3">
-            {/* §2 — the 3px stripe on the leading edge, never animated. */}
-            <span
-              aria-hidden
-              className={`h-z5 w-[3px] ${TONE_STRIPE[stripeTone]}`}
-            />
-            <h1 className="text-lg font-medium text-ink">
-              {view.copyableIdentifiers ? (
-                <Copyable
-                  value={load.loadNumber}
-                  className="font-mono"
-                  labels={copyLabels}
-                />
-              ) : (
-                <span className="font-mono">{load.loadNumber}</span>
-              )}
-              {/* THE NUMBER DISPATCH QUOTES TO AMAZON, in the header where it is
-               * read from rather than buried in the summary list. Our load
-               * number is what this office calls the freight; the reference is
-               * what the broker calls it, and a phone call about a trip starts
-               * with theirs. Dimmer, because it identifies the same load.
-               *
-               * ITEM 1: and on Amazon freight the reference IS the Trip ID —
-               * the string that gets pasted into Relay's search — so it is the
-               * one identifier on this screen most worth not retyping. */}
-              {load.referenceNumber === null ? null : (
-                <span className="ms-z2 font-mono text-sm text-ink-2" dir="ltr">
-                  · {t('loads.column.reference')}{' '}
-                  {view.copyableIdentifiers ? (
-                    <Copyable
-                      value={load.referenceNumber}
-                      className="font-mono"
-                      labels={copyLabels}
-                    />
-                  ) : (
-                    load.referenceNumber
-                  )}
-                </span>
-              )}
+            <Link
+              href="/loads"
+              aria-label={t('loads.back')}
+              className="text-lg text-ink-2 hover:text-accent"
+            >
+              ←
+            </Link>
+            <h1 className="flex items-baseline gap-z2 text-lg font-medium text-ink">
+              <Link href="/loads" className="text-ink-2 hover:text-accent">
+                {t('loads.breadcrumb')}
+              </Link>
+              <span aria-hidden className="text-ink-3">
+                /
+              </span>
+              {copy(load.loadNumber)}
             </h1>
-            {/* §7.2 — operational FILLED, billing OUTLINED, side by side. */}
-            <StatusBadge
-              tone={operationalTone(load.operationalStatus)}
-              label={t(operationalLabelKey(load.operationalStatus))}
-            />
-            <StatusBadge
-              tone={billingTone(load.billingStatus)}
-              variant="outlined"
-              label={t(billingLabelKey(load.billingStatus))}
-            />
+            {statusBadge}
             {load.isCancelled ? (
               <StatusBadge tone="muted" label={t('loads.cancelled')} />
             ) : null}
-            {/* THE THIRD BADGE, AND IT IS DERIVED. `unknown` shows rather
-             * than hides: a delivered load nobody checked in is a gap in
-             * the record somebody can still close, and it is the reason
-             * the driver rate below excludes it instead of guessing. */}
-            {onTime === null ? null : (
-              <StatusBadge
-                tone={ON_TIME_TONE[onTime]}
-                variant="outlined"
-                label={t(`dispatch.onTime.${onTime}` as MessageKey)}
-              />
-            )}
           </div>
-
+          {/* NEUTRAL ACTIONS ONLY in the Amazon header (§7.13, owner's
+           * review 2026-11-17): Cancel load is in the ⋮ menu. */}
           <div className="flex items-center gap-z3">
-            <p className="text-xs text-ink-3">{t('loads.stripeMeaning')}</p>
-            {actionsNode}
+            {/* §7.14 — Create invoice on broker freight: enabled exactly when
+             * the readiness query admits the load, else disabled with the
+             * reason beside it. */}
+            {invoiceState ? (
+              invoiceState.ready ? (
+                <form action={createLoadInvoiceAction.bind(null, id)}>
+                  <Button type="submit" variant="primary">
+                    {t('invoices.create')}
+                  </Button>
+                </form>
+              ) : (
+                <span className="flex items-center gap-z2">
+                  <Button
+                    type="button"
+                    variant="primary"
+                    disabled
+                    aria-describedby="invoice-block"
+                  >
+                    {t('invoices.create')}
+                  </Button>
+                  <span id="invoice-block" className="text-xs text-ink-3">
+                    {t(
+                      `loads.invoiceBlock.${invoiceState.reason}` as MessageKey,
+                    )}
+                  </span>
+                </span>
+              )
+            ) : null}
+            {actionsFor('menu')}
           </div>
         </div>
-
-        {/* THE SUMMARY CARD'S FACTS, ACROSS THE HEADER. The card that held
-         * them is gone: four short strings and a number do not need half the
-         * width of the screen, and they are the load's identity rather than
-         * its detail — the same class of thing as the number above them. */}
-        <LoadFacts facts={headerFacts} />
-
-        {/* THE CANCELLATION REASON FOLLOWS THE CANCELLED BADGE, which is in
-         * the row above. It was in the summary card only because that is where
-         * the facts were; it is a statement about the whole load. */}
+        <div className="max-w-[640px]">
+          <FactGrid
+            facts={secondRow}
+            columns={secondRow.length === 3 ? 3 : 2}
+          />
+        </div>
         {load.isCancelled && load.cancelReason ? (
           <p className="rounded-control border border-danger bg-danger-soft px-z2 py-z1 text-sm text-danger">
             {load.cancelReason}
@@ -1535,378 +1240,182 @@ export default async function LoadDetailPage({
         ) : null}
       </div>
 
+      <Tabs
+        tabs={tabs}
+        active={active}
+        hrefFor={(key) =>
+          key === 'info' ? `/loads/${id}` : `/loads/${id}?tab=${key}`
+        }
+        label={t('loads.tabsLabel')}
+      />
+
       <div
         className={`min-h-0 flex-1 overflow-y-auto bg-surface-2 px-gutter py-z5 ${load.isCancelled ? 'opacity-60' : ''}`}
       >
-        <div className="grid max-w-[1100px] gap-z4 lg:grid-cols-2">
-          {/* ITEM 9 — THE SAME FIVE WORDS ON EVERY LOAD, ABOVE EVERYTHING.
-           *
-           * It goes first and full width because it answers the question the
-           * screen is opened to answer — roughly where is this — and a summary
-           * of the whole load belongs above the panels it summarises.
-           *
-           * A STRIP IN A CONTAINER, deliberately. When the header work moves
-           * it, only this div changes; the component takes a stage and some
-           * words and does not know where on the page it is. */}
-          <div className="lg:col-span-2">
-            <PipelineStrip
-              stage={stage}
-              cancelled={load.isCancelled}
-              labels={{
-                title: t('loads.pipelineTitle'),
-                cancelled: t('loads.cancelled'),
-                upcoming: t('loads.stageUpcoming'),
-                inTransit: t('loads.stageInTransit'),
-                delivered: t('loads.stageDelivered'),
-                // §7.12 — "On statement" on direct-settled freight, where the
-                // literal word read as a demand for an invoice nobody raises.
-                invoiced: t(
-                  view.settledWord === 'onStatement'
-                    ? 'loads.stageOnStatement'
-                    : 'loads.stageInvoiced',
-                ),
-                paid: t('loads.stagePaid'),
-              }}
-            />
+        <div className="grid gap-z4 xl:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="flex min-w-0 flex-col gap-z4">
+            {active === 'info' ? (
+              <>
+                <TrackerSteps
+                  step={step}
+                  cancelled={load.isCancelled}
+                  labels={{
+                    title: t('loads.pipelineTitle'),
+                    cancelled: t('loads.cancelled'),
+                    steps: trackerWords,
+                  }}
+                />
+                {assignmentNode}
+                <AmazonStops
+                  stops={amazonStops}
+                  labels={{
+                    title: t('loads.stopsTitle'),
+                    position: t('loads.colPosition'),
+                    facility: t('loads.stopsCol.facility'),
+                    place: t('loads.stopsCol.place'),
+                    zip: t('loads.stopsCol.zip'),
+                    window: t('loads.stopsCol.window'),
+                    arrived: t('loads.stopsCol.arrived'),
+                    departed: t('loads.stopsCol.departed'),
+                    address: t('loads.stopsCol.address'),
+                    empty: t('loads.stopsEmpty'),
+                  }}
+                />
+                {/* §7.14 — the stop time-zone editor the older broker layout
+                 * carried, kept for broker freight: a dock typed once has no
+                 * export to name its zone. */}
+                {view.brokerShape && view.showStopTimezone && mayUpdate ? (
+                  <DetailCard title={t('loads.stopZones')}>
+                    <p className="text-xs text-ink-3">
+                      {t('places.timezoneHint')}
+                    </p>
+                    <ul className="mt-z2 flex flex-col gap-z2">
+                      {load.stops
+                        .filter((stop) => stop.locationId)
+                        .map((stop) => (
+                          <li key={stop.id}>
+                            <form
+                              action={setStopZoneAction.bind(
+                                null,
+                                id,
+                                stop.locationId as string,
+                              )}
+                              className="flex items-center gap-z2"
+                            >
+                              <span className="min-w-0 flex-1 truncate text-sm text-ink">
+                                {`${stop.sequence} · ${stop.name ?? placeOf(stop) ?? '—'}`}
+                              </span>
+                              <Select
+                                name="timezone"
+                                label={t('places.timezone')}
+                                labelHidden
+                                defaultValue={stop.location?.timezone ?? ''}
+                                options={zoneOptions}
+                              />
+                              <Button
+                                type="submit"
+                                variant="ghost"
+                                size="compact"
+                              >
+                                {t('ref.save')}
+                              </Button>
+                            </form>
+                          </li>
+                        ))}
+                    </ul>
+                  </DetailCard>
+                ) : null}
+                {tripsNode}
+                <div className="grid gap-z4 lg:grid-cols-3">
+                  <DetailCard title={t('loads.card.loadInfo')}>
+                    <FactGrid
+                      columns={1}
+                      facts={[
+                        {
+                          label: t('ref.authority'),
+                          value: load.company.name,
+                        },
+                        {
+                          label: t('loads.card.loadId'),
+                          value: load.referenceNumber,
+                        },
+                        {
+                          label: t('loads.card.reference'),
+                          value: load.poNumber ?? load.bolNumber,
+                        },
+                      ]}
+                    />
+                  </DetailCard>
+                  {milesNode}
+                  <DetailCard title={t('loads.column.customer')}>
+                    <Link
+                      href={`/brokers/${load.customer.id}`}
+                      className="text-sm font-medium text-ink hover:text-accent"
+                    >
+                      {load.customer.name}
+                    </Link>
+                  </DetailCard>
+                </div>
+              </>
+            ) : null}
+            {active === 'trips' ? tripsNode : null}
+            {active === 'documents' ? documentsNode : null}
+            {active === 'financials' ? (
+              <>
+                {rateNode}
+                {paymentTypeNode}
+                {factoringNode}
+              </>
+            ) : null}
+            {active === 'status' ? (
+              <ActivityTimeline
+                entries={activityStream.filter(
+                  (entry) => entry.kind === 'status',
+                )}
+                truncated={false}
+                statusLabels={statusLabels}
+                documentTypeLabels={docTypeLabels}
+                locale={locale}
+                timeZone={zone}
+                labels={{ ...activityLabels, title: t('loads.tab.status') }}
+              />
+            ) : null}
           </div>
 
-          {/* ASSIGNMENT, ON AMAZON LOADS. `load.directSettled` is the whole
-           * discriminator for this redesign — copied from the customer when the
-           * load was booked and never re-read, so freight keeps the screen it
-           * was booked under even if the broker's terms change next year.
-           *
-           * BROKER FREIGHT HAS THE IDENTICAL GAP and does not get this panel,
-           * because the ruling scoped the redesign to direct-settled loads and
-           * "Werner and broker freight keep the full screen". Lifting the gate
-           * is deleting one condition; it is flagged rather than assumed. */}
-          {assignmentNode}
-
-          {/* ITEM 6 — A TABLE FOR RELAY FREIGHT, CARDS FOR EVERYTHING ELSE.
-           *
-           * Six to eight stops read as a route in a table and as a scroll in a
-           * stack of cards. Broker freight is two stops, where eight columns
-           * of mostly empty cells would be worse than the list it replaces —
-           * so the cards below are not legacy, they are the right shape for
-           * the other kind of load. */}
-          {/* ITEM 7 — Loaded / Empty / Total, beside the stops they come from.
-           * Only on freight whose legs were classified; broker loads have no
-           * split to show and the panel would be two em dashes and a number. */}
-          {/* BOTH SPAN THE GRID, AND THAT IS WHAT MAKES THE TABLE READABLE.
-           *
-           * Eight columns inside a half-width cell meant Checked out, Schedule
-           * time and Waiting were all off-screen behind a horizontal scrollbar
-           * — three of the eight columns invisible on the panel built to show
-           * them, which is most of the point of a table gone. Miles was the
-           * other half of the same mistake: three numbers given a column of
-           * their own, standing as tall as the table beside it.
-           *
-           * So they stack, full width: the distances, then the stops they were
-           * measured over. The two-column grid still holds everything else,
-           * where a card of label/value pairs is exactly what fits in half a
-           * width. */}
-          {/* MILES ON EVERY LOAD NOW, not only on Relay freight. The panel was
-           * Amazon-only because the loaded/empty split is Relay's alone — but
-           * the TOTAL is every load's fact, and it was the summary card that
-           * carried it for broker freight. With that card gone this is where
-           * the number lives, and the split does not render where it was never
-           * measured. */}
-          <div className="lg:col-span-2">{milesNode}</div>
-
-          {view.stopsAsTable ? (
-            <div className="lg:col-span-2">
-              <StopsTable
-                stops={stopRows}
-                labels={{
-                  title: t('loads.stopsTitle'),
-                  position: t('loads.colPosition'),
-                  location: t('loads.colLocation'),
-                  checkedInAt: t('loads.colInAt'),
-                  checkedInBy: t('loads.colInBy'),
-                  checkedOutAt: t('loads.colOutAt'),
-                  checkedOutBy: t('loads.colOutBy'),
-                  scheduled: t('loads.colScheduled'),
-                  waiting: t('loads.colWaiting'),
-                  empty: t('loads.stopsEmpty'),
-                  unattributed: t('loads.stopsUnattributed'),
-                }}
+          <aside className="flex min-w-0 flex-col gap-z4">
+            {activityNode}
+            {box ? (
+              <ProfitBoxCard
+                title={t('profit.title')}
+                rows={[
+                  {
+                    label: t('profit.revenue'),
+                    value: cents(box.revenueCents),
+                  },
+                  {
+                    label: t('rate.accessorials'),
+                    value: cents(box.accessorialsCents),
+                  },
+                  {
+                    label: t('profit.driverPay'),
+                    value: cents(box.driverPayCents),
+                  },
+                  {
+                    label: t('profit.grossProfit'),
+                    value: cents(box.grossProfitCents),
+                    strong: true,
+                  },
+                  {
+                    label: t('profit.margin'),
+                    value:
+                      box.marginBp === null
+                        ? '—'
+                        : formatBp(box.marginBp, locale),
+                  },
+                ]}
               />
-            </div>
-          ) : (
-            <section className="rounded-card border border-border bg-surface p-z4">
-              <h2 className="text-md font-medium text-ink">
-                {t('loads.stops')}
-              </h2>
-              {mayUpdate ? (
-                <p className="mt-z1 text-xs text-ink-3">
-                  {t('places.timezoneHint')}
-                </p>
-              ) : null}
-              <ol className="mt-z3 flex flex-col gap-z3">
-                {load.stops.map((stop) => {
-                  // Rule 3. In the STOP's zone, with the abbreviation shown.
-                  // ACTUALS ARE OPERATIVE ON A FINISHED TRIP. The rule lives in
-                  // stop-actuals.ts so this screen and the settlement document
-                  // cannot come to different conclusions about the same stop.
-                  const shown = shownStopTime(stop, { delivered })
-                  const when = renderStopTime(shown.at, stop.state, {
-                    fallbackZone: zone,
-                    locale,
-                    zone: stop.location?.timezone ?? null,
-                  })
-                  // The plan, rendered only when it says something the actual
-                  // does not — and always labelled, never bare.
-                  const planned = renderStopTime(
-                    shown.scheduledAt,
-                    stop.state,
-                    {
-                      fallbackZone: zone,
-                      locale,
-                      zone: stop.location?.timezone ?? null,
-                    },
-                  )
-                  const departed = renderStopTime(
-                    shown.departedAt,
-                    stop.state,
-                    {
-                      fallbackZone: zone,
-                      locale,
-                      zone: stop.location?.timezone ?? null,
-                    },
-                  )
-                  const lateness = latenessLabel(shown.latenessMinutes, {
-                    late: t('stop.late'),
-                    early: t('stop.early'),
-                  })
-                  // The stop's own address wins; the facility book fills the
-                  // silence. `formatAddress` returns null rather than '' so
-                  // "has none" is distinguishable from "has an empty one".
-                  const address =
-                    formatAddress(stop) ?? formatAddress(stop.location)
-                  return (
-                    <li
-                      key={stop.id}
-                      className="border-b border-border pb-z2 last:border-b-0"
-                    >
-                      <div className="flex items-baseline justify-between gap-z2">
-                        <span className="text-xs uppercase tracking-[0.04em] text-ink-2">
-                          {t(`stop.${stop.type}` as never)}
-                        </span>
-                        <span className="flex items-baseline gap-z2">
-                          {/* A PLAN IS NEVER SHOWN AS A RECORD. On a delivered
-                           * load its neighbours are actuals, which is exactly
-                           * when an unlabelled plan reads as one. */}
-                          {shown.at && !shown.isActual ? (
-                            <span className="text-xs text-ink-3">
-                              {t('stop.scheduled')}
-                            </span>
-                          ) : null}
-                          <span
-                            className="font-mono text-sm text-ink"
-                            title={when?.zone ?? zone}
-                          >
-                            {when?.text ?? '—'}
-                          </span>
-                        </span>
-                      </div>
-                      {/* ITEM 1 — THE FACILITY CODE, which is what gets typed
-                       * into Relay to find a dock, and the leg's own Load ID
-                       * beside it, which is what Relay calls this segment.
-                       * Both are carried to another system; the city under
-                       * them is read, so it stays plain text. */}
-                      <p className="mt-z1 flex flex-wrap items-baseline gap-z2 text-base text-ink">
-                        {view.copyableIdentifiers && stop.name ? (
-                          <Copyable value={stop.name} labels={copyLabels} />
-                        ) : (
-                          (stop.name ??
-                          [stop.city, stop.state].filter(Boolean).join(', '))
-                        )}
-                        {view.copyableIdentifiers && stop.referenceNumber ? (
-                          <Copyable
-                            value={stop.referenceNumber}
-                            className="font-mono text-sm text-ink-2"
-                            labels={copyLabels}
-                          />
-                        ) : null}
-                      </p>
-                      {/* THE ADDRESS, UNDER THE NAME A DISPATCHER RECOGNISES.
-                       * The stop's own address first — somebody typed or
-                       * corrected it — and the linked facility's only when the
-                       * stop has none, which is every Relay-imported stop.
-                       *
-                       * TEXT, WITH AN EDIT BEHIND IT (item 4, round 2). An
-                       * address that resolved from the book is already correct;
-                       * eight stops of four input boxes made the screen look
-                       * like an abandoned form and buried the lane a dispatcher
-                       * came to read.
-                       *
-                       * AND ABSENCE LOOKS LIKE ABSENCE (item 2). A facility with
-                       * no street used to render as blank space, which is a
-                       * driver being sent to a code nobody has an address for
-                       * with the screen saying nothing. */}
-                      {view.flagMissingAddress ? (
-                        <StopAddress
-                          shown={address}
-                          missing={address === null}
-                          value={{
-                            addressLine1: stop.addressLine1 ?? '',
-                            city: stop.city ?? '',
-                            state: stop.state ?? '',
-                            postalCode: stop.postalCode ?? '',
-                          }}
-                          fallback={{
-                            addressLine1: stop.location?.addressLine1 ?? '',
-                            city: stop.location?.city ?? '',
-                            state: stop.location?.state ?? '',
-                            postalCode: stop.location?.postalCode ?? '',
-                          }}
-                          mayEdit={mayUpdate}
-                          save={setStopAddressAction.bind(null, id, stop.id)}
-                          labels={{
-                            street: t('loads.stopStreet'),
-                            city: t('loads.stopCity'),
-                            state: t('loads.stopState'),
-                            zip: t('loads.stopZip'),
-                            edit: t('loads.editAddress'),
-                            save: t('ref.save'),
-                            cancel: t('ref.cancel'),
-                            saving: t('loads.assignSaving'),
-                            missing: t('loads.noAddress'),
-                          }}
-                        />
-                      ) : address !== null && address !== stop.name ? (
-                        // Broker freight, unchanged: suppressed when it would
-                        // only repeat the line above — a stop typed as
-                        // "Chicago, IL" has that as its name AND its whole
-                        // address, and printing it twice is noise.
-                        <p className="mt-z1 text-sm text-ink-2" dir="ltr">
-                          {address}
-                        </p>
-                      ) : null}
-                      {/* THE PLAN BENEATH THE RECORD, small, for reference —
-                       * and the lateness Relay itself shows, derived here from
-                       * the two columns rather than stored as a third. */}
-                      {planned ? (
-                        <p className="mt-z1 text-xs text-ink-3">
-                          {t('stop.scheduled')} {planned.text}
-                          {lateness ? ` · ${lateness}` : ''}
-                        </p>
-                      ) : null}
-                      {departed ? (
-                        <p className="mt-z1 text-xs text-ink-3">
-                          {t('stop.departed')} {departed.text}
-                        </p>
-                      ) : null}
-                      {when?.approximate ? (
-                        <p className="mt-z1 text-xs text-ink-3">
-                          {t('loads.zoneApprox').replace('{zone}', when.zone)}
-                        </p>
-                      ) : null}
-                      {/* ITEM 3 — NO ZONE PICKER ON AMAZON FREIGHT.
-                       *
-                       * "America/Boise" is not a question a dispatcher can
-                       * answer, and on Relay freight it is not a question worth
-                       * asking: the export names the facility, the facility
-                       * carries its zone, and the offset column cross-checks it.
-                       * The control stays on broker freight, where a dock is
-                       * often typed once and never seen again. */}
-                      {mayUpdate && view.showStopTimezone && stop.locationId ? (
-                        <form
-                          action={setStopZoneAction.bind(
-                            null,
-                            id,
-                            stop.locationId,
-                          )}
-                          className="mt-z2 flex items-center gap-z2"
-                        >
-                          <Select
-                            name="timezone"
-                            label={t('places.timezone')}
-                            labelHidden
-                            defaultValue={stop.location?.timezone ?? ''}
-                            options={zoneOptions}
-                          />
-                          <Button type="submit" variant="ghost" size="compact">
-                            {t('ref.save')}
-                          </Button>
-                        </form>
-                      ) : null}
-                    </li>
-                  )
-                })}
-              </ol>
-            </section>
-          )}
-          {/* ITEM 4 — LINEHAUL ALONE.
-           *
-           * Dispatch read the second money box as a second rate and asked
-           * which one Relay pays; Relay pays one figure. The COLUMN stays and
-           * settlements still sum it — this hides an input, it does not change
-           * what a load can carry.
-           *
-           * MILES ARE NOT HERE. They were, for one commit, and that put an
-           * operational number behind a money gate: a dispatcher without
-           * `load.financials` never sees this panel, so the field was
-           * invisible to exactly the person the request was for. It lives in
-           * the summary now, where it already rendered.
-           *
-           * ITEM 5 — TONU ONLY. It is the one accessorial Relay pays; the
-           * rest are broker vocabulary, and a list of twelve is how somebody
-           * bills Amazon for a lumper it will never reimburse. Filtered from
-           * the shared list rather than kept as a second one, so a type added
-           * upstream reaches both screens or neither. */}
-          {rateNode}
-
-          {/* MONEY §7 — ONE BUTTON, ONE PACKET.
-           *
-           * Under the rate, because it is the last thing that happens to the
-           * money on a load: the rate is entered, the invoice is raised, and
-           * then the whole thing is sold. Behind `load.financials:update` for
-           * the same reason the rate is — this sells a receivable.
-           *
-           * THE PIECE NAMES ARE TRANSLATED HERE. `readiness.because` is an
-           * English sentence for logs and API refusals; the screen joins its
-           * own list, because "the POD and the rate confirmation" is grammar
-           * rather than concatenation and three locales do it differently. */}
-          {paymentTypeNode}
-
-          {factoringNode}
-
-          {/* ITEM 6, AS §7.13 HAS IT — NO DOCUMENT IS ASKED FOR ON AMAZON
-           * FREIGHT. Drivers upload everything into Relay, so a Rate con / POD
-           * / BOL prompt here asks for paperwork that by agreement lives
-           * somewhere else; the card says so and keeps an optional upload.
-           * Broker freight renders here unchanged.
-           *
-           * SAFE ONLY BECAUSE OF THE TRANSITION RULING. `podConfirmed` fired
-           * from exactly one place — a POD attaching — and BOTH driver
-           * settlement and the ACH reconciliation queue select on
-           * POD_RECEIVED. Removing this panel on its own would have stopped
-           * driver pay for every Amazon load, silently, with the loads looking
-           * finished on every screen. `transitionOperational` now fires the
-           * POD when a direct-settled load reaches Delivered. */}
-          {documentsNode}
-
-          {/* ── ONE ACTIVITY TIMELINE (§7.10) ────────────────────────────
-           *
-           * THIS WAS TWO PANELS AND THE COMMENT HERE ARGUED FOR TWO: "a status
-           * transition is a business event and a column write is a record of
-           * who typed something, and merging them would bury the first under
-           * the second." Overturned by the owner's ruling of 2026-10-01, which
-           * is recorded in §7.10 rather than only here.
-           *
-           * THE OLD CONCERN WAS REAL AND IS ANSWERED BY THE RAIL, not by
-           * ignoring it: a status transition carries a filled dot and a badge,
-           * a field edit carries a plain dot and a `label: old → new` list, a
-           * document carries a SQUARE. Six kinds that do not dress alike, so
-           * the business events stay findable in a stream that also holds every
-           * keystroke. What the two panels could not do is answer "what
-           * happened to this load" without somebody interleaving them by eye.
-           *
-           * FULL WIDTH, because it is now the whole history rather than half
-           * of it.
-           *
-           * WHAT IT MAY SHOW IS STILL DECIDED IN load-activity.ts. */}
-          <div className="lg:col-span-2">{activityNode}</div>
+            ) : null}
+          </aside>
         </div>
       </div>
     </>

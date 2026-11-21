@@ -163,9 +163,11 @@ describe('Cancel load lives in the ⋮ menu on the Amazon header', () => {
     expect(screen.queryByRole('button', { name: 'Load actions' })).toBeNull()
   })
 
-  it('and the Amazon header is the one that asks for the menu', () => {
+  // §7.14: every load detail takes §7.13's header now, so the page asks for
+  // the menu everywhere; the inline layout stays a component option above.
+  it('and every load header asks for the menu', () => {
     const page = readFileSync('src/app/(app)/loads/[id]/page.tsx', 'utf8')
     expect(page).toContain("{actionsFor('menu')}")
-    expect(page).toContain("const actionsNode = actionsFor('inline')")
+    expect(page).not.toContain("actionsFor('inline')")
   })
 })

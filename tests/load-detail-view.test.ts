@@ -40,7 +40,7 @@ describe('the screen a load gets', () => {
     editStopAddress: true,
     showFuelSurcharge: false,
     documentsOnRelay: true,
-    datatruckShape: true,
+    brokerShape: false,
     stopsAsTable: true,
     flagMissingAddress: true,
     notesInTimeline: true,
@@ -58,7 +58,7 @@ describe('the screen a load gets', () => {
     editStopAddress: false,
     showFuelSurcharge: true,
     documentsOnRelay: false,
-    datatruckShape: false,
+    brokerShape: true,
     stopsAsTable: false,
     flagMissingAddress: false,
     notesInTimeline: false,
@@ -83,7 +83,7 @@ describe('the screen a load gets', () => {
       ...broker,
       showFuelSurcharge: false,
       documentsOnRelay: true,
-      datatruckShape: true,
+      brokerShape: false,
       showFactoring: false,
     })
   })
