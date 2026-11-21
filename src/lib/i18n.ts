@@ -2823,6 +2823,8 @@ const en = {
   'docType.ROAD_TEST_CERTIFICATE': 'Road test certificate',
   'docType.PHOTO': 'Photo',
   'docType.OTHER': 'Other',
+  'docType.COMMERCIAL_INVOICE': 'Commercial invoice',
+  'docType.INVOICE_PACKET': 'Invoice packet',
   'claims.new.truck': 'Truck',
   'claims.new.driver': 'Driver',
   'claims.new.assetHint':
@@ -6215,6 +6217,8 @@ const ru: Dictionary = {
   'docType.ROAD_TEST_CERTIFICATE': 'Свидетельство о дорожном тесте',
   'docType.PHOTO': 'Фото',
   'docType.OTHER': 'Другое',
+  'docType.COMMERCIAL_INVOICE': 'Коммерческий инвойс',
+  'docType.INVOICE_PACKET': 'Пакет для оплаты',
   'claims.new.truck': 'Тягач',
   'claims.new.driver': 'Водитель',
   'claims.new.assetHint':

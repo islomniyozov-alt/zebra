@@ -54,6 +54,8 @@ export const DOCUMENT_TYPE_LABEL_KEYS = {
   ROAD_TEST_CERTIFICATE: 'docType.ROAD_TEST_CERTIFICATE',
   PHOTO: 'docType.PHOTO',
   OTHER: 'docType.OTHER',
+  COMMERCIAL_INVOICE: 'docType.COMMERCIAL_INVOICE',
+  INVOICE_PACKET: 'docType.INVOICE_PACKET',
 } satisfies Record<DocumentType, MessageKey>
 
 /**

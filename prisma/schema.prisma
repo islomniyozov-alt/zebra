@@ -2517,6 +2517,21 @@ model Document {
   uploadedBy       User?    @relation(fields: [uploadedByUserId], references: [id])
   uploadedAt       DateTime @default(now())
 
+  /// The folder a load photo sits in (TMS §7.14 item 4, migration 76).
+  photoStage PhotoStage?
+
+  /// An `INVOICE_PACKET`'s identity: the SHA-256 of its inputs in packet
+  /// order (each source document's hash, then the invoice id). The same
+  /// inputs reuse the stored packet; changed inputs supersede it (TMS §7.14
+  /// item 5, R4; migration 76). Null on every other document.
+  packetInputsHash String?
+  /// The packet's last send (TMS §7.14 item 6, R4): when, and to which
+  /// address. A send of the same packet to the same address inside 24 hours
+  /// is refused with this time. The audited extension writes the row naming
+  /// who sent it.
+  packetSentAt     DateTime?
+  packetSentTo     String?
+
   // The mail this arrived as an attachment of (Phase 6 §4 step 4). Spec §12
   // wants the original openable from the load, and this is the thread back to
   // it — the email keeps the message, the Document keeps the file.
@@ -2635,6 +2650,22 @@ enum DocumentType {
   ROAD_TEST_CERTIFICATE
   PHOTO
   OTHER
+  /// A customs commercial invoice the broker or shipper hands over — the
+  /// fifth tile on the broker load's Documents card (TMS §7.14, migration 76).
+  /// NOT `INVOICE_PDF`, which is Zebra's own invoice to the customer.
+  COMMERCIAL_INVOICE
+  /// The merged packet a broker or factor is sent: POD photos, POD/BOL, rate
+  /// con, invoice, in that order (TMS §7.14 item 5, migration 76). One live
+  /// packet per load per inputs hash (`Document.packetInputsHash`).
+  INVOICE_PACKET
+}
+
+/// Which of the broker load's two photo folders a `PHOTO` belongs to (TMS
+/// §7.14 item 4, migration 76). Null is a photo filed before the folders, or
+/// with no stage — it lists under neither folder and stays in Documents.
+enum PhotoStage {
+  PICKUP
+  DELIVERY
 }
 
 enum OcrStatus {
