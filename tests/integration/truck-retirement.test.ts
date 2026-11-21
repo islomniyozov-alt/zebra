@@ -235,9 +235,13 @@ describe('the removal', () => {
     const open = facts.get(ids['open']!)!
     expect(open.truckRemoved).toBe(true)
     expect(open.hasTruck).toBe(true)
-    expect(loadWarnings(open, NOW).map((w) => [w.name, w.detail])).toEqual([
-      ['truck_inactive', `seed-${nonce}`],
-    ])
+    // §7.14: the seed's broker load has no rate con, so rate_con_missing also
+    // speaks; this test is about the truck, so it reads the warnings but that one.
+    expect(
+      loadWarnings(open, NOW)
+        .filter((w) => w.name !== 'rate_con_missing')
+        .map((w) => [w.name, w.detail]),
+    ).toEqual([['truck_inactive', `seed-${nonce}`]])
     const done = facts.get(ids['done']!)!
     expect(done.truckRemoved).toBe(true)
     expect(done.isFinished).toBe(true)

@@ -298,9 +298,13 @@ describe('load facts', () => {
   it('warn about a load hours from pickup with nobody on it', async () => {
     const id = await seedLoad({ pickupAt: hours(3) })
     const facts = await inOrg((tx) => loadWarningFacts(tx, [id]))
-    expect(loadWarnings(facts.get(id)!, NOW).map((w) => w.name)).toEqual([
-      'pickup_soon_unassigned',
-    ])
+    // §7.14: a broker load with no rate con also warns rate_con_missing; this
+    // test is about the pickup, so it reads the warnings but that one.
+    expect(
+      loadWarnings(facts.get(id)!, NOW)
+        .map((w) => w.name)
+        .filter((name) => name !== 'rate_con_missing'),
+    ).toEqual(['pickup_soon_unassigned'])
   })
 
   it('warn about a cancelled load still holding a driver', async () => {
