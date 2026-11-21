@@ -134,6 +134,11 @@ export const RESOURCES = [
   // Admin
   'user',
   'company',
+  // Removing a RETIRED authority (TMS §6.3 v11.40; owner's ruling
+  // 2026-11-21): the OWNER's alone, so ADMIN is filtered from its `delete`
+  // below. Its own name so that `company:delete` — an ADMIN removing a
+  // working authority entered by mistake — is not narrowed by it.
+  'company.retired',
   'organization',
   'integration',
   'auditLog',
@@ -341,7 +346,13 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
   OWNER: new Set(EVERYTHING),
 
   // Everything an owner can do except dissolving the tenant itself.
-  ADMIN: new Set(EVERYTHING.filter((p) => p !== 'organization:delete')),
+  // And except removing a retired authority, the owner's ruling of
+  // 2026-11-21 (TMS §6.3 v11.40).
+  ADMIN: new Set(
+    EVERYTHING.filter(
+      (p) => p !== 'organization:delete' && p !== 'company.retired:delete',
+    ),
+  ),
 
   // Runs the operation and watches the numbers, but does not move money.
   MANAGER: new Set<Permission>([

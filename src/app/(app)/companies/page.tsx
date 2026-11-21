@@ -5,6 +5,7 @@ import { getLocaleContext } from '@/lib/locale'
 import { Table, type Column } from '@/components/ui/Table'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
+import { spendsCap } from '@/lib/companies'
 
 // Admin → Authorities (Phase 6 §7 flag 11).
 //
@@ -130,7 +131,7 @@ export default async function CompaniesPage() {
            * about to be refused before they fill in a form. */}
           <span className="text-sm text-ink-2">
             {t('companies.usage')
-              .replace('{used}', String(rows.length))
+              .replace('{used}', String(rows.filter(spendsCap).length))
               .replace('{limit}', String(data.limit))}
           </span>
         </div>

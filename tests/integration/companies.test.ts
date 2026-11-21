@@ -512,3 +512,72 @@ describe('retiring an authority, which is not the same as deactivating it', () =
     expect(created.isActive).toBe(true)
   }, 300_000)
 })
+
+describe('the cap counts working authorities; a retired placeholder is the owner’s to remove', () => {
+  // TMS §6.3 v11.40, owner's ruling 2026-11-21. Dev's Authorities page read
+  // "5 of 5 used" with three Retired placeholders among the five, and the
+  // group could not add the authority it runs under next. By here this
+  // organization holds at least one retired authority (AG Freight, above).
+  it('admits a new authority while retired ones would have filled the cap', async () => {
+    const working = await owner.company.count({
+      where: { organizationId, retired: false },
+    })
+    const all = await owner.company.count({ where: { organizationId } })
+    // The shape of dev: counting every row, the cap is already spent.
+    expect(all).toBeGreaterThan(working)
+    await owner.organization.update({
+      where: { id: organizationId },
+      data: { maxCompanies: working + 1 },
+    })
+
+    const admitted = await inOrg((tx) =>
+      addCompany(tx, organizationId, { name: `Next Carrier ${nonce}` }),
+    )
+    expect(admitted.ok).toBe(true)
+
+    // And the working ones still fill it.
+    const refused = await inOrg((tx) =>
+      addCompany(tx, organizationId, { name: `One Too Many ${nonce}` }),
+    )
+    expect(refused).toMatchObject({ ok: false, reason: 'limit_reached' })
+  }, 300_000)
+
+  it('removes a retired placeholder for the owner only, and audits it', async () => {
+    const { id } = await owner.company.create({
+      data: { organizationId, name: `Placeholder ${nonce}`, retired: true },
+    })
+
+    const refused = await inOrg((tx) => deleteCompany(tx, id))
+    expect(refused).toEqual({ ok: false, reason: 'owner_only' })
+    expect(await owner.company.findFirst({ where: { id } })).not.toBeNull()
+
+    const removed = await inOrg((tx) =>
+      deleteCompany(tx, id, { mayRemoveRetired: true }),
+    )
+    expect(removed).toEqual({ ok: true })
+    expect(await owner.company.findFirst({ where: { id } })).toBeNull()
+
+    const audit = await owner.auditLog.findFirst({
+      where: { organizationId, entityType: 'Company', entityId: id },
+      orderBy: { createdAt: 'desc' },
+      select: { action: true, userId: true },
+    })
+    expect(audit).toEqual({ action: 'DELETE', userId })
+  }, 300_000)
+
+  it('keeps a retired authority that carries a number, even for the owner', async () => {
+    const { id } = await owner.company.create({
+      data: {
+        organizationId,
+        name: `Numbered Retired ${nonce}`,
+        retired: true,
+        dotNumber: `9${Date.now().toString().slice(-6)}`,
+      },
+    })
+    const refused = await inOrg((tx) =>
+      deleteCompany(tx, id, { mayRemoveRetired: true }),
+    )
+    expect(refused).toEqual({ ok: false, reason: 'has_numbers' })
+    expect(await owner.company.findFirst({ where: { id } })).not.toBeNull()
+  }, 300_000)
+})

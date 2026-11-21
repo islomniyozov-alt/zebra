@@ -209,8 +209,9 @@ export async function reactivateCompanyAction(id: string): Promise<void> {
  * wall behind that, and it is the one that matters.
  */
 export async function deleteCompanyAction(id: string): Promise<void> {
+  const mayRemoveRetired = await currentUserCan('delete', 'company.retired')
   const outcome = await withCurrentOrg('delete', 'company', (tx) =>
-    deleteCompany(tx, id),
+    deleteCompany(tx, id, { mayRemoveRetired }),
   )
 
   revalidateAuthorities(id)

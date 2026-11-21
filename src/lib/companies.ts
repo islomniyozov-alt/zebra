@@ -113,6 +113,23 @@ export function listedAuthoritiesSql(
   `
 }
 
+/**
+ * WHAT SPENDS THE PLAN'S AUTHORITY CAP (TMS §6.3 v11.40; owner's ruling
+ * 2026-11-21): an authority that is not retired. A retired one holds imported
+ * freight and is never offered for new work, so it never counts; a
+ * deactivated one is still the group's own and does, or deactivating and
+ * reactivating would buy authorities the plan does not sell.
+ *
+ * ONE RULE, TWO SHAPES: `SPENDS_CAP` is the `where` `addCompany` counts with,
+ * `spendsCap` the predicate /companies' "{used} of {limit} used" counts with,
+ * and the unit test holds them to each other.
+ */
+export const SPENDS_CAP = { retired: false } as const
+
+export function spendsCap(company: { retired: boolean }): boolean {
+  return company.retired === SPENDS_CAP.retired
+}
+
 export type AddCompanyFailure =
   | 'no_name'
   | 'duplicate_name'
@@ -203,7 +220,9 @@ export async function addCompany(
   // Stated explicitly, so the function is correct on its own terms rather than
   // correct because of where it happens to be called from. Under RLS this is
   // redundant and free; off it, it is the whole thing.
-  const existing = await tx.company.count({ where: { organizationId } })
+  const existing = await tx.company.count({
+    where: { organizationId, ...SPENDS_CAP },
+  })
   if (existing >= limit) {
     return { ok: false, reason: 'limit_reached', limit }
   }
@@ -484,6 +503,40 @@ export type DeleteCompanyResult =
   | { ok: true }
   | { ok: false; reason: 'not_found' }
   | { ok: false; reason: 'has_history'; usage: CompanyUsage }
+  | { ok: false; reason: RetiredRemovalRefusal }
+
+/** Why a RETIRED authority may not be removed, beyond having history. */
+export type RetiredRemovalRefusal = 'owner_only' | 'has_numbers'
+
+const hasText = (value: string | null): boolean =>
+  value !== null && value.trim() !== ''
+
+/**
+ * A RETIRED AUTHORITY IS REMOVED BY THE OWNER, AND ONLY WHEN IT IS A
+ * PLACEHOLDER (TMS §6.3 v11.40; owner's ruling 2026-11-21): no MC number, no
+ * DOT number. A retired authority with a number is a real carrier's record and
+ * stays. `mayRemoveRetired` is `company.retired:delete`, decided in
+ * permissions.ts; the history check is `deleteCompany`'s, for every authority.
+ *
+ * Null when this rule allows it. A working authority is not this rule's
+ * business and always passes. Read by the delete and by the page that decides
+ * whether to send the control at all, so the two cannot disagree.
+ */
+export function retiredRemovalRefusal(
+  company: {
+    retired: boolean
+    mcNumber: string | null
+    dotNumber: string | null
+  },
+  mayRemoveRetired: boolean,
+): RetiredRemovalRefusal | null {
+  if (!company.retired) return null
+  if (!mayRemoveRetired) return 'owner_only'
+  if (hasText(company.mcNumber) || hasText(company.dotNumber)) {
+    return 'has_numbers'
+  }
+  return null
+}
 
 /**
  * Remove an authority that never did anything.
@@ -502,12 +555,16 @@ export type DeleteCompanyResult =
 export async function deleteCompany(
   tx: TxClient,
   id: string,
+  options: { mayRemoveRetired: boolean } = { mayRemoveRetired: false },
 ): Promise<DeleteCompanyResult> {
   const existing = await tx.company.findFirst({
     where: { id },
-    select: { id: true },
+    select: { id: true, retired: true, mcNumber: true, dotNumber: true },
   })
   if (!existing) return { ok: false, reason: 'not_found' }
+
+  const refusal = retiredRemovalRefusal(existing, options.mayRemoveRetired)
+  if (refusal) return { ok: false, reason: refusal }
 
   const usage = await companyUsage(tx, id)
   if (usage.total > 0) return { ok: false, reason: 'has_history', usage }

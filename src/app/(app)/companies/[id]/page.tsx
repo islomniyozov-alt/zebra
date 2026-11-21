@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { fmcsaLabels } from '@/components/forms/fmcsa-labels'
-import { companyUsage } from '@/lib/companies'
+import { companyUsage, retiredRemovalRefusal } from '@/lib/companies'
 import { AddCompanyForm } from '../AddCompanyForm'
 import { CompanyLifecycle } from './CompanyLifecycle'
 import {
@@ -50,6 +50,7 @@ export default async function EditCompanyPage({
         phone: true,
         email: true,
         isActive: true,
+        retired: true,
       },
     })
     if (!company) return null
@@ -63,6 +64,14 @@ export default async function EditCompanyPage({
   const { company, usage } = data
 
   const mayRemove = await currentUserCan('delete', 'company')
+  // A retired authority: the OWNER's alone, and a placeholder only (TMS §6.3
+  // v11.40). The same predicate `deleteCompany` refuses with.
+  const removable =
+    usage.total === 0 &&
+    retiredRemovalRefusal(
+      company,
+      await currentUserCan('delete', 'company.retired'),
+    ) === null
 
   const text = (value: string | null) => value ?? ''
 
@@ -122,7 +131,7 @@ export default async function EditCompanyPage({
             // action and its four sentences both. Passing them and hiding the
             // button still ships "Remove permanently" in the payload of a page
             // where removing is impossible, which the walkthrough caught.
-            {...(usage.total === 0
+            {...(removable
               ? {
                   remove: {
                     action: deleteCompanyAction.bind(null, company.id),
