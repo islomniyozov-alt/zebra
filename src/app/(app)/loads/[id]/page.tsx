@@ -1504,6 +1504,18 @@ export default async function LoadDetailPage({
               <>
                 {documentsNode}
                 {photosNode}
+                {/* §7.14 item 5 — MERGE DOWNLOAD: broker freight, for a role
+                    that may see the money (the packet carries the invoice and
+                    the rate con) and file a document (it is stored). */}
+                {view.brokerShape && maySeeRate && mayUpload ? (
+                  <a
+                    className="self-start text-xs text-ink-2 underline underline-offset-2"
+                    href={`/api/loads/${id}/invoice-packet`}
+                    download
+                  >
+                    {t('loads.mergeDownload')}
+                  </a>
+                ) : null}
               </>
             ) : null}
             {active === 'financials' ? (

@@ -3318,6 +3318,8 @@ const en = {
   'packet.markPaid': 'Mark paid',
   'packet.marking': 'Marking…',
   'packet.openPacket': 'Open packet',
+  // §7.14 item 5: the invoice packet, built and stored once per inputs.
+  'loads.mergeDownload': 'Merge download',
   'packet.missing': 'Still missing:',
   'packet.piece.INVOICE_PDF': 'the invoice',
   'packet.piece.POD': 'the POD',
@@ -6744,6 +6746,7 @@ const ru: Dictionary = {
   'packet.markPaid': 'Отметить оплаченным',
   'packet.marking': 'Отмечаем…',
   'packet.openPacket': 'Открыть пакет',
+  'loads.mergeDownload': 'Скачать пакет',
   'packet.missing': 'Не хватает:',
   'packet.piece.INVOICE_PDF': 'счёт',
   'packet.piece.POD': 'подтверждение доставки (POD)',
