@@ -1,4 +1,7 @@
-import type { PhotoStage } from '@/generated/prisma/client'
+import type {
+  LoadOperationalStatus,
+  PhotoStage,
+} from '@/generated/prisma/client'
 import type { TxClient } from './tenancy'
 
 // ---------------------------------------------------------------------------
@@ -63,4 +66,18 @@ export async function setPhotoStage(
     data: { photoStage: stage },
   })
   return { ok: true }
+}
+
+/**
+ * The folder a portal photo files into, from where the load stands when it
+ * lands (TMS §7.14 item 4, owner's ruling 2026-11-22). AT the stop only: the
+ * Loaded and Delivered taps stamp the departure (`portal-status.ts`), so a
+ * photo after them was not taken at the stop. Anything else: no folder.
+ */
+export function photoStageForStatus(
+  status: LoadOperationalStatus | null,
+): PhotoStage | null {
+  if (status === 'AT_PICKUP') return 'PICKUP'
+  if (status === 'AT_DELIVERY') return 'DELIVERY'
+  return null
 }

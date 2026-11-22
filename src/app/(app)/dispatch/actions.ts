@@ -42,6 +42,7 @@ export async function assignAction(
       moved: null,
       warnings: null,
       rateConMissing: false,
+      held: null,
     }
   }
 
@@ -57,15 +58,10 @@ export async function assignAction(
   const rateConMissing = await withCurrentOrg('read', 'load', (tx) =>
     rateConMissingForDispatch(tx, loadId),
   )
+  // A blank reason is no reason: the assignment saves and the writer holds
+  // the dispatch (TMS §7.14 item 3, owner's ruling 2026-11-22). The board
+  // does not decide that — `applyAssignmentStatus` does, for every path.
   const overrideReason = String(formData.get('overrideReason') ?? '').trim()
-  if (rateConMissing && acknowledged && overrideReason === '') {
-    return {
-      error: t('dispatch.rateConReasonRequired'),
-      moved: null,
-      warnings: [],
-      rateConMissing: true,
-    }
-  }
 
   if ((warnings.length > 0 || rateConMissing) && !acknowledged) {
     const when = (days: number) =>
@@ -85,12 +81,14 @@ export async function assignAction(
         expired: warning.status === 'expired',
       })),
       rateConMissing,
+      held: null,
     }
   }
 
   const reason = assignmentReason({
     compliance: warnings.length > 0 ? describeWarnings(warnings) : null,
-    rateConOverride: rateConMissing ? overrideReason : null,
+    rateConOverride:
+      rateConMissing && overrideReason !== '' ? overrideReason : null,
   })
 
   try {
@@ -139,9 +137,11 @@ export async function assignAction(
           },
         })
 
-        // §7 — Dispatched, automatically, through the one engine. It appears
-        // in the timeline as AUTOMATIC because that is what it is.
-        return applyAssignmentStatus(tx, loadId, session.userId)
+        // §7 — Dispatched through the one writer, which holds broker
+        // freight with no rate con unless the reason above was written.
+        return applyAssignmentStatus(tx, loadId, session.userId, undefined, {
+          rateConOverride: overrideReason,
+        })
       },
       { timeoutMs: LOAD_WRITE_TIMEOUT_MS },
     )
@@ -153,6 +153,7 @@ export async function assignAction(
     return {
       error: null,
       moved: outcome?.result === 'moved' ? t('status.DISPATCHED') : null,
+      held: outcome?.result === 'held' ? t('dispatch.held') : null,
       // Empty, not null: the board can tell "we never asked" from "we asked
       // and they went ahead".
       warnings: [],
@@ -174,6 +175,7 @@ export async function assignAction(
         moved: null,
         warnings: null,
         rateConMissing: false,
+        held: null,
       }
     }
     throw error

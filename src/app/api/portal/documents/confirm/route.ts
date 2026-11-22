@@ -37,7 +37,9 @@ export async function POST(request: Request): Promise<Response> {
       (fn) => withCurrentOrg('create', 'portal.document', fn),
       session.organizationId,
       pendingUploadId,
-      { uploadedByUserId: session.userId },
+      // A photo files into Pickup or Delivery by where the load stands
+      // (TMS §7.14 item 4); any other type ignores it.
+      { uploadedByUserId: session.userId, photoStageFromLoad: true },
     )
     return NextResponse.json(document, { status: 201 })
   } catch (error) {

@@ -29,6 +29,8 @@ import {
 } from '@/lib/load-detail-view'
 import { isAmazonLoad } from '@/lib/amazon-load'
 import { trackerStep, TRACKER_STEPS } from '@/lib/load-tracker'
+import { dispatchHeld } from '@/lib/load-status'
+import { HeldDispatch } from './HeldDispatch'
 import { tripsFromStops } from '@/lib/load-trips'
 import { formatBp, profitBox } from '@/lib/load-profit'
 import { formatCents } from '@/lib/money'
@@ -80,6 +82,7 @@ import {
   setStopZoneAction,
   uncancelLoadAction,
   createLoadInvoiceAction,
+  dispatchWithReasonAction,
 } from './actions'
 import type {
   LoadBillingStatus,
@@ -394,6 +397,9 @@ export default async function LoadDetailPage({
       // they have one AND the picker can save them. Read after the picker so
       // the control never names someone it would then refuse.
       teamMate: load.driverId ? await teamMateFor(tx, load.driverId) : null,
+      // TMS §7.14 item 3: the writer's hold, asked without writing. One read,
+      // and only for a Booked load with truck and driver.
+      held: await dispatchHeld(tx, id, load),
     }
   })
 
@@ -409,6 +415,7 @@ export default async function LoadDetailPage({
     drivers,
     creator,
     teamMate,
+    held,
   } = data
   const offeredMate =
     teamMate && drivers.some((driver) => driver.id === teamMate.id)
@@ -1350,6 +1357,18 @@ export default async function LoadDetailPage({
             columns={secondRow.length === 3 ? 3 : 2}
           />
         </div>
+        {held ? (
+          <HeldDispatch
+            action={dispatchWithReasonAction.bind(null, id)}
+            mayDispatch={mayUpdate}
+            labels={{
+              title: t('loads.heldDispatch.title'),
+              body: t('loads.heldDispatch.body'),
+              reasonLabel: t('loads.heldDispatch.reasonLabel'),
+              submit: t('loads.heldDispatch.submit'),
+            }}
+          />
+        ) : null}
         {load.isCancelled && load.cancelReason ? (
           <p className="rounded-control border border-danger bg-danger-soft px-z2 py-z1 text-sm text-danger">
             {load.cancelReason}

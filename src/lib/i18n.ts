@@ -1953,8 +1953,18 @@ const en = {
     'This does not stop the dispatch. Assign anyway if the business says so — the assignment records that you were shown this.',
   'dispatch.warnConfirm': 'Assign anyway',
   'dispatch.rateConMissing': 'No rate confirmation on this load.',
-  'dispatch.rateConReason': 'Why dispatch without it?',
-  'dispatch.rateConReasonRequired': 'Say why it goes without a rate con.',
+  'dispatch.rateConReason':
+    'Why dispatch without it? Leave blank to save the truck and hold the load at Booked until the rate con lands.',
+  'dispatch.held':
+    'Truck and driver saved. The load stays Booked until its rate con lands or someone writes why it goes without.',
+  'loads.heldDispatch.title': 'Dispatch held: no rate confirmation',
+  'loads.heldDispatch.body':
+    'Truck and driver are assigned. The load moves to Dispatched when its rate con is uploaded, or now with a reason.',
+  'loads.heldDispatch.reasonLabel': 'Why it goes without a rate con',
+  'loads.heldDispatch.submit': 'Dispatch without rate con',
+  'loads.heldDispatch.reason_required': 'Say why it goes without a rate con.',
+  'loads.heldDispatch.not_held':
+    'This load is not held — it has its rate con, or is missing a truck or driver, or has moved on.',
   'dispatch.driverKeep': 'Driving: {driver}',
   'dispatch.empty': 'Nothing scheduled.',
   'dispatch.noTrucks': 'No trucks under this authority yet.',
@@ -5399,8 +5409,18 @@ const ru: Dictionary = {
     'Это не блокирует назначение. Назначайте, если так решил бизнес — в записи назначения останется, что вам это показали.',
   'dispatch.warnConfirm': 'Всё равно назначить',
   'dispatch.rateConMissing': 'У груза нет rate con.',
-  'dispatch.rateConReason': 'Почему отправляем без него?',
-  'dispatch.rateConReasonRequired': 'Укажите, почему без rate con.',
+  'dispatch.rateConReason':
+    'Почему отправляем без него? Оставьте пустым — тягач сохранится, груз останется «Забронирован», пока не придёт rate con.',
+  'dispatch.held':
+    'Тягач и водитель сохранены. Груз остаётся «Забронирован», пока не придёт rate con или не будет указана причина.',
+  'loads.heldDispatch.title': 'Отправка задержана: нет rate con',
+  'loads.heldDispatch.body':
+    'Тягач и водитель назначены. Груз перейдёт в «Отправлен», когда загрузят rate con, или сейчас — с причиной.',
+  'loads.heldDispatch.reasonLabel': 'Почему без rate con',
+  'loads.heldDispatch.submit': 'Отправить без rate con',
+  'loads.heldDispatch.reason_required': 'Укажите, почему без rate con.',
+  'loads.heldDispatch.not_held':
+    'Груз не задержан — rate con есть, нет тягача или водителя, или груз уже в пути.',
   'dispatch.driverKeep': 'За рулём: {driver}',
   'dispatch.empty': 'Ничего не запланировано.',
   'dispatch.noTrucks': 'У этого перевозчика пока нет тягачей.',

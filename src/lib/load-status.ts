@@ -1,5 +1,6 @@
 import type { TxClient } from './tenancy'
 import { refreshBillingStatus } from './billing-status'
+import { rateConMissingForDispatch } from './dispatch'
 import type {
   LoadOperationalStatus,
   StatusSource,
@@ -296,4 +297,136 @@ export function statusForAssignment(
   // Incomplete assignment. Revert only from DISPATCHED itself — "before any
   // later state" is the whole condition, and it is why this is a rewind.
   return current === 'DISPATCHED' ? { to: 'BOOKED', rewind: true } : null
+}
+
+/** The writer held a dispatch: truck and driver saved, the load stays Booked. */
+export interface HeldOutcome {
+  result: 'held'
+  at: LoadOperationalStatus
+  reason: 'rate_con_missing'
+}
+
+/**
+ * Re-derive the operational status from the current assignment (§7).
+ *
+ * Called after anything that changes truck or driver — the create form, the
+ * edit form, the dispatch board — and after a rate con lands. Idempotent by
+ * construction: `statusForAssignment` returns null when nothing should move,
+ * and `transitionOperational` is itself idempotent.
+ *
+ * THE RATE-CON GATE IS HERE AND NOWHERE ELSE (TMS §7.14 item 3, owner's ruling
+ * 2026-11-22). Booked → Dispatched on broker freight with no live rate con is
+ * HELD — nothing written, the load stays Booked and `rate_con_missing` says
+ * why — unless the caller carries a reason in words, which then becomes the
+ * timeline note under that user's name. One predicate,
+ * `rateConMissingForDispatch`, the one the board's warning reads; a form
+ * never refuses the save, because the create form attaches the rate con in
+ * the same flow as the truck and its confirm runs this again.
+ */
+export async function applyAssignmentStatus(
+  tx: TxClient,
+  loadId: string,
+  userId: string | null,
+  /**
+   * The load's state, when the caller already has it. Saves a round trip
+   * inside a transaction with a 5 second ceiling — see `writeStops`.
+   */
+  known?: {
+    operationalStatus: LoadOperationalStatus
+    truckId: string | null
+    driverId: string | null
+  },
+  options: { rateConOverride?: string | null } = {},
+): Promise<TransitionOutcome | HeldOutcome | null> {
+  const load =
+    known ??
+    (await tx.load.findUnique({
+      where: { id: loadId },
+      select: { operationalStatus: true, truckId: true, driverId: true },
+    }))
+  if (!load) return null
+
+  const move = statusForAssignment(load.operationalStatus, {
+    truckId: load.truckId,
+    driverId: load.driverId,
+  })
+  if (!move) return null
+
+  const override = options.rateConOverride?.trim() ?? ''
+  if (
+    move.to === 'DISPATCHED' &&
+    (await rateConMissingForDispatch(tx, loadId))
+  ) {
+    if (override === '') {
+      return {
+        result: 'held',
+        at: load.operationalStatus,
+        reason: 'rate_con_missing',
+      }
+    }
+    // A person decided, in words. MANUAL, because a reason is not automatic.
+    return transitionOperational(tx, loadId, 'DISPATCHED', {
+      source: 'MANUAL',
+      userId,
+      note: override,
+    })
+  }
+
+  return transitionOperational(tx, loadId, move.to, {
+    source: 'AUTOMATIC',
+    userId,
+    allowRewind: move.rewind,
+    // Keys, localized at render. A note written in English here is a note
+    // that stays English in the Russian timeline.
+    note:
+      move.to === 'DISPATCHED'
+        ? 'status.note.assigned'
+        : 'status.note.unassigned',
+  })
+}
+
+export type DispatchWithReasonOutcome =
+  | { ok: true }
+  | { ok: false; reason: 'reason_required' | 'not_held' }
+
+/**
+ * Dispatch without rate con, from the load page: the held move, released by
+ * a reason in words. Refused blank, and refused for a load that is not held
+ * (dispatched already, missing a truck or driver, or its rate con on file —
+ * in which case the move has already happened by itself).
+ */
+export async function dispatchWithReason(
+  tx: TxClient,
+  loadId: string,
+  userId: string | null,
+  reason: string,
+): Promise<DispatchWithReasonOutcome> {
+  if (reason.trim() === '') return { ok: false, reason: 'reason_required' }
+  const outcome = await applyAssignmentStatus(tx, loadId, userId, undefined, {
+    rateConOverride: reason,
+  })
+  return outcome?.result === 'moved' && outcome.to === 'DISPATCHED'
+    ? { ok: true }
+    : { ok: false, reason: 'not_held' }
+}
+
+/**
+ * Is this load's dispatch held for want of a rate con? The writer's own two
+ * questions, asked without writing — so the page's card and the writer's
+ * hold cannot disagree (TMS §7.14 item 3).
+ */
+export async function dispatchHeld(
+  tx: TxClient,
+  loadId: string,
+  load: {
+    operationalStatus: LoadOperationalStatus
+    truckId: string | null
+    driverId: string | null
+    isCancelled: boolean
+  },
+): Promise<boolean> {
+  if (load.isCancelled) return false
+  const move = statusForAssignment(load.operationalStatus, load)
+  if (move?.to !== 'DISPATCHED') return false
+  return rateConMissingForDispatch(tx, loadId)
 }

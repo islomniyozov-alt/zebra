@@ -8,8 +8,8 @@ import type {
 import { allocateNumber } from './counters'
 import { assertAssignable, loadWindow } from './dispatch'
 import {
+  applyAssignmentStatus,
   podConfirmed,
-  statusForAssignment,
   transitionOperational,
   type TransitionOutcome,
 } from './load-status'
@@ -493,53 +493,10 @@ export async function createLoad(
     : load
 }
 
-/**
- * Re-derive the operational status from the current assignment (§7).
- *
- * Called after anything that changes truck or driver. Idempotent by
- * construction: `statusForAssignment` returns null when nothing should move,
- * and `transitionOperational` is itself idempotent.
- */
-export async function applyAssignmentStatus(
-  tx: TxClient,
-  loadId: string,
-  userId: string | null,
-  /**
-   * The load's state, when the caller already has it. Saves a round trip
-   * inside a transaction with a 5 second ceiling — see `writeStops`.
-   */
-  known?: {
-    operationalStatus: LoadOperationalStatus
-    truckId: string | null
-    driverId: string | null
-  },
-): Promise<TransitionOutcome | null> {
-  const load =
-    known ??
-    (await tx.load.findUnique({
-      where: { id: loadId },
-      select: { operationalStatus: true, truckId: true, driverId: true },
-    }))
-  if (!load) return null
-
-  const move = statusForAssignment(load.operationalStatus, {
-    truckId: load.truckId,
-    driverId: load.driverId,
-  })
-  if (!move) return null
-
-  return transitionOperational(tx, loadId, move.to, {
-    source: 'AUTOMATIC',
-    userId,
-    allowRewind: move.rewind,
-    // Keys, localized at render. A note written in English here is a note
-    // that stays English in the Russian timeline.
-    note:
-      move.to === 'DISPATCHED'
-        ? 'status.note.assigned'
-        : 'status.note.unassigned',
-  })
-}
+// THE ONE WRITER of the assignment's status lives in load-status.ts now, so
+// a rate con's confirm can reach it without importing this module (§7.14
+// item 3). Re-exported for the callers that have always found it here.
+export { applyAssignmentStatus } from './load-status'
 
 export interface UpdateLoadInput extends Partial<Omit<LoadInput, 'companyId'>> {
   stops?: StopInput[]

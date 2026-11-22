@@ -366,6 +366,11 @@ function AssignModal({
           </p>
         ) : null}
 
+        {state.held ? (
+          <p role="status" className="text-base text-ink-2">
+            {state.held}
+          </p>
+        ) : null}
         {state.error ? (
           <p role="alert" className="text-base text-danger">
             {state.error}
@@ -414,7 +419,6 @@ function AssignModal({
                 {labels.rateConReason}
                 <textarea
                   name="overrideReason"
-                  required
                   rows={2}
                   className="rounded-control border border-border bg-surface px-z2 py-z1 text-base text-ink"
                 />

@@ -1,6 +1,7 @@
 import type { DocumentType } from '@/generated/prisma/client'
 import type { TxClient } from './tenancy'
-import { podConfirmed } from './load-status'
+import { applyAssignmentStatus, podConfirmed } from './load-status'
+import { photoStageForStatus } from './load-photos'
 import {
   deleteObject,
   headObject,
@@ -398,6 +399,12 @@ export async function confirmUpload(
      * same request.
      */
     target?: { entity: TargetEntity; id: string }
+    /**
+     * File a PHOTO into the folder of the stop the load stands at (TMS §7.14
+     * item 4, owner's ruling 2026-11-22). The driver portal's confirm passes
+     * it; the office files its photos by the folder it uploaded into.
+     */
+    photoStageFromLoad?: boolean
   } = {},
 ): Promise<{ documentId: string; r2Key: string }> {
   // Tenant-scoped: another organization's mint is not found.
@@ -466,6 +473,21 @@ export async function confirmUpload(
   // The document row, the mint's deletion and the POD transition belong
   // together — a Document with no mint deleted would be swept as an orphan.
   return run(async (tx) => {
+    // One read, and only for a portal photo onto a load: where the load
+    // stands now is where the driver was when the photo landed.
+    const photoStage =
+      options.photoStageFromLoad &&
+      pending.type === 'PHOTO' &&
+      targetEntity === 'load'
+        ? photoStageForStatus(
+            (
+              await tx.load.findUnique({
+                where: { id: targetId },
+                select: { operationalStatus: true },
+              })
+            )?.operationalStatus ?? null,
+          )
+        : null
     const document = await tx.document.create({
       data: {
         organizationId,
@@ -485,6 +507,7 @@ export async function confirmUpload(
         ocrText: pending.ocrText,
         extractedJson: pending.extractedJson ?? undefined,
         ocrError: pending.ocrError,
+        ...(photoStage !== null ? { photoStage } : {}),
       },
       select: { id: true, r2Key: true },
     })
@@ -503,6 +526,17 @@ export async function confirmUpload(
     // Both are handled by the engine rather than by a condition here.
     if (pending.type === 'POD' && targetEntity === 'load') {
       await podConfirmed(tx, targetId, options.uploadedByUserId ?? null)
+    }
+
+    // TMS §7.14 item 3: a broker load held at Booked for want of a rate con
+    // moves to Dispatched the moment one lands — through the one writer, which
+    // does nothing at all for a load that was not held.
+    if (pending.type === 'RATE_CONFIRMATION' && targetEntity === 'load') {
+      await applyAssignmentStatus(
+        tx,
+        targetId,
+        options.uploadedByUserId ?? null,
+      )
     }
 
     return { documentId: document.id, r2Key: document.r2Key }

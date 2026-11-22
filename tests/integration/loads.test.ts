@@ -111,6 +111,27 @@ afterAll(async () => {
   await owner.$disconnect()
 })
 
+/**
+ * A live rate con on the load. Broker freight with none is HELD at Booked by
+ * the assignment writer (TMS §7.14 item 3), so the cases below that test the
+ * dispatch mechanism itself file the paper first — the held case has its own
+ * file, `dispatch-hold.test.ts`.
+ */
+async function rateConOn(loadId: string, companyId = alphaId) {
+  await owner.document.create({
+    data: {
+      organizationId,
+      companyId,
+      loadId,
+      type: 'RATE_CONFIRMATION',
+      r2Key: `${organizationId}/rc/${loadId}-${Math.random()}`,
+      filename: 'rc.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 10,
+    },
+  })
+}
+
 /** A truck and driver under Alpha, fresh per test that assigns. */
 async function equipment(tag: string, companyId = alphaId) {
   const truck = await inOrg((tx) =>
@@ -462,6 +483,7 @@ describe('the status engine', () => {
       }),
     )
     loadId = load.id
+    await rateConOn(loadId)
   })
 
   const statusOf = () =>
@@ -627,6 +649,7 @@ describe('cancelling', () => {
         stops: stops(day(20), day(22)),
       }),
     )
+    await rateConOn(load.id)
     const { truckId, driverId } = await equipment('cancel')
     await inOrg((tx) => updateLoad(tx, load.id, { truckId, driverId }))
 

@@ -31,6 +31,11 @@ export interface AssignState {
    * and the confirm then needs a reason in words.
    */
   rateConMissing: boolean
+  /**
+   * Set when the assignment saved and the writer HELD the dispatch: broker
+   * freight, no rate con, no reason (TMS §7.14 item 3). The load is Booked.
+   */
+  held: string | null
 }
 
 export const ASSIGN_INITIAL: AssignState = {
@@ -38,4 +43,5 @@ export const ASSIGN_INITIAL: AssignState = {
   moved: null,
   warnings: null,
   rateConMissing: false,
+  held: null,
 }

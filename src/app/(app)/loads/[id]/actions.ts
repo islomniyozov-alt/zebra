@@ -15,6 +15,7 @@ import { ReferenceError, optionalText } from '@/lib/reference'
 import { redirect } from 'next/navigation'
 import { generateInvoice } from '@/lib/invoices'
 import { setPhotoStage } from '@/lib/load-photos'
+import { dispatchWithReason } from '@/lib/load-status'
 import { DispatchConflictError } from '@/lib/dispatch'
 import { ZONE_CHOICES } from '@/lib/stop-time'
 import type { MessageKey } from '@/lib/i18n'
@@ -366,4 +367,36 @@ export async function setPhotoStageAction(
   )
   revalidatePath(`/loads/${loadId}`)
   return { ok: outcome.ok }
+}
+
+/**
+ * Dispatch without rate con (TMS §7.14 item 3). A broker load held at Booked
+ * for want of a rate con, moved by a reason in words — the reason is the
+ * timeline note, under this user's name. The rule is `dispatchWithReason`.
+ */
+export async function dispatchWithReasonAction(
+  loadId: string,
+  _previous: DetailState,
+  formData: FormData,
+): Promise<DetailState> {
+  const { t } = await getLocaleContext()
+  const outcome = await withCurrentOrg(
+    'update',
+    'load',
+    (tx, session) =>
+      dispatchWithReason(
+        tx,
+        loadId,
+        session.userId,
+        String(formData.get('reason') ?? ''),
+      ),
+    { timeoutMs: LOAD_WRITE_TIMEOUT_MS },
+  )
+  if (!outcome.ok) {
+    return { error: t(`loads.heldDispatch.${outcome.reason}`), notice: null }
+  }
+  revalidatePath(`/loads/${loadId}`)
+  revalidatePath('/loads')
+  revalidatePath('/dispatch')
+  return { error: null, notice: null }
 }
