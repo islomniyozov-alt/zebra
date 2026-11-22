@@ -3,6 +3,7 @@ import type {
   LoadOperationalStatus,
 } from '@/generated/prisma/client'
 import type { MessageKey } from './i18n'
+import { isAssigned, type AssignmentFacts } from './load-readiness'
 
 // ---------------------------------------------------------------------------
 // STATUS → TOKEN, bound once, here, and nowhere else (§3.4).
@@ -78,6 +79,27 @@ export function complianceTone(daysUntilExpiry: number): StatusTone {
 export const operationalLabelKey = (
   status: LoadOperationalStatus,
 ): MessageKey => `status.${status}` as MessageKey
+
+/** A load's pill word: its stored status, or Assigned (§3.4, v11.44). */
+export type LoadStatusWord = LoadOperationalStatus | 'ASSIGNED'
+
+/**
+ * §3.4 v11.44 — A BOOKED LOAD WITH TRUCK AND DRIVER READS "ASSIGNED".
+ *
+ * A word, not a status: the stored value stays `BOOKED`. The fact is
+ * `isAssigned` — the same one `trackerStep` reads for its third step — so the
+ * pill and the tracker cannot disagree.
+ */
+export function loadStatusWord(
+  load: { operationalStatus: LoadOperationalStatus } & AssignmentFacts,
+): LoadStatusWord {
+  return load.operationalStatus === 'BOOKED' && isAssigned(load)
+    ? 'ASSIGNED'
+    : load.operationalStatus
+}
+
+export const loadStatusWordKey = (word: LoadStatusWord): MessageKey =>
+  `status.${word}` as MessageKey
 
 export const billingLabelKey = (status: LoadBillingStatus): MessageKey =>
   `billing.${status}` as MessageKey

@@ -118,6 +118,7 @@ describe('and the render carries them', () => {
     trailer: '53-07',
     documents: 'RC · BOL',
     operationalStatus: 'IN_TRANSIT' as const,
+    statusWord: 'IN_TRANSIT',
     billingStatus: 'UNINVOICED' as const,
     rate: '$2,450.00',
     isCancelled: false,

@@ -6,6 +6,8 @@ import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import {
   billingLabelKey,
+  loadStatusWord,
+  loadStatusWordKey,
   operationalLabelKey,
   operationalTone,
 } from '@/lib/status'
@@ -1130,7 +1132,8 @@ export default async function LoadDetailPage({
   const statusBadge = (
     <StatusBadge
       tone={operationalTone(load.operationalStatus)}
-      label={t(operationalLabelKey(load.operationalStatus))}
+      // §3.4 v11.44: Booked with truck and driver reads Assigned.
+      label={t(loadStatusWordKey(loadStatusWord(load)))}
     />
   )
 

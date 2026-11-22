@@ -11,7 +11,7 @@ import { getLocaleContext } from '@/lib/locale'
 import type { MessageKey } from '@/lib/i18n'
 import { Tabs } from '@/components/ui/Tabs'
 import { LoadsTable, type LoadRow } from './LoadsTable'
-import { billingLabelKey, operationalLabelKey } from '@/lib/status'
+import { billingLabelKey, loadStatusWordKey } from '@/lib/status'
 import { readLoadListParams } from '@/lib/load-list'
 import { LOADS_GRID, readLoadListData } from '@/lib/load-list-page'
 import { documentsLabel } from '@/lib/load-list-rows'
@@ -220,6 +220,7 @@ export default async function LoadsPage({
     trailer: row.trailer ?? '—',
     documents: documentsLabel(row.documents),
     operationalStatus: row.operationalStatus,
+    statusWord: row.statusWord,
     billingStatus: row.billingStatus,
     // Money is an integer of cents everywhere until the moment it is read.
     rate: money.format(row.linehaulCents / 100),
@@ -405,9 +406,9 @@ export default async function LoadsPage({
           trailer: mayOpenTrailer,
         }}
         statusLabels={Object.fromEntries(
-          ALL_OPERATIONAL.map((status) => [
-            status,
-            t(operationalLabelKey(status)),
+          [...ALL_OPERATIONAL, 'ASSIGNED' as const].map((word) => [
+            word,
+            t(loadStatusWordKey(word)),
           ]),
         )}
         billingLabels={Object.fromEntries(

@@ -62,6 +62,8 @@ export interface LoadRow {
   /** `RC · BOL · POD`, `+n` for other kinds, or an em dash. */
   documents: string
   operationalStatus: LoadOperationalStatus
+  /** The pill's word from `loadStatusWord` (§3.4 v11.44); the tone stays the status's. */
+  statusWord: string
   billingStatus: LoadBillingStatus
   /** Pre-formatted in the request's locale. Money never crosses as a number. */
   rate: string
@@ -263,7 +265,7 @@ export function LoadsTable({
         // (§7.2).
         <StatusBadge
           tone={operationalTone(row.operationalStatus)}
-          label={statusLabels[row.operationalStatus] ?? row.operationalStatus}
+          label={statusLabels[row.statusWord] ?? row.statusWord}
           variant="filled"
         />
       ),

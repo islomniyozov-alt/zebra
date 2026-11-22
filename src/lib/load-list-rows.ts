@@ -10,6 +10,7 @@ import {
   type Warning,
 } from './warnings'
 import { asDate } from './sql-json'
+import { loadStatusWord, type LoadStatusWord } from './status'
 import { renderStopTime, stopLocalDate } from './stop-time'
 import type { TxClient } from './tenancy'
 
@@ -45,6 +46,8 @@ export interface LoadListRow {
   customerName: string
   /** Both seats when there are two, primary first. */
   drivers: { id: string; name: string }[]
+  /** The pill's word: Booked with truck and driver reads Assigned (§3.4). */
+  statusWord: LoadStatusWord
   pickup: string
   delivery: string
   /** The first pickup's and final delivery's zip, for the cell's hover. */
@@ -235,6 +238,11 @@ export function loadRowsFrom(
           id: seat.id,
           name: `${seat.firstName} ${seat.lastName}`.trim(),
         })),
+      statusWord: loadStatusWord({
+        operationalStatus: load.operationalStatus,
+        driverId: load.driver?.id ?? null,
+        truckId: load.truck?.id ?? null,
+      }),
       pickup: stopPlace(firstPickup),
       delivery: stopPlace(finalDelivery),
       pickupZip: firstPickup?.postalCode ?? null,

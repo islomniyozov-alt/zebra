@@ -923,6 +923,8 @@ const en = {
   'status.AT_DELIVERY': 'At delivery',
   'status.DELIVERED': 'Delivered',
   'status.POD_RECEIVED': 'POD received',
+  // §3.4 v11.44: a word, not a status — BOOKED with truck and driver.
+  'status.ASSIGNED': 'Assigned',
   'billing.UNINVOICED': 'Uninvoiced',
   'billing.READY_TO_INVOICE': 'Ready to invoice',
   'billing.INVOICED': 'Invoiced',
@@ -4376,6 +4378,7 @@ const ru: Dictionary = {
   'status.AT_DELIVERY': 'На выгрузке',
   'status.DELIVERED': 'Доставлен',
   'status.POD_RECEIVED': 'POD получен',
+  'status.ASSIGNED': 'Назначен',
   'billing.UNINVOICED': 'Без счёта',
   'billing.READY_TO_INVOICE': 'Готов к выставлению',
   'billing.INVOICED': 'Счёт выставлен',
