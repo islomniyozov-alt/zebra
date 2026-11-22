@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   DASHBOARD_READS,
   dashboardTimingLine,
+  packetIsolateMark,
+  packetTimingLine,
   pageTimingLine,
   shellIsolateMark,
   shellTimingLine,
@@ -152,6 +154,53 @@ describe('the spans', () => {
 // THE PAGE'S LINE (GAPS 42, owner's instruction 2026-11-12): statements and
 // wall, built once the response has gone out.
 // ---------------------------------------------------------------------------
+
+describe('the packet timing line (GAPS 44, R9)', () => {
+  it('draws the isolate tag once and counts every packet request', () => {
+    const draw = vi.fn(() => 'feed0001')
+    const first = packetIsolateMark(draw)
+    const second = packetIsolateMark(draw)
+    expect(second.isolateTag).toBe(first.isolateTag)
+    expect(second.isolatePacketRequests).toBe(first.isolatePacketRequests + 1)
+    expect(draw.mock.calls.length).toBeLessThanOrEqual(1)
+  })
+
+  it('carries exactly the named fields', () => {
+    const line = JSON.parse(
+      packetTimingLine({
+        outcome: 'built',
+        pdfBytes: 19_880_033,
+        totalMs: 7200,
+        isolate: { isolateTag: 'feed0001', isolatePacketRequests: 1 },
+        startedAt: Date.UTC(2026, 10, 22, 19, 0, 0),
+      }),
+    )
+    expect(Object.keys(line).sort()).toEqual(
+      [
+        'event',
+        'outcome',
+        'pdfBytes',
+        'totalMs',
+        'isolateTag',
+        'isolatePacketRequests',
+        'sinceModuleEvalMs',
+        'startedAt',
+      ].sort(),
+    )
+    expect(line).toMatchObject({ event: 'packet.timing', outcome: 'built' })
+  })
+
+  it('the Merge download route writes it, on every outcome', () => {
+    const route = readFileSync(
+      'src/app/api/loads/[id]/invoice-packet/route.ts',
+      'utf8',
+    )
+    expect(route).toContain('const isolate = packetIsolateMark()')
+    expect(route).toMatch(
+      /report\(\s*outcome\.ok \? \(outcome\.reused \? 'reused' : 'built'\) : outcome\.reason\.kind,/,
+    )
+  })
+})
 
 describe('the page timing line', () => {
   it('carries exactly the named fields, and a count that was not kept is null', () => {

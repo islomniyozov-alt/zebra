@@ -54,12 +54,35 @@ export function parseArgs(argv) {
   return out
 }
 
+/**
+ * The route's own `packet.timing` line from a trimmed tail event, or null.
+ * It names the isolate (a tag drawn once per isolate) and how many packet
+ * requests that isolate had served — so a CPU figure can be read as a fresh
+ * isolate's or a warm one's (GAPS 44, 2026-11-22).
+ */
+export function packetLineOf(worker) {
+  for (const entry of worker?.logs ?? []) {
+    try {
+      const line = JSON.parse(entry.message)
+      if (line?.event === 'packet.timing') return line
+    } catch {
+      // not a JSON line
+    }
+  }
+  return null
+}
+
 /** One run's verdict from its status and the worker's account of its ray. */
 export function runVerdict(run) {
   if (run.status !== 200) return `HTTP ${run.status}`
   if (!run.worker) return 'no tail event — unreadable'
   if (namesCeiling(run.worker)) return 'MEMORY CEILING'
   if (run.worker.outcome !== 'ok') return `outcome ${run.worker.outcome}`
+  // A RUN THAT DID NOT BUILD MEASURED NOTHING, and a run whose line is
+  // missing cannot say whether it built.
+  const line = packetLineOf(run.worker)
+  if (!line) return 'no packet.timing line — unreadable'
+  if (line.outcome !== 'built') return `served ${line.outcome}, not built`
   return 'ok'
 }
 
@@ -193,10 +216,13 @@ async function main() {
   }
   tail.stop()
 
-  console.log('\nrun cleared status    bytes  client   wall    cpu  worker')
+  console.log(
+    '\nrun cleared status    bytes  client   wall    cpu  isolate  nth  worker',
+  )
   for (const row of results) {
+    const line = packetLineOf(row.worker)
     console.log(
-      `${String(row.run).padStart(3)} ${String(row.cleared).padStart(7)} ${String(row.status).padStart(6)} ${String(row.bytes).padStart(8)} ${String(row.clientMs).padStart(7)} ${String(row.worker?.wallTime ?? '-').padStart(6)} ${String(row.worker?.cpuTime ?? '-').padStart(6)}  ${runVerdict(row)}${row.detail ? ` — ${row.detail}` : ''}`,
+      `${String(row.run).padStart(3)} ${String(row.cleared).padStart(7)} ${String(row.status).padStart(6)} ${String(row.bytes).padStart(8)} ${String(row.clientMs).padStart(7)} ${String(row.worker?.wallTime ?? '-').padStart(6)} ${String(row.worker?.cpuTime ?? '-').padStart(6)}  ${String(line?.isolateTag ?? '-').padEnd(8)} ${String(line?.isolatePacketRequests ?? '-').padStart(4)}  ${runVerdict(row)}${row.detail ? ` — ${row.detail}` : ''}`,
     )
   }
   const line = probeLine(results)

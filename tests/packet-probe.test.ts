@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { parseArgs, probeLine, runVerdict } from '../scripts/packet-probe.mjs'
+import {
+  packetLineOf,
+  parseArgs,
+  probeLine,
+  runVerdict,
+} from '../scripts/packet-probe.mjs'
 
 // ---------------------------------------------------------------------------
 // The packet probe's reading (BROKER-LOAD-BRIEF R9; GAPS 44): clean is every
@@ -7,7 +12,48 @@ import { parseArgs, probeLine, runVerdict } from '../scripts/packet-probe.mjs'
 // the tail never delivered is not clean.
 // ---------------------------------------------------------------------------
 
-const ok = { status: 200, worker: { outcome: 'ok', exceptions: [], logs: [] } }
+const lineOf = (outcome: string) => ({
+  level: 'log',
+  message: JSON.stringify({
+    event: 'packet.timing',
+    outcome,
+    isolateTag: 'ab12cd34',
+    isolatePacketRequests: 1,
+  }),
+})
+const ok = {
+  status: 200,
+  worker: {
+    outcome: 'ok',
+    exceptions: [],
+    logs: [
+      { level: 'log', message: '{"event":"pg.connect"}' },
+      lineOf('built'),
+    ],
+  },
+}
+
+describe('the packet probe reads the route’s own line', () => {
+  it('finds packet.timing among the other log lines', () => {
+    expect(packetLineOf(ok.worker)).toMatchObject({
+      isolateTag: 'ab12cd34',
+      isolatePacketRequests: 1,
+    })
+    expect(packetLineOf({ logs: [{ message: 'not json' }] })).toBeNull()
+  })
+
+  it('a run served from the stored packet measured nothing', () => {
+    expect(
+      runVerdict({ ...ok, worker: { ...ok.worker, logs: [lineOf('reused')] } }),
+    ).toBe('served reused, not built')
+  })
+
+  it('a run without the line cannot say it built', () => {
+    expect(runVerdict({ ...ok, worker: { ...ok.worker, logs: [] } })).toBe(
+      'no packet.timing line — unreadable',
+    )
+  })
+})
 
 describe('the packet probe', () => {
   it('reads a clean run as ok', () => {

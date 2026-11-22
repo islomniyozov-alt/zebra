@@ -188,6 +188,50 @@ export function writeTimingLater(
   }
 }
 
+// ── MERGE DOWNLOAD'S LINE: WHICH ISOLATE, AND THE HOW-MANYTH ─────────────
+//
+// GAPS 44, BROKER-LOAD-BRIEF R9 (owner's question 2026-11-22: why did the
+// CPU of three builds of the same 2 KB packet read 450, 2322, 2641 ms?). The
+// tail's `cpuTime` is per invocation and cannot say whether the isolate was
+// fresh — a fresh isolate pays module evaluation and an unoptimised first
+// pass through the code inside the same invocation. This line can: a tag
+// drawn once per isolate (lazily — workerd refuses randomness at global
+// scope) and the count of packet requests that isolate has served. Same tag
+// on two rays is one isolate; a count of 1 is that isolate's first.
+
+let isolateTag: string | null = null
+let packetRequests = 0
+
+export function packetIsolateMark(
+  drawTag: () => string = () => crypto.randomUUID().slice(0, 8),
+): { isolateTag: string; isolatePacketRequests: number } {
+  isolateTag ??= drawTag()
+  packetRequests += 1
+  return { isolateTag, isolatePacketRequests: packetRequests }
+}
+
+export function packetTimingLine(input: {
+  /** `built`, `reused`, or the refusal's kind. */
+  outcome: string
+  /** The packet's bytes when one was served, else null. */
+  pdfBytes: number | null
+  /** The I/O-advanced wall of the handler (see the note on the clock). */
+  totalMs: number
+  isolate: { isolateTag: string; isolatePacketRequests: number }
+  startedAt: number
+}): string {
+  return JSON.stringify({
+    event: 'packet.timing',
+    outcome: input.outcome,
+    pdfBytes: input.pdfBytes,
+    totalMs: input.totalMs,
+    isolateTag: input.isolate.isolateTag,
+    isolatePacketRequests: input.isolate.isolatePacketRequests,
+    sinceModuleEvalMs: input.startedAt - MODULE_LOADED_AT,
+    startedAt: new Date(input.startedAt).toISOString(),
+  })
+}
+
 export function pageTimingLine(input: {
   role: string | null
   /** Every statement the request's client sent; null when nothing counted. */

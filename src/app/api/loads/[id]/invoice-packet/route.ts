@@ -4,6 +4,12 @@ import {
   invoicePacketRefusalDetail,
 } from '@/lib/invoice-packet-store'
 import { objectBytes, putObject, r2ConfigFromEnv } from '@/lib/r2'
+import {
+  packetIsolateMark,
+  packetTimingLine,
+  stopwatch,
+  writeTimingLine,
+} from '@/lib/request-timing'
 import { apiError, authFailureResponse } from '../../../_lib/respond'
 
 // GET /api/loads/{id}/invoice-packet — Merge download (TMS §7.14 item 5).
@@ -25,6 +31,19 @@ export async function GET(
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await context.params
+  // GAPS 44 / R9: one line per request naming the isolate and its count.
+  const watch = stopwatch()
+  const isolate = packetIsolateMark()
+  const report = (outcome: string, pdfBytes: number | null) =>
+    writeTimingLine(
+      packetTimingLine({
+        outcome,
+        pdfBytes,
+        totalMs: watch.ms(),
+        isolate,
+        startedAt: watch.startedAt,
+      }),
+    )
 
   try {
     const config = r2ConfigFromEnv()
@@ -43,6 +62,10 @@ export async function GET(
       id,
     )
 
+    report(
+      outcome.ok ? (outcome.reused ? 'reused' : 'built') : outcome.reason.kind,
+      outcome.ok ? outcome.pdf.byteLength : null,
+    )
     if (!outcome.ok) {
       if (outcome.reason.kind === 'load_not_found') {
         return apiError(404, 'not_found', 'No such load.')
