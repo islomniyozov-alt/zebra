@@ -58,6 +58,12 @@ Profit box rail) for every load that is not Amazon, plus:
   assignment and dispatch are one act today (truck + driver ⇒ `DISPATCHED`),
   the gate sits on that act. Alternative: let assignment through and hold the
   status at Booked — rejected, it invents a second dispatch step.
+  **SUPERSEDED 2026-11-22 by the owner (TMS v11.43):** the alternative is the
+  rule. The gate lives on the move to Dispatched, in `applyAssignmentStatus`;
+  create, edit and board save truck and driver and the load is held at Booked
+  until the rate con lands or a reason is written (board, or Dispatch without
+  rate con on the load page). One predicate, `rateConMissingForDispatch`.
+  Built in 12d0993.
 - **R3 — Migration 76:** `DocumentType` gains `COMMERCIAL_INVOICE` and
   `INVOICE_PACKET`; `Document` gains `photoStage` (`PICKUP` | `DELIVERY`,
   nullable) for the two photo folders, and `packetInputsHash` (nullable) for
