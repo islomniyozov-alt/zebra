@@ -81,22 +81,26 @@ describe('the stop time-zone editor', () => {
   })
 })
 
-describe('the rate-con hold on the dispatch board (step 2)', () => {
+describe('the rate-con warning on the dispatch board (step 2; v11.43)', () => {
   const action = readFileSync('src/app/(app)/dispatch/actions.ts', 'utf8')
 
-  it('is asked on every assignment, and an acknowledgement needs words', () => {
+  it('is shown on every assignment before it saves', () => {
     expect(action).toContain('rateConMissingForDispatch(tx, loadId)')
-    expect(action).toMatch(
-      /if \(rateConMissing && acknowledged && overrideReason === ''\) \{/,
-    )
     expect(action).toMatch(
       /if \(\(warnings\.length > 0 \|\| rateConMissing\) && !acknowledged\) \{/,
     )
   })
 
-  it('writes what was dispatched over onto the assignment row', () => {
+  it('a blank reason is not refused — the writer holds instead (v11.43)', () => {
+    expect(action).not.toMatch(/overrideReason === ''\) \{\s*return/)
     expect(action).toContain(
-      'rateConOverride: rateConMissing ? overrideReason : null',
+      "held: outcome?.result === 'held' ? t('dispatch.held') : null,",
+    )
+  })
+
+  it('writes a written reason onto the assignment row', () => {
+    expect(action).toMatch(
+      /rateConOverride:\s*rateConMissing && overrideReason !== '' \? overrideReason : null,/,
     )
     expect(action).toContain('...(reason !== null ? { reason } : {}),')
   })
