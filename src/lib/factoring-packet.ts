@@ -245,42 +245,10 @@ export function buildFactoringPacket(input: {
     for (const part of input.parts.filter(
       (candidate) => candidate.type === type,
     )) {
-      if (part.mimeType.startsWith('image/')) {
-        if (!jpegSize(part.bytes)) {
-          return { ok: false, reason: { kind: 'unreadable_image', type } }
-        }
-        pages.push({ kind: 'image', jpeg: part.bytes })
-        order.push(type)
-        continue
-      }
-      // A PDF PART CONTRIBUTES ITS OWN PAGES, COPIED.
-      //
-      // It used to contribute the TEXT spliced out of its content streams,
-      // which worked only for documents this system wrote and silently worked
-      // for nothing else. `importPdfPages` copies each page's dictionary with
-      // everything it reaches, so a broker's agreement arrives as the broker's
-      // agreement — its fonts, its images, its layout.
-      const imported = importPdfPages(part.bytes)
-      if (!imported.ok) {
-        // `no_pages` KEEPS ITS OLD NAME. A document that was read and has no
-        // page in it is the same fact `no_pages_from` has always carried, and
-        // it is a different fault from a file that could not be read at all —
-        // which is what the other names are for.
-        return {
-          ok: false,
-          reason:
-            imported.reason.kind === 'no_pages'
-              ? { kind: 'no_pages_from', type, filename: part.filename ?? '' }
-              : {
-                  kind: 'unimportable',
-                  type,
-                  filename: part.filename ?? '',
-                  why: imported.reason.kind,
-                },
-        }
-      }
-      for (let page = 0; page < imported.document.pages.length; page++) {
-        pages.push({ kind: 'imported', document: imported.document, page })
+      const read = partPages(part)
+      if (!read.ok) return read
+      for (const page of read.pages) {
+        pages.push(page)
         order.push(type)
       }
     }
@@ -291,5 +259,57 @@ export function buildFactoringPacket(input: {
     pdf: assemblePacketPdf(pages),
     pageCount: pages.length,
     order,
+  }
+}
+
+/**
+ * One document's pages for a packet: a JPEG as one full page, a PDF's own
+ * pages copied whole — or the refusal that names it. Shared by the factoring
+ * packet and the invoice packet (`invoice-packet.ts`), so the two can never
+ * read the same file differently.
+ */
+export function partPages(
+  part: PacketPart,
+): { ok: true; pages: PacketPage[] } | { ok: false; reason: PacketRefusal } {
+  const type = part.type
+  if (part.mimeType.startsWith('image/')) {
+    if (!jpegSize(part.bytes)) {
+      return { ok: false, reason: { kind: 'unreadable_image', type } }
+    }
+    return { ok: true, pages: [{ kind: 'image', jpeg: part.bytes }] }
+  }
+  // A PDF PART CONTRIBUTES ITS OWN PAGES, COPIED.
+  //
+  // It used to contribute the TEXT spliced out of its content streams,
+  // which worked only for documents this system wrote and silently worked
+  // for nothing else. `importPdfPages` copies each page's dictionary with
+  // everything it reaches, so a broker's agreement arrives as the broker's
+  // agreement — its fonts, its images, its layout.
+  const imported = importPdfPages(part.bytes)
+  if (!imported.ok) {
+    // `no_pages` KEEPS ITS OLD NAME. A document that was read and has no
+    // page in it is the same fact `no_pages_from` has always carried, and
+    // it is a different fault from a file that could not be read at all —
+    // which is what the other names are for.
+    return {
+      ok: false,
+      reason:
+        imported.reason.kind === 'no_pages'
+          ? { kind: 'no_pages_from', type, filename: part.filename ?? '' }
+          : {
+              kind: 'unimportable',
+              type,
+              filename: part.filename ?? '',
+              why: imported.reason.kind,
+            },
+    }
+  }
+  return {
+    ok: true,
+    pages: imported.document.pages.map((_, page) => ({
+      kind: 'imported' as const,
+      document: imported.document,
+      page,
+    })),
   }
 }
