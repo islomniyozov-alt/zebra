@@ -191,6 +191,8 @@ export type InvoicePacketDownload =
       documentId: string
       /** True when the stored packet answered and nothing was built. */
       reused: boolean
+      /** The invoice inside the packet, when one exists (Merge & send marks it sent). */
+      invoiceId: string | null
     }
   | { ok: false; reason: InvoicePacketPlanRefusal }
 
@@ -218,6 +220,7 @@ export async function invoicePacketForLoad(
         filename,
         documentId: plan.reuse.id,
         reused: true,
+        invoiceId: plan.invoiceId,
       }
     }
   }
@@ -282,6 +285,7 @@ export async function invoicePacketForLoad(
       filename,
       documentId: stored.documentId,
       reused: true,
+      invoiceId: plan.invoiceId,
     }
   }
   return {
@@ -290,6 +294,7 @@ export async function invoicePacketForLoad(
     filename,
     documentId: stored.documentId,
     reused: false,
+    invoiceId: plan.invoiceId,
   }
 }
 

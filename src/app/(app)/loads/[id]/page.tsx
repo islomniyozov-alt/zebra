@@ -33,6 +33,12 @@ import { isAmazonLoad } from '@/lib/amazon-load'
 import { trackerStep, TRACKER_STEPS } from '@/lib/load-tracker'
 import { dispatchHeld } from '@/lib/load-status'
 import { HeldDispatch } from './HeldDispatch'
+import { MergeSend } from './MergeSend'
+import { sendInvoicePacketAction } from './packet-send-actions'
+import {
+  packetRecipientFor,
+  packetSendFactsFor,
+} from '@/lib/invoice-packet-send'
 import { tripsFromStops } from '@/lib/load-trips'
 import { formatBp, profitBox } from '@/lib/load-profit'
 import { formatCents } from '@/lib/money'
@@ -466,9 +472,38 @@ export default async function LoadDetailPage({
   // one the /invoices queue uses, and a refusal comes back with its reason.
   const mayInvoice =
     view.brokerShape && (await currentUserCan('create', 'invoice'))
-  const invoiceState = mayInvoice
-    ? await withCurrentOrg('read', 'invoice', (tx) => invoiceReadiness(tx, id))
+  // §7.14 item 6 — MERGE & SEND's recipient rides in the SAME transaction as
+  // the readiness read (one statement more, no transaction more), and only
+  // for the role that may send: the address never reaches another payload.
+  const maySend =
+    mayInvoice &&
+    maySeeRate &&
+    mayUpload &&
+    (await currentUserCan('update', 'invoice'))
+  const invoiceRead = mayInvoice
+    ? await withCurrentOrg('read', 'invoice', async (tx) => ({
+        readiness: await invoiceReadiness(tx, id),
+        send: maySend ? await packetSendFactsFor(tx, id) : null,
+      }))
     : null
+  const invoiceState = invoiceRead?.readiness ?? null
+  const sendRecipient = invoiceRead?.send
+    ? packetRecipientFor(invoiceRead.send.load)
+    : null
+  const mergeSendRecipient:
+    | { to: string }
+    | { missing: string; href: string }
+    | null =
+    sendRecipient === null
+      ? null
+      : sendRecipient.ok
+        ? { to: sendRecipient.to }
+        : sendRecipient.kind === 'no_address'
+          ? {
+              missing: t(`loads.mergeSend.noAddress.${sendRecipient.field}`),
+              href: sendRecipient.href,
+            }
+          : null
 
   // §7.13 — DRIVER PAY FOR THE PROFIT BOX AND THE TRIPS TABLE, in its own read
   // behind `load.financials`, for the reason the filing read above is: a role
@@ -1515,6 +1550,21 @@ export default async function LoadDetailPage({
                   >
                     {t('loads.mergeDownload')}
                   </a>
+                ) : null}
+                {/* §7.14 item 6 — MERGE & SEND: the same gate plus the role
+                    that marks an invoice sent; the address only reaches the
+                    page for that role. Direct and Amazon freight: nothing. */}
+                {mergeSendRecipient ? (
+                  <MergeSend
+                    action={sendInvoicePacketAction.bind(null, id)}
+                    recipient={mergeSendRecipient}
+                    labels={{
+                      send: t('loads.mergeSend'),
+                      sending: t('loads.mergeSend.sending'),
+                      to: t('loads.mergeSend.to'),
+                      fix: t('loads.mergeSend.fix'),
+                    }}
+                  />
                 ) : null}
               </>
             ) : null}

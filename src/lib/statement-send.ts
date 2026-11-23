@@ -160,6 +160,15 @@ export async function sendStatementToDriver(
   const sent = await (options.send ?? ((m: EmailMessage) => sendEmail(m)))(
     message,
   )
-  if (!sent.ok) return { ok: false, reason: sent.reason }
+  if (!sent.ok) {
+    // A statement mail is a link and a sentence — no attachment — so it
+    // cannot reach Resend's 40 MB. Said, not mapped onto another reason.
+    if (sent.reason === 'too_large') {
+      throw new Error(
+        'statement mail over the email limit: it has no attachment',
+      )
+    }
+    return { ok: false, reason: sent.reason }
+  }
   return { ok: true, to }
 }

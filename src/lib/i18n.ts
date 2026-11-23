@@ -3324,6 +3324,25 @@ const en = {
   'packet.openPacket': 'Open packet',
   // §7.14 item 5: the invoice packet, built and stored once per inputs.
   'loads.mergeDownload': 'Merge download',
+  'loads.mergeSend': 'Merge & send',
+  'loads.mergeSend.sending': 'Sending…',
+  'loads.mergeSend.to': 'Sends to {to}',
+  'loads.mergeSend.fix': 'Add it',
+  'loads.mergeSend.sent': 'Sent to {to} at {at}.',
+  'loads.mergeSend.sentRecently':
+    'Already sent to {to} at {at} — the same packet goes to the same address once a day.',
+  'loads.mergeSend.notOffered': 'This load is not sent as a packet.',
+  'loads.mergeSend.notFound': 'No such load.',
+  'loads.mergeSend.noAddress.billing_email':
+    'The customer has no billing email.',
+  'loads.mergeSend.noAddress.factor_email':
+    'The factoring company has no email.',
+  'loads.mergeSend.noAddress.factoring_company':
+    'This load is Factored and names no factoring company.',
+  'loads.mergeSend.failed':
+    'The email service refused or could not be reached; nothing was sent. Try again in a minute.',
+  'loads.mergeSend.tooLarge':
+    'The packet is too large for email (over 40 MB once encoded). Use Merge download.',
   'packet.missing': 'Still missing:',
   'packet.piece.INVOICE_PDF': 'the invoice',
   'packet.piece.POD': 'the POD',
@@ -6755,6 +6774,24 @@ const ru: Dictionary = {
   'packet.marking': 'Отмечаем…',
   'packet.openPacket': 'Открыть пакет',
   'loads.mergeDownload': 'Скачать пакет',
+  'loads.mergeSend': 'Собрать и отправить',
+  'loads.mergeSend.sending': 'Отправка…',
+  'loads.mergeSend.to': 'Получатель: {to}',
+  'loads.mergeSend.fix': 'Добавить',
+  'loads.mergeSend.sent': 'Отправлено на {to} в {at}.',
+  'loads.mergeSend.sentRecently':
+    'Уже отправлено на {to} в {at} — один и тот же пакет на один адрес отправляется раз в сутки.',
+  'loads.mergeSend.notOffered': 'Этот груз не отправляется пакетом.',
+  'loads.mergeSend.notFound': 'Такого груза нет.',
+  'loads.mergeSend.noAddress.billing_email': 'У клиента нет email для счетов.',
+  'loads.mergeSend.noAddress.factor_email':
+    'У факторинговой компании нет email.',
+  'loads.mergeSend.noAddress.factoring_company':
+    'Груз на факторинге, но факторинговая компания не указана.',
+  'loads.mergeSend.failed':
+    'Почтовый сервис отказал или недоступен; ничего не отправлено. Повторите через минуту.',
+  'loads.mergeSend.tooLarge':
+    'Пакет слишком велик для email (больше 40 МБ после кодирования). Используйте «Скачать пакет».',
   'packet.missing': 'Не хватает:',
   'packet.piece.INVOICE_PDF': 'счёт',
   'packet.piece.POD': 'подтверждение доставки (POD)',

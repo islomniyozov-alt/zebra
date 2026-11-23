@@ -39,14 +39,119 @@ export interface EmailMessage {
   /** Plain text. Always sent — some clients never render the HTML part. */
   text: string
   html: string
+  /** Where a reply goes, when it should not go to the sender. */
+  replyTo?: string | null
+  /** Files, sent as Base64 inside the JSON body (Resend's only form). */
+  attachments?: readonly EmailAttachment[]
 }
+
+export interface EmailAttachment {
+  filename: string
+  content: Uint8Array
+}
+
+/**
+ * Resend's limit on one email, attachments included AFTER Base64 encoding.
+ * A body over it is refused here, by name, before the network — Resend's own
+ * refusal of a 45 MB upload would cost the isolate the upload first.
+ */
+export const RESEND_MAX_REQUEST_BYTES = 40 * 1024 * 1024
 
 export type SendResult =
   | { ok: true; id: string }
   | {
       ok: false
-      reason: 'not_configured' | 'rejected' | 'unreachable' | 'misconfigured'
+      reason:
+        | 'not_configured'
+        | 'rejected'
+        | 'unreachable'
+        | 'misconfigured'
+        | 'too_large'
     }
+
+const BASE64 =
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+/** Base64 written straight into bytes — never a string the size of the file. */
+export function base64Bytes(bytes: Uint8Array): Uint8Array {
+  const out = new Uint8Array(Math.ceil(bytes.length / 3) * 4)
+  let o = 0
+  let i = 0
+  for (; i + 2 < bytes.length; i += 3) {
+    const n = (bytes[i]! << 16) | (bytes[i + 1]! << 8) | bytes[i + 2]!
+    out[o++] = BASE64.charCodeAt(n >> 18)
+    out[o++] = BASE64.charCodeAt((n >> 12) & 63)
+    out[o++] = BASE64.charCodeAt((n >> 6) & 63)
+    out[o++] = BASE64.charCodeAt(n & 63)
+  }
+  const rest = bytes.length - i
+  if (rest > 0) {
+    const n = (bytes[i]! << 16) | (rest === 2 ? bytes[i + 1]! << 8 : 0)
+    out[o++] = BASE64.charCodeAt(n >> 18)
+    out[o++] = BASE64.charCodeAt((n >> 12) & 63)
+    out[o++] = rest === 2 ? BASE64.charCodeAt((n >> 6) & 63) : 61
+    out[o++] = 61
+  }
+  return out
+}
+
+/**
+ * The request body Resend reads, AS BYTES.
+ *
+ * A 20 MB packet is 27 MB of Base64. Built as a string inside
+ * `JSON.stringify` it would be a 27 MB string and then a second 27 MB buffer
+ * when `fetch` encodes it — inside a 128 MB isolate that already holds the
+ * packet. So the JSON is written with a marker where each attachment's
+ * content goes, encoded once, and the Base64 written into the one buffer
+ * between the halves. Markers are checked to occur exactly once.
+ */
+export function emailRequestBody(
+  config: Pick<EmailConfig, 'from'>,
+  message: EmailMessage,
+): Uint8Array {
+  const attachments = message.attachments ?? []
+  const marker = (index: number) => `zebra-attachment-${index}-content`
+  const json = JSON.stringify({
+    from: config.from,
+    to: [message.to],
+    subject: message.subject,
+    text: message.text,
+    html: message.html,
+    ...(message.replyTo ? { reply_to: message.replyTo } : {}),
+    ...(attachments.length > 0
+      ? {
+          attachments: attachments.map((attachment, index) => ({
+            filename: attachment.filename,
+            content: marker(index),
+          })),
+        }
+      : {}),
+  })
+  const encoder = new TextEncoder()
+  const pieces: Uint8Array[] = []
+  let rest = json
+  attachments.forEach((attachment, index) => {
+    const quoted = `"${marker(index)}"`
+    const parts = rest.split(quoted)
+    if (parts.length !== 2) {
+      throw new Error(`email body: attachment marker ${index} is not unique`)
+    }
+    pieces.push(encoder.encode(`${parts[0]}"`))
+    pieces.push(base64Bytes(attachment.content))
+    pieces.push(encoder.encode('"'))
+    rest = parts[1]!
+  })
+  pieces.push(encoder.encode(rest))
+  const body = new Uint8Array(
+    pieces.reduce((sum, piece) => sum + piece.byteLength, 0),
+  )
+  let at = 0
+  for (const piece of pieces) {
+    body.set(piece, at)
+    at += piece.byteLength
+  }
+  return body
+}
 
 export interface EmailConfig {
   apiKey: string
@@ -110,6 +215,16 @@ export async function sendEmail(
     return { ok: false, reason: 'not_configured' }
   }
 
+  const body = emailRequestBody(config, message)
+  if (body.byteLength > RESEND_MAX_REQUEST_BYTES) {
+    console.error('[zebra.email] the message is over Resend’s limit', {
+      to: domainOf(message.to),
+      bytes: body.byteLength,
+      limit: RESEND_MAX_REQUEST_BYTES,
+    })
+    return { ok: false, reason: 'too_large' }
+  }
+
   let response: Response
   try {
     response = await fetchImpl(ENDPOINT, {
@@ -118,13 +233,7 @@ export async function sendEmail(
         authorization: `Bearer ${config.apiKey}`,
         'content-type': 'application/json',
       },
-      body: JSON.stringify({
-        from: config.from,
-        to: [message.to],
-        subject: message.subject,
-        text: message.text,
-        html: message.html,
-      }),
+      body: body as unknown as BodyInit,
     })
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)

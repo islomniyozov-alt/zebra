@@ -77,7 +77,11 @@ describe('sending', () => {
     expect((init.headers as Record<string, string>)['authorization']).toBe(
       'Bearer re_secret',
     )
-    expect(JSON.parse(String(init.body))).toMatchObject({
+    // The body is bytes (`emailRequestBody`), so attachments never become a
+    // second copy as a string; decoded, it is the same JSON.
+    expect(
+      JSON.parse(new TextDecoder().decode(init.body as Uint8Array)),
+    ).toMatchObject({
       from: 'Zebra <a@b.c>',
       to: ['someone@example.com'],
       // BOTH parts. Corporate filters strip HTML, and a reset link that only
