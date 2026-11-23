@@ -91,8 +91,18 @@ export const READABLE_COMPLIANCE_DOCUMENTS: readonly ReadableComplianceDocument[
       looksLike:
         'an ACORD certificate of liability insurance — a wide grid of coverage rows with INSURED, INSURER and POLICY NUMBER columns, usually headed ACORD',
     },
-    // REGISTRATION and ANNUAL_INSPECTION go here, each with a reader behind
-    // the route. Neither has one yet, and listing a type whose route 404s
-    // would put a control on screen that cannot work — and would give the
-    // classifier a type it can propose and nothing can read.
+    {
+      // TMS §7.8, v11.47 (owner's ruling 2026-11-23). Header fields only,
+      // each read or unreadable — `annual-inspection.ts`. The route is the
+      // intake's own; it branches on INSPECTION_REPORT.
+      type: 'ANNUAL_INSPECTION',
+      documentType: 'INSPECTION_REPORT',
+      route: '/api/compliance/read',
+      nameKey: 'complianceType.ANNUAL_INSPECTION',
+      looksLike:
+        'a vehicle inspection report — a form headed ANNUAL or PERIODIC VEHICLE INSPECTION REPORT or VEHICLE HISTORY RECORD, with a report number, a fleet unit number and a list of inspected components marked OK or needs repair',
+    },
+    // REGISTRATION goes here once it has a reader behind the route. Listing a
+    // type whose route cannot read it would put a control on screen that
+    // cannot work — and would give the classifier a type nothing can read.
   ]

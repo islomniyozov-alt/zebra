@@ -5,6 +5,7 @@ import { getLocaleContext } from '@/lib/locale'
 import { ComplianceIntake } from './ComplianceIntake'
 import { medLabels } from './med-labels'
 import { coiLabels } from './coi-labels'
+import { inspectionLabels } from './inspection-labels'
 import { companyScopeFilter } from '@/lib/tenancy'
 import {
   COMPLIANCE_SUBJECTS,
@@ -404,6 +405,7 @@ export default async function SafetyPage({
               driverLabel={`${filingFor.firstName} ${filingFor.lastName}`}
               labels={medLabels(t)}
               coi={coiLabels(t)}
+              inspection={inspectionLabels(t)}
             />
             <Link
               href="/safety"
@@ -448,6 +450,7 @@ export default async function SafetyPage({
               roster={pickable}
               labels={medLabels(t)}
               coi={coiLabels(t)}
+              inspection={inspectionLabels(t)}
             />
           </div>
         </div>
@@ -487,6 +490,7 @@ export default async function SafetyPage({
                       roster={pickable}
                       labels={medLabels(t)}
                       coi={coiLabels(t)}
+                      inspection={inspectionLabels(t)}
                       prominent
                     />
                   </div>

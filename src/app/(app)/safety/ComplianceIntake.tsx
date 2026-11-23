@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { DropZone } from '@/components/forms/DropZone'
 import { MedicalCertUpload } from './MedicalCertUpload'
 import { CoiConfirm, type CoiProposalView } from './CoiConfirm'
+import { InspectionConfirm, type InspectionReadView } from './InspectionConfirm'
+import type { InspectionLabels } from './inspection-labels'
 import { READABLE_COMPLIANCE_DOCUMENTS } from './compliance-documents'
 import type { medLabels } from './med-labels'
 import type { coiLabels } from './coi-labels'
@@ -64,6 +66,7 @@ interface Props {
   roster: readonly Candidate[]
   labels: ReturnType<typeof medLabels>
   coi: ReturnType<typeof coiLabels>
+  inspection: InspectionLabels
   prominent?: boolean
   driverId?: string
   driverLabel?: string
@@ -72,11 +75,13 @@ interface Props {
 type Reading =
   | { kind: 'medical'; proposal: unknown; match: unknown }
   | { kind: 'coi'; proposal: CoiProposalView }
+  | { kind: 'inspection'; reading: InspectionReadView }
 
 export function ComplianceIntake({
   roster,
   labels,
   coi,
+  inspection,
   prominent,
   driverId,
   driverLabel,
@@ -122,6 +127,8 @@ export function ComplianceIntake({
         match?: unknown
         carrier?: { agrees: boolean; notes: string[] } | null
         needsType?: boolean
+        /** An annual inspection's reading (TMS §7.8, v11.47). */
+        inspection?: InspectionReadView
         notice: string | null
       }
 
@@ -129,6 +136,10 @@ export function ComplianceIntake({
       setNeedsType(Boolean(payload.needsType))
 
       if (payload.needsType) return
+      if (payload.inspection) {
+        setResult({ kind: 'inspection', reading: payload.inspection })
+        return
+      }
       if (!payload.proposal) {
         setNotice(payload.notice ?? 'safety.intake.unreadable')
         return
@@ -192,6 +203,20 @@ export function ComplianceIntake({
         <CoiConfirm
           proposal={result.proposal}
           labels={coi}
+          onCancel={restart}
+        />
+      </div>
+    )
+  }
+
+  if (result?.kind === 'inspection') {
+    return (
+      <div className="flex flex-col gap-z2">
+        {verdictLine}
+        <InspectionConfirm
+          reading={result.reading}
+          file={held}
+          labels={inspection}
           onCancel={restart}
         />
       </div>

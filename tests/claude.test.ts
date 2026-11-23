@@ -604,6 +604,7 @@ describe('the provider seam', () => {
       'coi',
       'rate_confirmation',
       'classify',
+      'inspection',
     ] as const) {
       expect(configuredProvider(kind, env), kind).toBe('DEEPSEEK')
     }

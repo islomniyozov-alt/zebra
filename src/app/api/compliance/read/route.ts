@@ -5,6 +5,11 @@ import { DOCUMENT_TYPES, IMAGE_TYPES, formatCostMilliCents } from '@/lib/claude'
 import { classifyDocument } from '@/lib/classify'
 import { coiProposal, readCoi } from '@/lib/coi'
 import {
+  inspectionPrefill,
+  matchTruck,
+  readAnnualInspection,
+} from '@/lib/annual-inspection'
+import {
   matchDriverByName,
   medicalCertProposal,
   readMedicalCert,
@@ -192,6 +197,50 @@ export async function POST(request: Request) {
       proposal,
       carrier: proposal.carrier,
       fields: outcome.fields,
+      cost: costBlock(outcome.cost),
+      notice: null,
+    })
+  }
+
+  // INSPECTION_REPORT — the annual DOT inspection (TMS §7.8, v11.47). Each
+  // field read or unreadable; only a reading with nothing usable is refused.
+  if (documentType === 'INSPECTION_REPORT') {
+    const outcome = await readAnnualInspection({ base64, mimeType: file.type })
+    if (!outcome.ok) {
+      await recordUsageQuietly(outcome.cost, {
+        documentType: 'INSPECTION_REPORT',
+        refused: outcome.reason,
+      })
+      return NextResponse.json({
+        verdict,
+        proposal: null,
+        notice:
+          outcome.reason === 'call_failed'
+            ? 'safety.intake.failed'
+            : 'safety.inspection.unreadable',
+      })
+    }
+    await recordUsageQuietly(outcome.cost, {
+      documentType: 'INSPECTION_REPORT',
+    })
+
+    const trucks = await withCurrentOrg('read', 'truck', async (tx, ctx) =>
+      tx.truck.findMany({
+        where: { ...companyScopeFilter(ctx.companyScopes), deletedAt: null },
+        orderBy: { unitNumber: 'asc' },
+        take: 500,
+        select: { id: true, unitNumber: true, vin: true },
+      }),
+    )
+    return NextResponse.json({
+      verdict,
+      inspection: {
+        verdicts: outcome.verdicts,
+        prefill: inspectionPrefill(outcome.verdicts),
+        match: matchTruck(outcome.verdicts, trucks),
+        trucks,
+      },
+      proposal: null,
       cost: costBlock(outcome.cost),
       notice: null,
     })

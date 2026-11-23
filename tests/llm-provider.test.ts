@@ -49,6 +49,7 @@ const KINDS: (ReadKind | null)[] = [
   'coi',
   'rate_confirmation',
   'classify',
+  'inspection',
 ]
 const MEDIA = ['image/jpeg', 'application/pdf', 'text/plain']
 

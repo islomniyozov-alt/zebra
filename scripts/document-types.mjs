@@ -62,6 +62,14 @@ export const DOCUMENT_TYPES = {
     // A runner supplying a carrier would be answering the question under test.
     extras: () => ({}),
   },
+  // TMS §7.8, v11.47. The intake's own route, told the type so the classifier
+  // is not part of what is graded.
+  inspection: {
+    label: 'annual DOT inspection',
+    route: '/api/compliance/read',
+    corpus: 'corpus/islom-2026-11-23',
+    extras: () => ({ type: 'INSPECTION_REPORT' }),
+  },
   med: {
     label: 'medical examiner certificate',
     route: '/api/med/read',

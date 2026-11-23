@@ -142,6 +142,8 @@ export type ReadKind =
   | 'coi'
   | 'rate_confirmation'
   | 'classify'
+  /** The annual DOT inspection's header (TMS §7.8, v11.47). */
+  | 'inspection'
 
 /** The variable naming the provider for one kind of read. */
 export function providerVarFor(kind: ReadKind): string {

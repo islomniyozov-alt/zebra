@@ -59,7 +59,7 @@ const MODEL = argv.includes('--model')
 
 if (!KIND || !CARD || !EMAIL || !PASSWORD) {
   console.error(
-    'Usage: node -r dotenv/config scripts/doc-accuracy.mjs <cdl|med> <path>',
+    'Usage: node -r dotenv/config scripts/doc-accuracy.mjs <cdl|med|inspection> <path>',
   )
   console.error('Needs VERIFY_EMAIL and VERIFY_PASSWORD (or the SEED_OWNER_*).')
   process.exit(1)
@@ -135,7 +135,19 @@ try {
     process.exit(3)
   }
 
-  const fields = parsed.fields ?? {}
+  // THE INSPECTION IS GRADED ON WHAT IT WOULD SHOW, not on the raw reading:
+  // a field the per-field rules made unreadable is null here, which is what
+  // the truth file's nulls assert (TMS §7.8, v11.47 — never a guess).
+  const fields = parsed.inspection
+    ? Object.fromEntries(
+        Object.entries(parsed.inspection.verdicts).map(([key, verdict]) => [
+          key,
+          verdict.read
+            ? { value: verdict.printed, confidence: verdict.confidence }
+            : null,
+        ]),
+      )
+    : (parsed.fields ?? {})
   const same = (a, b) =>
     Array.isArray(a) || Array.isArray(b)
       ? JSON.stringify(a ?? []) === JSON.stringify(b ?? [])
