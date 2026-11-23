@@ -311,6 +311,13 @@ export async function storeInvoicePacket(
     pageCount: number
   },
 ): Promise<{ documentId: string; raced: boolean }> {
+  // TWO WRITES FOR ONE LOAD TAKE TURNS. Without this, two clicks whose plans
+  // both found no packet each read "none live" here under READ COMMITTED and
+  // each created one — two live packets, and Merge & send then claimed and
+  // sent both (step 5's integration run, 2026-11-23). The load row's lock
+  // makes the second write wait for the first to commit, and its read below
+  // then sees the first's packet and answers `raced`.
+  await tx.$queryRaw`SELECT id FROM "Load" WHERE id = ${input.plan.loadId} FOR UPDATE`
   const live = await tx.document.findMany({
     where: {
       loadId: input.plan.loadId,

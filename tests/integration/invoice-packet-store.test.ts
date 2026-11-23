@@ -329,3 +329,24 @@ describe('refused by name', () => {
     expect(await packets(load.id)).toEqual([])
   }, 120_000)
 })
+
+describe('four builds at once (step 5, 2026-11-23)', () => {
+  it('leave ONE live packet, and every one answers with it', async () => {
+    const { objects, io } = bucket()
+    const load = await brokerLoad()
+    await file(objects, load.id, 'RATE_CONFIRMATION')
+
+    const results = await Promise.all(
+      [1, 2, 3, 4].map(() => invoicePacketForLoad(io, load.id)),
+    )
+    const ids = new Set(
+      results.map((result) => (result.ok ? result.documentId : null)),
+    )
+    expect([...ids]).toHaveLength(1)
+    expect(ids.has(null)).toBe(false)
+    const live = (await packets(load.id)).filter(
+      (row) => row.deletedAt === null,
+    )
+    expect(live).toHaveLength(1)
+  }, 120_000)
+})
