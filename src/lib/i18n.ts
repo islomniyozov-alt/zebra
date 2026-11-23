@@ -2355,6 +2355,10 @@ const en = {
   'compliancePanel.error.badDates':
     'The issue date cannot be after the expiry.',
   'compliancePanel.error.noExpiry': 'Enter the expiry date.',
+  'compliancePanel.error.expiryNotDate':
+    'The expiry is not a date this form can read. Type it like 02/18/2027, 2/18/2027 or 218.',
+  'compliancePanel.error.issuedNotDate':
+    'The issue date is not a date this form can read. Type it like 02/18/2026, 2/18/2026 or 218.',
   'compliancePanel.error.duplicate':
     'A record of that type already expires on that date. Renewing twice by accident is how a truck ends up with two live registrations.',
   'safety.title': 'Safety',
@@ -5802,6 +5806,10 @@ const ru: Dictionary = {
   'compliancePanel.error.badDates':
     'Дата выдачи не может быть позже даты окончания.',
   'compliancePanel.error.noExpiry': 'Укажите дату окончания.',
+  'compliancePanel.error.expiryNotDate':
+    'Дату окончания не удалось прочитать. Наберите её так: 02/18/2027, 2/18/2027 или 218.',
+  'compliancePanel.error.issuedNotDate':
+    'Дату выдачи не удалось прочитать. Наберите её так: 02/18/2026, 2/18/2026 или 218.',
   'compliancePanel.error.duplicate':
     'Запись этого типа уже заканчивается в эту дату. Случайное двойное продление — это две действующие регистрации на один тягач.',
   'safety.title': 'Безопасность',

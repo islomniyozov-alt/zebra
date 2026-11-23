@@ -15,6 +15,7 @@
 //   8/10       → same
 //   08/10/26   → same
 //   08/10/2026 → same
+//   8/10/2026  → same (one-digit month or day with a separator, v11.45)
 //   2026-08-10 → same
 //
 // Two-digit years resolve to 2000+, which is wrong in 2100 and right for the
@@ -34,8 +35,33 @@ export function normalizeTypedDate(
   const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text)
   if (iso) return valid(+iso[1]!, +iso[2]!, +iso[3]!)
 
-  const digits = text.replace(/\D/g, '')
   const year = today.getUTCFullYear()
+
+  // WITH A SEPARATOR, THE SEPARATOR DECIDES (§0 rule 14, v11.45). Month and
+  // day are one or two digits, the year two, four or absent: `2/18/2027`,
+  // `2/8/27`, `12/5`. This used to fall through to the digit forms below with
+  // the separators thrown away, so `2/18/2027` (seven digits) was refused and
+  // `12/5` read as `125` — the 25th of January. Reproduced on dev 2026-11-23:
+  // the compliance panel said "Enter the expiry date." to `2/18/2027`.
+  const separated = /^(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{2}|\d{4}))?$/.exec(
+    text,
+  )
+  if (separated) {
+    const typedYear = separated[3]
+    return valid(
+      typedYear === undefined
+        ? year
+        : typedYear.length === 2
+          ? 2000 + Number(typedYear)
+          : Number(typedYear),
+      Number(separated[1]),
+      Number(separated[2]),
+    )
+  }
+  // Any other separator pattern is not a date this parser can vouch for.
+  if (/[/.-]/.test(text)) return null
+
+  const digits = text.replace(/\D/g, '')
 
   // mmdd — the shortest useful form, and the one worth optimising for.
   if (digits.length === 3 || digits.length === 4) {

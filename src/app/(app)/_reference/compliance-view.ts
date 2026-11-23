@@ -20,6 +20,8 @@ const ERROR_KEYS: MessageKey[] = [
   'compliancePanel.error.subjectNotFound',
   'compliancePanel.error.badDates',
   'compliancePanel.error.noExpiry',
+  'compliancePanel.error.expiryNotDate',
+  'compliancePanel.error.issuedNotDate',
   'compliancePanel.error.duplicate',
 ]
 

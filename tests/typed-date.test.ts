@@ -40,6 +40,40 @@ describe('dates a dispatcher can type', () => {
     expect(normalizeTypedDate(typed, TODAY)).toBeNull()
   })
 
+  // §0 RULE 14 (v11.45). Reproduced on dev 2026-11-23: an expiry typed
+  // `2/18/2027` on the compliance panel answered "Enter the expiry date.",
+  // because the separators were thrown away before the digits were counted.
+  it.each([
+    ['2/18/2027', '2027-02-18'],
+    ['2/18/26', '2026-02-18'],
+    ['2/8/27', '2027-02-08'],
+    ['2.18.26', '2026-02-18'],
+    ['2-18-2027', '2027-02-18'],
+    ['12/5', '2026-12-05'],
+    ['12/5/2026', '2026-12-05'],
+  ])(
+    'takes a one-digit month or day with a separator: %s',
+    (typed, expected) => {
+      expect(normalizeTypedDate(typed, TODAY)).toBe(expected)
+    },
+  )
+
+  it('reads 12/5 as the 5th of December, not the 25th of January', () => {
+    // The digit path read `12/5` as `125`. Its own digit form still means
+    // what it always meant.
+    expect(normalizeTypedDate('12/5', TODAY)).toBe('2026-12-05')
+    expect(normalizeTypedDate('125', TODAY)).toBe('2026-01-25')
+  })
+
+  it.each([
+    ['2/18/202', 'a three-digit year'],
+    ['2/18/2027/1', 'four parts'],
+    ['123/4', 'a three-digit month'],
+    ['2/30/2027', 'the 30th of February'],
+  ])('refuses a separated date it cannot vouch for: %s (%s)', (typed) => {
+    expect(normalizeTypedDate(typed, TODAY)).toBeNull()
+  })
+
   it('rolls nothing into the next month', () => {
     // `new Date(2026, 1, 31)` is the 3rd of March in JavaScript. Accepting
     // that would silently move a delivery a month.

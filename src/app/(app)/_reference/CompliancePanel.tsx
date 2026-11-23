@@ -101,6 +101,8 @@ export function CompliancePanel({
     COMPLIANCE_INITIAL,
   )
 
+  const typed = state.values
+
   const statusLabel = {
     current: labels.statusCurrent,
     expiring: labels.statusExpiring,
@@ -177,22 +179,48 @@ export function CompliancePanel({
 
       {mayRenew ? (
         <form action={act} className="mt-z4 flex flex-col gap-z3">
+          {/* §0 rule 14: a refused save keeps what was typed. React resets an
+           * action form after the action; these defaults are the typed
+           * values on a refusal, so the reset lands on them, not on blanks. */}
           <h3 className="text-sm font-medium text-ink-2">{labels.add}</h3>
 
           <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-z3">
-            <Select name="type" label={labels.type} required options={types} />
+            <Select
+              name="type"
+              label={labels.type}
+              required
+              options={types}
+              defaultValue={typed?.type}
+            />
             <Input
               name="expiresAt"
               label={labels.expires}
               hint={labels.expiresHint}
               required
-              defaultValue={today}
+              defaultValue={typed?.expiresAt ?? today}
               inputMode="numeric"
             />
-            <Input name="issuedAt" label={labels.issued} inputMode="numeric" />
-            <Input name="identifier" label={labels.identifier} />
-            <Input name="issuer" label={labels.issuer} />
-            <Input name="notes" label={labels.notes} />
+            <Input
+              name="issuedAt"
+              label={labels.issued}
+              inputMode="numeric"
+              defaultValue={typed?.issuedAt}
+            />
+            <Input
+              name="identifier"
+              label={labels.identifier}
+              defaultValue={typed?.identifier}
+            />
+            <Input
+              name="issuer"
+              label={labels.issuer}
+              defaultValue={typed?.issuer}
+            />
+            <Input
+              name="notes"
+              label={labels.notes}
+              defaultValue={typed?.notes}
+            />
           </div>
 
           <div className="flex items-center gap-z3">
