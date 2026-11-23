@@ -126,6 +126,26 @@ describe('the connection path', () => {
         'postgresql://neondb_owner:x@abc.hyperdrive.local:5432/neondb',
       ),
     ).toThrow(/names an owner role/)
+    // v11.48, GAPS 49: the host dev's binding handed over from 2026-11-23
+    // 15:39 UTC, read off the tail (ray a5f2a1d91bf6f7bf).
+    const alt =
+      'postgresql://8a1f2c3d4e5f:generated-secret@b26af24c13c81a8a0d7098db49e244a9.workers.alt:5432/neondb?sslmode=disable'
+    expect(requireHyperdriveString(alt, 'production')).toBe(alt)
+    expect(requireHyperdriveString(alt, 'dev')).toBe(alt)
+    expect(() =>
+      requireHyperdriveString(
+        'postgresql://neondb_owner:x@abc.workers.alt:5432/neondb',
+      ),
+    ).toThrow(/names an owner role/)
+    for (const lookalike of [
+      'postgresql://zebra_app:x@workers.alt.neon.tech/neondb',
+      'postgresql://zebra_app:x@abcworkers.alt/neondb',
+      'postgresql://zebra_app:x@hyperdrive.local.example.com/neondb',
+    ]) {
+      expect(() => requireHyperdriveString(lookalike, 'production')).toThrow(
+        /does not point at a Hyperdrive host/,
+      )
+    }
     expect(() => requireHyperdriveString('not a url')).toThrow(
       /did not provide a connection URL/,
     )

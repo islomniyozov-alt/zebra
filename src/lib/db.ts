@@ -179,7 +179,16 @@ function createRequestPrismaClient(): PrismaClient {
  * says: a Neon URL pasted in, or any string naming the owner role. The role
  * is READ BACK from the config by the sweep before it starts (origin user
  * `zebra_app`, caching disabled), which is the check the string cannot make.
+ *
+ * TWO HOST FORMS, v11.48 (owner's ruling 2026-11-23, GAPS 49). Versions
+ * uploaded since 2026-11-23 15:39 UTC are handed `<32 hex>.workers.alt`, a
+ * different value per request, instead of `*.hyperdrive.local`; dev's
+ * d885ba5a and 0b791152 refused every sign-in on it with bindings identical
+ * to the version before. Both are Cloudflare's own in-runtime hosts; neither
+ * is a Neon endpoint, which is what this check exists to keep out.
  */
+export const HYPERDRIVE_HOST_SUFFIXES = ['.hyperdrive.local', '.workers.alt']
+
 export function requireHyperdriveString(
   connectionString: string,
   branch: string | undefined = process.env.NEON_BRANCH,
@@ -190,7 +199,8 @@ export function requireHyperdriveString(
   } catch {
     throw new Error('The HYPERDRIVE binding did not provide a connection URL.')
   }
-  if (!url.hostname.endsWith('.hyperdrive.local')) {
+  const host = url.hostname.toLowerCase()
+  if (!HYPERDRIVE_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))) {
     // GAPS 49 (owner's ruling 2026-11-23): dev's 05d437d build refused here
     // on every sign-in with bindings identical to the build before it, and
     // the message did not say what it was handed. Off production only, it now
