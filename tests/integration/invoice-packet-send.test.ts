@@ -6,6 +6,7 @@ import { createLoad, LOAD_WRITE_TIMEOUT_MS, type StopInput } from '@/lib/loads'
 import { renderInvoicePdf, remitToFor } from '@/lib/invoice-pdf'
 import type { EmailMessage, SendResult } from '@/lib/email'
 import {
+  PACKET_EMAIL_MAX_BYTES,
   PACKET_RESEND_WINDOW_MS,
   sendInvoicePacket,
   type PacketSendIo,
@@ -99,9 +100,28 @@ function rig(answer: () => SendResult = () => ({ ok: true, id: 're_1' })) {
 }
 
 let docSeq = 0
-async function rateCon(objects: Map<string, Uint8Array>, loadId: string) {
+/**
+ * A JPEG the assembler measures (SOI, a SOF0 frame header 16x16) padded to
+ * `bytes` — carried into the packet as-is, so the packet is at least that big.
+ */
+function paddedJpeg(bytes: number): Uint8Array {
+  const out = new Uint8Array(bytes)
+  out.set([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x10, 0x00, 0x10])
+  out.set([0xff, 0xd9], bytes - 2)
+  return out
+}
+
+async function rateCon(
+  objects: Map<string, Uint8Array>,
+  loadId: string,
+  source: { type: string; mimeType: string; bytes: Uint8Array } = {
+    type: 'RATE_CONFIRMATION',
+    mimeType: 'application/pdf',
+    bytes: onePagePdf(),
+  },
+) {
   docSeq += 1
-  const bytes = onePagePdf()
+  const bytes = source.bytes
   const r2Key = `${organizationId}/load/${loadId}/${nonce}-${docSeq}`
   objects.set(r2Key, bytes)
   await owner.document.create({
@@ -109,10 +129,10 @@ async function rateCon(objects: Map<string, Uint8Array>, loadId: string) {
       organizationId,
       companyId,
       loadId,
-      type: 'RATE_CONFIRMATION',
+      type: source.type as 'RATE_CONFIRMATION',
       r2Key,
       filename: `ratecon-${docSeq}.pdf`,
-      mimeType: 'application/pdf',
+      mimeType: source.mimeType,
       sizeBytes: bytes.byteLength,
       sha256: `sha-${nonce}-${docSeq}`,
     },
@@ -271,6 +291,28 @@ describe('Merge & send (R4, R5)', () => {
     expect((await sendInvoicePacket(io, load.id)).ok).toBe(true)
     expect(sent).toHaveLength(2)
   }, 120_000)
+
+  it('a packet over 18 MB is refused by name before the slot is claimed, and nothing is sent', async () => {
+    const { objects, sent, io } = rig()
+    const load = await brokerLoad()
+    await rateCon(objects, load.id)
+    await rateCon(objects, load.id, {
+      type: 'POD',
+      mimeType: 'image/jpeg',
+      bytes: paddedJpeg(PACKET_EMAIL_MAX_BYTES + 1),
+    })
+
+    const outcome = await sendInvoicePacket(io, load.id)
+    expect(outcome).toMatchObject({
+      ok: false,
+      reason: { kind: 'too_large_to_email', limit: PACKET_EMAIL_MAX_BYTES },
+    })
+    expect(sent).toHaveLength(0)
+    // The packet was built (Merge download serves it); no slot was taken.
+    const row = await packetRow(load.id)
+    expect(row.packetSentAt).toBeNull()
+    expect(row.packetSentTo).toBeNull()
+  }, 180_000)
 
   it('an existing invoice rides in the packet and is marked sent with the address', async () => {
     const { objects, io } = rig()

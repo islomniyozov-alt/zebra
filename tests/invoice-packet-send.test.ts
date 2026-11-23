@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { translator } from '@/lib/i18n'
 import {
+  PACKET_EMAIL_MAX_BYTES,
   packetEmail,
   packetRecipientFor,
   packetRefusalOf,
@@ -156,6 +157,14 @@ describe('every outcome is a sentence in both locales', () => {
     },
     { ok: false, reason: { kind: 'send_failed', why: 'rejected' } },
     { ok: false, reason: { kind: 'send_failed', why: 'too_large' } },
+    {
+      ok: false,
+      reason: {
+        kind: 'too_large_to_email',
+        bytes: PACKET_EMAIL_MAX_BYTES + 1,
+        limit: PACKET_EMAIL_MAX_BYTES,
+      },
+    },
   ]
 
   it('names a label that exists in EN and RU, with its values filled', () => {
@@ -176,6 +185,25 @@ describe('every outcome is a sentence in both locales', () => {
   it('the time is the first send’s, in the authority’s zone', () => {
     const message = packetSendMessage(outcomes[5]!, 'en')
     expect(message!.values.at).toMatch(/9:00/)
+  })
+
+  it('over 18 MB says so by name, in both locales — use Merge download', () => {
+    const outcome: PacketSendOutcome = {
+      ok: false,
+      reason: {
+        kind: 'too_large_to_email',
+        bytes: 18_000_001,
+        limit: 18_000_000,
+      },
+    }
+    const message = packetSendMessage(outcome, 'en')!
+    expect(translator('en')(message.key)).toBe(
+      'Packet too large to email (over 18 MB) — use Merge download.',
+    )
+    expect(translator('ru')(message.key)).toContain('18 МБ')
+    expect(packetRefusalOf(outcome.reason)).toBeNull()
+    // 18 MB of PDF, Base64-encoded, fits a 25 MB inbox.
+    expect((PACKET_EMAIL_MAX_BYTES / 3) * 4).toBeLessThanOrEqual(24_000_000)
   })
 
   it('a packet refusal is left to Merge download’s sentences', () => {

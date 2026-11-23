@@ -40,6 +40,14 @@ import type { TxClient } from './tenancy'
 /** R4's window for refusing the same packet to the same address. */
 export const PACKET_RESEND_WINDOW_MS = 24 * 60 * 60 * 1000
 
+/**
+ * The largest packet Merge & send emails (owner's ruling 2026-11-23, TMS
+ * §7.14 item 6 v11.49). 18,000,000 bytes is 24,000,000 once Base64-encoded,
+ * inside the 25 MB many inboxes accept (Gmail's) — Resend's 40 MB would let
+ * through a message the recipient's server bounces. Over it, Merge download.
+ */
+export const PACKET_EMAIL_MAX_BYTES = 18_000_000
+
 export interface PacketRecipientFacts {
   id: string
   directSettled: boolean
@@ -232,6 +240,7 @@ export type PacketSendRefusal =
   | PacketRecipientRefusal
   | { kind: 'sent_recently'; to: string; at: Date; timeZone: string }
   | { kind: 'send_failed'; why: string }
+  | { kind: 'too_large_to_email'; bytes: number; limit: number }
 
 export type PacketSendOutcome =
   | {
@@ -260,6 +269,19 @@ export async function sendInvoicePacket(
 
   const packet = await invoicePacketForLoad(io, loadId)
   if (!packet.ok) return packet
+
+  // BEFORE THE CLAIM: a packet that cannot be emailed takes no slot, so
+  // nothing has to be released and the audit row never names a send.
+  if (packet.pdf.byteLength > PACKET_EMAIL_MAX_BYTES) {
+    return {
+      ok: false,
+      reason: {
+        kind: 'too_large_to_email',
+        bytes: packet.pdf.byteLength,
+        limit: PACKET_EMAIL_MAX_BYTES,
+      },
+    }
+  }
 
   const now = io.now()
   const claim = await io.write((tx) =>
@@ -359,6 +381,8 @@ export function packetSendMessage(
           at: packetSendTime(reason.at, locale, reason.timeZone),
         },
       }
+    case 'too_large_to_email':
+      return { key: 'loads.mergeSend.tooLarge', values: {} }
     case 'send_failed':
       return {
         key:
@@ -386,6 +410,7 @@ export function packetRefusalOf(
     case 'no_address':
     case 'sent_recently':
     case 'send_failed':
+    case 'too_large_to_email':
       return null
     default:
       return reason

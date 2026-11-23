@@ -3376,7 +3376,7 @@ const en = {
   'loads.mergeSend.failed':
     'The email service refused or could not be reached; nothing was sent. Try again in a minute.',
   'loads.mergeSend.tooLarge':
-    'The packet is too large for email (over 40 MB once encoded). Use Merge download.',
+    'Packet too large to email (over 18 MB) — use Merge download.',
   'packet.missing': 'Still missing:',
   'packet.piece.INVOICE_PDF': 'the invoice',
   'packet.piece.POD': 'the POD',
@@ -6860,7 +6860,7 @@ const ru: Dictionary = {
   'loads.mergeSend.failed':
     'Почтовый сервис отказал или недоступен; ничего не отправлено. Повторите через минуту.',
   'loads.mergeSend.tooLarge':
-    'Пакет слишком велик для email (больше 40 МБ после кодирования). Используйте «Скачать пакет».',
+    'Пакет слишком велик для email (больше 18 МБ) — используйте «Скачать пакет».',
   'packet.missing': 'Не хватает:',
   'packet.piece.INVOICE_PDF': 'счёт',
   'packet.piece.POD': 'подтверждение доставки (POD)',
