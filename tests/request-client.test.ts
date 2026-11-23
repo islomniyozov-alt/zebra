@@ -131,6 +131,40 @@ describe('the connection path', () => {
     )
     const db = readFileSync('src/lib/db.ts', 'utf8')
     expect(db).toMatch(
+      /branch: string \| undefined = process\.env\.NEON_BRANCH/,
+    )
+  })
+
+  it('off production the host refusal names the host it was handed, never the user or password (GAPS 49)', () => {
+    const neon =
+      'postgresql://zebra_app:s3cret-pass@ep-x-pooler.us-east-2.aws.neon.tech/neondb'
+    const messageOn = (branch: string | undefined): string => {
+      try {
+        requireHyperdriveString(neon, branch)
+      } catch (error) {
+        return (error as Error).message
+      }
+      throw new Error('the refusal did not fire')
+    }
+    for (const branch of ['dev', 'ci-884', undefined]) {
+      const message = messageOn(branch)
+      expect(message).toContain(
+        'Host received: "ep-x-pooler.us-east-2.aws.neon.tech".',
+      )
+      expect(message).not.toContain('s3cret-pass')
+      expect(message).not.toContain('zebra_app:')
+    }
+    for (const branch of ['production', ' Production']) {
+      const message = messageOn(branch)
+      expect(message).toMatch(/does not point at a Hyperdrive host/)
+      expect(message).not.toContain('Host received')
+      expect(message).not.toContain('neon.tech')
+    }
+  })
+
+  it('the call site still hands requireHyperdriveString the binding string', () => {
+    const db = readFileSync('src/lib/db.ts', 'utf8')
+    expect(db).toMatch(
       /createPrismaClient\(requireHyperdriveString\(hyperdrive\), 'hyperdrive'\)/,
     )
   })

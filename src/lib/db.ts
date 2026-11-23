@@ -8,6 +8,7 @@ import { after } from 'next/server'
 import { PrismaClient } from '@/generated/prisma/client'
 import { auditExtension } from './audit'
 import { ensureAuditSink } from './audit-sink'
+import { ribbonBranch } from './environment'
 
 // ---------------------------------------------------------------------------
 // THE RUNTIME DATABASE CLIENT
@@ -179,7 +180,10 @@ function createRequestPrismaClient(): PrismaClient {
  * is READ BACK from the config by the sweep before it starts (origin user
  * `zebra_app`, caching disabled), which is the check the string cannot make.
  */
-export function requireHyperdriveString(connectionString: string): string {
+export function requireHyperdriveString(
+  connectionString: string,
+  branch: string | undefined = process.env.NEON_BRANCH,
+): string {
   let url: URL
   try {
     url = new URL(connectionString)
@@ -187,10 +191,21 @@ export function requireHyperdriveString(connectionString: string): string {
     throw new Error('The HYPERDRIVE binding did not provide a connection URL.')
   }
   if (!url.hostname.endsWith('.hyperdrive.local')) {
+    // GAPS 49 (owner's ruling 2026-11-23): dev's 05d437d build refused here
+    // on every sign-in with bindings identical to the build before it, and
+    // the message did not say what it was handed. Off production only, it now
+    // names the HOST the binding gave — the hostname alone, never the user or
+    // the password, which `URL.hostname` cannot contain. Production says
+    // nothing more than it did; `ribbonBranch` folds the label as the gate does.
+    const received =
+      ribbonBranch({ NEON_BRANCH: branch }) === null
+        ? ''
+        : ` Host received: ${JSON.stringify(url.hostname)}.`
     throw new Error(
       'The HYPERDRIVE binding does not point at a Hyperdrive host. The pg ' +
         'path takes only the binding’s own string; a database URL belongs in ' +
-        'DATABASE_URL, where the zebra_app check applies.',
+        'DATABASE_URL, where the zebra_app check applies.' +
+        received,
     )
   }
   if (/owner/i.test(url.username)) {
