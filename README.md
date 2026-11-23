@@ -483,10 +483,10 @@ It should appear in **Loads → Incoming** within about a minute — most of whi
 is the model reading it. If it does not, the two tails say which half:
 `no_tenant` means step 5 disagrees with itself, a 401 means step 4 does.
 
-> **Nothing here sends mail.** Outbound is still Resend, still
-> `onboarding@resend.dev`, and still blocked on verifying a sending domain —
-> see the parked block below. Receiving at `zebratms.com` and sending from it
-> are separate purchases of trust and only the first is done.
+> **Nothing here sends mail.** Outbound is Resend, from
+> `billing@zebratms.com` since 2026-11-23, when the domain was verified for
+> sending. Receiving at `zebratms.com` and sending from it are separate
+> purchases of trust; both are now done.
 
 ### Parked: moving production to a custom domain
 
@@ -527,11 +527,10 @@ Do it in this order. Steps 1 and 4 are account-level.
    then set `RESEND_FROM` to `Zebra <no-reply@tajikcargollc.com>` and deploy
    again.
 
-   **This is the step that unblocks onboarding.** Until it is done, production
-   sends from `onboarding@resend.dev`, Resend's shared sender, which delivers
-   **only to the address that owns the Resend account** — the owner can reset
-   their own password and nobody else can. Runbook step 12 creates dispatchers
-   by reset email, so it cannot be completed before this.
+   **Onboarding no longer waits on this step.** zebratms.com was verified for
+   sending on 2026-11-23 and both workers send from `billing@zebratms.com`, so
+   runbook step 12 (dispatchers created by reset email) works today. Moving
+   the sender to this domain is optional and needs its own verification.
 
 Afterwards, the checks worth running: `scripts/live-check.mjs` against the new
 origin, one document upload from a browser on the new host, and one reset
@@ -1000,13 +999,13 @@ says — the answer to "reset my password" must not change based on whether the
 account exists OR on whether Resend is reachable, or it becomes the
 account-enumeration oracle the rest of the flow carefully is not.
 
-**The sender.** `RESEND_FROM` defaults to `Zebra <onboarding@resend.dev>`,
-Resend's shared address: it works with no verified domain and delivers **only
-to the address that owns the Resend account**. Right for dev, wrong for
-production — production sets `Zebra <no-reply@tajikcargollc.com>`, which
-requires the domain to be verified in Resend first (DNS: DKIM CNAMEs plus an
-SPF TXT). Until it is verified, production mail is REFUSED rather than
-silently sent from a shared address, which is the better of the two failures.
+**The sender.** Both workers set `RESEND_FROM` to `Zebra <billing@zebratms.com>`
+as a var in `wrangler.jsonc` (owner's ruling 2026-11-23: zebratms.com Verified
+in Resend, DKIM, SPF and CNAME). `tests/resend-sender.test.ts` holds both
+values. The code's fallback, `Zebra <onboarding@resend.dev>`, is Resend's
+shared address and delivers **only to the address that owns the Resend
+account** — a worker that lost the var could reset the owner's password and
+nobody else's.
 
 **`APP_ORIGIN`** is where reset links point. It is a deployment fact, not a
 request fact: taken from the `Host` header, a worker reached through a preview

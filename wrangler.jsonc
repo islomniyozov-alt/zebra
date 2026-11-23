@@ -208,12 +208,12 @@
     // URL would mint links back to the preview.
     "APP_ORIGIN": "https://zebra-dev.tajikcargollc.workers.dev",
 
-    // The reset email's sender. `onboarding@resend.dev` is Resend's shared
-    // address: it works with an API key and NO verified domain, and it
-    // delivers only to the address that owns the Resend account — right for
-    // dev, wrong for production, which is why production overrides it below.
-    // RESEND_API_KEY is a secret and is set with `wrangler secret put`.
-    "RESEND_FROM": "Zebra <onboarding@resend.dev>",
+    // The sender of every mail the worker sends — reset links and invoice
+    // packets — on the verified domain (BROKER-LOAD-BRIEF R6; owner's ruling
+    // 2026-11-23). The same value as production's, so dev proves the sender
+    // production uses. RESEND_API_KEY is a secret and is set with
+    // `wrangler secret put`.
+    "RESEND_FROM": "Zebra <billing@zebratms.com>",
   },
 
   "env": {
@@ -309,18 +309,13 @@
         // 4). Checked against `Organization.inboundAddress` on every message —
         // see src/app/api/inbound-email/route.ts for why it is both.
         "INBOUND_EMAIL_ORG_ID": "cmsbsc82y0000nsvsa6yffuyh",
-        // `no-reply@tajikcargollc.com` needs the domain verified in Resend,
-        // and the domain does not exist yet. Rather than leave production
-        // mail refused, this is Resend's shared sender — which needs no
-        // verification and works today.
-        //
-        // WITH ONE LIMIT THAT MATTERS: onboarding@resend.dev delivers ONLY to
-        // the address that owns the Resend account. The owner can reset their
-        // own password; a dispatcher cannot be onboarded by reset email until
-        // a real sending domain is verified. That is a smaller failure than
-        // mail being refused outright, and it is not "working" — see the
-        // parked block in the README runbook.
-        "RESEND_FROM": "Zebra <onboarding@resend.dev>",
+        // The verified sender (BROKER-LOAD-BRIEF R6; owner's ruling
+        // 2026-11-23: zebratms.com Verified in Resend, DKIM, SPF and CNAME
+        // green). A var, not a secret: it is read back and it is not a
+        // credential. It replaces Resend's shared `onboarding@resend.dev`,
+        // which delivered only to the Resend account's owner — so a
+        // dispatcher's reset mail, and any packet to a broker, can now leave.
+        "RESEND_FROM": "Zebra <billing@zebratms.com>",
       },
     },
   },
