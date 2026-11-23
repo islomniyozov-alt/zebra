@@ -83,6 +83,11 @@ export function coiLabels(t: Translate) {
       'safety.coi.failed': t('safety.coi.failed'),
       'safety.intake.unreadable': t('safety.intake.unreadable'),
       'safety.intake.failed': t('safety.intake.failed'),
+      // TMS §7.8 v11.50: several photos, one document.
+      'pages.error.none': t('pages.error.none'),
+      'pages.error.tooMany': t('pages.error.tooMany'),
+      'pages.error.notPhoto': t('pages.error.notPhoto'),
+      'pages.error.pdfAmong': t('pages.error.pdfAmong'),
     } as Record<string, string>,
   }
 }

@@ -3517,6 +3517,19 @@ const en = {
   'portal.upload.failed': 'The upload did not finish. Try again.',
   'portal.upload.queued':
     'Kept on this phone. It sends when the signal is back.',
+  // TMS §9 v11.50: several photos, one document.
+  'portal.upload.addPage': 'Add another page',
+  'portal.upload.send': 'Send',
+  'portal.upload.sendPages': 'Send {n} pages',
+  'portal.upload.pages': 'Pages: {n} of {max}',
+  'portal.upload.removePage': 'Remove the last page',
+  'pages.error.none': 'There are no pages to send.',
+  'pages.error.tooMany':
+    'A document holds at most 10 pages. Send these, then start the next document.',
+  'pages.error.notPhoto':
+    'One of the pages is not a photo this can read. Take it again.',
+  'pages.error.pdfAmong':
+    'A PDF cannot be combined with other files. Drop it on its own.',
   'portal.status.queued':
     'Kept on this phone: {status}. It sends when the signal is back.',
   'portal.status.failed': 'Could not reach the office. Try again.',
@@ -7002,6 +7015,18 @@ const ru: Dictionary = {
   'portal.upload.failed': 'Загрузка не завершилась. Попробуйте ещё раз.',
   'portal.upload.queued':
     'Сохранено на телефоне. Отправится, когда появится связь.',
+  'portal.upload.addPage': 'Добавить ещё страницу',
+  'portal.upload.send': 'Отправить',
+  'portal.upload.sendPages': 'Отправить страниц: {n}',
+  'portal.upload.pages': 'Страниц: {n} из {max}',
+  'portal.upload.removePage': 'Удалить последнюю страницу',
+  'pages.error.none': 'Нет страниц для отправки.',
+  'pages.error.tooMany':
+    'В документе не больше 10 страниц. Отправьте эти и начните следующий документ.',
+  'pages.error.notPhoto':
+    'Одна из страниц — не фото, которое можно прочитать. Сфотографируйте её снова.',
+  'pages.error.pdfAmong':
+    'PDF нельзя объединить с другими файлами. Перетащите его отдельно.',
   'portal.status.queued':
     'Сохранено на телефоне: {status}. Отправится, когда появится связь.',
   'portal.status.failed': 'Не удалось связаться с офисом. Попробуйте ещё раз.',

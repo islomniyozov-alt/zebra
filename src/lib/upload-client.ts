@@ -27,6 +27,13 @@
 // sequence is not reinvented in a component.
 // ---------------------------------------------------------------------------
 
+import {
+  MAX_PAGES,
+  pagesFilename,
+  photosToPdf,
+  type PhotoPagesRefusal,
+} from './photo-pages'
+
 export type UploadPhase = 'idle' | 'preparing' | 'uploading' | 'done' | 'failed'
 
 export interface UploadProgress {
@@ -130,6 +137,74 @@ export async function compressImage(
   return new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), {
     type: 'image/jpeg',
   })
+}
+
+/**
+ * One photo as a PDF page's JPEG (TMS §9 and §7.8, v11.50).
+ *
+ * ALWAYS RE-ENCODED, unlike `compressImage`, which hands back a small file
+ * untouched. A page is embedded as `/DeviceRGB` DCT data, so it must be a
+ * three-component JPEG — a PNG, a WebP, a grayscale or a CMYK JPEG straight
+ * from the picker would make a page no viewer draws. The canvas is the one
+ * thing that guarantees the shape, and it applies EXIF orientation on the way.
+ */
+export async function jpegPage(
+  file: File,
+  options: CompressionOptions = DEFAULT_COMPRESSION,
+): Promise<Uint8Array> {
+  const bitmap = await createImageBitmap(file, {
+    imageOrientation: 'from-image',
+  })
+  const scale = Math.min(
+    1,
+    options.maxDimension / Math.max(bitmap.width, bitmap.height),
+  )
+  const canvas = new OffscreenCanvas(
+    Math.round(bitmap.width * scale),
+    Math.round(bitmap.height * scale),
+  )
+  const context = canvas.getContext('2d')
+  if (!context) {
+    bitmap.close()
+    throw new Error('This browser cannot prepare the photo as a page.')
+  }
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+  bitmap.close()
+  const blob = await canvas.convertToBlob({
+    type: 'image/jpeg',
+    quality: options.quality,
+  })
+  return new Uint8Array(await blob.arrayBuffer())
+}
+
+/**
+ * Several photos as ONE document (v11.50): one photo stays the photo it is,
+ * compressed as before; two or more become one PDF, a page per photo in the
+ * order given. A refusal comes back as its reason, for the caller to word.
+ */
+export async function photosAsDocument(
+  photos: readonly File[],
+): Promise<
+  | { ok: true; file: File; pageCount: number }
+  | { ok: false; reason: PhotoPagesRefusal }
+> {
+  if (photos.length === 1) {
+    return { ok: true, file: await compressImage(photos[0]!), pageCount: 1 }
+  }
+  if (photos.length > MAX_PAGES) return { ok: false, reason: 'too_many_pages' }
+  const pages: Uint8Array[] = []
+  for (const photo of photos) pages.push(await jpegPage(photo))
+  const built = photosToPdf(pages)
+  if (!built.ok) return { ok: false, reason: built.reason }
+  return {
+    ok: true,
+    file: new File(
+      [built.pdf as BlobPart],
+      pagesFilename(photos[0]!.name, built.pageCount),
+      { type: 'application/pdf' },
+    ),
+    pageCount: built.pageCount,
+  }
 }
 
 /** Base64 SHA-256 of the exact bytes, which is what the PUT is signed against. */

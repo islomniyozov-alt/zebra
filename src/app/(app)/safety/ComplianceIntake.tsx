@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import { DropZone } from '@/components/forms/DropZone'
+import { photoPagesRefusalKey } from '@/lib/photo-pages'
+import { photosAsDocument } from '@/lib/upload-client'
 import { MedicalCertUpload } from './MedicalCertUpload'
 import { CoiConfirm, type CoiProposalView } from './CoiConfirm'
 import { InspectionConfirm, type InspectionReadView } from './InspectionConfirm'
@@ -92,6 +94,41 @@ export function ComplianceIntake({
   const [verdict, setVerdict] = useState<Verdict | null>(null)
   const [needsType, setNeedsType] = useState(false)
   const [result, setResult] = useState<Reading | null>(null)
+
+  // SEVERAL PHOTOS, ONE DOCUMENT (TMS §7.8 v11.50). One file is read as it
+  // always was. Several photos dropped, pasted or picked together are
+  // assembled here, in the browser, into one PDF, a page per photo, and THAT
+  // is what is read and filed — so the reader sees every page in one request
+  // and the office keeps one document. A PDF among several files is refused
+  // by name: pages are never merged into somebody else's PDF.
+  const take = async (files: readonly File[]) => {
+    setNotice(null)
+    if (files.length > 1 && files.some((f) => !f.type.startsWith('image/'))) {
+      setNotice('pages.error.pdfAmong')
+      return
+    }
+    let file = files[0]!
+    if (files.length > 1) {
+      setReading(true)
+      try {
+        const built = await photosAsDocument(files)
+        if (!built.ok) {
+          setNotice(photoPagesRefusalKey(built.reason))
+          return
+        }
+        file = built.file
+      } catch {
+        setNotice('safety.intake.failed')
+        return
+      } finally {
+        setReading(false)
+      }
+    }
+    // HELD, so an override or a carrier choice costs one read rather than a
+    // read and a second upload.
+    setHeld(file)
+    void post(file)
+  }
 
   const post = async (file: File, type?: string) => {
     setReading(true)
@@ -305,12 +342,8 @@ export function ComplianceIntake({
         }}
         busy={reading}
         prominent={prominent ?? false}
-        onFile={(file) => {
-          // HELD, so an override or a carrier choice costs one read rather
-          // than a read and a second upload.
-          setHeld(file)
-          void post(file)
-        }}
+        onFile={() => {}}
+        onFiles={(files) => void take(files)}
       />
     </div>
   )

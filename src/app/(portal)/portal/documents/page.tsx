@@ -68,6 +68,17 @@ export default async function PortalDocumentsPage() {
             done: t('portal.upload.done'),
             queued: t('portal.upload.queued'),
             failed: t('portal.upload.failed'),
+            addPage: t('portal.upload.addPage'),
+            send: t('portal.upload.send'),
+            sendPages: t('portal.upload.sendPages'),
+            pages: t('portal.upload.pages'),
+            removePage: t('portal.upload.removePage'),
+            pageErrors: {
+              'pages.error.none': t('pages.error.none'),
+              'pages.error.tooMany': t('pages.error.tooMany'),
+              'pages.error.notPhoto': t('pages.error.notPhoto'),
+              'pages.error.pdfAmong': t('pages.error.pdfAmong'),
+            },
           }}
         />
       ) : (

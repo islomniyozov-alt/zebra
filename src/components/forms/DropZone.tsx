@@ -51,6 +51,13 @@ interface Props {
    */
   prominent?: boolean
   onFile: (file: File) => void
+  /**
+   * Several files at once — dropped, pasted or picked together (TMS §7.8
+   * v11.50). When given, the picker allows a multiple choice and every file
+   * goes here, in the order the browser lists them; `onFile` is then unused.
+   * The zone still decides nothing about them.
+   */
+  onFiles?: (files: File[]) => void
 }
 
 const DEFAULT_ACCEPT =
@@ -62,12 +69,16 @@ export function DropZone({
   busy = false,
   prominent = false,
   onFile,
+  onFiles,
 }: Props) {
   const [over, setOver] = useState(false)
   const input = useRef<HTMLInputElement>(null)
 
-  const take = (file: File | null | undefined) => {
-    if (file) onFile(file)
+  const take = (list: FileList | null | undefined) => {
+    const files = Array.from(list ?? [])
+    if (files.length === 0) return
+    if (onFiles) onFiles(files)
+    else onFile(files[0]!)
   }
 
   return (
@@ -80,9 +91,9 @@ export function DropZone({
       onDrop={(event) => {
         event.preventDefault()
         setOver(false)
-        take(event.dataTransfer.files?.[0])
+        take(event.dataTransfer.files)
       }}
-      onPaste={(event) => take(event.clipboardData.files?.[0])}
+      onPaste={(event) => take(event.clipboardData.files)}
       tabIndex={0}
       role="button"
       aria-label={labels.title}
@@ -121,8 +132,13 @@ export function DropZone({
         ref={input}
         type="file"
         accept={accept ?? DEFAULT_ACCEPT}
+        multiple={onFiles !== undefined}
         className="sr-only"
-        onChange={(event) => take(event.target.files?.[0])}
+        onChange={(event) => {
+          take(event.target.files)
+          // Cleared so picking the same photos again is a change.
+          event.target.value = ''
+        }}
       />
     </div>
   )
