@@ -200,6 +200,39 @@ export interface BatchPreview {
  * or, on the batch screen, on that batch's own. No date bound: "regardless of
  * date" is the ruling. `previewLoadsSql` spells the same clause in SQL.
  */
+/** A driver whose trips no rule pays, once, however many trips. */
+export interface DriverWithoutPayRule {
+  driverId: string
+  driverName: string
+  trips: number
+}
+
+/**
+ * "Drivers without a pay rule" (TMS §6.2.10 part 8, Uktam item 3): the
+ * `noRule` trips folded to one entry per driver, by name, so Create batch
+ * says each driver once with a Set pay rule link instead of a load per line.
+ * A trip with no driver is `noDriver`, never here.
+ */
+export function driversWithoutPayRule(
+  trips: readonly Pick<PreviewTrip, 'driverId' | 'driverName'>[],
+): DriverWithoutPayRule[] {
+  const byDriver = new Map<string, DriverWithoutPayRule>()
+  for (const trip of trips) {
+    if (trip.driverId === null) continue
+    const seen = byDriver.get(trip.driverId)
+    if (seen) seen.trips += 1
+    else
+      byDriver.set(trip.driverId, {
+        driverId: trip.driverId,
+        driverName: trip.driverName ?? trip.driverId,
+        trips: 1,
+      })
+  }
+  return [...byDriver.values()].sort((a, b) =>
+    a.driverName.localeCompare(b.driverName),
+  )
+}
+
 export function catchUpWhere(forBatchId: string | null): Prisma.LoadWhereInput {
   return {
     operationalStatus: { in: [...DELIVERED_STATUSES] },

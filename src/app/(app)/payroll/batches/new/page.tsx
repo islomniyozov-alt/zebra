@@ -10,6 +10,7 @@ import {
 import {
   previewBatch,
   UNAVAILABLE_REASONS,
+  driversWithoutPayRule,
   type UnavailableReason,
 } from '@/lib/batch-preview'
 import { applyList, type RawParams } from '@/lib/list-view'
@@ -24,6 +25,7 @@ import { PageHeader } from '../../../_grid/PageHeader'
 import { AuthorityFilter } from '../../../_grid/AuthorityFilter'
 import { gridView, pagedFooterLabel } from '../../../_grid/grid-page'
 import { CreateBatch } from './CreateBatch'
+import Link from 'next/link'
 import type { MessageKey } from '@/lib/i18n'
 
 // PAYROLL → BATCHES → CREATE BATCH (owner's ruling, 2026-09-29; §6.2.10 part 7
@@ -160,6 +162,11 @@ export default async function OpenBatchPage({
     applyList,
   )
 
+  // THE BLOCKERS, ONE PER DRIVER (§6.2.10 part 8, Uktam item 3). They left
+  // the Batches page; here each driver is said once with the link that fixes
+  // it, and the batch is created without their trips, as it always was.
+  const noRuleDrivers = driversWithoutPayRule(data.preview.unavailable.noRule)
+
   const totalUnavailable = UNAVAILABLE_REASONS.reduce(
     (sum, reason) => sum + data.preview.unavailable[reason].length,
     0,
@@ -262,6 +269,45 @@ export default async function OpenBatchPage({
           </span>
         ) : null}
       </div>
+
+      {noRuleDrivers.length > 0 ? (
+        <section
+          data-no-rule-drivers
+          className="border-b border-border bg-surface-2 px-gutter py-z3"
+        >
+          <h2 className="text-sm font-medium text-ink">
+            {t('preview.noRuleDrivers')}{' '}
+            <span className="font-mono tabular-nums text-ink-3">
+              {noRuleDrivers.length}
+            </span>
+          </h2>
+          <p className="mt-z1 max-w-[68ch] text-xs text-ink-3">
+            {t('preview.noRuleDriversHint')}
+          </p>
+          <ul className="mt-z2 flex flex-col gap-z1 text-sm">
+            {noRuleDrivers.map((driver) => (
+              <li
+                key={driver.driverId}
+                className="flex flex-wrap items-baseline gap-x-z3"
+              >
+                <span className="text-ink">{driver.driverName}</span>
+                <span className="text-xs text-ink-3">
+                  {t('preview.tripsCount').replace(
+                    '{count}',
+                    String(driver.trips),
+                  )}
+                </span>
+                <Link
+                  href={`/drivers/${driver.driverId}?tab=accounting`}
+                  className="text-xs font-medium text-accent hover:underline"
+                >
+                  {t('preview.setPayRule')}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <CreateBatch
         from={day(from)}

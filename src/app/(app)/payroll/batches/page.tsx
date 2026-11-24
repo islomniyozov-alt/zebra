@@ -35,7 +35,6 @@ import { FilterBar } from '@/components/ui/FilterBar'
 import { Tabs } from '@/components/ui/Tabs'
 import { GridFooterNav } from '../../_grid/GridFooterNav'
 import { PageHeader } from '../../_grid/PageHeader'
-import { SummaryStrip } from '../../_grid/SummaryStrip'
 import { PeriodPicker } from '../../_charts/PeriodPicker'
 import { ALL_DATES, windowed } from '../../_grid/window-params'
 import {
@@ -49,11 +48,7 @@ import { BulkStatus } from './BulkStatus'
 import { GridToolbar } from '../../_grid/GridToolbar'
 import { gridView, keepColumns, pagedFooterLabel } from '../../_grid/grid-page'
 import Link from 'next/link'
-import { Suspense } from 'react'
 import { Button } from '@/components/ui/Button'
-import { WeekPicker } from './WeekPicker'
-import { WeekStrip } from './WeekStrip'
-import { BatchActions } from '../../settlements/batches/[id]/BatchActions'
 import type { StatusTone } from '@/lib/status'
 import { batchWord } from '@/lib/pay-status'
 import { payrollStrip, payrollStripHref } from '../payroll-tabs'
@@ -141,7 +136,6 @@ export default async function PayrollPage({
 
   const raw = await searchParams
   const { t, locale } = await getLocaleContext()
-  const mayWrite = await currentUserCan('update', 'settlement')
   const mayOpen = await currentUserCan('create', 'settlement')
   const mayDelete = await currentUserCan('delete', 'settlement')
   // A DRIVER'S OWN MONEY IS A SEPARATE PERMISSION from a batch total. Three of
@@ -180,7 +174,7 @@ export default async function PayrollPage({
   // THE CHEAP HALF ONLY. `payrollWeek` ran the engine over every driver to
   // find the blockers — 8,493ms and nine statements against 408ms for the
   // grid — so the page waited nine seconds to render four rows. The blockers
-  // stream in behind it, through `<WeekStrip>`.
+  // left this page altogether in §6.2.10 part 8: Create batch lists them.
   //
   // AND THE CHEAP HALF IS ONE STATEMENT (§6.2.9 v11.01): the chosen week's
   // batch, the opened weeks, the column preference and — on the Batches tab
@@ -229,7 +223,6 @@ export default async function PayrollPage({
     },
   )
 
-  const { week } = data
   const day = (value: Date) => value.toISOString().slice(0, 10)
   const money = (cents: number) => (
     <span className="font-mono tabular-nums">{formatCents(cents, locale)}</span>
@@ -473,25 +466,6 @@ export default async function PayrollPage({
 
   // ── THE TAB STRIP ────────────────────────────────────────────────────────
 
-  /**
-   * Where a pipeline figure sends the reader: the batches grid, filtered to that
-   * status, with NO date filter.
-   *
-   * `?period=all` for the same reason as §6.2.8's balances — the figure counts
-   * every run in that state, so the list it opens must not be windowed, or the
-   * number above the rows is not the sum of the rows.
-   */
-  const pipelineHref = (status: string) => {
-    const next = new URLSearchParams(search)
-    for (const key of ['q', 'page', 'sort', 'dir', 'from', 'to']) {
-      next.delete(key)
-    }
-    next.set('tab', 'batches')
-    next.set('period', ALL_DATES)
-    next.set('f.status', status)
-    return `${PATH}?${next}`
-  }
-
   // ── ONE WINDOW CONTROL, THE SHARED ONE (§6.2.9) ──────────────────────
   //
   // The picker replaces the from/to range, as on Invoices and Payments. It
@@ -538,41 +512,17 @@ export default async function PayrollPage({
         title={t('accounting.payroll.title')}
         breadcrumb={[t('nav.group.payroll'), t('payroll.tab.batches')]}
         action={
-          week === null ? (
-            mayOpen ? (
-              // THE PREVIEW, NOT A BARE CREATE. `OpenWeek` opened the selected
-              // week with one click and no sight of what was about to go in;
-              // the flow at /new shows the trips and, more usefully, what is
-              // being left out and why. The one-click button is gone rather
-              // than kept beside it — two ways to open a batch is two ways to
-              // open the wrong one.
-              <Link
-                href={`/payroll/batches/new?from=${day(chosen.start)}&to=${day(chosen.end)}`}
-              >
-                <Button variant="primary" size="compact">
-                  {t('money.openBatch')}
-                </Button>
-              </Link>
-            ) : null
-          ) : mayWrite ? (
-            <BatchActions
-              batchId={week.id}
-              status={week.status}
-              // ── FINALISE IS OFFERED AND THE SERVER DECIDES ──────────
-              //
-              // It was gated on a blocker count this page no longer computes,
-              // and computing one here would put the 8.5 seconds back. The
-              // button is enabled; `finaliseBatch` refreshes the draft and
-              // refuses by name if anything blocks, which it did anyway — the
-              // gate here was never the real one, and its own comment said so:
-              // "the action re-checks the blockers server-side regardless".
-              canFinalise
-              labels={{
-                refresh: t('batch.refresh'),
-                finalise: t('batch.finalise'),
-                markPaid: t('batch.markPaid'),
-              }}
-            />
+          // CREATE NEW BATCH (§6.2.10 part 8, Uktam item 3): the create flow
+          // on the last full settlement week, as Open batch was. A week's
+          // refresh, finalise and mark-paid are on the batch's own page.
+          tab === 'batches' && mayOpen ? (
+            <Link
+              href={`/payroll/batches/new?from=${day(chosen.start)}&to=${day(chosen.end)}`}
+            >
+              <Button variant="primary" size="compact">
+                {t('batch.createNew')}
+              </Button>
+            </Link>
           ) : null
         }
       />
@@ -585,76 +535,15 @@ export default async function PayrollPage({
     </>
   )
 
-  // THE WEEK PICKER IS ON THE BATCHES TAB, because that is where a run is
-  // opened, refreshed and finalised — and the Tuesday strip below it is about
-  // the same week. BALANCES IS A YEAR, not a week, so it gets neither: a week
-  // control above a year's totals is a control that changes nothing.
-
-  const weekStrip =
-    tab === 'batches' ? (
-      <>
-        <WeekPicker
-          weeks={offered.map((period) => ({
-            start: day(period.start),
-            end: day(period.end),
-            hasBatch: data.opened.includes(period.start.getTime()),
-          }))}
-          selected={day(chosen.start)}
-          label={t('payroll.week')}
-          openedLabel={t('payroll.opened')}
-        />
-        <div className="flex flex-wrap items-baseline gap-z3 border-b border-border bg-surface-2 px-gutter py-z2 text-xs text-ink-2">
-          <span className="font-mono" dir="ltr">
-            {day(chosen.start)} — {day(chosen.end)}
-          </span>
-          {week ? (
-            <>
-              <span className="font-mono text-ink" dir="ltr">
-                {week.batchNumber ?? week.status}
-              </span>
-              <span>
-                {t('batch.checkDate')}{' '}
-                <span className="font-mono" dir="ltr">
-                  {day(week.checkDate)}
-                </span>
-              </span>
-            </>
-          ) : (
-            <span>{t('payroll.noBatch')}</span>
-          )}
-        </div>
-      </>
-    ) : null
-
   // ── ONE GRID, CHOSEN BY THE TAB ──────────────────────────────────────────
   //
   // Each branch is the same six steps — filter, sort, paginate, keep columns,
   // render, paginate control — over a different row type. `gridView` is the
   // arithmetic so that "paginate before filtering" is not reachable from here.
-
-  // BLOCKERS SIT WITH THE BATCHES TAB, beside the week they block. On Balances
-  // — a year's totals — a list of "who cannot be paid this week" would be an
-  // alarm about a period the grid is not showing.
-  // ── THE STRIP, BEHIND ITS OWN BOUNDARY ────────────────────────────────
   //
-  // Only on the Batches tab, and only for the selected week (owner's ruling).
-  // Balances is a YEAR, so a week's blockers above it would be an alarm about a
-  // period the grid is not showing.
-  //
-  // THE FALLBACK IS EMPTY, NOT A SKELETON. §14 rejects skeleton loaders on a
-  // table that returns quickly, and the same argument holds here: this is one
-  // strip that is usually absent entirely, so a placeholder would flash a
-  // problem that most weeks do not have.
-  const blockers =
-    tab === 'batches' ? (
-      <Suspense fallback={null}>
-        <WeekStrip
-          period={chosen}
-          batchId={week?.id ?? null}
-          batchStatus={week?.status ?? null}
-        />
-      </Suspense>
-    ) : null
+  // THE BATCHES TAB IS THE TABLE (§6.2.10 part 8, Uktam item 3): no pipeline
+  // strip, no week strip, no blockers banner. The blockers are in Create,
+  // as "Drivers without a pay rule".
 
   if (tab === 'batches') {
     const view = gridView(
@@ -667,53 +556,6 @@ export default async function PayrollPage({
     return (
       <>
         {header}
-        {/* ── THE TUESDAY STRIP, BACK AT THE TOP (owner's ruling, 2026-09-28) ──
-         *
-         * The week picker, the period with its two dates, and the blockers by
-         * name. This is where a run is opened, refreshed and finalised, so it
-         * is where "which week, and who cannot be paid in it" belongs — and a
-         * blocked driver has no settlement row, so the grid below cannot carry
-         * them. */}
-        {data.pipeline === null ? null : (
-          <SummaryStrip
-            locale={locale}
-            scopeLabels={{
-              balance: t('strip.asOfToday'),
-              window: t('strip.inWindow'),
-              all: t('strip.allDates'),
-            }}
-            figures={[
-              {
-                key: 'draft',
-                label: t('payStatus.unposted'),
-                cents: data.pipeline.draftCents,
-                note: `${String(data.pipeline.draftCount)} ${t('strip.runs')}`,
-                scope: 'balance',
-                href: pipelineHref('DRAFT'),
-              },
-              {
-                key: 'final',
-                label: t('payStatus.posted'),
-                cents: data.pipeline.finalCents,
-                note: `${String(data.pipeline.finalCount)} ${t('strip.runs')}`,
-                // APPROVED AND UNPAID — the figure with a deadline, so it is the
-                // one drawn in the danger tone. §3.3's hues mean something, and
-                // "money owed this week" is what this one means.
-                alarming: data.pipeline.finalCents > 0,
-                scope: 'balance',
-                href: pipelineHref('FINAL'),
-              },
-              {
-                key: 'paid',
-                label: t('payStatus.paid'),
-                cents: data.pipeline.paidCents,
-                note: `${String(data.pipeline.paidCount)} ${t('strip.runs')}`,
-                scope: 'balance',
-                href: pipelineHref('PAID'),
-              },
-            ]}
-          />
-        )}
         <div className="flex flex-wrap items-center justify-end gap-z3 border-b border-border bg-surface px-gutter py-z2">
           <PeriodPicker
             legend={t('dash.period')}
@@ -725,8 +567,6 @@ export default async function PayrollPage({
             }}
           />
         </div>
-        {weekStrip}
-        {blockers}
         <FilterBar
           groups={[]}
           search={{

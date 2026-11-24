@@ -262,13 +262,18 @@ describe('the controls each list carries', () => {
   // opened, refreshed and finalised, so the picker and the Tuesday strip live
   // there — and Balances, its other tab, is a YEAR, which is why the strip is
   // rendered per tab rather than per page.
-  it('batches has the week picker and the Tuesday strip', () => {
+  //
+  // AND THEN IT WAS TAKEN OFF (§6.2.10 part 8, owner's ruling 2026-11-23,
+  // Uktam item 3): the Batches page is Datatruck's — the table, Create new
+  // batch, Export, Columns, the filter bar. The week strip, the KPI cards and
+  // the blockers banner left it; the blockers are in Create.
+  it('batches is the table: no week strip, no KPI cards, no blockers banner', () => {
     const source = pageSource('batches')
-    expect(source).toContain('<WeekPicker')
-    expect(source).toContain('{weekStrip}')
-    expect(source).toContain('{blockers}')
-    // Per tab, not per page: Balances is a year's totals.
-    expect(source).toMatch(/tab === 'batches' \? \(/)
+    expect(source).not.toContain('<WeekPicker')
+    expect(source).not.toContain('<WeekStrip')
+    expect(source).not.toContain('<SummaryStrip')
+    expect(source).toContain("t('batch.createNew')")
+    expect(source).toContain('href={`/payroll/batches/new?')
   })
 
   // THE COMPANY FILTER: on the three lists whose rows belong to an authority.
