@@ -144,6 +144,8 @@ export type ReadKind =
   | 'classify'
   /** The annual DOT inspection's header (TMS §7.8, v11.47). */
   | 'inspection'
+  /** The vehicle registration, the cab card (TMS §6.5 part 4, v11.55). */
+  | 'registration'
 
 /** The variable naming the provider for one kind of read. */
 export function providerVarFor(kind: ReadKind): string {

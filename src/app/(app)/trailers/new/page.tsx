@@ -6,6 +6,7 @@ import { companyIdScopeFilter } from '@/lib/tenancy'
 import { NewAssetForm } from '@/components/forms/NewAssetForm'
 import { createTrailerAction } from '../actions'
 import { lastUsedAuthority } from '../../_reference/shared'
+import { newAssetLabels } from '../../_reference/new-asset-labels'
 
 export default async function NewTrailerPage() {
   if (!(await currentUserCan('create', 'trailer'))) notFound()
@@ -44,22 +45,7 @@ export default async function NewTrailerPage() {
           defaultAuthority={defaultAuthority}
           action={createTrailerAction}
           cancelHref="/trailers"
-          labels={{
-            authority: t('ref.authority'),
-            unitNumber: t('fleet.unitNumber'),
-            vin: t('fleet.vin'),
-            make: t('trucks.make'),
-            model: t('trucks.model'),
-            year: t('fleet.year'),
-            type: t('trailers.type'),
-            typeHint: t('trailers.typeHint'),
-            plate: t('fleet.plate'),
-            plateState: t('fleet.plateState'),
-            vinDecoding: t('fleet.vinDecoding'),
-            vinNotDecoded: t('fleet.vinNotDecoded'),
-            save: t('ref.save'),
-            cancel: t('ref.cancel'),
-          }}
+          labels={newAssetLabels(t)}
         />
       </div>
     </>

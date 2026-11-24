@@ -6,6 +6,7 @@ import { companyIdScopeFilter } from '@/lib/tenancy'
 import { NewAssetForm } from '@/components/forms/NewAssetForm'
 import { createTruckAction } from '../actions'
 import { lastUsedAuthority } from '../../_reference/shared'
+import { newAssetLabels } from '../../_reference/new-asset-labels'
 
 // A dispatcher holds `truck:read` and not `truck:create`, so this route is
 // simply not there for them — 404, not a disabled button. §4's rule about
@@ -59,22 +60,7 @@ export default async function NewTruckPage() {
           defaultAuthority={defaultAuthority}
           action={createTruckAction}
           cancelHref="/trucks"
-          labels={{
-            authority: t('ref.authority'),
-            unitNumber: t('fleet.unitNumber'),
-            vin: t('fleet.vin'),
-            make: t('trucks.make'),
-            model: t('trucks.model'),
-            year: t('fleet.year'),
-            type: t('trailers.type'),
-            typeHint: t('trailers.typeHint'),
-            plate: t('fleet.plate'),
-            plateState: t('fleet.plateState'),
-            vinDecoding: t('fleet.vinDecoding'),
-            vinNotDecoded: t('fleet.vinNotDecoded'),
-            save: t('ref.save'),
-            cancel: t('ref.cancel'),
-          }}
+          labels={newAssetLabels(t)}
         />
       </div>
     </>

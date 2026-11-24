@@ -1,0 +1,47 @@
+import type { Translate } from '@/lib/i18n'
+
+/** The short form's words (TMS §6.5 parts 3 and 4), for Add truck and Add trailer. */
+export function newAssetLabels(t: Translate) {
+  return {
+    authority: t('ref.authority'),
+    unitNumber: t('fleet.unitNumber'),
+    vin: t('fleet.vin'),
+    make: t('trucks.make'),
+    model: t('trucks.model'),
+    year: t('fleet.year'),
+    type: t('trailers.type'),
+    typeHint: t('trailers.typeHint'),
+    plate: t('fleet.plate'),
+    plateState: t('fleet.plateState'),
+    vinDecoding: t('fleet.vinDecoding'),
+    vinNotDecoded: t('fleet.vinNotDecoded'),
+    vinMismatch: t('fleet.vinMismatch'),
+    save: t('ref.save'),
+    cancel: t('ref.cancel'),
+    registration: {
+      dropTitle: t('fleet.registration.dropTitle'),
+      dropBody: t('fleet.registration.dropBody'),
+      dropHint: t('fleet.registration.dropHint'),
+      reading: t('fleet.registration.reading'),
+      filled: t('fleet.registration.filled'),
+      unreadable: t('fleet.registration.unreadable'),
+      failed: t('fleet.registration.failed'),
+      byHand: t('fleet.registration.byHand'),
+      seen: t('fleet.registration.seen'),
+      held: t('fleet.registration.held'),
+      remove: t('fleet.registration.remove'),
+      expires: t('fleet.registration.expires'),
+      expiresHint: t('fleet.registration.expiresHint'),
+      ownerName: t('trucks.ownerName'),
+      gvwr: t('fleet.registration.gvwr'),
+      attachFailed: t('fleet.registration.attachFailed'),
+      openRecord: t('fleet.registration.openRecord'),
+    },
+    pageErrors: {
+      'pages.error.none': t('pages.error.none'),
+      'pages.error.tooMany': t('pages.error.tooMany'),
+      'pages.error.notPhoto': t('pages.error.notPhoto'),
+      'pages.error.pdfAmong': t('pages.error.pdfAmong'),
+    },
+  }
+}

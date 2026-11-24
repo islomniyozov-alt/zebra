@@ -4,8 +4,10 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { createTruck, updateTruck, type TruckEdit } from '@/lib/fleet'
-import { rememberAuthority, toFormState } from '../_reference/shared'
+import { updateTruck, type TruckEdit } from '@/lib/fleet'
+import type { NewAssetState } from '@/lib/new-asset'
+import { toFormState } from '../_reference/shared'
+import { saveNewAsset } from '../_reference/new-asset-action'
 import type { RecordFormState } from '@/components/forms/RecordForm'
 import type { OwnershipType, TruckStatus } from '@/generated/prisma/client'
 
@@ -74,28 +76,23 @@ function readEdit(formData: FormData): TruckEdit {
   ) as TruckEdit
 }
 
+/**
+ * The short form's Save (§6.5 parts 3 and 4). Without a registration it opens
+ * the record; with one it answers the ids, so the browser can put the file on
+ * the registration item before it opens the record.
+ */
 export async function createTruckAction(
-  _previous: RecordFormState,
+  _previous: NewAssetState,
   formData: FormData,
-): Promise<RecordFormState> {
+): Promise<NewAssetState> {
   const { t } = await getLocaleContext()
-  const input = read(formData)
-
-  let created: { id: string }
-  try {
-    created = await withCurrentOrg('create', 'truck', (tx, session) =>
-      createTruck(tx, session.organizationId, input, {
-        byUserId: session.userId,
-      }),
-    )
-  } catch (error) {
-    return toFormState(error, t)
+  const outcome = await saveNewAsset('truck', read(formData), formData, t)
+  if (!outcome.done) return outcome.state
+  if (outcome.registrationId) {
+    return { error: null, field: null, created: outcome }
   }
-
-  await rememberAuthority(input.companyId)
-  revalidatePath('/trucks')
   // §6.5 part 3: Save opens the record, where the Details tab is.
-  redirect(`/trucks/${created.id}`)
+  redirect(`/trucks/${outcome.id}`)
 }
 
 export async function updateTruckAction(

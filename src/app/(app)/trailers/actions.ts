@@ -4,8 +4,10 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
-import { createTrailer, updateTrailer } from '@/lib/fleet'
-import { rememberAuthority, toFormState } from '../_reference/shared'
+import { updateTrailer } from '@/lib/fleet'
+import type { NewAssetState } from '@/lib/new-asset'
+import { toFormState } from '../_reference/shared'
+import { saveNewAsset } from '../_reference/new-asset-action'
 import type { RecordFormState } from '@/components/forms/RecordForm'
 import type { OwnershipType, TruckStatus } from '@/generated/prisma/client'
 
@@ -26,28 +28,19 @@ function read(formData: FormData) {
   }
 }
 
+/** The short form's Save, as the truck's (§6.5 parts 3 and 4). */
 export async function createTrailerAction(
-  _previous: RecordFormState,
+  _previous: NewAssetState,
   formData: FormData,
-): Promise<RecordFormState> {
+): Promise<NewAssetState> {
   const { t } = await getLocaleContext()
-  const input = read(formData)
-
-  let created: { id: string }
-  try {
-    created = await withCurrentOrg('create', 'trailer', (tx, session) =>
-      createTrailer(tx, session.organizationId, input, {
-        byUserId: session.userId,
-      }),
-    )
-  } catch (error) {
-    return toFormState(error, t)
+  const outcome = await saveNewAsset('trailer', read(formData), formData, t)
+  if (!outcome.done) return outcome.state
+  if (outcome.registrationId) {
+    return { error: null, field: null, created: outcome }
   }
-
-  await rememberAuthority(input.companyId)
-  revalidatePath('/trailers')
   // §6.5 part 3: Save opens the record.
-  redirect(`/trailers/${created.id}`)
+  redirect(`/trailers/${outcome.id}`)
 }
 
 export async function updateTrailerAction(

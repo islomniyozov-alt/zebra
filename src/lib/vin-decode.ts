@@ -109,3 +109,80 @@ export async function decodeVin(
     clearTimeout(timer)
   }
 }
+
+// ---------------------------------------------------------------------------
+// THE CROSS-CHECK (TMS §6.5 part 4, v11.55). When make, model or year came
+// from a registration or from the keyboard, the decode does not overwrite
+// them: it says where vPIC disagrees, and the form shows "VIN decodes to …"
+// beside the field. A mismatch to look at, never a correction.
+//
+// A CAB CARD ABBREVIATES THE MAKE. States print the NCIC vehicle make code —
+// FRHT, KW, PTRB — where vPIC says FREIGHTLINER, KENWORTH, PETERBILT. Without
+// the codes below every registration would "disagree" with its own VIN. A
+// code not listed still agrees when one name begins the other (UTILITY and
+// UTILITY TRAILER MANUFACTURER); anything else is a mismatch, which costs a
+// look, never a block.
+// ---------------------------------------------------------------------------
+
+export type DecodeField = 'make' | 'model' | 'year'
+
+/** NCIC make codes seen on tractor and trailer cab cards, to vPIC's names. */
+export const NCIC_MAKES: Readonly<Record<string, string>> = {
+  FRHT: 'FREIGHTLINER',
+  FRTL: 'FREIGHTLINER',
+  KW: 'KENWORTH',
+  KENW: 'KENWORTH',
+  PTRB: 'PETERBILT',
+  PETE: 'PETERBILT',
+  INTL: 'INTERNATIONAL',
+  NAVI: 'INTERNATIONAL',
+  VOLV: 'VOLVO TRUCK',
+  WSTR: 'WESTERN STAR',
+  UTIL: 'UTILITY TRAILER MANUFACTURER',
+  UTLT: 'UTILITY TRAILER MANUFACTURER',
+  GDAN: 'GREAT DANE',
+  WABA: 'WABASH',
+  WBSH: 'WABASH',
+  HYUN: 'HYUNDAI TRANSLEAD',
+  STOU: 'STOUGHTON',
+  VANG: 'VANGUARD',
+}
+
+const squash = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, '')
+
+/** True when two spellings of a make or model name the same thing. */
+function sameName(a: string, b: string, codes: boolean): boolean {
+  const left = squash(codes ? (NCIC_MAKES[squash(a)] ?? a) : a)
+  const right = squash(codes ? (NCIC_MAKES[squash(b)] ?? b) : b)
+  if (left === '' || right === '') return true
+  return left.startsWith(right) || right.startsWith(left)
+}
+
+/**
+ * vPIC's value for each field whose current value disagrees with it. A field
+ * that is empty, or that vPIC says nothing about, is never a mismatch.
+ */
+export function decodeMismatches(
+  current: Readonly<Record<DecodeField, string>>,
+  decoded: DecodedVin,
+): Partial<Record<DecodeField, string>> {
+  const out: Partial<Record<DecodeField, string>> = {}
+  const make = current.make.trim()
+  if (
+    make !== '' &&
+    decoded.make !== null &&
+    !sameName(make, decoded.make, true)
+  )
+    out.make = decoded.make
+  const model = current.model.trim()
+  if (
+    model !== '' &&
+    decoded.model !== null &&
+    !sameName(model, decoded.model, false)
+  )
+    out.model = decoded.model
+  const year = current.year.trim()
+  if (year !== '' && decoded.year !== null && Number(year) !== decoded.year)
+    out.year = String(decoded.year)
+  return out
+}

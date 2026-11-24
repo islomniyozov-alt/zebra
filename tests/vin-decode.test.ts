@@ -151,6 +151,10 @@ describe('the short form', () => {
       'year',
       'plate',
       'plateState',
+      'registration',
+      'registrationExpiresAt',
+      'ownerName',
+      'grossWeightLbs',
     ])
     expect(NEW_ASSET_FIELDS.trailer).toEqual([
       'companyId',
@@ -160,15 +164,29 @@ describe('the short form', () => {
       'type',
       'plate',
       'plateState',
+      'registration',
+      'registrationExpiresAt',
     ])
-    // Every name the form posts is one of those, and none of the Details tab's.
-    const posted = [...form.matchAll(/name="(\w+)"/g)].map((m) => m[1])
+    // Every name the form posts is one of those. Without a registration held
+    // (§6.5 part 4) none of the Details tab's: owner name and GVWR are asked
+    // only while a document is held, and nothing else from Details ever.
+    const names = (source: string) =>
+      [...source.matchAll(/name="(\w+)"/g)].map((m) => m[1])
+    const posted = names(form)
     const listed = new Set<string>([
       ...NEW_ASSET_FIELDS.truck,
       ...NEW_ASSET_FIELDS.trailer,
     ])
     for (const name of posted) expect(listed.has(name!)).toBe(true)
-    for (const name of TRUCK_DETAIL_FIELDS) expect(posted).not.toContain(name)
+    const held = form.indexOf(
+      '<input type="hidden" name="registration" value="yes" />',
+    )
+    expect(held).toBeGreaterThan(-1)
+    const always = names(form.slice(0, held))
+    for (const name of TRUCK_DETAIL_FIELDS) expect(always).not.toContain(name)
+    expect(
+      TRUCK_DETAIL_FIELDS.filter((name) => posted.includes(name)).sort(),
+    ).toEqual(['grossWeightLbs', 'ownerName'])
     expect(posted).not.toContain('status')
     expect(posted).not.toContain('ownershipType')
   })
@@ -182,20 +200,25 @@ describe('the short form', () => {
   })
 
   it('decodes on blur and fills, never on submit', () => {
-    expect(form).toContain('onBlur={(event) => void onVinBlur(event)}')
-    expect(form).toContain('const result = await decodeVin(vin)')
-    expect(form).toContain('if (decoded.make !== null) setMake(decoded.make)')
     expect(form).toContain(
-      'if (decoded.year !== null) setYear(String(decoded.year))',
+      'onBlur={(event) => void runDecode(event.target.value)}',
     )
+    expect(form).toContain('const result = await decodeVin(vin)')
+    // §6.5 part 4: an empty field, or one the decode filled, takes vPIC's
+    // value; one from the registration or the keyboard keeps its own and
+    // shows the mismatch.
+    expect(form).toContain(
+      "if (now[field].trim() === '' || from[field] === 'vin') {",
+    )
+    expect(form).toContain('setMismatch(decodeMismatches(kept, decoded))')
     expect(form).not.toMatch(/disabled=\{[^}]*decod/)
   })
 
   it('Save opens the record', () => {
     const trucks = readFileSync('src/app/(app)/trucks/actions.ts', 'utf8')
     const trailers = readFileSync('src/app/(app)/trailers/actions.ts', 'utf8')
-    expect(trucks).toContain('redirect(`/trucks/${created.id}`)')
-    expect(trailers).toContain('redirect(`/trailers/${created.id}`)')
+    expect(trucks).toContain('redirect(`/trucks/${outcome.id}`)')
+    expect(trailers).toContain('redirect(`/trailers/${outcome.id}`)')
   })
 
   it('the odometer is on Details, not Main', () => {

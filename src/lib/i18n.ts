@@ -1294,6 +1294,37 @@ const en = {
   'fleet.plateState': 'Plate state',
   'fleet.vinDecoding': 'Decoding VIN…',
   'fleet.vinNotDecoded': 'Could not decode VIN',
+  'fleet.vinMismatch': 'VIN decodes to {value}',
+  'fleet.registration.dropTitle': 'Drop the registration (cab card) or photo',
+  'fleet.registration.dropBody':
+    'A PDF or photos — several photos make one document. The form fills from it; nothing is saved until Save.',
+  'fleet.registration.dropHint': 'Or click to choose a file',
+  'fleet.registration.reading': 'Reading the registration…',
+  'fleet.registration.filled':
+    'Filled from the registration. Check each field before saving.',
+  'fleet.registration.unreadable':
+    'No registration could be read from that file — fill the form by hand.',
+  'fleet.registration.failed':
+    'The registration could not be read just now — fill the form by hand, or try again.',
+  'fleet.registration.byHand': 'Unreadable — enter by hand',
+  'fleet.registration.seen': 'read as “{printed}”',
+  'fleet.registration.held': 'Registration: {name}',
+  'fleet.registration.remove': 'Remove the document',
+  'fleet.registration.expires': 'Registration expires',
+  'fleet.registration.expiresHint':
+    'Filed in compliance, where the renewal warning reads it.',
+  'fleet.registration.gvwr': 'GVWR (lbs)',
+  'fleet.registration.noExpiry':
+    'Enter the registration expiry, or remove the document.',
+  'fleet.registration.expiryNotDate':
+    'The registration expiry is not a date — type it as mm/dd/yyyy.',
+  'fleet.registration.notAllowed':
+    'You may not file compliance records — remove the document to save without it.',
+  'fleet.registration.refused':
+    'The registration could not be filed — check its expiry.',
+  'fleet.registration.attachFailed':
+    'Saved, but the registration file did not upload — add it on the record’s compliance panel.',
+  'fleet.registration.openRecord': 'Open the record',
   'fleet.year': 'Year',
 
   'trucks.title': 'Trucks',
@@ -4826,6 +4857,37 @@ const ru: Dictionary = {
   'fleet.plateState': 'Штат регистрации',
   'fleet.vinDecoding': 'Расшифровываем VIN…',
   'fleet.vinNotDecoded': 'Не удалось расшифровать VIN',
+  'fleet.vinMismatch': 'По VIN: {value}',
+  'fleet.registration.dropTitle': 'Перетащите регистрацию (cab card) или фото',
+  'fleet.registration.dropBody':
+    'PDF или фото — несколько фото станут одним документом. Форма заполнится по нему; ничего не сохраняется до нажатия «Сохранить».',
+  'fleet.registration.dropHint': 'Или нажмите, чтобы выбрать файл',
+  'fleet.registration.reading': 'Читаем регистрацию…',
+  'fleet.registration.filled':
+    'Заполнено по регистрации. Проверьте каждое поле перед сохранением.',
+  'fleet.registration.unreadable':
+    'Не удалось прочитать регистрацию из этого файла — заполните форму вручную.',
+  'fleet.registration.failed':
+    'Сейчас не удалось прочитать регистрацию — заполните форму вручную или попробуйте ещё раз.',
+  'fleet.registration.byHand': 'Не читается — введите вручную',
+  'fleet.registration.seen': 'прочитано как «{printed}»',
+  'fleet.registration.held': 'Регистрация: {name}',
+  'fleet.registration.remove': 'Убрать документ',
+  'fleet.registration.expires': 'Регистрация действует до',
+  'fleet.registration.expiresHint':
+    'Записывается в compliance, откуда берётся предупреждение о продлении.',
+  'fleet.registration.gvwr': 'GVWR (фунты)',
+  'fleet.registration.noExpiry':
+    'Введите срок регистрации или уберите документ.',
+  'fleet.registration.expiryNotDate':
+    'Срок регистрации — не дата; введите как мм/дд/гггг.',
+  'fleet.registration.notAllowed':
+    'Вам нельзя создавать записи compliance — уберите документ, чтобы сохранить без него.',
+  'fleet.registration.refused':
+    'Не удалось записать регистрацию — проверьте срок.',
+  'fleet.registration.attachFailed':
+    'Сохранено, но файл регистрации не загрузился — добавьте его в панели compliance на карточке.',
+  'fleet.registration.openRecord': 'Открыть карточку',
   'fleet.year': 'Год',
 
   'trucks.title': 'Тягачи',

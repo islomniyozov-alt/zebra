@@ -33,9 +33,13 @@ export type UnreadableWhy =
   /** A result that does not say passed or failed in so many words. */
   | 'not_pass_fail'
 
-export type Verdict<T> =
+export type Verdict<T, W extends string = UnreadableWhy> =
   | { read: true; value: T; printed: string; confidence: Confidence }
-  | { read: false; why: UnreadableWhy; printed: string | null }
+  | {
+      read: false
+      why: W | 'not_shown' | 'low_confidence'
+      printed: string | null
+    }
 
 export type InspectionResult = 'passed' | 'failed'
 
@@ -54,12 +58,16 @@ export interface InspectionVerdicts {
 /** Confidence a value must carry to be shown as read. */
 const READABLE: readonly Confidence[] = ['high', 'medium']
 
-function judge<T>(
+/**
+ * One field, judged alone: not shown, low confidence, or refused by its
+ * converter is unreadable; anything else is read. Shared with the
+ * registration reader (`registration-fields.ts`), whose converters name
+ * their own reasons.
+ */
+export function judge<T, W extends string = UnreadableWhy>(
   field: Maybe<string>,
-  convert: (
-    printed: string,
-  ) => { ok: true; value: T } | { ok: false; why: UnreadableWhy },
-): Verdict<T> {
+  convert: (printed: string) => { ok: true; value: T } | { ok: false; why: W },
+): Verdict<T, W> {
   const printed = field?.value?.trim() ?? ''
   if (!field || printed === '')
     return { read: false, why: 'not_shown', printed: null }
@@ -76,7 +84,10 @@ function judge<T>(
   }
 }
 
-const asText = (printed: string) => ({ ok: true as const, value: printed })
+export const asText = (printed: string) => ({
+  ok: true as const,
+  value: printed,
+})
 
 /** `passed` or `failed` only when the words say so, and only one of them. */
 export function readResult(
