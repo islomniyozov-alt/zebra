@@ -8,7 +8,7 @@ import { setLoadRate } from '@/lib/rates'
 import { readyToInvoice } from '@/lib/invoices'
 import { renderSettlementPdf } from '@/lib/settlement-pdf'
 import { settlementPdfLines } from '@/lib/settlement-view'
-import { closePayRule, saveDriverPayRule } from '@/lib/driver-pay'
+import { closePayRule, ruleInForce, saveDriverPayRule } from '@/lib/driver-pay'
 import {
   addSettlementLine,
   approveSettlement,
@@ -370,15 +370,26 @@ describe('the pay rule on file', () => {
     expect(first).toMatchObject({ ok: true })
 
     // Two rules in force on the same day means the pay for that day depends on
-    // which row is read first, and the driver finds out on Friday.
+    // which row is read first, and the driver finds out on Friday. A rule from
+    // the open rule's own start day is not a change (TMS v11.51) — refused.
     const clash = await inOrg((tx) =>
       saveDriverPayRule(tx, driverId, {
         type: 'PERCENT_LINEHAUL',
         percentBps: 3200,
-        effectiveFrom: new Date(Date.UTC(2026, 5, 1)),
+        effectiveFrom: new Date(Date.UTC(2026, 0, 1)),
       }),
     )
     expect(clash).toMatchObject({ ok: false, reason: 'overlaps' })
+    // And so is one that started earlier and runs into it.
+    const before = await inOrg((tx) =>
+      saveDriverPayRule(tx, driverId, {
+        type: 'PERCENT_LINEHAUL',
+        percentBps: 3200,
+        effectiveFrom: new Date(Date.UTC(2025, 11, 1)),
+        effectiveTo: new Date(Date.UTC(2026, 0, 15)),
+      }),
+    )
+    expect(before).toMatchObject({ ok: false, reason: 'overlaps' })
   }, 300_000)
 
   it('refuses CUSTOM before it reaches the database', async () => {
@@ -719,6 +730,127 @@ describe('deductions, approval and payment', () => {
       ),
     )
     expect(released.map((row) => row.id)).toContain(load.id)
+  }, 300_000)
+})
+
+describe('changing a rule from a date (Uktam item 1, TMS v11.51)', () => {
+  it('90% to 88% from 1 October: the old rule ends 30 September, approved weeks keep 90%, later weeks pay 88%', async () => {
+    const changer = await owner.driver.create({
+      data: {
+        organizationId,
+        companyId,
+        firstName: 'Change',
+        lastName: `Rate ${nonce}`,
+      },
+    })
+    const ninety = await inOrg((tx) =>
+      saveDriverPayRule(tx, changer.id, {
+        type: 'PERCENT_GROSS',
+        percentBps: 9000,
+        effectiveFrom: new Date(Date.UTC(2026, 0, 1)),
+      }),
+    )
+    expect(ninety).toMatchObject({ ok: true, supersededRuleId: null })
+    if (!ninety.ok) return
+
+    // A week before the change, generated and approved under 90% — including
+    // a load delivered on the afternoon of 30 September, the old rule's last
+    // day, which the end-of-day boundary keeps under it.
+    await deliveredLoad(
+      '1000',
+      '0',
+      new Date(Date.UTC(2026, 8, 28, 12)),
+      {},
+      changer.id,
+    )
+    await deliveredLoad(
+      '500',
+      '0',
+      new Date(Date.UTC(2026, 8, 30, 15)),
+      {},
+      changer.id,
+    )
+    const september = {
+      periodStart: new Date(Date.UTC(2026, 8, 27)),
+      periodEnd: new Date(Date.UTC(2026, 9, 3, 23, 59, 59, 999)),
+    }
+    // POD stamps before 1 October only; the change does not reach this week.
+    const before = await inOrg((tx) =>
+      generateSettlement(tx, organizationId, {
+        driverId: changer.id,
+        periodStart: september.periodStart,
+        periodEnd: new Date(Date.UTC(2026, 8, 30, 23, 59, 59, 999)),
+        labels,
+      }),
+    )
+    expect(before).toMatchObject({ ok: true, earningsCents: 135000 })
+    if (!before.ok) return
+    await inOrg((tx) => approveSettlement(tx, before.settlementId, userId))
+
+    // THE CHANGE: one save, from 1 October.
+    const eightyEight = await inOrg((tx) =>
+      saveDriverPayRule(tx, changer.id, {
+        type: 'PERCENT_GROSS',
+        percentBps: 8800,
+        effectiveFrom: new Date(Date.UTC(2026, 9, 1)),
+      }),
+    )
+    expect(eightyEight).toMatchObject({
+      ok: true,
+      supersededRuleId: ninety.ruleId,
+    })
+    const rules = await owner.driverPayRule.findMany({
+      where: { driverId: changer.id },
+      orderBy: { effectiveFrom: 'asc' },
+      select: { percentBps: true, effectiveFrom: true, effectiveTo: true },
+    })
+    expect(
+      rules.map((rule) => [
+        rule.percentBps,
+        rule.effectiveFrom.toISOString(),
+        rule.effectiveTo?.toISOString() ?? null,
+      ]),
+    ).toEqual([
+      [9000, '2026-01-01T00:00:00.000Z', '2026-09-30T23:59:59.999Z'],
+      [8800, '2026-10-01T00:00:00.000Z', null],
+    ])
+
+    // THE DAY BEFORE IS STILL UNDER THE OLD RULE, all of it: the afternoon of
+    // 30 September reads 90%, the first minute of 1 October reads 88%.
+    const stored = await owner.driverPayRule.findMany({
+      where: { driverId: changer.id },
+    })
+    expect(
+      ruleInForce(stored, new Date(Date.UTC(2026, 8, 30, 15)))?.percentBps,
+    ).toBe(9000)
+    expect(
+      ruleInForce(stored, new Date(Date.UTC(2026, 9, 1, 0, 1)))?.percentBps,
+    ).toBe(8800)
+
+    // The approved statement is untouched.
+    const untouched = await owner.settlement.findUniqueOrThrow({
+      where: { id: before.settlementId },
+      select: { earningsCents: true, status: true },
+    })
+    expect(untouched.earningsCents).toBe(135000)
+
+    // After the date: 88%.
+    await deliveredLoad(
+      '1000',
+      '0',
+      new Date(Date.UTC(2026, 9, 2, 9)),
+      {},
+      changer.id,
+    )
+    const after = await inOrg((tx) =>
+      generateSettlement(tx, organizationId, {
+        driverId: changer.id,
+        periodStart: new Date(Date.UTC(2026, 9, 1)),
+        periodEnd: september.periodEnd,
+        labels,
+      }),
+    )
+    expect(after).toMatchObject({ ok: true, earningsCents: 88000 })
   }, 300_000)
 })
 

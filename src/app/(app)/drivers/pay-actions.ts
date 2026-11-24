@@ -20,8 +20,8 @@ import {
 import type { PayRuleType } from '@/generated/prisma/client'
 import type { MessageKey } from '@/lib/i18n'
 
-// Pay rules are `driver.pay` writes, which OWNER, ADMIN and ACCOUNTING hold —
-// a MANAGER reads what a driver is paid and does not set it, and a DISPATCHER
+// Pay rules are `driver.pay` writes, which OWNER, ADMIN, MANAGER and
+// ACCOUNTING hold (MANAGER since 2026-11-23, TMS v11.51) — a DISPATCHER
 // never sees the number at all. permissions.ts decides that; this asks.
 
 const ERRORS: Record<string, MessageKey> = {

@@ -35,7 +35,7 @@ interface Props {
   rules: readonly PayRuleRowView[]
   types: readonly SelectOption[]
   today: string
-  /** A MANAGER reads the rules and does not write them. */
+  /** A role without `driver.pay:update` reads the rules and does not write them. */
   readOnly: boolean
   translate: Record<string, string>
   labels: {

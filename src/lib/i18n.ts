@@ -2213,8 +2213,8 @@ const en = {
 
   'payRule.title': 'Pay',
   'payRule.hint':
-    'Rules are a history, not a setting. A raise closes the old rule and opens a new one, and every settlement already generated keeps the figure it was generated with.',
-  'payRule.add': 'Add a pay rule',
+    'Rules are a history, not a setting. To change a rate, save the new rule from its start date: the open rule ends the day before, and every settlement already generated keeps the figure it was generated with.',
+  'payRule.add': 'Add or change a pay rule',
   'payRule.type': 'Paid by',
   'payRule.percent': 'Percentage',
   'payRule.perMile': 'Rate per mile',
@@ -5743,8 +5743,8 @@ const ru: Dictionary = {
 
   'payRule.title': 'Оплата',
   'payRule.hint':
-    'Правила — это история, а не настройка. Повышение закрывает старое правило и открывает новое, а уже созданные расчёты сохраняют свои цифры.',
-  'payRule.add': 'Добавить правило оплаты',
+    'Правила — это история, а не настройка. Чтобы изменить ставку, сохраните новое правило с даты начала: действующее закончится накануне, а уже созданные расчёты сохраняют свои цифры.',
+  'payRule.add': 'Добавить или изменить правило оплаты',
   'payRule.type': 'Оплата по',
   'payRule.percent': 'Процент',
   'payRule.perMile': 'Ставка за милю',

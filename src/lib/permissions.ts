@@ -370,6 +370,14 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     ...CLAIMS_READ,
     ...CLAIMS_WRITE,
     ...MONEY_READ,
+    // ── A MANAGER SETS WHAT A DRIVER IS PAID ───────────────────────────────
+    //
+    // Owner's ruling 2026-11-23 (Uktam item 1, TMS v11.51), reversing §1's
+    // "a manager reads what a driver is paid and does not set it": pay rules
+    // are changed from the driver's Accounting tab by OWNER, ADMIN, MANAGER
+    // and ACCOUNTING. Pay-to, standing deductions and charges share the
+    // permission and come with it.
+    'driver.pay:update',
     ...RECORDS_READ,
     ...RECORDS_WRITE,
     'report:export',
@@ -435,8 +443,8 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     // at all — the four replayed weeks on dev showed every statement's
     // deductions against Zebra's $0.00, which was this gap and not an engine one.
     //
-    // MANAGER IS DELIBERATELY NOT INCLUDED: §1's rule that a manager reads what
-    // a driver is paid and does not set it is unchanged.
+    // MANAGER holds it too since 2026-11-23 (owner's ruling, TMS v11.51) —
+    // see the MANAGER set above.
     'driver.pay:update',
     ...read('dashboard'),
     ...read('load'),

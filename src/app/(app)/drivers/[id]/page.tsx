@@ -307,8 +307,8 @@ export default async function EditDriverPage({
     failed: t('compliancePanel.failed'),
   })
   const mayDelete = await currentUserCan('delete', 'driver')
-  // A MANAGER reads what a driver is paid; setting it is `driver.pay:update`,
-  // which OWNER, ADMIN and ACCOUNTING hold. A DISPATCHER sees neither.
+  // Setting what a driver is paid is `driver.pay:update`, which OWNER, ADMIN,
+  // MANAGER and ACCOUNTING hold (TMS v11.51). A DISPATCHER sees neither.
   const maySeePay = await currentUserCan('read', 'driver.pay')
   const maySetPay = await currentUserCan('update', 'driver.pay')
   const authorities = companies.map((c) => ({ value: c.id, label: c.name }))

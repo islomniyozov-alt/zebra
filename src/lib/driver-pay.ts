@@ -277,7 +277,12 @@ export type SaveRuleFailure =
   | 'overlaps'
 
 export type SaveRuleResult =
-  | { ok: true; ruleId: string }
+  | {
+      ok: true
+      ruleId: string
+      /** The open rule this one replaced, closed the day before; or null. */
+      supersededRuleId: string | null
+    }
   | { ok: false; reason: SaveRuleFailure }
 
 export interface SaveRuleInput {
@@ -342,25 +347,43 @@ export async function saveDriverPayRule(
   }
 
   const from = input.effectiveFrom
-  const to = input.effectiveTo ?? null
+  // A RULE ENDS AT THE END OF ITS LAST DAY (TMS v11.51). Stored as midnight,
+  // a load delivered that afternoon fell outside it and inside no rule.
+  const to = input.effectiveTo ? endOfUtcDay(input.effectiveTo) : null
   if (Number.isNaN(from.getTime())) return { ok: false, reason: 'bad_dates' }
   if (to && to.getTime() < from.getTime()) {
     return { ok: false, reason: 'bad_dates' }
   }
 
-  // OVERLAPS ARE REFUSED. Two rules in force on the same day means the pay for
-  // that day depends on which row is read first, and the driver finds out on
-  // Friday. Closing the previous rule is a deliberate act, below.
+  // A CHANGE SUPERSEDES THE OPEN RULE (owner's ruling 2026-11-23, TMS
+  // v11.51): a rule starting after the open rule's start closes it at the end
+  // of the day before, in this same write — 90% to 88% from a date is one
+  // Save. Every other overlap is still refused: two rules in force on one day
+  // means the pay for that day depends on which row is read first.
   const existing = await tx.driverPayRule.findMany({
     where: { driverId: driver.id },
     select: { id: true, effectiveFrom: true, effectiveTo: true },
   })
+  const superseded =
+    existing.find(
+      (rule) =>
+        rule.effectiveTo === null &&
+        rule.effectiveFrom.getTime() < from.getTime(),
+    ) ?? null
   const clashes = existing.some(
     (rule) =>
+      rule !== superseded &&
       rule.effectiveFrom.getTime() <= (to?.getTime() ?? Infinity) &&
       (rule.effectiveTo?.getTime() ?? Infinity) >= from.getTime(),
   )
   if (clashes) return { ok: false, reason: 'overlaps' }
+
+  if (superseded) {
+    await tx.driverPayRule.update({
+      where: { id: superseded.id },
+      data: { effectiveTo: new Date(from.getTime() - 1) },
+    })
+  }
 
   const created = await tx.driverPayRule.create({
     data: {
@@ -375,7 +398,21 @@ export async function saveDriverPayRule(
     select: { id: true },
   })
 
-  return { ok: true, ruleId: created.id }
+  return {
+    ok: true,
+    ruleId: created.id,
+    supersededRuleId: superseded?.id ?? null,
+  }
+}
+
+/** The last millisecond of a UTC day — where a rule's last day ends. */
+export function endOfUtcDay(day: Date): Date {
+  const midnight = Date.UTC(
+    day.getUTCFullYear(),
+    day.getUTCMonth(),
+    day.getUTCDate(),
+  )
+  return new Date(midnight + 86_400_000 - 1)
 }
 
 /**
@@ -396,9 +433,10 @@ export async function closePayRule(
   if (!rule) return { ok: false }
   if (effectiveTo.getTime() < rule.effectiveFrom.getTime()) return { ok: false }
 
+  // The end of the day given, not its midnight (TMS v11.51).
   await tx.driverPayRule.update({
     where: { id: rule.id },
-    data: { effectiveTo },
+    data: { effectiveTo: endOfUtcDay(effectiveTo) },
   })
   return { ok: true }
 }

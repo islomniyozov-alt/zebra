@@ -430,11 +430,11 @@ describe('navigationFor', () => {
   // question about the ROLE rather than answered by a screen.
   //
   // The owner answered it: ACCOUNTING holds `driver.pay:update` as of
-  // 2026-09-28. The split that survives is the one §1 states — a MANAGER reads
-  // what a driver is paid and does not set it.
-  it('lets a manager see charges without setting them', () => {
+  // 2026-09-28, and MANAGER as of 2026-11-23 (Uktam item 1, TMS v11.51),
+  // reversing §1's "a manager reads what a driver is paid and does not set it".
+  it('lets a manager see and set what a driver is paid', () => {
     expect(can(session('MANAGER'), 'read', 'driver.pay')).toBe(true)
-    expect(can(session('MANAGER'), 'update', 'driver.pay')).toBe(false)
+    expect(can(session('MANAGER'), 'update', 'driver.pay')).toBe(true)
   })
 
   it('lets accounting set them, which is the whole of the ruling', () => {
@@ -442,11 +442,11 @@ describe('navigationFor', () => {
     expect(can(session('ACCOUNTING'), 'update', 'driver.pay')).toBe(true)
   })
 
-  it('gives OWNER, ADMIN and ACCOUNTING the write side, and nobody else', () => {
-    for (const role of ['OWNER', 'ADMIN', 'ACCOUNTING'] as const) {
+  it('gives OWNER, ADMIN, MANAGER and ACCOUNTING the write side, and nobody else', () => {
+    for (const role of ['OWNER', 'ADMIN', 'MANAGER', 'ACCOUNTING'] as const) {
       expect(can(session(role), 'update', 'driver.pay'), role).toBe(true)
     }
-    for (const role of ['MANAGER', 'DISPATCHER', 'DRIVER'] as const) {
+    for (const role of ['DISPATCHER', 'DRIVER'] as const) {
       expect(can(session(role), 'update', 'driver.pay'), role).toBe(false)
     }
     // A DISPATCHER SEES NO DRIVER PAY AT ALL, which is the older rule and is not
