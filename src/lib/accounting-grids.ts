@@ -4,7 +4,7 @@ import { asDate, asNumber } from './sql-json'
 import { listPayments, type PaymentRow } from './payments'
 import { listCharges, type ChargeRow } from './driver-deductions'
 import type { StandingChargeListRow } from './standing-charges'
-import { agingBucketFor, type AgingBucket } from './factoring'
+import { AGING_BUCKETS, agingBucketFor, type AgingBucket } from './factoring'
 import {
   applyList,
   readListParams,
@@ -136,6 +136,30 @@ export async function readInvoices(
   }))
 }
 
+/**
+ * The age chips' counts over the tab's population under `raw` — window,
+ * authority, search and funnels; the age chip itself left out, so each count
+ * is what clicking it shows (TMS §7.4 v11.52). They counted every invoice,
+ * factored ones on the Invoices tab included, whatever the search said.
+ */
+export function invoiceAgeCounts(
+  population: readonly InvoiceGridRow[],
+  raw: RawParams,
+): Record<AgingBucket, number> {
+  const counts = Object.fromEntries(
+    AGING_BUCKETS.map((bucket) => [bucket, 0]),
+  ) as Record<AgingBucket, number>
+  for (const row of applyList(
+    population,
+    readListParams(raw),
+    invoiceShape,
+    raw,
+  )) {
+    if (row.bucket !== null) counts[row.bucket] += 1
+  }
+  return counts
+}
+
 export const invoiceShape: ListShape<InvoiceGridRow> = {
   searchText: (row) =>
     `${row.invoiceNumber} ${row.customerName} ${row.companyName}`,
@@ -236,6 +260,24 @@ export function unappliedTabRows(
 ): PaymentRow[] {
   return applyList(
     paymentsInState(rows, 'unapplied'),
+    readListParams(raw),
+    paymentShape,
+    raw,
+  )
+}
+
+/**
+ * A payment state chip's rows under `raw` — the same `applyList` as the
+ * list, so "Applied (n)" counts what the search left (TMS §7.4 v11.52). It
+ * was the strip's figure, which ignored the search box.
+ */
+export function paymentStateRows(
+  rows: readonly PaymentRow[],
+  state: 'applied' | 'unapplied',
+  raw: RawParams,
+): PaymentRow[] {
+  return applyList(
+    paymentsInState(rows, state),
     readListParams(raw),
     paymentShape,
     raw,
@@ -525,7 +567,7 @@ export function batchesFrom(
 
 export const batchShape: ListShape<BatchGridRow> = {
   searchText: (row) =>
-    `${row.batchNumber ?? ''} ${row.status} ${row.payCompanyName ?? ''} ${row.notes ?? ''}`,
+    `${row.batchNumber ?? ''} ${row.status} ${row.payCompanyName ?? ''} ${row.notes ?? ''} ${row.createdBy ?? ''}`,
   // §7.4.1 — CHECK DATE is what the range bounds here, and the bar says so. It is
   // the date somebody is looking for when they ask about a pay run; `createdAt` is
   // when a row was made, which is a fact about this software rather than the money.

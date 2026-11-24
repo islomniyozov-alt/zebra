@@ -799,10 +799,17 @@ export { podConfirmed }
 export function loadSearchWhere(term: string): Prisma.LoadWhereInput {
   const trimmed = term.trim()
   if (trimmed === '') return {}
+  // AND THE NAMES (TMS §7.4 v11.52, Uktam item 2): the customer and either
+  // driver seat, which is what an office reads down the row besides numbers.
+  const name = { contains: trimmed, mode: 'insensitive' } as const
+  const person = { OR: [{ firstName: name }, { lastName: name }] }
   return {
     OR: [
-      { referenceNumber: { contains: trimmed, mode: 'insensitive' } },
-      { loadNumber: { contains: trimmed, mode: 'insensitive' } },
+      { referenceNumber: name },
+      { loadNumber: name },
+      { customer: { name } },
+      { driver: person },
+      { coDriver: person },
     ],
   }
 }

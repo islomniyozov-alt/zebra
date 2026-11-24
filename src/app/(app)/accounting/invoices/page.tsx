@@ -18,6 +18,7 @@ import {
   type RawParams,
 } from '@/lib/list-view'
 import {
+  invoiceAgeCounts,
   invoiceShape,
   readInvoices,
   type InvoiceGridRow,
@@ -558,6 +559,7 @@ export default async function AccountingInvoicesPage({
     invoiceShape,
     applyList,
   )
+  const ageCounts = invoiceAgeCounts(population, windowed(raw, window))
 
   const allColumns: Column<InvoiceGridRow>[] = [
     {
@@ -705,8 +707,9 @@ export default async function AccountingInvoicesPage({
             choices: BUCKETS.map((bucket) => ({
               value: bucket,
               label: t(`aging.${bucket}` as MessageKey),
-              count: data.invoices.filter((row) => row.bucket === bucket)
-                .length,
+              // OVER THE SEARCHED ROWS (§7.4 v11.52): the tab's population
+              // under every other filter, search included, age excluded.
+              count: ageCounts[bucket],
             })),
           },
         ]}

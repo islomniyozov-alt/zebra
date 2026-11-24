@@ -619,6 +619,17 @@ describe('filters combine, and none overwrites another', () => {
     expect(keysOf(listed)).toEqual(['illinois', 'relay'])
   }, 300_000)
 
+  // THE SEARCH BOX READS NAMES TOO (TMS §7.4 v11.52, Uktam item 2): the
+  // driver in either seat and the customer, beside number and reference.
+  it('a search by a driver name finds either seat, and by the customer finds all', async () => {
+    const { listed } = await read({ ref: `Two ${nonce}` })
+    expect(keysOf(listed)).toEqual(['illinois', 'relay'])
+    const { listed: byCustomer } = await read({ ref: `broker ${nonce}` })
+    expect(byCustomer).toHaveLength(Object.keys(ids).length)
+    const { listed: none } = await read({ ref: `nobody-${nonce}` })
+    expect(none).toEqual([])
+  }, 300_000)
+
   it('the broker filter narrows to the broker', async () => {
     const { listed } = await read({ customer: brokerId })
     expect(listed).toHaveLength(Object.keys(ids).length)

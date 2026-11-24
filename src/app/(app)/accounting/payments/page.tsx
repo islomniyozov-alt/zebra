@@ -11,6 +11,7 @@ import {
   paymentShape,
   paymentsInState,
   readPayments,
+  paymentStateRows,
   unappliedTabRows,
 } from '@/lib/accounting-grids'
 import type { PaymentRow } from '@/lib/payments'
@@ -139,6 +140,11 @@ export default async function AccountingPaymentsPage({
   )
   const unappliedCount = unappliedTabRows(
     data.payments,
+    windowed(tabParams, window),
+  ).length
+  const appliedCount = paymentStateRows(
+    data.payments,
+    'applied',
     windowed(tabParams, window),
   ).length
 
@@ -368,7 +374,9 @@ export default async function AccountingPaymentsPage({
                     {
                       value: 'applied',
                       label: t('accounting.payments.appliedOnly'),
-                      count: data.strip.appliedCount,
+                      // OVER THE SEARCHED ROWS, as the unapplied chip is
+                      // (§7.4 v11.52) — the strip's figure ignored the box.
+                      count: appliedCount,
                     },
                   ],
                 },

@@ -31,7 +31,8 @@ import {
 import { ColumnsChooser } from '../_grid/ColumnsChooser'
 import { DensityControl } from './DensityControl'
 import { LoadFilters } from './LoadFilters'
-import { DateRangeFilter, ReferenceSearch } from './ToolbarControls'
+import { DateRangeFilter } from './ToolbarControls'
+import { SearchBox } from '@/components/ui/SearchBox'
 import { AuthorityFilter } from '../_grid/AuthorityFilter'
 import type {
   LoadBillingStatus,
@@ -343,9 +344,13 @@ export default async function LoadsPage({
         />
         <DateRangeFilter which="pickup" labels={range('pickup')} />
         <DateRangeFilter which="delivery" labels={range('delivery')} />
-        <ReferenceSearch
+        {/* THE ONE SEARCH BOX (§7.4, v11.52), on `?ref=` as before. */}
+        <SearchBox
+          param="ref"
           label={t('loads.filter.reference')}
           placeholder={t('loads.filter.referencePlaceholder')}
+          showLabel={false}
+          className="flex items-center"
         />
         {/* THE AUTHORITY, AS A DROPDOWN (§6.3, 2026-11-06); nothing when there
          * is one authority, which the component decides. */}

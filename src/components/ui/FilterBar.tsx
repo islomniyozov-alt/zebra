@@ -3,6 +3,7 @@
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, type ReactNode } from 'react'
 import { Button } from './Button'
+import { SearchBox } from './SearchBox'
 import { cx } from '@/lib/cx'
 
 // §7.4. Sits directly under the page title, never in a drawer. Chips, not
@@ -164,26 +165,7 @@ export function FilterBar({
     [params, pathname, router],
   )
 
-  // SUBMIT, NOT KEYSTROKE. A debounce would put a database query behind every
-  // letter of a nine-character trip id and re-render the table under the
-  // typing hand. Enter is the gesture, and it is also what makes the resulting
-  // URL a thing somebody chose to create rather than a trail of nine of them
-  // in the history.
-  const submitSearch = useCallback(
-    (value: string) => {
-      if (!search) return
-      const next = new URLSearchParams(params.toString())
-      const trimmed = value.trim()
-      if (trimmed === '') next.delete(search.param)
-      else next.set(search.param, trimmed)
-      router.replace(next.size > 0 ? `${pathname}?${next}` : pathname, {
-        scroll: false,
-      })
-    },
-    [params, pathname, router, search],
-  )
-
-  // ON CHANGE, NOT ON SUBMIT, and deliberately unlike the search box above. A
+  // ON CHANGE, NOT ON SUBMIT, and deliberately unlike the search box (`SearchBox`). A
   // date input fires `change` when a day is picked, not per keystroke, so there
   // is no query behind every character and nothing to debounce — and a range
   // that needed a separate Apply would be a control people leave half-set.
@@ -281,34 +263,11 @@ export function FilterBar({
 
       <Wrap on={twoRows} className="flex flex-wrap items-center gap-z2">
         {search ? (
-          <form
-            className="flex items-center gap-z1"
-            onSubmit={(event) => {
-              event.preventDefault()
-              const field = new FormData(event.currentTarget).get(search.param)
-              submitSearch(typeof field === 'string' ? field : '')
-            }}
-          >
-            <label
-              htmlFor={`filter-${search.param}`}
-              className="text-xs font-medium uppercase tracking-[0.04em] text-ink-3"
-            >
-              {search.label}
-            </label>
-            <input
-              id={`filter-${search.param}`}
-              name={search.param}
-              type="search"
-              dir="ltr"
-              // `key` on the URL value so a cleared filter empties the box.
-              // Without it the input keeps what was typed while the table shows
-              // everything, which reads as a filter that stopped working.
-              key={params.get(search.param) ?? ''}
-              defaultValue={params.get(search.param) ?? ''}
-              placeholder={search.placeholder}
-              className="h-control-compact rounded-control border border-border-strong bg-surface px-z2 font-mono text-xs text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none"
-            />
-          </form>
+          <SearchBox
+            param={search.param}
+            label={search.label}
+            placeholder={search.placeholder}
+          />
         ) : null}
 
         {range ? (
