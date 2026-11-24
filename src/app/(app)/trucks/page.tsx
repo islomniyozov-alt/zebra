@@ -401,7 +401,6 @@ export default async function TrucksPage({
       <div className="flex items-baseline justify-between gap-z4 border-b border-border bg-surface px-gutter py-z3">
         <h1 className="text-lg font-medium text-ink">{t('trucks.title')}</h1>
         <div className="flex items-center gap-z3">
-          <p className="text-xs text-ink-3">{t('trucks.stripeMeaning')}</p>
           {/* §6.5 part 1: this view, every row of it, as CSV. A plain link:
            * the browser downloads, middle-click works, nothing is posted. */}
           <a

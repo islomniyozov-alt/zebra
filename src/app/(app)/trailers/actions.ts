@@ -33,8 +33,9 @@ export async function createTrailerAction(
   const { t } = await getLocaleContext()
   const input = read(formData)
 
+  let created: { id: string }
   try {
-    await withCurrentOrg('create', 'trailer', (tx, session) =>
+    created = await withCurrentOrg('create', 'trailer', (tx, session) =>
       createTrailer(tx, session.organizationId, input, {
         byUserId: session.userId,
       }),
@@ -45,7 +46,8 @@ export async function createTrailerAction(
 
   await rememberAuthority(input.companyId)
   revalidatePath('/trailers')
-  redirect('/trailers')
+  // §6.5 part 3: Save opens the record.
+  redirect(`/trailers/${created.id}`)
 }
 
 export async function updateTrailerAction(

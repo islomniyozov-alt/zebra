@@ -28,15 +28,14 @@ export const TRUCK_IDENTITY_FIELDS = [
 ] as const
 
 /** Main, right: where it stands. */
-export const TRUCK_STATUS_FIELDS = [
-  'status',
-  'ownershipType',
-  'currentOdometer',
-  'notes',
-] as const
+export const TRUCK_STATUS_FIELDS = ['status', 'ownershipType', 'notes'] as const
 
-/** Details: the item-12 facts. */
+/**
+ * Details: the odometer and the item-12 facts — what Add truck does not ask
+ * (§6.5 part 3, v11.54, which moved the odometer here from Main).
+ */
 export const TRUCK_DETAIL_FIELDS = [
+  'currentOdometer',
   'fuelType',
   'fleetStatus',
   'ownerName',

@@ -81,8 +81,9 @@ export async function createTruckAction(
   const { t } = await getLocaleContext()
   const input = read(formData)
 
+  let created: { id: string }
   try {
-    await withCurrentOrg('create', 'truck', (tx, session) =>
+    created = await withCurrentOrg('create', 'truck', (tx, session) =>
       createTruck(tx, session.organizationId, input, {
         byUserId: session.userId,
       }),
@@ -93,7 +94,8 @@ export async function createTruckAction(
 
   await rememberAuthority(input.companyId)
   revalidatePath('/trucks')
-  redirect('/trucks')
+  // §6.5 part 3: Save opens the record, where the Details tab is.
+  redirect(`/trucks/${created.id}`)
 }
 
 export async function updateTruckAction(

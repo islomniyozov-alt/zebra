@@ -3,9 +3,8 @@ import { SELECTABLE_AUTHORITY } from '@/lib/companies'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyIdScopeFilter } from '@/lib/tenancy'
-import { RecordForm } from '@/components/forms/RecordForm'
+import { NewAssetForm } from '@/components/forms/NewAssetForm'
 import { createTruckAction } from '../actions'
-import { truckFields } from '../fields'
 import { lastUsedAuthority } from '../../_reference/shared'
 
 // A dispatcher holds `truck:read` and not `truck:create`, so this route is
@@ -51,16 +50,31 @@ export default async function NewTruckPage() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-surface-2 px-gutter py-z5">
-        <RecordForm
-          fields={truckFields(t, authorities, 'create')}
-          values={{
-            companyId: defaultAuthority,
-            status: 'AVAILABLE',
-            ownershipType: 'OWNED',
-          }}
+        {/* THE SHORT FORM (§6.5 part 3, v11.54): what identifies the unit.
+         * Status and ownership take their defaults; odometer and the item-12
+         * facts are on the record's Details tab, which Save opens. */}
+        <NewAssetForm
+          kind="truck"
+          authorities={authorities}
+          defaultAuthority={defaultAuthority}
           action={createTruckAction}
           cancelHref="/trucks"
-          labels={{ save: t('ref.save'), cancel: t('ref.cancel') }}
+          labels={{
+            authority: t('ref.authority'),
+            unitNumber: t('fleet.unitNumber'),
+            vin: t('fleet.vin'),
+            make: t('trucks.make'),
+            model: t('trucks.model'),
+            year: t('fleet.year'),
+            type: t('trailers.type'),
+            typeHint: t('trailers.typeHint'),
+            plate: t('fleet.plate'),
+            plateState: t('fleet.plateState'),
+            vinDecoding: t('fleet.vinDecoding'),
+            vinNotDecoded: t('fleet.vinNotDecoded'),
+            save: t('ref.save'),
+            cancel: t('ref.cancel'),
+          }}
         />
       </div>
     </>

@@ -3,9 +3,8 @@ import { SELECTABLE_AUTHORITY } from '@/lib/companies'
 import { currentUserCan, withCurrentOrg } from '@/lib/auth-context'
 import { getLocaleContext } from '@/lib/locale'
 import { companyIdScopeFilter } from '@/lib/tenancy'
-import { RecordForm } from '@/components/forms/RecordForm'
+import { NewAssetForm } from '@/components/forms/NewAssetForm'
 import { createTrailerAction } from '../actions'
-import { trailerFields } from '../fields'
 import { lastUsedAuthority } from '../../_reference/shared'
 
 export default async function NewTrailerPage() {
@@ -38,16 +37,29 @@ export default async function NewTrailerPage() {
         <h1 className="text-lg font-medium text-ink">{t('trailers.new')}</h1>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto bg-surface-2 px-gutter py-z5">
-        <RecordForm
-          fields={trailerFields(t, authorities, 'create')}
-          values={{
-            companyId: defaultAuthority,
-            status: 'AVAILABLE',
-            ownershipType: 'OWNED',
-          }}
+        {/* The truck's short form, the same shape (§6.5 part 3, v11.54). */}
+        <NewAssetForm
+          kind="trailer"
+          authorities={authorities}
+          defaultAuthority={defaultAuthority}
           action={createTrailerAction}
           cancelHref="/trailers"
-          labels={{ save: t('ref.save'), cancel: t('ref.cancel') }}
+          labels={{
+            authority: t('ref.authority'),
+            unitNumber: t('fleet.unitNumber'),
+            vin: t('fleet.vin'),
+            make: t('trucks.make'),
+            model: t('trucks.model'),
+            year: t('fleet.year'),
+            type: t('trailers.type'),
+            typeHint: t('trailers.typeHint'),
+            plate: t('fleet.plate'),
+            plateState: t('fleet.plateState'),
+            vinDecoding: t('fleet.vinDecoding'),
+            vinNotDecoded: t('fleet.vinNotDecoded'),
+            save: t('ref.save'),
+            cancel: t('ref.cancel'),
+          }}
         />
       </div>
     </>

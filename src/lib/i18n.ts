@@ -1292,6 +1292,8 @@ const en = {
   'fleet.vin': 'VIN',
   'fleet.plate': 'Plate',
   'fleet.plateState': 'Plate state',
+  'fleet.vinDecoding': 'Decoding VIN…',
+  'fleet.vinNotDecoded': 'Could not decode VIN',
   'fleet.year': 'Year',
 
   'trucks.title': 'Trucks',
@@ -1303,7 +1305,6 @@ const en = {
   'trucks.section.identity': 'Identity',
   'trucks.section.status': 'Assignments and status',
   'trucks.section.details': 'Details',
-  'trucks.stripeMeaning': 'Stripe shows availability',
   'trucks.health.title': 'Data health',
   'trucks.health.all': 'All trucks',
   'trucks.health.vin': 'No VIN',
@@ -4823,6 +4824,8 @@ const ru: Dictionary = {
   'fleet.vin': 'VIN',
   'fleet.plate': 'Госномер',
   'fleet.plateState': 'Штат регистрации',
+  'fleet.vinDecoding': 'Расшифровываем VIN…',
+  'fleet.vinNotDecoded': 'Не удалось расшифровать VIN',
   'fleet.year': 'Год',
 
   'trucks.title': 'Тягачи',
@@ -4834,7 +4837,6 @@ const ru: Dictionary = {
   'trucks.section.identity': 'Данные тягача',
   'trucks.section.status': 'Назначения и статус',
   'trucks.section.details': 'Подробности',
-  'trucks.stripeMeaning': 'Полоса показывает доступность',
   'trucks.health.title': 'Полнота данных',
   'trucks.health.all': 'Все тягачи',
   'trucks.health.vin': 'Без VIN',
