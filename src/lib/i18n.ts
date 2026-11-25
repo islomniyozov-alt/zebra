@@ -1252,6 +1252,7 @@ const en = {
   'trucks.fleetStatus': 'Fleet status',
   'trucks.ownerName': 'Owner',
   'trucks.ownerNameHint': 'Leave blank when the carrier owns it.',
+  'trucks.lessorName': 'Lessor',
   'trucks.axles': 'Axles',
   'trucks.fuelType': 'Fuel',
   'trucks.grossWeight': 'Gross weight (lb)',
@@ -1325,6 +1326,13 @@ const en = {
   'fleet.registration.attachFailed':
     'Saved, but the registration file did not upload — add it on the record’s compliance panel.',
   'fleet.registration.openRecord': 'Open the record',
+  'fleet.registration.fromVin': 'From VIN',
+  'fleet.registration.cardSays': 'Card: {value}',
+  'fleet.registration.cardType': 'Card type: {code}',
+  'fleet.registration.issued': 'Registration issued',
+  'fleet.registration.issuedNotDate':
+    'Registration issued is not a date. Use MM/DD/YYYY, or leave it blank.',
+  'fleet.registration.fuel': 'Fuel type',
   'fleet.year': 'Year',
 
   'trucks.title': 'Trucks',
@@ -4816,6 +4824,7 @@ const ru: Dictionary = {
   'trucks.ownerName': 'Владелец',
   'trucks.ownerNameHint':
     'Оставьте пустым, если тягач принадлежит перевозчику.',
+  'trucks.lessorName': 'Лизингодатель',
   'trucks.axles': 'Осей',
   'trucks.fuelType': 'Топливо',
   'trucks.grossWeight': 'Полная масса (фунты)',
@@ -4888,6 +4897,13 @@ const ru: Dictionary = {
   'fleet.registration.attachFailed':
     'Сохранено, но файл регистрации не загрузился — добавьте его в панели compliance на карточке.',
   'fleet.registration.openRecord': 'Открыть карточку',
+  'fleet.registration.fromVin': 'По VIN',
+  'fleet.registration.cardSays': 'На карточке: {value}',
+  'fleet.registration.cardType': 'Тип на карточке: {code}',
+  'fleet.registration.issued': 'Регистрация выдана',
+  'fleet.registration.issuedNotDate':
+    'Дата выдачи — не дата. Формат ММ/ДД/ГГГГ, или оставьте пустым.',
+  'fleet.registration.fuel': 'Топливо',
   'fleet.year': 'Год',
 
   'trucks.title': 'Тягачи',

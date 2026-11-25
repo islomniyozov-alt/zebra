@@ -153,7 +153,10 @@ describe('the short form', () => {
       'plateState',
       'registration',
       'registrationExpiresAt',
+      'registrationIssuedAt',
       'ownerName',
+      'lessorName',
+      'fuelType',
       'grossWeightLbs',
     ])
     expect(NEW_ASSET_FIELDS.trailer).toEqual([
@@ -166,9 +169,10 @@ describe('the short form', () => {
       'plateState',
       'registration',
       'registrationExpiresAt',
+      'registrationIssuedAt',
     ])
     // Every name the form posts is one of those. Without a registration held
-    // (§6.5 part 4) none of the Details tab's: owner name and GVWR are asked
+    // (§6.5 part 4) none of the Details tab's: owner name, lessor, fuel and GVWR are asked
     // only while a document is held, and nothing else from Details ever.
     const names = (source: string) =>
       [...source.matchAll(/name="(\w+)"/g)].map((m) => m[1])
@@ -186,7 +190,7 @@ describe('the short form', () => {
     for (const name of TRUCK_DETAIL_FIELDS) expect(always).not.toContain(name)
     expect(
       TRUCK_DETAIL_FIELDS.filter((name) => posted.includes(name)).sort(),
-    ).toEqual(['grossWeightLbs', 'ownerName'])
+    ).toEqual(['fuelType', 'grossWeightLbs', 'lessorName', 'ownerName'])
     expect(posted).not.toContain('status')
     expect(posted).not.toContain('ownershipType')
   })
@@ -204,13 +208,13 @@ describe('the short form', () => {
       'onBlur={(event) => void runDecode(event.target.value)}',
     )
     expect(form).toContain('const result = await decodeVin(vin)')
-    // §6.5 part 4: an empty field, or one the decode filled, takes vPIC's
-    // value; one from the registration or the keyboard keeps its own and
-    // shows the mismatch.
+    // §6.5 parts 4–5: what one decode does to the form is `mergeDecode`'s
+    // (pure, tested in registration-reader.test.ts); the form applies it.
+    expect(form).toContain('const merge = mergeDecode(')
+    expect(form).toContain('setMismatch(merge.mismatch)')
     expect(form).toContain(
-      "if (now[field].trim() === '' || from[field] === 'vin') {",
+      'setCard((current) => ({ ...current, ...merge.card }))',
     )
-    expect(form).toContain('setMismatch(decodeMismatches(kept, decoded))')
     expect(form).not.toMatch(/disabled=\{[^}]*decod/)
   })
 

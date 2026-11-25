@@ -8,10 +8,12 @@ import type { Maybe } from './envelope'
 // apportioned cab card or an ordinary single-state registration. Layouts vary
 // by state; the facts this system wants are the same few on every one.
 //
-// ── NINE FIELDS, ALL TRANSCRIBED ─────────────────────────────────────────
+// ── FOURTEEN FIELDS, ALL TRANSCRIBED ─────────────────────────────────────
 //
-// Every value is a free string as printed. The expiry is converted after the
-// reader by `us-dates.ts`, the VIN checked by `vin.ts`, the year and GVWR
+// Nine from part 4; unit number, issue date, fuel, type and lessor added by
+// part 5 (v11.56, owner's ruling 2026-11-25, on the first real cab card).
+// Every value is a free string as printed. The dates are converted after the
+// reader by `registration-fields.ts` (two-digit years included), the VIN checked by `vin.ts`, the year and GVWR
 // read as numbers by `registration-fields.ts`. None of that is asked of the
 // model, because a model asked for ISO or for a valid VIN will produce one.
 //
@@ -19,7 +21,7 @@ import type { Maybe } from './envelope'
 //
 // The registrant's address, the fees, the title number, the apportioned
 // jurisdictions and their weights are on many cab cards. The owner ruled the
-// nine. `tests/registration-reader.test.ts` checks every name in
+// fourteen. `tests/registration-reader.test.ts` checks every name in
 // `REGISTRATION_FORBIDDEN_FIELDS` against the schema, the type and the
 // prompt, so growing one is a failure that names it.
 // ---------------------------------------------------------------------------
@@ -46,6 +48,16 @@ export interface ExtractedRegistration {
    * On an apportioned card, the registered gross weight.
    */
   gvwr: Maybe<string>
+  /** The carrier's unit number as printed ("UNIT #"). */
+  unitNumber: Maybe<string>
+  /** The date the registration was issued, exactly as printed. */
+  issuedAt: Maybe<string>
+  /** The fuel as printed — "D", "DSL", "DIESEL". Converted by code. */
+  fuel: Maybe<string>
+  /** The vehicle type or body code as printed — "TT", "TRL". Shown, not kept. */
+  vehicleType: Maybe<string>
+  /** The lessor's name, when the card prints one. Never the address. */
+  lessorName: Maybe<string>
 }
 
 const field = (type: unknown) => ({
@@ -75,6 +87,11 @@ export const REGISTRATION_SCHEMA = {
     model: field({ type: 'string' }),
     ownerName: field({ type: 'string' }),
     gvwr: field({ type: 'string' }),
+    unitNumber: field({ type: 'string' }),
+    issuedAt: field({ type: 'string' }),
+    fuel: field({ type: 'string' }),
+    vehicleType: field({ type: 'string' }),
+    lessorName: field({ type: 'string' }),
   },
   required: [
     'vin',
@@ -86,6 +103,11 @@ export const REGISTRATION_SCHEMA = {
     'model',
     'ownerName',
     'gvwr',
+    'unitNumber',
+    'issuedAt',
+    'fuel',
+    'vehicleType',
+    'lessorName',
   ],
   additionalProperties: false,
 } as const
@@ -95,10 +117,11 @@ export const REGISTRATION_FIELDS = Object.keys(
   REGISTRATION_SCHEMA.properties,
 ) as (keyof ExtractedRegistration)[]
 
-/** What the nine-field contract must never grow a field for. */
+/** What the fourteen-field contract must never grow a field for. */
 export const REGISTRATION_FORBIDDEN_FIELDS: readonly string[] = [
   'address',
   'ownerAddress',
+  'lessorAddress',
   'street',
   'city',
   'zip',

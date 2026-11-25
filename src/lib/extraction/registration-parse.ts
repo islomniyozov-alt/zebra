@@ -21,5 +21,10 @@ export function parseRegistrationResponse(text: string): ExtractedRegistration {
     model: readField(root, 'model', asString),
     ownerName: readField(root, 'ownerName', asString),
     gvwr: readField(root, 'gvwr', asString),
+    unitNumber: readField(root, 'unitNumber', asString),
+    issuedAt: readField(root, 'issuedAt', asString),
+    fuel: readField(root, 'fuel', asString),
+    vehicleType: readField(root, 'vehicleType', asString),
+    lessorName: readField(root, 'lessorName', asString),
   }
 }

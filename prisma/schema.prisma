@@ -719,6 +719,11 @@ model Truck {
   /// a question the row already answers, free to disagree after a transfer.
   ownerName String?
 
+  /// The lessor the registration names, when the unit is leased (TMS §6.5
+  /// part 5, v11.56; migration 77). Blank means none is on file. Read off the
+  /// cab card by Add truck and shown on Details beside the owner name.
+  lessorName String?
+
   axles Int?
 
   /// TEXT against a code list, like `fleetStatus`. See `fleet-codes.ts`.

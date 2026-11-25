@@ -39,6 +39,7 @@ export const TRUCK_DETAIL_FIELDS = [
   'fuelType',
   'fleetStatus',
   'ownerName',
+  'lessorName',
   'grossWeightLbs',
   'axles',
 ] as const
@@ -68,6 +69,7 @@ export type TruckFormRow = Pick<
   | 'fuelType'
   | 'fleetStatus'
   | 'ownerName'
+  | 'lessorName'
   | 'grossWeightLbs'
   | 'axles'
 >
@@ -96,6 +98,7 @@ export function truckFormValues(
     fuelType: text(truck.fuelType),
     fleetStatus: text(truck.fleetStatus),
     ownerName: text(truck.ownerName),
+    lessorName: text(truck.lessorName),
     grossWeightLbs: whole(truck.grossWeightLbs),
     axles: whole(truck.axles),
   }

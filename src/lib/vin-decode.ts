@@ -186,3 +186,60 @@ export function decodeMismatches(
     out.year = String(decoded.year)
   return out
 }
+
+/** Where a decoded field's value came from, as the form tracks it. */
+export type FieldSource = 'none' | 'vin' | 'doc' | 'typed'
+
+export interface DecodeMerge {
+  /** The values the decode puts in the fields. */
+  fill: Partial<Record<DecodeField, string>>
+  /** Each field the decode filled, now sourced from the VIN. */
+  filled: DecodeField[]
+  /** "VIN decodes to {value}", beside a kept field vPIC disagrees with. */
+  mismatch: Partial<Record<DecodeField, string>>
+  /** "Card: {value}", the card's spelling of a make the decode replaced. */
+  card: Partial<Record<DecodeField, string>>
+}
+
+/**
+ * WHAT ONE DECODE DOES TO THE FORM (TMS §6.5 parts 3–5).
+ *
+ * - A field that is empty, or that the decode itself filled, takes vPIC's
+ *   value.
+ * - THE MAKE FROM THE DOCUMENT IS REPLACED (part 5, v11.56): vPIC's make is
+ *   the make, and the card's own spelling (VOLV for VOLVO TRUCK) is kept
+ *   beside it as "Card: …" whenever the two are not the same letters.
+ * - Any other field holding a value from the document, and ANY field typed
+ *   by hand, keeps it; where vPIC disagrees, "VIN decodes to …" is shown.
+ * - A field vPIC says nothing about is left exactly as it is.
+ */
+export function mergeDecode(
+  fields: readonly DecodeField[],
+  current: Readonly<Record<DecodeField, string>>,
+  sources: Readonly<Record<DecodeField, FieldSource>>,
+  decoded: DecodedVin,
+): DecodeMerge {
+  const out: DecodeMerge = { fill: {}, filled: [], mismatch: {}, card: {} }
+  const kept: Record<DecodeField, string> = { make: '', model: '', year: '' }
+  for (const field of fields) {
+    const answer =
+      field === 'year'
+        ? decoded.year === null
+          ? null
+          : String(decoded.year)
+        : decoded[field]
+    if (answer === null) continue
+    const now = current[field].trim()
+    const replaceDocMake = field === 'make' && sources.make === 'doc'
+    if (now === '' || sources[field] === 'vin' || replaceDocMake) {
+      out.fill[field] = answer
+      out.filled.push(field)
+      if (replaceDocMake && now !== '' && squash(now) !== squash(answer))
+        out.card[field] = now
+    } else {
+      kept[field] = current[field]
+    }
+  }
+  out.mismatch = decodeMismatches(kept, decoded)
+  return out
+}

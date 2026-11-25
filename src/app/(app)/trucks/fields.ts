@@ -131,6 +131,7 @@ export function truckFields(
       label: t('trucks.ownerName'),
       hint: t('trucks.ownerNameHint'),
     },
+    { kind: 'text', name: 'lessorName', label: t('trucks.lessorName') },
     { kind: 'number', name: 'axles', label: t('trucks.axles') },
     {
       kind: 'number',

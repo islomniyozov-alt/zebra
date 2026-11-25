@@ -86,6 +86,8 @@ export interface TruckInput {
   fleetStatus?: unknown
   /** Blank means the carrier owns it. */
   ownerName?: unknown
+  /** The lessor the registration names (§6.5 part 5). Blank means none. */
+  lessorName?: unknown
   axles?: unknown
   fuelType?: unknown
   grossWeightLbs?: unknown
@@ -460,6 +462,7 @@ function itemTwelveFields(input: Omit<TruckInput, 'companyId'>) {
     fleetStatus: readFleetStatus(input.fleetStatus),
     fuelType: readFuelType(input.fuelType),
     ownerName: optionalText(input.ownerName),
+    lessorName: optionalText(input.lessorName),
     axles: wholeNumber(input.axles, 'axles', 20),
     // 200,000 lb is past any legal gross in the United States by a wide
     // margin — a bound on a typo, not a rule about trucks.
@@ -515,6 +518,7 @@ export async function updateTruck(tx: TxClient, id: string, input: TruckEdit) {
     ),
     fuelType: when(input.fuelType, () => readFuelType(input.fuelType)),
     ownerName: when(input.ownerName, () => optionalText(input.ownerName)),
+    lessorName: when(input.lessorName, () => optionalText(input.lessorName)),
     axles: when(input.axles, () => wholeNumber(input.axles, 'axles', 20)),
     // 200,000 lb is past any legal gross in the United States by a wide
     // margin — a bound on a typo, not a rule about trucks.

@@ -10,18 +10,22 @@ import { REGISTRATION_SYSTEM } from '@/lib/extraction/registration-prompt'
 import { parseRegistrationResponse } from '@/lib/extraction/registration-parse'
 import {
   judgeRegistration,
+  readFuel,
   readGvwr,
   readModelYear,
   readPlateState,
+  readRegistrationDate,
   registrationPrefill,
+  verdictFor,
 } from '@/lib/extraction/registration-fields'
-import { decodeMismatches } from '@/lib/vin-decode'
+import { parseUsDate } from '@/lib/extraction/us-dates'
+import { decodeMismatches, mergeDecode } from '@/lib/vin-decode'
 import { readRegistrationFiling } from '@/lib/new-asset'
 import { translator } from '@/lib/i18n'
 
 // ---------------------------------------------------------------------------
 // THE VEHICLE-REGISTRATION READER (TMS §6.5 part 4, v11.55; owner's ruling
-// 2026-11-24): nine fields, each read or unreadable, never a guess; the form
+// 2026-11-24; part 5, v11.56, 2026-11-25): fourteen fields, each read or unreadable, never a guess; the form
 // fills, the VIN decode cross-checks, and Save files the REGISTRATION item.
 // The accuracy run against a real cab card is a separate instrument
 // (`corpus/registration/`, truth written first); these hold the contract.
@@ -44,11 +48,16 @@ const card = (
   model: high('CASCADIA'),
   ownerName: high('CYBER TRUCKING INC'),
   gvwr: high('80,000'),
+  unitNumber: high('524'),
+  issuedAt: high('03/31/2026'),
+  fuel: high('D'),
+  vehicleType: high('TT'),
+  lessorName: high('BROS LEASING INC'),
   ...over,
 })
 
 describe('the contract', () => {
-  it('asks for exactly the nine fields, and the prompt lists each', () => {
+  it('asks for exactly the fourteen fields, and the prompt lists each', () => {
     expect(REGISTRATION_FIELDS).toEqual([
       'vin',
       'plate',
@@ -59,6 +68,11 @@ describe('the contract', () => {
       'model',
       'ownerName',
       'gvwr',
+      'unitNumber',
+      'issuedAt',
+      'fuel',
+      'vehicleType',
+      'lessorName',
     ])
     expect(REGISTRATION_SCHEMA.required).toEqual(REGISTRATION_FIELDS)
     expect(REGISTRATION_SCHEMA.additionalProperties).toBe(false)
@@ -106,11 +120,18 @@ describe('the contract', () => {
         model: null,
         ownerName: null,
         gvwr: null,
+        unitNumber: { value: '524', confidence: 'high' },
+        issuedAt: null,
+        fuel: null,
+        vehicleType: null,
+        lessorName: null,
       }),
     )
     expect(parsed.vin?.value).toBe(GOOD_VIN)
     expect(parsed.plate).toBeNull()
     expect(parsed.plateState?.confidence).toBe('medium')
+    expect(parsed.unitNumber?.value).toBe('524')
+    expect(parsed.lessorName).toBeNull()
   })
 })
 
@@ -127,7 +148,51 @@ describe('each field read or unreadable', () => {
       ownerName: 'CYBER TRUCKING INC',
       grossWeightLbs: '80000',
       registrationExpiresAt: '03/31/2027',
+      unitNumber: '524',
+      registrationIssuedAt: '03/31/2026',
+      fuelType: 'Diesel',
+      lessorName: 'BROS LEASING INC',
     })
+    // The type is shown, never a form field.
+    expect(verdicts.vehicleType).toMatchObject({ read: true, value: 'TT' })
+  })
+
+  it('the Illinois card: a two-digit year converts (the first real card)', () => {
+    // corpus/registration/524 Registration 26-27.pdf printed 03/31/27; it was
+    // read correctly and then dropped as not_a_date under v11.55.
+    const verdicts = judgeRegistration(
+      card({ expiresAt: high('03/31/27'), issuedAt: high('03/31/26') }),
+      UPLOADED,
+    )
+    expect(verdicts.expiresAt).toMatchObject({
+      read: true,
+      value: '2027-03-31',
+    })
+    expect(verdicts.issuedAt).toMatchObject({ read: true, value: '2026-03-31' })
+    expect(verdictFor(verdicts, 'registrationIssuedAt').read).toBe(true)
+    expect(readRegistrationDate('3-1-27')).toEqual({
+      ok: true,
+      value: '2027-03-01',
+    })
+    expect(readRegistrationDate('03/31/2027')).toEqual({
+      ok: true,
+      value: '2027-03-31',
+    })
+    expect(readRegistrationDate('02/30/27').ok).toBe(false)
+    expect(readRegistrationDate('03/31/7').ok).toBe(false)
+    // The reader's rule only: the shared parser still wants four digits.
+    expect(parseUsDate('03/31/27').ok).toBe(false)
+  })
+
+  it('fuel converts by code; anything else is unreadable', () => {
+    for (const code of ['D', 'dsl', 'Diesel'])
+      expect(readFuel(code)).toEqual({ ok: true, value: 'Diesel' })
+    expect(readFuel('G')).toEqual({ ok: true, value: 'Gas' })
+    expect(readFuel('ELEC')).toEqual({ ok: true, value: 'Electric' })
+    expect(readFuel('P').ok).toBe(false)
+    expect(
+      judgeRegistration(card({ fuel: high('LPG') }), UPLOADED).fuel,
+    ).toMatchObject({ read: false, why: 'not_a_fuel' })
   })
 
   it('an unsure field is unreadable and the rest still fill', () => {
@@ -228,6 +293,66 @@ describe('the VIN decode cross-checks', () => {
   })
 })
 
+describe('the decode merges into the form (part 5)', () => {
+  const decoded = { make: 'VOLVO TRUCK', model: 'VNL', year: 2020 }
+  const ALL = ['make', 'model', 'year'] as const
+
+  it('the decode’s make replaces the card’s, the card’s spelling kept beside it', () => {
+    const merge = mergeDecode(
+      ALL,
+      { make: 'VOLV', model: '', year: '2020' },
+      { make: 'doc', model: 'none', year: 'doc' },
+      decoded,
+    )
+    expect(merge.fill).toEqual({ make: 'VOLVO TRUCK', model: 'VNL' })
+    expect(merge.filled).toEqual(['make', 'model'])
+    expect(merge.card).toEqual({ make: 'VOLV' })
+    expect(merge.mismatch).toEqual({})
+  })
+
+  it('the same letters on the card leave no note', () => {
+    const merge = mergeDecode(
+      ALL,
+      { make: 'Volvo Truck', model: '', year: '' },
+      { make: 'doc', model: 'none', year: 'none' },
+      decoded,
+    )
+    expect(merge.card).toEqual({})
+  })
+
+  it('a make typed by hand is kept, with VIN decodes to beside it', () => {
+    const merge = mergeDecode(
+      ALL,
+      { make: 'MACK', model: '', year: '' },
+      { make: 'typed', model: 'none', year: 'none' },
+      decoded,
+    )
+    expect(merge.fill.make).toBeUndefined()
+    expect(merge.mismatch).toEqual({ make: 'VOLVO TRUCK' })
+  })
+
+  it('a document year is kept, with the mismatch beside it, as part 4 says', () => {
+    const merge = mergeDecode(
+      ALL,
+      { make: '', model: '', year: '2019' },
+      { make: 'none', model: 'none', year: 'doc' },
+      decoded,
+    )
+    expect(merge.fill.year).toBeUndefined()
+    expect(merge.mismatch).toEqual({ year: '2020' })
+  })
+
+  it('a trailer is filled the year only', () => {
+    const merge = mergeDecode(
+      ['year'],
+      { make: '', model: '', year: '' },
+      { make: 'none', model: 'none', year: 'none' },
+      decoded,
+    )
+    expect(merge.fill).toEqual({ year: '2020' })
+  })
+})
+
 describe('Save files the registration', () => {
   const form = (entries: Record<string, string>) => {
     const data = new FormData()
@@ -251,13 +376,18 @@ describe('Save files the registration', () => {
     ).toEqual({
       ok: false,
       error: 'fleet.registration.noExpiry',
+      field: 'registrationExpiresAt',
     })
     expect(
       readRegistrationFiling(
         form({ registration: 'yes', registrationExpiresAt: '13/45/2027' }),
         today,
       ),
-    ).toEqual({ ok: false, error: 'fleet.registration.expiryNotDate' })
+    ).toEqual({
+      ok: false,
+      error: 'fleet.registration.expiryNotDate',
+      field: 'registrationExpiresAt',
+    })
   })
 
   it('files the expiry, the plate as identifier and the state as issuer', () => {
@@ -274,6 +404,35 @@ describe('Save files the registration', () => {
     expect(read.filing.expiresAt.toISOString()).toBe('2027-03-31T00:00:00.000Z')
     expect(read.filing.identifier).toBe('P123456')
     expect(read.filing.issuer).toBe('IL')
+    expect(read.filing.issuedAt).toBeNull()
+  })
+
+  it('files the issue date when given, and refuses one that is not a date', () => {
+    const read = readRegistrationFiling(
+      form({
+        registration: 'yes',
+        registrationExpiresAt: '03/31/27',
+        registrationIssuedAt: '03/31/26',
+      }),
+      today,
+    )
+    if (!read.ok || !read.filing) throw new Error('not filed')
+    expect(read.filing.expiresAt.toISOString()).toBe('2027-03-31T00:00:00.000Z')
+    expect(read.filing.issuedAt?.toISOString()).toBe('2026-03-31T00:00:00.000Z')
+    expect(
+      readRegistrationFiling(
+        form({
+          registration: 'yes',
+          registrationExpiresAt: '03/31/2027',
+          registrationIssuedAt: '99/99/26',
+        }),
+        today,
+      ),
+    ).toEqual({
+      ok: false,
+      error: 'fleet.registration.issuedNotDate',
+      field: 'registrationIssuedAt',
+    })
   })
 })
 
@@ -335,6 +494,12 @@ describe('the screens', () => {
       'fleet.registration.noExpiry',
       'fleet.registration.notAllowed',
       'fleet.vinMismatch',
+      'fleet.registration.fromVin',
+      'fleet.registration.cardSays',
+      'fleet.registration.cardType',
+      'fleet.registration.issued',
+      'fleet.registration.issuedNotDate',
+      'trucks.lessorName',
     ] as const) {
       expect(ru(key)).toEqual(expect.stringMatching(/\S/))
       expect(ru(key)).not.toBe(en(key))

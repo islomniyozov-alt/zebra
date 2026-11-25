@@ -49,6 +49,7 @@ describe('every field the edit form offers', () => {
       fuelType: 'Diesel',
       fleetStatus: 'In shop',
       ownerName: 'Karimov Leasing',
+      lessorName: 'Bros Leasing',
       grossWeightLbs: 52_000,
       axles: 3,
     })

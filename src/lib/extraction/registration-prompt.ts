@@ -5,9 +5,11 @@ import { REGISTRATION_SCHEMA } from './registration-shape'
 // v11.55).
 //
 // UNTUNED, AND THIS FILE SAYS SO UNTIL IT IS NOT. Every rule below comes from
-// the owner's ruling of 2026-11-24 — nine fields, unreadable per field, never
-// a guess — or from the inspection prompt it copies. None of it comes from
-// watching this prompt's output. The first accuracy run against a truth file
+// the owner's rulings of 2026-11-24 and 2026-11-25 — fourteen fields (part 5's
+// five added on the first real cab card), unreadable per field, never a
+// guess — or from the inspection prompt it copies. None of it comes from
+// watching this prompt's output: the first card's one miss (the expiry) was
+// the converter dropping a correct transcription, not the wording. The first accuracy run against a truth file
 // written beforehand (`corpus/registration/`) earns the right to edit it.
 // ---------------------------------------------------------------------------
 
@@ -18,7 +20,7 @@ export const REGISTRATION_SYSTEM = [
   'transcribe what is printed. You never infer, complete, or correct a value',
   'that is not legible.',
   '',
-  'RETURN EXACTLY NINE FIELDS AND NOTHING ELSE:',
+  'RETURN EXACTLY FOURTEEN FIELDS AND NOTHING ELSE:',
   '',
   '  vin         the vehicle identification number',
   '  plate       the plate number',
@@ -30,6 +32,11 @@ export const REGISTRATION_SYSTEM = [
   '  ownerName   the registered owner or registrant name — the name only',
   '  gvwr        the gross vehicle weight or registered gross weight, as',
   '              printed, with any unit',
+  '  unitNumber  the carrier unit number (often labelled UNIT # or UNIT NO)',
+  '  issuedAt    the date the registration was issued, as written',
+  '  fuel        the fuel, as printed (often a code, e.g. D)',
+  '  vehicleType the vehicle type or body code, as printed (e.g. TT)',
+  '  lessorName  the lessor name, only if the card prints one — the name only',
   '',
   'A FIELD YOU CANNOT READ IS NULL. If a value is cut off by the edge of the',
   'photo, hidden, blurred, or partly legible, return null for that field. Do',
@@ -40,16 +47,16 @@ export const REGISTRATION_SYSTEM = [
   '',
   'DATES ARE TRANSCRIBED EXACTLY AS WRITTEN — DO NOT CONVERT THEM. If the card',
   'says 03/31/2027, return "03/31/2027". Do not reorder, reformat or resolve',
-  'an ambiguous date. expiresAt is the registration’s expiry, not the date it',
-  'was issued or printed.',
+  'an ambiguous date or a two-digit year. expiresAt is the registration’s',
+  'expiry; issuedAt is the date it was issued. Never put one in the other.',
   '',
   'THE VIN AND THE PLATE ARE TRANSCRIBED CHARACTER FOR CHARACTER. Do not',
   'insert or remove characters to make a VIN 17 long; a VIN with a character',
   'you cannot see is null.',
   '',
-  'DO NOT RETURN ANYTHING ELSE FROM THE CARD — no address of the owner or',
-  'registrant, no fees, no title number, no list of jurisdictions or their',
-  'weights. Not in any field, not in a note.',
+  'DO NOT RETURN ANYTHING ELSE FROM THE CARD — no address of the owner,',
+  'registrant or lessor, no fees, no title number, no list of jurisdictions',
+  'or their weights. Not in any field, not in a note.',
   '',
   'CONFIDENCE IS PER FIELD: high when the characters are unambiguous, medium',
   'when legible but partly obscured, low when you are reconstructing.',

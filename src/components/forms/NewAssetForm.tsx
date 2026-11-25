@@ -8,16 +8,18 @@ import { Input } from '@/components/ui/Input'
 import { Select, type SelectOption } from '@/components/ui/Select'
 import { DropZone } from '@/components/forms/DropZone'
 import {
-  decodeMismatches,
   decodeVin,
+  mergeDecode,
   normalizeVin,
   type DecodeField,
+  type FieldSource,
 } from '@/lib/vin-decode'
 import { photoPagesRefusalKey } from '@/lib/photo-pages'
 import { photosAsDocument, uploadDocument } from '@/lib/upload-client'
-import type {
-  RegistrationFormField,
-  RegistrationVerdicts,
+import {
+  verdictFor,
+  type RegistrationFormField,
+  type RegistrationVerdicts,
 } from '@/lib/extraction/registration-fields'
 import type { NewAssetState } from '@/lib/new-asset'
 import { RECORD_FORM_INITIAL } from '@/components/forms/RecordForm'
@@ -42,6 +44,13 @@ import { RECORD_FORM_INITIAL } from '@/components/forms/RecordForm'
 // truck, shows owner name and GVWR, which fill Details), and Save files the
 // REGISTRATION item with the unit; the browser then puts the file on it and
 // opens the record.
+//
+// PART 5 (v11.56): the card's unit number fills Unit number; its issue date,
+// fuel and lessor fill beside the expiry (issued files on the REGISTRATION
+// item, fuel and lessor on the truck's Details); its type code is shown under
+// the held document and not kept. The decode's make REPLACES the card's, the
+// card's spelling shown beside it as "Card: …" (`mergeDecode`), and a field the
+// decode filled says "From VIN", never "Unreadable".
 
 type Kind = 'truck' | 'trailer'
 
@@ -89,6 +98,16 @@ interface Props {
       expiresHint: string
       ownerName: string
       gvwr: string
+      fromVin: string
+      /** "Card: {value}". */
+      cardSays: string
+      /** "Card type: {code}". */
+      cardType: string
+      issued: string
+      fuel: string
+      /** The truck's fuel code list, `FUEL_TYPES`. */
+      fuelOptions: readonly string[]
+      lessorName: string
       attachFailed: string
       openRecord: string
     }
@@ -98,7 +117,7 @@ interface Props {
 }
 
 type Decoding = 'idle' | 'decoding' | 'failed'
-type Source = 'none' | 'vin' | 'doc' | 'typed'
+type Source = FieldSource
 type Reading = 'idle' | 'reading' | 'filled' | 'unreadable' | 'failed'
 
 /** The fields each form can render, so a message for any other lands below. */
@@ -114,7 +133,10 @@ export const NEW_ASSET_FIELDS = {
     'plateState',
     'registration',
     'registrationExpiresAt',
+    'registrationIssuedAt',
     'ownerName',
+    'lessorName',
+    'fuelType',
     'grossWeightLbs',
   ],
   trailer: [
@@ -127,6 +149,7 @@ export const NEW_ASSET_FIELDS = {
     'plateState',
     'registration',
     'registrationExpiresAt',
+    'registrationIssuedAt',
   ],
 } as const
 
@@ -139,6 +162,7 @@ const DECODED: Record<Kind, readonly DecodeField[]> = {
 /** What a registration may fill, per unit, in the form's own names. */
 const FROM_REGISTRATION: Record<Kind, readonly RegistrationFormField[]> = {
   truck: [
+    'unitNumber',
     'vin',
     'plate',
     'plateState',
@@ -148,8 +172,19 @@ const FROM_REGISTRATION: Record<Kind, readonly RegistrationFormField[]> = {
     'ownerName',
     'grossWeightLbs',
     'registrationExpiresAt',
+    'registrationIssuedAt',
+    'fuelType',
+    'lessorName',
   ],
-  trailer: ['vin', 'plate', 'plateState', 'year', 'registrationExpiresAt'],
+  trailer: [
+    'unitNumber',
+    'vin',
+    'plate',
+    'plateState',
+    'year',
+    'registrationExpiresAt',
+    'registrationIssuedAt',
+  ],
 }
 
 type Values = Record<RegistrationFormField, string>
@@ -163,6 +198,10 @@ const EMPTY: Values = {
   ownerName: '',
   grossWeightLbs: '',
   registrationExpiresAt: '',
+  unitNumber: '',
+  registrationIssuedAt: '',
+  fuelType: '',
+  lessorName: '',
 }
 
 interface ReadingView {
@@ -192,6 +231,7 @@ export function NewAssetForm({
   const [mismatch, setMismatch] = useState<
     Partial<Record<DecodeField, string>>
   >({})
+  const [card, setCard] = useState<Partial<Record<DecodeField, string>>>({})
   const [decoding, setDecoding] = useState<Decoding>('idle')
   const [held, setHeld] = useState<File | null>(null)
   const [reading, setReading] = useState<Reading>('idle')
@@ -234,40 +274,30 @@ export function NewAssetForm({
       return
     }
     setDecoding('idle')
-    const { decoded } = result
-    const now = valuesRef.current
-    const from = sourcesRef.current
-    const fill: Partial<Values> = {}
+    const merge = mergeDecode(
+      DECODED[kind],
+      valuesRef.current,
+      sourcesRef.current,
+      result.decoded,
+    )
     const filled: Partial<Record<DecodeField, Source>> = {}
-    const kept = { make: '', model: '', year: '' }
-    for (const field of DECODED[kind]) {
-      const answer =
-        field === 'year'
-          ? decoded.year === null
-            ? null
-            : String(decoded.year)
-          : decoded[field]
-      if (answer === null) continue
-      if (now[field].trim() === '' || from[field] === 'vin') {
-        fill[field] = answer
-        filled[field] = 'vin'
-      } else {
-        kept[field] = now[field]
-      }
-    }
-    setValues((current) => ({ ...current, ...fill }))
+    for (const field of merge.filled) filled[field] = 'vin'
+    setValues((current) => ({ ...current, ...merge.fill }))
     setSources((current) => ({ ...current, ...filled }))
-    setMismatch(decodeMismatches(kept, decoded))
+    setMismatch(merge.mismatch)
+    setCard((current) => ({ ...current, ...merge.card }))
   }
 
   const typedDecoded = (field: DecodeField, value: string) => {
     set(field, value)
     setSources((current) => ({ ...current, [field]: 'typed' }))
-    setMismatch((current) => {
+    const without = (current: Partial<Record<DecodeField, string>>) => {
       const next = { ...current }
       delete next[field]
       return next
-    })
+    }
+    setMismatch(without)
+    setCard(without)
   }
 
   // ── THE REGISTRATION ──────────────────────────────────────────────────
@@ -341,7 +371,9 @@ export function NewAssetForm({
     setHeld(null)
     setView(null)
     setReading('idle')
+    setCard({})
     set('registrationExpiresAt', '')
+    set('registrationIssuedAt', '')
   }
 
   // ── AFTER SAVE: THE FILE GOES ON THE REGISTRATION ITEM ────────────────
@@ -358,15 +390,19 @@ export function NewAssetForm({
       .catch(() => setAttach('failed'))
   }, [created, held, attach, kind, router])
 
-  /** Under a field the registration could not read: by hand, and what was seen. */
+  /**
+   * Under a field the registration could not read: by hand, and what was
+   * seen. A field the decode filled says "From VIN" instead (part 5).
+   */
   const unreadHint = (name: RegistrationFormField): string | undefined => {
+    if (
+      (name === 'make' || name === 'model' || name === 'year') &&
+      sources[name] === 'vin' &&
+      values[name].trim() !== ''
+    )
+      return labels.registration.fromVin
     if (!view) return undefined
-    const verdict =
-      name === 'grossWeightLbs'
-        ? view.verdicts.gvwr
-        : name === 'registrationExpiresAt'
-          ? view.verdicts.expiresAt
-          : view.verdicts[name]
+    const verdict = verdictFor(view.verdicts, name)
     if (verdict.read) return undefined
     return verdict.printed
       ? `${labels.registration.byHand} — ${labels.registration.seen.replace('{printed}', verdict.printed)}`
@@ -393,6 +429,11 @@ export function NewAssetForm({
         hint={unreadHint(field)}
         error={errorFor(field)}
       />
+      {card[field] ? (
+        <p className="text-xs text-ink-2">
+          {labels.registration.cardSays.replace('{value}', card[field]!)}
+        </p>
+      ) : null}
       {mismatch[field] ? (
         <p role="status" className="text-xs text-warning">
           {labels.vinMismatch.replace('{value}', mismatch[field]!)}
@@ -429,8 +470,18 @@ export function NewAssetForm({
     <div className="flex max-w-[520px] flex-col gap-z4">
       {held ? (
         <div className="flex items-center justify-between gap-z3 rounded-card border border-border bg-surface px-z3 py-z2 text-sm">
-          <span className="truncate text-ink">
-            {labels.registration.held.replace('{name}', held.name)}
+          <span className="flex min-w-0 flex-col">
+            <span className="truncate text-ink">
+              {labels.registration.held.replace('{name}', held.name)}
+            </span>
+            {view?.verdicts.vehicleType.read ? (
+              <span className="text-xs text-ink-2">
+                {labels.registration.cardType.replace(
+                  '{code}',
+                  view.verdicts.vehicleType.value,
+                )}
+              </span>
+            ) : null}
           </span>
           <button
             type="button"
@@ -486,6 +537,9 @@ export function NewAssetForm({
           label={labels.unitNumber}
           required
           autoFocus
+          value={values.unitNumber}
+          onChange={(event) => set('unitNumber', event.target.value)}
+          hint={unreadHint('unitNumber')}
           error={errorFor('unitNumber')}
           className="font-mono"
         />
@@ -557,6 +611,18 @@ export function NewAssetForm({
               }
               error={errorFor('registrationExpiresAt')}
             />
+            <Input
+              id="asset-registrationIssuedAt"
+              name="registrationIssuedAt"
+              label={labels.registration.issued}
+              inputMode="numeric"
+              value={values.registrationIssuedAt}
+              onChange={(event) =>
+                set('registrationIssuedAt', event.target.value)
+              }
+              hint={unreadHint('registrationIssuedAt')}
+              error={errorFor('registrationIssuedAt')}
+            />
             {kind === 'truck' ? (
               <>
                 <Input
@@ -567,6 +633,15 @@ export function NewAssetForm({
                   onChange={(event) => set('ownerName', event.target.value)}
                   hint={unreadHint('ownerName')}
                   error={errorFor('ownerName')}
+                />
+                <Input
+                  id="asset-lessorName"
+                  name="lessorName"
+                  label={labels.registration.lessorName}
+                  value={values.lessorName}
+                  onChange={(event) => set('lessorName', event.target.value)}
+                  hint={unreadHint('lessorName')}
+                  error={errorFor('lessorName')}
                 />
                 <Input
                   id="asset-grossWeightLbs"
@@ -580,6 +655,28 @@ export function NewAssetForm({
                   hint={unreadHint('grossWeightLbs')}
                   error={errorFor('grossWeightLbs')}
                 />
+                <div className="flex flex-col gap-z1">
+                  <Select
+                    id="asset-fuelType"
+                    name="fuelType"
+                    label={labels.registration.fuel}
+                    options={[
+                      { value: '', label: '—' },
+                      ...labels.registration.fuelOptions.map((value) => ({
+                        value,
+                        label: value,
+                      })),
+                    ]}
+                    value={values.fuelType}
+                    onChange={(event) => set('fuelType', event.target.value)}
+                    error={errorFor('fuelType')}
+                  />
+                  {unreadHint('fuelType') ? (
+                    <p className="text-sm text-ink-3">
+                      {unreadHint('fuelType')}
+                    </p>
+                  ) : null}
+                </div>
               </>
             ) : null}
           </>

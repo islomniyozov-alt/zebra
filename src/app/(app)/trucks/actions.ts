@@ -36,6 +36,7 @@ function read(formData: FormData) {
     fleetStatus: formData.get('fleetStatus'),
     fuelType: formData.get('fuelType'),
     ownerName: formData.get('ownerName'),
+    lessorName: formData.get('lessorName'),
     axles: formData.get('axles'),
     grossWeightLbs: formData.get('grossWeightLbs'),
   }
@@ -70,6 +71,7 @@ function readEdit(formData: FormData): TruckEdit {
       fleetStatus: sent(formData, 'fleetStatus'),
       fuelType: sent(formData, 'fuelType'),
       ownerName: sent(formData, 'ownerName'),
+      lessorName: sent(formData, 'lessorName'),
       axles: sent(formData, 'axles'),
       grossWeightLbs: sent(formData, 'grossWeightLbs'),
     }).filter(([, value]) => value !== undefined),

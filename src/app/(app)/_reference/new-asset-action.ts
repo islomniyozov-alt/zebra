@@ -34,7 +34,7 @@ export async function saveNewAsset(
   if (!filing.ok) {
     return {
       done: false,
-      state: { error: t(filing.error), field: REGISTRATION_EXPIRY_FIELD },
+      state: { error: t(filing.error), field: filing.field },
     }
   }
   if (filing.filing && !(await currentUserCan('create', 'compliance'))) {

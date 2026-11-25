@@ -1,4 +1,5 @@
 import type { Translate } from '@/lib/i18n'
+import { FUEL_TYPES } from '@/lib/fleet-codes'
 
 /** The short form's words (TMS §6.5 parts 3 and 4), for Add truck and Add trailer. */
 export function newAssetLabels(t: Translate) {
@@ -34,6 +35,13 @@ export function newAssetLabels(t: Translate) {
       expiresHint: t('fleet.registration.expiresHint'),
       ownerName: t('trucks.ownerName'),
       gvwr: t('fleet.registration.gvwr'),
+      fromVin: t('fleet.registration.fromVin'),
+      cardSays: t('fleet.registration.cardSays'),
+      cardType: t('fleet.registration.cardType'),
+      issued: t('fleet.registration.issued'),
+      fuel: t('fleet.registration.fuel'),
+      fuelOptions: FUEL_TYPES,
+      lessorName: t('trucks.lessorName'),
       attachFailed: t('fleet.registration.attachFailed'),
       openRecord: t('fleet.registration.openRecord'),
     },

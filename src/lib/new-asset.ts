@@ -34,9 +34,13 @@ export type AssetKind = 'truck' | 'trailer'
 /** The form's flag that a registration was read and is held. */
 export const REGISTRATION_HELD_FIELD = 'registration'
 export const REGISTRATION_EXPIRY_FIELD = 'registrationExpiresAt'
+/** Optional (§6.5 part 5): the item's issued date when the card prints one. */
+export const REGISTRATION_ISSUED_FIELD = 'registrationIssuedAt'
 
 export interface RegistrationFiling {
   expiresAt: Date
+  /** The date the card says it was issued, or null. */
+  issuedAt: Date | null
   /** The plate number, the item's identifier. */
   identifier: string | null
   /** The plate state, the item's issuer — the state that registered it. */
@@ -45,7 +49,7 @@ export interface RegistrationFiling {
 
 export type ReadRegistrationFiling =
   | { ok: true; filing: RegistrationFiling | null }
-  | { ok: false; error: MessageKey }
+  | { ok: false; error: MessageKey; field: string }
 
 const text = (formData: FormData, name: string) =>
   String(formData.get(name) ?? '').trim()
@@ -62,15 +66,36 @@ export function readRegistrationFiling(
   if (text(formData, REGISTRATION_HELD_FIELD) !== 'yes')
     return { ok: true, filing: null }
   const typed = text(formData, REGISTRATION_EXPIRY_FIELD)
-  if (typed === '') return { ok: false, error: 'fleet.registration.noExpiry' }
+  if (typed === '')
+    return {
+      ok: false,
+      error: 'fleet.registration.noExpiry',
+      field: REGISTRATION_EXPIRY_FIELD,
+    }
   const iso = normalizeTypedDate(typed, today)
-  if (!iso) return { ok: false, error: 'fleet.registration.expiryNotDate' }
+  if (!iso)
+    return {
+      ok: false,
+      error: 'fleet.registration.expiryNotDate',
+      field: REGISTRATION_EXPIRY_FIELD,
+    }
+  // Blank is fine: many states' cards print no issue date (part 5).
+  const typedIssued = text(formData, REGISTRATION_ISSUED_FIELD)
+  const issuedIso =
+    typedIssued === '' ? null : normalizeTypedDate(typedIssued, today)
+  if (typedIssued !== '' && !issuedIso)
+    return {
+      ok: false,
+      error: 'fleet.registration.issuedNotDate',
+      field: REGISTRATION_ISSUED_FIELD,
+    }
   const plate = text(formData, 'plate')
   const state = text(formData, 'plateState').toUpperCase().slice(0, 2)
   return {
     ok: true,
     filing: {
       expiresAt: utcMidnight(iso),
+      issuedAt: issuedIso ? utcMidnight(issuedIso) : null,
       identifier: plate === '' ? null : plate,
       issuer: state === '' ? null : state,
     },
@@ -114,7 +139,7 @@ export async function createAssetWithRegistration(
     subjectId: unit.id,
     type: 'REGISTRATION',
     expiresAt: filing.expiresAt,
-    issuedAt: null,
+    issuedAt: filing.issuedAt,
     identifier: filing.identifier,
     issuer: filing.issuer,
     notes: null,

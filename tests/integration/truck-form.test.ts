@@ -100,6 +100,7 @@ describe('Save and reload', () => {
       fuelType: 'Diesel',
       fleetStatus: 'In shop',
       ownerName: 'Karimov Leasing',
+      lessorName: 'Bros Leasing',
       grossWeightLbs: '52000',
       axles: '3',
     }

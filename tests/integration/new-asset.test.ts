@@ -59,6 +59,7 @@ afterAll(async () => {
 })
 
 const expiresAt = new Date('2027-03-31T00:00:00.000Z')
+const issuedAt = new Date('2026-03-31T00:00:00.000Z')
 
 describe('Save with a registration held', () => {
   it('creates the truck and its REGISTRATION item with the expiry, plate and state', async () => {
@@ -73,9 +74,11 @@ describe('Save with a registration held', () => {
           plate: 'P123456',
           plateState: 'IL',
           ownerName: 'CYBER TRUCKING INC',
+          lessorName: 'BROS LEASING INC',
+          fuelType: 'Diesel',
           grossWeightLbs: '80000',
         },
-        { expiresAt, identifier: 'P123456', issuer: 'IL' },
+        { expiresAt, issuedAt, identifier: 'P123456', issuer: 'IL' },
         { byUserId: userId },
       ),
     )
@@ -92,11 +95,15 @@ describe('Save with a registration held', () => {
       deletedAt: null,
     })
     expect(item.expiresAt?.toISOString()).toBe(expiresAt.toISOString())
+    // Part 5: the card's issue date files on the item, not on the truck.
+    expect(item.issuedAt?.toISOString()).toBe(issuedAt.toISOString())
     const truck = await owner.truck.findUniqueOrThrow({
       where: { id: created.id },
     })
     expect(truck).toMatchObject({
       ownerName: 'CYBER TRUCKING INC',
+      lessorName: 'BROS LEASING INC',
+      fuelType: 'Diesel',
       grossWeightLbs: 80_000,
     })
   }, 300_000)
@@ -108,7 +115,7 @@ describe('Save with a registration held', () => {
         organizationId,
         'trailer',
         { companyId, unitNumber: `RT1-${nonce}` },
-        { expiresAt, identifier: null, issuer: null },
+        { expiresAt, issuedAt: null, identifier: null, issuer: null },
         { byUserId: userId },
       ),
     )
@@ -131,7 +138,12 @@ describe('Save with a registration held', () => {
           organizationId,
           'truck',
           { companyId, unitNumber },
-          { expiresAt: new Date('not a date'), identifier: null, issuer: null },
+          {
+            expiresAt: new Date('not a date'),
+            issuedAt: null,
+            identifier: null,
+            issuer: null,
+          },
           { byUserId: userId },
         ),
       ),

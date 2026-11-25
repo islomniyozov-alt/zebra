@@ -2,6 +2,7 @@ import type { Confidence } from './envelope'
 import type { ExtractedRegistration } from './registration-shape'
 import { asText, judge, type Verdict } from './inspection-fields'
 import { parseUsDate } from './us-dates'
+import type { FuelType } from '../fleet-codes'
 import { checkVin } from './vin'
 
 // ---------------------------------------------------------------------------
@@ -20,8 +21,10 @@ import { checkVin } from './vin'
 // ---------------------------------------------------------------------------
 
 export type RegistrationUnreadableWhy =
-  /** An expiry that does not convert under `parseUsDate`. */
+  /** A date that does not convert under `readRegistrationDate`. */
   | 'not_a_date'
+  /** A fuel that is not one of the codes `readFuel` knows. */
+  | 'not_a_fuel'
   /** A VIN of the wrong length, an illegal character, or a bad check digit. */
   | 'vin_invalid'
   /** A plate state that is not two letters once read. */
@@ -47,6 +50,14 @@ export interface RegistrationVerdicts {
   ownerName: RegistrationVerdict<string>
   /** Pounds, a whole number. */
   gvwr: RegistrationVerdict<number>
+  unitNumber: RegistrationVerdict<string>
+  /** ISO `yyyy-mm-dd`, converted from what was printed. */
+  issuedAt: RegistrationVerdict<string>
+  /** One of `FUEL_TYPES`. */
+  fuel: RegistrationVerdict<FuelType>
+  /** The card's own code (TT, TRL …), shown and never kept. */
+  vehicleType: RegistrationVerdict<string>
+  lessorName: RegistrationVerdict<string>
 }
 
 /**
@@ -161,6 +172,54 @@ export function readGvwr(
     : { ok: false, why: 'not_a_weight' }
 }
 
+/** `MM/DD/YY` or `MM-DD-YY`: a registration's two-digit year. */
+const TWO_DIGIT_YEAR = /^(\d{1,2})[/-](\d{1,2})[/-](\d{2})$/
+
+/**
+ * A registration's date (expiry or issue) to ISO. Everything `parseUsDate`
+ * reads, and also a TWO-DIGIT YEAR, read as 20YY (TMS §6.5 part 5, v11.56):
+ * the first real cab card printed its expiry 03/31/27, read correctly and
+ * then dropped here. A registration is never dated in the 1900s, so 20YY is a
+ * fact about the document rather than a guess about the characters — and it
+ * is this reader's rule only: `parseUsDate` also serves the medical card and
+ * ACORD, and stays four digits.
+ */
+export function readRegistrationDate(
+  printed: string,
+): { ok: true; value: string } | { ok: false; why: 'not_a_date' } {
+  const trimmed = printed.trim()
+  const short = TWO_DIGIT_YEAR.exec(trimmed)
+  const date = parseUsDate(
+    short ? `${short[1]}/${short[2]}/20${short[3]}` : trimmed,
+  )
+  return date.ok
+    ? { ok: true, value: date.iso }
+    : { ok: false, why: 'not_a_date' }
+}
+
+const FUEL_CODES: Readonly<Record<string, FuelType>> = {
+  D: 'Diesel',
+  DSL: 'Diesel',
+  DIESEL: 'Diesel',
+  G: 'Gas',
+  GAS: 'Gas',
+  GASOLINE: 'Gas',
+  E: 'Electric',
+  ELEC: 'Electric',
+  ELECTRIC: 'Electric',
+}
+
+/**
+ * The fuel from its printed code. Only the codes above convert; anything else
+ * (propane, a code nobody planned for) is unreadable, not guessed to Other.
+ */
+export function readFuel(
+  printed: string,
+): { ok: true; value: FuelType } | { ok: false; why: 'not_a_fuel' } {
+  const fuel = FUEL_CODES[printed.toUpperCase().replace(/[^A-Z]/g, '')]
+  return fuel ? { ok: true, value: fuel } : { ok: false, why: 'not_a_fuel' }
+}
+
 export function judgeRegistration(
   fields: ExtractedRegistration,
   uploadedOnIso: string,
@@ -174,11 +233,7 @@ export function judgeRegistration(
     }),
     plate: judge<string, RegistrationUnreadableWhy>(fields.plate, asText),
     plateState: judge(fields.plateState, readPlateState),
-    expiresAt: judge(fields.expiresAt, (printed) => {
-      const date = parseUsDate(printed)
-      if (!date.ok) return { ok: false, why: 'not_a_date' as const }
-      return { ok: true, value: date.iso }
-    }),
+    expiresAt: judge(fields.expiresAt, readRegistrationDate),
     year: judge(fields.year, (printed) =>
       readModelYear(printed, uploadedOnIso),
     ),
@@ -189,6 +244,20 @@ export function judgeRegistration(
       asText,
     ),
     gvwr: judge(fields.gvwr, readGvwr),
+    unitNumber: judge<string, RegistrationUnreadableWhy>(
+      fields.unitNumber,
+      asText,
+    ),
+    issuedAt: judge(fields.issuedAt, readRegistrationDate),
+    fuel: judge(fields.fuel, readFuel),
+    vehicleType: judge<string, RegistrationUnreadableWhy>(
+      fields.vehicleType,
+      asText,
+    ),
+    lessorName: judge<string, RegistrationUnreadableWhy>(
+      fields.lessorName,
+      asText,
+    ),
   }
 }
 
@@ -203,6 +272,10 @@ export type RegistrationFormField =
   | 'ownerName'
   | 'grossWeightLbs'
   | 'registrationExpiresAt'
+  | 'unitNumber'
+  | 'registrationIssuedAt'
+  | 'fuelType'
+  | 'lessorName'
 
 /** `yyyy-mm-dd` to `mm/dd/yyyy`, the way the typed-date fields show a date. */
 const typedDate = (iso: string) => {
@@ -235,7 +308,28 @@ export function registrationPrefill(
   put('ownerName', verdicts.ownerName)
   put('grossWeightLbs', verdicts.gvwr)
   put('registrationExpiresAt', verdicts.expiresAt, typedDate)
+  put('unitNumber', verdicts.unitNumber)
+  put('registrationIssuedAt', verdicts.issuedAt, typedDate)
+  put('fuelType', verdicts.fuel)
+  put('lessorName', verdicts.lessorName)
   return out
+}
+
+/** Which verdict stands behind each form field. */
+const VERDICT_OF: Record<RegistrationFormField, keyof RegistrationVerdicts> = {
+  vin: 'vin',
+  plate: 'plate',
+  plateState: 'plateState',
+  year: 'year',
+  make: 'make',
+  model: 'model',
+  ownerName: 'ownerName',
+  grossWeightLbs: 'gvwr',
+  registrationExpiresAt: 'expiresAt',
+  unitNumber: 'unitNumber',
+  registrationIssuedAt: 'issuedAt',
+  fuelType: 'fuel',
+  lessorName: 'lessorName',
 }
 
 /** The verdict behind each form field, for the "unreadable" hint. */
@@ -248,12 +342,7 @@ export function verdictFor(
   printed: string | null
   confidence?: Confidence
 } {
-  const verdict =
-    name === 'grossWeightLbs'
-      ? verdicts.gvwr
-      : name === 'registrationExpiresAt'
-        ? verdicts.expiresAt
-        : verdicts[name]
+  const verdict: RegistrationVerdict<unknown> = verdicts[VERDICT_OF[name]]
   return verdict.read
     ? { read: true, printed: verdict.printed, confidence: verdict.confidence }
     : { read: false, why: verdict.why, printed: verdict.printed }
