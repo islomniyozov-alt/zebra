@@ -6,6 +6,7 @@ import { ComplianceIntake } from './ComplianceIntake'
 import { medLabels } from './med-labels'
 import { coiLabels } from './coi-labels'
 import { inspectionLabels } from './inspection-labels'
+import { registrationLabels } from './registration-labels'
 import { companyScopeFilter } from '@/lib/tenancy'
 import {
   COMPLIANCE_SUBJECTS,
@@ -406,6 +407,7 @@ export default async function SafetyPage({
               labels={medLabels(t)}
               coi={coiLabels(t)}
               inspection={inspectionLabels(t)}
+              registration={registrationLabels(t)}
             />
             <Link
               href="/safety"
@@ -451,6 +453,7 @@ export default async function SafetyPage({
               labels={medLabels(t)}
               coi={coiLabels(t)}
               inspection={inspectionLabels(t)}
+              registration={registrationLabels(t)}
             />
           </div>
         </div>
@@ -491,6 +494,7 @@ export default async function SafetyPage({
                       labels={medLabels(t)}
                       coi={coiLabels(t)}
                       inspection={inspectionLabels(t)}
+                      registration={registrationLabels(t)}
                       prominent
                     />
                   </div>

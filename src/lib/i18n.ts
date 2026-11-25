@@ -1333,6 +1333,19 @@ const en = {
   'fleet.registration.issuedNotDate':
     'Registration issued is not a date. Use MM/DD/YYYY, or leave it blank.',
   'fleet.registration.fuel': 'Fuel type',
+  'safety.registration.name': 'Registration (cab card)',
+  'safety.registration.heading': 'Registration — check the truck and file',
+  'safety.registration.unreadable':
+    'No registration could be read from this file. Try a clearer photo, or file it on the truck’s compliance panel.',
+  'safety.registration.matchedByVin': 'Matched by VIN: unit {unit}',
+  'safety.registration.matchedByUnit': 'Matched by unit number: unit {unit}',
+  'safety.registration.matchedByPlate': 'Matched by plate: unit {unit}',
+  'safety.registration.several': 'More than one truck matches — choose one.',
+  'safety.registration.noTruck': 'No truck with this VIN — add it',
+  'safety.registration.file': 'File',
+  'safety.registration.filed': 'Registration filed on the truck’s compliance.',
+  'safety.registration.attachFailed':
+    'The file could not be attached — add it on the truck’s compliance panel.',
   'fleet.year': 'Year',
 
   'trucks.title': 'Trucks',
@@ -4904,6 +4917,19 @@ const ru: Dictionary = {
   'fleet.registration.issuedNotDate':
     'Дата выдачи — не дата. Формат ММ/ДД/ГГГГ, или оставьте пустым.',
   'fleet.registration.fuel': 'Топливо',
+  'safety.registration.name': 'Регистрация (cab card)',
+  'safety.registration.heading': 'Регистрация — проверьте тягач и сохраните',
+  'safety.registration.unreadable':
+    'Не удалось прочитать регистрацию из этого файла. Попробуйте фото чётче или внесите её в карточке тягача.',
+  'safety.registration.matchedByVin': 'Найден по VIN: юнит {unit}',
+  'safety.registration.matchedByUnit': 'Найден по номеру юнита: юнит {unit}',
+  'safety.registration.matchedByPlate': 'Найден по номеру знака: юнит {unit}',
+  'safety.registration.several': 'Подходит несколько тягачей — выберите один.',
+  'safety.registration.noTruck': 'Тягача с таким VIN нет — добавить',
+  'safety.registration.file': 'Сохранить',
+  'safety.registration.filed': 'Регистрация сохранена в документах тягача.',
+  'safety.registration.attachFailed':
+    'Файл не прикрепился — добавьте его в документах тягача.',
   'fleet.year': 'Год',
 
   'trucks.title': 'Тягачи',

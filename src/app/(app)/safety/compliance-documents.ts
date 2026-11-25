@@ -102,7 +102,16 @@ export const READABLE_COMPLIANCE_DOCUMENTS: readonly ReadableComplianceDocument[
       looksLike:
         'a vehicle inspection report — a form headed ANNUAL or PERIODIC VEHICLE INSPECTION REPORT or VEHICLE HISTORY RECORD, with a report number, a fleet unit number and a list of inspected components marked OK or needs repair',
     },
-    // REGISTRATION goes here once it has a reader behind the route. Listing a
-    // type whose route cannot read it would put a control on screen that
-    // cannot work — and would give the classifier a type nothing can read.
+    {
+      // TMS §7.8, v11.57 (owner's ruling 2026-11-25). The §6.5 vehicle-
+      // registration reader; the truck matched by VIN, unit number, then
+      // plate (`registration-match.ts`). The intake's own route branches on
+      // REGISTRATION.
+      type: 'REGISTRATION',
+      documentType: 'REGISTRATION',
+      route: '/api/compliance/read',
+      nameKey: 'safety.registration.name',
+      looksLike:
+        'a vehicle registration or IRP apportioned cab card — a state motor-vehicle card with a PLATE number, a VIN, MAKE and YEAR, a registrant name and an expiration date, often headed APPORTIONED, CAB CARD or REGISTRATION',
+    },
   ]

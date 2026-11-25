@@ -16,6 +16,7 @@ import {
 } from '@/lib/vin-decode'
 import { photoPagesRefusalKey } from '@/lib/photo-pages'
 import { photosAsDocument, uploadDocument } from '@/lib/upload-client'
+import { HELD_CARD_PARAM, HELD_CARD_VALUE, takeHeldCard } from '@/lib/held-card'
 import {
   verdictFor,
   type RegistrationFormField,
@@ -301,6 +302,48 @@ export function NewAssetForm({
   }
 
   // ── THE REGISTRATION ──────────────────────────────────────────────────
+  /** A reading, from this zone or handed over by the Safety intake. */
+  const applyReading = (file: File, reading: ReadingView) => {
+    const fill: Partial<Values> = {}
+    for (const name of FROM_REGISTRATION[kind]) {
+      const value = reading.prefill[name]
+      if (value !== undefined) fill[name] = value
+    }
+    const next = { ...valuesRef.current, ...fill }
+    const nextSources = { ...sourcesRef.current }
+    for (const field of DECODED[kind])
+      if (fill[field] !== undefined) nextSources[field] = 'doc'
+    valuesRef.current = next
+    sourcesRef.current = nextSources
+    setValues(next)
+    setSources(nextSources)
+    setHeld(file)
+    setView(reading)
+    setReading('filled')
+    // The decode cross-checks what the document said, as on blur.
+    asked.current = ''
+    void runDecode(next.vin)
+  }
+
+  // THE SAFETY INTAKE'S HANDOFF (TMS §7.8, v11.57): "No truck with this VIN —
+  // add it" opens this page as `?card=held` with the card already read on
+  // this device. Taken once; absent or stale, the page is simply empty.
+  const handoff = useRef(false)
+  useEffect(() => {
+    if (handoff.current) return
+    handoff.current = true
+    const query = new URLSearchParams(window.location.search)
+    if (query.get(HELD_CARD_PARAM) !== HELD_CARD_VALUE) return
+    void takeHeldCard<ReadingView>().then((card) => {
+      if (card)
+        applyReading(
+          new File([card.file], card.file.name, { type: card.file.type }),
+          card.reading,
+        )
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on mount
+  }, [])
+
   const take = async (files: readonly File[]) => {
     setNotice(null)
     if (files.length > 1 && files.some((f) => !f.type.startsWith('image/'))) {
@@ -343,25 +386,7 @@ export function NewAssetForm({
         )
         return
       }
-      const fill: Partial<Values> = {}
-      for (const name of FROM_REGISTRATION[kind]) {
-        const value = payload.reading.prefill[name]
-        if (value !== undefined) fill[name] = value
-      }
-      const next = { ...valuesRef.current, ...fill }
-      const nextSources = { ...sourcesRef.current }
-      for (const field of DECODED[kind])
-        if (fill[field] !== undefined) nextSources[field] = 'doc'
-      valuesRef.current = next
-      sourcesRef.current = nextSources
-      setValues(next)
-      setSources(nextSources)
-      setHeld(file)
-      setView(payload.reading)
-      setReading('filled')
-      // The decode cross-checks what the document said, as on blur.
-      asked.current = ''
-      void runDecode(next.vin)
+      applyReading(file, payload.reading)
     } catch {
       setReading('failed')
     }

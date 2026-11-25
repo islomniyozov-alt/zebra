@@ -14,6 +14,8 @@ import {
   medicalCertProposal,
   readMedicalCert,
 } from '@/lib/med-cert'
+import { readRegistration } from '@/lib/vehicle-registration'
+import { matchRegistrationTruck } from '@/lib/registration-match'
 import { READABLE_COMPLIANCE_DOCUMENTS } from '@/app/(app)/safety/compliance-documents'
 import { companyScopeFilter } from '@/lib/tenancy'
 import { apiError, authFailureResponse } from '../../_lib/respond'
@@ -238,6 +240,55 @@ export async function POST(request: Request) {
         verdicts: outcome.verdicts,
         prefill: inspectionPrefill(outcome.verdicts),
         match: matchTruck(outcome.verdicts, trucks),
+        trucks,
+      },
+      proposal: null,
+      cost: costBlock(outcome.cost),
+      notice: null,
+    })
+  }
+
+  // REGISTRATION — the cab card (TMS §7.8, v11.57). The §6.5 reader, each
+  // field read or unreadable; the truck proposed by VIN, then unit number,
+  // then plate, and confirmed on the screen. It never writes.
+  if (documentType === 'REGISTRATION') {
+    const outcome = await readRegistration({ base64, mimeType: file.type })
+    if (!outcome.ok) {
+      await recordUsageQuietly(outcome.cost, {
+        documentType: 'REGISTRATION',
+        refused: outcome.reason,
+      })
+      return NextResponse.json({
+        verdict,
+        proposal: null,
+        notice:
+          outcome.reason === 'call_failed'
+            ? 'safety.intake.failed'
+            : 'safety.registration.unreadable',
+      })
+    }
+    await recordUsageQuietly(outcome.cost, { documentType: 'REGISTRATION' })
+
+    const trucks = await withCurrentOrg('read', 'truck', async (tx, ctx) =>
+      tx.truck.findMany({
+        where: { ...companyScopeFilter(ctx.companyScopes), deletedAt: null },
+        orderBy: { unitNumber: 'asc' },
+        take: 500,
+        select: {
+          id: true,
+          unitNumber: true,
+          vin: true,
+          plate: true,
+          plateState: true,
+        },
+      }),
+    )
+    return NextResponse.json({
+      verdict,
+      registration: {
+        verdicts: outcome.verdicts,
+        prefill: outcome.prefill,
+        match: matchRegistrationTruck(outcome.verdicts, trucks),
         trucks,
       },
       proposal: null,

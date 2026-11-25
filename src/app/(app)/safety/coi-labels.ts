@@ -83,6 +83,8 @@ export function coiLabels(t: Translate) {
       'safety.coi.failed': t('safety.coi.failed'),
       'safety.intake.unreadable': t('safety.intake.unreadable'),
       'safety.intake.failed': t('safety.intake.failed'),
+      // TMS §7.8 v11.57: a cab card.
+      'safety.registration.unreadable': t('safety.registration.unreadable'),
       // TMS §7.8 v11.50: several photos, one document.
       'pages.error.none': t('pages.error.none'),
       'pages.error.tooMany': t('pages.error.tooMany'),

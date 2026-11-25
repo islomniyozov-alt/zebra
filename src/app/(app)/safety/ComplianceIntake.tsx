@@ -8,6 +8,11 @@ import { MedicalCertUpload } from './MedicalCertUpload'
 import { CoiConfirm, type CoiProposalView } from './CoiConfirm'
 import { InspectionConfirm, type InspectionReadView } from './InspectionConfirm'
 import type { InspectionLabels } from './inspection-labels'
+import {
+  RegistrationConfirm,
+  type RegistrationReadView,
+} from './RegistrationConfirm'
+import type { RegistrationLabels } from './registration-labels'
 import { READABLE_COMPLIANCE_DOCUMENTS } from './compliance-documents'
 import type { medLabels } from './med-labels'
 import type { coiLabels } from './coi-labels'
@@ -69,6 +74,7 @@ interface Props {
   labels: ReturnType<typeof medLabels>
   coi: ReturnType<typeof coiLabels>
   inspection: InspectionLabels
+  registration: RegistrationLabels
   prominent?: boolean
   driverId?: string
   driverLabel?: string
@@ -78,12 +84,14 @@ type Reading =
   | { kind: 'medical'; proposal: unknown; match: unknown }
   | { kind: 'coi'; proposal: CoiProposalView }
   | { kind: 'inspection'; reading: InspectionReadView }
+  | { kind: 'registration'; reading: RegistrationReadView }
 
 export function ComplianceIntake({
   roster,
   labels,
   coi,
   inspection,
+  registration,
   prominent,
   driverId,
   driverLabel,
@@ -166,6 +174,8 @@ export function ComplianceIntake({
         needsType?: boolean
         /** An annual inspection's reading (TMS §7.8, v11.47). */
         inspection?: InspectionReadView
+        /** A cab card's reading and truck match (TMS §7.8, v11.57). */
+        registration?: RegistrationReadView
         notice: string | null
       }
 
@@ -175,6 +185,10 @@ export function ComplianceIntake({
       if (payload.needsType) return
       if (payload.inspection) {
         setResult({ kind: 'inspection', reading: payload.inspection })
+        return
+      }
+      if (payload.registration) {
+        setResult({ kind: 'registration', reading: payload.registration })
         return
       }
       if (!payload.proposal) {
@@ -254,6 +268,20 @@ export function ComplianceIntake({
           reading={result.reading}
           file={held}
           labels={inspection}
+          onCancel={restart}
+        />
+      </div>
+    )
+  }
+
+  if (result?.kind === 'registration') {
+    return (
+      <div className="flex flex-col gap-z2">
+        {verdictLine}
+        <RegistrationConfirm
+          reading={result.reading}
+          file={held}
+          labels={registration}
           onCancel={restart}
         />
       </div>

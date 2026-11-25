@@ -4,7 +4,7 @@ import {
   type TrailerInput,
   type TruckInput,
 } from './fleet'
-import { recordRenewal } from './compliance'
+import { recordRenewal, type RenewalResult } from './compliance'
 import { normalizeTypedDate, utcMidnight } from './typed-date'
 import type { TxClient } from './tenancy'
 import type { MessageKey } from './i18n'
@@ -134,9 +134,26 @@ export async function createAssetWithRegistration(
   if (!unit) throw new Error('the unit was not created')
   if (!filing) return { id: unit.id, registrationId: null }
 
-  const renewal = await recordRenewal(tx, {
+  const renewal = await fileRegistration(tx, kind, unit.id, filing)
+  if (!renewal.ok) throw new RegistrationRefused(renewal.reason)
+  return { id: unit.id, registrationId: renewal.recordId }
+}
+
+/**
+ * FILE A REGISTRATION ON A UNIT — Add truck's filing and the Safety intake's
+ * (TMS §7.8 v11.57), one function so the two cannot drift. The compliance
+ * panel's own `recordRenewal`: REGISTRATION, the plate as identifier, the
+ * plate state as issuer. It never touches the unit's own fields.
+ */
+export function fileRegistration(
+  tx: TxClient,
+  kind: AssetKind,
+  unitId: string,
+  filing: RegistrationFiling,
+): Promise<RenewalResult> {
+  return recordRenewal(tx, {
     subject: kind,
-    subjectId: unit.id,
+    subjectId: unitId,
     type: 'REGISTRATION',
     expiresAt: filing.expiresAt,
     issuedAt: filing.issuedAt,
@@ -144,6 +161,4 @@ export async function createAssetWithRegistration(
     issuer: filing.issuer,
     notes: null,
   })
-  if (!renewal.ok) throw new RegistrationRefused(renewal.reason)
-  return { id: unit.id, registrationId: renewal.recordId }
 }

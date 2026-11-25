@@ -4,6 +4,7 @@ import { withOrg } from '@/lib/tenancy'
 import { LOAD_WRITE_TIMEOUT_MS } from '@/lib/loads'
 import {
   createAssetWithRegistration,
+  fileRegistration,
   RegistrationRefused,
 } from '@/lib/new-asset'
 import type { PrismaClient } from '@/generated/prisma/client'
@@ -170,5 +171,54 @@ describe('Save without a document', () => {
     expect(
       await owner.complianceItem.count({ where: { truckId: created.id } }),
     ).toBe(0)
+  }, 300_000)
+})
+
+describe('the Safety intake files a cab card on an existing truck (TMS §7.8 v11.57)', () => {
+  it('creates the REGISTRATION item on that truck and leaves the truck as it was', async () => {
+    const created = await inOrg((tx) =>
+      createAssetWithRegistration(
+        tx,
+        organizationId,
+        'truck',
+        {
+          companyId,
+          unitNumber: `R4-${nonce}`,
+          plate: 'OLD1',
+          plateState: 'IN',
+        },
+        null,
+        { byUserId: userId },
+      ),
+    )
+    const before = await owner.truck.findUniqueOrThrow({
+      where: { id: created.id },
+    })
+    const filed = await inOrg((tx) =>
+      fileRegistration(tx, 'truck', created.id, {
+        expiresAt,
+        issuedAt,
+        identifier: 'P 1297245',
+        issuer: 'IL',
+      }),
+    )
+    if (!filed.ok) throw new Error(`refused: ${filed.reason}`)
+    const item = await owner.complianceItem.findUniqueOrThrow({
+      where: { id: filed.recordId },
+    })
+    expect(item).toMatchObject({
+      type: 'REGISTRATION',
+      truckId: created.id,
+      identifier: 'P 1297245',
+      issuer: 'IL',
+    })
+    expect(item.expiresAt.toISOString()).toBe(expiresAt.toISOString())
+    expect(item.issuedAt?.toISOString()).toBe(issuedAt.toISOString())
+    // A confirmation is not an edit: the card's plate does not overwrite.
+    const after = await owner.truck.findUniqueOrThrow({
+      where: { id: created.id },
+    })
+    expect(after.plate).toBe(before.plate)
+    expect(after.plateState).toBe(before.plateState)
   }, 300_000)
 })
