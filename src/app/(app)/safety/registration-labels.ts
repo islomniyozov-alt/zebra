@@ -11,15 +11,22 @@ export function registrationLabels(t: Translate) {
     unitNumber: t('fleet.unitNumber'),
     plate: t('fleet.plate'),
     owner: t('trucks.ownerName'),
-    truck: t('safety.inspection.truck'),
-    chooseTruck: t('safety.inspection.chooseTruck'),
+    unit: t('safety.registration.unit'),
+    chooseUnit: t('safety.registration.chooseUnit'),
+    kind: {
+      truck: t('safety.registration.kind.truck'),
+      trailer: t('safety.registration.kind.trailer'),
+    },
     matchedBy: {
       vin: t('safety.registration.matchedByVin'),
       unit: t('safety.registration.matchedByUnit'),
       plate: t('safety.registration.matchedByPlate'),
     },
     several: t('safety.registration.several'),
-    noTruck: t('safety.registration.noTruck'),
+    addIt: {
+      truck: t('safety.registration.addTruck'),
+      trailer: t('safety.registration.addTrailer'),
+    },
     expires: t('fleet.registration.expires'),
     issued: t('fleet.registration.issued'),
     byHand: t('fleet.registration.byHand'),
@@ -38,7 +45,7 @@ export function registrationLabels(t: Translate) {
       'compliancePanel.error.subjectNotFound': t(
         'compliancePanel.error.subjectNotFound',
       ),
-      'safety.inspection.noTruck': t('safety.inspection.noTruck'),
+      'safety.registration.noUnit': t('safety.registration.noUnit'),
     } as Record<string, string>,
   }
 }

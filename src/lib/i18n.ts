@@ -1337,15 +1337,24 @@ const en = {
   'safety.registration.heading': 'Registration — check the truck and file',
   'safety.registration.unreadable':
     'No registration could be read from this file. Try a clearer photo, or file it on the truck’s compliance panel.',
-  'safety.registration.matchedByVin': 'Matched by VIN: unit {unit}',
-  'safety.registration.matchedByUnit': 'Matched by unit number: unit {unit}',
-  'safety.registration.matchedByPlate': 'Matched by plate: unit {unit}',
-  'safety.registration.several': 'More than one truck matches — choose one.',
-  'safety.registration.noTruck': 'No truck with this VIN — add it',
+  'safety.registration.matchedByVin': 'Matched by VIN: {unit}',
+  'safety.registration.matchedByUnit': 'Matched by unit number: {unit}',
+  'safety.registration.matchedByPlate': 'Matched by plate: {unit}',
+  'safety.registration.several':
+    'More than one truck or trailer matches — choose one.',
+  'safety.registration.addTruck':
+    'No truck or trailer with this VIN — add the truck',
+  'safety.registration.addTrailer':
+    'No truck or trailer with this VIN — add the trailer',
+  'safety.registration.unit': 'Truck or trailer',
+  'safety.registration.chooseUnit': 'Choose the truck or trailer',
+  'safety.registration.kind.truck': 'Truck {unit}',
+  'safety.registration.kind.trailer': 'Trailer {unit}',
+  'safety.registration.noUnit': 'Choose the truck or trailer to file it on.',
   'safety.registration.file': 'File',
-  'safety.registration.filed': 'Registration filed on the truck’s compliance.',
+  'safety.registration.filed': 'Registration filed on the unit’s compliance.',
   'safety.registration.attachFailed':
-    'The file could not be attached — add it on the truck’s compliance panel.',
+    'The file could not be attached — add it on the unit’s compliance panel.',
   'fleet.year': 'Year',
 
   'trucks.title': 'Trucks',
@@ -4921,15 +4930,25 @@ const ru: Dictionary = {
   'safety.registration.heading': 'Регистрация — проверьте тягач и сохраните',
   'safety.registration.unreadable':
     'Не удалось прочитать регистрацию из этого файла. Попробуйте фото чётче или внесите её в карточке тягача.',
-  'safety.registration.matchedByVin': 'Найден по VIN: юнит {unit}',
-  'safety.registration.matchedByUnit': 'Найден по номеру юнита: юнит {unit}',
-  'safety.registration.matchedByPlate': 'Найден по номеру знака: юнит {unit}',
-  'safety.registration.several': 'Подходит несколько тягачей — выберите один.',
-  'safety.registration.noTruck': 'Тягача с таким VIN нет — добавить',
+  'safety.registration.matchedByVin': 'Найден по VIN: {unit}',
+  'safety.registration.matchedByUnit': 'Найден по номеру юнита: {unit}',
+  'safety.registration.matchedByPlate': 'Найден по номеру знака: {unit}',
+  'safety.registration.several':
+    'Подходит несколько тягачей или прицепов — выберите один.',
+  'safety.registration.addTruck':
+    'Тягача или прицепа с таким VIN нет — добавить тягач',
+  'safety.registration.addTrailer':
+    'Тягача или прицепа с таким VIN нет — добавить прицеп',
+  'safety.registration.unit': 'Тягач или прицеп',
+  'safety.registration.chooseUnit': 'Выберите тягач или прицеп',
+  'safety.registration.kind.truck': 'Тягач {unit}',
+  'safety.registration.kind.trailer': 'Прицеп {unit}',
+  'safety.registration.noUnit':
+    'Выберите тягач или прицеп, к которому её отнести.',
   'safety.registration.file': 'Сохранить',
-  'safety.registration.filed': 'Регистрация сохранена в документах тягача.',
+  'safety.registration.filed': 'Регистрация сохранена в документах юнита.',
   'safety.registration.attachFailed':
-    'Файл не прикрепился — добавьте его в документах тягача.',
+    'Файл не прикрепился — добавьте его в документах юнита.',
   'fleet.year': 'Год',
 
   'trucks.title': 'Тягачи',

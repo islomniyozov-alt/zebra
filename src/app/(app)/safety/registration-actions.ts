@@ -4,12 +4,13 @@ import { revalidatePath } from 'next/cache'
 import { withCurrentOrg } from '@/lib/auth-context'
 import { fileRegistration, readRegistrationFiling } from '@/lib/new-asset'
 import type { MessageKey } from '@/lib/i18n'
+import { readUnitKey } from '@/lib/registration-match'
 import type { RegistrationFileState } from './registration-state'
 
 // FILING A CONFIRMED CAB CARD FROM THE SAFETY INTAKE (TMS §7.8, v11.57).
 // Glue only: the filing is read by `readRegistrationFiling` and written by
-// `fileRegistration` — Add truck's own two functions — against the truck the
-// person confirmed. §0 rule 14: a refusal hands what was typed back.
+// `fileRegistration` — Add truck's own two functions — against the unit the
+// person confirmed, truck or trailer (v11.58: the select posts `kind:id`). §0 rule 14: a refusal hands what was typed back.
 
 const ERRORS: Record<string, MessageKey> = {
   subject_not_found: 'compliancePanel.error.subjectNotFound',
@@ -23,13 +24,13 @@ export async function fileRegistrationAction(
   formData: FormData,
 ): Promise<RegistrationFileState> {
   const typed = {
-    truckId: String(formData.get('truckId') ?? ''),
+    unit: String(formData.get('unit') ?? ''),
     registrationExpiresAt: String(formData.get('registrationExpiresAt') ?? ''),
     registrationIssuedAt: String(formData.get('registrationIssuedAt') ?? ''),
   }
-  const truckId = typed.truckId.trim()
-  if (truckId === '') {
-    return { error: 'safety.inspection.noTruck', createdId: null, typed }
+  const unit = readUnitKey(typed.unit)
+  if (!unit) {
+    return { error: 'safety.registration.noUnit', createdId: null, typed }
   }
   const read = readRegistrationFiling(formData)
   if (!read.ok) return { error: read.error, createdId: null, typed }
@@ -39,7 +40,7 @@ export async function fileRegistrationAction(
   const filing = read.filing
 
   const outcome = await withCurrentOrg('create', 'compliance', (tx) =>
-    fileRegistration(tx, 'truck', truckId, filing),
+    fileRegistration(tx, unit.kind, unit.id, filing),
   )
   if (!outcome.ok) {
     return {
@@ -50,6 +51,6 @@ export async function fileRegistrationAction(
   }
 
   revalidatePath('/safety')
-  revalidatePath(`/trucks/${truckId}`)
+  revalidatePath(`/${unit.kind}s/${unit.id}`)
   return { error: null, createdId: outcome.recordId, typed: null }
 }

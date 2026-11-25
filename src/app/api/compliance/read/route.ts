@@ -15,7 +15,11 @@ import {
   readMedicalCert,
 } from '@/lib/med-cert'
 import { readRegistration } from '@/lib/vehicle-registration'
-import { matchRegistrationTruck } from '@/lib/registration-match'
+import {
+  addFormFor,
+  matchRegistrationUnit,
+  type RegistrationUnitCandidate,
+} from '@/lib/registration-match'
 import { READABLE_COMPLIANCE_DOCUMENTS } from '@/app/(app)/safety/compliance-documents'
 import { companyScopeFilter } from '@/lib/tenancy'
 import { apiError, authFailureResponse } from '../../_lib/respond'
@@ -269,27 +273,48 @@ export async function POST(request: Request) {
     }
     await recordUsageQuietly(outcome.cost, { documentType: 'REGISTRATION' })
 
-    const trucks = await withCurrentOrg('read', 'truck', async (tx, ctx) =>
-      tx.truck.findMany({
-        where: { ...companyScopeFilter(ctx.companyScopes), deletedAt: null },
+    // TRUCKS AND TRAILERS, ONE TRANSACTION (v11.58): the match runs over
+    // both. Trailers only where this role may read them.
+    const readsTrailers = can(session, 'read', 'trailer')
+    const units = await withCurrentOrg('read', 'truck', async (tx, ctx) => {
+      const where = {
+        ...companyScopeFilter(ctx.companyScopes),
+        deletedAt: null,
+      }
+      const select = {
+        id: true,
+        unitNumber: true,
+        vin: true,
+        plate: true,
+        plateState: true,
+      } as const
+      const trucks = await tx.truck.findMany({
+        where,
         orderBy: { unitNumber: 'asc' },
         take: 500,
-        select: {
-          id: true,
-          unitNumber: true,
-          vin: true,
-          plate: true,
-          plateState: true,
-        },
-      }),
-    )
+        select,
+      })
+      const trailers = readsTrailers
+        ? await tx.trailer.findMany({
+            where,
+            orderBy: { unitNumber: 'asc' },
+            take: 500,
+            select,
+          })
+        : []
+      return [
+        ...trucks.map((row) => ({ kind: 'truck' as const, ...row })),
+        ...trailers.map((row) => ({ kind: 'trailer' as const, ...row })),
+      ] satisfies RegistrationUnitCandidate[]
+    })
     return NextResponse.json({
       verdict,
       registration: {
         verdicts: outcome.verdicts,
         prefill: outcome.prefill,
-        match: matchRegistrationTruck(outcome.verdicts, trucks),
-        trucks,
+        match: matchRegistrationUnit(outcome.verdicts, units),
+        units,
+        addForm: addFormFor(outcome.verdicts),
       },
       proposal: null,
       cost: costBlock(outcome.cost),

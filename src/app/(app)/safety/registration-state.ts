@@ -6,7 +6,8 @@ export interface RegistrationFileState {
   createdId: string | null
   /** What was typed, handed back on a refusal (§0 rule 14). */
   typed: {
-    truckId: string
+    /** The select's `truck:<id>` or `trailer:<id>`. */
+    unit: string
     registrationExpiresAt: string
     registrationIssuedAt: string
   } | null

@@ -6,15 +6,17 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { uploadDocument } from '@/lib/upload-client'
-import { HELD_CARD_HREF, holdCard } from '@/lib/held-card'
+import { heldCardHref, holdCard } from '@/lib/held-card'
 import {
   verdictFor,
   type RegistrationFormField,
   type RegistrationVerdicts,
 } from '@/lib/extraction/registration-fields'
-import type {
-  RegistrationTruckCandidate,
-  RegistrationTruckMatch,
+import {
+  unitKey,
+  type RegistrationUnitCandidate,
+  type RegistrationUnitMatch,
+  type UnitKind,
 } from '@/lib/registration-match'
 import { fileRegistrationAction } from './registration-actions'
 import { REGISTRATION_FILE_INITIAL } from './registration-state'
@@ -23,8 +25,9 @@ import type { RegistrationLabels } from './registration-labels'
 // ---------------------------------------------------------------------------
 // A CAB CARD'S CONFIRM STEP ON THE SAFETY INTAKE (TMS §7.8, v11.57).
 //
-// What the card says, the truck it matched (VIN, then unit number, then
-// plate — `registration-match.ts`) in a select the person may change, and the
+// What the card says, the unit it matched — truck or trailer (v11.58) — by
+// VIN, then unit number, then plate (`registration-match.ts`), in a select
+// the person may change, and the
 // expiry and issue date prefilled. File is Add truck's own filing on that
 // truck; the file then goes on the new REGISTRATION item. Nothing is stored
 // until File is pressed, and the truck's own fields are never changed.
@@ -37,8 +40,10 @@ import type { RegistrationLabels } from './registration-labels'
 export interface RegistrationReadView {
   verdicts: RegistrationVerdicts
   prefill: Partial<Record<RegistrationFormField, string>>
-  match: RegistrationTruckMatch
-  trucks: RegistrationTruckCandidate[]
+  match: RegistrationUnitMatch
+  units: RegistrationUnitCandidate[]
+  /** Which Add form "add it" opens, from the card's type. */
+  addForm: UnitKind
 }
 
 interface Props {
@@ -61,7 +66,7 @@ export function RegistrationConfirm({
   )
   const [attach, setAttach] = useState<'idle' | 'done' | 'failed'>('idle')
   const [handing, setHanding] = useState(false)
-  const { verdicts, prefill, match, trucks } = reading
+  const { verdicts, prefill, match, units, addForm } = reading
 
   // The file goes on AFTER the item exists, as the inspection's does.
   useEffect(() => {
@@ -103,8 +108,10 @@ export function RegistrationConfirm({
       : labels.byHand
   }
 
-  const proposed = match.kind === 'one' ? match.truck : null
-  const offered = match.kind === 'several' ? match.trucks : trucks
+  const proposed = match.kind === 'one' ? match.unit : null
+  const offered = match.kind === 'several' ? match.units : units
+  const named = (unit: RegistrationUnitCandidate) =>
+    labels.kind[unit.kind].replace('{unit}', unit.unitNumber)
   const typed = state.typed
 
   const addIt = async () => {
@@ -112,7 +119,7 @@ export function RegistrationConfirm({
     // The slot may be unavailable (private window); Add truck then opens
     // empty with its own drop zone, which is still the right page.
     if (file) await holdCard(file, { verdicts, prefill })
-    router.push(HELD_CARD_HREF)
+    router.push(heldCardHref(addForm))
   }
 
   return (
@@ -143,14 +150,14 @@ export function RegistrationConfirm({
         {match.kind === 'none' ? (
           <p className="mb-z3 text-sm">
             <a
-              href={HELD_CARD_HREF}
+              href={heldCardHref(addForm)}
               onClick={(event) => {
                 event.preventDefault()
                 if (!handing) void addIt()
               }}
               className="font-medium text-accent underline underline-offset-2"
             >
-              {labels.noTruck}
+              {labels.addIt[addForm]}
             </a>
           </p>
         ) : null}
@@ -158,25 +165,22 @@ export function RegistrationConfirm({
         <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-z3">
           <div className="flex flex-col gap-z1">
             <Select
-              id="registration-truckId"
-              name="truckId"
-              label={labels.truck}
+              id="registration-unit"
+              name="unit"
+              label={labels.unit}
               required
-              defaultValue={typed?.truckId ?? proposed?.id ?? ''}
+              defaultValue={typed?.unit ?? (proposed ? unitKey(proposed) : '')}
               options={[
-                { value: '', label: labels.chooseTruck },
-                ...offered.map((truck) => ({
-                  value: truck.id,
-                  label: truck.unitNumber,
+                { value: '', label: labels.chooseUnit },
+                ...offered.map((unit) => ({
+                  value: unitKey(unit),
+                  label: named(unit),
                 })),
               ]}
             />
             {proposed && match.kind === 'one' ? (
               <p className="text-xs text-ink-3">
-                {labels.matchedBy[match.by].replace(
-                  '{unit}',
-                  proposed.unitNumber,
-                )}
+                {labels.matchedBy[match.by].replace('{unit}', named(proposed))}
               </p>
             ) : match.kind === 'several' ? (
               <p className="text-xs text-warning">{labels.several}</p>

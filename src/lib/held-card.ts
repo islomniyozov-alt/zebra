@@ -14,8 +14,9 @@
 // Browser-only: nothing here runs on the Worker.
 // ---------------------------------------------------------------------------
 
-/** The query Add truck is opened with: `/trucks/new?card=held`. */
-export const HELD_CARD_HREF = '/trucks/new?card=held'
+/** The query an Add form is opened with: `/trucks/new?card=held`. */
+export const heldCardHref = (kind: 'truck' | 'trailer') =>
+  `/${kind}s/new?card=held`
 export const HELD_CARD_PARAM = 'card'
 export const HELD_CARD_VALUE = 'held'
 

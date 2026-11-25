@@ -3,11 +3,14 @@ import { describe, expect, it } from 'vitest'
 import type { ExtractedRegistration } from '@/lib/extraction/registration-shape'
 import { judgeRegistration } from '@/lib/extraction/registration-fields'
 import {
-  matchRegistrationTruck,
-  type RegistrationTruckCandidate,
+  addFormFor,
+  matchRegistrationUnit,
+  readUnitKey,
+  unitKey,
+  type RegistrationUnitCandidate,
 } from '@/lib/registration-match'
 import { READABLE_COMPLIANCE_DOCUMENTS } from '@/app/(app)/safety/compliance-documents'
-import { HELD_CARD_HREF } from '@/lib/held-card'
+import { heldCardHref } from '@/lib/held-card'
 import { translator } from '@/lib/i18n'
 
 // ---------------------------------------------------------------------------
@@ -44,8 +47,9 @@ const card = (
 
 const truck = (
   id: string,
-  over: Partial<RegistrationTruckCandidate> = {},
-): RegistrationTruckCandidate => ({
+  over: Partial<RegistrationUnitCandidate> = {},
+): RegistrationUnitCandidate => ({
+  kind: 'truck',
   id,
   unitNumber: id,
   vin: null,
@@ -56,8 +60,13 @@ const truck = (
 
 const match = (
   fields: ExtractedRegistration,
-  trucks: RegistrationTruckCandidate[],
-) => matchRegistrationTruck(judgeRegistration(fields, UPLOADED), trucks)
+  units: RegistrationUnitCandidate[],
+) => matchRegistrationUnit(judgeRegistration(fields, UPLOADED), units)
+
+const trailer = (
+  id: string,
+  over: Partial<RegistrationUnitCandidate> = {},
+): RegistrationUnitCandidate => ({ ...truck(id, over), kind: 'trailer' })
 
 describe('the truck is matched: VIN, then unit number, then plate', () => {
   it('the VIN wins over a unit number that names another truck', () => {
@@ -68,7 +77,7 @@ describe('the truck is matched: VIN, then unit number, then plate', () => {
     expect(result).toMatchObject({
       kind: 'one',
       by: 'vin',
-      truck: { id: '101' },
+      unit: { id: '101' },
     })
   })
 
@@ -84,7 +93,7 @@ describe('the truck is matched: VIN, then unit number, then plate', () => {
       match(card({ unitNumber: null }), [
         truck('7', { plate: 'P1297245', plateState: 'il' }),
       ]),
-    ).toMatchObject({ kind: 'one', by: 'plate', truck: { id: '7' } })
+    ).toMatchObject({ kind: 'one', by: 'plate', unit: { id: '7' } })
     // Same plate, another state: not this truck.
     expect(
       match(card({ unitNumber: null }), [
@@ -108,6 +117,46 @@ describe('the truck is matched: VIN, then unit number, then plate', () => {
         [truck('1', { vin: '1M8GDM9AYKP042788' })],
       ),
     ).toEqual({ kind: 'none' })
+  })
+})
+
+describe('trucks and trailers together (v11.58)', () => {
+  it('a trailer matched by VIN is proposed as the trailer', () => {
+    expect(
+      match(card(), [truck('524'), trailer('5301', { vin: GOOD_VIN })]),
+    ).toMatchObject({
+      kind: 'one',
+      by: 'vin',
+      unit: { kind: 'trailer', id: '5301' },
+    })
+  })
+
+  it('truck 524 and trailer 524 tie on the unit rule and propose none', () => {
+    const result = match(card({ plate: null }), [truck('524'), trailer('524')])
+    expect(result).toMatchObject({ kind: 'several', by: 'unit' })
+  })
+
+  it('the select posts kind and id, and reads back only those two kinds', () => {
+    expect(unitKey({ kind: 'trailer', id: 'c1' })).toBe('trailer:c1')
+    expect(readUnitKey('trailer:c1')).toEqual({ kind: 'trailer', id: 'c1' })
+    expect(readUnitKey('truck:c2')).toEqual({ kind: 'truck', id: 'c2' })
+    expect(readUnitKey('driver:c3')).toBeNull()
+    expect(readUnitKey('')).toBeNull()
+  })
+
+  it('the card type picks the Add form; TT stays a truck (the Illinois tractor)', () => {
+    const form = (type: string | null) =>
+      addFormFor(
+        judgeRegistration(
+          card({ vehicleType: type ? high(type) : null }),
+          UPLOADED,
+        ),
+      )
+    for (const code of ['SE', 'ST', 'TRL', 'Semi', 'TRAILER', 'S.E.'])
+      expect(form(code)).toBe('trailer')
+    for (const code of ['TT', 'TK', 'TR', 'XX'])
+      expect(form(code)).toBe('truck')
+    expect(form(null)).toBe('truck')
   })
 })
 
@@ -142,7 +191,13 @@ describe('the fourth readable document', () => {
     expect(branch).toContain(
       'readRegistration({ base64, mimeType: file.type })',
     )
-    expect(branch).toContain('matchRegistrationTruck(outcome.verdicts, trucks)')
+    expect(branch).toContain('matchRegistrationUnit(outcome.verdicts, units)')
+    expect(branch).toContain('tx.trailer.findMany(')
+    // Read AND handed to the matcher, as trailers.
+    expect(branch).toContain(
+      "...trailers.map((row) => ({ kind: 'trailer' as const, ...row })),",
+    )
+    expect(branch).toContain('addForm: addFormFor(outcome.verdicts)')
     expect(branch).not.toMatch(/\.create\(|\.update\(|withCurrentOrg\('create'/)
   })
 })
@@ -159,7 +214,8 @@ describe('File is Add truck’s filing, on the confirmed truck', () => {
   const newAsset = readFileSync('src/lib/new-asset.ts', 'utf8')
 
   it('one filing function, called by both', () => {
-    expect(action).toContain("fileRegistration(tx, 'truck', truckId, filing)")
+    expect(action).toContain('fileRegistration(tx, unit.kind, unit.id, filing)')
+    expect(action).toContain('readUnitKey(typed.unit)')
     expect(action).toContain('readRegistrationFiling(formData)')
     expect(newAsset).toContain(
       'const renewal = await fileRegistration(tx, kind, unit.id, filing)',
@@ -175,12 +231,13 @@ describe('File is Add truck’s filing, on the confirmed truck', () => {
     expect(confirm).toContain('entityId: state.createdId,')
   })
 
-  it('no match offers Add truck, with the card handed over', () => {
+  it('no match offers the Add form the card asks for, with the card handed over', () => {
     expect(confirm).toContain("match.kind === 'none' ? (")
-    expect(confirm).toContain('{labels.noTruck}')
+    expect(confirm).toContain('{labels.addIt[addForm]}')
     expect(confirm).toContain('await holdCard(file, { verdicts, prefill })')
-    expect(confirm).toContain('router.push(HELD_CARD_HREF)')
-    expect(HELD_CARD_HREF).toBe('/trucks/new?card=held')
+    expect(confirm).toContain('router.push(heldCardHref(addForm))')
+    expect(heldCardHref('truck')).toBe('/trucks/new?card=held')
+    expect(heldCardHref('trailer')).toBe('/trailers/new?card=held')
     const form = readFileSync('src/components/forms/NewAssetForm.tsx', 'utf8')
     expect(form).toContain(
       'if (query.get(HELD_CARD_PARAM) !== HELD_CARD_VALUE) return',
@@ -191,12 +248,16 @@ describe('File is Add truck’s filing, on the confirmed truck', () => {
   it('says it in both languages', () => {
     const en = translator('en')
     const ru = translator('ru')
-    expect(en('safety.registration.noTruck')).toBe(
-      'No truck with this VIN — add it',
+    expect(en('safety.registration.addTrailer')).toBe(
+      'No truck or trailer with this VIN — add the trailer',
     )
     for (const key of [
       'safety.registration.name',
-      'safety.registration.noTruck',
+      'safety.registration.addTruck',
+      'safety.registration.addTrailer',
+      'safety.registration.unit',
+      'safety.registration.kind.trailer',
+      'safety.registration.noUnit',
       'safety.registration.matchedByVin',
       'safety.registration.several',
       'safety.registration.unreadable',
