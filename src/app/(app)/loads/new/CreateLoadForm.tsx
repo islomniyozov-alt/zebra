@@ -11,6 +11,7 @@ import {
 import { RateConOffer, type Facility, type Prefill } from './RateConOffer'
 import { centsToInput, parseMoneyToCents } from '@/lib/money'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
@@ -138,6 +139,8 @@ export interface CreateLoadLabels {
   uploading: string
   uploaded: string
   uploadFailed: string
+  /** After a save whose rate con did not attach: the link to the load. */
+  savedOpen: string
   createOnMiss: string
   placeHint: string
   facilityKnown: string
@@ -445,6 +448,7 @@ export function CreateLoadForm({
   const [file, setFile] = useState<File | null>(null)
   const [phase, setPhase] = useState<UploadPhase>('idle')
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const router = useRouter()
 
   // ⌘/Ctrl + Enter saves from anywhere in the form (§7.6). Bound on the form
   // rather than the window so it cannot fire from somewhere else on the page.
@@ -471,7 +475,16 @@ export function CreateLoadForm({
   // lint rule says so.
   useEffect(() => {
     const loadId = state.loadId
-    if (!loadId || !file) return
+    if (!loadId) return
+    // SAVED, SO THE LOAD OPENS (TMS §0 rule 15, owner's ruling 2026-11-26).
+    // Before this the form stayed on screen after Save with nothing saying
+    // the load existed. With no rate con the load opens at once; with one it
+    // opens when the file is on it; a failed attach stays here, says so, and
+    // links to the saved load.
+    if (!file) {
+      router.push(`/loads/${loadId}`)
+      return
+    }
     let cancelled = false
 
     uploadDocument(
@@ -482,16 +495,20 @@ export function CreateLoadForm({
         setPhase(progress.phase)
         setUploadError(null)
       },
-    ).catch((error: unknown) => {
-      if (cancelled) return
-      setPhase('failed')
-      setUploadError(error instanceof Error ? error.message : String(error))
-    })
+    )
+      .then(() => {
+        if (!cancelled) router.push(`/loads/${loadId}`)
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setPhase('failed')
+        setUploadError(error instanceof Error ? error.message : String(error))
+      })
 
     return () => {
       cancelled = true
     }
-  }, [state.loadId, file])
+  }, [state.loadId, file, router])
 
   const computed = useMemo(() => {
     if (!economics) return null
@@ -1026,6 +1043,15 @@ export function CreateLoadForm({
                   : labels.rateConHint}
         </p>
       </div>
+
+      {state.loadId && phase === 'failed' ? (
+        <Link
+          href={`/loads/${state.loadId}`}
+          className="text-sm text-accent underline"
+        >
+          {labels.savedOpen}
+        </Link>
+      ) : null}
 
       {state.error && !state.field ? (
         <p role="alert" className="text-base text-danger">

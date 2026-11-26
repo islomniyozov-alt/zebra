@@ -165,11 +165,29 @@ const SELECT = {
   expiresAt: true,
   notes: true,
   company: { select: { name: true } },
-  truck: { select: { id: true, unitNumber: true } },
-  trailer: { select: { id: true, unitNumber: true } },
+  truck: { select: { id: true, unitNumber: true, plate: true } },
+  trailer: { select: { id: true, unitNumber: true, plate: true } },
   driver: { select: { id: true, firstName: true, lastName: true } },
   _count: { select: { documents: true } },
 } satisfies Prisma.ComplianceItemSelect
+
+/**
+ * A REGISTRATION'S NUMBER IS ITS PLATE (owner's ruling 2026-11-26). The plate
+ * the filing stored as its identifier, else the unit's own plate — so a
+ * registration filed without one (by hand, or before the reader read plates)
+ * shows the plate under NUMBER rather than "—". Every other type shows what
+ * was stored, as before.
+ */
+export function shownIdentifier(row: {
+  type: ComplianceType
+  identifier: string | null
+  truck?: { plate?: string | null } | null
+  trailer?: { plate?: string | null } | null
+}): string | null {
+  const stored = row.identifier?.trim() || null
+  if (row.type !== 'REGISTRATION' || stored) return row.identifier
+  return row.truck?.plate?.trim() || row.trailer?.plate?.trim() || null
+}
 
 /**
  * Turn stored rows into read rows: derive the status, the days left, and which
@@ -189,8 +207,8 @@ export function shapeRecords(
     expiresAt: Date
     notes: string | null
     company: { name: string }
-    truck: { id: string; unitNumber: string } | null
-    trailer: { id: string; unitNumber: string } | null
+    truck: { id: string; unitNumber: string; plate?: string | null } | null
+    trailer: { id: string; unitNumber: string; plate?: string | null } | null
     driver: { id: string; firstName: string; lastName: string } | null
     _count: { documents: number }
   }[],
@@ -279,7 +297,7 @@ export function shapeRecords(
         subject,
         subjectId,
         subjectLabel,
-        identifier: row.identifier,
+        identifier: shownIdentifier(row),
         issuer: row.issuer,
         issuedAt: row.issuedAt,
         expiresAt: row.expiresAt,

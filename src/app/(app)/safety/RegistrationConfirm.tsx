@@ -1,6 +1,7 @@
 'use client'
 
 import { useActionState, useEffect, useState } from 'react'
+import { useFiled } from './use-filed'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -51,6 +52,8 @@ interface Props {
   file: File | null
   labels: RegistrationLabels
   onCancel: () => void
+  /** The intake's reset after a File (rule 15); absent, the step shows its own line. */
+  onFiled?: (message: string) => void
 }
 
 export function RegistrationConfirm({
@@ -58,6 +61,7 @@ export function RegistrationConfirm({
   file,
   labels,
   onCancel,
+  onFiled,
 }: Props) {
   const router = useRouter()
   const [state, act, pending] = useActionState(
@@ -79,6 +83,15 @@ export function RegistrationConfirm({
       .then(() => setAttach('done'))
       .catch(() => setAttach('failed'))
   }, [state.createdId, file, attach])
+
+  // Filed once the item exists AND its file has settled either way.
+  useFiled(
+    Boolean(state.createdId) && (!file || attach !== 'idle'),
+    attach === 'failed'
+      ? `${labels.filed} ${labels.attachFailed}`
+      : labels.filed,
+    onFiled,
+  )
 
   if (state.createdId) {
     return (

@@ -2045,6 +2045,7 @@ const en = {
   'upload.uploading': 'Uploading',
   'upload.done': 'Uploaded',
   'upload.failed': 'Upload failed',
+  'loads.savedOpen': 'The load is saved — open it',
   'upload.retry': 'Retry',
 
   'status.note.podConfirmed': 'POD document confirmed',
@@ -5643,6 +5644,7 @@ const ru: Dictionary = {
   'upload.uploading': 'Загрузка',
   'upload.done': 'Загружено',
   'upload.failed': 'Не удалось загрузить',
+  'loads.savedOpen': 'Груз сохранён — открыть',
   'upload.retry': 'Повторить',
 
   'status.note.podConfirmed': 'Документ POD подтверждён',

@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { FmcsaLookup } from '@/components/forms/FmcsaLookup'
 import type { FmcsaLabels } from '@/components/forms/fmcsa-labels'
-import { COMPANY_FORM_FIELDS } from '@/lib/company-form'
+import { COMPANY_FORM_FIELDS, savedHref } from '@/lib/company-form'
 import { lookupCarrierAction } from './actions'
 import {
   ADD_COMPANY_INITIAL,
@@ -92,11 +92,16 @@ export function AddCompanyForm({
     ADD_COMPANY_INITIAL,
   )
   const router = useRouter()
-  // SAVED, AND OPENED FROM A TRANSFER DIALOG: back to that record with the
-  // dialog open, where the new authority is now in the list.
+  // SAVED, SO THE SCREEN MOVES ON (TMS §0 rule 15, v11.59). Opened from a
+  // Transfer dialog: back to that record with the dialog open, where the new
+  // authority is now in the list. Otherwise the authorities list, naming the
+  // new one — as Edit does (§6.3 v11.41). Before this a plain Add returned
+  // the id and left the form on screen.
   useEffect(() => {
-    if (state.companyId && returnTo)
-      router.replace(transferReturnHref(returnTo))
+    if (!state.companyId) return
+    router.replace(
+      returnTo ? transferReturnHref(returnTo) : savedHref(state.companyId),
+    )
   }, [state.companyId, returnTo, router])
   const [values, setValues] = useState({ ...BLANK, ...initial })
   const [lookup, setLookup] = useState<LookupState>(LOOKUP_INITIAL)

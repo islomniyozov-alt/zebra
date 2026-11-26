@@ -230,3 +230,41 @@ describe('what the row says', () => {
     expect(TRACKED_TYPES).toContain('MEDICAL_CARD')
   })
 })
+
+describe('a registration shows its plate under NUMBER (owner, 2026-11-26)', () => {
+  const shown = (over: Parameters<typeof row>[0]) =>
+    shapeRecords([row(over)], 30, NOON)[0]!.identifier
+
+  it('the stored identifier first, then the truck or trailer plate', () => {
+    expect(
+      shown({
+        type: 'REGISTRATION',
+        identifier: 'P 1297245',
+        truck: { id: 't1', unitNumber: '524', plate: 'OTHER' },
+      }),
+    ).toBe('P 1297245')
+    expect(
+      shown({
+        type: 'REGISTRATION',
+        identifier: '  ',
+        truck: { id: 't1', unitNumber: '524', plate: 'P 1297245' },
+      }),
+    ).toBe('P 1297245')
+    expect(
+      shown({
+        type: 'REGISTRATION',
+        truck: null,
+        trailer: { id: 'r1', unitNumber: '5301', plate: 'TR99881' },
+      }),
+    ).toBe('TR99881')
+  })
+
+  it('every other type shows only what was stored', () => {
+    expect(
+      shown({
+        type: 'ANNUAL_INSPECTION',
+        truck: { id: 't1', unitNumber: '524', plate: 'P 1297245' },
+      }),
+    ).toBeNull()
+  })
+})

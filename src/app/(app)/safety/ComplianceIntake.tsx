@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { DropZone } from '@/components/forms/DropZone'
 import { photoPagesRefusalKey } from '@/lib/photo-pages'
 import { photosAsDocument } from '@/lib/upload-client'
@@ -56,6 +57,9 @@ import type { coiLabels } from './coi-labels'
 // trucks, and the confirm step names what it decided and why.
 // ---------------------------------------------------------------------------
 
+/** How long the filed line stays above the empty zone. */
+export const FILED_LINE_MS = 6000
+
 interface Candidate {
   id: string
   firstName: string
@@ -102,6 +106,16 @@ export function ComplianceIntake({
   const [verdict, setVerdict] = useState<Verdict | null>(null)
   const [needsType, setNeedsType] = useState(false)
   const [result, setResult] = useState<Reading | null>(null)
+  /** The last File's sentence, shown above the empty zone for a moment. */
+  const [filed, setFiled] = useState<string | null>(null)
+  const router = useRouter()
+
+  // The line goes by itself; the zone is usable the whole time.
+  useEffect(() => {
+    if (!filed) return
+    const timer = setTimeout(() => setFiled(null), FILED_LINE_MS)
+    return () => clearTimeout(timer)
+  }, [filed])
 
   // SEVERAL PHOTOS, ONE DOCUMENT (TMS §7.8 v11.50). One file is read as it
   // always was. Several photos dropped, pasted or picked together are
@@ -111,6 +125,7 @@ export function ComplianceIntake({
   // by name: pages are never merged into somebody else's PDF.
   const take = async (files: readonly File[]) => {
     setNotice(null)
+    setFiled(null)
     if (files.length > 1 && files.some((f) => !f.type.startsWith('image/'))) {
       setNotice('pages.error.pdfAmong')
       return
@@ -222,6 +237,25 @@ export function ComplianceIntake({
     setHeld(null)
   }
 
+  // ── AFTER ANY FILE, BACK TO AN EMPTY ZONE (rule 15, §7.8 v11.59) ──────
+  //
+  // The confirm step reports its filing finished; the intake drops the
+  // reading, shows the sentence above an empty drop zone, and refreshes the
+  // page so the queue below shows the new row and its document. Before this
+  // the result and "Read as…" stayed, and the next document needed a reload.
+  const onFiled = useCallback(
+    (message: string) => {
+      setResult(null)
+      setVerdict(null)
+      setNeedsType(false)
+      setHeld(null)
+      setNotice(null)
+      setFiled(message)
+      router.refresh()
+    },
+    [router],
+  )
+
   // ── THE VERDICT, WHEREVER THE FLOW HAS GOT TO ─────────────────────────
   //
   // Rendered above every branch below rather than inside one, because the
@@ -255,6 +289,7 @@ export function ComplianceIntake({
           proposal={result.proposal}
           labels={coi}
           onCancel={restart}
+          onFiled={onFiled}
         />
       </div>
     )
@@ -269,6 +304,7 @@ export function ComplianceIntake({
           file={held}
           labels={inspection}
           onCancel={restart}
+          onFiled={onFiled}
         />
       </div>
     )
@@ -283,6 +319,7 @@ export function ComplianceIntake({
           file={held}
           labels={registration}
           onCancel={restart}
+          onFiled={onFiled}
         />
       </div>
     )
@@ -307,6 +344,7 @@ export function ComplianceIntake({
               : null
           }
           {...(driverId ? { driverId, driverLabel } : {})}
+          onFiled={onFiled}
         />
       </div>
     )
@@ -346,6 +384,14 @@ export function ComplianceIntake({
 
   return (
     <div className="flex flex-col gap-z2">
+      {filed ? (
+        <p
+          role="status"
+          className="rounded-card border border-ok bg-ok-soft px-z3 py-z2 text-sm text-ok"
+        >
+          {filed}
+        </p>
+      ) : null}
       {notice ? (
         <p
           role="status"

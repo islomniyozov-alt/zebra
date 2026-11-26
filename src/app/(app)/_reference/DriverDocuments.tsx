@@ -31,6 +31,7 @@
 // ---------------------------------------------------------------------------
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { downscaleImage } from '../drivers/new/downscale'
 import { uploadDocument } from '@/lib/upload-client'
 import {
@@ -116,6 +117,7 @@ export function DriverDocuments({
   kindLabels,
   labels,
 }: Props) {
+  const router = useRouter()
   const [kind, setKind] = useState<string>(kinds[0]?.value ?? 'OTHER')
   /**
    * The parked document a person is currently turning, WITH ITS BYTES.
@@ -198,6 +200,9 @@ export function DriverDocuments({
       setNotice(
         outcome.ok ? labels.readOk : `${labels.readFailed} (${outcome.step})`,
       )
+      // The turned copy and its reading are rows now; the list shows them
+      // without a reload (rule 15).
+      if (outcome.ok) router.refresh()
     } catch {
       setNotice(labels.readFailed)
     } finally {

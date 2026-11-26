@@ -242,6 +242,7 @@ export default async function NewLoadPage({
             uploading: t('upload.uploading'),
             uploaded: t('upload.done'),
             uploadFailed: t('upload.failed'),
+            savedOpen: t('loads.savedOpen'),
             createOnMiss: t('loads.createOnMiss'),
             placeHint: t('loads.placeHint'),
             facilityKnown: t('loads.facilityKnown'),

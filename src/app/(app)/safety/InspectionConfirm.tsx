@@ -1,6 +1,7 @@
 'use client'
 
 import { useActionState, useEffect, useState } from 'react'
+import { useFiled } from './use-filed'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
@@ -44,9 +45,17 @@ interface Props {
   file: File | null
   labels: InspectionLabels
   onCancel: () => void
+  /** The intake's reset after a File (rule 15); absent, the step shows its own line. */
+  onFiled?: (message: string) => void
 }
 
-export function InspectionConfirm({ reading, file, labels, onCancel }: Props) {
+export function InspectionConfirm({
+  reading,
+  file,
+  labels,
+  onCancel,
+  onFiled,
+}: Props) {
   const [state, act, pending] = useActionState<ComplianceState, FormData>(
     fileInspectionAction,
     COMPLIANCE_INITIAL,
@@ -66,6 +75,15 @@ export function InspectionConfirm({ reading, file, labels, onCancel }: Props) {
       .then(() => setAttach('done'))
       .catch(() => setAttach('failed'))
   }, [state.createdId, file, attach])
+
+  // Filed once the record exists AND its photo has settled either way.
+  useFiled(
+    Boolean(state.createdId) && (!file || attach !== 'idle'),
+    attach === 'failed'
+      ? `${labels.filed} ${labels.attachFailed}`
+      : labels.filed,
+    onFiled,
+  )
 
   if (state.createdId) {
     return (

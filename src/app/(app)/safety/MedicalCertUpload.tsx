@@ -1,6 +1,8 @@
 'use client'
 
 import { useActionState, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { useFiled } from './use-filed'
 import { DropZone } from '@/components/forms/DropZone'
 import { cx } from '@/lib/cx'
 import { fileMedicalCertAction } from './med-actions'
@@ -121,6 +123,8 @@ interface Props {
    * uploads for itself.
    */
   initial?: { proposal: Proposal; match: Match } | null
+  /** The intake's reset after a File (rule 15); absent, the step shows its own line. */
+  onFiled?: (message: string) => void
 }
 
 export function MedicalCertUpload({
@@ -130,7 +134,9 @@ export function MedicalCertUpload({
   prominent = false,
   initial = null,
   labels,
+  onFiled,
 }: Props) {
+  const router = useRouter()
   const [reading, setReading] = useState(false)
   /** A photo waiting on the rotate step. Null unless a person is being asked. */
   const [awaitingUpright, setAwaitingUpright] = useState<File | null>(null)
@@ -206,6 +212,8 @@ export function MedicalCertUpload({
         unread: 'NEEDS_ROTATION',
       })
       setNotice('drivers.med.parkedUnread')
+      // The driver's document list shows the parked card now (rule 15).
+      router.refresh()
     } catch {
       // THE UPLOAD FAILING IS NOT THE END OF THE WORLD AND IS NOT SILENT. The
       // card is still on the person's phone; what must not happen is a screen
@@ -263,6 +271,8 @@ export function MedicalCertUpload({
       setReading(false)
     }
   }
+
+  useFiled(Boolean(state.filedRecordId), labels.filed, onFiled)
 
   if (state.filedRecordId) {
     return (

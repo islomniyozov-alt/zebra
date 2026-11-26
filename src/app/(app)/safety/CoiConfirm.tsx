@@ -1,6 +1,7 @@
 'use client'
 
 import { useActionState, useState } from 'react'
+import { useFiled } from './use-filed'
 import { Button } from '@/components/ui/Button'
 import { fileCoiAction } from './coi-actions'
 import { FILE_COI_INITIAL, type FileCoiState } from './coi-state'
@@ -96,6 +97,8 @@ interface Props {
   proposal: CoiProposalView
   labels: ReturnType<typeof coiLabels>
   onCancel: () => void
+  /** The intake's reset after a File (rule 15); absent, the step shows its own line. */
+  onFiled?: (message: string) => void
 }
 
 /**
@@ -119,7 +122,7 @@ const ASSET_TYPES = [
   'OTHER',
 ] as const
 
-export function CoiConfirm({ proposal, labels, onCancel }: Props) {
+export function CoiConfirm({ proposal, labels, onCancel, onFiled }: Props) {
   const [state, formAction] = useActionState<FileCoiState, FormData>(
     fileCoiAction,
     FILE_COI_INITIAL,
@@ -156,6 +159,16 @@ export function CoiConfirm({ proposal, labels, onCancel }: Props) {
       ]),
     ),
   )
+
+  const filedLine = [
+    labels.filed.replace('{count}', String(state.filedRecordIds.length)),
+    state.vinsFilled.length > 0
+      ? labels.vinsWritten.replace('{count}', String(state.vinsFilled.length))
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+  useFiled(state.filedRecordIds.length > 0 && !state.error, filedLine, onFiled)
 
   if (state.filedRecordIds.length > 0 && !state.error) {
     return (
