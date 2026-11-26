@@ -113,10 +113,17 @@ describe('and what the SAVE does with it — the half that was missing', () => {
   it('keeps midnight for a date with no clock', () => {
     // The ordinary typed load. Inventing 09:00 for a bare date would be a
     // number about freight that nobody wrote down.
-    const fn = actions.slice(
-      actions.indexOf('function stopDate('),
-      actions.indexOf('const COMPANY_FALLBACK_ZONE'),
+    // `stopDate` lives in `load-form.ts` since Edit load (TMS §7.14 part 7)
+    // came to share it; the create action imports it from there.
+    expect(actions).toMatch(
+      /import \{[^}]*stopDate[^}]*\} from '@\/lib\/load-form'/,
     )
+    const form = readFileSync('src/lib/load-form.ts', 'utf8')
+    const fn = form.slice(
+      form.indexOf('export function stopDate('),
+      form.indexOf('export const COMPANY_FALLBACK_ZONE'),
+    )
+    expect(fn.length).toBeGreaterThan(0)
     expect(fn).toContain('return zoneMidnight(iso, zone)')
     expect(fn).toMatch(/if \(typed !== null\)/)
   })

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import type { DetailState } from './actions'
+import { cx } from '@/lib/cx'
 
 // NOT exported from actions.ts. A 'use server' file may only export async
 // functions — Next refuses the build with "can only export async functions,
@@ -32,6 +33,21 @@ interface Props {
   markDelivered: (previous: DetailState) => Promise<DetailState>
   cancel: (previous: DetailState, formData: FormData) => Promise<DetailState>
   uncancel: () => Promise<void>
+  /**
+   * Duplicate load (TMS §7.14 part 7), in the ⋮ menu above Undo. Absent for
+   * a role that may not create a load.
+   */
+  duplicate?: (previous: DetailState) => Promise<DetailState>
+  /**
+   * Undo (TMS §7.14 part 7). `enabled` and `detail` are `undoVerdict`'s
+   * answer, asked by the page: what Undo would take back, or why it cannot.
+   * The write asks the same predicate again before it acts.
+   */
+  undo?: {
+    action: (previous: DetailState) => Promise<DetailState>
+    enabled: boolean
+    detail: string
+  }
   labels: {
     markDelivered: string
     cancel: string
@@ -43,8 +59,13 @@ interface Props {
     close: string
     /** The ⋮ button's name, for `layout="menu"`. */
     menu?: string
+    duplicate?: string
+    undo?: string
   }
 }
+
+const ITEM =
+  'block w-full px-z3 py-z1 text-start text-xs font-medium focus-visible:outline-none'
 
 export function LoadActions({
   isCancelled,
@@ -52,6 +73,8 @@ export function LoadActions({
   markDelivered,
   cancel,
   uncancel,
+  duplicate,
+  undo,
   labels,
   layout = 'inline',
 }: Props) {
@@ -82,14 +105,126 @@ export function LoadActions({
     cancel,
     DETAIL_INITIAL,
   )
+  const [undoState, undoAction, undoing] = useActionState(
+    undo?.action ?? (async () => DETAIL_INITIAL),
+    DETAIL_INITIAL,
+  )
+  const [duplicateState, duplicateAction, duplicating] = useActionState(
+    duplicate ?? (async () => DETAIL_INITIAL),
+    DETAIL_INITIAL,
+  )
+
+  // THE ⋮ MENU (§7.13; §7.14 part 7): Duplicate load, Undo, then Cancel load
+  // — red, and last. A cancelled load keeps the menu without Cancel, because
+  // Undo is how a cancellation made a minute ago is taken back.
+  const menu =
+    layout === 'menu' ? (
+      <div ref={menuRef} className="relative">
+        <button
+          type="button"
+          data-load-menu
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          aria-label={labels.menu}
+          onClick={() => setMenuOpen((value) => !value)}
+          className="inline-flex h-control-compact items-center justify-center px-z1 rounded-control border border-border-strong bg-surface text-ink-2 hover:bg-surface-3 focus-visible:outline focus-visible:outline-2"
+        >
+          <svg
+            aria-hidden
+            viewBox="0 0 16 16"
+            className="size-[14px]"
+            fill="currentColor"
+          >
+            <circle cx="8" cy="3.5" r="1.25" />
+            <circle cx="8" cy="8" r="1.25" />
+            <circle cx="8" cy="12.5" r="1.25" />
+          </svg>
+        </button>
+        {menuOpen ? (
+          <div
+            role="menu"
+            className="absolute end-0 top-[calc(100%+4px)] z-30 min-w-[220px] rounded-card border border-border-strong bg-surface py-z1 shadow-lg"
+          >
+            {duplicate ? (
+              <form action={duplicateAction}>
+                <button
+                  type="submit"
+                  role="menuitem"
+                  disabled={duplicating}
+                  className={cx(
+                    ITEM,
+                    'text-ink hover:bg-surface-3 focus-visible:bg-surface-3',
+                  )}
+                >
+                  {labels.duplicate}
+                </button>
+              </form>
+            ) : null}
+            {undo ? (
+              <form action={undoAction} onSubmit={() => setMenuOpen(false)}>
+                {/* Disabled says why, in the item itself: a greyed Undo with
+                 * no reason invites clicking it again. */}
+                <button
+                  type="submit"
+                  role="menuitem"
+                  disabled={!undo.enabled || undoing}
+                  aria-describedby="undo-detail"
+                  className={cx(
+                    ITEM,
+                    undo.enabled
+                      ? 'text-ink hover:bg-surface-3 focus-visible:bg-surface-3'
+                      : 'cursor-not-allowed text-ink-3',
+                  )}
+                >
+                  {labels.undo}
+                  <span
+                    id="undo-detail"
+                    className="block text-xs font-normal text-ink-3"
+                  >
+                    {undo.detail}
+                  </span>
+                </button>
+              </form>
+            ) : null}
+            {isCancelled ? null : (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false)
+                  setOpen(true)
+                }}
+                className={cx(
+                  ITEM,
+                  'text-danger hover:bg-danger-soft focus-visible:bg-danger-soft',
+                )}
+              >
+                {labels.confirmCancel}
+              </button>
+            )}
+          </div>
+        ) : null}
+      </div>
+    ) : null
+
+  // A refused Undo or Duplicate says why, beside the menu.
+  const menuError = undoState.error ?? duplicateState.error
 
   if (isCancelled) {
     return (
-      <form action={uncancel}>
-        <Button type="submit" variant="secondary" size="compact">
-          {labels.uncancel}
-        </Button>
-      </form>
+      <div className="flex items-center gap-z2">
+        <form action={uncancel}>
+          <Button type="submit" variant="secondary" size="compact">
+            {labels.uncancel}
+          </Button>
+        </form>
+        {menu}
+        {menuError ? (
+          <p role="alert" className="text-sm text-danger">
+            {menuError}
+          </p>
+        ) : null}
+      </div>
     )
   }
 
@@ -112,46 +247,7 @@ export function LoadActions({
        * accent-coloured. In the menu layout Cancel is not in the header at
        * all — it is the menu's red item, behind the same confirmation. */}
       {layout === 'menu' ? (
-        <div ref={menuRef} className="relative">
-          <button
-            type="button"
-            data-load-menu
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            aria-label={labels.menu}
-            onClick={() => setMenuOpen((value) => !value)}
-            className="inline-flex h-control-compact items-center justify-center px-z1 rounded-control border border-border-strong bg-surface text-ink-2 hover:bg-surface-3 focus-visible:outline focus-visible:outline-2"
-          >
-            <svg
-              aria-hidden
-              viewBox="0 0 16 16"
-              className="size-[14px]"
-              fill="currentColor"
-            >
-              <circle cx="8" cy="3.5" r="1.25" />
-              <circle cx="8" cy="8" r="1.25" />
-              <circle cx="8" cy="12.5" r="1.25" />
-            </svg>
-          </button>
-          {menuOpen ? (
-            <div
-              role="menu"
-              className="absolute end-0 top-[calc(100%+4px)] z-30 min-w-[180px] rounded-card border border-border-strong bg-surface py-z1 shadow-lg"
-            >
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setMenuOpen(false)
-                  setOpen(true)
-                }}
-                className="block w-full px-z3 py-z1 text-start text-xs font-medium text-danger hover:bg-danger-soft focus-visible:bg-danger-soft focus-visible:outline-none"
-              >
-                {labels.confirmCancel}
-              </button>
-            </div>
-          ) : null}
-        </div>
+        menu
       ) : (
         <Button
           type="button"
@@ -162,6 +258,12 @@ export function LoadActions({
           {labels.cancel}
         </Button>
       )}
+
+      {menuError ? (
+        <p role="alert" className="text-sm text-danger">
+          {menuError}
+        </p>
+      ) : null}
 
       {/* A declined transition is a NOTICE, not an error. The person clicking
        * did nothing wrong — the load is simply further along than their screen

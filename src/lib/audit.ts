@@ -379,8 +379,14 @@ function recordGap(
 
 type Row = Record<string, unknown>
 
-/** JSON-safe, and comparable. Prisma hands back Dates and Decimals. */
-function normalize(value: unknown): unknown {
+/**
+ * JSON-safe, and comparable. Prisma hands back Dates and Decimals.
+ *
+ * Exported so a reader comparing a live row against an audit row's `to`
+ * (Undo's guard, `load-undo.ts`) compares in exactly the form the row was
+ * written in, rather than a second idea of it.
+ */
+export function normalize(value: unknown): unknown {
   if (value === null || value === undefined) return null
   if (value instanceof Date) return value.toISOString()
   if (typeof value === 'bigint') return value.toString()
@@ -510,6 +516,40 @@ export async function flushAuditBuffer(scope: AuditScope): Promise<void> {
   )
 }
 
+/**
+ * Record an event that is not a row write, in the current save.
+ *
+ * Buffered like every other audit row, so it is flushed with them — same
+ * transaction, same instant, same user — and a rolled-back save leaves no
+ * event claiming it happened. Used for "Undo: <what>" (TMS §7.14 part 7),
+ * which has no table of its own: the reverted fields are audited by the
+ * extension as they are written, and this row says why.
+ *
+ * Throws outside a tenant transaction: an event nobody can attribute is not
+ * one this trail records.
+ */
+export function recordAuditEvent(event: {
+  entityType: string
+  entityId: string
+  companyId: string | null
+  changes: Record<string, FieldChange>
+}): void {
+  const scope = auditScope.getStore()
+  if (!scope) {
+    throw new Error(
+      `recordAuditEvent(${event.entityType}) outside a tenant transaction.`,
+    )
+  }
+  bufferEntries(scope, event.entityType, 'event', [
+    {
+      action: 'UPDATE',
+      entityId: event.entityId,
+      companyId: event.companyId,
+      changes: event.changes,
+    },
+  ])
+}
+
 function distinct(values: string[]): string {
   return [...new Set(values)].sort().join(',')
 }
@@ -543,9 +583,17 @@ async function writeEntries(
     return
   }
 
+  // ONE SAVE, ONE INSTANT (TMS §7.14 part 7, v11.60). Every row this flush
+  // writes carries the same `createdAt`, set here rather than left to each
+  // row's default — so "the rows one transaction wrote" is an exact
+  // question, `(userId, createdAt)`, and Undo can take back a whole save
+  // rather than a guess at one. `tests/audit-one-instant.test.ts` pins it.
+  const at = new Date()
+
   try {
     await tx.auditLog.createMany({
       data: entries.map((entry) => ({
+        createdAt: at,
         organizationId: scope.organizationId,
         companyId: entry.companyId,
         userId: attribution.userId,

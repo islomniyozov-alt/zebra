@@ -11,7 +11,13 @@ import {
   LOAD_WRITE_TIMEOUT_MS,
   setStopAddress,
 } from '@/lib/loads'
-import { ReferenceError, optionalText } from '@/lib/reference'
+import {
+  REFERENCE_ERROR_KEYS,
+  ReferenceError,
+  optionalText,
+} from '@/lib/reference'
+import { applyUndo } from '@/lib/load-undo'
+import { duplicateLoad } from '@/lib/load-edit'
 import { redirect } from 'next/navigation'
 import { generateInvoice } from '@/lib/invoices'
 import { setPhotoStage } from '@/lib/load-photos'
@@ -399,4 +405,58 @@ export async function dispatchWithReasonAction(
   revalidatePath('/loads')
   revalidatePath('/dispatch')
   return { error: null, notice: null }
+}
+
+/**
+ * Undo, from the ⋮ menu (TMS §7.14 part 7). `applyUndo` asks `undoVerdict`
+ * — the predicate the menu asked to enable the item — and refuses with a
+ * sentence when it says no, or when the load changed again since.
+ */
+export async function undoLoadAction(
+  loadId: string,
+  _previous: DetailState,
+): Promise<DetailState> {
+  const { t } = await getLocaleContext()
+  const outcome = await withCurrentOrg(
+    'update',
+    'load',
+    (tx, session) => applyUndo(tx, loadId, session.userId),
+    { timeoutMs: LOAD_WRITE_TIMEOUT_MS },
+  )
+  revalidatePath(`/loads/${loadId}`)
+  revalidatePath('/loads')
+  if (!outcome.ok) {
+    return { error: t(`loads.undo.reason.${outcome.reason}`), notice: null }
+  }
+  return { error: null, notice: null }
+}
+
+/**
+ * Duplicate load, from the ⋮ menu (TMS §7.14 part 7): `duplicateLoad` books
+ * the copy, and the new load's edit form opens.
+ */
+export async function duplicateLoadAction(
+  loadId: string,
+  _previous: DetailState,
+): Promise<DetailState> {
+  const { t } = await getLocaleContext()
+  let created: { id: string }
+  try {
+    created = await withCurrentOrg(
+      'create',
+      'load',
+      (tx, session) =>
+        duplicateLoad(tx, session.organizationId, loadId, {
+          byUserId: session.userId,
+        }),
+      { timeoutMs: LOAD_WRITE_TIMEOUT_MS },
+    )
+  } catch (error) {
+    if (error instanceof ReferenceError) {
+      return { error: t(REFERENCE_ERROR_KEYS[error.code]), notice: null }
+    }
+    throw error
+  }
+  revalidatePath('/loads')
+  redirect(`/loads/${created.id}/edit`)
 }

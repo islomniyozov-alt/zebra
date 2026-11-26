@@ -373,12 +373,16 @@ describe('the Amazon load detail page', () => {
     expect(page).toMatch(/\.\.\.\(maySeeRate\s*\?\s*\[\{ key: 'financials'/)
   })
 
-  // §7.13's flag: Zebra has no edit route, and §7.12 rules that nothing on
-  // direct-settled freight asks for an invoice. Since §7.14 Create invoice
-  // exists — on broker freight only, so an Amazon load never reaches it.
-  it('offers Amazon freight no Create invoice, and no load Edit load', () => {
+  // §7.12 rules that nothing on direct-settled freight asks for an invoice.
+  // Since §7.14 Create invoice exists — on broker freight only, so an Amazon
+  // load never reaches it. §7.13's other flag, "no edit route", closed with
+  // §7.14 part 7 (v11.60): Edit load is on BOTH shapes, gated by
+  // `load:update` and nothing about the shape.
+  it('offers Amazon freight no Create invoice; Edit load on every shape', () => {
     expect(page).toMatch(/const mayInvoice =\s*view\.brokerShape &&/)
     expect(page.match(/createLoadInvoiceAction\.bind/g)).toHaveLength(1)
-    expect(page).not.toMatch(/editLoad|\/edit`|Edit load/)
+    expect(page).toMatch(
+      /\{mayUpdate && !load\.isCancelled \? \(\s*<Link\s*href=\{`\/loads\/\$\{id\}\/edit`\}/,
+    )
   })
 })

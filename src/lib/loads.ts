@@ -272,7 +272,12 @@ async function writeStops(
 
   await tx.loadStop.deleteMany({ where: { loadId } })
 
-  await tx.loadStop.createMany({
+  // `createManyAndReturn`, still one statement: `createMany` returns no ids,
+  // so the audit trail recorded the new stops as a gap and nothing could say
+  // what a stop rewrite had put in. Undo needs the CREATE rows to take a
+  // rewrite back (TMS §7.14 part 7). No `select`, so the extension audits the
+  // returned rows without re-reading them.
+  await tx.loadStop.createManyAndReturn({
     data: stops.map((stop, index) => ({
       loadId,
       organizationId,

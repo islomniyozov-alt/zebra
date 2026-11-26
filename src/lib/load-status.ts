@@ -75,8 +75,9 @@ export interface TransitionOptions {
   userId?: string | null
   note?: string | null
   /**
-   * Allow a backwards move. Exactly one caller passes this — unassignment
-   * reverting DISPATCHED to BOOKED (§7) — and it is deliberately awkward to
+   * Allow a backwards move. Two callers pass this: unassignment reverting
+   * DISPATCHED to BOOKED (§7), and Undo taking a status move back to where
+   * it was (`load-undo.ts`, TMS §7.14 part 7). It is deliberately awkward to
    * type so that nothing else acquires the habit.
    */
   allowRewind?: boolean

@@ -70,6 +70,41 @@ interface Props {
   labels: CreateLoadLabels
   /** The queued email this form was opened from (§4 step 4), when it was. */
   fromEmail?: FromEmail
+  /** Edit load (TMS §7.14 part 7): this form, prefilled from a saved load. */
+  editing?: EditingLoad
+}
+
+/**
+ * A saved load, as Edit load opens it in this form (TMS §7.14 part 7).
+ *
+ * The values come from the server's own reading of the load
+ * (`stopFormValues` for the stops), and the save posts to `action` instead of
+ * Add load's. No rate-con offer and no file field: documents go on the
+ * load's Documents tab.
+ */
+export interface EditingLoad {
+  loadId: string
+  action: (
+    previous: CreateLoadState,
+    formData: FormData,
+  ) => Promise<CreateLoadState>
+  broker: string
+  truckId: string
+  driverId: string
+  stops: readonly {
+    id: string
+    place: string
+    type: StopRowValues['type']
+    date: string
+    from: string
+    to: string
+  }[]
+  bol: string
+  po: string
+  reference: string
+  miles: string
+  /** The line haul as the rate field shows it; empty for a role without one. */
+  rate: string
 }
 
 /**
@@ -176,8 +211,11 @@ export interface CreateLoadLabels {
 
 const INITIAL: CreateLoadState = { error: null, field: null, loadId: null }
 
-/** A stop as the FORM holds it. The place lives in the DOM, uncontrolled. */
-type StopRow = StopRowValues
+/**
+ * A stop as the FORM holds it. The place lives in the DOM, uncontrolled; on
+ * Edit load the row also carries the stored stop's id and its place as shown.
+ */
+type StopRow = StopRowValues & { id?: string; place?: string }
 
 const money = (cents: number) =>
   (cents / 100).toLocaleString(undefined, {
@@ -207,8 +245,12 @@ export function CreateLoadForm({
   economics,
   mayEnterRate,
   labels,
+  editing,
 }: Props) {
-  const [state, action, pending] = useActionState(createLoadAction, INITIAL)
+  const [state, action, pending] = useActionState(
+    editing?.action ?? createLoadAction,
+    INITIAL,
+  )
 
   /**
    * PROVENANCE, kept and shown (§3 step 2).
@@ -305,6 +347,13 @@ export function CreateLoadForm({
   // handler calls; this is not a second copy of the rules, which is what let
   // them drift in the first place.
   const [stops, setStops] = useState<StopRow[]>(() => {
+    // EDIT LOAD: the saved stops, each keyed to its stored row by id.
+    if (editing) {
+      return editing.stops.map((stop, index) => ({
+        key: `stop-${index}`,
+        ...stop,
+      }))
+    }
     const blank: StopRow[] = [
       { key: 'stop-0', type: 'PICKUP', date: '', from: '', to: '' },
       { key: 'stop-1', type: 'DELIVERY', date: '', from: '', to: '' },
@@ -353,7 +402,9 @@ export function CreateLoadForm({
   // distance on its face; that is read, not computed, so it may be carried.
   // Nothing infers a distance from two city names — that would be inventing
   // a number about freight, which the contract forbids.
-  const [miles, setMiles] = useState(() => extractedMiles(queued) ?? '')
+  const [miles, setMiles] = useState(
+    () => editing?.miles ?? extractedMiles(queued) ?? '',
+  )
 
   // THE SAME §1.3 GATE THE UPLOAD PATH APPLIES, applied at initialisation for
   // the same reason. `queuedExtraction` already stripped money for a role that
@@ -361,7 +412,11 @@ export function CreateLoadForm({
   // nothing; the check is here as well because a form that WOULD have filled
   // the field had the payload carried it is one API change away from doing so.
   const [rate, setRate] = useState(() =>
-    queued && mayEnterRate ? (extractedRate(queued) ?? '') : '',
+    editing && mayEnterRate
+      ? editing.rate
+      : queued && mayEnterRate
+        ? (extractedRate(queued) ?? '')
+        : '',
   )
 
   // PHASE 5 §3 STEP 2. What the extraction gave us, and which fields it was
@@ -544,34 +599,36 @@ export function CreateLoadForm({
       {/* §1: an OFFER above the form, never a gate through it. Everything
        * below works untouched if this is ignored, which is the 6.4-second
        * repeat-load path the brief refuses to slow down. */}
-      <RateConOffer
-        companyId={authority}
-        onExtracted={applyPrefill}
-        labels={{
-          title: labels.offerTitle,
-          hint: labels.offerHint,
-          choose: labels.offerChoose,
-          hashing: labels.offerHashing,
-          uploading: labels.offerUploading,
-          reading: labels.offerReading,
-          done: labels.offerDone,
-          failed: labels.offerFailed,
-          typeInstead: labels.offerTypeInstead,
-          failedUnreadable: labels.offerFailedUnreadable,
-          failedTryAgain: labels.offerFailedTryAgain,
-          failedMissing: labels.offerFailedMissing,
-          methodManual: labels.methodManual,
-          methodUpload: labels.methodUpload,
-          methodPaste: labels.methodPaste,
-          methodAmazon: labels.methodAmazon,
-          methodAmazonImport: labels.methodAmazonImport,
-          methodManualHint: labels.methodManualHint,
-          methodDropHint: labels.methodDropHint,
-          methodPastePlaceholder: labels.methodPastePlaceholder,
-          methodPasteRead: labels.methodPasteRead,
-          methodAmazonSoon: labels.methodAmazonSoon,
-        }}
-      />
+      {editing ? null : (
+        <RateConOffer
+          companyId={authority}
+          onExtracted={applyPrefill}
+          labels={{
+            title: labels.offerTitle,
+            hint: labels.offerHint,
+            choose: labels.offerChoose,
+            hashing: labels.offerHashing,
+            uploading: labels.offerUploading,
+            reading: labels.offerReading,
+            done: labels.offerDone,
+            failed: labels.offerFailed,
+            typeInstead: labels.offerTypeInstead,
+            failedUnreadable: labels.offerFailedUnreadable,
+            failedTryAgain: labels.offerFailedTryAgain,
+            failedMissing: labels.offerFailedMissing,
+            methodManual: labels.methodManual,
+            methodUpload: labels.methodUpload,
+            methodPaste: labels.methodPaste,
+            methodAmazon: labels.methodAmazon,
+            methodAmazonImport: labels.methodAmazonImport,
+            methodManualHint: labels.methodManualHint,
+            methodDropHint: labels.methodDropHint,
+            methodPastePlaceholder: labels.methodPastePlaceholder,
+            methodPasteRead: labels.methodPasteRead,
+            methodAmazonSoon: labels.methodAmazonSoon,
+          }}
+        />
+      )}
       {/* WHICH DRAFT THIS CAME FROM. The save action closes it — links the
        * load, marks it CONFIRMED, takes it out of the queue — which is what
        * "Confirm" means when there is no second surface to confirm on. */}
@@ -594,7 +651,10 @@ export function CreateLoadForm({
         defaultValue={defaultAuthority}
         onChange={(event) => setAuthority(event.target.value)}
         required
-        autoFocus
+        // A load number belongs to its authority's series, so Edit load
+        // shows the authority and does not offer to change it.
+        disabled={editing !== undefined}
+        autoFocus={editing === undefined}
         error={
           state.field === 'companyId' ? (state.error ?? undefined) : undefined
         }
@@ -612,7 +672,8 @@ export function CreateLoadForm({
                 noteChange('brokerName', event.target.value),
             }
           : {})}
-        defaultValue={valueOf('brokerName')}
+        defaultValue={editing?.broker ?? valueOf('brokerName')}
+        autoFocus={editing !== undefined}
         required
         error={
           state.field === 'customerId' ? (state.error ?? undefined) : undefined
@@ -662,6 +723,7 @@ export function CreateLoadForm({
         name="truckId"
         label={labels.truck}
         options={[{ value: '', label: labels.unassigned }, ...trucks]}
+        defaultValue={editing?.truckId}
         error={
           state.field === 'truckId' ? (state.error ?? undefined) : undefined
         }
@@ -670,6 +732,7 @@ export function CreateLoadForm({
         name="driverId"
         label={labels.driver}
         options={[{ value: '', label: labels.unassigned }, ...drivers]}
+        defaultValue={editing?.driverId}
         error={
           state.field === 'driverId' ? (state.error ?? undefined) : undefined
         }
@@ -699,6 +762,16 @@ export function CreateLoadForm({
               <span className="pb-z2 font-mono text-xs text-ink-3">
                 {index + 1}
               </span>
+              {/* EDIT LOAD: which stored stop this row is, so the save keeps
+               * what the stop carries when its place and times come back
+               * unchanged (`editedStops`). Matched by id, never by position. */}
+              {stop.id ? (
+                <input
+                  type="hidden"
+                  name={`stops[${index}].id`}
+                  value={stop.id}
+                />
+              ) : null}
               <div className="flex-1">
                 <Input
                   name={`stops[${index}].place`}
@@ -715,7 +788,7 @@ export function CreateLoadForm({
                     index === 0 ? labels.placeHint : undefined,
                   )}
                   key={`place-${stop.key}-${prefill?.pendingUploadId ?? 'typed'}`}
-                  defaultValue={stopPlace(index)}
+                  defaultValue={stop.place ?? stopPlace(index)}
                   {...(prefill
                     ? {
                         onChange: (
@@ -898,10 +971,42 @@ export function CreateLoadForm({
        * BOL yet anyway — it is known at pickup, not at booking — so the fields
        * appear because an extraction filled them, and the duplicate warnings
        * they feed are about numbers a document actually carried. */}
-      {prefill &&
-      (valueOf('bolNumber') ||
-        valueOf('poNumber') ||
-        valueOf('brokerReference')) ? (
+      {/* EDIT LOAD always shows them: the references are part of what an
+       * edit is for, and the typed path's tab order is not at stake here. */}
+      {editing ? (
+        <div className="flex gap-z3">
+          <div className="flex-1">
+            <Input
+              name="bol"
+              label={labels.bol}
+              identifier
+              defaultValue={editing.bol}
+              className="font-mono"
+            />
+          </div>
+          <div className="flex-1">
+            <Input
+              name="po"
+              label={labels.po}
+              identifier
+              defaultValue={editing.po}
+              className="font-mono"
+            />
+          </div>
+          <div className="flex-1">
+            <Input
+              name="reference"
+              label={labels.reference}
+              identifier
+              defaultValue={editing.reference}
+              className="font-mono"
+            />
+          </div>
+        </div>
+      ) : prefill &&
+        (valueOf('bolNumber') ||
+          valueOf('poNumber') ||
+          valueOf('brokerReference')) ? (
         <div className="flex gap-z3">
           <div className="flex-1">
             <Input
@@ -1015,34 +1120,36 @@ export function CreateLoadForm({
         </dl>
       ) : null}
 
-      <div className="flex flex-col gap-z1">
-        <label htmlFor="rateCon" className="text-sm font-medium text-ink-2">
-          {labels.rateCon}
-        </label>
-        <input
-          id="rateCon"
-          name="rateCon"
-          type="file"
-          accept="application/pdf,image/*"
-          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-          className="text-sm text-ink-2 file:me-z2 file:rounded-control file:border file:border-border-strong file:bg-surface-2 file:px-z2 file:py-[6px] file:text-base file:text-ink"
-        />
-        {/* Two visibly distinct states. "Preparing" is local CPU — compress and
-         * hash — and "Uploading" is the network. Merging them means a driver on
-         * bad signal cannot tell a slow phone from a stalled upload, and the two
-         * call for different responses. */}
-        <p className="text-sm text-ink-3" role="status">
-          {phase === 'preparing'
-            ? labels.preparing
-            : phase === 'uploading'
-              ? labels.uploading
-              : phase === 'done'
-                ? labels.uploaded
-                : phase === 'failed'
-                  ? (uploadError ?? labels.uploadFailed)
-                  : labels.rateConHint}
-        </p>
-      </div>
+      {editing ? null : (
+        <div className="flex flex-col gap-z1">
+          <label htmlFor="rateCon" className="text-sm font-medium text-ink-2">
+            {labels.rateCon}
+          </label>
+          <input
+            id="rateCon"
+            name="rateCon"
+            type="file"
+            accept="application/pdf,image/*"
+            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+            className="text-sm text-ink-2 file:me-z2 file:rounded-control file:border file:border-border-strong file:bg-surface-2 file:px-z2 file:py-[6px] file:text-base file:text-ink"
+          />
+          {/* Two visibly distinct states. "Preparing" is local CPU — compress and
+           * hash — and "Uploading" is the network. Merging them means a driver on
+           * bad signal cannot tell a slow phone from a stalled upload, and the two
+           * call for different responses. */}
+          <p className="text-sm text-ink-3" role="status">
+            {phase === 'preparing'
+              ? labels.preparing
+              : phase === 'uploading'
+                ? labels.uploading
+                : phase === 'done'
+                  ? labels.uploaded
+                  : phase === 'failed'
+                    ? (uploadError ?? labels.uploadFailed)
+                    : labels.rateConHint}
+          </p>
+        </div>
+      )}
 
       {state.loadId && phase === 'failed' ? (
         <Link
@@ -1090,7 +1197,7 @@ export function CreateLoadForm({
           {state.warnings?.length ? labels.warnSaveAnyway : labels.save}
         </Button>
         <Link
-          href="/loads"
+          href={editing ? `/loads/${editing.loadId}` : '/loads'}
           className="inline-flex h-control items-center rounded-control px-z3 text-base font-medium text-ink-2 hover:bg-surface-3"
         >
           {labels.cancel}

@@ -95,6 +95,14 @@ export interface ActivityRow {
   changes: unknown
 }
 
+/**
+ * The audit `entityType` of an Undo's own event row (TMS §7.14 part 7). Its
+ * one change, `undo: { from: <when the undone save happened>, to: <kind> }`,
+ * renders as "Undo: <what>". Here because this module reads it and must stay
+ * free of the writers; `load-undo.ts` imports it from here.
+ */
+export const UNDO_EVENT = 'LoadUndo'
+
 /** What the trips importer stamps so its own writes are recognisable later. */
 export const INTEGRATION_USER_AGENT = 'zebra-relay-trips-import'
 
@@ -290,6 +298,19 @@ export type ActivityItem =
       documentType: DocumentType
     }
   | { kind: 'note'; id: string; at: Date; actor: string | null; body: string }
+  | {
+      /**
+       * An Undo (TMS §7.14 part 7): "Undo: <what>", under the person who
+       * pressed it. The fields it put back are their own `field` entry at
+       * the same instant, as any edit's are.
+       */
+      kind: 'undo'
+      id: string
+      at: Date
+      actor: string | null
+      /** `status` · `assignment` · `accessorial` · `edit`. */
+      undone: string
+    }
 
 /**
  * Every source merged, newest first.
@@ -323,31 +344,41 @@ export function mergeActivity(input: {
   const fromAudit: Timed<ActivityItem>[] = input.entries.map((entry) => ({
     at: entry.at,
     value:
-      entry.action === 'CREATE'
+      entry.entityType === UNDO_EVENT
         ? {
-            kind: 'created' as const,
+            kind: 'undo' as const,
             id: entry.id,
             at: entry.at,
             actor: entry.actor,
-            via: entry.via,
+            undone: String(
+              entry.diffs.find((diff) => diff.field === 'undo')?.to ?? '',
+            ),
           }
-        : entry.action === 'DELETE'
+        : entry.action === 'CREATE'
           ? {
-              kind: 'deleted' as const,
+              kind: 'created' as const,
               id: entry.id,
               at: entry.at,
               actor: entry.actor,
               via: entry.via,
             }
-          : {
-              kind: 'field' as const,
-              id: entry.id,
-              at: entry.at,
-              actor: entry.actor,
-              via: entry.via,
-              entityType: entry.entityType,
-              diffs: entry.diffs,
-            },
+          : entry.action === 'DELETE'
+            ? {
+                kind: 'deleted' as const,
+                id: entry.id,
+                at: entry.at,
+                actor: entry.actor,
+                via: entry.via,
+              }
+            : {
+                kind: 'field' as const,
+                id: entry.id,
+                at: entry.at,
+                actor: entry.actor,
+                via: entry.via,
+                entityType: entry.entityType,
+                diffs: entry.diffs,
+              },
   }))
 
   const fromStatuses: Timed<ActivityItem>[] = input.statuses.map((event) => ({

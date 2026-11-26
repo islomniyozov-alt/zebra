@@ -187,6 +187,7 @@ export const ID_SOURCES = [
   ['/drivers/[id]', 'Driver'],
   ['/invoices/[id]', 'Invoice'],
   ['/loads/[id]', 'Load'],
+  ['/loads/[id]/edit', 'Load'],
   ['/payments/[id]', 'Payment'],
   ['/safety/claims/[id]', 'Claim'],
   ['/safety/inspections/[id]', 'RoadsideInspection'],

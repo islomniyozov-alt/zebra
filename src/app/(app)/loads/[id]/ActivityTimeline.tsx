@@ -84,6 +84,11 @@ interface Props {
     changed: string
     /** `loads.field.<name>` when one exists; otherwise the name is humanised. */
     field: (name: string) => string
+    /**
+     * "Undo: <what>", from the undone change's kind (§7.14 part 7). Only the
+     * load page reads Undo rows; a timeline without it shows the kind.
+     */
+    undo?: (kind: string) => string
   }
 }
 
@@ -146,6 +151,14 @@ export function ActivityTimeline({
                     stamp={stamp}
                     labels={labels}
                   />
+                ) : entry.kind === 'undo' ? (
+                  <>
+                    {/* §7.14 part 7 — the Undo as its own event. */}
+                    <p className="text-base font-medium text-ink">
+                      {labels.undo?.(entry.undone) ?? entry.undone}
+                    </p>
+                    {stamp(entry.at, entry.actor)}
+                  </>
                 ) : entry.kind === 'note' ? (
                   <>
                     {/* VERBATIM. §12: a person's sentence is evidence. */}

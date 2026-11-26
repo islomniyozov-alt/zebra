@@ -33,8 +33,7 @@ import {
   ReferenceError,
   optionalText,
 } from '@/lib/reference'
-import { normalizeTypedDate, normalizeTypedTime } from '@/lib/typed-date'
-import { resolveZone, zoneMidnight } from '@/lib/stop-time'
+import { cents, readStops, stopDate, stopMoment } from '@/lib/load-form'
 import { rememberAuthority } from '../../_reference/shared'
 import { confirmEmail } from '@/lib/inbound-email'
 
@@ -56,109 +55,6 @@ export interface CreateLoadState {
    */
   warnings?: string[]
   acknowledge?: string
-}
-
-/**
- * When a stop is due, as an instant **in the stop's own zone**.
- *
- * NOT UTC. A pickup typed as September 15th, stored at UTC midnight and then
- * rendered in the stop's zone per design rule 3, displays as "Sep 14, 19:00
- * CDT" — the rule's own failure mode, committed by the code meant to honour
- * it. Caught in a screenshot of the Step 5 detail screen.
- *
- * Parsed here as well as in the browser, and not because the browser is
- * untrusted about dates — because the form works without JavaScript, and the
- * blur handler that normalises "810" into "2026-08-10" is JavaScript.
- *
- * THE CLOCK BELONGS TO THE APPOINTMENT, and until 2026-08-17 it had nowhere to
- * go. This returned midnight and nothing else, so a document printing "Pickup
- * 08/14 03:45" produced a load whose stop time was 00:00 — the appointment
- * discarded on the way through a form that had no field for it. It survived
- * being flagged once because the visible symptom was two empty clock boxes,
- * and a fix that filled them in would have entrenched the real fault.
- *
- * ONE TIME MEANS AN APPOINTMENT; TWO MEAN A WINDOW. A dispatcher typing a
- * single clock is saying when the stop is due, and that is `scheduledAt`. When
- * they type both ends, `windowStart`/`windowEnd` carry the window and this
- * still records the start as the moment the stop is due — the same instant a
- * board sorts by, rather than a midnight that sorts before every load booked
- * that day.
- *
- * MIDNIGHT REMAINS THE ANSWER FOR A DATE WITH NO CLOCK, which is the ordinary
- * typed load: a date alone is a date alone, and inventing 09:00 for it would
- * be a number about freight that nobody wrote down.
- */
-function stopDate(
-  value: unknown,
-  place: { state: string | null; timezone: string | null },
-  clock?: unknown,
-): Date | null {
-  const text = optionalText(value)
-  if (text === null) return null
-  const iso = normalizeTypedDate(text)
-  if (iso === null) return null
-  // The facility's recorded zone wins over the state's — that is the whole
-  // point of Location.timezone.
-  const { zone } = resolveZone(
-    place.timezone,
-    place.state,
-    COMPANY_FALLBACK_ZONE,
-  )
-
-  const typed = optionalText(clock)
-  if (typed !== null) {
-    const moment = stopMoment(iso, typed, place)
-    if (moment !== null) return moment
-  }
-
-  return zoneMidnight(iso, zone)
-}
-
-/**
- * Where a stop with no state is assumed to be.
- *
- * The company's own zone would be better and is one query away; it is not read
- * here because this is the create path and the stop's state is almost always
- * present. Flagged in the Step 5 report.
- */
-const COMPANY_FALLBACK_ZONE = 'America/Chicago'
-
-/**
- * A date and a clock time, as an instant in the STOP's own zone.
- *
- * The same rule `stopDate` follows and for the same reason: design rule 3 says
- * the stop's zone decides, and a window built at UTC midnight-plus-eight shows
- * a Florida dock opening at three in the morning. Null unless BOTH halves are
- * there — a time with no date is not a moment, and `createLoad` refuses a
- * window that ends before it starts, so half a window is worse than none.
- */
-function stopMoment(
-  date: string,
-  time: string,
-  place: { state: string | null; timezone: string | null },
-): Date | null {
-  const day = normalizeTypedDate(date.trim())
-  const clock = normalizeTypedTime(time)
-  if (day === null || clock === null) return null
-
-  const { zone } = resolveZone(
-    place.timezone,
-    place.state,
-    COMPANY_FALLBACK_ZONE,
-  )
-  const midnight = zoneMidnight(day, zone)
-  const [hour, minute] = clock.split(':').map(Number)
-  return new Date(
-    midnight.getTime() + (hour ?? 0) * 3_600_000 + (minute ?? 0) * 60_000,
-  )
-}
-
-/** "$2,450.00" → 245000. Money is an integer of cents the moment it is read. */
-function cents(value: unknown): number {
-  const text = optionalText(value)
-  if (text === null) return 0
-  const amount = Number(text.replace(/[,$\s]/g, ''))
-  return Number.isFinite(amount) ? Math.round(amount * 100) : 0
 }
 
 export async function createLoadAction(
@@ -698,46 +594,4 @@ async function splitFromMint(
     select: { extractedJson: true },
   })
   return rateSplitFromMoney(storedMoneyOf(mint?.extractedJson ?? null))
-}
-
-interface FormStop {
-  place: string
-  type: 'PICKUP' | 'DELIVERY' | 'INTERMEDIATE'
-  date: string
-  /** `HH:MM`, the window's ends. Empty on most stops. */
-  from: string
-  to: string
-}
-
-/**
- * The stops the form sent, in order.
- *
- * Read until the indices run out rather than to a fixed count: the form owns
- * how many there are, and a load with four stops posts four. A row with no
- * place at all still counts, so the required check can name which one is
- * empty instead of silently dropping it.
- */
-function readStops(formData: FormData): FormStop[] {
-  const stops: FormStop[] = []
-  for (let index = 0; ; index++) {
-    const place = formData.get(`stops[${index}].place`)
-    if (place === null) break
-    const type = String(formData.get(`stops[${index}].type`) ?? '')
-    stops.push({
-      place: String(place).trim(),
-      // Defaulted by POSITION only when the form did not say — a form that
-      // always sends the field never reaches this, and a caller that does not
-      // is choosing the ordinary shape rather than having one assumed of it.
-      type:
-        type === 'PICKUP' || type === 'DELIVERY' || type === 'INTERMEDIATE'
-          ? type
-          : index === 0
-            ? 'PICKUP'
-            : 'DELIVERY',
-      date: String(formData.get(`stops[${index}].date`) ?? ''),
-      from: String(formData.get(`stops[${index}].from`) ?? ''),
-      to: String(formData.get(`stops[${index}].to`) ?? ''),
-    })
-  }
-  return stops
 }

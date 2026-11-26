@@ -635,9 +635,10 @@ describe('the route matrix covers every protected page, and only those', () => {
     expect(MATRIX.size).toBe(protectedRoutes.length)
     // 54 at §6.8's writing; 55 since §6.9's testing summary (2026-10-11); 59
     // since the driver portal's four pages (Phase 7 step 2, 2026-11-12); 62
-    // since the three export routes (v11.12, 2026-11-16). A pinned number so
-    // a page cannot appear or vanish without this line moving.
-    expect(protectedRoutes.length).toBe(62)
+    // since the three export routes (v11.12, 2026-11-16); 63 since Edit load,
+    // `/loads/[id]/edit` (v11.60, 2026-11-26). A pinned number so a page
+    // cannot appear or vanish without this line moving.
+    expect(protectedRoutes.length).toBe(63)
   })
 
   it.each(ROUTES.filter((route) => !PUBLIC.has(route)))(

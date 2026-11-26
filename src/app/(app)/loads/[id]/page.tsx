@@ -91,7 +91,10 @@ import {
   uncancelLoadAction,
   createLoadInvoiceAction,
   dispatchWithReasonAction,
+  duplicateLoadAction,
+  undoLoadAction,
 } from './actions'
+import { UNDO_EVENT, undoStateFor } from '@/lib/load-undo'
 import type {
   LoadBillingStatus,
   LoadOperationalStatus,
@@ -175,7 +178,7 @@ export default async function LoadDetailPage({
 
   // §6.8: a role without the read is REFUSED as a 404, never a 500 (sweep).
   if (!(await currentUserCan('read', 'load'))) notFound()
-  const data = await withCurrentOrg('read', 'load', async (tx) => {
+  const data = await withCurrentOrg('read', 'load', async (tx, session) => {
     const load = await tx.load.findUnique({
       where: { id },
       include: {
@@ -253,6 +256,7 @@ export default async function LoadDetailPage({
       trucks,
       drivers,
       creator,
+      undo,
     ] = await Promise.all([
       tx.loadStatusEvent.findMany({
         where: { loadId: id },
@@ -331,6 +335,8 @@ export default async function LoadDetailPage({
             // same money filter it applies to everything else; what
             // `mergeActivity` takes from them is the actor.
             { entityType: 'Document', entityId: { in: documentIds } },
+            // §7.14 part 7 — "Undo: <what>", the Undo's own event row.
+            { entityType: UNDO_EVENT, entityId: id },
           ],
         },
         orderBy: { createdAt: 'desc' },
@@ -389,9 +395,21 @@ export default async function LoadDetailPage({
             select: { user: { select: { name: true } } },
           })
         : null,
+      // TMS §7.14 part 7 — what Undo would take back, or why it cannot:
+      // `undoVerdict` over the newest save on this load, one statement. The
+      // write asks the same predicate again before it acts.
+      undoStateFor(
+        tx,
+        {
+          id,
+          childIds: [...stopIds, ...load.accessorials.map((line) => line.id)],
+        },
+        session.userId,
+      ),
     ])
 
     return {
+      undo,
       load,
       events,
       documents,
@@ -424,6 +442,7 @@ export default async function LoadDetailPage({
     creator,
     teamMate,
     held,
+    undo,
   } = data
   const offeredMate =
     teamMate && drivers.some((driver) => driver.id === teamMate.id)
@@ -443,6 +462,8 @@ export default async function LoadDetailPage({
   const copyLabels = { copy: t('loads.copy'), copied: t('loads.copied') }
 
   const mayUpdate = await currentUserCan('update', 'load')
+  // Duplicate load books a new load: Add load's permission (§7.14 part 7).
+  const mayCreate = await currentUserCan('create', 'load')
   const mayUpload = await currentUserCan('create', 'document')
 
   // §7 and rule 8: a role that cannot see money is not handed money and told
@@ -793,7 +814,19 @@ export default async function LoadDetailPage({
         markDelivered={markDeliveredAction.bind(null, id)}
         cancel={cancelLoadAction.bind(null, id)}
         uncancel={uncancelLoadAction.bind(null, id)}
+        {...(mayCreate
+          ? { duplicate: duplicateLoadAction.bind(null, id) }
+          : {})}
+        undo={{
+          action: undoLoadAction.bind(null, id),
+          enabled: undo.ok,
+          detail: undo.ok
+            ? t(`loads.undo.kind.${undo.kind}`)
+            : t(`loads.undo.reason.${undo.reason}`),
+        }}
         labels={{
+          duplicate: t('loads.duplicate'),
+          undo: t('loads.undo'),
           markDelivered: t('loads.markDelivered'),
           cancel: t('ref.cancel'),
           cancelTitle: t('loads.cancelTitle'),
@@ -1127,6 +1160,13 @@ export default async function LoadDetailPage({
       const key = `loads.field.${name}`
       return isMessageKey(key) ? t(key) : humaniseField(name)
     },
+    undo: (kind: string) => {
+      const key = `loads.undo.kind.${kind}`
+      return t('loads.undo.event').replace(
+        '{what}',
+        isMessageKey(key) ? t(key) : kind,
+      )
+    },
   }
 
   const activityNode = (
@@ -1385,6 +1425,17 @@ export default async function LoadDetailPage({
                   </span>
                 </span>
               )
+            ) : null}
+            {/* §7.14 part 7 — Edit load, beside Create invoice: Add load's
+             * own form, prefilled. Absent on a cancelled load, which
+             * `updateLoad` refuses. */}
+            {mayUpdate && !load.isCancelled ? (
+              <Link
+                href={`/loads/${id}/edit`}
+                className="inline-flex h-control items-center rounded-control border border-border-strong bg-surface px-z3 text-base font-medium text-ink hover:bg-surface-3"
+              >
+                {t('loads.editLoad')}
+              </Link>
             ) : null}
             {actionsFor('menu')}
           </div>
